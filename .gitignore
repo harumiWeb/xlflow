@@ -12,6 +12,7 @@ coverage.out
 # xlflow
 .xlflow/
 build/
+.worktrees/
 
 # OS / Editor
 .DS_Store
