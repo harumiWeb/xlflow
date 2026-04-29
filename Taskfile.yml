@@ -1,0 +1,32 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install xlflow to local environment
+    cmds:
+      - go install ./cmd/xlflow
+
+  run:
+    desc: Run xlflow without install
+    cmds:
+      - go run ./cmd/xlflow {{.CLI_ARGS}}
+
+  doctor:
+    cmds:
+      - task run -- doctor
+
+  lint:
+    cmds:
+      - task run -- lint
+
+  test:
+    cmds:
+      - go test ./...
+
+  fmt:
+    cmds:
+      - go fmt ./...
+
+  tidy:
+    cmds:
+      - go mod tidy
