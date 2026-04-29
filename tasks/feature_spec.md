@@ -1,65 +1,51 @@
-# xlflow MVP Feature Spec
+# xlflow tmp_workspaces E2E Skill Spec
 
 ## Goal
 
-Implement the MVP command set from `docs/design.md` as a Windows-first, agent-ready VBA development CLI.
+Create a repository-local skill that standardizes how agents verify `xlflow` by creating disposable projects under `tmp_workspaces` and running the CLI end-to-end.
 
-## Commands
+## Skill Contract
 
-- `xlflow new [workbook]`: scaffold a new project and create a fresh macro-enabled workbook under `build/`. Defaults to `Book.xlsm`; appends `.xlsm` when the provided workbook name has no extension; rejects any other extension.
-- `xlflow init <workbook>`: scaffold project directories, copy the workbook to `build/`, write `xlflow.toml`, and write `prompts/agent.md`.
-- `xlflow doctor [--json]`: diagnose Excel COM availability, workbook open support, and VBIDE trust access.
-- `xlflow pull [--json]`: export workbook VBA components into configured source directories.
-- `xlflow push [--json]`: back up current workbook VBA components, then import source files into the workbook.
-- `xlflow run [macro] [--json]`: run the provided macro or `project.entry`.
-- `xlflow lint [--json]`: lint `.bas`, `.cls`, and `.frm` files under configured source directories and `tests`.
+- Skill name: `xlflow-tmp-workspace-e2e`
+- Location: `.agents/skills/xlflow-tmp-workspace-e2e`
+- Required files:
+  - `SKILL.md`
+  - `agents/openai.yaml`
 
-## Configuration Types
+## Trigger Scope
 
-`xlflow.toml` is the only MVP configuration filename.
+Use the skill when Codex needs to:
 
-```go
-type Config struct {
-    Project ProjectConfig
-    Excel   ExcelConfig
-    Src     SourceConfig
-    Lint    LintConfig
-}
-```
+- create a temporary `xlflow` project under `tmp_workspaces`
+- validate `xlflow` CLI behavior with real Excel COM integration
+- run repository-standard E2E checks for `new`, `init`, `doctor`, `pull`, `push`, `run`, or `lint`
+- verify workbook state or exported VBA artifacts after CLI execution
 
-Defaults:
+## Workflow Requirements
 
-- `excel.path`: `build/Book.xlsm`
-- `excel.visible`: `false`
-- `excel.display_alerts`: `false`
-- `src.modules`: `src/modules`
-- `src.classes`: `src/classes`
-- `src.forms`: `src/forms`
-- `src.workbook`: `src/workbook`
-- lint booleans: `true`
+The skill should instruct agents to:
 
-## Result Types
+1. review `tasks/lessons.md` before starting
+2. create a fresh workspace directory under `tmp_workspaces`
+3. use installed `xlflow` from PATH, confirming `Get-Command xlflow`
+4. run the blank-project path:
+   - `xlflow new --json`
+   - `xlflow doctor --json`
+   - `xlflow pull --json`
+   - `xlflow lint --json`
+5. when macro execution matters, add a minimal `src/modules/Main.bas` and run:
+   - `xlflow lint --json`
+   - `xlflow push --json`
+   - `xlflow run Main.Run --json`
+   - `xlflow pull --json`
+   - `xlflow lint --json`
+6. verify workbook effects with Excel COM when behavior depends on saved workbook state
+7. exercise `init` in a second fresh workspace when requested or when validating project bootstrapping from an existing workbook
+8. treat failures as bugs to investigate and fix, then rerun the affected verification path
 
-All JSON output follows the stable envelope in `docs/specs/cli-contract.md`.
+## Reporting Requirements
 
-Errors are classified into:
-
-- validation failures: exit code `1`
-- config and argument errors: exit code `2`
-- environment/script/Excel failures: exit code `3`
-
-## PowerShell Bridge
-
-Go executes scripts with:
-
-```text
-powershell -NoProfile -ExecutionPolicy Bypass -File <script>
-```
-
-Scripts must write only JSON to stdout and must release COM objects in cleanup paths.
-
-`xlflow new` uses Excel COM to save an empty workbook as macro-enabled format `52`.
-
-## Lint Issues
-
-Each lint issue includes `code`, `severity`, `file`, `line`, and `message`.
+- report exact workspace paths under `tmp_workspaces`
+- distinguish blank-workbook verification from macro round-trip verification
+- include concrete verification evidence, not assumptions
+- call out known limitations when a path was not exercised

@@ -1,0 +1,4 @@
+interface:
+  display_name: "xlflow Tmp Workspace E2E"
+  short_description: "Validate xlflow in tmp_workspaces with real Excel COM"
+  default_prompt: "Use $xlflow-tmp-workspace-e2e to create disposable xlflow projects under tmp_workspaces and verify the CLI end-to-end with Excel COM, workbook round-trips, and evidence-based reporting."
