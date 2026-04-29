@@ -1,0 +1,4 @@
+interface:
+  display_name: "ADR Manager"
+  short_description: "Decide, draft, review, and audit ADRs"
+  default_prompt: "Use $adr-manager to decide whether this change needs an ADR, draft or review the ADR, audit it against the repo, or refresh ADR indexes when the repo already uses them."

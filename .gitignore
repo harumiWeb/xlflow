@@ -1,0 +1,19 @@
+# Go
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+
+# Excel
+~$*.xls*
+*.tmp
+
+# xlflow
+.xlflow/
+build/
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
