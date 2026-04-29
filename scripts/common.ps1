@@ -64,3 +64,41 @@ function Write-XlflowJson {
   param([hashtable]$Result)
   $Result | ConvertTo-Json -Depth 8
 }
+
+function Get-XlflowDocumentModuleContent {
+  param([string]$Path)
+
+  $lines = Get-Content -LiteralPath $Path
+  $filtered = New-Object System.Collections.Generic.List[string]
+
+  foreach ($line in $lines) {
+    if ($line -match '^\s*Attribute\s+VB_') {
+      continue
+    }
+    $filtered.Add($line)
+  }
+
+  return ($filtered -join [Environment]::NewLine)
+}
+
+function Sync-XlflowDocumentModule {
+  param($Component, [string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $false
+  }
+
+  $code = Get-XlflowDocumentModuleContent -Path $Path
+  $module = $Component.CodeModule
+  $lineCount = $module.CountOfLines
+
+  if ($lineCount -gt 0) {
+    $module.DeleteLines(1, $lineCount)
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($code)) {
+    $module.AddFromString($code)
+  }
+
+  return $true
+}
