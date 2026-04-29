@@ -8,6 +8,7 @@ xlflow turns Excel VBA projects into a CLI-first development workflow:
 - edit VBA as normal source files
 - import modules back into Excel
 - run macros from the CLI
+- run VBA tests from the CLI
 - lint VBA for safer automation
 - return deterministic JSON for AI agents
 
@@ -22,11 +23,21 @@ xlflow doctor --json
 xlflow pull --json
 xlflow push --json
 xlflow run Main.Run --json
+xlflow test --json
+xlflow test --filter TestCreateReport --json
 xlflow lint --json
 ```
 
 The MVP uses `xlflow.toml` as its project configuration file. Excel automation is Windows-first and uses PowerShell plus Excel COM.
 `xlflow new` only accepts `.xlsm` workbook names because it always creates macro-enabled workbook content.
+
+`xlflow test` discovers argument-free VBA `Sub` procedures from the configured workbook when their names start with `Test` or end with `_Test`. New and initialized projects include `src/modules/XlflowAssert.bas`, which provides scalar-only `AssertEquals expected, actual, [message]`. Compare object properties such as `Range.Value2`, not object references.
+
+```vb
+Public Sub TestCreateReport()
+    AssertEquals 10, Sheets("Result").Range("A1").Value
+End Sub
+```
 
 ## Verification
 
@@ -38,4 +49,4 @@ task verify
 
 For Excel COM E2E verification, run on a Windows environment with Excel and VBIDE access enabled, then confirm `doctor --json` reports healthy Excel/VBIDE diagnostics.
 
-Use the repo-local `xlflow-tmp-workspace-e2e` skill and run the `tmp_workspaces` flow as the standard real-workbook path. Success criteria are: `new/doctor/pull/lint` all succeed, then module/class/form round-trip checks succeed via `push/run/pull/lint`.
+Use the repo-local `xlflow-tmp-workspace-e2e` skill and run the `tmp_workspaces` flow as the standard real-workbook path. Success criteria are: `new/doctor/pull/lint` all succeed, then module/class/form round-trip checks succeed via `push/run/test/pull/lint`.

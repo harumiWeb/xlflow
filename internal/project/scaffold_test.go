@@ -25,6 +25,7 @@ func TestInitScaffold(t *testing.T) {
 	for _, path := range []string{
 		config.FileName,
 		"prompts/agent.md",
+		"src/modules/XlflowAssert.bas",
 		"src/modules",
 		"src/classes",
 		"src/forms",
@@ -35,6 +36,41 @@ func TestInitScaffold(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
+	}
+}
+
+func TestScaffoldCreatesAssertHelper(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowAssert.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.Contains(got, `Attribute VB_Name = "XlflowAssert"`) {
+		t.Fatalf("Assert helper should preserve the imported module name:\n%s", got)
+	}
+	if !strings.Contains(got, "Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = \"\")") {
+		t.Fatalf("AssertEquals signature missing from helper:\n%s", got)
+	}
+	if !strings.Contains(got, "Err.Raise vbObjectError + 513") {
+		t.Fatalf("AssertEquals should raise a VBA error on mismatch:\n%s", got)
+	}
+	for _, want := range []string{
+		"IsObject(expected) Or IsObject(actual)",
+		"IsArray(expected) Or IsArray(actual)",
+		"IsNull(expected) Or IsNull(actual)",
+		"AssertEquals supports scalar values only",
+		"Private Function DescribeAssertValue",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Assert helper should contain %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "AssertTrue") {
+		t.Fatalf("AssertTrue is out of scope for v1 helper:\n%s", got)
 	}
 }
 

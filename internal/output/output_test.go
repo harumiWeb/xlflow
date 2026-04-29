@@ -34,3 +34,22 @@ func TestWriteJSONEnvelope(t *testing.T) {
 		t.Fatalf("decoded envelope = %+v", decoded)
 	}
 }
+
+func TestWriteJSONEnvelopeIncludesTests(t *testing.T) {
+	env := New("test")
+	env.Tests = []map[string]any{
+		{"name": "TestCreateReport", "module": "ReportTests", "status": "passed", "duration_ms": 12},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	tests, ok := decoded["tests"].([]any)
+	if !ok || len(tests) != 1 {
+		t.Fatalf("expected one test result in JSON envelope: %s", buf.String())
+	}
+}

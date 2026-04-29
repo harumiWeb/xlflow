@@ -15,6 +15,7 @@ xlflow [--json] doctor
 xlflow [--json] pull
 xlflow [--json] push
 xlflow [--json] run [macro]
+xlflow [--json] test [--filter <name>]
 xlflow [--json] lint
 ```
 
@@ -27,6 +28,8 @@ xlflow [--json] lint
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`.
+
+`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 
 ## Configuration
 
@@ -77,14 +80,29 @@ Command-specific fields are added at the top level:
 - `diagnostics` for `doctor`
 - `workbook` and `backup` for Excel file commands
 - `macro` for `run`
+- `tests` for `test`
 - `issues` for `lint`
+
+`test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
 
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings and macro failure
+- `1`: user-code or validation failure, including lint findings, macro failure, VBA test failure, no tests found, missing filter targets, and duplicate test names
 - `2`: CLI argument or configuration error
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
+
+## VBA Test Rules
+
+New and initialized projects include `src/modules/XlflowAssert.bas` with `AssertEquals expected, actual, [message]`. The helper is scalar-only: it compares normal scalar values, treats `Null` as equal only to `Null`, and raises a clear assertion error for object or array inputs. Compare object properties such as `Range.Value2` instead of passing object references.
+
+Example:
+
+```vb
+Public Sub TestCreateReport()
+    AssertEquals 10, Sheets("Result").Range("A1").Value
+End Sub
+```
 
 ## Lint Rules
 

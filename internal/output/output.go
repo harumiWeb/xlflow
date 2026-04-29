@@ -35,6 +35,7 @@ type Envelope struct {
 	Backup      any `json:"backup,omitempty"`
 	Macro       any `json:"macro,omitempty"`
 	Issues      any `json:"issues,omitempty"`
+	Tests       any `json:"tests,omitempty"`
 }
 
 type ExitError struct {

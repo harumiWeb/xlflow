@@ -44,6 +44,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.pullCommand(),
 		a.pushCommand(),
 		a.runCommand(),
+		a.testCommand(),
 		a.lintCommand(),
 	)
 	return root
@@ -192,6 +193,28 @@ func (a *app) runCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+}
+
+func (a *app) testCommand() *cobra.Command {
+	var filter string
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Run workbook VBA tests",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("test")
+			if err != nil {
+				return err
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.Test(cfg, filter)
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	return cmd
 }
 
 func (a *app) lintCommand() *cobra.Command {

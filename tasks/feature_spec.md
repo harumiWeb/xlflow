@@ -1,21 +1,27 @@
-# xlflow MVP Quality Hardening Spec
+# xlflow Test Harness Spec
 
 ## Goal
 
-Harden post-MVP quality checks by locking in verified module-round-trip behavior, regression protection, and a clear local verification entry point before the next real Excel COM verification pass.
+Add `xlflow test` so agents and CI can execute workbook VBA tests through Excel, receive stable JSON results, and use exit codes to decide whether to repair VBA or the local Excel environment.
 
-## Active Slice
+## Behavior
 
-Current hardening slice status:
+- `xlflow test` opens the configured workbook and discovers tests from the workbook VBIDE state.
+- Test procedures are argument-free `Sub` procedures whose names start with `Test` or end with `_Test`.
+- `xlflow test --filter <name>` runs only the test whose procedure name exactly matches `<name>`.
+- Duplicate discovered test names fail with `duplicate_test_name`.
+- No discovered tests fail with `no_tests_found`.
+- A missing filter target fails with `test_not_found`.
+- Individual VBA assertion or runtime errors fail the command with exit code `1` and include per-test error details.
+- Excel, COM, VBIDE, PowerShell, or script problems fail with exit code `3`.
 
-- [x] Task 1: `docs/specs/cli-contract.md` and `README.md` aligned with verified behavior.
-- [x] Task 2: regression tests plus `scripts/common.ps1` hardening for document-module normalization, including malformed-header protection.
-- [x] Task 3: `Taskfile.yml` `verify` target added and README clarifies local verify vs `tmp_workspaces` E2E.
-- [x] Follow-up: explicit `.frx` companion regression coverage added.
-- [x] Follow-up: rerun the real workbook verification path (`xlflow-tmp-workspace-e2e`) for userforms and `init` after the hardening changes.
+## Interfaces
 
-## Verification Focus
+- CLI: `xlflow [--json] test [--filter <name>]`
+- JSON: top-level `tests` field containing test result objects with `name`, `module`, `status`, `duration_ms`, and optional `error`.
+- Scaffold: `src/modules/XlflowAssert.bas` provides `AssertEquals`.
 
-1. keep local fast checks (`task verify`) as the routine gate
-2. keep `.frx` companion preservation covered by the automated script suite
-3. keep `tmp_workspaces` E2E for userform and `init` paths as the real Excel COM proof
+## Verification
+
+- Fast gate: `go test ./...` and `task verify`.
+- Real Excel gate: create a disposable project, push a test module, run `xlflow test --json`, verify passing, failing, and exact filter cases.

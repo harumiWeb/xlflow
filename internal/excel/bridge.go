@@ -35,6 +35,7 @@ type ScriptResult struct {
 	Workbook    any           `json:"workbook,omitempty"`
 	Backup      any           `json:"backup,omitempty"`
 	Macro       any           `json:"macro,omitempty"`
+	Tests       any           `json:"tests,omitempty"`
 }
 
 func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
@@ -80,6 +81,14 @@ func (r Runner) Run(cfg config.Config, macro string) (output.Envelope, int, erro
 	return r.run("run", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"MacroName":    macro,
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	})
+}
+
+func (r Runner) Test(cfg config.Config, filter string) (output.Envelope, int, error) {
+	return r.run("test", map[string]string{
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"Filter":       filter,
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 	})
 }
@@ -133,13 +142,23 @@ func (r Runner) run(commandName string, args map[string]string) (output.Envelope
 	env.Workbook = result.Workbook
 	env.Backup = result.Backup
 	env.Macro = result.Macro
+	env.Tests = result.Tests
 	if result.Status == output.StatusFailed {
-		if result.Error != nil && result.Error.Code == "macro_failed" {
-			return env, output.ExitValidation, nil
-		}
-		return env, output.ExitEnvironment, nil
+		return env, exitCodeForScriptResult(result), nil
 	}
 	return env, output.ExitSuccess, nil
+}
+
+func exitCodeForScriptResult(result ScriptResult) int {
+	if result.Error == nil {
+		return output.ExitEnvironment
+	}
+	switch result.Error.Code {
+	case "macro_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
+		return output.ExitValidation
+	default:
+		return output.ExitEnvironment
+	}
 }
 
 func workbookPath(root, path string) string {

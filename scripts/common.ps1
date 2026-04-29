@@ -10,7 +10,7 @@ function New-XlflowResult {
 
 function Set-XlflowError {
   param(
-    [hashtable]$Result,
+    $Result,
     [string]$Code,
     [string]$Message,
     [string]$Source = "",
@@ -63,6 +63,86 @@ function Get-XlflowComponentPath {
 function Write-XlflowJson {
   param([hashtable]$Result)
   $Result | ConvertTo-Json -Depth 8
+}
+
+function Find-XlflowTestProcedures {
+  param([string]$ModuleName, [string]$Code)
+
+  $tests = New-Object System.Collections.Generic.List[object]
+  if ([string]::IsNullOrEmpty($Code)) {
+    return $tests
+  }
+
+  $lines = $Code -split "`r?`n"
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i].Trim()
+    $match = [regex]::Match($line, '^(?:Public\s+)?Sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(?:''.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $match.Success) {
+      continue
+    }
+    $name = $match.Groups[1].Value
+    if ($name -like "Test*" -or $name -like "*_Test") {
+      $tests.Add([pscustomobject][ordered]@{
+        name = $name
+        module = $ModuleName
+        line = $i + 1
+      })
+    }
+  }
+
+  foreach ($test in $tests) {
+    Write-Output $test
+  }
+}
+
+function Select-XlflowTests {
+  param($Tests, [string]$Filter = "")
+
+  $selected = New-Object System.Collections.Generic.List[object]
+  foreach ($test in $Tests) {
+    if ([string]::IsNullOrWhiteSpace($Filter) -or $test.name -eq $Filter) {
+      $selected.Add($test)
+    }
+  }
+  foreach ($test in $selected) {
+    Write-Output $test
+  }
+}
+
+function Get-XlflowCodeModuleText {
+  param($CodeModule)
+
+  if ($null -eq $CodeModule -or $CodeModule.CountOfLines -le 0) {
+    return ""
+  }
+  return $CodeModule.Lines(1, $CodeModule.CountOfLines)
+}
+
+function New-XlflowTestRunnerCode {
+  param($Tests)
+
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.AppendLine("Option Explicit")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Public Function RunTest(ByVal testIndex As Long) As Variant")
+  [void]$builder.AppendLine("  On Error Resume Next")
+  [void]$builder.AppendLine("  Err.Clear")
+  [void]$builder.AppendLine("  Select Case testIndex")
+  $index = 0
+  foreach ($test in $Tests) {
+    [void]$builder.AppendLine("    Case $index")
+    [void]$builder.AppendLine("      " + $test.module + "." + $test.name)
+    $index++
+  }
+  [void]$builder.AppendLine("  End Select")
+  [void]$builder.AppendLine("  If Err.Number <> 0 Then")
+  [void]$builder.AppendLine("    RunTest = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))")
+  [void]$builder.AppendLine("  Else")
+  [void]$builder.AppendLine("    RunTest = Array(True, CLng(0), """", """")")
+  [void]$builder.AppendLine("  End If")
+  [void]$builder.AppendLine("  Err.Clear")
+  [void]$builder.AppendLine("End Function")
+  return $builder.ToString()
 }
 
 function Get-XlflowDocumentModuleContent {
