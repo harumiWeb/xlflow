@@ -2,19 +2,20 @@
 
 ## Goal
 
-Prepare the post-MVP phase by standardizing real Excel COM verification, adding regression coverage for known round-trip risks, and aligning local workflow docs with actual repository practice.
+Harden post-MVP quality checks by locking in verified module-round-trip behavior, regression protection, and a clear local verification entry point before the next real Excel COM verification pass.
 
 ## Active Slice
 
-This planning session covers:
+Current hardening slice status:
 
-- defining the quality-hardening scope in `docs/specs/mvp-quality-hardening.md`
-- writing the execution plan in `docs/superpowers/plans/2026-04-29-mvp-quality-hardening.md`
-- refreshing task tracking so later agents can continue without rediscovering context
+- [x] Task 1: `docs/specs/cli-contract.md` and `README.md` aligned with verified behavior.
+- [x] Task 2: regression tests plus `scripts/common.ps1` hardening for document-module normalization, including malformed-header protection.
+- [x] Task 3: `Taskfile.yml` `verify` target added and README clarifies local verify vs `tmp_workspaces` E2E.
+- [x] Follow-up: explicit `.frx` companion regression coverage added.
+- [x] Follow-up: rerun the real workbook verification path (`xlflow-tmp-workspace-e2e`) for userforms and `init` after the hardening changes.
 
-## Next Implementation Targets
+## Verification Focus
 
-1. document verified class/form/document-module round-trip behavior in repository docs
-2. strengthen script regression tests around workbook-source transforms
-3. add one obvious local verification entry point for fast automated checks
-4. keep `tmp_workspaces` E2E verification as the required real-workbook path
+1. keep local fast checks (`task verify`) as the routine gate
+2. keep `.frx` companion preservation covered by the automated script suite
+3. keep `tmp_workspaces` E2E for userform and `init` paths as the real Excel COM proof

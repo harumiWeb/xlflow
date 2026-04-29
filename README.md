@@ -27,3 +27,15 @@ xlflow lint --json
 
 The MVP uses `xlflow.toml` as its project configuration file. Excel automation is Windows-first and uses PowerShell plus Excel COM.
 `xlflow new` only accepts `.xlsm` workbook names because it always creates macro-enabled workbook content.
+
+## Verification
+
+Run `task verify` as the obvious local automated verification entry point. It is fast and deterministic, and currently executes non-COM test coverage via `go test ./...`.
+
+```bash
+task verify
+```
+
+For Excel COM E2E verification, run on a Windows environment with Excel and VBIDE access enabled, then confirm `doctor --json` reports healthy Excel/VBIDE diagnostics.
+
+Use the repo-local `xlflow-tmp-workspace-e2e` skill and run the `tmp_workspaces` flow as the standard real-workbook path. Success criteria are: `new/doctor/pull/lint` all succeed, then module/class/form round-trip checks succeed via `push/run/pull/lint`.

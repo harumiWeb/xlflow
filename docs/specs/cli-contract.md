@@ -9,16 +9,22 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
-xlflow new [workbook]
-xlflow init <workbook>
-xlflow doctor [--json]
-xlflow pull [--json]
-xlflow push [--json]
-xlflow run [macro] [--json]
-xlflow lint [--json]
+xlflow [--json] new [workbook]
+xlflow [--json] init <workbook>
+xlflow [--json] doctor
+xlflow [--json] pull
+xlflow [--json] push
+xlflow [--json] run [macro]
+xlflow [--json] lint
 ```
 
+`--json` is a persistent global flag and can be used with every command, including `new` and `init`.
+
 `new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`.
+
+`init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, and records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`).
+
+`pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`.
 
@@ -47,6 +53,8 @@ require_option_explicit = true
 forbid_select = true
 forbid_activate = true
 forbid_on_error_resume_next = true
+detect_implicit_variant = true
+forbid_public_module_fields = true
 ```
 
 ## JSON Envelope

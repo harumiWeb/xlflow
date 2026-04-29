@@ -23,6 +23,11 @@ tasks:
     cmds:
       - go test ./...
 
+  verify:
+    desc: Fast local verification (non-COM)
+    cmds:
+      - task test
+
   fmt:
     cmds:
       - go fmt ./...

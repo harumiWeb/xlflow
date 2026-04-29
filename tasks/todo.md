@@ -1,21 +1,20 @@
 # xlflow MVP Quality Hardening Todo
 
-## Planning
+## Completed (Tasks 1-3)
 
-- [x] Define the post-MVP quality-hardening scope in `docs/specs/mvp-quality-hardening.md`.
-- [x] Write the implementation plan in `docs/superpowers/plans/2026-04-29-mvp-quality-hardening.md`.
-- [x] Refresh session tracking docs for the active phase.
+- [x] Update `docs/specs/cli-contract.md` and `README.md` to reflect verified behavior.
+- [x] Add regression tests for document-module normalization and malformed-header handling; harden `scripts/common.ps1`.
+- [x] Add `task verify` and document local verify vs `tmp_workspaces` E2E in `README.md`.
+- [x] Add explicit regression coverage for `.frx` companion preservation in the userform path.
+- [x] Re-run `tmp_workspaces` E2E verification for userform round-trip, including `.frm`/`.frx`.
+- [x] Re-run `tmp_workspaces` E2E verification for `init` from an existing workbook after the hardening changes.
 
-## Next Implementation Work
+## Remaining
 
-- [ ] Update `docs/specs/cli-contract.md` and `README.md` to reflect the verified verification baseline.
-- [ ] Add regression tests for document-module, class, and userform round-trips.
-- [ ] Add one obvious local automated verification command.
-- [ ] Re-run `tmp_workspaces` E2E verification after quality-hardening changes.
+- [ ] Decide whether to broaden automated coverage beyond the current MVP hardening scope.
 
 ## Verification
 
-- [x] Review existing specs and task-tracking files before planning.
-- [x] Save the new phase spec and implementation plan to the repository.
-- [ ] Validate future implementation changes with `go test ./...`.
-- [ ] Validate real workbook behavior with the `xlflow-tmp-workspace-e2e` skill.
+- [x] Keep local verification entry point available via `task verify`.
+- [x] Validate userform real workbook behavior with the `xlflow-tmp-workspace-e2e` skill.
+- [x] Validate `init` real workbook behavior with the `xlflow-tmp-workspace-e2e` skill.

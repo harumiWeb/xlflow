@@ -70,16 +70,35 @@ function Get-XlflowDocumentModuleContent {
 
   $lines = Get-Content -LiteralPath $Path
   $filtered = New-Object System.Collections.Generic.List[string]
+  $inClassHeader = $false
+  $classHeaderBuffer = New-Object System.Collections.Generic.List[string]
 
   foreach ($line in $lines) {
     $trimmed = $line.Trim()
+    if ($trimmed -eq "VERSION 1.0 CLASS") {
+      $inClassHeader = $true
+      $classHeaderBuffer.Clear()
+      $classHeaderBuffer.Add($line)
+      continue
+    }
+    if ($inClassHeader) {
+      $classHeaderBuffer.Add($line)
+      if ($trimmed -eq "END") {
+        $inClassHeader = $false
+        $classHeaderBuffer.Clear()
+      }
+      continue
+    }
     if ($trimmed -match '^Attribute\s+VB_') {
       continue
     }
-    if ($trimmed -in @("VERSION 1.0 CLASS", "BEGIN", "END") -or $trimmed -match '^MultiUse\s*=') {
-      continue
-    }
     $filtered.Add($line)
+  }
+
+  if ($inClassHeader -and $classHeaderBuffer.Count -gt 0) {
+    foreach ($headerLine in $classHeaderBuffer) {
+      $filtered.Add($headerLine)
+    }
   }
 
   $hasOptionExplicit = $false

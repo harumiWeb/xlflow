@@ -1,2 +1,3 @@
 - Validate user-visible file extensions against the actual serialized format. If a command always writes one concrete format, reject mismatched extensions instead of silently producing content under a misleading filename.
 - Normalize Excel document-module exports to editable VBA body text before linting or push. `ThisWorkbook` / worksheet sources must not retain `VERSION/BEGIN/MultiUse/END` header lines because those lines compile in exported files but fail when reinserted into VBIDE.
+- When module headers are malformed or partially missing, avoid aggressive stripping. Prefer conservative normalization that preserves executable VBA body text over risky truncation heuristics.
