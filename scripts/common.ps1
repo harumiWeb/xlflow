@@ -72,13 +72,43 @@ function Get-XlflowDocumentModuleContent {
   $filtered = New-Object System.Collections.Generic.List[string]
 
   foreach ($line in $lines) {
-    if ($line -match '^\s*Attribute\s+VB_') {
+    $trimmed = $line.Trim()
+    if ($trimmed -match '^Attribute\s+VB_') {
+      continue
+    }
+    if ($trimmed -in @("VERSION 1.0 CLASS", "BEGIN", "END") -or $trimmed -match '^MultiUse\s*=') {
       continue
     }
     $filtered.Add($line)
   }
 
+  $hasOptionExplicit = $false
+  $hasNonHeaderCode = $false
+  foreach ($line in $filtered) {
+    $trimmed = $line.Trim()
+    if ($trimmed -eq "") {
+      continue
+    }
+    if ($trimmed -ieq "Option Explicit") {
+      $hasOptionExplicit = $true
+      continue
+    }
+    $hasNonHeaderCode = $true
+  }
+
+  if (-not $hasOptionExplicit -and -not $hasNonHeaderCode) {
+    $filtered.Add("")
+    $filtered.Add("Option Explicit")
+  }
+
   return ($filtered -join [Environment]::NewLine)
+}
+
+function Normalize-XlflowDocumentModuleFile {
+  param([string]$Path)
+
+  $content = Get-XlflowDocumentModuleContent -Path $Path
+  Set-Content -LiteralPath $Path -Value $content
 }
 
 function Sync-XlflowDocumentModule {

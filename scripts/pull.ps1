@@ -28,6 +28,9 @@ try {
         Remove-Item -LiteralPath $path -Force
       }
       $component.Export($path)
+      if ($component.Type -eq 100) {
+        Normalize-XlflowDocumentModuleFile -Path $path
+      }
       $exported += $path
     }
   }
