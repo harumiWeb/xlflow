@@ -1,5 +1,61 @@
 # AIエージェント向けガイド
 
+## 0. プロジェクト概要
+
+```txt
+root: .
+├── cmd/
+│   └── xlflow/
+│       └── main.go
+├── docs/
+│   ├── adr/
+│   ├── specs/
+│   ├── superpowers/
+│   │   └── plans/
+│   └── design.md
+├── internal/
+│   ├── cli/
+│   │   ├── root.go
+│   │   └── root_test.go
+│   ├── command/
+│   ├── config/
+│   │   ├── config.go
+│   │   └── config_test.go
+│   ├── excel/
+│   │   ├── bridge.go
+│   │   └── bridge_test.go
+│   ├── lint/
+│   │   ├── linter.go
+│   │   └── linter_test.go
+│   ├── output/
+│   │   ├── output.go
+│   │   └── output_test.go
+│   └── project/
+│       ├── scaffold.go
+│       └── scaffold_test.go
+├── scripts/
+│   ├── common.ps1
+│   ├── doctor.ps1
+│   ├── new.ps1
+│   ├── pull.ps1
+│   ├── push.ps1
+│   ├── run.ps1
+│   ├── scripts_test.go
+│   └── test.ps1
+├── tasks/
+│   ├── feature_spec.md
+│   ├── lessons.md
+│   └── todo.md
+├── AGENTS.md
+├── CLAUDE.md
+├── go.mod
+├── go.sum
+├── lefthook.yml
+├── LICENSE
+├── README.md
+└── Taskfile.yml
+```
+
 ## 1. ワークフロー設計
 
 ### 1. 基本は Plan モードで進める
