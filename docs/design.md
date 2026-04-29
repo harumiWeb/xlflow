@@ -1,603 +1,182 @@
-# 全体コンセプト
+## 優先度高
 
-```text
-xlflow = Agent-ready VBA development framework
+### 1. `xlflow test`：VBAテスト実行ハーネス
 
-「Excelを操作するCLI」ではなく
-「VBAプロジェクトをコードとして扱う開発基盤」
-```
-
----
-
-# アーキテクチャ
-
-```text
-+---------------------------+
-|        xlflow CLI (Go)      |
-|---------------------------|
-| command router            |
-| config loader             |
-| logger / JSON output      |
-| linter / parser           |
-| test runner               |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|   Execution Adapter Layer |
-|---------------------------|
-| PowerShell bridge         |
-| VBScript bridge           |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|       Excel (COM)         |
-| VBIDE / Application.Run   |
-+---------------------------+
-```
-
----
-
-# コマンド設計（コア）
-
-CLIは「人間」ではなく**AIが使う前提**で設計します。
-
-## 基本コマンド
+最優先です。
 
 ```bash
-xlflow init Book.xlsm
-xlflow pull
-xlflow push
-xlflow run Module1.Main
-xlflow lint
+xlflow test
+xlflow test --filter TestCreateReport
+```
+
+VBA側に以下のような規約を作ります。
+
+```vb
+Public Sub TestCreateReport()
+    AssertEquals 10, Sheets("Result").Range("A1").Value
+End Sub
+```
+
+最低限ほしい機能はこれです。
+
+- `Test*` / `*_Test` プロシージャを検出
+- Excelを起動して実行
+- 成功/失敗/エラーをCLIに出す
+- JSON出力対応
+- 終了コードでCI/AIエージェントが判断できる
+
+```bash
+xlflow test --json
+```
+
+これはAIエージェントにとっての生命線です。
+
+---
+
+### 2. `xlflow run`：マクロ実行ハーネス
+
+任意のSubをCLIから実行できる仕組みです。
+
+```bash
+xlflow run Module1.CreateReport
+xlflow run Sheet1.Button_Click
+```
+
+欲しい機能は以下です。
+
+- 指定マクロの実行
+- 引数指定
+- 実行時間表示
+- エラー時にVBAの行番号・モジュール名・Err.Number・Err.Descriptionを表示
+- 実行前後でブックを保存するか選べる
+
+```bash
+xlflow run Report.Generate --input fixtures/sample.xlsx --save-as out/result.xlsx
+```
+
+---
+
+### 3. `xlflow diff`：Excel/VBA差分ハーネス
+
+AIが変更した結果を人間とAIが確認しやすくする機能です。
+
+```bash
+xlflow diff before.xlsm after.xlsm
+```
+
+見るべき差分は2種類あります。
+
+#### VBAコード差分
+
+```text
+Module1.bas
+- Range("A1").Value = "old"
++ Range("A1").Value = "new"
+```
+
+#### ワークブック状態差分
+
+```text
+Sheet: Report
+A1: "" -> "売上レポート"
+B2: 100 -> 120
+Shape "Button1": caption changed
+```
+
+AIエージェントには「コード差分」だけでは不十分です。Excelは最終成果物がブック状態なので、セル・シート・名前定義・図形・印刷範囲あたりの差分があると強いです。
+
+---
+
+### 4. `xlflow lint`：VBA静的チェック
+
+VBAは実行時まで壊れていることに気づきにくいので、軽量lintがあるとAIに効きます。
+
+チェック例：
+
+- `Option Explicit` がない
+- 未使用変数
+- 暗黙の `ActiveSheet` / `Selection` / `Activate`
+- `On Error Resume Next` の濫用
+- `Integer` 使用を `Long` 推奨
+- グローバル状態の多用
+- `Application.ScreenUpdating` を戻していない
+- `Application.DisplayAlerts` を戻していない
+- `Workbook_Open` などイベント系の危険変更
+
+特にAI向けには、単なる警告ではなく修正指針があると良いです。
+
+```text
+Avoid ActiveSheet. Use explicit worksheet reference:
+Set ws = ThisWorkbook.Worksheets("Report")
+```
+
+---
+
+### 5. `xlflow doctor`：実行環境診断
+
+Windows + Excel + COM + セキュリティ設定は壊れやすいので必須級です。
+
+```bash
 xlflow doctor
 ```
 
+確認項目：
+
+- Excelがインストールされているか
+- COM起動できるか
+- VBAプロジェクトへのアクセスが許可されているか
+- マクロ実行ポリシー
+- 一時ディレクトリ書き込み
+- ブックが保護されていないか
+- 既存のExcelプロセスが残っていないか
+
+AIエージェントが「コードが悪い」のか「環境が悪い」のか判定できるようになります。
+
 ---
 
-## AI向け拡張コマンド（重要）
+## あるとかなり強い
+
+### 6. `xlflow trace`：実行ログ/イベント記録
+
+VBAに簡易ロガーを差し込んで、AIが実行過程を見られるようにします。
+
+```vb
+Call XlflowLog("start GenerateReport")
+Call XlflowLog("rowCount=" & rowCount)
+```
+
+CLI側：
 
 ```bash
-xlflow run --json
-xlflow lint --json
-xlflow diagnose --json
-xlflow fix --auto
-```
-
-👉 全てJSONで返せるのが重要
-
----
-
-# ディレクトリ構成
-
-```text
-project/
-├─ src/
-│  ├─ modules/
-│  │   └─ Main.bas
-│  ├─ classes/
-│  │   └─ User.cls
-│  ├─ forms/
-│  │   └─ Form1.frm
-│  └─ workbook/
-│      └─ Sheet1.bas
-│
-├─ tests/
-│  └─ MainTest.bas
-│
-├─ build/
-│  └─ Book.xlsm
-│
-├─ prompts/              # AIエージェント用
-│  └─ agent.md
-│
-├─ vba.toml
-└─ .xlflow/
-   └─ cache.json
-```
-
----
-
-# 設定ファイル（vba.toml）
-
-```toml
-[project]
-name = "sales_tool"
-entry = "Main.Run"
-
-[excel]
-path = "build/Book.xlsm"
-visible = false
-
-[lint]
-require_option_explicit = true
-forbid_select = true
-max_line_length = 120
-
-[test]
-runner = "xlflow"
-```
-
----
-
-# コア機能設計
-
-## 1. pull / push
-
-```text
-pull
-- VBComponents.Export
-- ファイルとして保存
-
-push
-- 既存削除
-- Import
-```
-
----
-
-## 2. run（最重要）
-
-```bash
-xlflow run Main.Run --json
+xlflow run Report.Generate --trace
 ```
 
 出力：
 
-```json
-{
-  "status": "failed",
-  "macro": "Main.Run",
-  "error": {
-    "number": 91,
-    "message": "Object variable not set",
-    "module": "Main",
-    "line": 42
-  },
-  "logs": [
-    "Start processing...",
-    "Loading sheet..."
-  ]
-}
+```text
+[00:00.120] start GenerateReport
+[00:00.214] rowCount=128
+[00:00.420] created sheet: Report
 ```
 
-👉 AIがこのJSONを元に修正できる
+VBAはデバッグ情報が取りづらいので、これはかなり効きます。
 
 ---
 
-## 3. lint
+## 結論
 
-VBA特有のルールを持つ
+xlflowで本当に価値が出るのは、VBAを書き出せることよりも、
 
 ```text
-- Option Explicit必須
-- Select / Activate禁止
-- 未使用変数
-- 暗黙Variant
-- Range("A1")直書き検出
-- On Error Resume Next検出
-```
-
----
-
-## 4. doctor（かなり重要）
-
-```bash
-xlflow doctor
-```
-
-```json
-{
-  "excel_installed": true,
-  "vbide_access": false,
-  "fix": "Enable 'Trust access to VBA project model'"
-}
-```
-
-👉 初期ハマりを完全に潰す
-
----
-
-# AIエージェント対応設計
-
-ここがこのツールの“核”です。
-
-## prompts/agent.md
-
-```md
-You are a VBA developer.
-
-Rules:
-- Never use Select/Activate
-- Always use Option Explicit
-- Prefer With blocks
-- Avoid global state
-```
-
----
-
-## AIフレンドリー設計
-
-```text
-すべてのコマンドが
-- exit code
-- JSON
-- deterministic output
-を持つ
-```
-
----
-
-# 実行ブリッジ設計
-
-## PowerShell（推奨）
-
-```powershell
-$excel = New-Object -ComObject Excel.Application
-$wb = $excel.Workbooks.Open($path)
-$excel.Run("Main.Run")
-```
-
----
-
-## エラー取得
-
-```text
-On Error GoTo Handler
+AIが変更する
 ↓
-Err.Number / Err.Description を取得
-```
-
-👉 JSONでGo側へ返す
-
----
-
-# 将来拡張
-
-## 1. テストフレームワーク
-
-```vba
-Sub Test_Add()
-    AssertEqual Add(1,2), 3
-End Sub
-```
-
-```bash
-xlflow test
-```
-
----
-
-## 2. watchモード
-
-```bash
-xlflow watch
-```
-
-```text
-保存 → push → run → 結果表示
-```
-
-👉 AIエージェントと相性抜群
-
----
-
-## 3. スナップショット
-
-```bash
-xlflow snapshot save
-xlflow snapshot restore
-```
-
-👉 Excel破壊対策
-
----
-
-## 4. GUIログビュー（将来）
-
-CLI + TUI（Bubble Tea）もあり
-
----
-
-# MVPスコープ
-
-まずここだけで十分価値があります
-
-```text
-- init
-- pull / push
-- run（JSON出力）
-- lint（最低限）
-- doctor
-```
-
----
-
-以下、**Go製CLI + PowerShellブリッジ**前提の初期設計です。
-
-# ディレクトリ構成
-
-```text
-xlflow/
-├─ cmd/
-│  └─ xlflow/
-│     └─ main.go
-├─ internal/
-│  ├─ cli/
-│  │  └─ root.go
-│  ├─ command/
-│  │  ├─ init.go
-│  │  ├─ pull.go
-│  │  ├─ push.go
-│  │  ├─ run.go
-│  │  ├─ lint.go
-│  │  └─ doctor.go
-│  ├─ config/
-│  │  └─ config.go
-│  ├─ excel/
-│  │  ├─ bridge.go
-│  │  ├─ powershell.go
-│  │  └─ result.go
-│  ├─ lint/
-│  │  ├─ linter.go
-│  │  └─ rules.go
-│  ├─ project/
-│  │  ├─ layout.go
-│  │  └─ scaffold.go
-│  └─ output/
-│     └─ json.go
-├─ scripts/
-│  ├─ pull.ps1
-│  ├─ push.ps1
-│  ├─ run.ps1
-│  └─ doctor.ps1
-├─ testdata/
-│  └─ sample.xlsm
-├─ go.mod
-├─ README.md
-└─ vba.toml
-```
-
-# Goパッケージ責務
-
-```text
-cmd/xlflow
-- エントリーポイント
-
-internal/cli
-- CobraなどのCLIルート定義
-
-internal/command
-- 各コマンドのUseCase層
-
-internal/config
-- vba.toml読み込み
-
-internal/excel
-- PowerShell実行
-- JSON結果のパース
-- Excel操作の抽象化
-
-internal/lint
-- VBAファイル解析
-- ルール実行
-
-internal/project
-- init時の雛形生成
-- src/ tests/ build/ prompts/ 作成
-
-internal/output
-- 人間向け/AI向け出力の切り替え
-```
-
-# CLI設計
-
-```bash
-xlflow init ./Book.xlsm
-xlflow pull
-xlflow push
-xlflow run
-xlflow run Main.Run
-xlflow lint
-xlflow doctor
-```
-
-AI向けには共通で `--json` を持たせます。
-
-```bash
-xlflow run Main.Run --json
-xlflow lint --json
-xlflow doctor --json
-```
-
-# vba.toml
-
-```toml
-[project]
-name = "sample"
-entry = "Main.Run"
-
-[excel]
-path = "build/Book.xlsm"
-visible = false
-display_alerts = false
-
-[src]
-modules = "src/modules"
-classes = "src/classes"
-forms = "src/forms"
-workbook = "src/workbook"
-
-[lint]
-require_option_explicit = true
-forbid_select = true
-forbid_activate = true
-forbid_on_error_resume_next = true
-```
-
-# PowerShellブリッジ方針
-
-GoからPowerShellを実行します。
-
-```go
-cmd := exec.Command(
-    "powershell",
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", scriptPath,
-    "-WorkbookPath", workbookPath,
-)
-```
-
-PowerShell側は必ずJSONを返します。
-
-```json
-{
-  "status": "ok",
-  "message": "Macro executed successfully"
-}
-```
-
-失敗時：
-
-```json
-{
-  "status": "failed",
-  "error": {
-    "number": 1004,
-    "message": "Cannot run the macro",
-    "source": "Microsoft Excel"
-  }
-}
-```
-
-# run.ps1 の最小イメージ
-
-```powershell
-param(
-  [string]$WorkbookPath,
-  [string]$MacroName,
-  [bool]$Visible = $false
-)
-
-$result = @{
-  status = "ok"
-  macro = $MacroName
-  error = $null
-}
-
-try {
-  $excel = New-Object -ComObject Excel.Application
-  $excel.Visible = $Visible
-  $excel.DisplayAlerts = $false
-
-  $workbook = $excel.Workbooks.Open($WorkbookPath)
-  $excel.Run($MacroName)
-
-  $workbook.Save()
-  $workbook.Close($true)
-  $excel.Quit()
-}
-catch {
-  $result.status = "failed"
-  $result.error = @{
-    message = $_.Exception.Message
-    source = $_.Exception.Source
-  }
-
-  if ($workbook) {
-    $workbook.Close($false)
-  }
-  if ($excel) {
-    $excel.Quit()
-  }
-}
-finally {
-  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) | Out-Null
-  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
-}
-
-$result | ConvertTo-Json -Depth 5
-```
-
-# lint MVPルール
-
-まずは文字列ベースで十分です。
-
-```text
-VB001 Option Explicit がない
-VB002 Select を使用している
-VB003 Activate を使用している
-VB004 On Error Resume Next を使用している
-VB005 暗黙Variantの可能性がある
-VB006 Public変数を使用している
-```
-
-出力例：
-
-```json
-{
-  "status": "failed",
-  "issues": [
-    {
-      "code": "VB002",
-      "severity": "warning",
-      "file": "src/modules/Main.bas",
-      "line": 12,
-      "message": "Avoid Select. Use direct object references instead."
-    }
-  ]
-}
-```
-
-# MVP実装順
-
-```text
-1. xlflow init
-2. vba.toml読み込み
-3. xlflow doctor
-4. xlflow pull
-5. xlflow push
-6. xlflow run --json
-7. xlflow lint
-```
-
-最初に作るなら、`doctor` を先に作るのが良いです。
-Excelが入っているか、COMが使えるか、VBIDEアクセスが許可されているかを確認できないと、他の機能のデバッグが地獄になります。
-
-# 最初のREADME見出し
-
-```md
-# xlflow
-
-Agent-ready VBA development framework.
-
-xlflow turns Excel VBA projects into a CLI-first development workflow.
-
-- Export VBA modules from `.xlsm`
-- Edit VBA as normal source files
-- Import modules back into Excel
-- Run macros from CLI
-- Lint VBA for safer automation
-- Return machine-readable JSON for AI agents
-```
-
-この方針なら、かなり実装に移しやすいです。
-
-
----
-
-# 総評（重要）
-
-このプロジェクトの本質は
-
-```text
-VBAをCLI化することではない
+Excel上で実行する
 ↓
-AIがExcel業務を自動化できるようにすること
+結果を機械的に検証する
+↓
+失敗理由をCLIで読める
+↓
+再修正する
 ```
 
-です。
+このループを作れることです。
