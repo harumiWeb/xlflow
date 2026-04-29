@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -49,4 +50,82 @@ func TestInitRefusesOverwrite(t *testing.T) {
 	if _, err := Init(dir, workbook); err == nil {
 		t.Fatal("expected overwrite refusal")
 	}
+}
+
+func TestNewScaffoldDefaultWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	result, err := New(dir, "", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/Book.xlsm" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Project.Name != "Book" {
+		t.Fatalf("project name = %q", cfg.Project.Name)
+	}
+	if cfg.Excel.Path != "build/Book.xlsm" {
+		t.Fatalf("excel path = %q", cfg.Excel.Path)
+	}
+}
+
+func TestNewScaffoldAppendsXlsmExtension(t *testing.T) {
+	dir := t.TempDir()
+	result, err := New(dir, "Sales", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/Sales.xlsm" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Project.Name != "Sales" {
+		t.Fatalf("project name = %q", cfg.Project.Name)
+	}
+}
+
+func TestNewScaffoldKeepsXlsmExtension(t *testing.T) {
+	dir := t.TempDir()
+	result, err := New(dir, "Sales.xlsm", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/Sales.xlsm" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+}
+
+func TestNewRejectsNonXlsmExtension(t *testing.T) {
+	dir := t.TempDir()
+	_, err := New(dir, "Sales.xlsx", fakeWorkbookCreator)
+	if err == nil {
+		t.Fatal("expected extension validation error")
+	}
+	if !strings.Contains(err.Error(), ".xlsm") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected config not to be created, got %v", statErr)
+	}
+}
+
+func TestNewRefusesOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Sales", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, "Sales", fakeWorkbookCreator); err == nil {
+		t.Fatal("expected overwrite refusal")
+	}
+}
+
+func fakeWorkbookCreator(path string) error {
+	return os.WriteFile(path, []byte("fake workbook"), 0o644)
 }

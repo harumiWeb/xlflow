@@ -8,7 +8,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"common.ps1", "doctor.ps1", "pull.ps1", "push.ps1", "run.ps1"}
+	scripts := []string{"common.ps1", "doctor.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {

@@ -1,0 +1,1 @@
+- Validate user-visible file extensions against the actual serialized format. If a command always writes one concrete format, reject mismatched extensions instead of silently producing content under a misleading filename.

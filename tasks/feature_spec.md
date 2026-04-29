@@ -6,6 +6,7 @@ Implement the MVP command set from `docs/design.md` as a Windows-first, agent-re
 
 ## Commands
 
+- `xlflow new [workbook]`: scaffold a new project and create a fresh macro-enabled workbook under `build/`. Defaults to `Book.xlsm`; appends `.xlsm` when the provided workbook name has no extension; rejects any other extension.
 - `xlflow init <workbook>`: scaffold project directories, copy the workbook to `build/`, write `xlflow.toml`, and write `prompts/agent.md`.
 - `xlflow doctor [--json]`: diagnose Excel COM availability, workbook open support, and VBIDE trust access.
 - `xlflow pull [--json]`: export workbook VBA components into configured source directories.
@@ -56,6 +57,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File <script>
 ```
 
 Scripts must write only JSON to stdout and must release COM objects in cleanup paths.
+
+`xlflow new` uses Excel COM to save an empty workbook as macro-enabled format `52`.
 
 ## Lint Issues
 

@@ -9,6 +9,7 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
+xlflow new [workbook]
 xlflow init <workbook>
 xlflow doctor [--json]
 xlflow pull [--json]
@@ -16,6 +17,8 @@ xlflow push [--json]
 xlflow run [macro] [--json]
 xlflow lint [--json]
 ```
+
+`new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`.
 

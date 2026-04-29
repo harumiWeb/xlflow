@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -37,6 +38,7 @@ func (a *app) rootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
 	root.AddCommand(
+		a.newCommand(),
 		a.initCommand(),
 		a.doctorCommand(),
 		a.pullCommand(),
@@ -45,6 +47,50 @@ func (a *app) rootCommand() *cobra.Command {
 		a.lintCommand(),
 	)
 	return root
+}
+
+func (a *app) newCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "new [workbook]",
+		Short: "Create a new xlflow project and macro workbook",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			var excelEnv output.Envelope
+			var excelCode int
+			result, err := project.New(a.cwd, workbook, func(path string) error {
+				env, code, err := excel.Runner{RootDir: a.cwd}.New(path)
+				excelEnv = env
+				excelCode = code
+				if err != nil {
+					return err
+				}
+				if code != output.ExitSuccess {
+					if env.Error != nil {
+						return errors.New(env.Error.Message)
+					}
+					return errors.New("workbook creation failed")
+				}
+				return nil
+			})
+			if err != nil {
+				if excelCode != 0 {
+					return a.write(excelEnv, excelCode)
+				}
+				return a.writeFailure("new", output.ExitConfig, "new_failed", err)
+			}
+			env := output.New("new")
+			env.Workbook = result.Workbook
+			env.Logs = []string{
+				"created " + result.ConfigPath,
+				"created " + result.Workbook,
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 }
 
 func (a *app) initCommand() *cobra.Command {

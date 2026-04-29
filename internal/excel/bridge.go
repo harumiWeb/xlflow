@@ -44,6 +44,12 @@ func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
+func (r Runner) New(workbook string) (output.Envelope, int, error) {
+	return r.run("new", map[string]string{
+		"WorkbookPath": workbookPath(r.RootDir, workbook),
+	})
+}
+
 func (r Runner) Pull(cfg config.Config) (output.Envelope, int, error) {
 	return r.run("pull", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
