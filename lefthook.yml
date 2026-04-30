@@ -5,3 +5,7 @@ pre-commit:
       run: goimports -w cmd internal
     lint:
       run: golangci-lint run
+    fmt:
+      run: go fmt ./...
+    pnpm-format:
+      run: pnpm run format
