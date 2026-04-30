@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -125,5 +126,140 @@ func TestWriteJSONEnvelopeIncludesErrorLine(t *testing.T) {
 	}
 	if errorMap["line"] != float64(10) {
 		t.Fatalf("error line = %#v", errorMap["line"])
+	}
+}
+
+func TestWriteWithOptionsRendersDoctorChecklist(t *testing.T) {
+	env := New("doctor")
+	env.Diagnostics = map[string]any{
+		"excel_installed":   true,
+		"workbook_openable": true,
+		"vbide_access":      false,
+		"fix":               "Enable Trust access.",
+	}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm"}
+	env.Status = StatusFailed
+	env.Error = &Error{Code: "vbide_access_denied", Message: "VBIDE access is not available.", Source: "Excel"}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow doctor", "Excel automation", "Workbook", "VBIDE access", "Enable Trust access.", "vbide_access_denied"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+	env.Trace = map[string]any{"events": []map[string]any{{"timestamp": "2026-04-30 10:00:00", "message": "start"}}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Main.Run", "42ms", "left unchanged", "Trace", "start"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsDoesNotDuplicateTraceEventsFromLogs(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+	env.Logs = []string{"ran Main.Run in 42ms", "[2026-04-30 10:00:00] start"}
+	env.Trace = map[string]any{"events": []map[string]any{{"timestamp": "2026-04-30 10:00:00", "message": "start"}}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if strings.Count(got, "start") != 1 {
+		t.Fatalf("expected trace event once:\n%s", got)
+	}
+	if !strings.Contains(got, "ran Main.Run in 42ms") {
+		t.Fatalf("expected non-trace log to remain:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersTestFailures(t *testing.T) {
+	env := Failure("test", Error{Code: "test_failed", Message: "1 of 2 test(s) failed"})
+	env.Tests = []map[string]any{
+		{"name": "TestOk", "module": "Tests", "status": "passed", "duration_ms": 3},
+		{"name": "TestBad", "module": "Tests", "status": "failed", "duration_ms": 5, "error": map[string]any{"message": "expected 1"}},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"1 passed, 1 failed, 2 total", "Tests.TestOk", "Tests.TestBad", "expected 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("test output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersDiscoveredButUnrunTestsAsNotRun(t *testing.T) {
+	env := Failure("test", Error{Code: "duplicate_test_name", Message: "duplicate VBA test name(s): TestSame"})
+	env.Tests = []map[string]any{
+		{"name": "TestSame", "module": "TestsA"},
+		{"name": "TestSame", "module": "TestsB"},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"0 passed, 0 failed, 2 not run, 2 total", "[-] TestsA.TestSame", "[-] TestsB.TestSame"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("test output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "[x] TestsA.TestSame") || strings.Contains(got, "[x] TestsB.TestSame") {
+		t.Fatalf("unrun tests should not be marked failed:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersLintIssues(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
+	env.Issues = []map[string]any{{
+		"code":     "VB001",
+		"severity": "warning",
+		"file":     "src/modules/Main.bas",
+		"line":     1,
+		"message":  "missing Option Explicit",
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"VB001", "src/modules/Main.bas:1", "missing Option Explicit"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lint output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersDiffSummary(t *testing.T) {
+	env := New("diff")
+	env.Diff = map[string]any{"summary": map[string]any{"total_diffs": 2, "sheet_diffs": 1, "cell_diffs": 1, "vba_diffs": 0}}
+	env.Logs = []string{"Sheet: + Result", "A1 value: \"old\" -> \"new\""}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Total diffs", "2", "Sheet Diffs", "1", "A1 value"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diff output missing %q:\n%s", want, got)
+		}
 	}
 }

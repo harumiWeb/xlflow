@@ -69,7 +69,13 @@ func (a *app) macrosCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Macros(cfg)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Reading VBA project", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Macros(cfg)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -102,7 +108,9 @@ func (a *app) newCommand() *cobra.Command {
 			var excelEnv output.Envelope
 			var excelCode int
 			result, err := project.New(a.cwd, workbook, func(path string) error {
-				env, code, err := excel.Runner{RootDir: a.cwd}.New(path)
+				env, code, err := a.runExcel("Creating workbook", func() (output.Envelope, int, error) {
+					return excel.Runner{RootDir: a.cwd}.New(path)
+				})
 				excelEnv = env
 				excelCode = code
 				if err != nil {
@@ -201,7 +209,13 @@ func (a *app) doctorCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Doctor(cfg)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Checking Excel automation", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -220,7 +234,13 @@ func (a *app) pullCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Pull(cfg)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Exporting VBA source", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Pull(cfg)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -239,7 +259,13 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Push(cfg)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Importing VBA source", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Push(cfg)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -314,7 +340,13 @@ func (a *app) runCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Running macro", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -355,7 +387,13 @@ func (a *app) traceInjectCommand() *cobra.Command {
 				}
 				cfg = config.Default()
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Injecting trace module", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -375,7 +413,13 @@ func (a *app) testCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Test(cfg, filter)
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Running VBA tests", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Test(cfg, filter)
+				return runErr
+			})
 			if err != nil {
 				return err
 			}
@@ -538,6 +582,22 @@ func stdinIsTerminal() bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+func stdoutIsTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func stderrIsTerminal() bool {
+	info, err := os.Stderr.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
 func (a *app) loadConfig(command string) (config.Config, error) {
 	cfg, err := config.Load(a.cwd)
 	if err != nil {
@@ -548,18 +608,45 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
 	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
-	if writeErr := output.Write(os.Stdout, env, a.json); writeErr != nil {
+	if writeErr := output.WriteWithOptions(os.Stdout, env, a.outputOptions()); writeErr != nil {
 		return output.WithExitCode(code, writeErr)
 	}
 	return output.WithExitCode(code, err)
 }
 
 func (a *app) write(env output.Envelope, code int) error {
-	if err := output.Write(os.Stdout, env, a.json); err != nil {
+	if err := output.WriteWithOptions(os.Stdout, env, a.outputOptions()); err != nil {
 		return output.WithExitCode(code, err)
 	}
 	if code != output.ExitSuccess {
 		return output.WithExitCode(code, fmt.Errorf("%s failed", env.Command))
 	}
 	return nil
+}
+
+func (a *app) outputOptions() output.Options {
+	interactive := !a.json && stdoutIsTerminal()
+	return output.Options{
+		JSON:        a.json,
+		Interactive: interactive,
+		Color:       interactive,
+	}
+}
+
+func (a *app) runExcel(label string, fn func() (output.Envelope, int, error)) (output.Envelope, int, error) {
+	var env output.Envelope
+	var code int
+	err := a.withSpinner(label, func() error {
+		var runErr error
+		env, code, runErr = fn()
+		return runErr
+	})
+	return env, code, err
+}
+
+func (a *app) withSpinner(label string, fn func() error) error {
+	if a.json || !stdoutIsTerminal() || !stderrIsTerminal() {
+		return fn()
+	}
+	return runSpinner(os.Stderr, label, fn)
 }
