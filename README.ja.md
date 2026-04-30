@@ -503,4 +503,4 @@ xlflow は MVP 段階のツールです。
 
 ## License
 
-TBD
+MIT
