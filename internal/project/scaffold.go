@@ -100,6 +100,15 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 		return result, err
 	}
 	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, assertPath)))
+
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+	updatedGitignore, err := ensureGitignore(gitignorePath)
+	if err != nil {
+		return result, err
+	}
+	if updatedGitignore {
+		result.Created = append(result.Created, ".gitignore")
+	}
 	return result, nil
 }
 
@@ -142,6 +151,83 @@ func writeExclusive(path, body string) (err error) {
 	return err
 }
 
+func ensureGitignore(path string) (bool, error) {
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := writeExclusive(path, defaultGitignore); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	missing := missingGitignoreSections(string(body))
+	if len(missing) == 0 {
+		return false, nil
+	}
+
+	appendBody := strings.Join(missing, "\n\n") + "\n"
+	if len(body) > 0 {
+		lineEnding := "\n"
+		if strings.Contains(string(body), "\r\n") {
+			lineEnding = "\r\n"
+			appendBody = strings.ReplaceAll(appendBody, "\n", "\r\n")
+		}
+		if !strings.HasSuffix(string(body), "\n") {
+			appendBody = lineEnding + lineEnding + appendBody
+		} else if !strings.HasSuffix(string(body), "\n\n") {
+			appendBody = lineEnding + appendBody
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return false, err
+	}
+	if _, err := f.WriteString(appendBody); err != nil {
+		_ = f.Close()
+		return false, err
+	}
+	if err := f.Close(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func missingGitignoreSections(body string) []string {
+	lines := map[string]bool{}
+	for _, line := range strings.FieldsFunc(body, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	}) {
+		lines[strings.TrimSpace(line)] = true
+	}
+
+	var sections []string
+	if !lines["~$*.xls*"] || !lines["*.tmp"] {
+		var entries []string
+		if !lines["~$*.xls*"] {
+			entries = append(entries, "~$*.xls*")
+		}
+		if !lines["*.tmp"] {
+			entries = append(entries, "*.tmp")
+		}
+		sections = append(sections, "# Excel\n"+strings.Join(entries, "\n"))
+	}
+	if !lines[".xlflow/"] || !lines["build/"] {
+		var entries []string
+		if !lines[".xlflow/"] {
+			entries = append(entries, ".xlflow/")
+		}
+		if !lines["build/"] {
+			entries = append(entries, "build/")
+		}
+		sections = append(sections, "# xlflow\n"+strings.Join(entries, "\n"))
+	}
+	return sections
+}
+
 func rel(base, path string) string {
 	r, err := filepath.Rel(base, path)
 	if err != nil {
@@ -174,6 +260,15 @@ func normalizeWorkbookName(name string) (string, error) {
 	}
 	return name, nil
 }
+
+const defaultGitignore = `# Excel
+~$*.xls*
+*.tmp
+
+# xlflow
+.xlflow/
+build/
+`
 
 const defaultAssertModule = `Attribute VB_Name = "XlflowAssert"
 Option Explicit

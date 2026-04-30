@@ -1,11 +1,19 @@
-# xlflow AI Agent Skill Spec
+# xlflow Scaffold Spec
 
 ## Goal
 
-Replace scaffolded `prompts/agent.md` with a bundled `xlflow` Skill that AI agents can install into project-local provider directories and use as the official Excel VBA development workflow.
+Define the current project scaffold behavior for `xlflow new` and `xlflow init`.
 
 ## Behavior
 
+- `xlflow new` and `xlflow init` create or update a project-local `.gitignore`.
+- New `.gitignore` files contain only xlflow project artifacts and Excel temporary files:
+  - `~$*.xls*`
+  - `*.tmp`
+  - `.xlflow/`
+  - `build/`
+- Existing `.gitignore` files are preserved and receive only missing managed entries.
+- Existing managed entries are not duplicated.
 - `xlflow skill install` installs the bundled `xlflow` Skill.
 - `xlflow new/init --with-skill` installs the same Skill during project creation.
 - Supported providers are `agents`, `codex`, `claude`, `cursor`, `gemini`, and `copilot`.
@@ -27,4 +35,4 @@ Replace scaffolded `prompts/agent.md` with a bundled `xlflow` Skill that AI agen
 
 - Fast gate: `go test ./...` and `task verify`.
 - Skill gate: `skill-creator` quick validation for the bundled skill folder.
-- Coverage: scaffold prompt removal, provider install paths, overwrite refusal and `--force`, `init --with-skill`, non-interactive JSON failure, and Bubble Tea selector model behavior.
+- Coverage: `.gitignore` creation and append behavior, scaffold prompt removal, provider install paths, overwrite refusal and `--force`, `init --with-skill`, non-interactive JSON failure, and Bubble Tea selector model behavior.

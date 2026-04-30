@@ -41,6 +41,7 @@ xlflow skill install --target .agents/skills
 
 The MVP uses `xlflow.toml` as its project configuration file. Excel automation is Windows-first and uses PowerShell plus Excel COM.
 `xlflow new` only accepts `.xlsm` workbook names because it always creates macro-enabled workbook content.
+`xlflow new` and `xlflow init` create or update a project-local `.gitignore` for xlflow build artifacts, `.xlflow/`, and Excel temporary files. Existing `.gitignore` content is preserved and only missing xlflow entries are appended.
 
 `xlflow new/init --with-skill` installs the bundled `xlflow` AI agent skill during setup. The same skill can be installed later with `xlflow skill install`. Supported provider targets are `agents`, `codex`, `claude`, `cursor`, `gemini`, and `copilot`; when no provider is specified in an interactive terminal, xlflow shows a Bubble Tea selector. JSON and non-interactive runs must pass `--agent` or `--target`.
 

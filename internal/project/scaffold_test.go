@@ -31,6 +31,7 @@ func TestInitScaffold(t *testing.T) {
 		"src/workbook",
 		"tests",
 		".xlflow",
+		".gitignore",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
@@ -38,6 +39,89 @@ func TestInitScaffold(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "prompts", "agent.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected prompts/agent.md not to be scaffolded, got %v", err)
+	}
+}
+
+func TestNewScaffoldCreatesGitignore(t *testing.T) {
+	dir := t.TempDir()
+	result, err := New(dir, "Book", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); got != defaultGitignore {
+		t.Fatalf(".gitignore =\n%s", got)
+	}
+	if !containsString(result.Created, ".gitignore") {
+		t.Fatalf("expected .gitignore in created paths: %v", result.Created)
+	}
+}
+
+func TestScaffoldAppendsMissingGitignoreEntries(t *testing.T) {
+	dir := t.TempDir()
+	existing := "# User\n.env\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := New(dir, "Book", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.HasPrefix(got, existing) {
+		t.Fatalf("existing .gitignore content should be preserved:\n%s", got)
+	}
+	for _, want := range []string{"~$*.xls*", "*.tmp", ".xlflow/", "build/"} {
+		if strings.Count(got, want) != 1 {
+			t.Fatalf("expected one %q entry in .gitignore:\n%s", want, got)
+		}
+	}
+	if !containsString(result.Created, ".gitignore") {
+		t.Fatalf("expected .gitignore in created paths: %v", result.Created)
+	}
+}
+
+func TestScaffoldDoesNotDuplicateGitignoreEntries(t *testing.T) {
+	dir := t.TempDir()
+	existing := "# Existing\nbuild/\n*.tmp\n.xlflow/\n~$*.xls*\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := New(dir, "Book", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); got != existing {
+		t.Fatalf(".gitignore should be unchanged when entries exist:\n%s", got)
+	}
+	if containsString(result.Created, ".gitignore") {
+		t.Fatalf("did not expect unchanged .gitignore in created paths: %v", result.Created)
+	}
+}
+
+func TestExistingGitignoreDoesNotBlockOverwriteRefusal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("# User\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, "Sales", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, "Sales", fakeWorkbookCreator); err == nil {
+		t.Fatal("expected protected file overwrite refusal")
+	} else if strings.Contains(err.Error(), ".gitignore") {
+		t.Fatalf("expected .gitignore not to cause overwrite refusal: %v", err)
 	}
 }
 
@@ -166,4 +250,13 @@ func TestNewRefusesOverwrite(t *testing.T) {
 
 func fakeWorkbookCreator(path string) error {
 	return os.WriteFile(path, []byte("fake workbook"), 0o644)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
