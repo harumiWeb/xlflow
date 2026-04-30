@@ -89,6 +89,7 @@ forbid_activate = true
 forbid_on_error_resume_next = true
 detect_implicit_variant = true
 forbid_public_module_fields = true
+forbid_interactive_input = true
 ```
 
 ## JSON Envelope

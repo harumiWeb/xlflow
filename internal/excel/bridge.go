@@ -50,7 +50,9 @@ type ScriptResult struct {
 	Diagnostics any           `json:"diagnostics,omitempty"`
 	Workbook    any           `json:"workbook,omitempty"`
 	Backup      any           `json:"backup,omitempty"`
+	Source      any           `json:"source,omitempty"`
 	Macro       any           `json:"macro,omitempty"`
+	Macros      any           `json:"macros,omitempty"`
 	Tests       any           `json:"tests,omitempty"`
 	Trace       any           `json:"trace,omitempty"`
 }
@@ -92,14 +94,22 @@ func (r Runner) Push(cfg config.Config) (output.Envelope, int, error) {
 }
 
 func (r Runner) TraceInject(cfg config.Config, workbook string) (output.Envelope, int, error) {
+	return r.run("trace", buildTraceInjectScriptArgs(r.RootDir, cfg, workbook))
+}
+
+func buildTraceInjectScriptArgs(root string, cfg config.Config, workbook string) map[string]string {
 	if workbook == "" {
 		workbook = cfg.Excel.Path
 	}
-	return r.run("trace", map[string]string{
+	args := map[string]string{
 		"Action":       "inject",
-		"WorkbookPath": workbookPath(r.RootDir, workbook),
+		"WorkbookPath": workbookPath(root, workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}
+	if workbook == cfg.Excel.Path {
+		args["ModulesDir"] = filepath.Join(root, cfg.Src.Modules)
+	}
+	return args
 }
 
 func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[string]string, error) {
@@ -147,6 +157,13 @@ func (r Runner) Test(cfg config.Config, filter string) (output.Envelope, int, er
 	return r.run("test", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Filter":       filter,
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	})
+}
+
+func (r Runner) Macros(cfg config.Config) (output.Envelope, int, error) {
+	return r.run("macros", map[string]string{
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 	})
 }
@@ -199,7 +216,9 @@ func (r Runner) run(commandName string, args map[string]string) (output.Envelope
 	env.Diagnostics = result.Diagnostics
 	env.Workbook = result.Workbook
 	env.Backup = result.Backup
+	env.Source = result.Source
 	env.Macro = result.Macro
+	env.Macros = result.Macros
 	env.Tests = result.Tests
 	env.Trace = result.Trace
 	if result.Status == output.StatusFailed {
@@ -213,7 +232,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
+	case "macro_failed", "macro_not_found", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment

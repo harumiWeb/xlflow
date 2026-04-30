@@ -15,7 +15,8 @@ function Set-XlflowError {
     [string]$Message,
     [string]$Source = "",
     [int]$Number = 0,
-    [int]$Line = 0
+    [int]$Line = 0,
+    [string]$Phase = ""
   )
   $Result.status = "failed"
   $Result.error = [ordered]@{
@@ -24,6 +25,7 @@ function Set-XlflowError {
     source = $Source
     number = $Number
     line = $Line
+    phase = $Phase
   }
 }
 
@@ -435,6 +437,20 @@ function New-XlflowTraceModuleCode {
   return $builder.ToString()
 }
 
+function Write-XlflowTraceModuleSource {
+  param([string]$ModulesDir)
+
+  if ([string]::IsNullOrWhiteSpace($ModulesDir)) {
+    return $null
+  }
+
+  New-Item -ItemType Directory -Force -Path $ModulesDir | Out-Null
+  $path = Join-Path $ModulesDir "XlflowTrace.bas"
+  $source = 'Attribute VB_Name = "XlflowTrace"' + [Environment]::NewLine + (New-XlflowTraceModuleCode)
+  Set-XlflowUtf8Text -Path $path -Text $source
+  return $path
+}
+
 function Test-XlflowTraceModuleInjected {
   param($VBProject)
 
@@ -484,6 +500,63 @@ function Read-XlflowTraceEvents {
   foreach ($event in $events) {
     Write-Output $event
   }
+}
+
+function Find-XlflowMacroProcedures {
+  param([string]$ModuleName, [string]$Code)
+
+  $macros = New-Object System.Collections.Generic.List[object]
+  if ([string]::IsNullOrEmpty($Code)) {
+    return $macros
+  }
+
+  $lines = $Code -split "`r?`n"
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i].Trim()
+    if ($line -match '^(?i)(Private|Friend)\s+(Sub|Function)\b') {
+      continue
+    }
+    $match = [regex]::Match($line, '^(?:(Public)\s+)?(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $match.Success) {
+      continue
+    }
+    $name = $match.Groups[3].Value
+    if ([string]::IsNullOrWhiteSpace($name)) {
+      continue
+    }
+    $argText = $match.Groups[4].Value.Trim()
+    $args = @()
+    if (-not [string]::IsNullOrWhiteSpace($argText)) {
+      $args = @($argText -split "," | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    $macros.Add([pscustomobject][ordered]@{
+      module = $ModuleName
+      name = $name
+      qualified_name = ($ModuleName + "." + $name)
+      kind = $match.Groups[2].Value.ToLowerInvariant()
+      args = @($args)
+      line = $i + 1
+    })
+  }
+
+  foreach ($macro in $macros) {
+    Write-Output $macro
+  }
+}
+
+function Test-XlflowMacroTargetFailure {
+  param(
+    [int]$Number,
+    [string]$Description
+  )
+
+  if ($Description -match '(?i)(cannot run the macro|sub or function not defined|macro may not be available|unable to run)') {
+    return $true
+  }
+  if ($Number -eq 1004 -and $Description -match '(?i)macro') {
+    return $true
+  }
+  return $false
 }
 
 function New-XlflowRunHarnessModuleName {

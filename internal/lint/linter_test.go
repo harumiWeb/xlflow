@@ -21,6 +21,12 @@ ActiveCell.Activate
 On Error Resume Next
 End Sub
 Public SharedState As String
+Sub Prompt()
+Application.GetOpenFilename
+Application.FileDialog(msoFileDialogFilePicker).Show
+InputBox "Path?"
+MsgBox "Done"
+End Sub
 `
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -29,7 +35,7 @@ Public SharedState As String
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCodes := map[string]bool{"VB001": false, "VB002": false, "VB003": false, "VB004": false, "VB005": false, "VB006": false}
+	wantCodes := map[string]bool{"VB001": false, "VB002": false, "VB003": false, "VB004": false, "VB005": false, "VB006": false, "VB007": false}
 	for _, issue := range issues {
 		if _, ok := wantCodes[issue.Code]; ok {
 			wantCodes[issue.Code] = true
@@ -65,6 +71,34 @@ End Sub
 	for _, issue := range issues {
 		if issue.Code == "VB002" {
 			t.Fatalf("Select Case should not trigger VB002: %+v", issues)
+		}
+	}
+}
+
+func TestLinterAllowsInteractiveInputWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+Application.GetOpenFilename
+InputBox "Path?"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB007" {
+			t.Fatalf("VB007 should be disabled: %+v", issues)
 		}
 	}
 }

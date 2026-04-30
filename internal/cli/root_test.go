@@ -57,6 +57,19 @@ func TestRootCommandIncludesTraceInjectCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesMacrosCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"macros"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "macros" {
+		t.Fatalf("expected macros command, got %#v", cmd)
+	}
+}
+
 func TestRootCommandIncludesDiffCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

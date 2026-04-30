@@ -43,6 +43,7 @@ type LintConfig struct {
 	ForbidOnErrorResumeNext  bool `toml:"forbid_on_error_resume_next"`
 	DetectImplicitVariant    bool `toml:"detect_implicit_variant"`
 	ForbidPublicModuleFields bool `toml:"forbid_public_module_fields"`
+	ForbidInteractiveInput   bool `toml:"forbid_interactive_input"`
 }
 
 func Default() Config {
@@ -69,6 +70,7 @@ func Default() Config {
 			ForbidOnErrorResumeNext:  true,
 			DetectImplicitVariant:    true,
 			ForbidPublicModuleFields: true,
+			ForbidInteractiveInput:   true,
 		},
 	}
 }

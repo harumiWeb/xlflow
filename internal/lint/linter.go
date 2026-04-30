@@ -24,12 +24,13 @@ type Linter struct {
 }
 
 var (
-	selectRe          = regexp.MustCompile(`(?i)\.\s*select\b`)
-	activateRe        = regexp.MustCompile(`(?i)\.\s*activate\b`)
-	onErrorResumeNext = regexp.MustCompile(`(?i)\bon\s+error\s+resume\s+next\b`)
-	dimWithoutAs      = regexp.MustCompile(`(?i)^\s*(dim|private|public|static)\s+([^']+)$`)
-	publicVarRe       = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
-	publicProcRe      = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
+	selectRe           = regexp.MustCompile(`(?i)\.\s*select\b`)
+	activateRe         = regexp.MustCompile(`(?i)\.\s*activate\b`)
+	onErrorResumeNext  = regexp.MustCompile(`(?i)\bon\s+error\s+resume\s+next\b`)
+	interactiveInputRe = regexp.MustCompile(`(?i)\b(application\s*\.\s*(getopenfilename|filedialog)|inputbox|msgbox)\b`)
+	dimWithoutAs       = regexp.MustCompile(`(?i)^\s*(dim|private|public|static)\s+([^']+)$`)
+	publicVarRe        = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
+	publicProcRe       = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -117,6 +118,9 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 		}
 		if l.Config.Lint.ForbidPublicModuleFields && looksPublicVariable(trimmed) {
 			issues = append(issues, l.issue(path, lineNo, "VB006", "warning", "Avoid Public module variables; pass state explicitly."))
+		}
+		if l.Config.Lint.ForbidInteractiveInput && interactiveInputRe.MatchString(code) {
+			issues = append(issues, l.issue(path, lineNo, "VB007", "warning", "Avoid UI prompts in CLI-run macros; use run arguments, environment variables, configuration cells, or deterministic paths."))
 		}
 	}
 	if err := scanner.Err(); err != nil {

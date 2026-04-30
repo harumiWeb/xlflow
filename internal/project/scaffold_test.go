@@ -193,6 +193,9 @@ func TestNewScaffoldDefaultWorkbook(t *testing.T) {
 	if cfg.Excel.Path != "build/Book.xlsm" {
 		t.Fatalf("excel path = %q", cfg.Excel.Path)
 	}
+	if !cfg.Lint.ForbidInteractiveInput {
+		t.Fatal("expected scaffolded config to enable interactive input lint")
+	}
 }
 
 func TestNewScaffoldAppendsXlsmExtension(t *testing.T) {

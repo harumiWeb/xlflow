@@ -18,6 +18,7 @@ $workbook = $null
 $vbProject = $null
 $runnerComponent = $null
 $traceRequested = ConvertTo-XlflowBool $TraceEnabled
+$currentPhase = "initialize"
 
 try {
   if ($traceRequested) {
@@ -37,6 +38,7 @@ try {
     }
   }
 
+  $currentPhase = "open_workbook"
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
   $excel.DisplayAlerts = ConvertTo-XlflowBool $DisplayAlerts
@@ -52,15 +54,17 @@ try {
   }
 
   try {
+    $currentPhase = "prepare_vbide"
     $vbProject = $workbook.VBProject
     if ($traceRequested -and -not (Test-XlflowTraceModuleInjected -VBProject $vbProject)) {
-      Set-XlflowError -Result $result -Code "trace_not_injected" -Message "XlflowTrace module is not injected. Run xlflow trace inject before xlflow run --trace." -Source "xlflow"
+      Set-XlflowError -Result $result -Code "trace_not_injected" -Message "XlflowTrace module is not injected. Run xlflow trace inject before xlflow run --trace." -Source "xlflow" -Phase $currentPhase
       throw "XlflowTrace module is not injected"
     }
+    $currentPhase = "inject_harness"
     $runnerComponent = $vbProject.VBComponents.Add(1)
   } catch {
     if ($result.error -eq $null) {
-      Set-XlflowError -Result $result -Code "vbide_access_denied" -Message $_.Exception.Message -Source "vbide"
+      Set-XlflowError -Result $result -Code "vbide_access_denied" -Message $_.Exception.Message -Source "vbide" -Phase $currentPhase
     }
     throw
   }
@@ -69,6 +73,7 @@ try {
   $runnerComponent.Name = $runnerName
   $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs -TraceEnabled $traceRequested -TraceFile $TraceFile))
 
+  $currentPhase = "invoke_macro"
   $runResult = $excel.Run($runnerName + ".RunMacro")
   $successLog = "ran " + $MacroName + " in " + ([int]$runResult[5]) + "ms"
   if ($null -ne $runnerComponent) {
@@ -83,13 +88,19 @@ try {
 
   if (-not [bool]$runResult[0]) {
     $failureMessage = Format-XlflowMacroFailureMessage -ModuleName ([string]$runResult[1]) -Line ([int]$runResult[4]) -Number ([int]$runResult[2]) -Description ([string]$runResult[3])
-    Set-XlflowError -Result $result -Code "macro_failed" -Message $failureMessage -Source ([string]$runResult[1]) -Number ([int]$runResult[2]) -Line ([int]$runResult[4])
+    $errorCode = "macro_failed"
+    if (Test-XlflowMacroTargetFailure -Number ([int]$runResult[2]) -Description ([string]$runResult[3])) {
+      $errorCode = "macro_not_found"
+    }
+    Set-XlflowError -Result $result -Code $errorCode -Message $failureMessage -Source ([string]$runResult[1]) -Number ([int]$runResult[2]) -Line ([int]$runResult[4]) -Phase $currentPhase
     $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null }
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
+    $currentPhase = "save_result"
     $workbook.Save()
     $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; save_as = $null }
     $result.logs = @($successLog, "saved workbook in place")
   } elseif (-not [string]::IsNullOrWhiteSpace($SaveAsPath)) {
+    $currentPhase = "save_result"
     Assert-XlflowSaveAsExtension -WorkbookPath $WorkbookPath -SaveAsPath $SaveAsPath
     $targetDir = Split-Path -Parent $SaveAsPath
     if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
@@ -104,7 +115,11 @@ try {
   }
 } catch {
   if ($result.error -eq $null) {
-    Set-XlflowError -Result $result -Code "macro_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
+    $errorCode = "macro_failed"
+    if ($currentPhase -eq "invoke_macro" -and (Test-XlflowMacroTargetFailure -Number ([int]$_.Exception.HResult) -Description $_.Exception.Message)) {
+      $errorCode = "macro_not_found"
+    }
+    Set-XlflowError -Result $result -Code $errorCode -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult -Phase $currentPhase
   }
   if ($null -eq $result.macro) {
     $result.macro = [ordered]@{ name = $MacroName; args = @(); duration_ms = 0 }
@@ -116,6 +131,7 @@ try {
   }
   Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
   if ($traceRequested) {
+    $currentPhase = "read_trace"
     if ($null -eq $result.trace) {
       $result.trace = [ordered]@{
         enabled = $true
@@ -127,6 +143,10 @@ try {
     try {
       $events = @(Read-XlflowTraceEvents -Path $TraceFile)
       $result.trace.events = @($events)
+      if ($result.status -eq "failed" -and $events.Count -eq 0) {
+        $result.trace.hint = "no trace events were written; execution may have failed before reaching user XlflowLog calls"
+        $result.logs += $result.trace.hint
+      }
       foreach ($event in $events) {
         $result.logs += ("[" + $event.timestamp + "] " + $event.message)
       }

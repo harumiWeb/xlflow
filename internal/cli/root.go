@@ -50,12 +50,32 @@ func (a *app) rootCommand() *cobra.Command {
 		a.pushCommand(),
 		a.traceCommand(),
 		a.runCommand(),
+		a.macrosCommand(),
 		a.testCommand(),
 		a.diffCommand(),
 		a.lintCommand(),
 		a.skillCommand(),
 	)
 	return root
+}
+
+func (a *app) macrosCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "macros",
+		Short: "Discover runnable workbook macros",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("macros")
+			if err != nil {
+				return err
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.Macros(cfg)
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
 }
 
 func (a *app) newCommand() *cobra.Command {

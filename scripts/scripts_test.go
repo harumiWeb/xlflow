@@ -11,7 +11,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"common.ps1", "doctor.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
+	scripts := []string{"common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -52,6 +52,42 @@ func TestTestProcedureDiscoveryRules(t *testing.T) {
 	}
 	if got[1].Name != "Totals_Test" || got[1].Module != "ReportTests" {
 		t.Fatalf("unexpected second test: %+v", got[1])
+	}
+}
+
+func TestMacroProcedureDiscoveryRules(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $body = @('Option Explicit','Public Sub Run()','End Sub','Sub Generate(path As String, count As Long)','End Sub','Public Function Build() As Boolean','End Function','Private Sub Hidden()','End Sub') -join [Environment]::NewLine; Find-XlflowMacroProcedures -ModuleName 'Main' -Code $body | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro discovery failed: %v\n%s", err, out)
+	}
+	var got []struct {
+		Module        string   `json:"module"`
+		Name          string   `json:"name"`
+		QualifiedName string   `json:"qualified_name"`
+		Kind          string   `json:"kind"`
+		Args          []string `json:"args"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse discovery output: %v\n%s", err, out)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 discovered macros, got %d: %+v", len(got), got)
+	}
+	if got[0].QualifiedName != "Main.Run" || got[0].Kind != "sub" {
+		t.Fatalf("unexpected first macro: %+v", got[0])
+	}
+	if got[1].Name != "Generate" || len(got[1].Args) != 2 || got[1].Args[0] != "path As String" {
+		t.Fatalf("unexpected argument discovery: %+v", got[1])
+	}
+	if got[2].Name != "Build" || got[2].Kind != "function" {
+		t.Fatalf("unexpected function discovery: %+v", got[2])
 	}
 }
 
@@ -122,6 +158,31 @@ func TestSetXlflowErrorMutatesResultEnvelope(t *testing.T) {
 	}
 	if got.Status != "failed" || got.Error == nil || got.Error.Code != "test_failed" || got.Error.Message != "boom" {
 		t.Fatalf("expected failed envelope, got %+v", got)
+	}
+}
+
+func TestSetXlflowErrorIncludesPhase(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $result = New-XlflowResult -Command 'run'; Set-XlflowError -Result $result -Code 'macro_failed' -Message 'boom' -Phase 'invoke_macro'; Write-XlflowJson -Result $result",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Set-XlflowError failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Error *struct {
+			Phase string `json:"phase"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse envelope: %v\n%s", err, out)
+	}
+	if got.Error == nil || got.Error.Phase != "invoke_macro" {
+		t.Fatalf("expected phase metadata, got %+v", got)
 	}
 }
 
@@ -469,6 +530,181 @@ func TestTraceModuleCodeProvidesPublicLoggerAPI(t *testing.T) {
 	}
 }
 
+func TestWriteTraceModuleSourceWritesUtf8BasFile(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  $path = Write-XlflowTraceModuleSource -ModulesDir $root
+  [ordered]@{
+    path = $path
+    content = Get-XlflowUtf8Text -Path $path
+    bom = ([System.IO.File]::ReadAllBytes($path)[0] -eq 239)
+  } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace module source write failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		BOM     bool   `json:"bom"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse source write output: %v\n%s", err, out)
+	}
+	if !strings.HasSuffix(strings.ReplaceAll(got.Path, "\\", "/"), "/XlflowTrace.bas") {
+		t.Fatalf("unexpected trace source path: %q", got.Path)
+	}
+	if !strings.Contains(got.Content, `Attribute VB_Name = "XlflowTrace"`) || !strings.Contains(got.Content, "Public Sub XlflowLog") {
+		t.Fatalf("unexpected trace source content: %q", got.Content)
+	}
+	if got.BOM {
+		t.Fatal("expected UTF-8 without BOM")
+	}
+}
+
+func TestTraceInjectThenPushPreservesTraceModule(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  traceStatus = ''
+  pushStatus = ''
+  sourceExists = $false
+  traceStillInjected = $false
+}
+$excel = $null
+$workbook = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'trace-persist.xlsm'
+  $modulesDir = Join-Path $root 'src/modules'
+  $classesDir = Join-Path $root 'src/classes'
+  $formsDir = Join-Path $root 'src/forms'
+  $workbookDir = Join-Path $root 'src/workbook'
+  $backupRoot = Join-Path $root '.xlflow/backups'
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+  try {
+    $null = $workbook.VBProject
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $workbook.SaveAs($wbPath, 52)
+  $workbook.Close($true) | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
+  $workbook = $null
+  $excel.Quit() | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+  $excel = $null
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+
+  $trace = & ./trace.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -Visible false | ConvertFrom-Json
+  $result.traceStatus = $trace.status
+  $sourcePath = Join-Path $modulesDir 'XlflowTrace.bas'
+  $result.sourceExists = Test-Path -LiteralPath $sourcePath
+  if ($trace.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -ClassesDir $classesDir -FormsDir $formsDir -WorkbookDir $workbookDir -BackupRoot $backupRoot -Visible false | ConvertFrom-Json
+  $result.pushStatus = $push.status
+  if ($push.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $excel = New-Object -ComObject Excel.Application
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Open($wbPath)
+  $result.traceStillInjected = Test-XlflowTraceModuleInjected -VBProject $workbook.VBProject
+  $result | ConvertTo-Json -Compress
+} catch {
+  $result.skip = $false
+  $result.skipReason = ''
+  $result.error = $_.Exception.Message
+  $result | ConvertTo-Json -Compress
+  exit 1
+} finally {
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace persistence check failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip               bool   `json:"skip"`
+		SkipReason         string `json:"skipReason"`
+		TraceStatus        string `json:"traceStatus"`
+		PushStatus         string `json:"pushStatus"`
+		SourceExists       bool   `json:"sourceExists"`
+		TraceStillInjected bool   `json:"traceStillInjected"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trace persistence output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skipf("skipped: %s", got.SkipReason)
+	}
+	if got.TraceStatus != "ok" || !got.SourceExists {
+		t.Fatalf("expected trace inject to create source, got %+v output=%s", got, out)
+	}
+	if got.PushStatus != "ok" {
+		t.Fatalf("expected push to succeed, got %+v output=%s", got, out)
+	}
+	if !got.TraceStillInjected {
+		t.Fatalf("expected XlflowTrace to remain after push, got %+v output=%s", got, out)
+	}
+}
+
 func TestRunHarnessCodeConfiguresTraceBeforeMacro(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -517,6 +753,33 @@ func TestReadTraceEventsParsesTimestampMessageAndRawLine(t *testing.T) {
 	}
 	if got[0].Timestamp != "2026-04-29 21:12:03" || got[0].Message != "start GenerateReport" || got[0].Raw != "2026-04-29 21:12:03\tstart GenerateReport" {
 		t.Fatalf("unexpected first trace event: %+v", got[0])
+	}
+}
+
+func TestRunTraceFailureWithNoEventsIncludesHint(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$missing = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.xlsm'); ./run.ps1 -WorkbookPath $missing -MacroName 'Main.Run' -TraceEnabled true | ConvertFrom-Json | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run trace failure command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Trace  *struct {
+			Events []any  `json:"events"`
+			Hint   string `json:"hint"`
+		} `json:"trace"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse run output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Trace == nil || len(got.Trace.Events) != 0 || !strings.Contains(got.Trace.Hint, "no trace events") {
+		t.Fatalf("expected empty trace hint, got %+v", got)
 	}
 }
 

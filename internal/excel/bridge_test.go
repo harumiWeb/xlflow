@@ -150,3 +150,31 @@ func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
 		t.Fatalf("exitCodeForScriptResult(trace_not_injected) = %d, want %d", got, output.ExitValidation)
 	}
 }
+
+func TestMacroNotFoundIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "macro_not_found", Message: "missing"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(macro_not_found) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTraceInjectScriptArgs(root, cfg, "")
+	if args["ModulesDir"] != filepath.Join(root, "src", "modules") {
+		t.Fatalf("modules dir = %q", args["ModulesDir"])
+	}
+}
+
+func TestTraceInjectScriptArgsOmitModulesDirForStandaloneWorkbook(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTraceInjectScriptArgs(root, cfg, "other.xlsm")
+	if _, ok := args["ModulesDir"]; ok {
+		t.Fatalf("standalone workbook should not receive ModulesDir: %+v", args)
+	}
+}

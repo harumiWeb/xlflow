@@ -27,6 +27,7 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 4. Execute behavior.
    - Prefer `xlflow test --json`.
    - Use `xlflow test --filter <name> --json` while iterating on one failing test.
+   - If the macro entrypoint is unclear, run `xlflow macros --json` before choosing a target.
    - If no tests exist, run the target macro with `xlflow run <MacroName> --json`.
    - Use `xlflow run <MacroName> --trace --json` when debugging runtime behavior or workbook mutation.
 
@@ -43,6 +44,7 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 - Use `xlflow push` after source edits; it creates a backup before replacing VBA components.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test` as the primary correctness signal when tests exist.
+- Use `xlflow macros` to discover runnable macro entrypoints before guessing a `run` target.
 - Use `xlflow run --trace` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
 
@@ -56,10 +58,11 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 - Restore `Application` state in cleanup paths.
 - Use `On Error GoTo ErrHandler`; avoid broad `On Error Resume Next`.
 - Do not pass object or array values to `AssertEquals`; compare scalar properties such as `Range.Value2`.
+- Avoid UI prompts such as `Application.GetOpenFilename`, `Application.FileDialog`, `InputBox`, and modal `MsgBox` in macros that must run from xlflow. Prefer `run --arg`, environment variables, configuration cells, or deterministic paths.
 
 ## Trace Rules
 
-Before using trace logging, run `xlflow trace inject --json` once for the configured workbook. If `xlflow run --trace --json` reports `trace_not_injected`, inject the trace module first, then rerun the macro.
+Before using trace logging, run `xlflow trace inject --json` once for the configured workbook. In configured projects this also writes `src/modules/XlflowTrace.bas`, so later `xlflow push` keeps the trace module. If `xlflow run --trace --json` reports `trace_not_injected`, inject the trace module first, then rerun the macro.
 
 When debugging, add `XlflowLog` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
 
@@ -75,7 +78,9 @@ Call XlflowLog("finished GenerateReport")
 
 If `xlflow test` fails, read the failing test name, module, VBA error number, description, and line. Patch the smallest relevant area, rerun the focused test first, then run the full test suite.
 
-If `xlflow run --trace` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun.
+If `xlflow run` fails, inspect `error.code` and `error.phase`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
+
+If `xlflow run --trace` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --json`.
 
 If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`.
 

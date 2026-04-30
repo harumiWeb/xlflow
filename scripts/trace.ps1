@@ -1,6 +1,7 @@
 param(
   [string]$Action = "inject",
   [string]$WorkbookPath,
+  [string]$ModulesDir = "",
   [string]$Visible = "false"
 )
 
@@ -38,8 +39,15 @@ try {
   $component.CodeModule.AddFromString((New-XlflowTraceModuleCode))
   $workbook.Save()
 
+  if (-not [string]::IsNullOrWhiteSpace($ModulesDir)) {
+    $sourcePath = Write-XlflowTraceModuleSource -ModulesDir $ModulesDir
+    $result.source = [ordered]@{ path = $sourcePath; updated = $true }
+  }
   $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true }
   $result.logs = @("injected XlflowTrace into " + $WorkbookPath)
+  if ($null -ne $result.source) {
+    $result.logs += ("wrote " + $result.source.path)
+  }
 } catch {
   if ($result.error -eq $null) {
     Set-XlflowError -Result $result -Code "trace_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult

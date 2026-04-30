@@ -23,6 +23,7 @@ type Error struct {
 	Source  string `json:"source,omitempty"`
 	Number  int    `json:"number,omitempty"`
 	Line    int    `json:"line,omitempty"`
+	Phase   string `json:"phase,omitempty"`
 }
 
 type Envelope struct {
@@ -34,7 +35,9 @@ type Envelope struct {
 	Diagnostics any `json:"diagnostics,omitempty"`
 	Workbook    any `json:"workbook,omitempty"`
 	Backup      any `json:"backup,omitempty"`
+	Source      any `json:"source,omitempty"`
 	Macro       any `json:"macro,omitempty"`
+	Macros      any `json:"macros,omitempty"`
 	Issues      any `json:"issues,omitempty"`
 	Tests       any `json:"tests,omitempty"`
 	Diff        any `json:"diff,omitempty"`
