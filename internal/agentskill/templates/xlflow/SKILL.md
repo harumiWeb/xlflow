@@ -59,6 +59,8 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 
 ## Trace Rules
 
+Before using trace logging, run `xlflow trace inject --json` once for the configured workbook. If `xlflow run --trace --json` reports `trace_not_injected`, inject the trace module first, then rerun the macro.
+
 When debugging, add `XlflowLog` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
 
 Keep high-level progress trace logs if they help future diagnosis. Remove noisy temporary logs before finalizing.
