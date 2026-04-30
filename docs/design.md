@@ -1,429 +1,378 @@
-なるほど、理解しました。
-それなら問題の見方はかなり変わります。
+# Excelの「ボタン配置」機能についての設計メモ
 
-つまり「xlflow のコマンド出力が静か」なのではなく、
+xlflow で応えるなら、最初は **「フォームコントロールのボタンをシートに配置して、既存マクロを割り当てる」** ところから始めるのが現実的です。
 
-> **xlflow 側は適切に出力しているが、VSCode GitHub Copilot 側のタスク実行・出力取得のライフサイクルが、Excel COM処理の完了を待てていない**
+Excel には大きく分けて次のボタンがあります。
 
-ということですね。
+| 種類                         | xlflow対応の現実性 | コメント                                              |
+| ---------------------------- | -----------------: | ----------------------------------------------------- |
+| フォームコントロールのボタン |               高い | `.OnAction` でマクロ割り当て可能。AI/CLI向き          |
+| 図形・Shapeをボタン風に使う  |               高い | 角丸四角形などに `.OnAction` を設定できる             |
+| ActiveX CommandButton        |             低〜中 | イベントコード、信頼設定、COM依存が重い。後回し推奨   |
+| リボンUI追加                 |             中〜低 | OpenXML/customUI 編集が必要。便利だがスコープが大きい |
 
-この場合、レビュー内の「静かすぎるコマンド」という指摘は、**xlflow のUX問題というより、AIエージェント実行環境との同期問題** と見たほうがよいです。
-
----
-
-## これはかなり重要な発見です
-
-Excel / VBA / COM を扱うCLIは、通常のCLIツールよりも実行時間や状態遷移が読みづらいです。
-
-たとえば `xlflow push` や `xlflow run` は内部で、
-
-```txt
-CLI起動
-↓
-Excelプロセス起動 or 既存Excel接続
-↓
-Workbook open
-↓
-VBA project 操作
-↓
-保存
-↓
-Excel側の処理完了待ち
-↓
-結果出力
-↓
-CLI終了
-```
-
-のような流れになります。
-
-しかしAIエージェント側が、
-
-```txt
-コマンドを投げた
-↓
-一定時間出力がない
-↓
-「結果取得できなかった」と判断
-↓
-次の作業へ進む
-```
-
-となっているなら、これは **Excel処理の遅さ・COM待機・GUIアプリ連携** と **AIエージェントの短気なタスク管理** の相性問題です。
-
-なので、対策は「出力を増やす」よりも、**長時間処理中であることをエージェントに観測させ続ける** 方向になります。
+最初に狙うべきは、**フォームコントロールボタン**か**Shapeボタン**です。
 
 ---
 
-## 対策1: heartbeat 出力を入れる
+## なぜニーズがあるか
 
-一番効くのはこれです。
+業務VBAでは、ユーザーに「マクロ一覧から実行してください」とは言いにくいです。
 
-長めのExcel処理中に、定期的に進捗ログを出す。
+実務ではかなりの頻度でこうなります。
 
-```txt
-[00:00] Starting xlflow push...
-[00:01] Connecting to Excel...
-[00:03] Opening workbook: Book1.xlsm
-[00:06] Updating VBA modules...
-[00:10] Saving workbook...
-[00:14] Waiting for Excel to finish...
-[00:18] Still working...
-[00:22] Still working...
-[00:25] Done.
+```text
+このボタンを押したら集計
+このボタンを押したらCSV出力
+このボタンを押したら帳票作成
+このボタンを押したら入力チェック
 ```
 
-重要なのは、詳細な進捗でなくてもよいことです。
+つまり、AIエージェントがVBAを書けるだけでは不十分で、**利用者が実行しやすい入口をシート上に作る**ところまでできると完成度が一段上がります。
 
-```txt
-xlflow: still working...
-```
+xlflow がここまで扱えると、単なる VBA テキスト管理ツールではなく、
 
-だけでも、AIエージェント側が「プロセスは生きている」と判断しやすくなります。
+> Excel業務アプリをCLI/AIエージェントから組み立てるためのハーネス
 
-特にCopilotやClaude Code系のエージェントは、**標準出力がしばらく無いと固まった/終わった/失敗したと誤認する** ことがあるので、heartbeatはかなり有効です。
+に近づきます。
 
 ---
 
-## 対策2: `--no-quiet` ではなく `--keepalive` が欲しい
+## 具体的にできそうな機能
 
-この問題に対しては、`--verbose` より `--keepalive` のほうが適切です。
+例えば、次のようなコマンドが考えられます。
 
 ```bash
-xlflow push --keepalive
-xlflow run Main.Entry --keepalive
+xlflow button add \
+  --sheet "Menu" \
+  --text "集計を実行" \
+  --macro "Main.RunAggregation" \
+  --cell "B2" \
+  --width 160 \
+  --height 40
 ```
 
-挙動はこうです。
+または JSON/YAML マニフェストで定義する形です。
 
-```txt
-xlflow: running push...
-xlflow: still working... 5s elapsed
-xlflow: still working... 10s elapsed
-xlflow: still working... 15s elapsed
-xlflow: push completed successfully
+```yaml
+buttons:
+  - sheet: Menu
+    text: 集計を実行
+    macro: Main.RunAggregation
+    cell: B2
+    width: 160
+    height: 40
+    style: primary
 ```
 
-さらにAIエージェント前提なら、設定ファイルで有効化できるとよいです。
-
-```toml
-[agent]
-keepalive = true
-keepalive_interval_seconds = 3
-```
-
-あるいは環境変数でもいいです。
+適用コマンド:
 
 ```bash
-XLFLOW_AGENT=1 xlflow push
+xlflow apply-ui xlflow.ui.yaml
 ```
 
-この場合は自動で、
-
-- keepalive有効
-- 最終ステータス出力
-- exit code明示
-- JSON/構造化ログ出力
-
-に寄せる。
+この方向はかなり良いです。
 
 ---
 
-## 対策3: Excel処理フェーズを明示する
+## 実装方法の候補
 
-heartbeatだけだと「何を待っているのか」が分からないので、Excel処理の境界では必ず出したほうがいいです。
+### 1. COM経由でフォームボタンを追加する
 
-```txt
-xlflow: connecting to Excel...
-xlflow: opening workbook...
-xlflow: importing VBA modules...
-xlflow: saving workbook...
-xlflow: waiting for Excel COM operation...
-xlflow: completed
+Windows + Excel 前提なら、かなり現実的です。
+
+VBA的にはこの系統です。
+
+```vb
+Set btn = ws.Buttons.Add(left, top, width, height)
+btn.Caption = "集計を実行"
+btn.OnAction = "Main.RunAggregation"
 ```
 
-これがあると、エージェントだけでなく人間にもかなり分かりやすくなります。
+xlflow が Go 製なら、Excel COM を叩いて同等の処理を行うか、内部的に一時VBA/PowerShell/WSHを使って操作する形になります。
 
-今回の問題は、たぶん「結果出力が少ない」ではなく、**結果出力までの無音区間が長い** ことが本質です。
+メリット:
 
-なので改善ポイントは、
+- Excel標準の機能なので安定しやすい
+- `.OnAction` でマクロ割り当てが簡単
+- ユーザー視点で自然
+- AIエージェントにも扱いやすい
 
-```txt
-最終出力を増やす
-```
+デメリット:
 
-ではなく、
-
-```txt
-最終出力までの間に、生存確認ログを出す
-```
-
-です。
+- Windows + Excel インストール環境前提
+- COM操作の待機・例外処理が必要
+- 位置指定・重複検出・削除などの設計が必要
 
 ---
 
-## 対策4: `run` は特にタイムアウト設計が必要
+### 2. Shapeをボタンとして追加する
 
-`push` や `pull` はまだ処理内容を予測しやすいですが、`run` はVBA側の実装次第でいくらでも長くなります。
+個人的にはこちらもかなりおすすめです。
 
-そのため `run` には明示的なタイムアウト指定があるとよいです。
+Excelでは図形にもマクロを割り当てられます。
+
+```vb
+Set shp = ws.Shapes.AddShape(msoShapeRoundedRectangle, left, top, width, height)
+shp.TextFrame2.TextRange.Text = "集計を実行"
+shp.OnAction = "Main.RunAggregation"
+```
+
+メリット:
+
+- 見た目を整えやすい
+- 「メニュー画面」を作りやすい
+- `xlflow inspect-gui` や `trace` と相性がよい
+- 将来的に ExStruct 的な shape 抽出とも相性がよい
+
+デメリット:
+
+- スタイル指定が増えると設計が膨らむ
+- 図形名・重複管理が必要
+- フォームボタンより壊れやすいケースはある
+
+---
+
+## 最初に実装するならこの仕様がよさそうです
+
+最小構成はこれで十分です。
 
 ```bash
-xlflow run Main.Process --timeout 60s --keepalive
+xlflow button add \
+  --sheet Menu \
+  --cell B2 \
+  --text "集計を実行" \
+  --macro "Main.RunAggregation"
 ```
 
-出力例。
+内部では以下を行います。
 
-```txt
-xlflow: running macro Main.Process
-xlflow: elapsed 5s
-xlflow: elapsed 10s
-xlflow: elapsed 15s
-xlflow: macro completed
-```
+1. 対象ブックを開く
+2. 対象シートを取得、なければエラーまたは `--create-sheet`
+3. `cell` の位置から `Left` / `Top` を計算
+4. 既存の同名ボタンがあれば更新またはエラー
+5. ボタンを配置
+6. `OnAction` にマクロ名を設定
+7. 保存
+8. 配置結果を JSON で返す
 
-タイムアウト時は、
-
-```txt
-xlflow: macro did not complete within 60s
-xlflow: Excel may still be running the macro
-xlflow: use inspect-gui or attach mode to check current workbook state
-```
-
-のようにするとよいです。
-
-ここで大事なのは、**CLIプロセスの終了とExcel側処理の終了を明確に対応させる** ことです。
-
-もし内部的にExcel側処理が非同期っぽくなっている箇所があるなら、そこはかなり注意が必要です。
-
----
-
-## 対策5: 最終行に完了マーカーを出す
-
-これは前回の話とも少し重なりますが、今回の問題でも有効です。
-
-例えばすべてのコマンドの最後に、
-
-```txt
-XLFLOW_DONE status=success command=push
-```
-
-失敗時は、
-
-```txt
-XLFLOW_DONE status=failed command=run reason=timeout
-```
-
-を出す。
-
-AIエージェント向けにはこれが非常に効きます。
-
-なぜなら、エージェント側のプロンプトやskillに、
-
-```txt
-Do not proceed until you see a line starting with XLFLOW_DONE.
-```
-
-と書けるからです。
-
-これはかなり現実的な対策です。
-
----
-
-## 対策6: xlflow skill側で「完了マーカー待ち」を明記する
-
-xlflow本体だけでなく、AIエージェント向けskillにこう書くべきです。
-
-```md
-When running xlflow commands, wait until the command exits and the output contains `XLFLOW_DONE`.
-Do not start the next step while Excel is still processing.
-If no output appears for a while, wait for keepalive logs instead of assuming completion.
-```
-
-日本語にすると、
-
-```md
-xlflowコマンド実行後は、必ず `XLFLOW_DONE` が出力されるまで待つこと。
-Excel処理中は数秒〜数十秒かかる場合がある。
-出力が一時的に止まっても、処理完了とは判断しないこと。
-```
-
-このルールはかなり重要です。
-
-Copilotがどこまで守るかは別として、少なくともCodex/Claude Code系にはかなり効くはずです。
-
----
-
-## このレビューの「静かすぎる」はどう扱うべきか
-
-レビュー文としては、少し修正して読むべきです。
-
-元の指摘：
-
-> 静かすぎるコマンドがある
-
-実態：
-
-> Excel処理中にAIエージェントが出力取得を待てず、完了前に次の作業へ進んでしまうことがある
-
-なので、課題名としてはこうです。
-
-```txt
-AIエージェント実行環境での長時間Excel処理に対するkeepalive/完了同期の不足
-```
-
-またはissueにするなら、
-
-```md
-Add keepalive output and completion markers for agent-driven Excel operations
-```
-
-です。
-
----
-
-## かなり現実的な実装方針
-
-最小実装ならこれで十分です。
-
-### 1. 長時間処理コマンドに keepalive を入れる
-
-対象はまずこのあたり。
-
-```txt
-push
-pull
-run
-inspect-gui
-trace
-doctor
-```
-
-特に優先は、
-
-```txt
-push
-run
-```
-
-です。
-
-### 2. 一定間隔で stderr に出す
-
-heartbeatは stdout ではなく stderr がよいと思います。
-
-```txt
-xlflow: still working... 10s elapsed
-```
-
-stdoutをJSON出力に使いたい場合でも、stderrなら壊しにくいです。
-
-### 3. 最終結果は stdout に出す
-
-人間向けテキストでもJSONでも、最終結果はstdout。
-
-### 4. 完了マーカーを必ず出す
-
-通常テキストモードなら、
-
-```txt
-XLFLOW_DONE status=success command=push
-```
-
-JSONモードなら、
+出力例:
 
 ```json
 {
-  "status": "success",
-  "command": "push",
-  "done": true
+  "ok": true,
+  "sheet": "Menu",
+  "name": "xlflow_btn_RunAggregation",
+  "text": "集計を実行",
+  "macro": "Main.RunAggregation",
+  "cell": "B2",
+  "left": 120,
+  "top": 36,
+  "width": 160,
+  "height": 40
 }
 ```
 
-### 5. `--agent` で有効化
+AIエージェント向けには、この JSON 出力がかなり重要です。
 
-通常利用者には少しうるさい可能性があるので、
+---
+
+## コマンド設計案
+
+個人的には `button` という独立コマンドでもよいですが、将来的には `ui` 名前空間の方が広げやすいです。
 
 ```bash
-xlflow push --agent
+xlflow ui button add
+xlflow ui button list
+xlflow ui button remove
+xlflow ui button update
 ```
 
-または、
+または短くするなら:
 
 ```bash
-xlflow push --keepalive
+xlflow button add
+xlflow button list
+xlflow button remove
 ```
 
-で有効化する。
+将来的に以下も追加できます。
 
-ただし、個人的には **デフォルトで主要フェーズログだけ出して、`--agent` でheartbeatを追加** が一番よいと思います。
+```bash
+xlflow ui menu init
+xlflow ui shape add
+xlflow ui ribbon add
+xlflow ui inspect
+```
+
+最初は `button add/list/remove` だけで十分です。
 
 ---
 
-## 今回のレビュー全体の見方
+## 重要なのは「再実行可能性」です
 
-この前提で見ると、レビューの「悪かったところ」のうち、静かすぎる問題はxlflowの設計不備ではなく、**AIエージェントがExcel処理を通常の短命CLIと同じ感覚で扱ってしまった問題** です。
+AIエージェントに使わせるなら、単にボタンを追加できるだけでは足りません。
 
-一方で、次の指摘は引き続き有効です。
+同じコマンドを何度実行しても破綻しない設計が必要です。
 
-```txt
-headless と interactive の境界が厳密
-UI付きマクロはheadless実行に向かない
-GUI入口と処理本体を分けるべき
-lintルールが設計制約として効く
-inspect-gui と diff の組み合わせが有効
+例えば、以下のようにします。
+
+```bash
+xlflow button add \
+  --id run-aggregation \
+  --sheet Menu \
+  --cell B2 \
+  --text "集計を実行" \
+  --macro "Main.RunAggregation"
 ```
 
-これらはむしろxlflowの価値を示しています。
+内部の図形名を固定します。
 
-なので総評としては、
+```text
+xlflow.button.run-aggregation
+```
 
-> xlflowの本質的な設計はかなり良い。
-> ただし、AIエージェントがExcel COM処理の完了を正しく待てるように、keepalive・完了マーカー・agent modeを入れるとさらに安定する。
+すでに存在すれば、追加ではなく更新します。
 
-という評価になります。
+これにより、AIエージェントが何度試行してもボタンが増殖しません。
+
+ここはかなり大事です。
 
 ---
 
-## 優先順位を更新するとこうです
+## さらに良い仕様: マクロ存在確認
 
-| 優先度 | 対応                              | 目的                                         |
-| ------ | --------------------------------- | -------------------------------------------- |
-| 最優先 | `--keepalive` / `--agent`         | AIエージェントが処理中に離脱しないようにする |
-| 最優先 | `XLFLOW_DONE` 完了マーカー        | 次工程へ進む判定を安定させる                 |
-| 高     | `run --timeout`                   | VBA実行が長時間化/停止したときの制御         |
-| 高     | フェーズログ出力                  | Excel処理のどこにいるか分かるようにする      |
-| 中     | skillに「完了マーカー待ち」を明記 | Copilot/Codex/Claude Code向けの運用安定化    |
-| 中     | `--json`                          | エージェントが結果を機械的に読めるようにする |
+ボタン追加時に、指定マクロが本当に存在するかを検証できると強いです。
+
+```bash
+xlflow button add \
+  --sheet Menu \
+  --cell B2 \
+  --text "集計を実行" \
+  --macro "Main.RunAggregation" \
+  --verify-macro
+```
+
+存在しない場合:
+
+```text
+error: macro not found: Main.RunAggregation
+
+Candidates:
+  - Main.RunAggregationReport
+  - Main.Run
+  - Report.RunAggregation
+```
+
+これは xlflow の `lint` や `inspect` とかなり相性がよいです。
 
 ---
 
-## かなり良い方向性だと思います
+## 「ボタンを押す」テストもできると強い
 
-今回の問題は、xlflowがダメというより、むしろ **Excel VBAをAIエージェントに触らせると実際に起きる問題を発見できた** という感じです。
+ボタン配置だけでなく、割り当て先マクロの実行確認もあると完成度が高いです。
 
-普通のCLIツールなら「コマンド終了 = 処理完了」で済みますが、Excel COM/VBAは、
-
-- Excelプロセス
-- COM呼び出し
-- Workbook保存
-- VBA実行
-- GUI待ち
-- マクロ側の処理時間
-
-が絡むので、AIエージェントにとってはかなり扱いづらいです。
-
-だからこそ、xlflow側が、
-
-```txt
-今Excel処理中です
-まだ生きています
-このフェーズです
-完了しました
-ここから次へ進んでください
+```bash
+xlflow button click --sheet Menu --id run-aggregation
 ```
 
-を明示できると、かなり強いです。
+ただし、実際にGUI上のボタンをクリックする必要はなく、基本的には `.OnAction` のマクロを解決して `Application.Run` すればよいです。
 
-これは単なるログ改善ではなく、**AIエージェントとExcelの同期プロトコル** です。
-xlflowの方向性として非常に相性がいい改善だと思います。
+つまり内部的には:
+
+```text
+ボタンを探す
+↓
+OnAction を読む
+↓
+Application.Run OnAction
+```
+
+これならGUI操作に寄せすぎず、CLIで検証できます。
+
+---
+
+## 優先度としてはかなり高いと思います
+
+今の xlflow の方向性を考えると、これは **実用面でかなり刺さる機能**です。
+
+特に Copilot / Claude Code / Codex に Excel VBA を作らせる場合、最終成果物として、
+
+```text
+標準モジュールにマクロがあるだけ
+```
+
+よりも、
+
+```text
+Menuシートに「実行」ボタンがあり、利用者はそこから操作できる
+```
+
+の方が圧倒的に納品物っぽいです。
+
+これはレビュー時の印象も良いです。
+
+---
+
+## ただし ActiveX は最初から狙わない方がいいです
+
+ActiveX の CommandButton は、見た目は業務Excelでよく見ますが、xlflowの初期対応としてはおすすめしません。
+
+理由は以下です。
+
+- イベントプロシージャがシートモジュール側に必要
+- セキュリティ設定や信頼済みドキュメントの影響を受けやすい
+- 32bit/64bitや環境差の影響を受ける可能性がある
+- AIエージェントの自動検証と相性が悪い
+- 壊れたときの診断が難しい
+
+最初は **フォームボタン / Shape + OnAction** に限定した方が堅実です。
+
+---
+
+## 最終的なおすすめ
+
+xlflow に入れる価値はかなりあります。
+
+おすすめのロードマップはこうです。
+
+```text
+Phase 1:
+  xlflow button add/list/remove
+  フォームコントロール or Shapeボタン
+  OnAction割り当て
+  id指定による冪等更新
+
+Phase 2:
+  YAML/JSONマニフェスト対応
+  xlflow ui apply
+  メニューシート生成
+  マクロ存在検証
+
+Phase 3:
+  button click / button run
+  配置済みボタンのOnAction実行
+  inspect-gui連携
+
+Phase 4:
+  Shapeスタイル
+  primary/danger/secondary などの簡易プリセット
+  レイアウト自動配置
+
+Phase 5:
+  Ribbon UI / ActiveX は必要が見えてから検討
+```
+
+個人的には、**`xlflow ui` 系コマンドとして実装する価値はかなり高い**です。
+
+特に `run` / `lint` / `inspect-gui` / `trace` と組み合わせると、
+
+> AIがVBAを書く
+> xlflowがブックに反映する
+> メニューシートに実行ボタンを作る
+> ボタンのOnActionを検証する
+> 実行ログを見る
+
+という流れが作れます。
+
+これは Excel VBA のAIエージェント開発体験としてかなり強いです。
