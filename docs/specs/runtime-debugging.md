@@ -54,14 +54,29 @@ Agents should use this discovery result before guessing a `run` target.
 
 ## Automation-Hostile VBA Patterns
 
-`xlflow lint` detects interactive VBA patterns that block unattended CLI execution:
+xlflow treats GUI operations as explicit boundaries instead of trying to automate them invisibly. The same source scanner is used by `lint`, `doctor`, `inspect-gui`, and `run --headless`.
 
 - `Application.GetOpenFilename`
+- `Application.GetSaveAsFilename`
 - `Application.FileDialog`
 - `InputBox`
 - modal `MsgBox`
+- `UserForm.Show` and modal `.Show vbModal`
+- `DoEvents`
+- `Shell`
+- `CreateObject("WScript.Shell").Popup`
 
-Findings explain that xlflow-oriented macros should prefer explicit `run --arg` values, environment variables, configuration cells, or deterministic paths over UI prompts.
+Each boundary reports `file`, `line`, `kind`, `symbol`, `severity`, `message`, and `suggestion`. Stable `kind` values are `file_picker`, `modal_dialog`, `user_form`, `external_process`, and `message_pump`.
+
+Findings explain that xlflow-oriented macros should prefer explicit `run --arg` values, environment variables, configuration cells, or deterministic paths over UI prompts. GUI entrypoints may remain available for humans, but the core business logic should be extractable into parameterized procedures that can run headlessly.
+
+## Headless and Interactive Run Modes
+
+`xlflow run --headless` is the default recommendation for AI agents and CI. It scans source before starting Excel. If GUI boundaries are present, it fails with `gui_boundary_detected` and returns top-level `gui_boundaries` so the agent can explain why execution was refused.
+
+`xlflow run --interactive` is for human-assisted sessions. It runs Excel visibly with alerts enabled, allowing a person to complete file pickers, message boxes, or UserForms. `--timeout` defaults to five minutes; timeout failures return `macro_timeout` and should be interpreted as a possible unresolved dialog, form, file picker, or long-running loop.
+
+`xlflow inspect-gui` exposes the same boundary report without running Excel. `xlflow attach --active` verifies that the human-opened active workbook matches the configured workbook before an interactive workflow continues.
 
 ## Empty Trace Guidance
 

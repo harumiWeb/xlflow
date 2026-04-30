@@ -7,7 +7,8 @@ param(
   [string]$SaveWorkbook = "false",
   [string]$SaveAsPath = "",
   [string]$TraceEnabled = "false",
-  [string]$TraceFile = ""
+  [string]$TraceFile = "",
+  [int]$TimeoutSeconds = 0
 )
 
 . "$PSScriptRoot/common.ps1"

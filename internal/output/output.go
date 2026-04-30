@@ -36,16 +36,17 @@ type Envelope struct {
 	Error   *Error   `json:"error"`
 	Logs    []string `json:"logs"`
 
-	Diagnostics any `json:"diagnostics,omitempty"`
-	Workbook    any `json:"workbook,omitempty"`
-	Backup      any `json:"backup,omitempty"`
-	Source      any `json:"source,omitempty"`
-	Macro       any `json:"macro,omitempty"`
-	Macros      any `json:"macros,omitempty"`
-	Issues      any `json:"issues,omitempty"`
-	Tests       any `json:"tests,omitempty"`
-	Diff        any `json:"diff,omitempty"`
-	Trace       any `json:"trace,omitempty"`
+	Diagnostics   any `json:"diagnostics,omitempty"`
+	Workbook      any `json:"workbook,omitempty"`
+	Backup        any `json:"backup,omitempty"`
+	Source        any `json:"source,omitempty"`
+	Macro         any `json:"macro,omitempty"`
+	Macros        any `json:"macros,omitempty"`
+	Issues        any `json:"issues,omitempty"`
+	Tests         any `json:"tests,omitempty"`
+	Diff          any `json:"diff,omitempty"`
+	Trace         any `json:"trace,omitempty"`
+	GUIBoundaries any `json:"gui_boundaries,omitempty"`
 }
 
 type Options struct {
@@ -166,9 +167,11 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTest(env))
 	case "lint":
 		b.WriteString(r.renderLint(env))
+	case "inspect-gui":
+		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
 		b.WriteString(r.renderMacros(env))
-	case "pull", "push", "trace":
+	case "pull", "push", "trace", "attach":
 		b.WriteString(r.renderWorkbookSource(env))
 	case "diff":
 		b.WriteString(r.renderDiff(env))
@@ -179,6 +182,33 @@ func renderHuman(env Envelope, opts Options) string {
 	}
 	out := strings.TrimRight(b.String(), "\n")
 	return out + "\n"
+}
+
+func (r renderer) renderGUIBoundaries(env Envelope) string {
+	boundaries := listOfObjects(env.GUIBoundaries)
+	if env.GUIBoundaries == nil && env.Status == StatusFailed {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(boundaries) == 0 {
+		b.WriteString("No GUI boundaries found.\n")
+		return b.String()
+	}
+	b.WriteString(kv("Boundaries", fmt.Sprintf("%d", len(boundaries))))
+	for _, boundary := range boundaries {
+		loc := stringValue(boundary, "file")
+		if n, ok := numberValue(boundary, "line"); ok && n > 0 {
+			loc = fmt.Sprintf("%s:%d", loc, int(n))
+		}
+		fmt.Fprintf(&b, "- %s [%s] %s\n", loc, stringValue(boundary, "kind"), stringValue(boundary, "symbol"))
+		if suggestion := stringValue(boundary, "suggestion"); suggestion != "" {
+			b.WriteString("  ")
+			b.WriteString(suggestion)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func renderFallback(env Envelope) string {

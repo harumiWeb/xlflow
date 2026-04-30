@@ -10,48 +10,42 @@ root: .
 ├── docs/
 │   ├── adr/
 │   ├── specs/
-│   └── design.md
 ├── internal/
+│   ├── agentskill/
+│   │   ├── templates/
+│   │   │   └── xlflow/
+│   │   │       └── SKILL.md
+│   │   ├── skill.go
+│   │   └── skill_test.go
 │   ├── cli/
-│   │   ├── root.go
-│   │   └── root_test.go
 │   ├── command/
 │   ├── config/
-│   │   ├── config.go
-│   │   └── config_test.go
+│   ├── diff/
 │   ├── excel/
-│   │   ├── bridge.go
-│   │   └── bridge_test.go
+│   ├── gui/
 │   ├── lint/
-│   │   ├── linter.go
-│   │   └── linter_test.go
 │   ├── output/
-│   │   ├── output.go
-│   │   └── output_test.go
 │   └── project/
-│       ├── scaffold.go
-│       └── scaffold_test.go
 ├── scripts/
-│   ├── common.ps1
-│   ├── doctor.ps1
-│   ├── new.ps1
-│   ├── pull.ps1
-│   ├── push.ps1
-│   ├── run.ps1
-│   ├── scripts_test.go
-│   └── test.ps1
 ├── tasks/
 │   ├── feature_spec.md
 │   ├── lessons.md
 │   └── todo.md
 ├── AGENTS.md
 ├── CLAUDE.md
+├── CONTRIBUTING.md
 ├── go.mod
 ├── go.sum
 ├── lefthook.yml
 ├── LICENSE
+├── package.json
+├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
+├── README.ja.md
 ├── README.md
-└── Taskfile.yml
+├── SECURITY.md
+├── Taskfile.yml
+└── THIRD_PARTY_LICENCES.md
 ```
 
 ## 1. ワークフロー設計

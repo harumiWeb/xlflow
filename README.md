@@ -17,6 +17,7 @@ xlflow lets you manage VBA as normal source code and inspect, import, run, test,
 - Run VBA tests from the CLI
 - Compare workbook cell values, formulas, and exported VBA source
 - Lint VBA for automation-hostile patterns
+- Detect GUI interaction boundaries before unattended runs
 - Collect runtime logs through trace events
 - Return stable JSON for AI agents
 - Install bundled Skills for Codex, Claude, Cursor, Gemini, and other agents
@@ -128,6 +129,18 @@ Run a macro:
 xlflow run Main.Run --json
 ```
 
+For unattended automation, prefer headless mode:
+
+```bash
+xlflow run Main.Run --headless --json
+```
+
+If the macro intentionally shows file pickers, message boxes, or UserForms, use interactive mode so a person can operate Excel:
+
+```bash
+xlflow run Main.Run --interactive --timeout 5m --json
+```
+
 Run VBA tests:
 
 ```bash
@@ -175,6 +188,18 @@ xlflow doctor --json
 ```
 
 It checks whether Excel is installed, whether the workbook can be opened, and whether VBIDE access is available. If `pull`, `push`, `run`, or `test` fails because of the environment, run `doctor` first.
+
+When source files are available, `doctor` also reports GUI boundary candidates that may block headless runs.
+
+### `xlflow attach`
+
+Validates the workbook currently active in Excel.
+
+```bash
+xlflow attach --active --json
+```
+
+This is a safety check for human-assisted sessions. It confirms that the active Excel workbook matches configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
 
 ### `xlflow pull`
 
@@ -234,6 +259,8 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 ```
 
 When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available.
+
+`--headless` rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries`. `--interactive` runs with Excel visible and alerts enabled for human operation. `--timeout` defaults to `5m` and returns `macro_timeout` when execution does not complete in time.
 
 ### `xlflow trace`
 
@@ -325,6 +352,16 @@ It detects patterns that are unsafe or inconvenient for AI agents and unattended
 - Possible implicit `Variant`
 - Module-level `Public` variables
 - Interactive operations such as `Application.GetOpenFilename`, `Application.FileDialog`, `InputBox`, and modal `MsgBox`
+
+### `xlflow inspect-gui`
+
+Reports GUI interaction boundaries without opening Excel.
+
+```bash
+xlflow inspect-gui --json
+```
+
+The report includes file, line, kind, symbol, and a suggested refactor. Use it before deciding whether a macro should run with `--headless` or `--interactive`.
 
 ### `xlflow skill install`
 
@@ -444,7 +481,7 @@ Recommended workflow:
 4. Run xlflow push --json to update the workbook
 5. Run xlflow lint --json and fix unsafe patterns
 6. Run xlflow test --json
-7. If no tests exist, run xlflow macros --json → xlflow run <qualified_name> --json
+7. If no tests exist, run xlflow macros --json → xlflow run <qualified_name> --headless --json
 8. If runtime errors are unclear, use xlflow trace inject → xlflow run --trace --json
 9. If workbook changes must be reviewed, use xlflow diff --json
 ```
@@ -464,6 +501,7 @@ VBA executed by xlflow should be written for unattended automation.
 - Use explicit `Workbook`, `Worksheet`, and `Range` references
 - Prefer `Long` over `Integer`
 - Do not depend on UI dialogs or modal `MsgBox`
+- Keep GUI entrypoints thin and extract parameterized headless procedures for the core logic
 - Pass input values through `xlflow run --arg`, configuration files, deterministic paths, or environment variables
 - Avoid broad `On Error Resume Next`
 - Emit error messages that make failures diagnosable

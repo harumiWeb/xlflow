@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
@@ -37,10 +38,39 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "input", "save", "save-as", "trace"} {
+	for _, name := range []string{"arg", "input", "save", "save-as", "trace", "headless", "interactive", "timeout"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestRootCommandIncludesInspectGUICommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"inspect-gui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "inspect-gui" {
+		t.Fatalf("expected inspect-gui command, got %#v", cmd)
+	}
+}
+
+func TestRootCommandIncludesAttachActiveCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"attach"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "attach" {
+		t.Fatalf("expected attach command, got %#v", cmd)
+	}
+	if cmd.Flags().Lookup("active") == nil {
+		t.Fatal("expected attach command to define --active")
 	}
 }
 
@@ -235,7 +265,7 @@ func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false)
+	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, 5*time.Minute)
 	if err == nil || !strings.Contains(err.Error(), "--save and --save-as cannot be combined") {
 		t.Fatalf("expected save conflict error, got %v", err)
 	}
@@ -243,7 +273,7 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "", true)
+	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "", true, true, false, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +292,12 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	if !opts.Trace {
 		t.Fatal("expected trace flag to be enabled")
 	}
+	if opts.Mode != "headless" {
+		t.Fatalf("mode = %q, want headless", opts.Mode)
+	}
+	if opts.Timeout != 5*time.Minute {
+		t.Fatalf("timeout = %s", opts.Timeout)
+	}
 	if !reflect.DeepEqual(opts.Args, want) {
 		t.Fatalf("run args = %#v, want %#v", opts.Args, want)
 	}
@@ -269,12 +305,44 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "", false)
+	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "", false, false, false, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(opts.Args) != 1 || opts.Args[0].Type != "string" || opts.Args[0].Value != "" {
 		t.Fatalf("run args = %#v", opts.Args)
+	}
+}
+
+func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
+	cfg := config.Default()
+	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, true, true, 5*time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "--headless and --interactive") {
+		t.Fatalf("expected run mode conflict error, got %v", err)
+	}
+}
+
+func TestRunHeadlessPreflightRejectsGUIBoundariesBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  MsgBox \"stop\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--headless"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
 	}
 }
 
@@ -293,7 +361,7 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.literal, func(t *testing.T) {
-			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "", false)
+			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "", false, false, false, 5*time.Minute)
 			if err == nil {
 				t.Fatalf("expected %q to fail", tt.literal)
 			}

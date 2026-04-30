@@ -8,14 +8,18 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/gui"
 )
 
 type Issue struct {
-	Code     string `json:"code"`
-	Severity string `json:"severity"`
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Message  string `json:"message"`
+	Code       string `json:"code"`
+	Severity   string `json:"severity"`
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+	Message    string `json:"message"`
+	Kind       string `json:"kind,omitempty"`
+	Symbol     string `json:"symbol,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 type Linter struct {
@@ -24,13 +28,12 @@ type Linter struct {
 }
 
 var (
-	selectRe           = regexp.MustCompile(`(?i)\.\s*select\b`)
-	activateRe         = regexp.MustCompile(`(?i)\.\s*activate\b`)
-	onErrorResumeNext  = regexp.MustCompile(`(?i)\bon\s+error\s+resume\s+next\b`)
-	interactiveInputRe = regexp.MustCompile(`(?i)\b(application\s*\.\s*(getopenfilename|filedialog)|inputbox|msgbox)\b`)
-	dimWithoutAs       = regexp.MustCompile(`(?i)^\s*(dim|private|public|static)\s+([^']+)$`)
-	publicVarRe        = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
-	publicProcRe       = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
+	selectRe          = regexp.MustCompile(`(?i)\.\s*select\b`)
+	activateRe        = regexp.MustCompile(`(?i)\.\s*activate\b`)
+	onErrorResumeNext = regexp.MustCompile(`(?i)\bon\s+error\s+resume\s+next\b`)
+	dimWithoutAs      = regexp.MustCompile(`(?i)^\s*(dim|private|public|static)\s+([^']+)$`)
+	publicVarRe       = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
+	publicProcRe      = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -99,7 +102,7 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 	for scanner.Scan() {
 		lineNo++
 		line := scanner.Text()
-		code := stripComment(line)
+		code := gui.StripComment(line)
 		trimmed := strings.TrimSpace(code)
 		if strings.EqualFold(trimmed, "Option Explicit") {
 			hasOptionExplicit = true
@@ -119,9 +122,6 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 		if l.Config.Lint.ForbidPublicModuleFields && looksPublicVariable(trimmed) {
 			issues = append(issues, l.issue(path, lineNo, "VB006", "warning", "Avoid Public module variables; pass state explicitly."))
 		}
-		if l.Config.Lint.ForbidInteractiveInput && interactiveInputRe.MatchString(code) {
-			issues = append(issues, l.issue(path, lineNo, "VB007", "warning", "Avoid UI prompts in CLI-run macros; use run arguments, environment variables, configuration cells, or deterministic paths."))
-		}
 	}
 	if err := scanner.Err(); err != nil {
 		if closeErr := f.Close(); closeErr != nil {
@@ -134,6 +134,24 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 	}
 	if l.Config.Lint.RequireOptionExplicit && !hasOptionExplicit {
 		issues = append([]Issue{l.issue(path, 1, "VB001", "error", "Missing Option Explicit.")}, issues...)
+	}
+	if l.Config.Lint.ForbidInteractiveInput {
+		boundaries, err := gui.Analyzer{RootDir: l.RootDir, Config: l.Config}.AnalyzeFile(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, boundary := range boundaries {
+			issues = append(issues, Issue{
+				Code:       "VB007",
+				Severity:   "warning",
+				File:       boundary.File,
+				Line:       boundary.Line,
+				Message:    boundary.Message + " " + boundary.Suggestion,
+				Kind:       boundary.Kind,
+				Symbol:     boundary.Symbol,
+				Suggestion: boundary.Suggestion,
+			})
+		}
 	}
 	return issues, nil
 }
@@ -150,13 +168,6 @@ func (l Linter) issue(path string, line int, code, severity, message string) Iss
 		Line:     line,
 		Message:  message,
 	}
-}
-
-func stripComment(line string) string {
-	if i := strings.Index(line, "'"); i >= 0 {
-		return line[:i]
-	}
-	return line
 }
 
 func looksImplicitVariant(line string) bool {

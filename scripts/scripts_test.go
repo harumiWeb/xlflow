@@ -11,7 +11,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -22,6 +22,49 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestRunScriptAcceptsTimeoutParameter(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$command = Get-Command ./run.ps1; $command.Parameters.ContainsKey('TimeoutSeconds')",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run script timeout parameter check failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "True" {
+		t.Fatalf("expected run.ps1 to expose TimeoutSeconds, got %q", out)
+	}
+}
+
+func TestAttachActiveWithoutWorkbookReturnsStructuredFailure(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"./attach.ps1 -WorkbookPath 'C:\\missing.xlsm' -Active true | ConvertFrom-Json | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("attach active command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse attach output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code == "" {
+		t.Fatalf("expected structured attach failure, got %+v", got)
 	}
 }
 

@@ -30,6 +30,8 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
    - Use `xlflow test --filter <name> --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --json` before choosing a target.
    - If no tests exist, run the target macro with `xlflow run <MacroName> --json`.
+   - Prefer `xlflow run <MacroName> --headless --json` for unattended agent work.
+   - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --json` when debugging runtime behavior or workbook mutation.
 
 5. Compare results.
@@ -58,6 +60,7 @@ Before designing a CLI-run macro, decide how inputs are supplied:
 - Prefer `xlflow run <MacroName> --arg <type:value>` for user-provided paths, flags, and scalar settings.
 - Use deterministic paths, environment variables, or configuration cells only when they are part of the project contract.
 - Avoid UI prompts and active-window assumptions because unattended Excel automation cannot reliably answer them.
+- When GUI behavior is required, keep the GUI entrypoint thin and extract the core logic into parameterized procedures that can run with `xlflow run --headless --arg`.
 
 ## Decision Flow
 
@@ -69,7 +72,7 @@ When the user asks to create or change VBA behavior:
 4. Run `xlflow push --json`.
 5. Run `xlflow lint --json`.
 6. Run `xlflow test --json` when tests exist.
-7. If tests do not cover the behavior, run `xlflow macros --json`, then `xlflow run <qualified_name> --json` or `xlflow run <qualified_name> --trace --json`.
+7. If tests do not cover the behavior, run `xlflow macros --json`, then `xlflow run <qualified_name> --headless --json` or `xlflow run <qualified_name> --trace --json`.
 8. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
@@ -88,6 +91,9 @@ When the user reports a runtime failure:
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test` as the primary correctness signal when tests exist.
 - Use `xlflow macros` to discover runnable macro entrypoints before guessing a `run` target.
+- Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
+- Use `xlflow run --headless` for repeatable automation; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
+- Use `xlflow attach --active --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
 
@@ -101,7 +107,21 @@ When the user reports a runtime failure:
 - Restore `Application` state in cleanup paths.
 - Use `On Error GoTo ErrHandler`; avoid broad `On Error Resume Next`.
 - Do not pass object or array values to `AssertEquals`; compare scalar properties such as `Range.Value2`.
-- Avoid UI prompts such as `Application.GetOpenFilename`, `Application.FileDialog`, `InputBox`, and modal `MsgBox` in macros that must run from xlflow. Prefer `run --arg`, environment variables, configuration cells, or deterministic paths.
+- Avoid UI prompts such as `Application.GetOpenFilename`, `Application.GetSaveAsFilename`, `Application.FileDialog`, `InputBox`, `UserForm.Show`, and modal `MsgBox` in macros that must run headlessly. Prefer `run --arg`, environment variables, configuration cells, or deterministic paths.
+- Structure GUI-dependent macros with a human-facing entrypoint and a headless core:
+
+```vb
+Public Sub ImportData()
+    Dim path As String
+    path = PickImportFilePath()
+    If path = "" Then Exit Sub
+    ImportDataFromPath path
+End Sub
+
+Public Sub ImportDataFromPath(ByVal path As String)
+    ' Core logic here
+End Sub
+```
 
 ## Trace Rules
 
@@ -122,6 +142,8 @@ Call XlflowLog("finished GenerateReport")
 If `xlflow test` fails, read the failing test name, module, VBA error number, description, and line. Patch the smallest relevant area, rerun the focused test first, then run the full test suite.
 
 If `xlflow run` fails, inspect `error.code` and `error.phase`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
+
+If `xlflow run --headless --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. Either refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop.
 
 If `xlflow run --trace` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --json`.
 

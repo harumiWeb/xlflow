@@ -2,6 +2,7 @@ package excel
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -40,21 +41,24 @@ type RunOptions struct {
 	Save         bool
 	SaveAs       string
 	Trace        bool
+	Mode         string
+	Timeout      time.Duration
 }
 
 type ScriptResult struct {
-	Status      string        `json:"status"`
-	Command     string        `json:"command"`
-	Error       *output.Error `json:"error"`
-	Logs        []string      `json:"logs"`
-	Diagnostics any           `json:"diagnostics,omitempty"`
-	Workbook    any           `json:"workbook,omitempty"`
-	Backup      any           `json:"backup,omitempty"`
-	Source      any           `json:"source,omitempty"`
-	Macro       any           `json:"macro,omitempty"`
-	Macros      any           `json:"macros,omitempty"`
-	Tests       any           `json:"tests,omitempty"`
-	Trace       any           `json:"trace,omitempty"`
+	Status        string        `json:"status"`
+	Command       string        `json:"command"`
+	Error         *output.Error `json:"error"`
+	Logs          []string      `json:"logs"`
+	Diagnostics   any           `json:"diagnostics,omitempty"`
+	Workbook      any           `json:"workbook,omitempty"`
+	Backup        any           `json:"backup,omitempty"`
+	Source        any           `json:"source,omitempty"`
+	Macro         any           `json:"macro,omitempty"`
+	Macros        any           `json:"macros,omitempty"`
+	Tests         any           `json:"tests,omitempty"`
+	Trace         any           `json:"trace,omitempty"`
+	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
 }
 
 func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
@@ -136,6 +140,13 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"SaveWorkbook":  strconv.FormatBool(opts.Save),
 		"TraceEnabled":  strconv.FormatBool(opts.Trace),
 	}
+	if opts.Mode == "interactive" {
+		scriptArgs["Visible"] = "true"
+		scriptArgs["DisplayAlerts"] = "true"
+	}
+	if opts.Timeout > 0 {
+		scriptArgs["TimeoutSeconds"] = strconv.Itoa(int(opts.Timeout.Seconds()))
+	}
 	if opts.SaveAs != "" {
 		scriptArgs["SaveAsPath"] = workbookPath(root, opts.SaveAs)
 	}
@@ -150,7 +161,17 @@ func (r Runner) Run(cfg config.Config, opts RunOptions) (output.Envelope, int, e
 	if err != nil {
 		return output.Failure("run", output.Error{Code: "run_args_invalid", Message: err.Error(), Source: "xlflow"}), output.ExitConfig, nil
 	}
-	return r.run("run", scriptArgs)
+	return r.runWithTimeout("run", scriptArgs, opts.Timeout)
+}
+
+func (r Runner) Attach(cfg config.Config, active bool) (output.Envelope, int, error) {
+	if !active {
+		return output.Failure("attach", output.Error{Code: "attach_args_invalid", Message: "--active is required for attach in this version", Source: "xlflow"}), output.ExitConfig, nil
+	}
+	return r.run("attach", map[string]string{
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"Active":       strconv.FormatBool(active),
+	})
 }
 
 func (r Runner) Test(cfg config.Config, filter string) (output.Envelope, int, error) {
@@ -169,6 +190,10 @@ func (r Runner) Macros(cfg config.Config) (output.Envelope, int, error) {
 }
 
 func (r Runner) run(commandName string, args map[string]string) (output.Envelope, int, error) {
+	return r.runWithTimeout(commandName, args, 0)
+}
+
+func (r Runner) runWithTimeout(commandName string, args map[string]string, timeout time.Duration) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	if runtime.GOOS != "windows" {
 		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
@@ -184,11 +209,32 @@ func (r Runner) run(commandName string, args map[string]string) (output.Envelope
 	for k, v := range args {
 		cmdArgs = append(cmdArgs, "-"+k, v)
 	}
-	cmd := exec.Command("powershell", cmdArgs...)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", cmdArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded && commandName == "run" {
+			env = output.Failure(commandName, output.Error{
+				Code:    "macro_timeout",
+				Message: fmt.Sprintf("Macro did not complete within %s. Possible causes: a file picker, MsgBox, UserForm, or long-running loop is still waiting.", timeout.String()),
+				Source:  "xlflow",
+				Phase:   "invoke_macro",
+			})
+			env.Logs = []string{
+				"Excel automation timed out while running the macro.",
+				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
+			}
+			return env, output.ExitValidation, nil
+		}
 		message := err.Error()
 		if stderr.Len() > 0 {
 			message = stderr.String()
@@ -221,6 +267,7 @@ func (r Runner) run(commandName string, args map[string]string) (output.Envelope
 	env.Macros = result.Macros
 	env.Tests = result.Tests
 	env.Trace = result.Trace
+	env.GUIBoundaries = result.GUIBoundaries
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
@@ -232,7 +279,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_not_found", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
+	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch":
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment

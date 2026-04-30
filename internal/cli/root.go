@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	"github.com/harumiWeb/xlflow/internal/gui"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/project"
@@ -46,6 +49,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.newCommand(),
 		a.initCommand(),
 		a.doctorCommand(),
+		a.attachCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.traceCommand(),
@@ -53,6 +57,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.macrosCommand(),
 		a.testCommand(),
 		a.diffCommand(),
+		a.inspectGUICommand(),
 		a.lintCommand(),
 		a.skillCommand(),
 	)
@@ -219,9 +224,43 @@ func (a *app) doctorCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			boundaries, analyzeErr := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			if analyzeErr == nil && len(boundaries) > 0 {
+				env.GUIBoundaries = boundaries
+				env.Diagnostics = withGUIBoundarySummary(env.Diagnostics, boundaries)
+				env.Logs = append(env.Logs, fmt.Sprintf("detected %d GUI boundary candidate(s) in source", len(boundaries)))
+			}
 			return a.write(env, code)
 		},
 	}
+}
+
+func (a *app) attachCommand() *cobra.Command {
+	var active bool
+	cmd := &cobra.Command{
+		Use:   "attach --active",
+		Short: "Inspect the active Excel workbook connection",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("attach")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Inspecting active workbook", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&active, "active", false, "attach to the active Excel workbook")
+	return cmd
 }
 
 func (a *app) pullCommand() *cobra.Command {
@@ -274,9 +313,12 @@ func (a *app) pushCommand() *cobra.Command {
 	}
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool) (excel.RunOptions, error) {
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, timeout time.Duration) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
+	}
+	if headless && interactive {
+		return excel.RunOptions{}, fmt.Errorf("--headless and --interactive cannot be combined")
 	}
 	if macro == "" {
 		macro = cfg.Project.Entry
@@ -306,6 +348,13 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		}
 		args = append(args, excel.RunArgument{Type: parts[0], Value: parts[1]})
 	}
+	mode := ""
+	if headless {
+		mode = "headless"
+	}
+	if interactive {
+		mode = "interactive"
+	}
 	return excel.RunOptions{
 		Macro:        macro,
 		WorkbookPath: input,
@@ -313,6 +362,8 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		Save:         save,
 		SaveAs:       saveAs,
 		Trace:        trace,
+		Mode:         mode,
+		Timeout:      timeout,
 	}, nil
 }
 
@@ -322,6 +373,9 @@ func (a *app) runCommand() *cobra.Command {
 	var save bool
 	var saveAs string
 	var trace bool
+	var headless bool
+	var interactive bool
+	var timeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "run [macro]",
@@ -336,9 +390,29 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, timeout)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
+			}
+			if opts.Mode == "headless" {
+				boundaries, err := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+				if err != nil {
+					return a.writeFailure("run", output.ExitEnvironment, "gui_preflight_failed", err)
+				}
+				if len(boundaries) > 0 {
+					env := output.Failure("run", output.Error{
+						Code:    "gui_boundary_detected",
+						Message: "Cannot run in headless mode because this project contains GUI interaction boundaries.",
+						Source:  "xlflow",
+						Phase:   "preflight",
+					})
+					env.GUIBoundaries = boundaries
+					env.Logs = []string{
+						"Use xlflow run --interactive if a human can operate Excel dialogs.",
+						"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
+					}
+					return a.write(env, output.ExitValidation)
+				}
 			}
 			var env output.Envelope
 			var code int
@@ -358,6 +432,9 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
 	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
+	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
+	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	return cmd
 }
 
@@ -515,6 +592,80 @@ func (a *app) lintCommand() *cobra.Command {
 			env.Logs = []string{"no lint issues found"}
 			return a.write(env, output.ExitSuccess)
 		},
+	}
+}
+
+func (a *app) inspectGUICommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inspect-gui",
+		Short: "Report VBA GUI interaction boundaries",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("inspect-gui")
+			if err != nil {
+				return err
+			}
+			boundaries, err := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			if err != nil {
+				return a.writeFailure("inspect-gui", output.ExitEnvironment, "inspect_gui_failed", err)
+			}
+			env := output.New("inspect-gui")
+			env.GUIBoundaries = boundaries
+			if len(boundaries) == 0 {
+				env.Logs = []string{"no GUI boundaries found"}
+			} else {
+				env.Logs = []string{fmt.Sprintf("detected %d GUI boundary candidate(s)", len(boundaries))}
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func withGUIBoundarySummary(value any, boundaries []gui.Boundary) any {
+	diag := map[string]any{}
+	if value != nil {
+		for key, item := range cliObjectMap(value) {
+			diag[key] = item
+		}
+	}
+	counts := map[string]int{}
+	for _, boundary := range boundaries {
+		counts[boundary.Kind]++
+	}
+	diag["gui_boundaries"] = map[string]any{
+		"count":    len(boundaries),
+		"by_kind":  counts,
+		"detected": len(boundaries) > 0,
+	}
+	return diag
+}
+
+func cliObjectMap(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		return v
+	case map[string]string:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = item
+		}
+		return out
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return map[string]any{}
+		}
+		var out map[string]any
+		if err := json.Unmarshal(data, &out); err != nil {
+			return map[string]any{}
+		}
+		if out == nil {
+			return map[string]any{}
+		}
+		return out
 	}
 }
 

@@ -23,9 +23,14 @@ End Sub
 Public SharedState As String
 Sub Prompt()
 Application.GetOpenFilename
+Application.GetSaveAsFilename
 Application.FileDialog(msoFileDialogFilePicker).Show
 InputBox "Path?"
 MsgBox "Done"
+UserForm1.Show
+DoEvents
+Shell "notepad.exe"
+CreateObject("WScript.Shell").Popup "Done"
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
@@ -45,6 +50,16 @@ End Sub
 		if !found {
 			t.Fatalf("missing lint issue %s in %+v", code, issues)
 		}
+	}
+	foundBoundaryMetadata := false
+	for _, issue := range issues {
+		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
+			foundBoundaryMetadata = true
+			break
+		}
+	}
+	if !foundBoundaryMetadata {
+		t.Fatalf("expected VB007 to include GUI boundary metadata: %+v", issues)
 	}
 }
 
