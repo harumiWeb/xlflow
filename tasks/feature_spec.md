@@ -1,46 +1,36 @@
-# GUI Boundary and Human-Assisted Run Spec
+# Push/Run Keepalive Spec
 
 ## Goal
 
-Make xlflow safer for AI agents and CI when VBA contains Excel GUI operations. GUI calls are explicit boundaries, not hidden automation targets. Headless runs fail before Excel starts; interactive runs make human participation intentional.
+Prevent AI agents and task runners from treating long-running Excel COM operations as stalled when `xlflow push` or `xlflow run` produces no final result for several seconds.
 
-## GUI Boundary Model
+## CLI Contract
 
-`internal/gui` scans configured `.bas`, `.cls`, and `.frm` source files under modules, classes, forms, workbook, and `tests`.
+- `xlflow push --keepalive [--keepalive-interval <duration>]`
+- `xlflow run [macro] --keepalive [--keepalive-interval <duration>]`
+- `--keepalive-interval` defaults to `5s`.
+- When `--keepalive` is enabled, a non-positive interval is a CLI argument error with exit code `2`.
+- Keepalive output is written only to stderr.
+- Stdout remains unchanged, including pure JSON output when `--json` is set.
 
-Each boundary contains:
+## Output Contract
 
-- `file`
-- `line`
-- `kind`: `file_picker`, `modal_dialog`, `user_form`, `external_process`, or `message_pump`
-- `symbol`
-- `severity`: `interactive-only`
-- `message`
-- `suggestion`
+Heartbeat lines start immediately and repeat at the configured interval:
 
-Initial symbols:
+```text
+xlflow: push still running... elapsed=0s
+xlflow: run still running... elapsed=5s
+```
 
-- `Application.GetOpenFilename`
-- `Application.GetSaveAsFilename`
-- `Application.FileDialog`
-- `InputBox`
-- `MsgBox`
-- `UserForm.Show`
-- `.Show vbModal`
-- `DoEvents`
-- `Shell`
-- `CreateObject("WScript.Shell").Popup`
+Completion markers are written after the command result is known:
 
-## CLI Behavior
+```text
+XLFLOW_DONE status=success command=push
+XLFLOW_DONE status=failed command=run code=macro_timeout
+```
 
-- `xlflow lint` keeps `VB007` and adds boundary metadata to JSON findings.
-- `xlflow inspect-gui` reports top-level `gui_boundaries` without opening Excel.
-- `xlflow doctor` includes GUI boundary summary diagnostics when source is available.
-- `xlflow run --headless` fails with `gui_boundary_detected` before Excel starts if any boundary exists.
-- `xlflow run --interactive` runs with Excel visible and alerts enabled.
-- `xlflow run --timeout <duration>` defaults to `5m`; timeout failures return `macro_timeout`.
-- `xlflow attach --active` validates that the active Excel workbook matches configured `excel.path`. It does not retarget `pull`, `push`, or `run`.
+`code` is present only when xlflow has a structured error code.
 
-## VBA Design Guidance
+## Agent Rule
 
-GUI entrypoints should be thin wrappers. Core behavior should live in parameterized procedures that can be invoked with `xlflow run --headless --arg`.
+Agents should use `--keepalive --json` for long `push` and `run` calls, wait for process exit, and not start the next workbook-dependent command until stderr contains `XLFLOW_DONE`.

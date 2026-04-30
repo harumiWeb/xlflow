@@ -1,10 +1,13 @@
 package excel
 
 import (
+	"bytes"
 	"encoding/base64"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -176,5 +179,57 @@ func TestTraceInjectScriptArgsOmitModulesDirForStandaloneWorkbook(t *testing.T) 
 	args := buildTraceInjectScriptArgs(root, cfg, "other.xlsm")
 	if _, ok := args["ModulesDir"]; ok {
 		t.Fatalf("standalone workbook should not receive ModulesDir: %+v", args)
+	}
+}
+
+func TestStartKeepaliveWritesImmediateAndPeriodicHeartbeat(t *testing.T) {
+	var stderr bytes.Buffer
+	stop := startKeepalive("run", CommandOptions{
+		Keepalive:         true,
+		KeepaliveInterval: 10 * time.Millisecond,
+		Stderr:            &stderr,
+	})
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if strings.Count(stderr.String(), "xlflow: run still running...") >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+
+	got := stderr.String()
+	if !strings.Contains(got, "xlflow: run still running... elapsed=0s") {
+		t.Fatalf("missing immediate heartbeat:\n%s", got)
+	}
+	if strings.Count(got, "xlflow: run still running...") < 2 {
+		t.Fatalf("expected periodic heartbeat after immediate line:\n%s", got)
+	}
+}
+
+func TestWriteDoneMarkerWritesSuccessAndFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	writeDoneMarker("push", output.New("push"), CommandOptions{Keepalive: true, Stderr: &stderr})
+	writeDoneMarker("run", output.Failure("run", output.Error{Code: "macro_timeout", Message: "timed out"}), CommandOptions{Keepalive: true, Stderr: &stderr})
+
+	got := stderr.String()
+	if !strings.Contains(got, "XLFLOW_DONE status=success command=push\n") {
+		t.Fatalf("missing success marker:\n%s", got)
+	}
+	if !strings.Contains(got, "XLFLOW_DONE status=failed command=run code=macro_timeout\n") {
+		t.Fatalf("missing failure marker:\n%s", got)
+	}
+	if strings.Count(got, "XLFLOW_DONE") != 2 {
+		t.Fatalf("expected exactly two done markers:\n%s", got)
+	}
+}
+
+func TestKeepaliveDoesNotWriteWhenDisabled(t *testing.T) {
+	var stderr bytes.Buffer
+	stop := startKeepalive("push", CommandOptions{Stderr: &stderr})
+	stop()
+	writeDoneMarker("push", output.New("push"), CommandOptions{Stderr: &stderr})
+	if got := stderr.String(); got != "" {
+		t.Fatalf("disabled keepalive wrote output:\n%s", got)
 	}
 }

@@ -84,6 +84,14 @@ Findings explain that xlflow-oriented macros should prefer explicit `run --arg` 
 
 The bundled AI agent skill instructs agents to add trace logs at procedure entry, important branches, external file access, destructive operations, and error handlers.
 
+## Agent Keepalive Output
+
+`xlflow push --keepalive` and `xlflow run --keepalive` are for AI agents and task runners that may stop waiting when Excel COM operations are silent for too long. Keepalive writes only to stderr. Stdout remains reserved for normal human output or the JSON envelope when `--json` is set.
+
+Heartbeat output starts immediately with `xlflow: <command> still running... elapsed=0s` and repeats at `--keepalive-interval`, which defaults to `5s`. At command completion, xlflow writes `XLFLOW_DONE status=success command=<command>` or `XLFLOW_DONE status=failed command=<command> code=<error-code>` when a structured error code is available.
+
+Agents should use `--keepalive --json` for long `push` and `run` calls, wait for process exit, and treat the `XLFLOW_DONE` marker as the synchronization point before starting the next workbook-dependent command.
+
 ## Bundled Skill Workflow Guidance
 
 The bundled AI agent skill must make xlflow's source-first workflow explicit. In configured projects, agents should treat the configured source directories as authoritative unless the user says the workbook has newer VBA or the source tree is missing or stale. In those cases, agents should run `xlflow pull --json` before editing and then continue from source files.

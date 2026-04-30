@@ -14,9 +14,9 @@ xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]
 xlflow [--json] doctor
 xlflow [--json] attach --active
 xlflow [--json] pull
-xlflow [--json] push
+xlflow [--json] push [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace inject [workbook]
-xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--timeout <duration>]
+xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] macros
 xlflow [--json] test [--filter <name>]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
@@ -28,6 +28,8 @@ xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 `--json` is a persistent global flag and can be used with every command, including `new` and `init`.
 
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
+
+`push` and `run` support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=push` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
 
 `new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`.
 

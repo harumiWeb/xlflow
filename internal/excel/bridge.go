@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,13 @@ type RunOptions struct {
 	Trace        bool
 	Mode         string
 	Timeout      time.Duration
+	Keepalive    CommandOptions
+}
+
+type CommandOptions struct {
+	Keepalive         bool
+	KeepaliveInterval time.Duration
+	Stderr            io.Writer
 }
 
 type ScriptResult struct {
@@ -85,7 +93,7 @@ func (r Runner) Pull(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
-func (r Runner) Push(cfg config.Config) (output.Envelope, int, error) {
+func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("push", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
@@ -94,7 +102,7 @@ func (r Runner) Push(cfg config.Config) (output.Envelope, int, error) {
 		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
 		"BackupRoot":   filepath.Join(r.RootDir, ".xlflow", "backups"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}, opts...)
 }
 
 func (r Runner) TraceInject(cfg config.Config, workbook string) (output.Envelope, int, error) {
@@ -161,7 +169,10 @@ func (r Runner) Run(cfg config.Config, opts RunOptions) (output.Envelope, int, e
 	if err != nil {
 		return output.Failure("run", output.Error{Code: "run_args_invalid", Message: err.Error(), Source: "xlflow"}), output.ExitConfig, nil
 	}
-	return r.runWithTimeout("run", scriptArgs, opts.Timeout)
+	return r.runWithOptions("run", scriptArgs, commandRunOptions{
+		Timeout:   opts.Timeout,
+		Keepalive: opts.Keepalive,
+	})
 }
 
 func (r Runner) Attach(cfg config.Config, active bool) (output.Envelope, int, error) {
@@ -189,11 +200,20 @@ func (r Runner) Macros(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
-func (r Runner) run(commandName string, args map[string]string) (output.Envelope, int, error) {
-	return r.runWithTimeout(commandName, args, 0)
+func (r Runner) run(commandName string, args map[string]string, opts ...CommandOptions) (output.Envelope, int, error) {
+	runOpts := commandRunOptions{}
+	if len(opts) > 0 {
+		runOpts.Keepalive = opts[0]
+	}
+	return r.runWithOptions(commandName, args, runOpts)
 }
 
-func (r Runner) runWithTimeout(commandName string, args map[string]string, timeout time.Duration) (output.Envelope, int, error) {
+type commandRunOptions struct {
+	Timeout   time.Duration
+	Keepalive CommandOptions
+}
+
+func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	if runtime.GOOS != "windows" {
 		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
@@ -211,8 +231,8 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	if opts.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), opts.Timeout)
 	} else {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
@@ -221,11 +241,17 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	stopKeepalive := startKeepalive(commandName, opts.Keepalive)
+	err = cmd.Start()
+	if err == nil {
+		err = cmd.Wait()
+	}
+	stopKeepalive()
+	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded && commandName == "run" {
 			env = output.Failure(commandName, output.Error{
 				Code:    "macro_timeout",
-				Message: fmt.Sprintf("Macro did not complete within %s. Possible causes: a file picker, MsgBox, UserForm, or long-running loop is still waiting.", timeout.String()),
+				Message: fmt.Sprintf("Macro did not complete within %s. Possible causes: a file picker, MsgBox, UserForm, or long-running loop is still waiting.", opts.Timeout.String()),
 				Source:  "xlflow",
 				Phase:   "invoke_macro",
 			})
@@ -233,6 +259,7 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
 			}
+			writeDoneMarker(commandName, env, opts.Keepalive)
 			return env, output.ExitValidation, nil
 		}
 		message := err.Error()
@@ -240,6 +267,7 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 			message = stderr.String()
 		}
 		env = output.Failure(commandName, output.Error{Code: "script_failed", Message: message, Source: "powershell"})
+		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -247,6 +275,7 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: "powershell"})
 		env.Logs = []string{stdout.String()}
+		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
 	if result.Status == "" {
@@ -268,10 +297,66 @@ func (r Runner) runWithTimeout(commandName string, args map[string]string, timeo
 	env.Tests = result.Tests
 	env.Trace = result.Trace
 	env.GUIBoundaries = result.GUIBoundaries
+	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
 	return env, output.ExitSuccess, nil
+}
+
+func startKeepalive(commandName string, opts CommandOptions) func() {
+	if !opts.Keepalive {
+		return func() {}
+	}
+	w := opts.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	interval := opts.KeepaliveInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	started := time.Now()
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	_, _ = fmt.Fprintf(w, "xlflow: %s still running... elapsed=0s\n", commandName)
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				elapsed := time.Since(started).Truncate(time.Second)
+				_, _ = fmt.Fprintf(w, "xlflow: %s still running... elapsed=%s\n", commandName, elapsed)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+	}
+}
+
+func writeDoneMarker(commandName string, env output.Envelope, opts CommandOptions) {
+	if !opts.Keepalive {
+		return
+	}
+	w := opts.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	status := "success"
+	if env.Status == output.StatusFailed {
+		status = "failed"
+	}
+	_, _ = fmt.Fprintf(w, "XLFLOW_DONE status=%s command=%s", status, commandName)
+	if env.Error != nil && env.Error.Code != "" {
+		_, _ = fmt.Fprintf(w, " code=%s", env.Error.Code)
+	}
+	_, _ = fmt.Fprintln(w)
 }
 
 func exitCodeForScriptResult(result ScriptResult) int {

@@ -27,6 +27,8 @@ type app struct {
 	cwd  string
 }
 
+const defaultKeepaliveInterval = 5 * time.Second
+
 func Execute() error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -289,36 +291,66 @@ func (a *app) pullCommand() *cobra.Command {
 }
 
 func (a *app) pushCommand() *cobra.Command {
-	return &cobra.Command{
+	var keepalive bool
+	var keepaliveInterval time.Duration
+
+	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Import source VBA components into the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
+			if err != nil {
+				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("push")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Importing VBA source", func() error {
+			run := func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Push(cfg)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Push(cfg, keepaliveOpts)
 				return runErr
-			})
+			}
+			if keepaliveOpts.Keepalive {
+				err = run()
+			} else {
+				err = a.withSpinner("Importing VBA source", run)
+			}
 			if err != nil {
 				return err
 			}
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
+	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
+	return cmd
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, timeout time.Duration) (excel.RunOptions, error) {
+func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.CommandOptions, error) {
+	if keepalive && interval <= 0 {
+		return excel.CommandOptions{}, fmt.Errorf("--keepalive-interval must be greater than 0")
+	}
+	return excel.CommandOptions{
+		Keepalive:         keepalive,
+		KeepaliveInterval: interval,
+		Stderr:            os.Stderr,
+	}, nil
+}
+
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
 	if headless && interactive {
 		return excel.RunOptions{}, fmt.Errorf("--headless and --interactive cannot be combined")
+	}
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
+	if err != nil {
+		return excel.RunOptions{}, err
 	}
 	if macro == "" {
 		macro = cfg.Project.Entry
@@ -364,6 +396,7 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		Trace:        trace,
 		Mode:         mode,
 		Timeout:      timeout,
+		Keepalive:    keepaliveOpts,
 	}, nil
 }
 
@@ -376,6 +409,8 @@ func (a *app) runCommand() *cobra.Command {
 	var headless bool
 	var interactive bool
 	var timeout time.Duration
+	var keepalive bool
+	var keepaliveInterval time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "run [macro]",
@@ -390,7 +425,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, timeout)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, timeout, keepalive, keepaliveInterval)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -416,11 +451,16 @@ func (a *app) runCommand() *cobra.Command {
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Running macro", func() error {
+			run := func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
 				return runErr
-			})
+			}
+			if opts.Keepalive.Keepalive {
+				err = run()
+			} else {
+				err = a.withSpinner("Running macro", run)
+			}
 			if err != nil {
 				return err
 			}
@@ -435,6 +475,8 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
+	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
+	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
 	return cmd
 }
 

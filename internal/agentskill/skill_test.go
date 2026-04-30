@@ -30,6 +30,8 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"Treat the configured source directories as authoritative",
 		"Use a listed `qualified_name` from `xlflow macros --json`",
 		"Run `xlflow doctor --json` for setup phases",
+		"xlflow push --keepalive --json",
+		"XLFLOW_DONE status=success command=push",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("installed skill is missing %q:\n%s", want, body)

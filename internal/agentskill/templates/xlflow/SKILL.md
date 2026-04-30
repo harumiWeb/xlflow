@@ -22,15 +22,15 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
    - Do not edit binary workbooks directly unless the task is explicitly workbook-state only.
 
 3. Import and check.
-   - Run `xlflow push --json` after source edits.
+   - Run `xlflow push --keepalive --json` after source edits.
    - Run `xlflow lint --json` and fix reported issues before finalizing.
 
 4. Execute behavior.
    - Prefer `xlflow test --json`.
    - Use `xlflow test --filter <name> --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --json` before choosing a target.
-   - If no tests exist, run the target macro with `xlflow run <MacroName> --json`.
-   - Prefer `xlflow run <MacroName> --headless --json` for unattended agent work.
+   - If no tests exist, run the target macro with `xlflow run <MacroName> --keepalive --json`.
+   - Prefer `xlflow run <MacroName> --headless --keepalive --json` for unattended agent work.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --json` when debugging runtime behavior or workbook mutation.
 
@@ -69,10 +69,10 @@ When the user asks to create or change VBA behavior:
 1. Read `xlflow.toml` and relevant source files.
 2. If the current source of truth is unclear, run `xlflow pull --json` before editing.
 3. Edit `.bas`, `.cls`, or `.frm` source files.
-4. Run `xlflow push --json`.
+4. Run `xlflow push --keepalive --json`.
 5. Run `xlflow lint --json`.
 6. Run `xlflow test --json` when tests exist.
-7. If tests do not cover the behavior, run `xlflow macros --json`, then `xlflow run <qualified_name> --headless --json` or `xlflow run <qualified_name> --trace --json`.
+7. If tests do not cover the behavior, run `xlflow macros --json`, then `xlflow run <qualified_name> --headless --keepalive --json` or `xlflow run <qualified_name> --trace --keepalive --json`.
 8. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
@@ -87,12 +87,12 @@ When the user reports a runtime failure:
 
 - Use `xlflow doctor` before blaming VBA when Excel automation fails before user code starts.
 - Use `xlflow pull` to refresh editable source from the configured workbook.
-- Use `xlflow push` after source edits; it creates a backup before replacing VBA components.
+- Use `xlflow push --keepalive` after source edits; it creates a backup before replacing VBA components.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test` as the primary correctness signal when tests exist.
 - Use `xlflow macros` to discover runnable macro entrypoints before guessing a `run` target.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
-- Use `xlflow run --headless` for repeatable automation; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
+- Use `xlflow run --headless --keepalive` for repeatable automation; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
 - Use `xlflow attach --active --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
@@ -122,6 +122,14 @@ Public Sub ImportDataFromPath(ByVal path As String)
     ' Core logic here
 End Sub
 ```
+
+## Keepalive Rules
+
+Use `--keepalive --json` for long `xlflow push` and `xlflow run` commands. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
+
+After starting a keepalive command, wait until the process exits and stderr contains a line beginning with `XLFLOW_DONE`. Do not begin the next workbook-dependent step just because stdout has not changed for a while.
+
+Expected markers include `XLFLOW_DONE status=success command=push` and `XLFLOW_DONE status=failed command=run code=macro_timeout`.
 
 ## Trace Rules
 
