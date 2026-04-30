@@ -38,6 +38,7 @@ type Envelope struct {
 	Issues      any `json:"issues,omitempty"`
 	Tests       any `json:"tests,omitempty"`
 	Diff        any `json:"diff,omitempty"`
+	Trace       any `json:"trace,omitempty"`
 }
 
 type ExitError struct {
@@ -111,6 +112,11 @@ func Write(w io.Writer, env Envelope, jsonOutput bool) error {
 		return nil
 	}
 	if env.Error != nil {
+		for _, line := range env.Logs {
+			if _, err := fmt.Fprintln(w, line); err != nil {
+				return err
+			}
+		}
 		_, err := fmt.Fprintln(w, env.Error.Message)
 		return err
 	}

@@ -47,6 +47,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.doctorCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
+		a.traceCommand(),
 		a.runCommand(),
 		a.testCommand(),
 		a.diffCommand(),
@@ -177,7 +178,7 @@ func (a *app) pushCommand() *cobra.Command {
 	}
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string) (excel.RunOptions, error) {
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -215,6 +216,7 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		Args:         args,
 		Save:         save,
 		SaveAs:       saveAs,
+		Trace:        trace,
 	}, nil
 }
 
@@ -223,6 +225,7 @@ func (a *app) runCommand() *cobra.Command {
 	var input string
 	var save bool
 	var saveAs string
+	var trace bool
 
 	cmd := &cobra.Command{
 		Use:   "run [macro]",
@@ -237,7 +240,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -252,7 +255,43 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
+	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
 	return cmd
+}
+
+func (a *app) traceCommand() *cobra.Command {
+	trace := &cobra.Command{
+		Use:   "trace",
+		Short: "Manage workbook trace logging support",
+	}
+	trace.AddCommand(a.traceInjectCommand())
+	return trace
+}
+
+func (a *app) traceInjectCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inject [workbook]",
+		Short: "Inject the XlflowTrace VBA module into a workbook",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(a.cwd)
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			if err != nil {
+				if workbook == "" {
+					return a.writeFailure("trace", output.ExitConfig, "config_error", err)
+				}
+				cfg = config.Default()
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook)
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
 }
 
 func (a *app) testCommand() *cobra.Command {

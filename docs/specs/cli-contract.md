@@ -14,7 +14,8 @@ xlflow [--json] init <workbook>
 xlflow [--json] doctor
 xlflow [--json] pull
 xlflow [--json] push
-xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>]
+xlflow [--json] trace inject [workbook]
+xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace]
 xlflow [--json] test [--filter <name>]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] lint
@@ -28,9 +29,13 @@ xlflow [--json] lint
 
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import.
 
+`trace inject` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml`; when `[workbook]` is provided, the command can run without project configuration. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
+
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
 
 `run` adds a `macro` object with `name`, `args`, and `duration_ms`. Failed macro runs return `macro_failed` with `error.source`, `error.number`, `error.message`, and `error.line` when VBA exposes a non-zero `Erl` value. Plain-text success output must include the elapsed duration and whether the workbook was saved, copied, or left unchanged. Plain-text failure output must use the formatted message `Module line <n> Err <n>: <description>` when line and error number are available, and otherwise omit the `line <n>` segment. Because `run` injects a temporary VBA harness to measure duration while avoiding modal VBA runtime error dialogs, VBIDE access failures return an environment error such as `vbide_access_denied` and exit code `3`.
+
+`run --trace` creates a fresh temp log under `%TEMP%\xlflow`, calls `XlflowTrace.XlflowSetTraceFile` before the target macro, then reads trace events after execution. User VBA code writes events with `Call XlflowLog("message")`. JSON output adds top-level `trace.enabled`, `trace.path`, `trace.events`, and optional `trace.read_error`; each event has `timestamp`, `message`, and `raw`. Plain-text output prints trace events as `[timestamp] message` after the normal run logs. If `XlflowTrace` is missing, `run --trace` returns `trace_not_injected` with exit code `1`. If the macro fails after writing trace events, those events are still returned. Trace read errors are reported in `trace.read_error` without changing the macro result.
 
 `test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 
@@ -88,6 +93,7 @@ Command-specific fields are added at the top level:
 - `tests` for `test`
 - `diff` for `diff`
 - `issues` for `lint`
+- `trace` for traced `run`
 
 `test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
 
@@ -96,7 +102,7 @@ Command-specific fields are added at the top level:
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings, macro failure, VBA test failure, no tests found, missing filter targets, and duplicate test names
+- `1`: user-code or validation failure, including lint findings, macro failure, missing trace module, VBA test failure, no tests found, missing filter targets, and duplicate test names
 - `2`: CLI argument or configuration error
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
 

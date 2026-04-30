@@ -11,7 +11,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"common.ps1", "doctor.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1"}
+	scripts := []string{"common.ps1", "doctor.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -359,6 +359,77 @@ func TestRunHarnessCodeIncludesMacroInvocationAndErrorLine(t *testing.T) {
 	}
 }
 
+func TestTraceModuleCodeProvidesPublicLoggerAPI(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; New-XlflowTraceModuleCode",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace module code generation failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{"Public Sub XlflowLog(ByVal message As String)", "Public Sub XlflowSetTraceFile(ByVal path As String)", "On Error GoTo Handler", "Open mTraceFile For Append", "If opened Then Close #f", "Err.Raise errNumber, errSource, errDescription", "Format$(Now"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected trace module code to contain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunHarnessCodeConfiguresTraceBeforeMacro(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; New-XlflowRunHarnessCode -MacroName 'Report.Generate' -Arguments @() -TraceEnabled $true -TraceFile 'C:\\Temp\\xlflow\\trace.log'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run harness trace generation failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	setup := `XlflowTrace.XlflowSetTraceFile "C:\Temp\xlflow\trace.log"`
+	invocation := "Report.Generate"
+	if !strings.Contains(got, setup) {
+		t.Fatalf("expected trace setup %q:\n%s", setup, got)
+	}
+	if strings.Index(got, setup) > strings.Index(got, invocation) {
+		t.Fatalf("expected trace setup before macro invocation:\n%s", got)
+	}
+}
+
+func TestReadTraceEventsParsesTimestampMessageAndRawLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @(\"2026-04-29 21:12:03`tstart GenerateReport\",\"2026-04-29 21:12:04`tlastRow=128\"); . ./common.ps1; $events = @(Read-XlflowTraceEvents -Path $tmp); Remove-Item -LiteralPath $tmp -Force; ConvertTo-Json -InputObject $events -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace event parsing failed: %v\n%s", err, out)
+	}
+	var got []struct {
+		Timestamp string `json:"timestamp"`
+		Message   string `json:"message"`
+		Raw       string `json:"raw"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trace events: %v\n%s", err, out)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 trace events, got %d: %+v", len(got), got)
+	}
+	if got[0].Timestamp != "2026-04-29 21:12:03" || got[0].Message != "start GenerateReport" || got[0].Raw != "2026-04-29 21:12:03\tstart GenerateReport" {
+		t.Fatalf("unexpected first trace event: %+v", got[0])
+	}
+}
+
 func TestRunHarnessCodeAcceptsDecodedJSONArgumentArrays(t *testing.T) {
 	json := `[{"type":"string","value":"fixtures\\sample.xlsx"},{"type":"int","value":"3"},{"type":"bool","value":"true"}]`
 	json64 := base64.StdEncoding.EncodeToString([]byte(json))
@@ -606,15 +677,15 @@ try {
 	}
 
 	var got struct {
-		Skip             bool   `json:"skip"`
-		SkipReason       string `json:"skipReason"`
-		FrmPath          string `json:"frmPath"`
-		FrxPath          string `json:"frxPath"`
-		FrxExists        bool   `json:"frxExists"`
-		FrmReferencesFrx bool   `json:"frmReferencesFrx"`
-		FrxIsSibling     bool   `json:"frxIsSibling"`
-		InitialPullStatus string `json:"initialPullStatus"`
-		PushStatus        string `json:"pushStatus"`
+		Skip                bool   `json:"skip"`
+		SkipReason          string `json:"skipReason"`
+		FrmPath             string `json:"frmPath"`
+		FrxPath             string `json:"frxPath"`
+		FrxExists           bool   `json:"frxExists"`
+		FrmReferencesFrx    bool   `json:"frmReferencesFrx"`
+		FrxIsSibling        bool   `json:"frxIsSibling"`
+		InitialPullStatus   string `json:"initialPullStatus"`
+		PushStatus          string `json:"pushStatus"`
 		RoundtripPullStatus string `json:"roundtripPullStatus"`
 	}
 	if err := json.Unmarshal(out, &got); err != nil {

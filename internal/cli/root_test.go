@@ -36,10 +36,23 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "input", "save", "save-as"} {
+	for _, name := range []string{"arg", "input", "save", "save-as", "trace"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestRootCommandIncludesTraceInjectCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"trace", "inject"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "inject" {
+		t.Fatalf("expected trace inject command, got %#v", cmd)
 	}
 }
 
@@ -104,7 +117,7 @@ func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm")
+	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false)
 	if err == nil || !strings.Contains(err.Error(), "--save and --save-as cannot be combined") {
 		t.Fatalf("expected save conflict error, got %v", err)
 	}
@@ -112,7 +125,7 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "")
+	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +141,9 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	if opts.WorkbookPath != "fixtures\\Book.xlsm" {
 		t.Fatalf("workbook path = %q", opts.WorkbookPath)
 	}
+	if !opts.Trace {
+		t.Fatal("expected trace flag to be enabled")
+	}
 	if !reflect.DeepEqual(opts.Args, want) {
 		t.Fatalf("run args = %#v, want %#v", opts.Args, want)
 	}
@@ -135,7 +151,7 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "")
+	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +175,7 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.literal, func(t *testing.T) {
-			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "")
+			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "", false)
 			if err == nil {
 				t.Fatalf("expected %q to fail", tt.literal)
 			}

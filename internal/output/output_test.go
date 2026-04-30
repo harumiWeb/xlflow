@@ -72,6 +72,37 @@ func TestWriteJSONEnvelopeIncludesDiff(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesTrace(t *testing.T) {
+	env := New("run")
+	env.Trace = map[string]any{
+		"enabled": true,
+		"events":  []map[string]string{{"message": "start"}},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["trace"].(map[string]any); !ok {
+		t.Fatalf("expected trace result in JSON envelope: %s", buf.String())
+	}
+}
+
+func TestWritePlainFailureIncludesLogsBeforeError(t *testing.T) {
+	env := Failure("run", Error{Message: "macro failed"})
+	env.Logs = []string{"[2026-04-29 21:12:03] start"}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "[2026-04-29 21:12:03] start\nmacro failed\n" {
+		t.Fatalf("plain failure output = %q", got)
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesErrorLine(t *testing.T) {
 	env := Failure("run", Error{
 		Code:    "macro_failed",

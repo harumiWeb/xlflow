@@ -64,7 +64,7 @@ function Get-XlflowComponentPath {
 
 function Write-XlflowJson {
   param([hashtable]$Result)
-  $Result | ConvertTo-Json -Depth 8
+  $Result | ConvertTo-Json -Depth 10
 }
 
 function Find-XlflowTestProcedures {
@@ -338,13 +338,107 @@ function Format-XlflowMacroFailureMessage {
   return (($parts -join " ") + ": " + $Description)
 }
 
+function New-XlflowTraceModuleCode {
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.AppendLine("Option Explicit")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Private mTraceFile As String")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Public Sub XlflowSetTraceFile(ByVal path As String)")
+  [void]$builder.AppendLine("  mTraceFile = path")
+  [void]$builder.AppendLine("End Sub")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Public Sub XlflowLog(ByVal message As String)")
+  [void]$builder.AppendLine("  If Len(mTraceFile) = 0 Then")
+  [void]$builder.AppendLine('    Err.Raise vbObjectError + 900, "XlflowTrace.XlflowLog", "trace file is not configured. Run the macro with xlflow run --trace."')
+  [void]$builder.AppendLine("  End If")
+  [void]$builder.AppendLine("  Dim f As Integer")
+  [void]$builder.AppendLine("  Dim opened As Boolean")
+  [void]$builder.AppendLine("  On Error GoTo Handler")
+  [void]$builder.AppendLine("  f = FreeFile")
+  [void]$builder.AppendLine("  Open mTraceFile For Append As #f")
+  [void]$builder.AppendLine("  opened = True")
+  [void]$builder.AppendLine('  Print #f, Format$(Now, "yyyy-mm-dd hh:nn:ss") & vbTab & message')
+  [void]$builder.AppendLine("  Close #f")
+  [void]$builder.AppendLine("  Exit Sub")
+  [void]$builder.AppendLine("Handler:")
+  [void]$builder.AppendLine("  Dim errNumber As Long")
+  [void]$builder.AppendLine("  Dim errSource As String")
+  [void]$builder.AppendLine("  Dim errDescription As String")
+  [void]$builder.AppendLine("  errNumber = Err.Number")
+  [void]$builder.AppendLine("  errSource = Err.Source")
+  [void]$builder.AppendLine("  errDescription = Err.Description")
+  [void]$builder.AppendLine("  On Error Resume Next")
+  [void]$builder.AppendLine("  If opened Then Close #f")
+  [void]$builder.AppendLine("  On Error GoTo 0")
+  [void]$builder.AppendLine("  Err.Raise errNumber, errSource, errDescription")
+  [void]$builder.AppendLine("End Sub")
+  return $builder.ToString()
+}
+
+function Test-XlflowTraceModuleInjected {
+  param($VBProject)
+
+  try {
+    $null = $VBProject.VBComponents.Item("XlflowTrace")
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function ConvertTo-XlflowTraceEvent {
+  param([string]$Line)
+
+  $timestamp = ""
+  $message = $Line
+  $tab = $Line.IndexOf("`t")
+  if ($tab -ge 0) {
+    $timestamp = $Line.Substring(0, $tab)
+    if ($tab + 1 -lt $Line.Length) {
+      $message = $Line.Substring($tab + 1)
+    } else {
+      $message = ""
+    }
+  }
+  return [ordered]@{
+    timestamp = $timestamp
+    message = $message
+    raw = $Line
+  }
+}
+
+function Read-XlflowTraceEvents {
+  param([string]$Path)
+
+  $events = New-Object System.Collections.Generic.List[object]
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return $events
+  }
+  $lines = Get-Content -LiteralPath $Path
+  foreach ($line in $lines) {
+    if ([string]::IsNullOrWhiteSpace($line)) {
+      continue
+    }
+    $events.Add((ConvertTo-XlflowTraceEvent -Line $line))
+  }
+  foreach ($event in $events) {
+    Write-Output $event
+  }
+}
+
 function New-XlflowRunHarnessModuleName {
   $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 20)
   return "XlflowRun_" + $suffix
 }
 
 function New-XlflowRunHarnessCode {
-  param([string]$MacroName, [object[]]$Arguments)
+  param(
+    [string]$MacroName,
+    [object[]]$Arguments,
+    [bool]$TraceEnabled = $false,
+    [string]$TraceFile = ""
+  )
 
   $builder = New-Object System.Text.StringBuilder
   $moduleName = Get-XlflowMacroModuleName -MacroName $MacroName
@@ -363,6 +457,9 @@ function New-XlflowRunHarnessCode {
   [void]$builder.AppendLine("  Dim startedAt As Double")
   [void]$builder.AppendLine("  startedAt = Timer")
   [void]$builder.AppendLine("  On Error GoTo Handler")
+  if ($TraceEnabled) {
+    [void]$builder.AppendLine("  XlflowTrace.XlflowSetTraceFile " + (ConvertTo-XlflowVBALiteral -Type "string" -Value $TraceFile))
+  }
   [void]$builder.AppendLine("  " + $invocation)
   [void]$builder.AppendLine('  RunMacro = Array(True, "' + $moduleName + '", CLng(0), "", CLng(0), CLng((Timer - startedAt) * 1000))')
   [void]$builder.AppendLine("  Exit Function")

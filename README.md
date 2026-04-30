@@ -23,7 +23,9 @@ xlflow init Book.xlsm
 xlflow doctor --json
 xlflow pull --json
 xlflow push --json
+xlflow trace inject
 xlflow run Main.Run --json
+xlflow run Main.Run --trace --json
 xlflow run Report.Generate --arg string:fixtures\sample.xlsx --arg int:3 --arg bool:true --save --json
 xlflow run Report.Generate --input build\Book.xlsm --arg string:fixtures\sample.xlsx --save-as build\Result.xlsm --json
 xlflow test --json
@@ -37,6 +39,8 @@ The MVP uses `xlflow.toml` as its project configuration file. Excel automation i
 `xlflow new` only accepts `.xlsm` workbook names because it always creates macro-enabled workbook content.
 
 `xlflow run` accepts repeatable typed arguments with the `string:`, `int:`, and `bool:` prefixes. `string:` may carry an empty value. Successful runs report `macro.duration_ms` in JSON and print the elapsed time plus save behavior in plain text. Failing runs return `macro_failed` with VBA error metadata including module name, `Err.Number`, `Err.Description`, and `error.line` when VBA exposes `Erl`, and the non-JSON message stays readable as `Main Err 5: inputPath is required` or `Main line 10 Err 5: inputPath is required` when a line number is available. The default run does not save the workbook; use `--save` or `--save-as` explicitly.
+
+`xlflow trace inject [workbook]` injects the opt-in `XlflowTrace` VBA module. After injection, VBA code can call `XlflowLog "message"` or `Call XlflowLog("message")`; `xlflow run --trace` initializes a temp log file, runs the macro, and returns trace events in the top-level JSON `trace` field.
 
 `xlflow test` discovers argument-free VBA `Sub` procedures from the configured workbook when their names start with `Test` or end with `_Test`. New and initialized projects include `src/modules/XlflowAssert.bas`, which provides scalar-only `AssertEquals expected, actual, [message]`. Compare object properties such as `Range.Value2`, not object references.
 

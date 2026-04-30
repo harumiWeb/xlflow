@@ -5,7 +5,9 @@ param(
   [string]$Visible = "false",
   [string]$DisplayAlerts = "false",
   [string]$SaveWorkbook = "false",
-  [string]$SaveAsPath = ""
+  [string]$SaveAsPath = "",
+  [string]$TraceEnabled = "false",
+  [string]$TraceFile = ""
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -15,8 +17,26 @@ $excel = $null
 $workbook = $null
 $vbProject = $null
 $runnerComponent = $null
+$traceRequested = ConvertTo-XlflowBool $TraceEnabled
 
 try {
+  if ($traceRequested) {
+    if ([string]::IsNullOrWhiteSpace($TraceFile)) {
+      $TraceFile = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "xlflow") ("trace-" + [guid]::NewGuid().ToString("N") + ".log")
+    }
+    $traceDir = Split-Path -Parent $TraceFile
+    if (-not [string]::IsNullOrWhiteSpace($traceDir)) {
+      New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
+    }
+    Set-Content -LiteralPath $TraceFile -Value "" -NoNewline
+    $result.trace = [ordered]@{
+      enabled = $true
+      path = $TraceFile
+      events = @()
+      read_error = $null
+    }
+  }
+
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
   $excel.DisplayAlerts = ConvertTo-XlflowBool $DisplayAlerts
@@ -33,15 +53,21 @@ try {
 
   try {
     $vbProject = $workbook.VBProject
+    if ($traceRequested -and -not (Test-XlflowTraceModuleInjected -VBProject $vbProject)) {
+      Set-XlflowError -Result $result -Code "trace_not_injected" -Message "XlflowTrace module is not injected. Run xlflow trace inject before xlflow run --trace." -Source "xlflow"
+      throw "XlflowTrace module is not injected"
+    }
     $runnerComponent = $vbProject.VBComponents.Add(1)
   } catch {
-    Set-XlflowError -Result $result -Code "vbide_access_denied" -Message $_.Exception.Message -Source "vbide"
+    if ($result.error -eq $null) {
+      Set-XlflowError -Result $result -Code "vbide_access_denied" -Message $_.Exception.Message -Source "vbide"
+    }
     throw
   }
 
   $runnerName = New-XlflowRunHarnessModuleName
   $runnerComponent.Name = $runnerName
-  $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs))
+  $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs -TraceEnabled $traceRequested -TraceFile $TraceFile))
 
   $runResult = $excel.Run($runnerName + ".RunMacro")
   $successLog = "ran " + $MacroName + " in " + ([int]$runResult[5]) + "ms"
@@ -89,6 +115,25 @@ try {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch {}
   }
   Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
+  if ($traceRequested) {
+    if ($null -eq $result.trace) {
+      $result.trace = [ordered]@{
+        enabled = $true
+        path = $TraceFile
+        events = @()
+        read_error = $null
+      }
+    }
+    try {
+      $events = @(Read-XlflowTraceEvents -Path $TraceFile)
+      $result.trace.events = @($events)
+      foreach ($event in $events) {
+        $result.logs += ("[" + $event.timestamp + "] " + $event.message)
+      }
+    } catch {
+      $result.trace.read_error = $_.Exception.Message
+    }
+  }
 }
 
 Write-XlflowJson -Result $result

@@ -119,3 +119,34 @@ func TestBuildRunScriptArgsNormalizesNilArgsToEmptyArray(t *testing.T) {
 		t.Fatalf("macro args json = %q, want base64 of []", args["MacroArgsJSON"])
 	}
 }
+
+func TestBuildRunScriptArgsEnablesTrace(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro: "Main.Run",
+		Trace: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["TraceEnabled"] != "true" {
+		t.Fatalf("trace enabled = %q, want true", args["TraceEnabled"])
+	}
+	if args["TraceFile"] == "" {
+		t.Fatal("expected trace file path")
+	}
+	if filepath.Base(filepath.Dir(args["TraceFile"])) != "xlflow" {
+		t.Fatalf("trace file path = %q, expected xlflow temp directory", args["TraceFile"])
+	}
+}
+
+func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "trace_not_injected", Message: "trace missing"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(trace_not_injected) = %d, want %d", got, output.ExitValidation)
+	}
+}

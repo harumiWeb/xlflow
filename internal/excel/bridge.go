@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -38,6 +39,7 @@ type RunOptions struct {
 	Args         []RunArgument
 	Save         bool
 	SaveAs       string
+	Trace        bool
 }
 
 type ScriptResult struct {
@@ -50,6 +52,7 @@ type ScriptResult struct {
 	Backup      any           `json:"backup,omitempty"`
 	Macro       any           `json:"macro,omitempty"`
 	Tests       any           `json:"tests,omitempty"`
+	Trace       any           `json:"trace,omitempty"`
 }
 
 func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
@@ -88,6 +91,17 @@ func (r Runner) Push(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
+func (r Runner) TraceInject(cfg config.Config, workbook string) (output.Envelope, int, error) {
+	if workbook == "" {
+		workbook = cfg.Excel.Path
+	}
+	return r.run("trace", map[string]string{
+		"Action":       "inject",
+		"WorkbookPath": workbookPath(r.RootDir, workbook),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	})
+}
+
 func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[string]string, error) {
 	workbook := cfg.Excel.Path
 	if opts.WorkbookPath != "" {
@@ -110,9 +124,13 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"Visible":       strconv.FormatBool(cfg.Excel.Visible),
 		"DisplayAlerts": strconv.FormatBool(cfg.Excel.DisplayAlerts),
 		"SaveWorkbook":  strconv.FormatBool(opts.Save),
+		"TraceEnabled":  strconv.FormatBool(opts.Trace),
 	}
 	if opts.SaveAs != "" {
 		scriptArgs["SaveAsPath"] = workbookPath(root, opts.SaveAs)
+	}
+	if opts.Trace {
+		scriptArgs["TraceFile"] = filepath.Join(os.TempDir(), "xlflow", fmt.Sprintf("trace-%d.log", time.Now().UnixNano()))
 	}
 	return scriptArgs, nil
 }
@@ -183,6 +201,7 @@ func (r Runner) run(commandName string, args map[string]string) (output.Envelope
 	env.Backup = result.Backup
 	env.Macro = result.Macro
 	env.Tests = result.Tests
+	env.Trace = result.Trace
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
@@ -194,7 +213,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
+	case "macro_failed", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name":
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment

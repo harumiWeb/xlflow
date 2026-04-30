@@ -1,19 +1,19 @@
-# xlflow Diff Harness Todo
+# xlflow Trace Harness Todo
 
 ## Implementation
 
-- [x] Add `excelize/v2` dependency.
-- [x] Add workbook sheet, cell value, and formula diff backend.
-- [x] Add exported VBA text diff backend for `.bas`, `.cls`, and `.frm`.
-- [x] Add `xlflow diff` CLI command and argument validation.
-- [x] Add top-level JSON `diff` envelope field.
-- [x] Update CLI contract, README, feature spec, and ADR documentation.
+- [x] Add `xlflow trace inject [workbook]` CLI command.
+- [x] Add `xlflow run --trace` CLI flag and script argument plumbing.
+- [x] Add `XlflowTrace` VBA module generation.
+- [x] Add PowerShell trace injection script.
+- [x] Add run-time trace initialization, missing-module validation, log reading, and JSON/plain-text output.
+- [x] Update CLI contract, README, and feature spec.
 
 ## Verification
 
-- [x] Add unit tests for CLI registration and argument validation.
-- [x] Add unit tests for workbook sheet/value/formula diffs.
-- [x] Add unit tests for VBA add/change and line-ending normalization.
-- [x] Add output envelope JSON coverage for `diff`.
-- [x] Run `go test ./...` after documentation updates.
+- [x] Add unit tests for CLI registration and run trace option parsing.
+- [x] Add bridge tests for trace script arguments and `trace_not_injected` exit classification.
+- [x] Add PowerShell helper tests for trace module generation, run harness setup, and event parsing.
+- [x] Run `go test ./...`.
 - [x] Run `task verify`.
+- [x] Run Excel COM E2E trace flow when Excel/VBIDE access is available.
