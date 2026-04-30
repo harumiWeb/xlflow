@@ -1,5 +1,9 @@
 # xlflow Runtime Debugging Hardening Spec
 
+## Skill provider target correction
+
+Copilot must not be offered as a provider-specific skill target. GitHub Copilot reads repository instructions from `.agents`, so users should choose `agents` for shared Copilot-compatible instructions or pass an explicit `--target` when they need a custom location. The supported `--agent` values for bundled skill installation are `agents`, `codex`, `claude`, `cursor`, and `gemini`.
+
 ## Goal
 
 Make xlflow easier for AI agents to use when debugging workbook macros from the CLI. The main failure mode to address is that source-controlled VBA and workbook VBA can drift, and runtime failures currently require too much implicit knowledge to interpret.

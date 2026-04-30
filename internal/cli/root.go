@@ -142,7 +142,7 @@ func (a *app) newCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
-	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	return cmd
 }
 
@@ -187,7 +187,7 @@ func (a *app) initCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
-	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	return cmd
 }
 
@@ -505,7 +505,7 @@ func (a *app) skillInstallCommand() *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
-	cmd.Flags().StringVar(&agent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	cmd.Flags().StringVar(&agent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().StringVar(&target, "target", "", "directory that should receive the xlflow skill folder")
 	cmd.Flags().BoolVar(&force, "force", false, "replace an existing xlflow skill")
 	return cmd

@@ -20,7 +20,7 @@ The skill needs to stay version-aligned with the CLI and work in offline or cont
 
 Bundle the official `xlflow` AI agent skill in the CLI binary and install it through `xlflow skill install` or `xlflow new/init --with-skill`.
 
-The supported provider targets are `.agents/skills`, `.codex/skills`, `.claude/skills`, `.cursor/skills`, `.gemini/skills`, and `.copilot/skills`. Non-interactive and JSON runs must provide `--agent` or `--target`; interactive runs may choose a provider through a Bubble Tea selector.
+The supported provider targets are `.agents/skills`, `.codex/skills`, `.claude/skills`, `.cursor/skills`, and `.gemini/skills`. GitHub Copilot uses the shared `.agents/skills` target rather than a separate `.copilot/skills` target. Non-interactive and JSON runs must provide `--agent` or `--target`; interactive runs may choose a provider through a Bubble Tea selector.
 
 Stop generating `prompts/agent.md` from project scaffolding.
 

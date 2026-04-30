@@ -1,5 +1,12 @@
 # xlflow Runtime Debugging Hardening Todo
 
+## Skill provider target correction
+
+- [x] Remove `copilot` from provider defaults and CLI help.
+- [x] Add regression coverage that `--agent copilot` is unsupported.
+- [x] Update README, CLI contract, and ADR provider target text.
+- [x] Run focused Go tests for skill install behavior.
+
 ## Phase 1: Persist trace injection
 
 - [x] Update the CLI contract for `trace inject` source persistence.

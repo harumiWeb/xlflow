@@ -35,4 +35,9 @@ func TestSkillSelectorViewIncludesTargets(t *testing.T) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
 	}
+	for _, unwanted := range []string{"copilot", ".copilot/skills"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("view should not include %q:\n%s", unwanted, view)
+		}
+	}
 }

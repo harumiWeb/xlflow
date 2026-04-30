@@ -75,3 +75,10 @@ func TestInstallRejectsUnknownProvider(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestInstallRejectsCopilotProvider(t *testing.T) {
+	_, err := Install(InstallOptions{RootDir: t.TempDir(), Agent: "copilot"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported skill agent") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

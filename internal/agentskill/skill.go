@@ -40,7 +40,6 @@ var providers = []Provider{
 	{Name: "claude", Dir: ".claude/skills", Description: "Claude project skills"},
 	{Name: "cursor", Dir: ".cursor/skills", Description: "Cursor project skills"},
 	{Name: "gemini", Dir: ".gemini/skills", Description: "Gemini project skills"},
-	{Name: "copilot", Dir: ".copilot/skills", Description: "Copilot project skills"},
 }
 
 func Providers() []Provider {

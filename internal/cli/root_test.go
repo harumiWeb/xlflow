@@ -104,6 +104,9 @@ func TestRootCommandIncludesSkillInstallCommand(t *testing.T) {
 			t.Fatalf("expected skill install command to define --%s", name)
 		}
 	}
+	if usage := cmd.Flags().Lookup("agent").Usage; strings.Contains(usage, "copilot") {
+		t.Fatalf("agent flag usage should not mention copilot: %q", usage)
+	}
 }
 
 func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
