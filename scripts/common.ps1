@@ -14,7 +14,8 @@ function Set-XlflowError {
     [string]$Code,
     [string]$Message,
     [string]$Source = "",
-    [int]$Number = 0
+    [int]$Number = 0,
+    [int]$Line = 0
   )
   $Result.status = "failed"
   $Result.error = [ordered]@{
@@ -22,6 +23,7 @@ function Set-XlflowError {
     message = $Message
     source = $Source
     number = $Number
+    line = $Line
   }
 }
 
@@ -230,4 +232,143 @@ function Sync-XlflowDocumentModule {
   }
 
   return $true
+}
+
+function ConvertFrom-XlflowRunArgumentsJson {
+  param([string]$Json)
+
+  if ([string]::IsNullOrWhiteSpace($Json)) {
+    return @()
+  }
+  # Decode base64 JSON
+  $decodedBytes = [System.Convert]::FromBase64String($Json)
+  $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
+  
+  $specs = ConvertFrom-Json -InputObject $decodedJson
+  $values = New-Object System.Collections.Generic.List[object]
+  foreach ($spec in $specs) {
+    switch ([string]$spec.type) {
+      "string" {
+        $values.Add([string]$spec.value)
+      }
+      "int" {
+        $parsed = 0
+        if (-not [int]::TryParse([string]$spec.value, [ref]$parsed)) {
+          throw "invalid int run argument: $($spec.value)"
+        }
+        $values.Add($parsed)
+      }
+      "bool" {
+        if ($spec.value -ne "true" -and $spec.value -ne "false") {
+          throw "invalid bool run argument: $($spec.value)"
+        }
+        $values.Add((ConvertTo-XlflowBool ([string]$spec.value)))
+      }
+      default {
+        throw "unsupported run argument type: $($spec.type)"
+      }
+    }
+  }
+  return $values.ToArray()
+}
+
+function ConvertTo-XlflowVBALiteral {
+  param([string]$Type, [string]$Value)
+
+  switch ($Type) {
+    "string" { return '"' + $Value.Replace('"', '""') + '"' }
+    "int" { return "CLng(" + $Value + ")" }
+    "bool" {
+      if ($Value -eq "true") {
+        return "CBool(True)"
+      }
+      return "CBool(False)"
+    }
+    default { throw "unsupported run argument type: $Type" }
+  }
+}
+
+function Get-XlflowMacroModuleName {
+  param([string]$MacroName)
+
+  $parts = $MacroName.Split(".")
+  if ($parts.Count -lt 2) {
+    return $MacroName
+  }
+  return ($parts[0..($parts.Count - 2)] -join ".")
+}
+
+function Assert-XlflowSaveAsExtension {
+  param([string]$WorkbookPath, [string]$SaveAsPath)
+
+  if ([string]::IsNullOrWhiteSpace($SaveAsPath)) {
+    return
+  }
+  $workbookExtension = [System.IO.Path]::GetExtension($WorkbookPath)
+  $saveAsExtension = [System.IO.Path]::GetExtension($SaveAsPath)
+  if ($workbookExtension -ne $saveAsExtension) {
+    throw "save-as extension $saveAsExtension does not match workbook extension $workbookExtension"
+  }
+}
+
+function Format-XlflowMacroFailureMessage {
+  param(
+    [string]$ModuleName,
+    [int]$Line,
+    [int]$Number,
+    [string]$Description
+  )
+
+  $parts = New-Object System.Collections.Generic.List[string]
+  if (-not [string]::IsNullOrWhiteSpace($ModuleName)) {
+    $parts.Add($ModuleName)
+  }
+  if ($Line -gt 0) {
+    $parts.Add("line " + $Line)
+  }
+  if ($Number -ne 0) {
+    $parts.Add("Err " + $Number)
+  }
+  if ([string]::IsNullOrWhiteSpace($Description)) {
+    return ($parts -join " ")
+  }
+  if ($parts.Count -eq 0) {
+    return $Description
+  }
+  return (($parts -join " ") + ": " + $Description)
+}
+
+function New-XlflowRunHarnessModuleName {
+  $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 20)
+  return "XlflowRun_" + $suffix
+}
+
+function New-XlflowRunHarnessCode {
+  param([string]$MacroName, [object[]]$Arguments)
+
+  $builder = New-Object System.Text.StringBuilder
+  $moduleName = Get-XlflowMacroModuleName -MacroName $MacroName
+  $literals = New-Object System.Collections.Generic.List[string]
+  foreach ($argument in $Arguments) {
+    $literals.Add((ConvertTo-XlflowVBALiteral -Type ([string]$argument.type) -Value ([string]$argument.value)))
+  }
+  $invocation = $MacroName
+  if ($literals.Count -gt 0) {
+    $invocation += " " + ($literals -join ", ")
+  }
+
+  [void]$builder.AppendLine("Option Explicit")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Public Function RunMacro() As Variant")
+  [void]$builder.AppendLine("  Dim startedAt As Double")
+  [void]$builder.AppendLine("  startedAt = Timer")
+  [void]$builder.AppendLine("  On Error GoTo Handler")
+  [void]$builder.AppendLine("  " + $invocation)
+  [void]$builder.AppendLine('  RunMacro = Array(True, "' + $moduleName + '", CLng(0), "", CLng(0), CLng((Timer - startedAt) * 1000))')
+  [void]$builder.AppendLine("  Exit Function")
+  [void]$builder.AppendLine("Handler:")
+  [void]$builder.AppendLine('  RunMacro = Array(False, "' + $moduleName + '", CLng(Err.Number), CStr(Err.Description), CLng(Erl), CLng((Timer - startedAt) * 1000))')
+  [void]$builder.AppendLine("  Err.Clear")
+  [void]$builder.AppendLine("End Function")
+  return $builder.ToString()
 }

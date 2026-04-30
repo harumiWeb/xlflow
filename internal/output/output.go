@@ -22,6 +22,7 @@ type Error struct {
 	Message string `json:"message"`
 	Source  string `json:"source,omitempty"`
 	Number  int    `json:"number,omitempty"`
+	Line    int    `json:"line,omitempty"`
 }
 
 type Envelope struct {

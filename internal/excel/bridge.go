@@ -2,6 +2,7 @@ package excel
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,19 @@ type WorkbookRef struct {
 
 type BackupRef struct {
 	Path string `json:"path"`
+}
+
+type RunArgument struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type RunOptions struct {
+	Macro        string
+	WorkbookPath string
+	Args         []RunArgument
+	Save         bool
+	SaveAs       string
 }
 
 type ScriptResult struct {
@@ -74,15 +88,41 @@ func (r Runner) Push(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
-func (r Runner) Run(cfg config.Config, macro string) (output.Envelope, int, error) {
-	if macro == "" {
-		macro = cfg.Project.Entry
+func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[string]string, error) {
+	workbook := cfg.Excel.Path
+	if opts.WorkbookPath != "" {
+		workbook = opts.WorkbookPath
 	}
-	return r.run("run", map[string]string{
-		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
-		"MacroName":    macro,
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	args := opts.Args
+	if args == nil {
+		args = []RunArgument{}
+	}
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	// Base64-encode the JSON to avoid PowerShell command-line parsing issues
+	argsJSON64 := base64.StdEncoding.EncodeToString(argsJSON)
+	scriptArgs := map[string]string{
+		"WorkbookPath":  workbookPath(root, workbook),
+		"MacroName":     opts.Macro,
+		"MacroArgsJSON": string(argsJSON64),
+		"Visible":       strconv.FormatBool(cfg.Excel.Visible),
+		"DisplayAlerts": strconv.FormatBool(cfg.Excel.DisplayAlerts),
+		"SaveWorkbook":  strconv.FormatBool(opts.Save),
+	}
+	if opts.SaveAs != "" {
+		scriptArgs["SaveAsPath"] = workbookPath(root, opts.SaveAs)
+	}
+	return scriptArgs, nil
+}
+
+func (r Runner) Run(cfg config.Config, opts RunOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildRunScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		return output.Failure("run", output.Error{Code: "run_args_invalid", Message: err.Error(), Source: "xlflow"}), output.ExitConfig, nil
+	}
+	return r.run("run", scriptArgs)
 }
 
 func (r Runner) Test(cfg config.Config, filter string) (output.Envelope, int, error) {

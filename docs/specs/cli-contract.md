@@ -14,7 +14,7 @@ xlflow [--json] init <workbook>
 xlflow [--json] doctor
 xlflow [--json] pull
 xlflow [--json] push
-xlflow [--json] run [macro]
+xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>]
 xlflow [--json] test [--filter <name>]
 xlflow [--json] lint
 ```
@@ -27,7 +27,9 @@ xlflow [--json] lint
 
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import.
 
-`run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`.
+`run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
+
+`run` adds a `macro` object with `name`, `args`, and `duration_ms`. Failed macro runs return `macro_failed` with `error.source`, `error.number`, `error.message`, and `error.line` when VBA exposes a non-zero `Erl` value. Plain-text success output must include the elapsed duration and whether the workbook was saved, copied, or left unchanged. Plain-text failure output must use the formatted message `Module line <n> Err <n>: <description>` when line and error number are available, and otherwise omit the `line <n>` segment. Because `run` injects a temporary VBA harness to measure duration while avoiding modal VBA runtime error dialogs, VBIDE access failures return an environment error such as `vbide_access_denied` and exit code `3`.
 
 `test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 

@@ -1,7 +1,9 @@
 package scripts_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -293,6 +295,186 @@ func TestNormalizeDocumentModuleFileRewritesExportedWorkbookModule(t *testing.T)
 		if strings.Contains(got, marker) {
 			t.Fatalf("expected rewritten workbook module to drop class header lines: %q", got)
 		}
+	}
+}
+
+func TestRunArgumentConversionSupportsExplicitTypes(t *testing.T) {
+	// Base64-encode the JSON since that's what the function now expects
+	json := `[{"type":"string","value":"hello"},{"type":"int","value":"7"},{"type":"bool","value":"true"}]`
+	json64 := base64.StdEncoding.EncodeToString([]byte(json))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		fmt.Sprintf(". ./common.ps1; $json64 = '%s'; $values = ConvertFrom-XlflowRunArgumentsJson -Json $json64; ConvertTo-Json -InputObject $values -Compress", json64),
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run argument conversion failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "[\"hello\",7,true]" {
+		t.Fatalf("converted values = %s", got)
+	}
+}
+
+func TestRunArgumentConversionSupportsExplicitTypesInWindowsPowerShell(t *testing.T) {
+	json := `[{"type":"string","value":"hello"},{"type":"int","value":"7"},{"type":"bool","value":"true"}]`
+	json64 := base64.StdEncoding.EncodeToString([]byte(json))
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		fmt.Sprintf(". ./common.ps1; $json64 = '%s'; $values = ConvertFrom-XlflowRunArgumentsJson -Json $json64; ConvertTo-Json -InputObject $values -Compress", json64),
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run argument conversion failed in powershell: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "[\"hello\",7,true]" {
+		t.Fatalf("converted values = %s", got)
+	}
+}
+
+func TestRunHarnessCodeIncludesMacroInvocationAndErrorLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $args = @([pscustomobject]@{ type = 'string'; value = 'fixtures\\sample.xlsx' }, [pscustomobject]@{ type = 'int'; value = '3' }, [pscustomobject]@{ type = 'bool'; value = 'true' }); New-XlflowRunHarnessCode -MacroName 'Report.Generate' -Arguments $args",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run harness code generation failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{"Report.Generate \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)", "Err.Description", "Erl"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected run harness code to contain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunHarnessCodeAcceptsDecodedJSONArgumentArrays(t *testing.T) {
+	json := `[{"type":"string","value":"fixtures\\sample.xlsx"},{"type":"int","value":"3"},{"type":"bool","value":"true"}]`
+	json64 := base64.StdEncoding.EncodeToString([]byte(json))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		fmt.Sprintf(". ./common.ps1; $json64 = '%s'; $decodedJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($json64)); $args = ConvertFrom-Json -InputObject $decodedJson; New-XlflowRunHarnessCode -MacroName 'Report.Generate' -Arguments $args", json64),
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run harness code generation from decoded JSON failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{"Report.Generate \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected run harness code to contain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunHarnessCodeEscapesEmbeddedQuotesInStringArguments(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $args = @([pscustomobject]@{ type = 'string'; value = 'say \"hi\"' }); New-XlflowRunHarnessCode -MacroName 'M.Sub' -Arguments $args",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run harness code generation failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	want := `"say ""hi"""`
+	if !strings.Contains(got, want) {
+		t.Fatalf("expected run harness code to contain escaped string literal %q:\n%s", want, got)
+	}
+}
+
+func TestSaveAsExtensionValidationRejectsMismatchedTargets(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; try { Assert-XlflowSaveAsExtension -WorkbookPath 'build\\Book.xlsm' -SaveAsPath 'build\\Book.xlsx'; 'unexpected success' } catch { $_.Exception.Message }",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("save-as validation command failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if !strings.Contains(got, "does not match workbook extension") {
+		t.Fatalf("validation output = %q", got)
+	}
+}
+
+func TestFormatMacroFailureMessageIncludesLineAndErrNumber(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Format-XlflowMacroFailureMessage -ModuleName 'Main' -Line 10 -Number 5 -Description 'inputPath is required'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro failure message formatting failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "Main line 10 Err 5: inputPath is required" {
+		t.Fatalf("failure message = %q", got)
+	}
+}
+
+func TestRunHarnessModuleNameFitsVBAModuleLimit(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $name = New-XlflowRunHarnessModuleName; Write-Output $name; Write-Output $name.Length",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run harness module name generation failed: %v\n%s", err, out)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) != 2 {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.HasPrefix(lines[0], "XlflowRun_") {
+		t.Fatalf("module name = %q", lines[0])
+	}
+	if lines[1] != "30" {
+		t.Fatalf("module name length = %q, want 30", lines[1])
+	}
+}
+
+func TestFormatMacroFailureMessageDescriptionOnlyNoLeadingColon(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Format-XlflowMacroFailureMessage -ModuleName '' -Line 0 -Number 0 -Description 'inputPath is required'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro failure message formatting failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "inputPath is required" {
+		t.Fatalf("failure message = %q, expected no leading colon", got)
 	}
 }
 

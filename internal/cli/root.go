@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -172,8 +174,54 @@ func (a *app) pushCommand() *cobra.Command {
 	}
 }
 
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string) (excel.RunOptions, error) {
+	if save && saveAs != "" {
+		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
+	}
+	if macro == "" {
+		macro = cfg.Project.Entry
+	}
+	args := make([]excel.RunArgument, 0, len(argLiterals))
+	for _, literal := range argLiterals {
+		parts := strings.SplitN(literal, ":", 2)
+		if len(parts) != 2 {
+			return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: expected type:value", literal)
+		}
+		switch parts[0] {
+		case "string":
+		case "int", "bool":
+			if parts[1] == "" {
+				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: %s values cannot be empty", literal, parts[0])
+			}
+			if parts[0] == "int" {
+				if _, err := strconv.Atoi(parts[1]); err != nil {
+					return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: int values must parse as base-10 integers", literal)
+				}
+			}
+			if parts[0] == "bool" && parts[1] != "true" && parts[1] != "false" {
+				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: bool values must be true or false", literal)
+			}
+		default:
+			return excel.RunOptions{}, fmt.Errorf("unsupported --arg type prefix %q", parts[0])
+		}
+		args = append(args, excel.RunArgument{Type: parts[0], Value: parts[1]})
+	}
+	return excel.RunOptions{
+		Macro:        macro,
+		WorkbookPath: input,
+		Args:         args,
+		Save:         save,
+		SaveAs:       saveAs,
+	}, nil
+}
+
 func (a *app) runCommand() *cobra.Command {
-	return &cobra.Command{
+	var argLiterals []string
+	var input string
+	var save bool
+	var saveAs string
+
+	cmd := &cobra.Command{
 		Use:   "run [macro]",
 		Short: "Run a workbook macro",
 		Args:  cobra.MaximumNArgs(1),
@@ -186,13 +234,22 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.Run(cfg, macro)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs)
+			if err != nil {
+				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
 			if err != nil {
 				return err
 			}
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, or bool:true")
+	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
+	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
+	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
+	return cmd
 }
 
 func (a *app) testCommand() *cobra.Command {

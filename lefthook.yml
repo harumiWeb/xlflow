@@ -5,3 +5,5 @@ pre-commit:
       run: goimports -w cmd internal
     lint:
       run: golangci-lint run
+    test:
+      run: go test ./...

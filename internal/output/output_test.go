@@ -53,3 +53,28 @@ func TestWriteJSONEnvelopeIncludesTests(t *testing.T) {
 		t.Fatalf("expected one test result in JSON envelope: %s", buf.String())
 	}
 }
+
+func TestWriteJSONEnvelopeIncludesErrorLine(t *testing.T) {
+	env := Failure("run", Error{
+		Code:    "macro_failed",
+		Message: "inputPath is required",
+		Source:  "Main",
+		Number:  5,
+		Line:    10,
+	})
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	errorMap, ok := decoded["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error payload = %#v", decoded["error"])
+	}
+	if errorMap["line"] != float64(10) {
+		t.Fatalf("error line = %#v", errorMap["line"])
+	}
+}
