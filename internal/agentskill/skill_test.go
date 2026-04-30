@@ -26,6 +26,15 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 	if !strings.Contains(string(body), "name: xlflow") {
 		t.Fatalf("unexpected skill body:\n%s", body)
 	}
+	for _, want := range []string{
+		"Treat the configured source directories as authoritative",
+		"Use a listed `qualified_name` from `xlflow macros --json`",
+		"Run `xlflow doctor --json` for setup phases",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("installed skill is missing %q:\n%s", want, body)
+		}
+	}
 }
 
 func TestInstallSupportsAllProviders(t *testing.T) {

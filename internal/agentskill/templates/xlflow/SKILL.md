@@ -13,6 +13,7 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 
 1. Inspect the project.
    - Read `xlflow.toml`.
+   - Treat the configured source directories as authoritative when `xlflow.toml` exists and the user has not said the workbook contains newer VBA.
    - Run `xlflow doctor --json` when Excel, COM, VBIDE, or macro execution looks suspicious.
    - Run `xlflow pull --json` before editing when the workbook is the current source of truth.
 
@@ -36,6 +37,48 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
    - Add `--vba-before <dir> --vba-after <dir>` when exported source changes also need review.
 
 6. Repeat until the command results prove the task.
+
+## Project Orientation
+
+Before editing, decide what is authoritative:
+
+- If `xlflow.toml` exists and source files are present, edit the configured source tree and use `xlflow push --json` to update the workbook.
+- If the user says the workbook has the latest VBA, or source files are missing or stale, run `xlflow pull --json` first and then edit source files.
+- Do not mix direct workbook edits with source edits in the same task unless the requested change is workbook-state only and no VBA source change is needed.
+- After `xlflow trace inject --json`, remember that `XlflowTrace.bas` is generated xlflow support code. Do not rewrite it by hand unless the user is changing xlflow itself.
+
+Before running a macro, decide the runnable entrypoint:
+
+- Run `xlflow macros --json` when the macro name is not already proven by tests, docs, or prior command output.
+- Use a listed `qualified_name` from `xlflow macros --json`; do not assume names such as `Main.Run`.
+- If the desired entrypoint is missing, add or fix the source module, run `xlflow push --json`, then rediscover macros before running.
+
+Before designing a CLI-run macro, decide how inputs are supplied:
+
+- Prefer `xlflow run <MacroName> --arg <type:value>` for user-provided paths, flags, and scalar settings.
+- Use deterministic paths, environment variables, or configuration cells only when they are part of the project contract.
+- Avoid UI prompts and active-window assumptions because unattended Excel automation cannot reliably answer them.
+
+## Decision Flow
+
+When the user asks to create or change VBA behavior:
+
+1. Read `xlflow.toml` and relevant source files.
+2. If the current source of truth is unclear, run `xlflow pull --json` before editing.
+3. Edit `.bas`, `.cls`, or `.frm` source files.
+4. Run `xlflow push --json`.
+5. Run `xlflow lint --json`.
+6. Run `xlflow test --json` when tests exist.
+7. If tests do not cover the behavior, run `xlflow macros --json`, then `xlflow run <qualified_name> --json` or `xlflow run <qualified_name> --trace --json`.
+8. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
+
+When the user reports a runtime failure:
+
+1. Reproduce with `xlflow test --json` or `xlflow run <qualified_name> --trace --json`.
+2. Inspect `error.code`, `error.phase`, VBA error metadata, and trace events before changing source.
+3. Run `xlflow doctor --json` for setup phases such as `open_workbook`, `prepare_vbide`, or `inject_harness`.
+4. Add targeted `XlflowLog` calls only around the suspected path, rerun, and keep the final trace noise low.
+5. Patch the smallest relevant source area, then rerun the reproduction and broader verification.
 
 ## Command Usage
 
