@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/harumiWeb/xlflow/internal/agentskill"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
@@ -52,16 +53,28 @@ func (a *app) rootCommand() *cobra.Command {
 		a.testCommand(),
 		a.diffCommand(),
 		a.lintCommand(),
+		a.skillCommand(),
 	)
 	return root
 }
 
 func (a *app) newCommand() *cobra.Command {
-	return &cobra.Command{
+	var withSkill bool
+	var skillAgent string
+
+	cmd := &cobra.Command{
 		Use:   "new [workbook]",
 		Short: "Create a new xlflow project and macro workbook",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var skillOpts agentskill.InstallOptions
+			if withSkill {
+				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
+				if err != nil {
+					return a.writeFailure("new", output.ExitConfig, "skill_agent_required", err)
+				}
+				skillOpts = opts
+			}
 			workbook := ""
 			if len(args) == 1 {
 				workbook = args[0]
@@ -89,26 +102,57 @@ func (a *app) newCommand() *cobra.Command {
 				}
 				return a.writeFailure("new", output.ExitConfig, "new_failed", err)
 			}
+			var skillResult agentskill.InstallResult
+			if withSkill {
+				skillResult, err = agentskill.Install(skillOpts)
+				if err != nil {
+					return a.writeFailure("new", output.ExitConfig, "skill_install_failed", err)
+				}
+			}
 			env := output.New("new")
 			env.Workbook = result.Workbook
 			env.Logs = []string{
 				"created " + result.ConfigPath,
 				"created " + result.Workbook,
 			}
+			if withSkill {
+				env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
+			}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
+	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	return cmd
 }
 
 func (a *app) initCommand() *cobra.Command {
-	return &cobra.Command{
+	var withSkill bool
+	var skillAgent string
+
+	cmd := &cobra.Command{
 		Use:   "init <workbook>",
 		Short: "Create an xlflow project from an existing macro workbook",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var skillOpts agentskill.InstallOptions
+			if withSkill {
+				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
+				if err != nil {
+					return a.writeFailure("init", output.ExitConfig, "skill_agent_required", err)
+				}
+				skillOpts = opts
+			}
 			result, err := project.Init(a.cwd, args[0])
 			if err != nil {
 				return a.writeFailure("init", output.ExitConfig, "init_failed", err)
+			}
+			var skillResult agentskill.InstallResult
+			if withSkill {
+				skillResult, err = agentskill.Install(skillOpts)
+				if err != nil {
+					return a.writeFailure("init", output.ExitConfig, "skill_install_failed", err)
+				}
 			}
 			env := output.New("init")
 			env.Workbook = result.Workbook
@@ -116,9 +160,15 @@ func (a *app) initCommand() *cobra.Command {
 				"created " + result.ConfigPath,
 				"copied workbook to " + result.Workbook,
 			}
+			if withSkill {
+				env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
+			}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
+	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	return cmd
 }
 
 func (a *app) doctorCommand() *cobra.Command {
@@ -402,6 +452,70 @@ func (a *app) lintCommand() *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+}
+
+func (a *app) skillCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "skill",
+		Short: "Manage bundled AI agent skills",
+	}
+	cmd.AddCommand(a.skillInstallCommand())
+	return cmd
+}
+
+func (a *app) skillInstallCommand() *cobra.Command {
+	var agent string
+	var target string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install the bundled xlflow AI agent skill",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := a.resolveSkillInstallOptions(agent, target, force)
+			if err != nil {
+				return a.writeFailure("skill install", output.ExitConfig, "skill_agent_required", err)
+			}
+			result, err := agentskill.Install(opts)
+			if err != nil {
+				return a.writeFailure("skill install", output.ExitConfig, "skill_install_failed", err)
+			}
+			env := output.New("skill install")
+			env.Logs = []string{"installed xlflow skill to " + result.Path}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&agent, "agent", "", "skill provider target: agents, codex, claude, cursor, gemini, or copilot")
+	cmd.Flags().StringVar(&target, "target", "", "directory that should receive the xlflow skill folder")
+	cmd.Flags().BoolVar(&force, "force", false, "replace an existing xlflow skill")
+	return cmd
+}
+
+func (a *app) resolveSkillInstallOptions(agent, target string, force bool) (agentskill.InstallOptions, error) {
+	if agent == "" && target == "" {
+		if a.json || !stdinIsTerminal() {
+			return agentskill.InstallOptions{}, fmt.Errorf("--agent or --target is required when interactive selection is unavailable")
+		}
+		provider, err := runSkillSelector()
+		if err != nil {
+			return agentskill.InstallOptions{}, err
+		}
+		agent = provider.Name
+	}
+	return agentskill.InstallOptions{
+		RootDir: a.cwd,
+		Agent:   agent,
+		Target:  target,
+		Force:   force,
+	}, nil
+}
+
+func stdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func (a *app) loadConfig(command string) (config.Config, error) {

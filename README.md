@@ -17,9 +17,11 @@ xlflow turns Excel VBA projects into a CLI-first development workflow:
 
 ```bash
 xlflow new
+xlflow new --with-skill --agent codex
 xlflow new Sales
 xlflow new Sales.xlsm
 xlflow init Book.xlsm
+xlflow init Book.xlsm --with-skill --agent claude
 xlflow doctor --json
 xlflow pull --json
 xlflow push --json
@@ -33,10 +35,14 @@ xlflow test --filter TestCreateReport --json
 xlflow diff before.xlsm after.xlsm --json
 xlflow diff before.xlsm after.xlsm --vba-before before-src --vba-after after-src --json
 xlflow lint --json
+xlflow skill install --agent codex
+xlflow skill install --target .agents/skills
 ```
 
 The MVP uses `xlflow.toml` as its project configuration file. Excel automation is Windows-first and uses PowerShell plus Excel COM.
 `xlflow new` only accepts `.xlsm` workbook names because it always creates macro-enabled workbook content.
+
+`xlflow new/init --with-skill` installs the bundled `xlflow` AI agent skill during setup. The same skill can be installed later with `xlflow skill install`. Supported provider targets are `agents`, `codex`, `claude`, `cursor`, `gemini`, and `copilot`; when no provider is specified in an interactive terminal, xlflow shows a Bubble Tea selector. JSON and non-interactive runs must pass `--agent` or `--target`.
 
 `xlflow run` accepts repeatable typed arguments with the `string:`, `int:`, and `bool:` prefixes. `string:` may carry an empty value. Successful runs report `macro.duration_ms` in JSON and print the elapsed time plus save behavior in plain text. Failing runs return `macro_failed` with VBA error metadata including module name, `Err.Number`, `Err.Description`, and `error.line` when VBA exposes `Erl`, and the non-JSON message stays readable as `Main Err 5: inputPath is required` or `Main line 10 Err 5: inputPath is required` when a line number is available. The default run does not save the workbook; use `--save` or `--save-as` explicitly.
 

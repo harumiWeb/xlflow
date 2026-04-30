@@ -24,7 +24,6 @@ func TestInitScaffold(t *testing.T) {
 	}
 	for _, path := range []string{
 		config.FileName,
-		"prompts/agent.md",
 		"src/modules/XlflowAssert.bas",
 		"src/modules",
 		"src/classes",
@@ -36,6 +35,9 @@ func TestInitScaffold(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "prompts", "agent.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected prompts/agent.md not to be scaffolded, got %v", err)
 	}
 }
 

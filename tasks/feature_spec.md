@@ -1,28 +1,30 @@
-# xlflow Trace Harness Spec
+# xlflow AI Agent Skill Spec
 
 ## Goal
 
-Add trace logging support so agents and humans can collect simple VBA execution events during `xlflow run`.
+Replace scaffolded `prompts/agent.md` with a bundled `xlflow` Skill that AI agents can install into project-local provider directories and use as the official Excel VBA development workflow.
 
 ## Behavior
 
-- `xlflow trace inject [workbook]` injects or replaces a standard VBA module named `XlflowTrace`.
-- When workbook is omitted, `trace inject` uses `[excel].path` from `xlflow.toml`; when workbook is explicit, it can run without project configuration.
-- The injected module exposes `XlflowSetTraceFile path` for the run harness and `XlflowLog message` for user VBA code.
-- `xlflow run [macro] --trace` creates a fresh temp trace log under `%TEMP%\xlflow`, configures `XlflowTrace`, runs the macro, then reads trace events back into CLI output.
-- `run --trace` fails with `trace_not_injected` when the target workbook does not contain `XlflowTrace`.
-- Macro failures still include any trace events written before the failure.
+- `xlflow skill install` installs the bundled `xlflow` Skill.
+- `xlflow new/init --with-skill` installs the same Skill during project creation.
+- Supported providers are `agents`, `codex`, `claude`, `cursor`, `gemini`, and `copilot`.
+- Provider defaults install to `<provider-dir>/skills/xlflow`, for example `.codex/skills/xlflow`.
+- `--target <dir>` installs to `<dir>/xlflow`.
+- Existing Skill directories are not overwritten unless `--force` is set.
+- Interactive terminals use a Bubble Tea selector when no provider or target is specified.
+- JSON and non-interactive runs require `--agent` or `--target`.
+- `new` and `init` no longer create `prompts/agent.md`.
 
 ## Interfaces
 
-- CLI: `xlflow [--json] trace inject [workbook]`
-- CLI: `xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace]`
-- VBA: `Call XlflowLog("message")`
-- JSON: top-level `trace` field containing `enabled`, `path`, `events`, and optional `read_error`.
-- Trace events contain `timestamp`, `message`, and `raw`.
+- CLI: `xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]`
+- CLI: `xlflow [--json] new [workbook] [--with-skill] [--agent <provider>]`
+- CLI: `xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]`
+- Skill artifact: bundled `xlflow/SKILL.md` with workflow, validation, trace, lint, test, diff, and final reporting guidance.
 
 ## Verification
 
 - Fast gate: `go test ./...` and `task verify`.
-- Script gate: PowerShell parse tests include `trace.ps1`; helper tests cover trace module generation, trace harness setup, and event parsing.
-- Integration gate: create a temporary workbook, run `trace inject`, add `XlflowLog` calls, run `xlflow run --trace --json`, and confirm `trace.events` contains the expected messages.
+- Skill gate: `skill-creator` quick validation for the bundled skill folder.
+- Coverage: scaffold prompt removal, provider install paths, overwrite refusal and `--force`, `init --with-skill`, non-interactive JSON failure, and Bubble Tea selector model behavior.

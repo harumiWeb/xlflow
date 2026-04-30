@@ -9,8 +9,8 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
-xlflow [--json] new [workbook]
-xlflow [--json] init <workbook>
+xlflow [--json] new [workbook] [--with-skill] [--agent <provider>]
+xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]
 xlflow [--json] doctor
 xlflow [--json] pull
 xlflow [--json] push
@@ -19,6 +19,7 @@ xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save
 xlflow [--json] test [--filter <name>]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] lint
+xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 ```
 
 `--json` is a persistent global flag and can be used with every command, including `new` and `init`.
@@ -26,6 +27,19 @@ xlflow [--json] lint
 `new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`.
 
 `init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, and records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`).
+
+`new` and `init` do not create `prompts/agent.md`. Use `--with-skill` to install the bundled `xlflow` AI agent skill during project creation. `--agent` selects one of `agents`, `codex`, `claude`, `cursor`, `gemini`, or `copilot`. When `--with-skill` is used without `--agent` in an interactive terminal, xlflow opens a Bubble Tea provider selector. With `--json` or non-interactive input, `--agent` is required.
+
+`skill install` installs the bundled `xlflow` skill without creating or changing an xlflow project scaffold. Provider targets are:
+
+- `agents`: `.agents/skills/xlflow`
+- `codex`: `.codex/skills/xlflow`
+- `claude`: `.claude/skills/xlflow`
+- `cursor`: `.cursor/skills/xlflow`
+- `gemini`: `.gemini/skills/xlflow`
+- `copilot`: `.copilot/skills/xlflow`
+
+`--target <dir>` installs to `<dir>/xlflow` instead of a provider default. `--agent` and `--target` cannot be combined. Existing skill directories are not overwritten unless `--force` is set. If neither `--agent` nor `--target` is provided, interactive terminals use the Bubble Tea provider selector; `--json` and non-interactive runs return a configuration error instead.
 
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import.
 

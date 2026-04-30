@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -71,6 +72,107 @@ func TestRootCommandIncludesDiffCommand(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected diff command to define --%s", name)
 		}
+	}
+}
+
+func TestRootCommandIncludesSkillInstallCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"skill", "install"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "install" {
+		t.Fatalf("expected skill install command, got %#v", cmd)
+	}
+	for _, name := range []string{"agent", "target", "force"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected skill install command to define --%s", name)
+		}
+	}
+}
+
+func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	for _, command := range []string{"new", "init"} {
+		cmd, _, err := root.Find([]string{command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"with-skill", "agent"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("expected %s command to define --%s", command, name)
+			}
+		}
+	}
+}
+
+func TestSkillInstallCommandInstallsProviderSkill(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"skill", "install", "--agent", "codex"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("skill install command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".codex", "skills", "xlflow", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook, "--with-skill", "--agent", "codex"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".codex", "skills", "xlflow", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "prompts", "agent.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected prompts/agent.md not to be scaffolded, got %v", err)
+	}
+}
+
+func TestSkillInstallCommandRefusesOverwriteUnlessForced(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"skill", "install", "--agent", "codex"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	root = a.rootCommand()
+	root.SetArgs([]string{"skill", "install", "--agent", "codex"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected overwrite refusal, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	root = a.rootCommand()
+	root.SetArgs([]string{"skill", "install", "--agent", "codex", "--force"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("forced skill install command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+}
+
+func TestSkillInstallJSONRequiresExplicitTarget(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "skill", "install"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config error, got err=%v exit=%d", err, output.ExitCode(err))
 	}
 }
 

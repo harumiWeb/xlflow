@@ -56,9 +56,8 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
-	promptPath := filepath.Join(cwd, "prompts", "agent.md")
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
-	for _, path := range []string{destPath, configPath, promptPath, assertPath} {
+	for _, path := range []string{destPath, configPath, assertPath} {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -73,7 +72,6 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 		filepath.Join(cwd, "src", "workbook"),
 		filepath.Join(cwd, "tests"),
 		filepath.Join(cwd, "build"),
-		filepath.Join(cwd, "prompts"),
 		filepath.Join(cwd, ".xlflow"),
 	}
 	for _, dir := range dirs {
@@ -97,11 +95,6 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 	}
 	result.ConfigPath = config.FileName
 	result.Created = append(result.Created, config.FileName)
-
-	if err := writeExclusive(promptPath, defaultPrompt); err != nil {
-		return result, err
-	}
-	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, promptPath)))
 
 	if err := writeExclusive(assertPath, defaultAssertModule); err != nil {
 		return result, err
@@ -181,15 +174,6 @@ func normalizeWorkbookName(name string) (string, error) {
 	}
 	return name, nil
 }
-
-const defaultPrompt = `You are a VBA developer.
-
-Rules:
-- Never use Select/Activate
-- Always use Option Explicit
-- Prefer With blocks
-- Avoid global state
-`
 
 const defaultAssertModule = `Attribute VB_Name = "XlflowAssert"
 Option Explicit
