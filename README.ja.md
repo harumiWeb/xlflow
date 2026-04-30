@@ -422,12 +422,12 @@ AI エージェントや CI は、人間向けの標準出力を parse せず、
 
 xlflow の exit code は次のように分類されます。
 
-| Code | 意味 |
-|---:|---|
-| 0 | 成功 |
-| 1 | lint、macro、test などの検証失敗 |
-| 2 | CLI 引数または設定エラー |
-| 3 | Excel、COM、VBIDE、PowerShell などの環境エラー |
+| Code | 意味                                           |
+| ---: | ---------------------------------------------- |
+|    0 | 成功                                           |
+|    1 | lint、macro、test などの検証失敗               |
+|    2 | CLI 引数または設定エラー                       |
+|    3 | Excel、COM、VBIDE、PowerShell などの環境エラー |
 
 `diff` は差分が見つかった場合でも exit code `0` を返します。差分の有無は `diff.summary.total_diffs` を確認してください。
 
