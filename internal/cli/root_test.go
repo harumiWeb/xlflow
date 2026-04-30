@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/xuri/excelize/v2"
 )
 
 func TestRootCommandIncludesTestCommand(t *testing.T) {
@@ -37,6 +40,65 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestRootCommandIncludesDiffCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"diff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "diff" {
+		t.Fatalf("expected diff command, got %#v", cmd)
+	}
+	for _, name := range []string{"vba-before", "vba-after"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected diff command to define --%s", name)
+		}
+	}
+}
+
+func TestBuildDiffOptionsRejectsPartialVBADirs(t *testing.T) {
+	_, err := buildDiffOptions(".", "before.xlsx", "after.xlsx", "src1", "")
+	if err == nil || !strings.Contains(err.Error(), "--vba-before and --vba-after") {
+		t.Fatalf("expected vba dir pair error, got %v", err)
+	}
+}
+
+func TestBuildDiffOptionsRejectsUnsupportedWorkbookExtensions(t *testing.T) {
+	_, err := buildDiffOptions(".", "before.xls", "after.xlsx", "", "")
+	if err == nil || !strings.Contains(err.Error(), "unsupported extension") {
+		t.Fatalf("expected extension error, got %v", err)
+	}
+}
+
+func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
+	dir := t.TempDir()
+	beforePath := filepath.Join(dir, "before.xlsx")
+	afterPath := filepath.Join(dir, "after.xlsx")
+	before := excelize.NewFile()
+	if err := before.SetCellValue("Sheet1", "A1", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := before.SaveAs(beforePath); err != nil {
+		t.Fatal(err)
+	}
+	after := excelize.NewFile()
+	if err := after.SetCellValue("Sheet1", "A1", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := after.SaveAs(afterPath); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"diff", beforePath, afterPath})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("diff command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 }
 

@@ -54,6 +54,24 @@ func TestWriteJSONEnvelopeIncludesTests(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesDiff(t *testing.T) {
+	env := New("diff")
+	env.Diff = map[string]any{
+		"summary": map[string]any{"total_diffs": 1},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["diff"].(map[string]any); !ok {
+		t.Fatalf("expected diff result in JSON envelope: %s", buf.String())
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesErrorLine(t *testing.T) {
 	env := Failure("run", Error{
 		Code:    "macro_failed",

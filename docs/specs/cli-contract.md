@@ -16,6 +16,7 @@ xlflow [--json] pull
 xlflow [--json] push
 xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>]
 xlflow [--json] test [--filter <name>]
+xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] lint
 ```
 
@@ -32,6 +33,8 @@ xlflow [--json] lint
 `run` adds a `macro` object with `name`, `args`, and `duration_ms`. Failed macro runs return `macro_failed` with `error.source`, `error.number`, `error.message`, and `error.line` when VBA exposes a non-zero `Erl` value. Plain-text success output must include the elapsed duration and whether the workbook was saved, copied, or left unchanged. Plain-text failure output must use the formatted message `Module line <n> Err <n>: <description>` when line and error number are available, and otherwise omit the `line <n>` segment. Because `run` injects a temporary VBA harness to measure duration while avoiding modal VBA runtime error dialogs, VBIDE access failures return an environment error such as `vbide_access_denied` and exit code `3`.
 
 `test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
+
+`diff` compares two workbook files and optionally two exported VBA source trees. Workbook inputs must use `.xlsx`, `.xlsm`, `.xltx`, or `.xltm`. Workbook state comparison covers sheet additions/removals plus used-range cell values and formulas. VBA comparison is enabled only when both `--vba-before` and `--vba-after` are provided, recursively compares `.bas`, `.cls`, and `.frm` files, ignores other files such as `.frx`, and normalizes CRLF/LF line endings before comparison. Differences are successful command results with exit code `0`; malformed arguments fail with exit code `2`, and unreadable workbooks or source trees fail with exit code `3`.
 
 ## Configuration
 
@@ -83,9 +86,12 @@ Command-specific fields are added at the top level:
 - `workbook` and `backup` for Excel file commands
 - `macro` for `run`
 - `tests` for `test`
+- `diff` for `diff`
 - `issues` for `lint`
 
 `test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
+
+`diff` result objects contain `summary`, `sheets`, `cells`, and `vba`. Cell diffs contain `sheet`, `address`, `kind`, `before`, and `after`, where `kind` is `value` or `formula`. VBA diffs contain `file`, `kind`, and optional changed line details.
 
 ## Exit Codes
 
@@ -93,6 +99,8 @@ Command-specific fields are added at the top level:
 - `1`: user-code or validation failure, including lint findings, macro failure, VBA test failure, no tests found, missing filter targets, and duplicate test names
 - `2`: CLI argument or configuration error
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
+
+`diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 
 ## VBA Test Rules
 

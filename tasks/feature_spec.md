@@ -1,27 +1,27 @@
-# xlflow Test Harness Spec
+# xlflow Diff Harness Spec
 
 ## Goal
 
-Add `xlflow test` so agents and CI can execute workbook VBA tests through Excel, receive stable JSON results, and use exit codes to decide whether to repair VBA or the local Excel environment.
+Add `xlflow diff` so agents and humans can compare workbook state and exported VBA source after automated Excel/VBA changes.
 
 ## Behavior
 
-- `xlflow test` opens the configured workbook and discovers tests from the workbook VBIDE state.
-- Test procedures are argument-free `Sub` procedures whose names start with `Test` or end with `_Test`.
-- `xlflow test --filter <name>` runs only the test whose procedure name exactly matches `<name>`.
-- Duplicate discovered test names fail with `duplicate_test_name`.
-- No discovered tests fail with `no_tests_found`.
-- A missing filter target fails with `test_not_found`.
-- Individual VBA assertion or runtime errors fail the command with exit code `1` and include per-test error details.
-- Excel, COM, VBIDE, PowerShell, or script problems fail with exit code `3`.
+- `xlflow diff <before-workbook> <after-workbook>` compares workbook sheet lists, used-range cell values, and formulas.
+- Workbook inputs must use `.xlsx`, `.xlsm`, `.xltx`, or `.xltm`.
+- `--vba-before <dir>` and `--vba-after <dir>` must be provided together.
+- VBA comparison recursively includes `.bas`, `.cls`, and `.frm` files only.
+- VBA text comparison normalizes line endings so CRLF/LF differences alone do not count as changes.
+- Differences are successful command results with exit code `0`.
+- Malformed arguments fail with exit code `2`.
+- Unreadable workbooks or source trees fail with exit code `3`.
 
 ## Interfaces
 
-- CLI: `xlflow [--json] test [--filter <name>]`
-- JSON: top-level `tests` field containing test result objects with `name`, `module`, `status`, `duration_ms`, and optional `error`.
-- Scaffold: `src/modules/XlflowAssert.bas` provides `AssertEquals`.
+- CLI: `xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]`
+- JSON: top-level `diff` field containing `summary`, `sheets`, `cells`, and `vba`.
+- Plain text: existing `logs` rendering prints `no differences found` or compact human-readable diff lines.
 
 ## Verification
 
 - Fast gate: `go test ./...` and `task verify`.
-- Real Excel gate: create a disposable project, push a test module, run `xlflow test --json`, verify passing, failing, and exact filter cases.
+- Integration gate: create two temporary workbooks, run `xlflow diff before.xlsx after.xlsx --json`, and confirm `diff.summary.total_diffs` reflects the workbook changes.

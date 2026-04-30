@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -47,6 +49,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.pushCommand(),
 		a.runCommand(),
 		a.testCommand(),
+		a.diffCommand(),
 		a.lintCommand(),
 	)
 	return root
@@ -272,6 +275,67 @@ func (a *app) testCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
 	return cmd
+}
+
+func (a *app) diffCommand() *cobra.Command {
+	var vbaBefore string
+	var vbaAfter string
+	cmd := &cobra.Command{
+		Use:   "diff <before-workbook> <after-workbook>",
+		Short: "Compare workbook state and exported VBA source",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildDiffOptions(a.cwd, args[0], args[1], vbaBefore, vbaAfter)
+			if err != nil {
+				return a.writeFailure("diff", output.ExitConfig, "diff_args_invalid", err)
+			}
+			result, err := diff.Compare(opts)
+			if err != nil {
+				return a.writeFailure("diff", output.ExitEnvironment, "diff_failed", err)
+			}
+			env := output.New("diff")
+			env.Diff = result
+			env.Logs = result.Logs()
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&vbaBefore, "vba-before", "", "compare exported VBA source from this before directory")
+	cmd.Flags().StringVar(&vbaAfter, "vba-after", "", "compare exported VBA source from this after directory")
+	return cmd
+}
+
+func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {
+	if (vbaBefore == "") != (vbaAfter == "") {
+		return diff.Options{}, fmt.Errorf("--vba-before and --vba-after must be provided together")
+	}
+	if err := validateWorkbookDiffExt(beforeWorkbook); err != nil {
+		return diff.Options{}, fmt.Errorf("before workbook: %w", err)
+	}
+	if err := validateWorkbookDiffExt(afterWorkbook); err != nil {
+		return diff.Options{}, fmt.Errorf("after workbook: %w", err)
+	}
+	return diff.Options{
+		BeforeWorkbook: workbookArgPath(root, beforeWorkbook),
+		AfterWorkbook:  workbookArgPath(root, afterWorkbook),
+		VBABeforeDir:   workbookArgPath(root, vbaBefore),
+		VBAAfterDir:    workbookArgPath(root, vbaAfter),
+	}, nil
+}
+
+func validateWorkbookDiffExt(path string) error {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".xlsx", ".xlsm", ".xltx", ".xltm":
+		return nil
+	default:
+		return fmt.Errorf("unsupported extension %q; expected .xlsx, .xlsm, .xltx, or .xltm", filepath.Ext(path))
+	}
+}
+
+func workbookArgPath(root, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
 }
 
 func (a *app) lintCommand() *cobra.Command {

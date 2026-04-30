@@ -1,19 +1,19 @@
-# xlflow Test Harness Todo
+# xlflow Diff Harness Todo
 
 ## Implementation
 
-- [x] Add failing tests for `xlflow test` CLI registration and runner wiring.
-- [x] Add failing tests for JSON `tests` passthrough and test failure exit-code classification.
-- [x] Add failing tests for PowerShell test discovery, filter, and parse coverage.
-- [x] Add failing tests for `XlflowAssert.bas` scaffold creation.
-- [x] Implement the Go CLI, output, and Excel runner changes.
-- [x] Implement `scripts/test.ps1` and shared PowerShell helper functions.
-- [x] Add `XlflowAssert.bas` to project scaffolding.
-- [x] Update `docs/specs/cli-contract.md` and `README.md`.
+- [x] Add `excelize/v2` dependency.
+- [x] Add workbook sheet, cell value, and formula diff backend.
+- [x] Add exported VBA text diff backend for `.bas`, `.cls`, and `.frm`.
+- [x] Add `xlflow diff` CLI command and argument validation.
+- [x] Add top-level JSON `diff` envelope field.
+- [x] Update CLI contract, README, feature spec, and ADR documentation.
 
 ## Verification
 
-- [x] Run focused Go tests for touched packages.
-- [x] Run `go test ./...`.
+- [x] Add unit tests for CLI registration and argument validation.
+- [x] Add unit tests for workbook sheet/value/formula diffs.
+- [x] Add unit tests for VBA add/change and line-ending normalization.
+- [x] Add output envelope JSON coverage for `diff`.
+- [x] Run `go test ./...` after documentation updates.
 - [x] Run `task verify`.
-- [x] Run real Excel COM E2E for passing, failing, and filtered VBA tests when the environment allows it.
