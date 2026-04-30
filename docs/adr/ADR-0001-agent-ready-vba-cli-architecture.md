@@ -24,6 +24,8 @@ The MVP is Windows-first. Excel-dependent commands are expected to run on Window
 
 `push` creates a timestamped backup under `.xlflow/backups/` before replacing VBA components.
 
+VBA source-controlled files use UTF-8 without BOM. The Excel COM bridge treats VBIDE import and export text files as CP932 and converts at the `pull`/`push` boundary. Binary userform companions such as `.frx` are copied without text conversion.
+
 ## Consequences
 
 Positive consequences:
@@ -36,6 +38,7 @@ Negative consequences:
 
 - Excel operations are not portable beyond Windows in the MVP.
 - PowerShell and COM behavior must be tested separately from pure Go logic.
+- Japanese and other non-ASCII VBA source depends on the bridge conversion staying explicit at import and export boundaries.
 - Future non-Windows backends may require a new ADR before expanding the adapter boundary.
 
 ## Rationale

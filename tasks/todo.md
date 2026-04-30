@@ -1,21 +1,19 @@
-# xlflow Scaffold Todo
+# xlflow VBA Source Encoding Todo
 
 ## Implementation
 
-- [x] Add project-local `.gitignore` creation for `new` and `init`.
-- [x] Preserve existing `.gitignore` content and append only missing managed entries.
-- [x] Remove scaffolded `prompts/agent.md` generation.
-- [x] Add bundled `xlflow` Skill artifact.
-- [x] Add provider-aware Skill installer.
-- [x] Add `xlflow skill install`.
-- [x] Add `new/init --with-skill`.
-- [x] Add Bubble Tea provider selector.
-- [x] Update CLI contract, README, and ADR.
+- [x] Add explicit UTF-8 without BOM and CP932 text helpers in the PowerShell bridge.
+- [x] Convert exported VBIDE text from CP932 to UTF-8 during `pull`.
+- [x] Convert UTF-8 source to CP932 temporary files during `push`.
+- [x] Preserve `.frx` userform companion files as binary copies.
+- [x] Keep workbook document module synchronization on UTF-8 source text.
+- [x] Update CLI contract and ADR-0001 with the encoding boundary.
 
 ## Verification
 
-- [x] Add unit tests for `.gitignore` creation, append, no-duplicate behavior, and overwrite refusal staying scoped to protected generated files.
-- [x] Add unit tests for scaffold prompt removal, Skill installation, overwrite behavior, CLI flags, `init --with-skill`, JSON non-interactive behavior, and selector model behavior.
-- [x] Run `skill-creator` quick validation.
-- [x] Run `go test ./...`.
+- [x] Add helper tests for Japanese UTF-8 to CP932 round-trip behavior.
+- [x] Add helper tests for byte-preserving `.frx` copy behavior.
+- [x] Update document module tests to avoid default PowerShell text encoding.
+- [x] Run `go test ./...` with a long timeout for Excel COM-backed tests.
 - [x] Run `task verify`.
+- [x] Run Excel COM e2e with Japanese VBA strings when available.

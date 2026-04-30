@@ -62,6 +62,65 @@ function Get-XlflowComponentPath {
   }
 }
 
+function Get-XlflowUtf8Encoding {
+  return (New-Object System.Text.UTF8Encoding -ArgumentList $false)
+}
+
+function Get-XlflowCp932Encoding {
+  try {
+    $providerType = [type]::GetType("System.Text.CodePagesEncodingProvider, System.Text.Encoding.CodePages")
+    if ($null -ne $providerType) {
+      $provider = $providerType.GetProperty("Instance").GetValue($null, $null)
+      [System.Text.Encoding]::RegisterProvider($provider)
+    }
+  } catch {
+  }
+  return [System.Text.Encoding]::GetEncoding(932)
+}
+
+function Get-XlflowUtf8Text {
+  param([string]$Path)
+  return [System.IO.File]::ReadAllText($Path, (Get-XlflowUtf8Encoding))
+}
+
+function Set-XlflowUtf8Text {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::WriteAllText($Path, $Text, (Get-XlflowUtf8Encoding))
+}
+
+function Get-XlflowCp932Text {
+  param([string]$Path)
+  return [System.IO.File]::ReadAllText($Path, (Get-XlflowCp932Encoding))
+}
+
+function Set-XlflowCp932Text {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::WriteAllText($Path, $Text, (Get-XlflowCp932Encoding))
+}
+
+function Convert-XlflowExportedSourceToUtf8 {
+  param([string]$Path)
+  $content = Get-XlflowCp932Text -Path $Path
+  Set-XlflowUtf8Text -Path $Path -Text $content
+}
+
+function Copy-XlflowSourceForImport {
+  param([string]$SourcePath, [string]$DestinationPath)
+
+  $parent = Split-Path -Parent $DestinationPath
+  if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+
+  if ([System.IO.Path]::GetExtension($SourcePath) -ieq ".frx") {
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    return
+  }
+
+  $content = Get-XlflowUtf8Text -Path $SourcePath
+  Set-XlflowCp932Text -Path $DestinationPath -Text $content
+}
+
 function Write-XlflowJson {
   param([hashtable]$Result)
   $Result | ConvertTo-Json -Depth 10
@@ -150,7 +209,7 @@ function New-XlflowTestRunnerCode {
 function Get-XlflowDocumentModuleContent {
   param([string]$Path)
 
-  $lines = Get-Content -LiteralPath $Path
+  $lines = (Get-XlflowUtf8Text -Path $Path) -split "`r?`n"
   $filtered = New-Object System.Collections.Generic.List[string]
   $inClassHeader = $false
   $classHeaderBuffer = New-Object System.Collections.Generic.List[string]
@@ -209,7 +268,7 @@ function Normalize-XlflowDocumentModuleFile {
   param([string]$Path)
 
   $content = Get-XlflowDocumentModuleContent -Path $Path
-  Set-Content -LiteralPath $Path -Value $content
+  Set-XlflowUtf8Text -Path $Path -Text $content
 }
 
 function Sync-XlflowDocumentModule {

@@ -3,3 +3,5 @@
 - When module headers are malformed or partially missing, avoid aggressive stripping. Prefer conservative normalization that preserves executable VBA body text over risky truncation heuristics.
 - Keep scaffolded VBA assertion helpers explicit about supported value types. Do not compare or stringify object/array variants with generic operators; either guard them with clear assertion errors or define a precise comparison contract first.
 - Generated VBA that opens files must include an error cleanup path. Track whether the file was opened, close it under `On Error Resume Next`, and re-raise the original error so failed writes do not leak file handles.
+- Temporary import/export workspaces must be removed in `finally` after the owning command finishes. Do not leave generated source copies under `.xlflow/tmp` after success or failure.
+- Excel COM-backed Go tests can take several minutes, especially userform/VBIDE round-trip tests. Do not use two-minute timeouts for full `go test ./...` or `go test ./scripts`; use at least 8 minutes for full runs and 5 minutes for `scripts` package runs before treating slowness as a hang.

@@ -125,12 +125,102 @@ func TestSetXlflowErrorMutatesResultEnvelope(t *testing.T) {
 	}
 }
 
+func TestSourceTextEncodingHelpersRoundTripJapaneseViaCp932(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $sourcePath = Join-Path $root 'Main.bas'
+  $importPath = Join-Path $root 'import\Main.bas'
+  $text = 'Public Sub Run()' + [Environment]::NewLine + '  MsgBox "処理が完了しました"' + [Environment]::NewLine + 'End Sub'
+  Set-XlflowUtf8Text -Path $sourcePath -Text $text
+  Copy-XlflowSourceForImport -SourcePath $sourcePath -DestinationPath $importPath
+  $roundtrip = Get-XlflowCp932Text -Path $importPath
+  $cp932Base64 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($importPath))
+  $utf8Base64 = [Convert]::ToBase64String((Get-XlflowUtf8Encoding).GetBytes($text))
+  [ordered]@{
+    roundtrip = $roundtrip
+    cp932DiffersFromUtf8 = $cp932Base64 -ne $utf8Base64
+  } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("encoding helper round trip failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Roundtrip            string `json:"roundtrip"`
+		Cp932DiffersFromUTF8 bool   `json:"cp932DiffersFromUtf8"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse encoding helper output: %v\n%s", err, out)
+	}
+	if !strings.Contains(got.Roundtrip, "処理が完了しました") {
+		t.Fatalf("expected Japanese text to survive CP932 round trip: %q", got.Roundtrip)
+	}
+	if !got.Cp932DiffersFromUTF8 {
+		t.Fatalf("expected import file bytes to be CP932, not UTF-8: %s", out)
+	}
+}
+
+func TestCopyXlflowSourceForImportPreservesFrxBytes(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $sourcePath = Join-Path $root 'UserForm1.frx'
+  $importPath = Join-Path $root 'import\UserForm1.frx'
+  $bytes = [byte[]](0, 255, 130, 160, 13, 10)
+  [System.IO.File]::WriteAllBytes($sourcePath, $bytes)
+  Copy-XlflowSourceForImport -SourcePath $sourcePath -DestinationPath $importPath
+  [ordered]@{
+    source = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($sourcePath))
+    copied = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($importPath))
+  } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("frx copy failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Source string `json:"source"`
+		Copied string `json:"copied"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse frx copy output: %v\n%s", err, out)
+	}
+	if got.Source != got.Copied {
+		t.Fatalf("expected .frx bytes to be copied unchanged, got source=%q copied=%q", got.Source, got.Copied)
+	}
+}
+
 func TestDocumentModuleContentNormalization(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('Attribute VB_Name = \"ThisWorkbook\"','Attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"','Option Explicit','Private Sub Workbook_Open()','End Sub'); . ./common.ps1; $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('Attribute VB_Name = \"ThisWorkbook\"','Attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"','Option Explicit','Private Sub Workbook_Open()','  MsgBox \"\"起動しました\"\"','End Sub') -join [Environment]::NewLine); $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -149,7 +239,7 @@ func TestDocumentModuleContentNormalization(t *testing.T) {
 			t.Fatalf("class header lines were not removed: %q", got)
 		}
 	}
-	if !strings.Contains(got, "Option Explicit") || !strings.Contains(got, "Workbook_Open") {
+	if !strings.Contains(got, "Option Explicit") || !strings.Contains(got, "Workbook_Open") || !strings.Contains(got, "起動しました") {
 		t.Fatalf("expected VBA body to remain: %q", got)
 	}
 }
@@ -159,7 +249,7 @@ func TestDocumentModuleContentAddsOptionExplicitForEmptyDocumentModule(t *testin
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"Sheet1\"','Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = True'); . ./common.ps1; $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"Sheet1\"','Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = True') -join [Environment]::NewLine); $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -215,7 +305,7 @@ func TestDocumentModuleContentKeepsExecutableEndStatement(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"ThisWorkbook\"','Option Explicit','Public Sub StopAll()','  End','End Sub'); . ./common.ps1; $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"ThisWorkbook\"','Option Explicit','Public Sub StopAll()','  End','End Sub') -join [Environment]::NewLine); $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -238,7 +328,7 @@ func TestDocumentModuleContentDropsAdditionalClassHeaderProperties(t *testing.T)
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','  Persistable = 0  ''NotPersistable','END','Attribute VB_Name = \"ThisWorkbook\"','Option Explicit','Public Sub Hello()','End Sub'); . ./common.ps1; $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','  Persistable = 0  ''NotPersistable','END','Attribute VB_Name = \"ThisWorkbook\"','Option Explicit','Public Sub Hello()','End Sub') -join [Environment]::NewLine); $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -259,7 +349,7 @@ func TestDocumentModuleContentDoesNotTruncateBodyWhenHeaderEndMissing(t *testing
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','Option Explicit','Public Sub Recover()','End Sub'); . ./common.ps1; $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','Option Explicit','Public Sub Recover()','End Sub') -join [Environment]::NewLine); $content = Get-XlflowDocumentModuleContent -Path $tmp; Remove-Item -LiteralPath $tmp -Force; $content",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -277,7 +367,7 @@ func TestNormalizeDocumentModuleFileRewritesExportedWorkbookModule(t *testing.T)
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$tmp = New-TemporaryFile; Set-Content -LiteralPath $tmp -Value @('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"Sheet1\"','Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = True'); . ./common.ps1; Normalize-XlflowDocumentModuleFile -Path $tmp; Get-Content -Raw -LiteralPath $tmp; Remove-Item -LiteralPath $tmp -Force",
+		"$tmp = New-TemporaryFile; . ./common.ps1; Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 1.0 CLASS','BEGIN','  MultiUse = -1  ''True','END','Attribute VB_Name = \"Sheet1\"','Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = True') -join [Environment]::NewLine); Normalize-XlflowDocumentModuleFile -Path $tmp; Get-XlflowUtf8Text -Path $tmp; Remove-Item -LiteralPath $tmp -Force",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()

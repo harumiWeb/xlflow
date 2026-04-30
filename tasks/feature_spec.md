@@ -1,38 +1,22 @@
-# xlflow Scaffold Spec
+# xlflow VBA Source Encoding Spec
 
 ## Goal
 
-Define the current project scaffold behavior for `xlflow new` and `xlflow init`.
+Keep Git-managed VBA source files UTF-8 while preserving compatibility with Excel/VBIDE import and export behavior on Japanese Windows.
 
 ## Behavior
 
-- `xlflow new` and `xlflow init` create or update a project-local `.gitignore`.
-- New `.gitignore` files contain only xlflow project artifacts and Excel temporary files:
-  - `~$*.xls*`
-  - `*.tmp`
-  - `.xlflow/`
-  - `build/`
-- Existing `.gitignore` files are preserved and receive only missing managed entries.
-- Existing managed entries are not duplicated.
-- `xlflow skill install` installs the bundled `xlflow` Skill.
-- `xlflow new/init --with-skill` installs the same Skill during project creation.
-- Supported providers are `agents`, `codex`, `claude`, `cursor`, `gemini`, and `copilot`.
-- Provider defaults install to `<provider-dir>/skills/xlflow`, for example `.codex/skills/xlflow`.
-- `--target <dir>` installs to `<dir>/xlflow`.
-- Existing Skill directories are not overwritten unless `--force` is set.
-- Interactive terminals use a Bubble Tea selector when no provider or target is specified.
-- JSON and non-interactive runs require `--agent` or `--target`.
-- `new` and `init` no longer create `prompts/agent.md`.
-
-## Interfaces
-
-- CLI: `xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]`
-- CLI: `xlflow [--json] new [workbook] [--with-skill] [--agent <provider>]`
-- CLI: `xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]`
-- Skill artifact: bundled `xlflow/SKILL.md` with workflow, validation, trace, lint, test, diff, and final reporting guidance.
+- Source-controlled `.bas`, `.cls`, and `.frm` files are UTF-8 without BOM.
+- VBIDE import/export text files are treated as CP932 at the PowerShell bridge boundary.
+- `xlflow pull` exports through VBIDE, reads exported text as CP932, and rewrites source files as UTF-8 without BOM.
+- `xlflow push` reads source files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/import/<timestamp>/`, and imports those copies through VBIDE.
+- `.frx` userform companion files are binary and are copied without text conversion.
+- Workbook document modules are normalized and synchronized from UTF-8 source text.
 
 ## Verification
 
+- PowerShell helper tests cover UTF-8/CP932 round-trip behavior for Japanese text.
+- PowerShell helper tests cover byte-preserving `.frx` copy behavior.
+- Document module normalization tests include Japanese body text and do not rely on default `Get-Content` or `Set-Content` encoding.
 - Fast gate: `go test ./...` and `task verify`.
-- Skill gate: `skill-creator` quick validation for the bundled skill folder.
-- Coverage: `.gitignore` creation and append behavior, scaffold prompt removal, provider install paths, overwrite refusal and `--force`, `init --with-skill`, non-interactive JSON failure, and Bubble Tea selector model behavior.
+- Excel COM gate: run the `xlflow-tmp-workspace-e2e` workflow with Japanese VBA strings when Excel/VBIDE access is available.
