@@ -1,0 +1,17 @@
+{
+  "name": "xlflow",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
+  "main": "index.js",
+  "scripts": {
+    "format": "oxfmt",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.47.0"
+  },
+  "packageManager": "pnpm@10.28.1"
+}

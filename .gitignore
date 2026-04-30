@@ -20,3 +20,4 @@ build/
 .idea/
 
 tmp_workspaces/
+node_modules/

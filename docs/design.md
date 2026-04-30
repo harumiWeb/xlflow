@@ -38,6 +38,7 @@ skills/
 Use xlflow when working with Excel VBA projects from the command line.
 
 The agent must not assume VBA code is correct until it has:
+
 1. exported or inspected the workbook,
 2. run relevant tests or macros,
 3. checked the resulting workbook state,
@@ -104,6 +105,7 @@ AIエージェントにはここがかなり効きます。
 ## Failure handling
 
 If `xlflow test` fails:
+
 - Read the failing test name.
 - Read the VBA error number and description.
 - Inspect the related module.
@@ -112,6 +114,7 @@ If `xlflow test` fails:
 - Then run the full test suite.
 
 If `xlflow run --trace` fails:
+
 - Read the trace log from top to bottom.
 - Identify the last successful trace entry.
 - Add more `XlflowLog` calls around the suspected block.
@@ -132,6 +135,7 @@ skillでは、コマンド一覧より **いつ使うか** を書くのが重要
 Use `xlflow doctor` before blaming VBA code.
 
 Run it when:
+
 - Excel COM fails
 - macro execution fails before entering VBA code
 - import/export fails
@@ -151,6 +155,7 @@ If there are no tests, create minimal tests when practical.
 
 ```md
 Use `xlflow run --trace` when:
+
 - implementing a new macro
 - debugging runtime behavior
 - no formal tests exist
@@ -163,6 +168,7 @@ Use `xlflow run --trace` when:
 Use `xlflow diff` after running macros that modify a workbook.
 
 Check:
+
 - changed cells
 - added/removed sheets
 - formulas
@@ -240,6 +246,7 @@ AIにこう書かせたい。
 ## Trace logging
 
 When debugging macro execution, insert trace logs at:
+
 - procedure entry
 - important branch decisions
 - row/column counts
@@ -254,6 +261,7 @@ Call XlflowLog("start GenerateReport")
 Call XlflowLog("lastRow=" & lastRow)
 Call XlflowLog("creating report sheet")
 Call XlflowLog("finished GenerateReport")
+```
 ````
 
 ````
@@ -275,6 +283,7 @@ Remove noisy temporary logs before finalizing.
 ## Final response format
 
 Report:
+
 - Changed files/modules
 - Commands executed
 - Test result
@@ -287,15 +296,18 @@ Report:
 
 ```md
 Changed:
+
 - Module `ReportGenerator`
 - Added `TestReportGenerator`
 
 Verified:
+
 - `xlflow lint vba/`
 - `xlflow test build/out.xlsm`
 - `xlflow diff fixtures/expected.xlsm build/out.xlsm`
 
 Result:
+
 - All tests passed.
 - Output workbook matches expected snapshot.
 ```
@@ -310,14 +322,23 @@ Result:
 # xlflow Skill
 
 ## Purpose
+
 ## When to use xlflow
+
 ## Standard workflow
+
 ## Command usage
+
 ## VBA coding rules
+
 ## Testing rules
+
 ## Trace logging rules
+
 ## Failure handling
+
 ## Workbook diff rules
+
 ## Final response format
 ```
 
@@ -411,11 +432,11 @@ project/
 
 この方式のメリットは大きいです。
 
-* ユーザーが迷わない
-* xlflowのバージョンとskill内容を揃えやすい
-* プロジェクト固有のルールを書き足せる
-* エージェントがリポジトリ内で確実に読める
-* オフライン/社内環境でも使いやすい
+- ユーザーが迷わない
+- xlflowのバージョンとskill内容を揃えやすい
+- プロジェクト固有のルールを書き足せる
+- エージェントがリポジトリ内で確実に読める
+- オフライン/社内環境でも使いやすい
 
 特にあなたの想定ユーザーは **業務Excel + 社内PC + AIエージェント** なので、外部skill manager前提は少し弱いです。
 
@@ -460,10 +481,10 @@ skills/xlflow/SKILL.md
 
 理由は：
 
-* まだskill managerの標準が固まっていない
-* ユーザーのAIエージェント環境がバラバラ
-* 企業環境では `npx` や外部取得が制限されやすい
-* xlflow本体とskillのバージョン同期が面倒
+- まだskill managerの標準が固まっていない
+- ユーザーのAIエージェント環境がバラバラ
+- 企業環境では `npx` や外部取得が制限されやすい
+- xlflow本体とskillのバージョン同期が面倒
 
 なので、外部配布は **補助導線** が良いです。
 

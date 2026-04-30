@@ -422,12 +422,12 @@ AI agents and CI jobs should use `--json` instead of parsing human-readable outp
 
 xlflow uses the following exit code categories:
 
-| Code | Meaning |
-|---:|---|
-| 0 | Success |
-| 1 | Validation failure, such as lint, macro, or test failure |
-| 2 | CLI argument or configuration error |
-| 3 | Environment error, such as Excel, COM, VBIDE, or PowerShell failure |
+| Code | Meaning                                                             |
+| ---: | ------------------------------------------------------------------- |
+|    0 | Success                                                             |
+|    1 | Validation failure, such as lint, macro, or test failure            |
+|    2 | CLI argument or configuration error                                 |
+|    3 | Environment error, such as Excel, COM, VBIDE, or PowerShell failure |
 
 `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.
 

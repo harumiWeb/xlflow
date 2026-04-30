@@ -29,8 +29,10 @@ tasks:
       - task test
 
   fmt:
+    parallel: true
     cmds:
       - go fmt ./...
+      - pnpm run format
 
   tidy:
     cmds:
