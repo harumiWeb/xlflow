@@ -15,9 +15,21 @@ tasks:
     cmds:
       - task run -- doctor
 
-  lint:
+  xlflow-lint:
+    desc: Run xlflow lint without install
     cmds:
       - task run -- lint
+
+  ps-lint:
+    desc: Run PSScriptAnalyzer for tracked PowerShell sources
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\lint-powershell.ps1'
+
+  lint:
+    desc: Run repository linters
+    cmds:
+      - golangci-lint run
+      - task ps-lint
 
   test:
     cmds:

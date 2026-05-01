@@ -37,16 +37,16 @@ function ConvertTo-XlflowBool {
 function Close-XlflowCom {
   param($Workbook, $Excel, [bool]$Save)
   if ($null -ne $Workbook) {
-    try { $Workbook.Close($Save) | Out-Null } catch {}
+    try { $Workbook.Close($Save) | Out-Null } catch { Write-Verbose ("failed to close workbook: " + $_.Exception.Message) }
   }
   if ($null -ne $Excel) {
-    try { $Excel.Quit() | Out-Null } catch {}
+    try { $Excel.Quit() | Out-Null } catch { Write-Verbose ("failed to quit Excel: " + $_.Exception.Message) }
   }
   if ($null -ne $Workbook) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Workbook) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Workbook) | Out-Null } catch { Write-Verbose ("failed to release workbook COM object: " + $_.Exception.Message) }
   }
   if ($null -ne $Excel) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel) | Out-Null } catch { Write-Verbose ("failed to release Excel COM object: " + $_.Exception.Message) }
   }
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
@@ -76,6 +76,7 @@ function Get-XlflowCp932Encoding {
       [System.Text.Encoding]::RegisterProvider($provider)
     }
   } catch {
+    Write-Verbose ("failed to register code page provider: " + $_.Exception.Message)
   }
   return [System.Text.Encoding]::GetEncoding(932)
 }
@@ -304,7 +305,7 @@ function ConvertFrom-XlflowRunArgumentsJson {
   # Decode base64 JSON
   $decodedBytes = [System.Convert]::FromBase64String($Json)
   $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
-  
+
   $specs = ConvertFrom-Json -InputObject $decodedJson
   $values = New-Object System.Collections.Generic.List[object]
   foreach ($spec in $specs) {
@@ -527,8 +528,8 @@ function Read-XlflowTraceEvents {
     }
     $events.Add((ConvertTo-XlflowTraceEvent -Line $line))
   }
-  foreach ($event in $events) {
-    Write-Output $event
+  foreach ($traceEvent in $events) {
+    Write-Output $traceEvent
   }
 }
 
@@ -555,16 +556,16 @@ function Find-XlflowMacroProcedures {
       continue
     }
     $argText = $match.Groups[4].Value.Trim()
-    $args = @()
+    $macroArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($argText)) {
-      $args = @($argText -split "," | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      $macroArgs = @($argText -split "," | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     $macros.Add([pscustomobject][ordered]@{
       module = $ModuleName
       name = $name
       qualified_name = ($ModuleName + "." + $name)
       kind = $match.Groups[2].Value.ToLowerInvariant()
-      args = @($args)
+      args = @($macroArgs)
       line = $i + 1
     })
   }
@@ -646,6 +647,7 @@ function ConvertTo-XlflowUIButtonInfo {
   try {
     $cell = $Button.TopLeftCell.Address($false, $false)
   } catch {
+    Write-Verbose ("failed to read button top-left cell: " + $_.Exception.Message)
   }
   return [ordered]@{
     id = $Id

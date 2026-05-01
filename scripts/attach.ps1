@@ -24,16 +24,16 @@ try {
   $activeWorkbook = $excel.ActiveWorkbook
   $activePath = $activeWorkbook.FullName
   $configuredPath = [System.IO.Path]::GetFullPath($WorkbookPath)
-  $matches = ([string]::Equals($activePath, $configuredPath, [System.StringComparison]::OrdinalIgnoreCase))
+  $pathsMatch = ([string]::Equals($activePath, $configuredPath, [System.StringComparison]::OrdinalIgnoreCase))
 
   $result.workbook = [ordered]@{
     path = $activePath
     configured_path = $configuredPath
     active = $true
-    matches_config = $matches
+    matches_config = $pathsMatch
   }
 
-  if (-not $matches) {
+  if (-not $pathsMatch) {
     Set-XlflowError -Result $result -Code "active_workbook_mismatch" -Message ("Active workbook does not match configured workbook: " + $activePath) -Source "Excel"
   } else {
     $result.logs = @("attached to active workbook " + $activePath)

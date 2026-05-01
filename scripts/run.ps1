@@ -23,6 +23,10 @@ $traceTempInjected = $false
 $currentPhase = "initialize"
 
 try {
+  if ($TimeoutSeconds -lt 0) {
+    Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-TimeoutSeconds must be greater than or equal to 0." -Source "xlflow"
+    throw "invalid timeout"
+  }
   if ($traceRequested) {
     if ([string]::IsNullOrWhiteSpace($TraceFile)) {
       $TraceFile = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "xlflow") ("trace-" + [guid]::NewGuid().ToString("N") + ".log")
@@ -69,7 +73,7 @@ try {
     $currentPhase = "inject_harness"
     $runnerComponent = $vbProject.VBComponents.Add(1)
   } catch {
-    if ($result.error -eq $null) {
+    if ($null -eq $result.error) {
       Set-XlflowError -Result $result -Code "vbide_access_denied" -Message $_.Exception.Message -Source "vbide" -Phase $currentPhase
     }
     throw
@@ -127,7 +131,7 @@ try {
     $result.logs = @($successLog, "left workbook unchanged on disk")
   }
 } catch {
-  if ($result.error -eq $null) {
+  if ($null -eq $result.error) {
     $errorCode = "macro_failed"
     if ($currentPhase -eq "invoke_macro" -and (Test-XlflowMacroTargetFailure -Number ([int]$_.Exception.HResult) -Description $_.Exception.Message)) {
       $errorCode = "macro_not_found"
@@ -140,7 +144,7 @@ try {
   $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null }
 } finally {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
-    try { $vbProject.VBComponents.Remove($runnerComponent) } catch {}
+    try { $vbProject.VBComponents.Remove($runnerComponent) } catch { Write-Verbose ("failed to remove run harness module: " + $_.Exception.Message) }
   }
   if ($traceTempInjected -and $null -ne $vbProject) {
     try {
@@ -148,7 +152,9 @@ try {
       if ($null -ne $result.trace) {
         $result.trace.temporary_reverted = $true
       }
-    } catch {}
+    } catch {
+      Write-Verbose ("failed to remove temporary trace module: " + $_.Exception.Message)
+    }
   }
   Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
   if ($traceRequested) {
@@ -168,8 +174,8 @@ try {
         $result.trace.hint = "no trace events were written; execution may have failed before reaching user XlflowLog calls"
         $result.logs += $result.trace.hint
       }
-      foreach ($event in $events) {
-        $result.logs += ("[" + $event.timestamp + "] " + $event.message)
+      foreach ($traceEvent in $events) {
+        $result.logs += ("[" + $traceEvent.timestamp + "] " + $traceEvent.message)
       }
     } catch {
       $result.trace.read_error = $_.Exception.Message

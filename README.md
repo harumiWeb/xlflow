@@ -550,6 +550,14 @@ VBA executed by xlflow should be written for unattended automation.
 
 ## Local verification
 
+Run repository linters with:
+
+```bash
+task lint
+```
+
+`task lint` runs `golangci-lint run` and `PSScriptAnalyzer` against tracked `.ps1` sources. Make sure `Invoke-ScriptAnalyzer` is available in your local PowerShell environment.
+
 Run the fast repository verification with:
 
 ```bash

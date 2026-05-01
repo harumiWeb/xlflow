@@ -138,7 +138,7 @@ try {
   $result["workbook"] = [ordered]@{ path = $WorkbookPath }
 } finally {
   if ($null -ne $runnerComponent) {
-    try { $workbook.VBProject.VBComponents.Remove($runnerComponent) | Out-Null } catch {}
+    try { $workbook.VBProject.VBComponents.Remove($runnerComponent) | Out-Null } catch { Write-Verbose ("failed to remove test harness module: " + $_.Exception.Message) }
   }
   Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
 }

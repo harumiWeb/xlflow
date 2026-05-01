@@ -84,6 +84,12 @@ Install locally:
 go install ./cmd/xlflow
 ```
 
+Repository linting uses `golangci-lint` and `PSScriptAnalyzer`. Ensure `Invoke-ScriptAnalyzer` is available in your PowerShell environment before running the lint task or pre-commit hook.
+
+```bash
+task lint
+```
+
 Run the fast verification task:
 
 ```bash

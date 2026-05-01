@@ -107,7 +107,7 @@ try {
     $result.logs = @("reported XlflowTrace status for " + $WorkbookPath)
   }
 } catch {
-  if ($result.error -eq $null) {
+  if ($null -eq $result.error) {
     Set-XlflowError -Result $result -Code "trace_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
   }
   if ($null -eq $result.workbook -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
