@@ -119,6 +119,8 @@ try {
       $traceTempInjected = $true
       $result.trace.lifecycle = "temporary"
       $result.trace.temporary_injected = $true
+    } elseif ($traceRequested) {
+      $result.trace.lifecycle = "existing"
     }
     $currentPhase = "verify_macro"
     if (-not (Test-XlflowMacroExists -Workbook $workbook -MacroName $MacroName)) {

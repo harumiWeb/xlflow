@@ -3,6 +3,7 @@ package analyze
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -56,6 +57,10 @@ End Function
 		t.Fatal(err)
 	}
 	assertFinding(t, findings, "VBA103", 3)
+	finding := findFinding(t, findings, "VBA103", 3)
+	if !containsAll(finding.Suggestion, "Set GetSheet = ...", "Worksheet") {
+		t.Fatalf("unexpected VBA103 suggestion: %q", finding.Suggestion)
+	}
 }
 
 func TestAnalyzerIgnoresScalarAndSetAssignments(t *testing.T) {
@@ -153,6 +158,10 @@ End Sub
 		t.Fatal(err)
 	}
 	assertFinding(t, findings, "VBA105", 3)
+	finding := findFinding(t, findings, "VBA105", 3)
+	if !containsAll(finding.Suggestion, "xlflow trace enable", "xlflow run --trace") {
+		t.Fatalf("unexpected VBA105 suggestion: %q", finding.Suggestion)
+	}
 }
 
 func TestAnalyzerFindsMissingXlflowSetTraceFileHelperSource(t *testing.T) {
@@ -168,6 +177,10 @@ End Sub
 		t.Fatal(err)
 	}
 	assertFinding(t, findings, "VBA106", 3)
+	finding := findFinding(t, findings, "VBA106", 3)
+	if !containsAll(finding.Suggestion, "xlflow run --trace", "xlflow trace enable") {
+		t.Fatalf("unexpected VBA106 suggestion: %q", finding.Suggestion)
+	}
 }
 
 func TestAnalyzerDoesNotFlagTraceHelperCallsWhenHelperSourceExists(t *testing.T) {
@@ -215,4 +228,24 @@ func assertFinding(t *testing.T, findings []Finding, code string, line int) {
 		}
 	}
 	t.Fatalf("missing %s line %d in %+v", code, line, findings)
+}
+
+func findFinding(t *testing.T, findings []Finding, code string, line int) Finding {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.Code == code && finding.Line == line {
+			return finding
+		}
+	}
+	t.Fatalf("missing %s line %d in %+v", code, line, findings)
+	return Finding{}
+}
+
+func containsAll(text string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(text, part) {
+			return false
+		}
+	}
+	return true
 }

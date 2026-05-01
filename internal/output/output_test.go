@@ -189,6 +189,70 @@ func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersRunTraceHelperLifecycle(t *testing.T) {
+	tests := []struct {
+		name  string
+		trace map[string]any
+		want  string
+	}{
+		{
+			name: "temporary reverted",
+			trace: map[string]any{
+				"enabled":            true,
+				"lifecycle":          "temporary",
+				"temporary_reverted": true,
+			},
+			want: "temporary helper injected for this run and reverted afterward",
+		},
+		{
+			name: "existing helper",
+			trace: map[string]any{
+				"enabled":   true,
+				"lifecycle": "existing",
+			},
+			want: "using an existing workbook trace helper",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := New("run")
+			env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+			env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+			env.Trace = tt.trace
+			var buf bytes.Buffer
+			if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+				t.Fatal(err)
+			}
+			if got := buf.String(); !strings.Contains(got, tt.want) {
+				t.Fatalf("run trace lifecycle output missing %q:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestWriteWithOptionsRendersRunPreflightAnalysis(t *testing.T) {
+	env := Failure("run", Error{Code: "analyze_failed", Message: "1 source issue(s) must be fixed before run", Source: "xlflow", Phase: "preflight"})
+	env.Analysis = []map[string]any{{
+		"code":       "VBA105",
+		"severity":   "error",
+		"file":       "src/modules/Main.bas",
+		"line":       3,
+		"message":    "XlflowLog is called but no Public standard-module definition was found in source.",
+		"suggestion": "If you want source-controlled tracing, run `xlflow trace enable`.",
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"VBA105", "src/modules/Main.bas:3", "Suggestion:", "xlflow trace enable"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run preflight output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersRunDiagnostic(t *testing.T) {
 	env := Failure("run", Error{Code: "macro_failed", Message: "Main Err 450", Source: "Main", Number: 450, Phase: "invoke_macro"})
 	env.RunDiagnostic = map[string]any{
@@ -205,6 +269,56 @@ func TestWriteWithOptionsRendersRunDiagnostic(t *testing.T) {
 	for _, want := range []string{"Diagnostic", "missing Set", "Use Set result", "result = FindRange()"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run diagnostic output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
+	env := New("push")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true}
+	env.Source = map[string]any{"changed_only": true, "changed": true}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"updated live session workbook only", "xlflow save --session"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("push output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersTraceCommandSummary(t *testing.T) {
+	env := New("trace")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": true, "session": true}
+	env.Source = map[string]any{"path": "src/modules/XlflowTrace.bas", "updated": true}
+	env.Trace = map[string]any{"lifecycle": "enabled", "log_dir": ".xlflow/traces"}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"saved live session workbook with trace helper", "persisted in workbook and source", "Trace dir"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("trace output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersBridgeHost(t *testing.T) {
+	env := New("run")
+	env.Bridge = map[string]any{"host": "powershell.exe", "edition": "Desktop", "version": "5.1"}
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Bridge:", "powershell.exe", "Desktop", "5.1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bridge output missing %q:\n%s", want, got)
 		}
 	}
 }

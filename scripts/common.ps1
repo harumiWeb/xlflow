@@ -7,6 +7,52 @@
   Write-Verbose ("failed to configure UTF-8 console encoding: " + $_.Exception.Message)
 }
 
+function Get-XlflowPowerShellBridgeInfo {
+  $hostName = ""
+  $edition = ""
+  $version = ""
+
+  try {
+    $process = Get-Process -Id $PID -ErrorAction Stop
+    if ($null -ne $process -and -not [string]::IsNullOrWhiteSpace($process.ProcessName)) {
+      $hostName = $process.ProcessName
+      if (-not $hostName.EndsWith(".exe")) {
+        $hostName += ".exe"
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to resolve PowerShell bridge process name: " + $_.Exception.Message)
+  }
+
+  try {
+    $edition = [string]$PSVersionTable.PSEdition
+  } catch {
+    Write-Verbose ("failed to resolve PowerShell edition: " + $_.Exception.Message)
+  }
+
+  try {
+    if ($null -ne $PSVersionTable -and $null -ne $PSVersionTable.PSVersion) {
+      $version = $PSVersionTable.PSVersion.ToString()
+    }
+  } catch {
+    Write-Verbose ("failed to resolve PowerShell version: " + $_.Exception.Message)
+  }
+
+  if ([string]::IsNullOrWhiteSpace($hostName)) {
+    if ($edition -eq "Core") {
+      $hostName = "pwsh.exe"
+    } else {
+      $hostName = "powershell.exe"
+    }
+  }
+
+  return [ordered]@{
+    host = $hostName
+    edition = $edition
+    version = $version
+  }
+}
+
 function New-XlflowResult {
   param([string]$Command)
   return [ordered]@{
@@ -14,6 +60,7 @@ function New-XlflowResult {
     command = $Command
     error = $null
     logs = @()
+    bridge = (Get-XlflowPowerShellBridgeInfo)
   }
 }
 

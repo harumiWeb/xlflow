@@ -73,13 +73,13 @@ var invalidObjectMembers = map[string]map[string]invalidMemberRule{
 var traceHelperDependencies = map[string]helperDependencyRule{
 	"xlflowlog": {
 		Code:       "VBA105",
-		Reason:     "XlflowLog is provided by the xlflow trace helper module. Without a Public standard-module definition, Excel compiles the project with 'Sub or Function not defined'.",
-		Suggestion: "Run `xlflow trace enable` to persist XlflowTrace.bas in source, or use `xlflow run --trace` for temporary helper injection during execution.",
+		Reason:     "XlflowLog compiles only when a Public standard-module trace helper exists in source or xlflow injects the helper temporarily for a traced run.",
+		Suggestion: "If you want source-controlled tracing, run `xlflow trace enable` to write XlflowTrace.bas. If you only need trace during execution, rerun with `xlflow run --trace`.",
 	},
 	"xlflowsettracefile": {
 		Code:       "VBA106",
-		Reason:     "XlflowSetTraceFile is provided by the xlflow trace helper module. Without a Public standard-module definition, Excel compiles the project with 'Sub or Function not defined'.",
-		Suggestion: "Prefer `xlflow run --trace`, or add the bundled XlflowTrace.bas helper with `xlflow trace enable` before relying on XlflowSetTraceFile in source-controlled VBA.",
+		Reason:     "XlflowSetTraceFile is an xlflow trace-helper entrypoint. It compiles only when the bundled Public standard-module helper is present in source or workbook state.",
+		Suggestion: "Prefer `xlflow run --trace` instead of calling XlflowSetTraceFile directly. If your source needs the helper, run `xlflow trace enable` to write XlflowTrace.bas first.",
 	},
 }
 
@@ -283,11 +283,12 @@ func (a Analyzer) finding(path, module, procedure string, line int, lines []stri
 		file = path
 	}
 	msg := target + " is declared As " + typ + " and is assigned without Set."
-	reason := "VBA object references require Set when assigning an object value."
-	suggestion := "Use Set " + target + " = ... when the right-hand side returns an object."
+	reason := "VBA object references require `Set` when assigning an object value."
+	suggestion := "Use `Set " + target + " = ...` when the right-hand side returns an object."
 	if code == "VBA103" {
 		msg = target + " returns As " + typ + " and is assigned without Set."
-		suggestion = "Use Set " + target + " = ... when returning an object from this function."
+		reason = "Object-returning VBA functions must assign the function name with `Set` before returning."
+		suggestion = "Use `Set " + target + " = ...` inside this function body when returning a " + typ + "."
 	}
 	return Finding{
 		Code:       code,

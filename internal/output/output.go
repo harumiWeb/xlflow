@@ -40,6 +40,7 @@ type Envelope struct {
 	Workbook      any `json:"workbook,omitempty"`
 	Backup        any `json:"backup,omitempty"`
 	Source        any `json:"source,omitempty"`
+	Bridge        any `json:"bridge,omitempty"`
 	Macro         any `json:"macro,omitempty"`
 	Macros        any `json:"macros,omitempty"`
 	Issues        any `json:"issues,omitempty"`
@@ -164,10 +165,17 @@ func renderHuman(env Envelope, opts Options) string {
 	if env.Status == StatusFailed {
 		b.WriteString(r.errorBlock(env))
 	}
+	b.WriteString(r.renderBridge(env))
 	switch env.Command {
 	case "doctor":
 		b.WriteString(r.renderDoctor(env))
 	case "run":
+		if env.Issues != nil {
+			b.WriteString(r.renderLint(env))
+		}
+		if env.Analysis != nil {
+			b.WriteString(r.renderAnalysis(env))
+		}
 		b.WriteString(r.renderRun(env))
 	case "test":
 		b.WriteString(r.renderTest(env))
@@ -177,13 +185,33 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderAnalysis(env))
 	case "check":
 		b.WriteString(r.renderCheck(env))
+		if env.Issues != nil {
+			b.WriteString(r.renderLint(env))
+		}
+		if env.Analysis != nil {
+			b.WriteString(r.renderAnalysis(env))
+		}
 	case "inspect-gui":
 		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
 		b.WriteString(r.renderMacros(env))
-	case "pull", "push", "trace", "attach":
+	case "trace":
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
+		}
+		if env.Analysis != nil {
+			b.WriteString(r.renderAnalysis(env))
+		}
+		b.WriteString(r.renderTraceCommand(env))
+	case "pull", "push", "attach":
+		if env.Issues != nil {
+			b.WriteString(r.renderLint(env))
+		}
+		if env.Analysis != nil {
+			b.WriteString(r.renderAnalysis(env))
+		}
+		if env.Issues != nil || env.Analysis != nil {
+			b.WriteString(r.renderLogs(env))
 		} else {
 			b.WriteString(r.renderWorkbookSource(env))
 		}
@@ -319,14 +347,14 @@ func (r renderer) renderRun(env Envelope) string {
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(kv("Workbook", path))
 	}
-	if saveAs := stringValue(workbook, "save_as"); saveAs != "" {
-		b.WriteString(kv("Result", "copied to "+saveAs))
-	} else if saved, ok := boolValueOK(workbook, "saved"); ok {
-		if saved {
-			b.WriteString(kv("Result", "saved in place"))
-		} else {
-			b.WriteString(kv("Result", "left unchanged"))
-		}
+	if summary := summarizeRunWorkbookResult(workbook); summary != "" {
+		b.WriteString(kv("Result", summary))
+	}
+	if helper := summarizeRunTraceHelper(trace); helper != "" {
+		b.WriteString(kv("Trace helper", helper))
+	}
+	if hint := stringValue(trace, "hint"); hint != "" {
+		b.WriteString(kv("Trace hint", hint))
 	}
 	events := listOfObjects(trace["events"])
 	b.WriteString(r.renderLogsSkipping(env, traceEventLogLines(events)))
@@ -473,7 +501,7 @@ func (r renderer) renderAnalysis(env Envelope) string {
 		}
 		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(finding, "severity")+"]", "214", true), stringValue(finding, "code"), loc, stringValue(finding, "message"))
 		if suggestion := stringValue(finding, "suggestion"); suggestion != "" {
-			b.WriteString("  ")
+			b.WriteString("  Suggestion: ")
 			b.WriteString(suggestion)
 			b.WriteString("\n")
 		}
@@ -551,6 +579,40 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	if path := stringValue(source, "path"); path != "" {
 		b.WriteString(kv("Source", path))
 	}
+	if summary := summarizeWorkbookSourceResult(env.Command, workbook, source); summary != "" {
+		b.WriteString(kv("Result", summary))
+	}
+	if updated, ok := boolValueOK(source, "updated"); ok {
+		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
+	}
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderTraceCommand(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	source := objectMap(env.Source)
+	trace := objectMap(env.Trace)
+	if len(workbook) == 0 && len(source) == 0 && len(trace) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if path := stringValue(source, "path"); path != "" {
+		b.WriteString(kv("Source", path))
+	}
+	if summary := summarizeTraceCommandResult(workbook, trace); summary != "" {
+		b.WriteString(kv("Result", summary))
+	}
+	if helper := summarizeTraceCommandHelper(trace, source); helper != "" {
+		b.WriteString(kv("Trace helper", helper))
+	}
+	if logDir := stringValue(trace, "log_dir"); logDir != "" {
+		b.WriteString(kv("Trace dir", logDir))
+	}
 	if updated, ok := boolValueOK(source, "updated"); ok {
 		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
 	}
@@ -625,6 +687,177 @@ func traceEventLogLines(events []map[string]any) map[string]bool {
 		lines["["+timestamp+"] "+message] = true
 	}
 	return lines
+}
+
+func (r renderer) renderBridge(env Envelope) string {
+	bridge := objectMap(env.Bridge)
+	if len(bridge) == 0 {
+		return ""
+	}
+	summary := stringValue(bridge, "host")
+	details := make([]string, 0, 2)
+	if edition := stringValue(bridge, "edition"); edition != "" {
+		details = append(details, edition)
+	}
+	if version := stringValue(bridge, "version"); version != "" {
+		details = append(details, version)
+	}
+	if summary == "" && len(details) == 0 {
+		return ""
+	}
+	if len(details) > 0 {
+		if summary != "" {
+			summary += " (" + strings.Join(details, " ") + ")"
+		} else {
+			summary = strings.Join(details, " ")
+		}
+	}
+	return kv("Bridge", summary)
+}
+
+func summarizeRunWorkbookResult(workbook map[string]any) string {
+	if len(workbook) == 0 {
+		return ""
+	}
+	if saveAs := stringValue(workbook, "save_as"); saveAs != "" {
+		return "copied to " + saveAs
+	}
+	saved, ok := boolValueOK(workbook, "saved")
+	if !ok {
+		return ""
+	}
+	session := boolValue(workbook, "session")
+	if saved {
+		if session {
+			return "saved live session workbook to disk"
+		}
+		return "saved in place"
+	}
+	if session {
+		return "live session workbook may differ from disk; use xlflow save --session to persist"
+	}
+	return "left unchanged on disk"
+}
+
+func summarizeRunTraceHelper(trace map[string]any) string {
+	if len(trace) == 0 {
+		return ""
+	}
+	switch stringValue(trace, "lifecycle") {
+	case "temporary":
+		if boolValue(trace, "temporary_reverted") {
+			return "temporary helper injected for this run and reverted afterward"
+		}
+		return "temporary helper injected for this run"
+	case "existing":
+		return "using an existing workbook trace helper"
+	}
+	return ""
+}
+
+func summarizeWorkbookSourceResult(command string, workbook, source map[string]any) string {
+	if len(workbook) == 0 {
+		return ""
+	}
+	session := boolValue(workbook, "session")
+	saved, savedKnown := boolValueOK(workbook, "saved")
+	switch command {
+	case "push":
+		changedOnly, _ := boolValueOK(source, "changed_only")
+		changed, changedKnown := boolValueOK(source, "changed")
+		if changedOnly && changedKnown && !changed {
+			return "skipped workbook import; source unchanged"
+		}
+		if savedKnown && saved {
+			if session {
+				return "saved live session workbook to disk"
+			}
+			return "saved workbook in place"
+		}
+		if session {
+			return "updated live session workbook only; use xlflow save --session to persist"
+		}
+	case "pull":
+		if session {
+			return "exported from live session workbook"
+		}
+	case "attach":
+		return "inspected the active workbook"
+	}
+	return ""
+}
+
+func summarizeTraceCommandResult(workbook, trace map[string]any) string {
+	if len(trace) == 0 {
+		return ""
+	}
+	session := boolValue(workbook, "session")
+	saved := boolValue(workbook, "saved")
+	switch stringValue(trace, "lifecycle") {
+	case "enabled":
+		if session && saved {
+			return "saved live session workbook with trace helper"
+		}
+		if saved {
+			return "saved workbook with trace helper"
+		}
+		return "enabled trace helper"
+	case "disabled":
+		if session && saved {
+			return "saved live session workbook after trace helper removal"
+		}
+		if saved {
+			return "saved workbook after trace helper removal"
+		}
+		return "disabled trace helper"
+	}
+	if stringValue(trace, "status") != "" {
+		if session {
+			return "inspected trace helper state on the live session workbook"
+		}
+		return "inspected trace helper state"
+	}
+	return ""
+}
+
+func summarizeTraceCommandHelper(trace, source map[string]any) string {
+	if len(trace) == 0 {
+		return ""
+	}
+	switch stringValue(trace, "lifecycle") {
+	case "enabled":
+		if stringValue(source, "path") != "" {
+			return "persisted in workbook and source"
+		}
+		return "enabled in workbook only"
+	case "disabled":
+		parts := make([]string, 0, 2)
+		if boolValue(trace, "workbook_removed") {
+			parts = append(parts, "removed from workbook")
+		}
+		if boolValue(trace, "source_removed") {
+			parts = append(parts, "removed from source")
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "; ")
+		}
+		return "disabled"
+	}
+	if stringValue(trace, "status") != "" {
+		return fmt.Sprintf("workbook=%s source=%s bundled=%s",
+			yesNo(boolValue(trace, "workbook_injected")),
+			yesNo(boolValue(trace, "source_exists")),
+			yesNo(boolValue(trace, "source_matches_bundled")),
+		)
+	}
+	return ""
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 func (r renderer) errorBlock(env Envelope) string {

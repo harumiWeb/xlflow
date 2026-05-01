@@ -84,6 +84,7 @@ type ScriptResult struct {
 	Workbook      any           `json:"workbook,omitempty"`
 	Backup        any           `json:"backup,omitempty"`
 	Source        any           `json:"source,omitempty"`
+	Bridge        any           `json:"bridge,omitempty"`
 	Macro         any           `json:"macro,omitempty"`
 	Macros        any           `json:"macros,omitempty"`
 	Tests         any           `json:"tests,omitempty"`
@@ -502,6 +503,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Workbook = result.Workbook
 	env.Backup = result.Backup
 	env.Source = result.Source
+	env.Bridge = result.Bridge
 	env.Macro = result.Macro
 	env.Macros = result.Macros
 	env.Tests = result.Tests

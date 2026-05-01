@@ -60,6 +60,10 @@ pull → edit → push → lint → test/run → trace → diff
 > [!IMPORTANT]
 > xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM + PowerShell** を使用します。
 
+> [!NOTE]
+> Excel COM を使う command は、xlflow 自身が使った bridge host を top-level `bridge` に返します。
+> ただし workbook 側の VBA が別途 PowerShell を起動する場合、その host は xlflow の bridge host と一致するとは限りません。`powershell.exe` と `pwsh.exe` の差を追うときは、workbook 側で解決された実行ファイルも確認してください。
+
 ---
 
 ## 動作要件
@@ -422,6 +426,8 @@ xlflow session stop
 
 session mode は明示的に opt-in です。通常の `push` / `run` は従来どおり1回ごとに Excel を開閉します。
 
+`push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
+
 </details>
 
 <details open>
@@ -458,6 +464,7 @@ trace event は JSON の top-level `trace` フィールドに返されます。
 実行時エラーの直前にどこまで処理が進んだかを把握しやすくなります。
 
 `xlflow run --trace` は helper がない場合でも一時的に注入し、実行後に戻します。
+human output と JSON の `trace.lifecycle` で、その一時注入か、すでに永続化済みの helper かを区別できます。
 trace log は `.xlflow/traces` に保存されます。
 永続化した helper を外すには `xlflow trace disable --json`、ログを消すには `xlflow trace clean --json` を使います。
 `xlflow trace inject` は互換用 alias として残ります。

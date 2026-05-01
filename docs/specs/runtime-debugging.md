@@ -97,6 +97,18 @@ Findings explain that xlflow-oriented macros should prefer explicit `run --arg` 
 
 The bundled AI agent skill instructs agents to add trace logs at procedure entry, important branches, external file access, destructive operations, and error handlers.
 
+## PowerShell Host Diagnostics
+
+Excel COM-backed commands return top-level `bridge` metadata with `host`, `edition`, and `version`. This identifies the xlflow PowerShell bridge host only.
+
+When workbook VBA launches its own external PowerShell process, agents should not assume that it matches `bridge.host`. They should inspect the VBA command string or log the resolved executable from workbook code.
+
+Windows review checklist:
+
+1. Check `bridge.host` to confirm which PowerShell xlflow itself used.
+2. Check the workbook-side command or resolved executable if VBA launches `powershell.exe`, `pwsh.exe`, or another shell.
+3. Prefer one host consistently when debugging encoding or environment differences across external-process VBA flows.
+
 ## Agent Keepalive Output
 
 `--keepalive` on Excel COM-backed commands is for AI agents and task runners that may stop waiting when Excel COM operations are silent for too long. It is available on `new`, `doctor`, `attach`, `pull`, `push`, trace lifecycle commands, `run`, `macros`, `ui button add/list/remove`, `test`, and `check`. Keepalive writes only to stderr. Stdout remains reserved for normal human output or the JSON envelope when `--json` is set.

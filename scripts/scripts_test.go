@@ -49,6 +49,33 @@ func TestUIButtonIdAndNameNormalization(t *testing.T) {
 	}
 }
 
+func TestNewXlflowResultIncludesBridgeMetadata(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; New-XlflowResult -Command 'run' | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bridge metadata command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Bridge *struct {
+			Host    string `json:"host"`
+			Edition string `json:"edition"`
+			Version string `json:"version"`
+		} `json:"bridge"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse bridge metadata output: %v\n%s", err, out)
+	}
+	if got.Bridge == nil || got.Bridge.Host == "" || got.Bridge.Edition == "" || got.Bridge.Version == "" {
+		t.Fatalf("expected bridge metadata, got %+v", got)
+	}
+}
+
 func TestUIScriptRejectsUnsupportedActionAsStructuredFailure(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

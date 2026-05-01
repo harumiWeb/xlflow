@@ -20,6 +20,8 @@ For normal AI-agent development tasks, use an explicit xlflow session from task 
 
 Use isolated non-session commands only for one-shot CI-style verification, release checks, suspicious session state, or when the user explicitly asks not to keep Excel open.
 
+If `xlflow push --session --no-save` succeeds, or `xlflow run --session` completes without `--save` or `--save-as`, treat the live workbook as potentially newer than the `.xlsm` on disk until `xlflow save --session` runs.
+
 ## Standard Workflow
 
 1. Inspect the project.
@@ -155,6 +157,8 @@ Expected markers include `XLFLOW_DONE status=success command=pull`, `XLFLOW_DONE
 
 Use `xlflow run --trace --session --keepalive --json` when you need trace events during normal development; xlflow can temporarily inject and revert the helper if it is missing. Use `xlflow trace enable --session --keepalive --json` when you want the helper persisted in the configured workbook and source tree. Use `xlflow trace status --session --json`, `xlflow trace disable --session --json`, and `xlflow trace clean --json` to inspect or remove trace state. `xlflow trace inject` is an older alias for `trace enable`.
 
+Read the human output or top-level `trace.lifecycle` to tell whether the helper was temporary for one run or already persisted. If a traced run reports temporary helper injection but you want source-controlled tracing, follow with `xlflow trace enable --session --keepalive --json`.
+
 When debugging, add `XlflowLog` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
 
 Keep high-level progress trace logs if they help future diagnosis. Remove noisy temporary logs before finalizing.
@@ -164,6 +168,14 @@ Call XlflowLog("start GenerateReport")
 Call XlflowLog("lastRow=" & lastRow)
 Call XlflowLog("finished GenerateReport")
 ```
+
+## Windows PowerShell Checklist
+
+When workbook code launches an external PowerShell process, separate xlflow's bridge host from the workbook-side host:
+
+1. Check top-level `bridge.host` to see which PowerShell xlflow itself used.
+2. Inspect the VBA command string or log the resolved executable from workbook code; it may be `powershell.exe` even when xlflow reports `pwsh.exe`, or the reverse.
+3. If the issue looks like encoding or environment drift, standardize on one host before changing xlflow or VBA logic.
 
 ## Failure Handling
 

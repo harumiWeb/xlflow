@@ -59,6 +59,10 @@ pull → edit → push → lint → test/run → trace → diff
 > [!IMPORTANT]
 > xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM + PowerShell**.
 
+> [!NOTE]
+> Excel COM-backed commands report the xlflow bridge host in top-level `bridge`.
+> If workbook VBA launches its own external PowerShell process, that host can still differ from xlflow's bridge host. Inspect or log the workbook-side executable when debugging `powershell.exe` vs `pwsh.exe` behavior.
+
 ---
 
 ## Requirements
@@ -419,6 +423,8 @@ xlflow session stop
 
 Session mode is explicit. Normal `push` and `run` still open and close Excel for one isolated operation.
 
+When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
+
 </details>
 
 <details open>
@@ -455,6 +461,7 @@ Trace events are returned in the top-level JSON `trace` field.
 This helps identify how far execution progressed before a runtime error.
 
 `xlflow run --trace` can temporarily inject and revert the helper when it is missing.
+Human output and JSON `trace.lifecycle` distinguish that temporary path from a helper that is already persisted in workbook/source state.
 Trace logs are written under `.xlflow/traces`.
 Use `xlflow trace disable --json` to remove the persistent helper and `xlflow trace clean --json` to remove trace log files.
 `xlflow trace inject` remains as a compatibility alias for `trace enable`.
