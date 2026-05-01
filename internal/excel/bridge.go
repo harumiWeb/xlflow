@@ -43,9 +43,25 @@ type RunOptions struct {
 	SaveAs       string
 	Trace        bool
 	Mode         string
+	Direct       bool
+	Fast         bool
+	Session      bool
 	Timeout      time.Duration
 	Keepalive    CommandOptions
 	TraceDir     string
+}
+
+type PushOptions struct {
+	BackupMode  string
+	Fast        bool
+	ChangedOnly bool
+	Session     bool
+	NoSave      bool
+	Keepalive   CommandOptions
+}
+
+type SessionOptions struct {
+	Action string
 }
 
 type CommandOptions struct {
@@ -69,6 +85,8 @@ type ScriptResult struct {
 	Trace         any           `json:"trace,omitempty"`
 	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
 	UI            any           `json:"ui,omitempty"`
+	Session       any           `json:"session,omitempty"`
+	Runner        any           `json:"runner,omitempty"`
 	Analysis      any           `json:"analysis,omitempty"`
 	Check         any           `json:"check,omitempty"`
 	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
@@ -120,6 +138,23 @@ func (r Runner) Pull(cfg config.Config, opts ...CommandOptions) (output.Envelope
 }
 
 func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+	pushOpts := PushOptions{BackupMode: "always"}
+	if len(opts) > 0 {
+		pushOpts.Keepalive = opts[0]
+	}
+	return r.PushWithOptions(cfg, pushOpts)
+}
+
+func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Envelope, int, error) {
+	backupMode := opts.BackupMode
+	if backupMode == "" {
+		backupMode = "always"
+	}
+	changedOnly := opts.ChangedOnly
+	if opts.Fast {
+		backupMode = "never"
+		changedOnly = true
+	}
 	return r.run("push", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
@@ -127,8 +162,13 @@ func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope
 		"FormsDir":     filepath.Join(r.RootDir, cfg.Src.Forms),
 		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
 		"BackupRoot":   filepath.Join(r.RootDir, ".xlflow", "backups"),
+		"StatePath":    filepath.Join(r.RootDir, ".xlflow", "state", "push.json"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, opts...)
+		"BackupMode":   backupMode,
+		"ChangedOnly":  strconv.FormatBool(changedOnly),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"NoSave":       strconv.FormatBool(opts.NoSave),
+	}, opts.Keepalive)
 }
 
 func (r Runner) TraceInject(cfg config.Config, workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -194,6 +234,8 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"DisplayAlerts": strconv.FormatBool(cfg.Excel.DisplayAlerts),
 		"SaveWorkbook":  strconv.FormatBool(opts.Save),
 		"TraceEnabled":  strconv.FormatBool(opts.Trace),
+		"Direct":        strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace)),
+		"UseSession":    strconv.FormatBool(opts.Session),
 	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
@@ -213,6 +255,35 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		scriptArgs["TraceFile"] = filepath.Join(traceDir, fmt.Sprintf("trace-%d.log", time.Now().UnixNano()))
 	}
 	return scriptArgs, nil
+}
+
+func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := CommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts = opts[0]
+	}
+	return r.run("session", map[string]string{
+		"Action":       action,
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	}, cmdOpts)
+}
+
+func (r Runner) SaveSession(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+	return r.Session(cfg, "save", opts...)
+}
+
+func (r Runner) RunnerModule(cfg config.Config, action string, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := CommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts = opts[0]
+	}
+	return r.run("runner", map[string]string{
+		"Action":       action,
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	}, cmdOpts)
 }
 
 func (r Runner) Run(cfg config.Config, opts RunOptions) (output.Envelope, int, error) {
@@ -397,6 +468,8 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Trace = result.Trace
 	env.GUIBoundaries = result.GUIBoundaries
 	env.UI = result.UI
+	env.Session = result.Session
+	env.Runner = result.Runner
 	env.Analysis = result.Analysis
 	env.Check = result.Check
 	env.RunDiagnostic = result.RunDiagnostic
@@ -469,6 +542,8 @@ func exitCodeForScriptResult(result ScriptResult) int {
 	switch result.Error.Code {
 	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
 		return output.ExitValidation
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid":
+		return output.ExitConfig
 	default:
 		return output.ExitEnvironment
 	}

@@ -88,11 +88,14 @@ When the user reports a runtime failure:
 - Use `xlflow doctor --keepalive --json` before blaming VBA when Excel automation fails before user code starts.
 - Use `xlflow pull --keepalive --json` to refresh editable source from the configured workbook.
 - Use `xlflow push --keepalive` after source edits; it creates a backup before replacing VBA components.
+- Use `xlflow push --fast --keepalive` for repeated local development loops when Git/source control is the rollback mechanism.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --keepalive --json` as the primary correctness signal when tests exist.
 - Use `xlflow macros --keepalive --json` to discover runnable macro entrypoints before guessing a `run` target.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow run --headless --keepalive` for repeatable automation; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
+- Use `xlflow run --fast --keepalive` for argument-free, trace-disabled smoke checks during tight iteration.
+- For many repeated push/run cycles, use `xlflow session start`, then explicit `--session` commands, and finish with `xlflow session stop`.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.

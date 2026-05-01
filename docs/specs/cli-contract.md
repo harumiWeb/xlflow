@@ -14,13 +14,20 @@ xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]
 xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] pull [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] push [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] push [--backup always|never] [--fast] [--changed-only] [--session] [--no-save] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] session start
+xlflow [--json] session status
+xlflow [--json] session stop
+xlflow [--json] save --session
+xlflow [--json] runner install
+xlflow [--json] runner remove
+xlflow [--json] runner status
 xlflow [--json] trace enable [workbook] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace disable [workbook] [--force] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace status [workbook] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace clean [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace inject [workbook] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--direct] [--fast] [--session] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] macros [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] ui button list [--sheet <name>] [--keepalive] [--keepalive-interval <duration>]
@@ -60,11 +67,19 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import. Source-controlled `.bas`, `.cls`, and `.frm` files are UTF-8 without BOM. Excel/VBIDE import and export files are treated as CP932 at the bridge boundary, and `pull` converts exported text to UTF-8 before writing the source tree.
 
-`push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion.
+`push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion. By default `push` creates a timestamped backup under `.xlflow/backups`, replaces non-document VBA components, updates document modules, saves the workbook, and writes source fingerprints to `.xlflow/state/push.json`.
+
+`push --backup=never` skips the export backup. `push --fast` is a development-mode shorthand for `--backup=never --changed-only`. `push --changed-only` compares source fingerprints against `.xlflow/state/push.json`; when unchanged, it skips Excel/VBIDE import and returns `source.changed=false`. When changed or state is missing, v1 safely falls back to the normal full component replacement and refreshes the state file after success. `push --session` attaches to the workbook kept open by `xlflow session start` instead of opening a fresh Excel instance. `push --no-save` is allowed only with `--session` and leaves workbook changes unsaved until `xlflow save --session` or `xlflow session stop`.
+
+`session start` opens the configured workbook in Excel and writes `.xlflow/session.json` with process metadata. `session status` reports whether the recorded process is running and the configured workbook is open. `session stop` saves and closes the workbook, quits Excel, and removes the metadata. Session v1 is explicit opt-in: normal `push` and `run` do not auto-attach to sessions. `save --session` saves the workbook held by the active session.
+
+`runner install`, `runner remove`, and `runner status` manage the persistent workbook module `XlflowRunner`. In v1 this module is a stable marker for fast-run workflows; argument-free `run --fast` uses direct execution when eligible and otherwise keeps the normal temporary harness path.
 
 `trace enable` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml` and also writes the same bundled trace module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. This keeps a subsequent `push` from deleting the workbook trace module. JSON output for configured project injection includes top-level `source.path` and `source.updated` metadata. `trace inject` is a compatibility alias for `trace enable`. `trace disable` removes the workbook helper and removes source helper only when it matches xlflow's bundled helper, unless `--force` is set. `trace status` reports workbook and source helper presence plus whether the source matches the bundled helper. `trace clean` removes `.xlflow/traces`. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
+
+`run --direct` executes an argument-free, trace-disabled macro through `Excel.Run($MacroName)` without injecting the temporary harness module. It cannot be combined with `--arg` or `--trace`; those combinations fail before Excel starts. Direct runs return weaker VBA diagnostics because errors are surfaced by Excel COM rather than the xlflow harness. `run --fast` uses direct execution when the macro has no CLI arguments and trace is disabled; otherwise it falls back to the normal harness. `run --session` attaches to the workbook opened by `session start`.
 
 `run --headless` is for AI agents, tests, and CI. Before Excel starts, xlflow scans the configured VBA source tree for GUI boundaries. If any boundary is found, the run fails with `gui_boundary_detected`, exit code `1`, and top-level `gui_boundaries` containing the detected file, line, kind, symbol, severity, message, and suggestion. `run --interactive` is for human-assisted Excel workflows. It runs with Excel visible and alerts enabled so a person can complete dialogs, message boxes, or forms. `--headless` and `--interactive` cannot be combined. `--timeout` defaults to `5m`; if a run exceeds the timeout, xlflow returns `macro_timeout` with exit code `1` and guidance that a dialog, form, file picker, or loop may still be waiting. Running without either mode keeps the legacy behavior except for the timeout.
 
@@ -151,6 +166,8 @@ Command-specific fields are added at the top level:
 - `check` for `check`
 - `run_diagnostic` for enriched `run` failures
 - `trace` for traced `run`
+- `session` for session status metadata
+- `runner` for persistent runner module status
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
 - `ui` for `ui button` commands
 
@@ -164,7 +181,7 @@ Command-specific fields are added at the top level:
 
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, missing macro target, trace source removal refusal, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, and duplicate test names
-- `2`: CLI argument or configuration error
+- `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, and `runner` option combinations
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.

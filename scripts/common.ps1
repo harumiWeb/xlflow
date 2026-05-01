@@ -52,6 +52,107 @@ function Close-XlflowCom {
   [GC]::WaitForPendingFinalizers()
 }
 
+function Get-XlflowActiveExcel {
+  try {
+    return [System.Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
+  } catch {
+    throw "xlflow session is not running"
+  }
+}
+
+function Get-XlflowOpenWorkbook {
+  param($Excel, [string]$WorkbookPath)
+
+  $target = [System.IO.Path]::GetFullPath($WorkbookPath)
+  foreach ($candidate in @($Excel.Workbooks)) {
+    try {
+      if ([System.IO.Path]::GetFullPath([string]$candidate.FullName) -ieq $target) {
+        return $candidate
+      }
+    } catch {
+      Write-Verbose ("failed to inspect open workbook: " + $_.Exception.Message)
+    }
+  }
+  throw "xlflow session workbook is not open: $WorkbookPath"
+}
+
+function Get-XlflowFileHash {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return ""
+  }
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-XlflowSourceFingerprint {
+  param(
+    [string]$WorkbookPath,
+    [string]$ModulesDir,
+    [string]$ClassesDir,
+    [string]$FormsDir,
+    [string]$WorkbookDir
+  )
+
+  $files = New-Object System.Collections.Generic.List[object]
+  foreach ($entry in @(
+    @{ kind = "module"; dir = $ModulesDir },
+    @{ kind = "class"; dir = $ClassesDir },
+    @{ kind = "form"; dir = $FormsDir },
+    @{ kind = "workbook"; dir = $WorkbookDir }
+  )) {
+    $dir = [string]$entry.dir
+    if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) {
+      continue
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -in @(".bas", ".cls", ".frm", ".frx") } | Sort-Object FullName) {
+      $base = [System.IO.Path]::GetFullPath($dir).TrimEnd("\", "/")
+      $full = [System.IO.Path]::GetFullPath($file.FullName)
+      $relative = $full
+      if ($full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $full.Substring($base.Length).TrimStart("\", "/")
+      }
+      $files.Add([ordered]@{
+        kind = [string]$entry.kind
+        path = $relative.Replace("\", "/")
+        hash = Get-XlflowFileHash -Path $file.FullName
+      })
+    }
+  }
+  return [pscustomobject][ordered]@{
+    workbook_path = [System.IO.Path]::GetFullPath($WorkbookPath)
+    files = @($files.ToArray())
+  }
+}
+
+function Test-XlflowFingerprintMatchesState {
+  param($Fingerprint, [string]$StatePath)
+
+  if ([string]::IsNullOrWhiteSpace($StatePath) -or -not (Test-Path -LiteralPath $StatePath)) {
+    return $false
+  }
+  try {
+    $existing = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+    $currentJson = $Fingerprint | ConvertTo-Json -Depth 10 -Compress
+    $existingJson = $existing | ConvertTo-Json -Depth 10 -Compress
+    return $currentJson -eq $existingJson
+  } catch {
+    return $false
+  }
+}
+
+function Write-XlflowFingerprintState {
+  param($Fingerprint, [string]$StatePath)
+
+  if ([string]::IsNullOrWhiteSpace($StatePath)) {
+    return
+  }
+  $parent = Split-Path -Parent $StatePath
+  if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+  $Fingerprint | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $StatePath -Encoding UTF8
+}
+
 function Get-XlflowComponentPath {
   param($Component, [string]$ModulesDir, [string]$ClassesDir, [string]$FormsDir, [string]$WorkbookDir)
   $name = $Component.Name
@@ -487,6 +588,51 @@ function Test-XlflowTraceModuleInjected {
 
   try {
     $null = $VBProject.VBComponents.Item("XlflowTrace")
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function New-XlflowRunnerModuleCode {
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.AppendLine("Option Explicit")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("' Persistent marker module for xlflow fast run workflows.")
+  [void]$builder.AppendLine("Public Function XlflowRunnerVersion() As String")
+  [void]$builder.AppendLine('  XlflowRunnerVersion = "1"')
+  [void]$builder.AppendLine("End Function")
+  return $builder.ToString()
+}
+
+function Test-XlflowRunnerModuleInstalled {
+  param($VBProject)
+  try {
+    $null = $VBProject.VBComponents.Item("XlflowRunner")
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Install-XlflowRunnerModule {
+  param($VBProject)
+  try {
+    $existing = $VBProject.VBComponents.Item("XlflowRunner")
+    $VBProject.VBComponents.Remove($existing)
+  } catch {
+    Write-Verbose ("XlflowRunner was not installed before install: " + $_.Exception.Message)
+  }
+  $component = $VBProject.VBComponents.Add(1)
+  $component.Name = "XlflowRunner"
+  $component.CodeModule.AddFromString((New-XlflowRunnerModuleCode))
+}
+
+function Remove-XlflowRunnerModule {
+  param($VBProject)
+  try {
+    $existing = $VBProject.VBComponents.Item("XlflowRunner")
+    $VBProject.VBComponents.Remove($existing)
     return $true
   } catch {
     return $false

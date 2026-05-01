@@ -60,6 +60,9 @@ func (a *app) rootCommand() *cobra.Command {
 		a.attachCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
+		a.sessionCommand(),
+		a.saveCommand(),
+		a.runnerCommand(),
 		a.traceCommand(),
 		a.runCommand(),
 		a.macrosCommand(),
@@ -536,6 +539,11 @@ func (a *app) pullCommand() *cobra.Command {
 
 func (a *app) pushCommand() *cobra.Command {
 	var keepalive keepaliveFlags
+	var backupMode string
+	var fast bool
+	var changedOnly bool
+	var session bool
+	var noSave bool
 
 	cmd := &cobra.Command{
 		Use:   "push",
@@ -550,11 +558,15 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pushOpts, err := buildPushOptions(backupMode, fast, changedOnly, session, noSave, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
+			}
 			var env output.Envelope
 			var code int
 			run := func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Push(cfg, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, pushOpts)
 				return runErr
 			}
 			err = a.withExcelProgress("Importing VBA source", keepaliveOpts, run)
@@ -564,8 +576,37 @@ func (a *app) pushCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().StringVar(&backupMode, "backup", "always", "backup policy: always or never")
+	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast push defaults")
+	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
+	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
+}
+
+func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bool, noSave bool, keepalive excel.CommandOptions) (excel.PushOptions, error) {
+	if backupMode == "" {
+		backupMode = "always"
+	}
+	if backupMode != "always" && backupMode != "never" {
+		return excel.PushOptions{}, fmt.Errorf("--backup must be always or never")
+	}
+	if noSave && !session {
+		return excel.PushOptions{}, fmt.Errorf("--no-save requires --session")
+	}
+	if fast {
+		backupMode = "never"
+		changedOnly = true
+	}
+	return excel.PushOptions{
+		BackupMode:  backupMode,
+		Fast:        fast,
+		ChangedOnly: changedOnly,
+		Session:     session,
+		NoSave:      noSave,
+		Keepalive:   keepalive,
+	}, nil
 }
 
 func addKeepaliveFlags(cmd *cobra.Command, keepalive *keepaliveFlags) {
@@ -584,12 +625,15 @@ func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.Comman
 	}, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
 	if headless && interactive {
 		return excel.RunOptions{}, fmt.Errorf("--headless and --interactive cannot be combined")
+	}
+	if direct && trace {
+		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --trace")
 	}
 	keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
 	if err != nil {
@@ -623,6 +667,9 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		}
 		args = append(args, excel.RunArgument{Type: parts[0], Value: parts[1]})
 	}
+	if direct && len(args) > 0 {
+		return excel.RunOptions{}, fmt.Errorf("--direct cannot be used with --arg")
+	}
 	mode := ""
 	if headless {
 		mode = "headless"
@@ -638,9 +685,93 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		SaveAs:       saveAs,
 		Trace:        trace,
 		Mode:         mode,
+		Direct:       direct,
+		Fast:         fast,
+		Session:      session,
 		Timeout:      timeout,
 		Keepalive:    keepaliveOpts,
 	}, nil
+}
+
+func (a *app) sessionCommand() *cobra.Command {
+	session := &cobra.Command{
+		Use:   "session",
+		Short: "Manage an xlflow Excel session",
+	}
+	for _, action := range []string{"start", "status", "stop"} {
+		action := action
+		cmd := &cobra.Command{
+			Use:   action,
+			Short: action + " the xlflow Excel session",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				cfg, err := a.loadConfig("session")
+				if err != nil {
+					return err
+				}
+				env, code, err := excel.Runner{RootDir: a.cwd}.Session(cfg, action)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
+			},
+		}
+		session.AddCommand(cmd)
+	}
+	return session
+}
+
+func (a *app) saveCommand() *cobra.Command {
+	var session bool
+	cmd := &cobra.Command{
+		Use:   "save --session",
+		Short: "Save the current xlflow session workbook",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !session {
+				return a.writeFailure("save", output.ExitConfig, "save_args_invalid", fmt.Errorf("--session is required"))
+			}
+			cfg, err := a.loadConfig("save")
+			if err != nil {
+				return err
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.SaveSession(cfg)
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&session, "session", false, "save the workbook held by xlflow session")
+	return cmd
+}
+
+func (a *app) runnerCommand() *cobra.Command {
+	runner := &cobra.Command{
+		Use:   "runner",
+		Short: "Manage the persistent xlflow runner module",
+	}
+	for _, action := range []string{"install", "remove", "status"} {
+		action := action
+		cmd := &cobra.Command{
+			Use:   action,
+			Short: action + " the persistent xlflow runner module",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				cfg, err := a.loadConfig("runner")
+				if err != nil {
+					return err
+				}
+				env, code, err := excel.Runner{RootDir: a.cwd}.RunnerModule(cfg, action)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
+			},
+		}
+		runner.AddCommand(cmd)
+	}
+	return runner
 }
 
 func (a *app) runCommand() *cobra.Command {
@@ -651,6 +782,9 @@ func (a *app) runCommand() *cobra.Command {
 	var trace bool
 	var headless bool
 	var interactive bool
+	var direct bool
+	var fast bool
+	var session bool
 	var timeout time.Duration
 	var keepalive bool
 	var keepaliveInterval time.Duration
@@ -668,7 +802,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, timeout, keepalive, keepaliveInterval)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, direct, fast, session, timeout, keepalive, keepaliveInterval)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -720,6 +854,9 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
 	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
+	cmd.Flags().BoolVar(&direct, "direct", false, "run an argument-free macro without injecting a temporary harness")
+	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast run defaults")
+	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
 	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")

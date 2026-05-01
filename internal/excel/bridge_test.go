@@ -140,6 +140,9 @@ func TestBuildRunScriptArgsSerializesArgumentsAndSaveAs(t *testing.T) {
 	if args["SaveWorkbook"] != "false" {
 		t.Fatalf("save flag = %q", args["SaveWorkbook"])
 	}
+	if args["Direct"] != "false" || args["UseSession"] != "false" {
+		t.Fatalf("unexpected direct/session defaults: %+v", args)
+	}
 	if args["SaveAsPath"] != filepath.Join(root, "build", "Result.xlsm") {
 		t.Fatalf("save-as path = %q", args["SaveAsPath"])
 	}
@@ -147,6 +150,22 @@ func TestBuildRunScriptArgsSerializesArgumentsAndSaveAs(t *testing.T) {
 	wantJSON64 := base64.StdEncoding.EncodeToString([]byte(wantJSON))
 	if args["MacroArgsJSON"] != wantJSON64 {
 		t.Fatalf("macro args json base64 = %s, want %s", args["MacroArgsJSON"], wantJSON64)
+	}
+}
+
+func TestBuildRunScriptArgsPassesFastDirectAndSession(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:   "Main.Run",
+		Fast:    true,
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["Direct"] != "true" || args["UseSession"] != "true" {
+		t.Fatalf("unexpected args: %+v", args)
 	}
 }
 

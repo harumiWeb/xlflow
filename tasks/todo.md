@@ -1,12 +1,12 @@
-# Runtime Diagnostics Todo
+# xlflow Performance Mode Todo
 
-- [x] Add `internal/analyze` with `VBA101`, `VBA102`, and `VBA103`.
-- [x] Add `xlflow analyze` and top-level `analysis` output.
-- [x] Add `xlflow check` aggregate output.
-- [x] Add `run_diagnostic` enrichment for macro failures.
-- [x] Add `trace enable/disable/status/clean` while preserving `trace inject`.
-- [x] Move traced run logs to `.xlflow/traces` and support temporary helper injection.
-- [x] Update scaffolded source modules toward `Main.Run -> App.RunCore`.
-- [x] Update README, specs, bundled skill, and working task docs.
-- [x] Run full `go test ./...` with an 8-minute timeout.
-- [x] Run Excel COM-backed script tests available in the local environment.
+- [x] Add push fast flags and Go option validation.
+- [x] Add push source fingerprint state and no-op changed-only skip.
+- [x] Add run direct/fast/session flags and Go option validation.
+- [x] Add PowerShell direct run path.
+- [x] Add explicit Excel session commands and session attach support.
+- [x] Add persistent runner module commands.
+- [x] Update CLI contract, README, bundled skill, and ADR.
+- [x] Add focused Go tests for CLI/script argument plumbing.
+- [x] Run focused Go unit tests and PowerShell parse tests.
+- [x] Run full Excel COM-backed script/e2e tests in an environment where they complete within the expected long timeout.

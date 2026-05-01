@@ -48,6 +48,8 @@ type Envelope struct {
 	Trace         any `json:"trace,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
 	UI            any `json:"ui,omitempty"`
+	Session       any `json:"session,omitempty"`
+	Runner        any `json:"runner,omitempty"`
 	Analysis      any `json:"analysis,omitempty"`
 	Check         any `json:"check,omitempty"`
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`

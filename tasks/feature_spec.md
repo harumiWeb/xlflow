@@ -1,34 +1,33 @@
-# Runtime Diagnostics Spec
+# xlflow Performance Mode Spec
 
 ## Goal
 
-Make xlflow failures easier to repair by combining lightweight VBA source analysis, aggregate preflight checks, lower-friction trace commands, and enriched `run` failure diagnostics.
+Speed up repeated agent development loops while preserving the current safe defaults for CI and release workflows.
 
 ## CLI Contract
 
-- `xlflow analyze [--json]`
-- `xlflow check [--json] [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow trace enable [workbook] [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow trace disable [workbook] [--force] [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow trace status [workbook] [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow trace clean [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow trace inject [workbook]` remains a compatibility alias for `trace enable`.
+- `xlflow push --backup=always|never [--changed-only] [--fast] [--session] [--no-save]`
+- `xlflow run [macro] [--direct] [--fast] [--session]`
+- `xlflow runner install|remove|status`
+- `xlflow session start|status|stop`
+- `xlflow save --session`
 
-## Output Contract
+## Behavior
 
-- `analyze` returns top-level `analysis`.
-- `check` returns top-level `check`, plus `issues`, `analysis`, and doctor diagnostics where available.
-- Failed `run` results may include top-level `run_diagnostic`.
-- Trace commands return lifecycle/status/clean metadata under top-level `trace`.
+- Default `push` still backs up, fully replaces non-document components, updates document modules, saves, and closes Excel.
+- `push --backup=never` skips backup export.
+- `push --changed-only` uses `.xlflow/state/push.json`; unchanged source skips Excel/VBIDE import, changed or missing state falls back to full push.
+- `push --fast` expands to `--backup=never --changed-only`.
+- `push --no-save` is valid only with `--session`.
+- `run --direct` is valid only without `--arg` and without `--trace`; it uses `Excel.Run` directly and returns weaker diagnostics.
+- `run --fast` uses direct execution when eligible and otherwise falls back to the normal temporary harness.
+- `session start` keeps the configured workbook open and writes `.xlflow/session.json`.
+- `--session` commands attach to the already-open workbook by path.
+- `session stop` saves, closes, quits Excel, and removes session metadata.
 
-## Analyzer Rules
+## Outputs
 
-- `VBA101`: object variable assignment likely missing `Set`.
-- `VBA102`: object-returning function assignment likely missing `Set`.
-- `VBA103`: object-returning function body likely missing `Set <FunctionName> = ...`.
-
-## Failure Contract
-
-- Analyzer findings exit `1`.
-- `check` exits `1` for lint/analyze findings and `3` for doctor/environment failure.
-- `trace disable` refuses to delete a modified `XlflowTrace.bas` unless `--force` is set.
+- `push` may include top-level `source.changed`, `source.changed_only`, and `source.state`.
+- `run.macro.direct` indicates whether the direct path was used.
+- `session` commands may include top-level `session`.
+- `runner` commands may include top-level `runner`.
