@@ -327,6 +327,34 @@ try {
 	}
 }
 
+func TestXlflowFileHashDoesNotDependOnGetFileHashCmdlet(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = New-TemporaryFile
+try {
+  [System.IO.File]::WriteAllText($tmp, 'abc', [System.Text.Encoding]::ASCII)
+  function Get-FileHash { throw 'Get-FileHash should not be called' }
+  Get-XlflowFileHash -Path $tmp
+} finally {
+  Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("file hash helper failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	const want = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	if got != want {
+		t.Fatalf("hash = %q, want %q", got, want)
+	}
+}
+
 func TestCopyXlflowSourceForImportPreservesFrxBytes(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
