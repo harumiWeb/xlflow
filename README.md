@@ -1,103 +1,115 @@
 <p align="center">
-    <img width="600" alt="logo" src="docs/images/logo.png" />
+    <img width="600" alt="xlflow logo" src="docs/images/logo.png" />
 </p>
 
 <p align="center">
-  <em>xlflow - An Excel VBA development framework for the AI agent era</em>
+  <em>Excel VBA development, rebuilt for CLI-first humans and AI agents.</em>
 </p>
 
 <p align="center">
-  <a href="README.md">
-    English
-  </a>
-   |
-  <a href="README.ja.md">
-    日本語
-  </a>
+  <a href="README.md">English</a>
+  |
+  <a href="README.ja.md">日本語</a>
 </p>
 
 # xlflow
 
-**An Excel VBA development framework for the AI agent era**
+**xlflow** is an Excel VBA development framework for the AI agent era.
 
-xlflow turns Excel VBA projects into a CLI-first development workflow.
+It turns `.xlsm` workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, traced, and executed from the command line.
 
-Traditional Excel VBA development usually means editing code directly in the VBE, running macros manually, and debugging problems through the Excel UI. That workflow is cumbersome for humans and especially unsuitable for AI agents that operate primarily through the command line.
+> [!TIP]
+> Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
 
-xlflow lets you manage VBA as normal source code and inspect, import, run, test, trace, and compare Excel VBA projects from the CLI.
+---
 
-## What xlflow can do
+## Why xlflow?
 
-- Export VBA modules from `.xlsm` workbooks
-- Edit `.bas`, `.cls`, and `.frm` files as normal source code
-- Import edited VBA source back into Excel workbooks
-- Run macros from the CLI
-- Run VBA tests from the CLI
-- Compare workbook cell values, formulas, and exported VBA source
-- Lint VBA for automation-hostile patterns
-- Detect GUI interaction boundaries before unattended runs
-- Collect runtime logs through trace events
-- Return stable JSON for AI agents
-- Install bundled Skills for Codex, Claude, Cursor, Gemini, and other agents
+Traditional VBA development is still heavily tied to the Excel UI and the Visual Basic Editor.
+That works for small manual edits, but it becomes painful when you want repeatable development, source control, tests, diffs, or AI-agent-assisted changes.
 
-## Why xlflow exists
-
-Excel VBA is still an important automation platform in many business environments. At the same time, it is difficult for AI agents to work with safely.
-
-Common problems include:
-
-- VBA code is trapped inside `.xlsm` files
-- Editing, running, and verifying VBA from the CLI is hard
-- Macro entrypoints are often unclear
-- Runtime errors are difficult to locate and diagnose
-- File picker dialogs and `MsgBox` calls block unattended automation
-- Tests and diffs are hard to standardize
-
-xlflow provides the following development loop for Excel VBA:
+| Pain in normal VBA development | What xlflow adds |
+| --- | --- |
+| VBA code is trapped inside `.xlsm` files | Export/import VBA as `.bas`, `.cls`, and `.frm` source files |
+| Macro entrypoints are unclear | Discover runnable `Public Sub` procedures with `xlflow macros` |
+| Runtime failures are hard to locate | Return structured errors, diagnostics, and trace logs |
+| File dialogs and `MsgBox` block automation | Detect GUI boundaries before headless runs |
+| Workbook changes are hard to review | Compare values, formulas, sheets, and exported VBA source |
+| AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output |
 
 ```text
 pull → edit → push → lint → test/run → trace → diff
 ```
 
-This makes Excel VBA closer to normal software development for both humans and AI agents.
+---
+
+## What xlflow can do
+
+| Area | Capabilities |
+| --- | --- |
+| Source control | Export and import standard modules, class modules, UserForms, and document modules |
+| Execution | Run macros from the CLI with typed arguments |
+| Testing | Discover and run VBA test procedures |
+| Linting | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
+| GUI safety | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries |
+| Debugging | Collect trace events and return runtime diagnostics |
+| Diffing | Compare workbook cell values, formulas, sheet structure, and exported VBA source |
+| AI agents | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents |
+
+> [!IMPORTANT]
+> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM + PowerShell**.
+
+---
 
 ## Requirements
 
-xlflow is Windows-first.
+| Requirement | Needed for |
+| --- | --- |
+| Windows | Excel COM automation |
+| Microsoft Excel | `new`, `init`, `pull`, `push`, `run`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell | Excel automation bridge |
+| Trust access to the VBA project object model | Reading and writing VBA projects |
+| Go | Installing from source with `go install` |
 
-Excel operations use PowerShell and Excel COM. Commands that operate on workbooks, such as `pull`, `push`, `run`, `test`, `macros`, and `trace`, require Windows and Microsoft Excel.
+> [!NOTE]
+> Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
-Reading and writing VBA projects also requires enabling **Trust access to the VBA project object model** in Excel.
+> [!WARNING]
+> In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
 
-Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+---
 
 ## Installation
 
-If Go is available, install xlflow with:
+Install xlflow with Go:
 
 ```bash
 go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
-After installation, verify that the command is available:
+Verify the installation:
 
 ```bash
 xlflow --help
 ```
 
-To run xlflow directly from a development checkout:
+For development checkout usage:
 
 ```bash
 go run ./cmd/xlflow --help
 ```
 
-If you use Taskfile:
+With Taskfile:
 
 ```bash
 task run -- --help
 ```
 
+---
+
 ## Quick start
+
+### 1. Create or initialize a project
 
 Create a new xlflow project and macro-enabled workbook:
 
@@ -105,45 +117,45 @@ Create a new xlflow project and macro-enabled workbook:
 xlflow new Book.xlsm
 ```
 
-To install the AI agent Skill during project creation:
-
-```bash
-xlflow new Book.xlsm --with-skill --agent codex
-```
-
-To start from an existing Excel workbook:
+Or start from an existing workbook:
 
 ```bash
 xlflow init Book.xlsm
 ```
 
-Check Excel, COM, and VBIDE access:
+Install the AI agent Skill during project creation:
+
+```bash
+xlflow new Book.xlsm --with-skill --agent codex
+```
+
+### 2. Check the Excel automation environment
 
 ```bash
 xlflow doctor --json
 ```
 
-Export VBA from the workbook into source files:
+> [!TIP]
+> If `pull`, `push`, `run`, or `test` fails because of Excel, COM, PowerShell, or VBIDE settings, run `doctor` first.
+
+### 3. Export VBA into source files
 
 ```bash
 xlflow pull --json
 ```
 
-After editing VBA source, import it back into the workbook:
+Edit the exported `.bas`, `.cls`, and `.frm` files under `src/` with your normal editor.
+
+### 4. Import edited source back into the workbook
 
 ```bash
 xlflow push --json
 ```
 
-Discover runnable macro entrypoints:
+### 5. Discover and run macros
 
 ```bash
 xlflow macros --json
-```
-
-Run a macro:
-
-```bash
 xlflow run Main.Run --json
 ```
 
@@ -153,25 +165,98 @@ For unattended automation, prefer headless mode:
 xlflow run Main.Run --headless --json
 ```
 
-If the macro intentionally shows file pickers, message boxes, or UserForms, use interactive mode so a person can operate Excel:
+If the macro intentionally shows file pickers, message boxes, or UserForms, use interactive mode:
 
 ```bash
 xlflow run Main.Run --interactive --timeout 5m --json
 ```
 
-Run VBA tests:
-
-```bash
-xlflow test --json
-```
-
-Run the linter:
+### 6. Lint and test
 
 ```bash
 xlflow lint --json
+xlflow test --json
 ```
 
-## Commands
+---
+
+## Common workflows
+
+### AI-agent-assisted VBA editing
+
+```text
+1. Read xlflow.toml
+2. Run xlflow pull --json when the workbook may have changed
+3. Edit files under src/
+4. Run xlflow push --json
+5. Run xlflow lint --json
+6. Run xlflow test --json
+7. Run xlflow macros --json
+8. Run xlflow run <qualified_name> --headless --json
+9. Use xlflow run --trace --json when runtime failures are unclear
+10. Use xlflow diff --json when workbook changes must be reviewed
+```
+
+> [!IMPORTANT]
+> AI agents and CI-like scripts should prefer `--json`. The JSON envelope is designed to be stable and easier to parse than human-readable output.
+
+### Human-assisted Excel sessions
+
+Use `attach` when a human has Excel open and you want to validate the active workbook before working with it:
+
+```bash
+xlflow attach --active --json
+```
+
+> [!NOTE]
+> `attach` is a safety check. It confirms that the active Excel workbook matches the configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
+
+### GUI-heavy macros
+
+Inspect GUI boundaries before deciding whether a macro can run headlessly:
+
+```bash
+xlflow inspect-gui --json
+```
+
+| Result | Suggested mode |
+| --- | --- |
+| No GUI boundaries | `xlflow run ... --headless --json` |
+| File picker, `InputBox`, modal `MsgBox`, or UserForm detected | `xlflow run ... --interactive --timeout 5m --json` |
+| GUI code wraps core logic | Refactor core logic into parameterized headless procedures |
+
+> [!WARNING]
+> Headless automation and modal Excel UI do not mix. Use `inspect-gui` before unattended runs and keep GUI entrypoints thin.
+
+---
+
+## Command map
+
+| Command | Purpose | Typical usage |
+| --- | --- | --- |
+| `new` | Create a new xlflow project and `.xlsm` workbook | `xlflow new Book.xlsm` |
+| `init` | Initialize xlflow from an existing workbook | `xlflow init Book.xlsm` |
+| `doctor` | Diagnose Excel, COM, PowerShell, and VBIDE access | `xlflow doctor --json` |
+| `attach` | Validate the workbook currently active in Excel | `xlflow attach --active --json` |
+| `pull` | Export VBA components into `src/` | `xlflow pull --json` |
+| `push` | Import VBA source back into the workbook | `xlflow push --json` |
+| `macros` | Discover runnable macro entrypoints | `xlflow macros --json` |
+| `run` | Execute a macro from the CLI | `xlflow run Main.Run --json` |
+| `trace` | Enable, collect, and clean VBA trace logs | `xlflow trace enable --json` |
+| `test` | Run VBA tests | `xlflow test --json` |
+| `diff` | Compare workbook content and optional VBA source | `xlflow diff before.xlsm after.xlsm --json` |
+| `lint` | Lint VBA source | `xlflow lint --json` |
+| `analyze` | Analyze runtime-risk patterns without opening Excel | `xlflow analyze --json` |
+| `check` | Run `lint`, `analyze`, and `doctor` as a preflight | `xlflow check --keepalive --json` |
+| `inspect-gui` | Detect GUI interaction boundaries | `xlflow inspect-gui --json` |
+| `skill install` | Install the bundled xlflow Skill for AI agents | `xlflow skill install --agent codex` |
+
+---
+
+## Commands in detail
+
+<details open>
+<summary><strong>Project setup: <code>new</code>, <code>init</code>, <code>doctor</code>, <code>attach</code></strong></summary>
 
 ### `xlflow new`
 
@@ -183,9 +268,12 @@ xlflow new Sales
 xlflow new Sales.xlsm
 ```
 
-When no argument is provided, xlflow creates `build/Book.xlsm`. When the name has no extension, `.xlsm` is appended. `new` creates a macro-enabled workbook, so extensions other than `.xlsm` are rejected.
+When no argument is provided, xlflow creates `build/Book.xlsm`.
+When the name has no extension, `.xlsm` is appended.
+`new` creates a macro-enabled workbook, so extensions other than `.xlsm` are rejected.
 
-`new` creates the project structure, including `xlflow.toml`, `src/`, `tests/`, `build/`, and `.xlflow/`. It also creates or updates `.gitignore` to ignore Excel temporary files and xlflow-generated artifacts.
+`new` creates the project structure, including `xlflow.toml`, `src/`, `tests/`, `build/`, and `.xlflow/`.
+It also creates or updates `.gitignore` to ignore Excel temporary files and xlflow-generated artifacts.
 
 ### `xlflow init`
 
@@ -205,8 +293,7 @@ Diagnoses the Excel automation environment.
 xlflow doctor --json
 ```
 
-It checks whether Excel is installed, whether the workbook can be opened, and whether VBIDE access is available. If `pull`, `push`, `run`, or `test` fails because of the environment, run `doctor` first.
-
+It checks whether Excel is installed, whether the workbook can be opened, and whether VBIDE access is available.
 When source files are available, `doctor` also reports GUI boundary candidates that may block headless runs.
 
 ### `xlflow attach`
@@ -217,7 +304,12 @@ Validates the workbook currently active in Excel.
 xlflow attach --active --json
 ```
 
-This is a safety check for human-assisted sessions. It confirms that the active Excel workbook matches configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
+This is useful for human-assisted sessions where Excel is already open.
+
+</details>
+
+<details open>
+<summary><strong>VBA source loop: <code>pull</code>, <code>push</code>, <code>macros</code>, <code>run</code></strong></summary>
 
 ### `xlflow pull`
 
@@ -237,17 +329,19 @@ Imports VBA source under `src/` back into the Excel workbook.
 xlflow push --json
 ```
 
-It reads `.bas`, `.cls`, and `.frm` files and imports them through VBIDE. UserForm `.frx` files are treated as binary companion files.
+It reads `.bas`, `.cls`, and `.frm` files and imports them through VBIDE.
+UserForm `.frx` files are treated as binary companion files.
 
 ### `xlflow macros`
 
-Discovers runnable Public Sub entrypoints.
+Discovers runnable `Public Sub` entrypoints.
 
 ```bash
 xlflow macros --json
 ```
 
-AI agents and automation scripts should run this command before guessing a macro name. Use the returned `qualified_name` with `xlflow run` to avoid entrypoint mistakes.
+> [!TIP]
+> AI agents and automation scripts should run this command before guessing a macro name. Use the returned `qualified_name` with `xlflow run` to avoid entrypoint mistakes.
 
 ### `xlflow run`
 
@@ -267,7 +361,8 @@ xlflow run Report.Generate \
   --json
 ```
 
-`--arg` accepts typed arguments with `string:`, `int:`, and `bool:` prefixes. Empty values are allowed only for `string:`.
+`--arg` accepts typed arguments with `string:`, `int:`, and `bool:` prefixes.
+Empty values are allowed only for `string:`.
 
 By default, `run` does not save the workbook. To persist results, explicitly pass `--save` or `--save-as`.
 
@@ -276,9 +371,19 @@ xlflow run Report.Generate --save --json
 xlflow run Report.Generate --save-as build\Result.xlsm --json
 ```
 
-When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available. Runtime failures also include `run_diagnostic` when xlflow can match the failure to nearby source or a known VBA pattern such as a missing `Set` assignment.
+When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available.
+Runtime failures also include `run_diagnostic` when xlflow can match the failure to nearby source or a known VBA pattern such as a missing `Set` assignment.
 
-`--headless` rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries`. `--interactive` runs with Excel visible and alerts enabled for human operation. `--timeout` defaults to `5m` and returns `macro_timeout` when execution does not complete in time.
+| Mode | Behavior |
+| --- | --- |
+| `--headless` | Rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries` |
+| `--interactive` | Runs with Excel visible and alerts enabled for human operation |
+| `--timeout 5m` | Stops execution if it does not complete in time and returns `macro_timeout` |
+
+</details>
+
+<details open>
+<summary><strong>Debugging and testing: <code>trace</code>, <code>test</code>, <code>diff</code></strong></summary>
 
 ### `xlflow trace`
 
@@ -291,7 +396,7 @@ xlflow trace enable --json
 xlflow trace status --json
 ```
 
-Then write logs from VBA:
+Write logs from VBA:
 
 ```vb
 Call XlflowLog("start GenerateReport")
@@ -305,9 +410,13 @@ Run the macro with trace enabled:
 xlflow run Main.Run --trace --json
 ```
 
-Trace events are returned in the top-level JSON `trace` field. This helps identify how far execution progressed before a runtime error.
+Trace events are returned in the top-level JSON `trace` field.
+This helps identify how far execution progressed before a runtime error.
 
-`xlflow run --trace` can temporarily inject and revert the helper when it is missing. Trace logs are written under `.xlflow/traces`. Use `xlflow trace disable --json` to remove the persistent helper and `xlflow trace clean --json` to remove trace log files. `xlflow trace inject` remains as a compatibility alias for `trace enable`.
+`xlflow run --trace` can temporarily inject and revert the helper when it is missing.
+Trace logs are written under `.xlflow/traces`.
+Use `xlflow trace disable --json` to remove the persistent helper and `xlflow trace clean --json` to remove trace log files.
+`xlflow trace inject` remains as a compatibility alias for `trace enable`.
 
 ### `xlflow test`
 
@@ -325,7 +434,8 @@ To run a single test, use `--filter`:
 xlflow test --filter TestCreateReport --json
 ```
 
-New and initialized projects include `src/modules/XlflowAssert.bas`. Use `AssertEquals expected, actual, [message]` to compare scalar values.
+New and initialized projects include `src/modules/XlflowAssert.bas`.
+Use `AssertEquals expected, actual, [message]` to compare scalar values.
 
 ```vb
 Public Sub TestCreateReport()
@@ -333,7 +443,8 @@ Public Sub TestCreateReport()
 End Sub
 ```
 
-`AssertEquals` does not support object or array comparison. Compare scalar properties such as `Range.Value2` instead of passing `Range` objects directly.
+> [!NOTE]
+> `AssertEquals` does not support object or array comparison. Compare scalar properties such as `Range.Value2` instead of passing `Range` objects directly.
 
 ### `xlflow diff`
 
@@ -354,7 +465,13 @@ xlflow diff before.xlsm after.xlsm \
   --json
 ```
 
-Differences are reported as successful command results. Inspect `diff.summary.total_diffs` in JSON to determine whether anything changed.
+> [!IMPORTANT]
+> Differences are reported as successful command results. `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` in JSON to determine whether anything changed.
+
+</details>
+
+<details open>
+<summary><strong>Quality gates: <code>lint</code>, <code>analyze</code>, <code>check</code>, <code>inspect-gui</code></strong></summary>
 
 ### `xlflow lint`
 
@@ -364,7 +481,7 @@ Lints VBA source.
 xlflow lint --json
 ```
 
-It detects patterns that are unsafe or inconvenient for AI agents and unattended automation, including:
+It detects patterns that are unsafe or inconvenient for AI agents and unattended automation:
 
 - Missing `Option Explicit`
 - `Select` usage
@@ -382,7 +499,8 @@ Analyzes VBA source for runtime-risk patterns without opening Excel.
 xlflow analyze --json
 ```
 
-The first analyzer rules report likely missing `Set` assignments for object variables and object-returning functions. Findings are returned in top-level `analysis` with file, module, procedure, line, nearby code, reason, and suggestion.
+The first analyzer rules report likely missing `Set` assignments for object variables and object-returning functions.
+Findings are returned in top-level `analysis` with file, module, procedure, line, nearby code, reason, and suggestion.
 
 ### `xlflow check`
 
@@ -392,7 +510,8 @@ Runs the standard preflight sequence:
 xlflow check --keepalive --json
 ```
 
-`check` runs `lint`, `analyze`, and `doctor`, then returns an aggregate top-level `check` object. It continues after lint/analyze findings so the report includes all cheap source feedback before the Excel COM doctor result.
+`check` runs `lint`, `analyze`, and `doctor`, then returns an aggregate top-level `check` object.
+It continues after lint/analyze findings so the report includes all cheap source feedback before the Excel COM doctor result.
 
 ### `xlflow inspect-gui`
 
@@ -402,7 +521,13 @@ Reports GUI interaction boundaries without opening Excel.
 xlflow inspect-gui --json
 ```
 
-The report includes file, line, kind, symbol, and a suggested refactor. Use it before deciding whether a macro should run with `--headless` or `--interactive`.
+The report includes file, line, kind, symbol, and a suggested refactor.
+Use it before deciding whether a macro should run with `--headless` or `--interactive`.
+
+</details>
+
+<details open>
+<summary><strong>AI agent support: <code>skill install</code></strong></summary>
 
 ### `xlflow skill install`
 
@@ -418,17 +543,23 @@ xlflow skill install --target .agents/skills
 
 Supported provider targets are:
 
-- `agents`: `.agents/skills/xlflow`
-- `codex`: `.codex/skills/xlflow`
-- `claude`: `.claude/skills/xlflow`
-- `cursor`: `.cursor/skills/xlflow`
-- `gemini`: `.gemini/skills/xlflow`
+| Agent target | Install path |
+| --- | --- |
+| `agents` | `.agents/skills/xlflow` |
+| `codex` | `.codex/skills/xlflow` |
+| `claude` | `.claude/skills/xlflow` |
+| `cursor` | `.cursor/skills/xlflow` |
+| `gemini` | `.gemini/skills/xlflow` |
 
-For GitHub Copilot, use the shared `.agents` target:
+For GitHub Copilot-style workflows, use the shared `.agents` target:
 
 ```bash
 xlflow skill install --agent agents
 ```
+
+</details>
+
+---
 
 ## Configuration
 
@@ -462,6 +593,8 @@ forbid_interactive_input = true
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
 
+---
+
 ## JSON output
 
 Every command can return AI-agent-friendly JSON by passing `--json`.
@@ -494,59 +627,42 @@ On failure, `status` is `failed`, and `error.code` and `error.message` are retur
 }
 ```
 
-AI agents and CI jobs should use `--json` instead of parsing human-readable output.
+> [!TIP]
+> AI agents and automation scripts should treat `status`, `command`, `error.code`, and command-specific top-level fields as the primary contract.
+
+---
 
 ## Exit codes
 
-xlflow uses the following exit code categories:
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success |
+| `1` | Validation failure, such as lint, macro, or test failure |
+| `2` | CLI argument or configuration error |
+| `3` | Environment error, such as Excel, COM, VBIDE, or PowerShell failure |
 
-| Code | Meaning                                                             |
-| ---: | ------------------------------------------------------------------- |
-|    0 | Success                                                             |
-|    1 | Validation failure, such as lint, macro, or test failure            |
-|    2 | CLI argument or configuration error                                 |
-|    3 | Environment error, such as Excel, COM, VBIDE, or PowerShell failure |
+> [!NOTE]
+> `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.
 
-`diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.
-
-## Using xlflow with AI agents
-
-xlflow provides a proof loop for AI agents to safely edit, run, and verify Excel VBA.
-
-Recommended workflow:
-
-```text
-1. Read xlflow.toml
-2. If needed, run xlflow pull --json to refresh current VBA source
-3. Edit .bas, .cls, or .frm files under src/
-4. Run xlflow push --json to update the workbook
-5. Run xlflow lint --json and fix unsafe patterns
-6. Run xlflow test --json
-7. If no tests exist, run xlflow macros --json → xlflow run <qualified_name> --headless --json
-8. If runtime errors are unclear, use xlflow run --trace --json and inspect run_diagnostic/trace output
-9. If workbook changes must be reviewed, use xlflow diff --json
-```
-
-To give the workflow to an AI agent, install the bundled Skill with `xlflow skill install` or `xlflow new/init --with-skill`.
-
-```bash
-xlflow skill install --agent codex
-```
+---
 
 ## Recommended VBA rules
 
 VBA executed by xlflow should be written for unattended automation.
 
-- Always use `Option Explicit`
-- Do not rely on `Select`, `Activate`, or `ActiveSheet`
-- Use explicit `Workbook`, `Worksheet`, and `Range` references
-- Prefer `Long` over `Integer`
-- Do not depend on UI dialogs or modal `MsgBox`
-- Keep GUI entrypoints thin and extract parameterized headless procedures for the core logic
-- Pass input values through `xlflow run --arg`, configuration files, deterministic paths, or environment variables
-- Avoid broad `On Error Resume Next`
-- Emit error messages that make failures diagnosable
-- Verify destructive workbook changes with tests or diff
+- [x] Always use `Option Explicit`
+- [x] Use explicit `Workbook`, `Worksheet`, and `Range` references
+- [x] Prefer `Long` over `Integer`
+- [x] Keep GUI entrypoints thin
+- [x] Extract parameterized headless procedures for the core logic
+- [x] Pass input values through `xlflow run --arg`, configuration files, deterministic paths, or environment variables
+- [x] Emit error messages that make failures diagnosable
+- [x] Verify destructive workbook changes with tests or diff
+- [ ] Do not rely on `Select`, `Activate`, or `ActiveSheet`
+- [ ] Do not depend on UI dialogs or modal `MsgBox` in headless procedures
+- [ ] Avoid broad `On Error Resume Next`
+
+---
 
 ## Local verification
 
@@ -556,7 +672,8 @@ Run repository linters with:
 task lint
 ```
 
-`task lint` runs `golangci-lint run` and `PSScriptAnalyzer` against tracked `.ps1` sources. Make sure `Invoke-ScriptAnalyzer` is available in your local PowerShell environment.
+`task lint` runs `golangci-lint run` and `PSScriptAnalyzer` against tracked `.ps1` sources.
+Make sure `Invoke-ScriptAnalyzer` is available in your local PowerShell environment.
 
 Run the fast repository verification with:
 
@@ -574,19 +691,29 @@ xlflow doctor --json
 
 After `doctor` reports a healthy environment, run `new`, `doctor`, `pull`, `lint`, `push`, `run`, `test`, and `diff` against a real workbook.
 
+---
+
 ## Current status
 
 xlflow is an MVP-stage tool.
 
-Its primary goal is to bring Excel VBA into AI-agent and CLI-based development workflows. Typical use cases include:
+Its primary goal is to bring Excel VBA into AI-agent and CLI-based development workflows.
+Typical use cases include:
 
-- Source control for existing VBA
-- AI-agent-assisted VBA modification
-- CLI execution of Excel macros
-- Automated VBA testing
-- Debugging with runtime logs
-- Workbook change review through diff
-- More maintainable internal Excel automation
+| Use case | Why xlflow helps |
+| --- | --- |
+| Source control for existing VBA | VBA modules become normal files |
+| AI-agent-assisted VBA modification | Agents can edit source, run checks, and inspect JSON output |
+| CLI execution of Excel macros | Macros can be invoked from scripts and terminals |
+| Automated VBA testing | Tests can be discovered and executed consistently |
+| Debugging with runtime logs | Trace events show how far execution progressed |
+| Workbook change review | `diff` makes workbook changes easier to inspect |
+| Internal Excel automation | Existing VBA assets can move toward safer development workflows |
+
+> [!CAUTION]
+> xlflow is useful, but it cannot make every legacy workbook safely headless. GUI-heavy macros, workbook-level side effects, external dependencies, and fragile Excel state still need deliberate refactoring.
+
+---
 
 ## License
 
