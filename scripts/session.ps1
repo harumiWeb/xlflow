@@ -12,19 +12,6 @@ $excel = $null
 $workbook = $null
 $sessionStarted = $false
 
-function Release-XlflowSessionComReferences {
-  param($Workbook, $Excel)
-
-  if ($null -ne $Workbook) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Workbook) | Out-Null } catch { Write-Verbose ("failed to release workbook COM object: " + $_.Exception.Message) }
-  }
-  if ($null -ne $Excel) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel) | Out-Null } catch { Write-Verbose ("failed to release Excel COM object: " + $_.Exception.Message) }
-  }
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
-}
-
 function Write-XlflowSessionMetadata {
   param($Excel, [string]$WorkbookPath, [string]$MetadataPath)
 
@@ -124,7 +111,7 @@ try {
       Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
     }
   } elseif ($Action -eq "status" -or $Action -eq "save" -or $Action -eq "stop") {
-    Release-XlflowSessionComReferences -Workbook $workbook -Excel $excel
+    Release-XlflowComReferences -Workbook $workbook -Excel $excel
   }
 }
 

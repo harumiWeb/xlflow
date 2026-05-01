@@ -4,7 +4,8 @@ param(
   [string]$ClassesDir,
   [string]$FormsDir,
   [string]$WorkbookDir,
-  [string]$Visible = "false"
+  [string]$Visible = "false",
+  [string]$UseSession = "false"
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -15,10 +16,15 @@ $workbook = $null
 
 try {
   New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
-  $excel = New-Object -ComObject Excel.Application
-  $excel.Visible = ConvertTo-XlflowBool $Visible
-  $excel.DisplayAlerts = $false
-  $workbook = $excel.Workbooks.Open($WorkbookPath)
+  if (ConvertTo-XlflowBool $UseSession) {
+    $excel = Get-XlflowActiveExcel
+    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+  } else {
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Visible = ConvertTo-XlflowBool $Visible
+    $excel.DisplayAlerts = $false
+    $workbook = $excel.Workbooks.Open($WorkbookPath)
+  }
 
   $exported = @()
   foreach ($component in $workbook.VBProject.VBComponents) {
@@ -36,12 +42,16 @@ try {
     }
   }
 
-  $result.workbook = [ordered]@{ path = $WorkbookPath }
+  $result.workbook = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
   $result.logs = @("exported $($exported.Count) VBA component(s)")
 } catch {
   Set-XlflowError -Result $result -Code "excel_export_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
 } finally {
-  Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
+  if (ConvertTo-XlflowBool $UseSession) {
+    Release-XlflowComReferences -Workbook $workbook -Excel $excel
+  } else {
+    Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
+  }
 }
 
 Write-XlflowJson -Result $result

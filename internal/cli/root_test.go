@@ -280,6 +280,30 @@ func TestRootCommandIncludesMacrosCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "macros" {
 		t.Fatalf("expected macros command, got %#v", cmd)
 	}
+	if cmd.Flags().Lookup("session") == nil {
+		t.Fatal("expected macros command to define --session")
+	}
+}
+
+func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	for _, args := range [][]string{
+		{"pull"},
+		{"test"},
+		{"trace", "enable"},
+		{"trace", "disable"},
+		{"trace", "status"},
+		{"trace", "inject"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd.Flags().Lookup("session") == nil {
+			t.Fatalf("expected %v command to define --session", args)
+		}
+	}
 }
 
 func TestRootCommandIncludesUIButtonCommands(t *testing.T) {

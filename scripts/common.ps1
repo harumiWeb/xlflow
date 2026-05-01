@@ -52,7 +52,33 @@ function Close-XlflowCom {
   [GC]::WaitForPendingFinalizers()
 }
 
+function Release-XlflowComReferences {
+  param($Workbook, $Excel)
+  $sessionWorkbook = Get-Variable -Name "XlflowSessionWorkbook" -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  $sessionExcel = Get-Variable -Name "XlflowSessionExcel" -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  if ($null -ne $Workbook) {
+    if ($null -ne $sessionWorkbook -and [object]::ReferenceEquals($Workbook, $sessionWorkbook)) {
+      Write-Verbose "leaving in-process xlflow session workbook reference open"
+    } else {
+      try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Workbook) | Out-Null } catch { Write-Verbose ("failed to release workbook COM object: " + $_.Exception.Message) }
+    }
+  }
+  if ($null -ne $Excel) {
+    if ($null -ne $sessionExcel -and [object]::ReferenceEquals($Excel, $sessionExcel)) {
+      Write-Verbose "leaving in-process xlflow session Excel reference open"
+    } else {
+      try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel) | Out-Null } catch { Write-Verbose ("failed to release Excel COM object: " + $_.Exception.Message) }
+    }
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}
+
 function Get-XlflowActiveExcel {
+  $sessionExcel = Get-Variable -Name "XlflowSessionExcel" -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  if ($null -ne $sessionExcel) {
+    return $sessionExcel
+  }
   try {
     return [System.Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
   } catch {
@@ -64,6 +90,16 @@ function Get-XlflowOpenWorkbook {
   param($Excel, [string]$WorkbookPath)
 
   $target = [System.IO.Path]::GetFullPath($WorkbookPath)
+  $sessionWorkbook = Get-Variable -Name "XlflowSessionWorkbook" -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  if ($null -ne $sessionWorkbook) {
+    try {
+      if ([System.IO.Path]::GetFullPath([string]$sessionWorkbook.FullName) -ieq $target) {
+        return $sessionWorkbook
+      }
+    } catch {
+      Write-Verbose ("failed to inspect in-process session workbook: " + $_.Exception.Message)
+    }
+  }
   foreach ($candidate in @($Excel.Workbooks)) {
     try {
       if ([System.IO.Path]::GetFullPath([string]$candidate.FullName) -ieq $target) {

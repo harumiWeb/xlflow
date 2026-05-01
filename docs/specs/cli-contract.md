@@ -13,7 +13,7 @@ xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--keepalive]
 xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]
 xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] pull [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] pull [--session] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] push [--backup always|never] [--fast] [--changed-only] [--session] [--no-save] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] session start
 xlflow [--json] session status
@@ -22,17 +22,17 @@ xlflow [--json] save --session
 xlflow [--json] runner install
 xlflow [--json] runner remove
 xlflow [--json] runner status
-xlflow [--json] trace enable [workbook] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace disable [workbook] [--force] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace status [workbook] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace enable [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace disable [workbook] [--force] [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace status [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace clean [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace inject [workbook] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace inject [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--direct] [--fast] [--session] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] macros [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] macros [--session] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] ui button list [--sheet <name>] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] ui button remove --id <id> [--sheet <name>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] test [--filter <name>] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] test [--filter <name>] [--session] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
@@ -65,7 +65,7 @@ Excel COM-backed commands support `--keepalive` for AI agent and task-runner env
 
 For GitHub Copilot, use `agents` because Copilot reads repository instructions from `.agents`. `--target <dir>` installs to `<dir>/xlflow` instead of a provider default. `--agent` and `--target` cannot be combined. Existing skill directories are not overwritten unless `--force` is set. If neither `--agent` nor `--target` is provided, interactive terminals use the Bubble Tea provider selector; `--json` and non-interactive runs return a configuration error instead.
 
-`pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import. Source-controlled `.bas`, `.cls`, and `.frm` files are UTF-8 without BOM. Excel/VBIDE import and export files are treated as CP932 at the bridge boundary, and `pull` converts exported text to UTF-8 before writing the source tree.
+`pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import. Source-controlled `.bas`, `.cls`, and `.frm` files are UTF-8 without BOM. Excel/VBIDE import and export files are treated as CP932 at the bridge boundary, and `pull` converts exported text to UTF-8 before writing the source tree. `pull --session` exports from the workbook opened by `session start`.
 
 `push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion. By default `push` creates a timestamped backup under `.xlflow/backups`, replaces non-document VBA components, updates document modules, saves the workbook, and writes source fingerprints to `.xlflow/state/push.json`.
 
@@ -75,7 +75,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `runner install`, `runner remove`, and `runner status` manage the persistent workbook module `XlflowRunner`. In v1 this module is a stable marker for fast-run workflows; argument-free `run --fast` uses direct execution when eligible and otherwise keeps the normal temporary harness path.
 
-`trace enable` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml` and also writes the same bundled trace module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. This keeps a subsequent `push` from deleting the workbook trace module. JSON output for configured project injection includes top-level `source.path` and `source.updated` metadata. `trace inject` is a compatibility alias for `trace enable`. `trace disable` removes the workbook helper and removes source helper only when it matches xlflow's bundled helper, unless `--force` is set. `trace status` reports workbook and source helper presence plus whether the source matches the bundled helper. `trace clean` removes `.xlflow/traces`. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
+`trace enable` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml` and also writes the same bundled trace module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. This keeps a subsequent `push` from deleting the workbook trace module. JSON output for configured project injection includes top-level `source.path` and `source.updated` metadata. `trace inject` is a compatibility alias for `trace enable`. `trace disable` removes the workbook helper and removes source helper only when it matches xlflow's bundled helper, unless `--force` is set. `trace status` reports workbook and source helper presence plus whether the source matches the bundled helper. `trace clean` removes `.xlflow/traces`. `trace enable/disable/status/inject --session` operate on the workbook opened by `session start`. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
 
@@ -91,7 +91,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `check` runs `lint`, `analyze`, then `doctor`. It continues after lint/analyze findings so source issues and environment status are returned together. JSON output includes top-level `check`, `issues`, `analysis`, and doctor diagnostics. Lint/analyze findings return exit code `1`; doctor/environment failure returns exit code `3`.
 
-`macros` opens the configured workbook and discovers public runnable VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. Agents should use this command before guessing a `run` target.
+`macros` opens the configured workbook and discovers public runnable VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
 
 `ui button add` opens the configured workbook and adds or updates an xlflow-managed Excel form-control button. The target worksheet is selected by `--sheet`; if it does not exist, the command fails with `sheet_not_found` unless `--create-sheet` is set. `--cell` is the top-left placement anchor, `--text` becomes the button caption, and `--macro` is assigned to the button `OnAction`. `--width` and `--height` are in Excel points and default to `160` and `40`. The stable internal button name is `xlflow.button.<id>`, where `<id>` is the normalized `--id` value or, when omitted, a normalized value derived from `--macro`. Re-running `add` with the same id updates the existing button instead of creating duplicates. `--verify-macro` checks the workbook VBIDE project for the macro before saving; missing macros fail with `macro_not_found`, and unavailable VBIDE access is an environment failure.
 
@@ -103,7 +103,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `attach --active` inspects the current active Excel workbook. It verifies that the active workbook path matches configured `excel.path` and reports top-level `workbook.path`, `workbook.configured_path`, `workbook.active`, and `workbook.matches_config`. In this version, `attach` does not change the connection target for `pull`, `push`, or `run`; it only validates the human-opened workbook.
 
-`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
+`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. `test --session` runs against the workbook opened by `session start`. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 
 `diff` compares two workbook files and optionally two exported VBA source trees. Workbook inputs must use `.xlsx`, `.xlsm`, `.xltx`, or `.xltm`. Workbook state comparison covers sheet additions/removals plus used-range cell values and formulas. VBA comparison is enabled only when both `--vba-before` and `--vba-after` are provided, recursively compares `.bas`, `.cls`, and `.frm` files, ignores other files such as `.frx`, and normalizes CRLF/LF line endings before comparison. Differences are successful command results with exit code `0`; malformed arguments fail with exit code `2`, and unreadable workbooks or source trees fail with exit code `3`.
 

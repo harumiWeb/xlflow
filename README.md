@@ -12,7 +12,7 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
-# xlflow
+# :surfing_man: xlflow
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
 
@@ -323,6 +323,7 @@ xlflow pull --json
 ```
 
 It exports standard modules, class modules, UserForms, and document modules such as Workbook and Worksheet modules into `src/`.
+Use `xlflow pull --session --json` when an xlflow session is already open.
 
 ### `xlflow push`
 
@@ -357,6 +358,7 @@ xlflow macros --json
 
 > [!TIP]
 > AI agents and automation scripts should run this command before guessing a macro name. Use the returned `qualified_name` with `xlflow run` to avoid entrypoint mistakes.
+> During session-based development, use `xlflow macros --session --json`.
 
 ### `xlflow run`
 
@@ -428,6 +430,8 @@ xlflow trace enable --json
 xlflow trace status --json
 ```
 
+During session-based development, add `--session` to `trace enable`, `trace status`, `trace disable`, and traced `run` commands.
+
 Write logs from VBA:
 
 ```vb
@@ -459,6 +463,7 @@ xlflow test --json
 ```
 
 xlflow discovers argument-free `Sub` procedures whose names start with `Test` or end with `_Test`.
+Use `xlflow test --session --json` when an xlflow session is already open.
 
 To run a single test, use `--filter`:
 

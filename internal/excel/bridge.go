@@ -60,6 +60,11 @@ type PushOptions struct {
 	Keepalive   CommandOptions
 }
 
+type SessionCommandOptions struct {
+	Session   bool
+	Keepalive CommandOptions
+}
+
 type SessionOptions struct {
 	Action string
 }
@@ -127,6 +132,14 @@ func (r Runner) New(workbook string, opts ...CommandOptions) (output.Envelope, i
 }
 
 func (r Runner) Pull(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := SessionCommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts.Keepalive = opts[0]
+	}
+	return r.PullWithOptions(cfg, cmdOpts)
+}
+
+func (r Runner) PullWithOptions(cfg config.Config, opts SessionCommandOptions) (output.Envelope, int, error) {
 	return r.run("pull", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
@@ -134,7 +147,8 @@ func (r Runner) Pull(cfg config.Config, opts ...CommandOptions) (output.Envelope
 		"FormsDir":     filepath.Join(r.RootDir, cfg.Src.Forms),
 		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, opts...)
+		"UseSession":   strconv.FormatBool(opts.Session),
+	}, opts.Keepalive)
 }
 
 func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -179,6 +193,7 @@ type TraceOptions struct {
 	Action   string
 	Workbook string
 	Force    bool
+	Session  bool
 }
 
 func (r Runner) Trace(cfg config.Config, traceOpts TraceOptions, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -203,6 +218,7 @@ func buildTraceScriptArgs(root string, cfg config.Config, traceOpts TraceOptions
 		"WorkbookPath": workbookPath(root, workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"Force":        strconv.FormatBool(traceOpts.Force),
+		"UseSession":   strconv.FormatBool(traceOpts.Session),
 		"TraceDir":     filepath.Join(root, ".xlflow", "traces"),
 	}
 	if workbook == cfg.Excel.Path && action != "clean" {
@@ -308,18 +324,36 @@ func (r Runner) Attach(cfg config.Config, active bool, opts ...CommandOptions) (
 }
 
 func (r Runner) Test(cfg config.Config, filter string, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := SessionCommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts.Keepalive = opts[0]
+	}
+	return r.TestWithOptions(cfg, filter, cmdOpts)
+}
+
+func (r Runner) TestWithOptions(cfg config.Config, filter string, opts SessionCommandOptions) (output.Envelope, int, error) {
 	return r.run("test", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Filter":       filter,
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, opts...)
+		"UseSession":   strconv.FormatBool(opts.Session),
+	}, opts.Keepalive)
 }
 
 func (r Runner) Macros(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := SessionCommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts.Keepalive = opts[0]
+	}
+	return r.MacrosWithOptions(cfg, cmdOpts)
+}
+
+func (r Runner) MacrosWithOptions(cfg config.Config, opts SessionCommandOptions) (output.Envelope, int, error) {
 	return r.run("macros", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, opts...)
+		"UseSession":   strconv.FormatBool(opts.Session),
+	}, opts.Keepalive)
 }
 
 func (r Runner) UIButtonAdd(cfg config.Config, opts UIButtonAddOptions, cmdOpts ...CommandOptions) (output.Envelope, int, error) {

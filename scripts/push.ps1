@@ -112,12 +112,7 @@ try {
   Set-XlflowError -Result $result -Code "excel_import_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
 } finally {
   if (ConvertTo-XlflowBool $UseSession) {
-    if ($null -ne $workbook) {
-      try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch { Write-Verbose ("failed to release workbook COM object: " + $_.Exception.Message) }
-    }
-    if ($null -ne $excel) {
-      try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch { Write-Verbose ("failed to release Excel COM object: " + $_.Exception.Message) }
-    }
+    Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
   }

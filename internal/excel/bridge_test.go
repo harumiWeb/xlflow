@@ -244,6 +244,15 @@ func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.
 	}
 }
 
+func TestTraceScriptArgsPassSessionFlag(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTraceScriptArgs(root, cfg, TraceOptions{Action: "status", Session: true})
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+}
+
 func TestTraceInjectScriptArgsOmitModulesDirForStandaloneWorkbook(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

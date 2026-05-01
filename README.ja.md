@@ -12,7 +12,7 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
-# xlflow
+# :surfing_man: xlflow
 
 **xlflow** は、AIエージェント時代のための Excel VBA 開発フレームワークです。
 
@@ -325,6 +325,7 @@ xlflow pull --json
 ```
 
 標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet などの document module を `src/` 配下へ出力します。
+xlflow session が開いている場合は `xlflow pull --session --json` を使います。
 
 ### `xlflow push`
 
@@ -359,6 +360,7 @@ xlflow macros --json
 
 > [!TIP]
 > AIエージェントや自動化スクリプトは、macro 名を推測する前にこのコマンドを実行してください。返された `qualified_name` を `xlflow run` に渡すことで、entrypoint の指定ミスを減らせます。
+> session 中の開発では `xlflow macros --session --json` を使います。
 
 ### `xlflow run`
 
@@ -431,6 +433,8 @@ xlflow trace enable --json
 xlflow trace status --json
 ```
 
+session 中の開発では、`trace enable`、`trace status`、`trace disable`、trace 付き `run` に `--session` を付けます。
+
 VBA 側では次のようにログを出せます。
 
 ```vb
@@ -462,6 +466,7 @@ xlflow test --json
 ```
 
 `Test` で始まる、または `_Test` で終わる引数なしの `Sub` を test として検出します。
+xlflow session が開いている場合は `xlflow test --session --json` を使います。
 
 特定の test だけを実行する場合は `--filter` を指定します。
 

@@ -753,16 +753,10 @@ try {
     exit 0
   }
   $workbook.SaveAs($wbPath, 52)
-  $workbook.Close($true) | Out-Null
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
-  $workbook = $null
-  $excel.Quit() | Out-Null
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
-  $excel = $null
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
+  $global:XlflowSessionExcel = $excel
+  $global:XlflowSessionWorkbook = $workbook
 
-  $trace = & ./trace.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -Visible false | ConvertFrom-Json
+  $trace = & ./trace.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -Visible false -UseSession true | ConvertFrom-Json
   $result.traceStatus = $trace.status
   $sourcePath = Join-Path $modulesDir 'XlflowTrace.bas'
   $result.sourceExists = Test-Path -LiteralPath $sourcePath
@@ -771,17 +765,15 @@ try {
     exit 0
   }
 
-  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -ClassesDir $classesDir -FormsDir $formsDir -WorkbookDir $workbookDir -BackupRoot $backupRoot -Visible false | ConvertFrom-Json
+  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir -ClassesDir $classesDir -FormsDir $formsDir -WorkbookDir $workbookDir -BackupRoot $backupRoot -Visible false -UseSession true | ConvertFrom-Json
   $result.pushStatus = $push.status
   if ($push.status -ne 'ok') {
     $result | ConvertTo-Json -Compress
     exit 0
   }
 
-  $excel = New-Object -ComObject Excel.Application
-  $excel.Visible = $false
-  $excel.DisplayAlerts = $false
-  $workbook = $excel.Workbooks.Open($wbPath)
+  $excel = Get-XlflowActiveExcel
+  $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $wbPath
   $result.traceStillInjected = Test-XlflowTraceModuleInjected -VBProject $workbook.VBProject
   $result | ConvertTo-Json -Compress
 } catch {
@@ -791,6 +783,8 @@ try {
   $result | ConvertTo-Json -Compress
   exit 1
 } finally {
+  $global:XlflowSessionWorkbook = $null
+  $global:XlflowSessionExcel = $null
   if ($null -ne $workbook) {
     try { $workbook.Close($false) | Out-Null } catch {}
     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
@@ -936,6 +930,7 @@ $result = [ordered]@{
 }
 $excel = $null
 $workbook = $null
+$sessionStarted = $false
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
 try {
   New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -1251,31 +1246,24 @@ try {
   $label = $designer.Controls.Add('Forms.Label.1')
   $label.Caption = 'frx-regression'
   $workbook.SaveAs($wbPath, 52)
+  $global:XlflowSessionExcel = $excel
+  $global:XlflowSessionWorkbook = $workbook
 
-  $workbook.Close($true) | Out-Null
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
-  $workbook = $null
-  $excel.Quit() | Out-Null
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
-  $excel = $null
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
-
-  $pull1 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -Visible false | ConvertFrom-Json
+  $pull1 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -Visible false -UseSession true | ConvertFrom-Json
   $result.initialPullStatus = $pull1.status
   if ($pull1.status -ne 'ok') {
     $result | ConvertTo-Json -Compress
     exit 0
   }
 
-  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -BackupRoot $backupRoot -Visible false | ConvertFrom-Json
+  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -BackupRoot $backupRoot -Visible false -UseSession true | ConvertFrom-Json
   $result.pushStatus = $push.status
   if ($push.status -ne 'ok') {
     $result | ConvertTo-Json -Compress
     exit 0
   }
 
-  $pull2 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir2 -ClassesDir $classesDir2 -FormsDir $formsDir2 -WorkbookDir $workbookDir2 -Visible false | ConvertFrom-Json
+  $pull2 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir2 -ClassesDir $classesDir2 -FormsDir $formsDir2 -WorkbookDir $workbookDir2 -Visible false -UseSession true | ConvertFrom-Json
   $result.roundtripPullStatus = $pull2.status
   $result.frmPath = Join-Path $formsDir2 ($formName + '.frm')
   $result.frxPath = Join-Path $formsDir2 ($formName + '.frx')
@@ -1294,6 +1282,8 @@ try {
   $result | ConvertTo-Json -Compress
   exit 1
 } finally {
+  $global:XlflowSessionWorkbook = $null
+  $global:XlflowSessionExcel = $null
   if ($null -ne $workbook) {
     try { $workbook.Close($false) | Out-Null } catch {}
     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}

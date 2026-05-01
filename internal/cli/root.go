@@ -80,6 +80,7 @@ func (a *app) rootCommand() *cobra.Command {
 
 func (a *app) macrosCommand() *cobra.Command {
 	var keepalive keepaliveFlags
+	var session bool
 	cmd := &cobra.Command{
 		Use:   "macros",
 		Short: "Discover runnable workbook macros",
@@ -97,7 +98,7 @@ func (a *app) macrosCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Reading VBA project", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Macros(cfg, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
 				return runErr
 			})
 			if err != nil {
@@ -106,6 +107,7 @@ func (a *app) macrosCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -507,6 +509,7 @@ func (a *app) attachCommand() *cobra.Command {
 
 func (a *app) pullCommand() *cobra.Command {
 	var keepalive keepaliveFlags
+	var session bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Export VBA components from the configured workbook",
@@ -524,7 +527,7 @@ func (a *app) pullCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Exporting VBA source", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Pull(cfg, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
 				return runErr
 			})
 			if err != nil {
@@ -533,6 +536,7 @@ func (a *app) pullCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -887,6 +891,7 @@ func (a *app) traceInjectCommand() *cobra.Command {
 func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 	var keepalive keepaliveFlags
 	var force bool
+	var session bool
 	cmd := &cobra.Command{
 		Use:   action + " [workbook]",
 		Short: short,
@@ -919,7 +924,7 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 			}
 			err = a.withExcelProgress(label, keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force}, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -931,6 +936,9 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 	if action == "disable" {
 		cmd.Flags().BoolVar(&force, "force", false, "remove modified trace helper source")
 	}
+	if action != "clean" {
+		cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	}
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -938,6 +946,7 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 func (a *app) testCommand() *cobra.Command {
 	var filter string
 	var keepalive keepaliveFlags
+	var session bool
 	cmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run workbook VBA tests",
@@ -955,7 +964,7 @@ func (a *app) testCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Test(cfg, filter, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
 				return runErr
 			})
 			if err != nil {
@@ -965,6 +974,7 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
