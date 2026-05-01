@@ -57,6 +57,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.traceCommand(),
 		a.runCommand(),
 		a.macrosCommand(),
+		a.uiCommand(),
 		a.testCommand(),
 		a.diffCommand(),
 		a.inspectGUICommand(),
@@ -89,6 +90,190 @@ func (a *app) macrosCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+}
+
+func (a *app) uiCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ui",
+		Short: "Manage workbook UI controls",
+	}
+	cmd.AddCommand(a.uiButtonCommand())
+	return cmd
+}
+
+func (a *app) uiButtonCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "button",
+		Short: "Manage xlflow workbook buttons",
+	}
+	cmd.AddCommand(
+		a.uiButtonAddCommand(),
+		a.uiButtonListCommand(),
+		a.uiButtonRemoveCommand(),
+	)
+	return cmd
+}
+
+func (a *app) uiButtonAddCommand() *cobra.Command {
+	var opts excel.UIButtonAddOptions
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add or update a workbook form-control button",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			built, err := buildUIButtonAddOptions(opts)
+			if err != nil {
+				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("ui")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Adding workbook button", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&opts.Cell, "cell", "", "top-left cell address such as B2")
+	cmd.Flags().StringVar(&opts.Text, "text", "", "button caption")
+	cmd.Flags().StringVar(&opts.Macro, "macro", "", "macro assigned to the button, such as Main.Run")
+	cmd.Flags().StringVar(&opts.ID, "id", "", "stable xlflow button id")
+	cmd.Flags().IntVar(&opts.Width, "width", 160, "button width in points")
+	cmd.Flags().IntVar(&opts.Height, "height", 40, "button height in points")
+	cmd.Flags().BoolVar(&opts.CreateSheet, "create-sheet", false, "create the target worksheet when it does not exist")
+	cmd.Flags().BoolVar(&opts.VerifyMacro, "verify-macro", false, "verify that the assigned macro exists before saving")
+	return cmd
+}
+
+func (a *app) uiButtonListCommand() *cobra.Command {
+	var opts excel.UIButtonListOptions
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List xlflow-managed workbook buttons",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("ui")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Listing workbook buttons", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	return cmd
+}
+
+func (a *app) uiButtonRemoveCommand() *cobra.Command {
+	var opts excel.UIButtonRemoveOptions
+	cmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Remove an xlflow-managed workbook button",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			built, err := buildUIButtonRemoveOptions(opts)
+			if err != nil {
+				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("ui")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withSpinner("Removing workbook button", func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&opts.ID, "id", "", "stable xlflow button id")
+	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	return cmd
+}
+
+func buildUIButtonAddOptions(opts excel.UIButtonAddOptions) (excel.UIButtonAddOptions, error) {
+	if strings.TrimSpace(opts.Sheet) == "" {
+		return opts, fmt.Errorf("--sheet is required")
+	}
+	if strings.TrimSpace(opts.Cell) == "" {
+		return opts, fmt.Errorf("--cell is required")
+	}
+	if strings.TrimSpace(opts.Text) == "" {
+		return opts, fmt.Errorf("--text is required")
+	}
+	if strings.TrimSpace(opts.Macro) == "" {
+		return opts, fmt.Errorf("--macro is required")
+	}
+	if opts.Width <= 0 {
+		return opts, fmt.Errorf("--width must be greater than 0")
+	}
+	if opts.Height <= 0 {
+		return opts, fmt.Errorf("--height must be greater than 0")
+	}
+	opts.Sheet = strings.TrimSpace(opts.Sheet)
+	opts.Cell = strings.TrimSpace(opts.Cell)
+	opts.Text = strings.TrimSpace(opts.Text)
+	opts.Macro = strings.TrimSpace(opts.Macro)
+	opts.ID = normalizeUIButtonID(opts.ID)
+	if opts.ID == "" {
+		opts.ID = normalizeUIButtonID(opts.Macro)
+	}
+	if opts.ID == "" {
+		return opts, fmt.Errorf("--id could not be derived from --macro")
+	}
+	return opts, nil
+}
+
+func buildUIButtonRemoveOptions(opts excel.UIButtonRemoveOptions) (excel.UIButtonRemoveOptions, error) {
+	opts.ID = normalizeUIButtonID(opts.ID)
+	opts.Sheet = strings.TrimSpace(opts.Sheet)
+	if opts.ID == "" {
+		return opts, fmt.Errorf("--id is required")
+	}
+	return opts, nil
+}
+
+func normalizeUIButtonID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func (a *app) newCommand() *cobra.Command {

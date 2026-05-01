@@ -1,36 +1,25 @@
-# Push/Run Keepalive Spec
+# UI Button Spec
 
 ## Goal
 
-Prevent AI agents and task runners from treating long-running Excel COM operations as stalled when `xlflow push` or `xlflow run` produces no final result for several seconds.
+Allow agents and users to place a runnable entrypoint on a workbook sheet by creating an Excel form-control button and assigning an existing macro to its `OnAction`.
 
 ## CLI Contract
 
-- `xlflow push --keepalive [--keepalive-interval <duration>]`
-- `xlflow run [macro] --keepalive [--keepalive-interval <duration>]`
-- `--keepalive-interval` defaults to `5s`.
-- When `--keepalive` is enabled, a non-positive interval is a CLI argument error with exit code `2`.
-- Keepalive output is written only to stderr.
-- Stdout remains unchanged, including pure JSON output when `--json` is set.
+- `xlflow ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]`
+- `xlflow ui button list [--sheet <name>]`
+- `xlflow ui button remove --id <id> [--sheet <name>]`
+- `add` creates or updates an Excel form-control button named `xlflow.button.<id>`.
+- `--id` is normalized to a lowercase ASCII slug. When omitted, it is derived from `--macro`.
+- `--width` defaults to `160`; `--height` defaults to `40`.
+- `--verify-macro` checks VBIDE for the macro before saving; without it, the button is added even if the macro cannot be inspected.
 
 ## Output Contract
 
-Heartbeat lines start immediately and repeat at the configured interval:
+JSON output adds a top-level `ui` field. `add` and `remove` return `ui.button`; `list` returns `ui.buttons`. Button objects include `id`, `name`, `sheet`, `text`, `macro`, `cell`, `left`, `top`, `width`, `height`, and `updated`.
 
-```text
-xlflow: push still running... elapsed=0s
-xlflow: run still running... elapsed=5s
-```
+## Failure Contract
 
-Completion markers are written after the command result is known:
-
-```text
-XLFLOW_DONE status=success command=push
-XLFLOW_DONE status=failed command=run code=macro_timeout
-```
-
-`code` is present only when xlflow has a structured error code.
-
-## Agent Rule
-
-Agents should use `--keepalive --json` for long `push` and `run` calls, wait for process exit, and not start the next workbook-dependent command until stderr contains `XLFLOW_DONE`.
+- CLI argument errors return exit code `2`.
+- Missing sheets, missing buttons, invalid cells, and missing macros under `--verify-macro` are validation failures.
+- Excel COM, workbook open, PowerShell, and VBIDE access failures are environment failures.

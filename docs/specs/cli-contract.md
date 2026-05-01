@@ -18,6 +18,9 @@ xlflow [--json] push [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace inject [workbook]
 xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] macros
+xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]
+xlflow [--json] ui button list [--sheet <name>]
+xlflow [--json] ui button remove --id <id> [--sheet <name>]
 xlflow [--json] test [--filter <name>]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect-gui
@@ -64,6 +67,12 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 `run --trace` creates a fresh temp log under `%TEMP%\xlflow`, calls `XlflowTrace.XlflowSetTraceFile` before the target macro, then reads trace events after execution. User VBA code writes events with `Call XlflowLog("message")`. JSON output adds top-level `trace.enabled`, `trace.path`, `trace.events`, and optional `trace.read_error`; each event has `timestamp`, `message`, and `raw`. Plain-text output prints trace events as `[timestamp] message` after the normal run logs. If `XlflowTrace` is missing, `run --trace` returns `trace_not_injected` with exit code `1`. If the macro fails after writing trace events, those events are still returned. Trace read errors are reported in `trace.read_error` without changing the macro result. If a traced run fails with zero events, output should indicate that execution may have failed before reaching user trace calls.
 
 `macros` opens the configured workbook and discovers public runnable VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. Agents should use this command before guessing a `run` target.
+
+`ui button add` opens the configured workbook and adds or updates an xlflow-managed Excel form-control button. The target worksheet is selected by `--sheet`; if it does not exist, the command fails with `sheet_not_found` unless `--create-sheet` is set. `--cell` is the top-left placement anchor, `--text` becomes the button caption, and `--macro` is assigned to the button `OnAction`. `--width` and `--height` are in Excel points and default to `160` and `40`. The stable internal button name is `xlflow.button.<id>`, where `<id>` is the normalized `--id` value or, when omitted, a normalized value derived from `--macro`. Re-running `add` with the same id updates the existing button instead of creating duplicates. `--verify-macro` checks the workbook VBIDE project for the macro before saving; missing macros fail with `macro_not_found`, and unavailable VBIDE access is an environment failure.
+
+`ui button list` reports only xlflow-managed form-control buttons whose internal names start with `xlflow.button.`. When `--sheet` is provided, only that worksheet is inspected and a missing worksheet fails with `sheet_not_found`. `list` does not save the workbook.
+
+`ui button remove` deletes an xlflow-managed form-control button by `--id`, optionally restricted to `--sheet`. Missing worksheets fail with `sheet_not_found`; missing buttons fail with `button_not_found`. `remove` saves the workbook only after a successful deletion.
 
 `inspect-gui` scans configured source directories and reports GUI interaction boundaries without opening Excel. JSON output includes top-level `gui_boundaries`. Human output shows each boundary location, kind, symbol, and suggested refactor.
 
@@ -130,15 +139,18 @@ Command-specific fields are added at the top level:
 - `issues` for `lint`
 - `trace` for traced `run`
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
+- `ui` for `ui button` commands
 
 `test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
+
+`ui button add` and `ui button remove` return `ui.button` with `id`, `name`, `sheet`, `text`, `macro`, `cell`, `left`, `top`, `width`, `height`, and `updated`. `ui button list` returns `ui.buttons` with the same fields for each managed button.
 
 `diff` result objects contain `summary`, `sheets`, `cells`, and `vba`. Cell diffs contain `sheet`, `address`, `kind`, `before`, and `after`, where `kind` is `value` or `formula`. VBA diffs contain `file`, `kind`, and optional changed line details.
 
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings, GUI boundary preflight failures, macro failure, macro timeout, missing macro target, missing trace module, VBA test failure, no tests found, missing filter targets, active workbook mismatches, and duplicate test names
+- `1`: user-code or validation failure, including lint findings, GUI boundary preflight failures, macro failure, macro timeout, missing macro target, missing trace module, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, and duplicate test names
 - `2`: CLI argument or configuration error
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
 

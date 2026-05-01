@@ -11,7 +11,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -22,6 +22,56 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestUIButtonIdAndNameNormalization(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; ConvertTo-XlflowUIButtonId -Value 'Main.Run Aggregation'; ConvertTo-XlflowUIButtonName -Id 'Main.Run Aggregation'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("button id normalization failed: %v\n%s", err, out)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) != 2 {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if lines[0] != "main-run-aggregation" {
+		t.Fatalf("id = %q, want main-run-aggregation", lines[0])
+	}
+	if lines[1] != "xlflow.button.main-run-aggregation" {
+		t.Fatalf("name = %q, want xlflow.button.main-run-aggregation", lines[1])
+	}
+}
+
+func TestUIScriptRejectsUnsupportedActionAsStructuredFailure(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"./ui.ps1 -Action nope -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ui action command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse ui output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "ui_button_args_invalid" {
+		t.Fatalf("expected structured ui failure, got %+v", got)
 	}
 }
 
@@ -823,6 +873,161 @@ func TestRunTraceFailureWithNoEventsIncludesHint(t *testing.T) {
 	}
 	if got.Status != "failed" || got.Trace == nil || len(got.Trace.Events) != 0 || !strings.Contains(got.Trace.Hint, "no trace events") {
 		t.Fatalf("expected empty trace hint, got %+v", got)
+	}
+}
+
+func TestUIButtonAddListRemoveEndToEnd(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  addStatus = ''
+  updateStatus = ''
+  listStatus = ''
+  removeStatus = ''
+  finalListStatus = ''
+  buttonCountAfterUpdate = 0
+  buttonCountAfterRemove = 0
+  updated = $false
+  text = ''
+  macro = ''
+}
+$excel = $null
+$workbook = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'ui-button.xlsm'
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+  try {
+    $module = $workbook.VBProject.VBComponents.Add(1)
+    $module.Name = 'Main'
+    $module.CodeModule.AddFromString(('Option Explicit', 'Public Sub Run()', 'End Sub') -join [Environment]::NewLine)
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $workbook.SaveAs($wbPath, 52)
+  $workbook.Close($true) | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
+  $workbook = $null
+  $excel.Quit() | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+  $excel = $null
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+
+  $add = & ./ui.ps1 -Action add -WorkbookPath $wbPath -Sheet 'Menu' -Cell 'B2' -Text 'Run' -Macro 'Main.Run' -Id 'run' -CreateSheet true -VerifyMacro true | ConvertFrom-Json
+  $result.addStatus = $add.status
+  if ($add.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $update = & ./ui.ps1 -Action add -WorkbookPath $wbPath -Sheet 'Menu' -Cell 'B3' -Text 'Run Updated' -Macro 'Main.Run' -Id 'run' -VerifyMacro true | ConvertFrom-Json
+  $result.updateStatus = $update.status
+  $result.updated = $update.ui.button.updated
+  if ($update.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $list = & ./ui.ps1 -Action list -WorkbookPath $wbPath -Sheet 'Menu' | ConvertFrom-Json
+  $result.listStatus = $list.status
+  $buttons = @($list.ui.buttons)
+  $result.buttonCountAfterUpdate = $buttons.Count
+  if ($buttons.Count -gt 0) {
+    $result.text = $buttons[0].text
+    $result.macro = $buttons[0].macro
+  }
+
+  $remove = & ./ui.ps1 -Action remove -WorkbookPath $wbPath -Sheet 'Menu' -Id 'run' | ConvertFrom-Json
+  $result.removeStatus = $remove.status
+  if ($remove.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $finalList = & ./ui.ps1 -Action list -WorkbookPath $wbPath -Sheet 'Menu' | ConvertFrom-Json
+  $result.finalListStatus = $finalList.status
+  $result.buttonCountAfterRemove = @($finalList.ui.buttons).Count
+  $result | ConvertTo-Json -Compress
+} catch {
+  $result.error = $_.Exception.Message
+  $result | ConvertTo-Json -Compress
+  exit 1
+} finally {
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ui button e2e failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip                   bool   `json:"skip"`
+		SkipReason             string `json:"skipReason"`
+		AddStatus              string `json:"addStatus"`
+		UpdateStatus           string `json:"updateStatus"`
+		ListStatus             string `json:"listStatus"`
+		RemoveStatus           string `json:"removeStatus"`
+		FinalListStatus        string `json:"finalListStatus"`
+		ButtonCountAfterUpdate int    `json:"buttonCountAfterUpdate"`
+		ButtonCountAfterRemove int    `json:"buttonCountAfterRemove"`
+		Updated                bool   `json:"updated"`
+		Text                   string `json:"text"`
+		Macro                  string `json:"macro"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse ui button e2e output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skipf("skipped: %s", got.SkipReason)
+	}
+	if got.AddStatus != "ok" || got.UpdateStatus != "ok" || got.ListStatus != "ok" || got.RemoveStatus != "ok" || got.FinalListStatus != "ok" {
+		t.Fatalf("unexpected ui statuses: %+v output=%s", got, out)
+	}
+	if !got.Updated {
+		t.Fatalf("expected second add to update existing button: %+v", got)
+	}
+	if got.ButtonCountAfterUpdate != 1 {
+		t.Fatalf("expected exactly one button after idempotent update, got %+v", got)
+	}
+	if got.Text != "Run Updated" || got.Macro != "Main.Run" {
+		t.Fatalf("unexpected button metadata after update: %+v", got)
+	}
+	if got.ButtonCountAfterRemove != 0 {
+		t.Fatalf("expected no buttons after remove, got %+v", got)
 	}
 }
 

@@ -47,6 +47,7 @@ type Envelope struct {
 	Diff          any `json:"diff,omitempty"`
 	Trace         any `json:"trace,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
+	UI            any `json:"ui,omitempty"`
 }
 
 type Options struct {

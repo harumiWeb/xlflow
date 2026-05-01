@@ -559,6 +559,98 @@ function Test-XlflowMacroTargetFailure {
   return $false
 }
 
+function ConvertTo-XlflowUIButtonId {
+  param([string]$Value)
+
+  $value = ([string]$Value).Trim().ToLowerInvariant()
+  $builder = New-Object System.Text.StringBuilder
+  $lastDash = $false
+  foreach ($char in $value.ToCharArray()) {
+    $isValid = (($char -ge [char]'a' -and $char -le [char]'z') -or ($char -ge [char]'0' -and $char -le [char]'9'))
+    if ($isValid) {
+      [void]$builder.Append($char)
+      $lastDash = $false
+      continue
+    }
+    if (-not $lastDash -and $builder.Length -gt 0) {
+      [void]$builder.Append("-")
+      $lastDash = $true
+    }
+  }
+  return $builder.ToString().Trim("-")
+}
+
+function ConvertTo-XlflowUIButtonName {
+  param([string]$Id)
+  return "xlflow.button." + (ConvertTo-XlflowUIButtonId -Value $Id)
+}
+
+function Get-XlflowWorksheet {
+  param($Workbook, [string]$Sheet)
+
+  foreach ($worksheet in @($Workbook.Worksheets)) {
+    if ($worksheet.Name -eq $Sheet) {
+      return $worksheet
+    }
+  }
+  return $null
+}
+
+function Get-XlflowUIButton {
+  param($Worksheet, [string]$Name)
+
+  $buttons = $Worksheet.Buttons()
+  for ($i = 1; $i -le $buttons.Count; $i++) {
+    $button = $buttons.Item($i)
+    if ($button.Name -eq $Name) {
+      return $button
+    }
+  }
+  return $null
+}
+
+function ConvertTo-XlflowUIButtonInfo {
+  param($Button, [string]$Sheet, [string]$Id, [bool]$Updated = $false)
+
+  $cell = ""
+  try {
+    $cell = $Button.TopLeftCell.Address($false, $false)
+  } catch {
+  }
+  return [ordered]@{
+    id = $Id
+    name = $Button.Name
+    sheet = $Sheet
+    text = $Button.Caption
+    macro = $Button.OnAction
+    cell = $cell
+    left = [double]$Button.Left
+    top = [double]$Button.Top
+    width = [double]$Button.Width
+    height = [double]$Button.Height
+    updated = $Updated
+  }
+}
+
+function Test-XlflowMacroExists {
+  param($Workbook, [string]$MacroName)
+
+  $project = $Workbook.VBProject
+  foreach ($component in @($project.VBComponents)) {
+    if ($component.Name -like "Xlflow*") {
+      continue
+    }
+    $code = Get-XlflowCodeModuleText -CodeModule $component.CodeModule
+    $macros = Find-XlflowMacroProcedures -ModuleName $component.Name -Code $code
+    foreach ($macro in @($macros)) {
+      if ($macro.qualified_name -eq $MacroName -or $macro.name -eq $MacroName) {
+        return $true
+      }
+    }
+  }
+  return $false
+}
+
 function New-XlflowRunHarnessModuleName {
   $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 20)
   return "XlflowRun_" + $suffix

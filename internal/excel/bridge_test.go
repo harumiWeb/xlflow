@@ -33,6 +33,58 @@ func TestRunnerTestFindsRepositoryScript(t *testing.T) {
 	}
 }
 
+func TestRunnerUIFindsRepositoryScript(t *testing.T) {
+	path, err := scriptPath(t.TempDir(), "ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path == "" {
+		t.Fatal("expected ui script path")
+	}
+}
+
+func TestBuildUIButtonAddScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonAddScriptArgs(root, cfg, UIButtonAddOptions{
+		Sheet:       "Menu",
+		Cell:        "B2",
+		Text:        "Run",
+		Macro:       "Main.Run",
+		ID:          "run",
+		Width:       160,
+		Height:      40,
+		CreateSheet: true,
+		VerifyMacro: true,
+	})
+	if args["Action"] != "add" {
+		t.Fatalf("action = %q, want add", args["Action"])
+	}
+	if args["WorkbookPath"] != filepath.Join(root, "build", "Book.xlsm") {
+		t.Fatalf("workbook path = %q", args["WorkbookPath"])
+	}
+	if args["Sheet"] != "Menu" || args["Cell"] != "B2" || args["Text"] != "Run" || args["Macro"] != "Main.Run" || args["Id"] != "run" {
+		t.Fatalf("unexpected args: %+v", args)
+	}
+	if args["Width"] != "160" || args["Height"] != "40" || args["CreateSheet"] != "true" || args["VerifyMacro"] != "true" {
+		t.Fatalf("unexpected numeric/bool args: %+v", args)
+	}
+}
+
+func TestUIValidationFailureCodesAreValidationFailures(t *testing.T) {
+	for _, code := range []string{"sheet_not_found", "button_not_found", "ui_button_args_invalid"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitValidation)
+			}
+		})
+	}
+}
+
 func TestTestFailureCodesAreValidationFailures(t *testing.T) {
 	for _, code := range []string{"test_failed", "no_tests_found", "test_not_found", "duplicate_test_name"} {
 		t.Run(code, func(t *testing.T) {

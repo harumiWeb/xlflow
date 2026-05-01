@@ -67,6 +67,28 @@ type ScriptResult struct {
 	Tests         any           `json:"tests,omitempty"`
 	Trace         any           `json:"trace,omitempty"`
 	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
+	UI            any           `json:"ui,omitempty"`
+}
+
+type UIButtonAddOptions struct {
+	Sheet       string
+	Cell        string
+	Text        string
+	Macro       string
+	ID          string
+	Width       int
+	Height      int
+	CreateSheet bool
+	VerifyMacro bool
+}
+
+type UIButtonListOptions struct {
+	Sheet string
+}
+
+type UIButtonRemoveOptions struct {
+	Sheet string
+	ID    string
 }
 
 func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
@@ -200,6 +222,54 @@ func (r Runner) Macros(cfg config.Config) (output.Envelope, int, error) {
 	})
 }
 
+func (r Runner) UIButtonAdd(cfg config.Config, opts UIButtonAddOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonAddScriptArgs(r.RootDir, cfg, opts))
+}
+
+func buildUIButtonAddScriptArgs(root string, cfg config.Config, opts UIButtonAddOptions) map[string]string {
+	return map[string]string{
+		"Action":       "add",
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"Cell":         opts.Cell,
+		"Text":         opts.Text,
+		"Macro":        opts.Macro,
+		"Id":           opts.ID,
+		"Width":        strconv.Itoa(opts.Width),
+		"Height":       strconv.Itoa(opts.Height),
+		"CreateSheet":  strconv.FormatBool(opts.CreateSheet),
+		"VerifyMacro":  strconv.FormatBool(opts.VerifyMacro),
+	}
+}
+
+func (r Runner) UIButtonList(cfg config.Config, opts UIButtonListOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonListScriptArgs(r.RootDir, cfg, opts))
+}
+
+func buildUIButtonListScriptArgs(root string, cfg config.Config, opts UIButtonListOptions) map[string]string {
+	return map[string]string{
+		"Action":       "list",
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+	}
+}
+
+func (r Runner) UIButtonRemove(cfg config.Config, opts UIButtonRemoveOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonRemoveScriptArgs(r.RootDir, cfg, opts))
+}
+
+func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButtonRemoveOptions) map[string]string {
+	return map[string]string{
+		"Action":       "remove",
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"Id":           opts.ID,
+	}
+}
+
 func (r Runner) run(commandName string, args map[string]string, opts ...CommandOptions) (output.Envelope, int, error) {
 	runOpts := commandRunOptions{}
 	if len(opts) > 0 {
@@ -297,6 +367,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Tests = result.Tests
 	env.Trace = result.Trace
 	env.GUIBoundaries = result.GUIBoundaries
+	env.UI = result.UI
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
@@ -364,7 +435,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch":
+	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment

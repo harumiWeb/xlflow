@@ -115,6 +115,71 @@ func TestRootCommandIncludesMacrosCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesUIButtonCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"ui", "button", "add"},
+		{"ui", "button", "list"},
+		{"ui", "button", "remove"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("expected command %v, got %#v", args, cmd)
+		}
+	}
+
+	add, _, err := root.Find([]string{"ui", "button", "add"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sheet", "cell", "text", "macro", "id", "width", "height", "create-sheet", "verify-macro"} {
+		if add.Flags().Lookup(name) == nil {
+			t.Fatalf("expected ui button add to define --%s", name)
+		}
+	}
+}
+
+func TestBuildUIButtonAddOptionsDefaultsAndNormalizesID(t *testing.T) {
+	opts, err := buildUIButtonAddOptions(excel.UIButtonAddOptions{
+		Sheet:       " Menu ",
+		Cell:        " B2 ",
+		Text:        " Run ",
+		Macro:       " Main.RunAggregation ",
+		Width:       160,
+		Height:      40,
+		CreateSheet: true,
+		VerifyMacro: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ID != "main-runaggregation" {
+		t.Fatalf("id = %q, want main-runaggregation", opts.ID)
+	}
+	if opts.Sheet != "Menu" || opts.Cell != "B2" || opts.Text != "Run" || opts.Macro != "Main.RunAggregation" {
+		t.Fatalf("unexpected trimmed opts: %#v", opts)
+	}
+	if !opts.CreateSheet || !opts.VerifyMacro {
+		t.Fatalf("expected boolean flags to be preserved: %#v", opts)
+	}
+}
+
+func TestBuildUIButtonAddOptionsValidatesRequiredFields(t *testing.T) {
+	_, err := buildUIButtonAddOptions(excel.UIButtonAddOptions{Sheet: "Menu", Cell: "B2", Text: "Run", Width: 160, Height: 40})
+	if err == nil || !strings.Contains(err.Error(), "--macro is required") {
+		t.Fatalf("expected macro required error, got %v", err)
+	}
+	_, err = buildUIButtonAddOptions(excel.UIButtonAddOptions{Sheet: "Menu", Cell: "B2", Text: "Run", Macro: "Main.Run", Width: 0, Height: 40})
+	if err == nil || !strings.Contains(err.Error(), "--width") {
+		t.Fatalf("expected width error, got %v", err)
+	}
+}
+
 func TestRootCommandIncludesDiffCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
