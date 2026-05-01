@@ -76,6 +76,7 @@ pull → edit → push → lint → test/run → trace → diff
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
+>
 > <details>
 > <summary>Details</summary>
 > In Excel options, please enable "Trust Center" → "Macro Settings" → "Trust access to the VBA project object model".
