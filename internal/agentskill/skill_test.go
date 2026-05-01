@@ -28,10 +28,12 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Treat the configured source directories as authoritative",
-		"Use a listed `qualified_name` from `xlflow macros --json`",
+		"Use a listed `qualified_name` from `xlflow macros --session --json`",
 		"Run `xlflow doctor --keepalive --json` for setup phases",
-		"xlflow pull --keepalive --json",
-		"xlflow push --keepalive --json",
+		"xlflow session start",
+		"xlflow pull --session --keepalive --json",
+		"xlflow push --fast --session --no-save --keepalive --json",
+		"xlflow session stop",
 		"XLFLOW_DONE status=success command=pull",
 	} {
 		if !strings.Contains(string(body), want) {
