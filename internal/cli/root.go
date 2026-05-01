@@ -29,6 +29,11 @@ type app struct {
 
 const defaultKeepaliveInterval = 5 * time.Second
 
+type keepaliveFlags struct {
+	enabled  bool
+	interval time.Duration
+}
+
 func Execute() error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -68,20 +73,25 @@ func (a *app) rootCommand() *cobra.Command {
 }
 
 func (a *app) macrosCommand() *cobra.Command {
-	return &cobra.Command{
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "macros",
 		Short: "Discover runnable workbook macros",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("macros", output.ExitConfig, "macros_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("macros")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Reading VBA project", func() error {
+			err = a.withExcelProgress("Reading VBA project", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Macros(cfg)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Macros(cfg, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -90,6 +100,8 @@ func (a *app) macrosCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) uiCommand() *cobra.Command {
@@ -116,6 +128,7 @@ func (a *app) uiButtonCommand() *cobra.Command {
 
 func (a *app) uiButtonAddCommand() *cobra.Command {
 	var opts excel.UIButtonAddOptions
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add or update a workbook form-control button",
@@ -125,15 +138,19 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
 			}
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("ui")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Adding workbook button", func() error {
+			err = a.withExcelProgress("Adding workbook button", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -151,45 +168,19 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 	cmd.Flags().IntVar(&opts.Height, "height", 40, "button height in points")
 	cmd.Flags().BoolVar(&opts.CreateSheet, "create-sheet", false, "create the target worksheet when it does not exist")
 	cmd.Flags().BoolVar(&opts.VerifyMacro, "verify-macro", false, "verify that the assigned macro exists before saving")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) uiButtonListCommand() *cobra.Command {
 	var opts excel.UIButtonListOptions
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List xlflow-managed workbook buttons",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := a.loadConfig("ui")
-			if err != nil {
-				return err
-			}
-			var env output.Envelope
-			var code int
-			err = a.withSpinner("Listing workbook buttons", func() error {
-				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts)
-				return runErr
-			})
-			if err != nil {
-				return err
-			}
-			return a.write(env, code)
-		},
-	}
-	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
-	return cmd
-}
-
-func (a *app) uiButtonRemoveCommand() *cobra.Command {
-	var opts excel.UIButtonRemoveOptions
-	cmd := &cobra.Command{
-		Use:   "remove",
-		Short: "Remove an xlflow-managed workbook button",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			built, err := buildUIButtonRemoveOptions(opts)
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
 			if err != nil {
 				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
 			}
@@ -199,9 +190,47 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Removing workbook button", func() error {
+			err = a.withExcelProgress("Listing workbook buttons", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts, keepaliveOpts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) uiButtonRemoveCommand() *cobra.Command {
+	var opts excel.UIButtonRemoveOptions
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Remove an xlflow-managed workbook button",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			built, err := buildUIButtonRemoveOptions(opts)
+			if err != nil {
+				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
+			}
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("ui")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Removing workbook button", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -212,6 +241,7 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.ID, "id", "", "stable xlflow button id")
 	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -279,12 +309,17 @@ func normalizeUIButtonID(value string) string {
 func (a *app) newCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
+	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "new [workbook]",
 		Short: "Create a new xlflow project and macro workbook",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("new", output.ExitConfig, "new_args_invalid", err)
+			}
 			var skillOpts agentskill.InstallOptions
 			if withSkill {
 				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
@@ -300,8 +335,8 @@ func (a *app) newCommand() *cobra.Command {
 			var excelEnv output.Envelope
 			var excelCode int
 			result, err := project.New(a.cwd, workbook, func(path string) error {
-				env, code, err := a.runExcel("Creating workbook", func() (output.Envelope, int, error) {
-					return excel.Runner{RootDir: a.cwd}.New(path)
+				env, code, err := a.runExcelWithProgress("Creating workbook", keepaliveOpts, func() (output.Envelope, int, error) {
+					return excel.Runner{RootDir: a.cwd}.New(path, keepaliveOpts)
 				})
 				excelEnv = env
 				excelCode = code
@@ -343,6 +378,7 @@ func (a *app) newCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -392,20 +428,25 @@ func (a *app) initCommand() *cobra.Command {
 }
 
 func (a *app) doctorCommand() *cobra.Command {
-	return &cobra.Command{
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose Excel COM and VBIDE access",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("doctor", output.ExitConfig, "doctor_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("doctor")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Checking Excel automation", func() error {
+			err = a.withExcelProgress("Checking Excel automation", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -420,24 +461,31 @@ func (a *app) doctorCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) attachCommand() *cobra.Command {
 	var active bool
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "attach --active",
 		Short: "Inspect the active Excel workbook connection",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("attach", output.ExitConfig, "attach_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("attach")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Inspecting active workbook", func() error {
+			err = a.withExcelProgress("Inspecting active workbook", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -447,24 +495,30 @@ func (a *app) attachCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&active, "active", false, "attach to the active Excel workbook")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) pullCommand() *cobra.Command {
-	return &cobra.Command{
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Export VBA components from the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("pull")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Exporting VBA source", func() error {
+			err = a.withExcelProgress("Exporting VBA source", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Pull(cfg)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Pull(cfg, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -473,18 +527,19 @@ func (a *app) pullCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) pushCommand() *cobra.Command {
-	var keepalive bool
-	var keepaliveInterval time.Duration
+	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Import source VBA components into the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
@@ -499,20 +554,20 @@ func (a *app) pushCommand() *cobra.Command {
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.Push(cfg, keepaliveOpts)
 				return runErr
 			}
-			if keepaliveOpts.Keepalive {
-				err = run()
-			} else {
-				err = a.withSpinner("Importing VBA source", run)
-			}
+			err = a.withExcelProgress("Importing VBA source", keepaliveOpts, run)
 			if err != nil {
 				return err
 			}
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
-	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
+}
+
+func addKeepaliveFlags(cmd *cobra.Command, keepalive *keepaliveFlags) {
+	cmd.Flags().BoolVar(&keepalive.enabled, "keepalive", false, "write periodic progress heartbeat lines to stderr")
+	cmd.Flags().DurationVar(&keepalive.interval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
 }
 
 func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.CommandOptions, error) {
@@ -675,11 +730,16 @@ func (a *app) traceCommand() *cobra.Command {
 }
 
 func (a *app) traceInjectCommand() *cobra.Command {
-	return &cobra.Command{
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "inject [workbook]",
 		Short: "Inject the XlflowTrace VBA module into a workbook",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("trace", output.ExitConfig, "trace_args_invalid", err)
+			}
 			cfg, err := config.Load(a.cwd)
 			workbook := ""
 			if len(args) == 1 {
@@ -693,9 +753,9 @@ func (a *app) traceInjectCommand() *cobra.Command {
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Injecting trace module", func() error {
+			err = a.withExcelProgress("Injecting trace module", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -704,24 +764,31 @@ func (a *app) traceInjectCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) testCommand() *cobra.Command {
 	var filter string
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run workbook VBA tests",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("test")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withSpinner("Running VBA tests", func() error {
+			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Test(cfg, filter)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Test(cfg, filter, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -731,6 +798,7 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -1011,15 +1079,22 @@ func (a *app) outputOptions() output.Options {
 	}
 }
 
-func (a *app) runExcel(label string, fn func() (output.Envelope, int, error)) (output.Envelope, int, error) {
+func (a *app) runExcelWithProgress(label string, opts excel.CommandOptions, fn func() (output.Envelope, int, error)) (output.Envelope, int, error) {
 	var env output.Envelope
 	var code int
-	err := a.withSpinner(label, func() error {
+	err := a.withExcelProgress(label, opts, func() error {
 		var runErr error
 		env, code, runErr = fn()
 		return runErr
 	})
 	return env, code, err
+}
+
+func (a *app) withExcelProgress(label string, opts excel.CommandOptions, fn func() error) error {
+	if opts.Keepalive {
+		return fn()
+	}
+	return a.withSpinner(label, fn)
 }
 
 func (a *app) withSpinner(label string, fn func() error) error {

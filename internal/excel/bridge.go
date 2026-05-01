@@ -91,20 +91,20 @@ type UIButtonRemoveOptions struct {
 	ID    string
 }
 
-func (r Runner) Doctor(cfg config.Config) (output.Envelope, int, error) {
+func (r Runner) Doctor(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("doctor", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}, opts...)
 }
 
-func (r Runner) New(workbook string) (output.Envelope, int, error) {
+func (r Runner) New(workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("new", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, workbook),
-	})
+	}, opts...)
 }
 
-func (r Runner) Pull(cfg config.Config) (output.Envelope, int, error) {
+func (r Runner) Pull(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("pull", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
@@ -112,7 +112,7 @@ func (r Runner) Pull(cfg config.Config) (output.Envelope, int, error) {
 		"FormsDir":     filepath.Join(r.RootDir, cfg.Src.Forms),
 		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}, opts...)
 }
 
 func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -127,8 +127,8 @@ func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope
 	}, opts...)
 }
 
-func (r Runner) TraceInject(cfg config.Config, workbook string) (output.Envelope, int, error) {
-	return r.run("trace", buildTraceInjectScriptArgs(r.RootDir, cfg, workbook))
+func (r Runner) TraceInject(cfg config.Config, workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
+	return r.run("trace", buildTraceInjectScriptArgs(r.RootDir, cfg, workbook), opts...)
 }
 
 func buildTraceInjectScriptArgs(root string, cfg config.Config, workbook string) map[string]string {
@@ -197,33 +197,33 @@ func (r Runner) Run(cfg config.Config, opts RunOptions) (output.Envelope, int, e
 	})
 }
 
-func (r Runner) Attach(cfg config.Config, active bool) (output.Envelope, int, error) {
+func (r Runner) Attach(cfg config.Config, active bool, opts ...CommandOptions) (output.Envelope, int, error) {
 	if !active {
 		return output.Failure("attach", output.Error{Code: "attach_args_invalid", Message: "--active is required for attach in this version", Source: "xlflow"}), output.ExitConfig, nil
 	}
 	return r.run("attach", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Active":       strconv.FormatBool(active),
-	})
+	}, opts...)
 }
 
-func (r Runner) Test(cfg config.Config, filter string) (output.Envelope, int, error) {
+func (r Runner) Test(cfg config.Config, filter string, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("test", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Filter":       filter,
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}, opts...)
 }
 
-func (r Runner) Macros(cfg config.Config) (output.Envelope, int, error) {
+func (r Runner) Macros(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	return r.run("macros", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	})
+	}, opts...)
 }
 
-func (r Runner) UIButtonAdd(cfg config.Config, opts UIButtonAddOptions) (output.Envelope, int, error) {
-	return r.run("ui", buildUIButtonAddScriptArgs(r.RootDir, cfg, opts))
+func (r Runner) UIButtonAdd(cfg config.Config, opts UIButtonAddOptions, cmdOpts ...CommandOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonAddScriptArgs(r.RootDir, cfg, opts), cmdOpts...)
 }
 
 func buildUIButtonAddScriptArgs(root string, cfg config.Config, opts UIButtonAddOptions) map[string]string {
@@ -243,8 +243,8 @@ func buildUIButtonAddScriptArgs(root string, cfg config.Config, opts UIButtonAdd
 	}
 }
 
-func (r Runner) UIButtonList(cfg config.Config, opts UIButtonListOptions) (output.Envelope, int, error) {
-	return r.run("ui", buildUIButtonListScriptArgs(r.RootDir, cfg, opts))
+func (r Runner) UIButtonList(cfg config.Config, opts UIButtonListOptions, cmdOpts ...CommandOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonListScriptArgs(r.RootDir, cfg, opts), cmdOpts...)
 }
 
 func buildUIButtonListScriptArgs(root string, cfg config.Config, opts UIButtonListOptions) map[string]string {
@@ -256,8 +256,8 @@ func buildUIButtonListScriptArgs(root string, cfg config.Config, opts UIButtonLi
 	}
 }
 
-func (r Runner) UIButtonRemove(cfg config.Config, opts UIButtonRemoveOptions) (output.Envelope, int, error) {
-	return r.run("ui", buildUIButtonRemoveScriptArgs(r.RootDir, cfg, opts))
+func (r Runner) UIButtonRemove(cfg config.Config, opts UIButtonRemoveOptions, cmdOpts ...CommandOptions) (output.Envelope, int, error) {
+	return r.run("ui", buildUIButtonRemoveScriptArgs(r.RootDir, cfg, opts), cmdOpts...)
 }
 
 func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButtonRemoveOptions) map[string]string {

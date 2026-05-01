@@ -7,3 +7,4 @@
 - Excel COM-backed Go tests can take several minutes, especially userform/VBIDE round-trip tests. Do not use two-minute timeouts for full `go test ./...` or `go test ./scripts`; use at least 8 minutes for full runs and 5 minutes for `scripts` package runs before treating slowness as a hang.
 - Avoid tight wall-clock sleeps in concurrency/ticker tests. Prefer polling with a generous deadline or injecting the clock/ticker so Windows CI scheduler delays do not make tests flaky.
 - Validate cheap CLI/script action enums before opening Excel COM or workbook files. Unsupported actions should return argument errors without starting Excel, so invalid input cannot be masked by workbook-open failures or localized COM messages.
+- After refactoring shared CLI helpers, run lint or search for now-unused wrappers before finalizing; tests can pass while `unused` still fails CI lint.

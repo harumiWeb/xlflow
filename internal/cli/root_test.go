@@ -11,6 +11,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -45,17 +46,128 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	}
 }
 
-func TestRootCommandIncludesPushKeepaliveFlags(t *testing.T) {
+func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 
-	cmd, _, err := root.Find([]string{"push"})
+	for _, args := range [][]string{
+		{"new"},
+		{"doctor"},
+		{"attach"},
+		{"pull"},
+		{"push"},
+		{"trace", "inject"},
+		{"macros"},
+		{"test"},
+		{"ui", "button", "add"},
+		{"ui", "button", "list"},
+		{"ui", "button", "remove"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			cmd, _, err := root.Find(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"keepalive", "keepalive-interval"} {
+				if cmd.Flags().Lookup(name) == nil {
+					t.Fatalf("expected %v command to define --%s", args, name)
+				}
+			}
+		})
+	}
+}
+
+func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"init"},
+		{"lint"},
+		{"diff"},
+		{"inspect-gui"},
+		{"skill", "install"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			cmd, _, err := root.Find(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cmd.Flags().Lookup("keepalive") != nil || cmd.Flags().Lookup("keepalive-interval") != nil {
+				t.Fatalf("expected %v command not to define keepalive flags", args)
+			}
+		})
+	}
+}
+
+func TestAddKeepaliveFlagsUsesDefaultInterval(t *testing.T) {
+	var flags keepaliveFlags
+	cmd := &cobra.Command{Use: "sample"}
+	addKeepaliveFlags(cmd, &flags)
+
+	if err := cmd.Flags().Set("keepalive", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("keepalive-interval", "3s"); err != nil {
+		t.Fatal(err)
+	}
+	if !flags.enabled {
+		t.Fatal("expected keepalive to be enabled")
+	}
+	if flags.interval != 3*time.Second {
+		t.Fatalf("interval = %s, want 3s", flags.interval)
+	}
+}
+
+func TestPullCommandRejectsInvalidKeepaliveIntervalBeforeConfigLoad(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"pull", "--keepalive", "--keepalive-interval", "0s"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "--keepalive-interval") {
+		t.Fatalf("error = %v, want keepalive interval message", err)
+	}
+}
+
+func TestUIButtonCommandRejectsInvalidKeepaliveIntervalWithUIButtonError(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{
+		"ui", "button", "add",
+		"--sheet", "Menu",
+		"--cell", "B2",
+		"--text", "Run",
+		"--macro", "Main.Run",
+		"--keepalive",
+		"--keepalive-interval", "0s",
+	})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "--keepalive-interval") {
+		t.Fatalf("error = %v, want keepalive interval message", err)
+	}
+}
+
+func TestKeepaliveFlagsAreNotDuplicatedOnRun(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"run"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"keepalive", "keepalive-interval"} {
-		if cmd.Flags().Lookup(name) == nil {
-			t.Fatalf("expected push command to define --%s", name)
+		if flag := cmd.Flags().Lookup(name); flag == nil {
+			t.Fatalf("expected run command to define --%s", name)
 		}
 	}
 }
