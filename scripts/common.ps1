@@ -446,9 +446,39 @@ function Write-XlflowTraceModuleSource {
 
   New-Item -ItemType Directory -Force -Path $ModulesDir | Out-Null
   $path = Join-Path $ModulesDir "XlflowTrace.bas"
-  $source = 'Attribute VB_Name = "XlflowTrace"' + [Environment]::NewLine + (New-XlflowTraceModuleCode)
-  Set-XlflowUtf8Text -Path $path -Text $source
+  Set-XlflowUtf8Text -Path $path -Text (Get-XlflowTraceModuleSourceText)
   return $path
+}
+
+function Get-XlflowTraceModuleSourceText {
+  return 'Attribute VB_Name = "XlflowTrace"' + [Environment]::NewLine + (New-XlflowTraceModuleCode)
+}
+
+function Test-XlflowTraceModuleSourceMatches {
+  param([string]$ModulesDir)
+
+  if ([string]::IsNullOrWhiteSpace($ModulesDir)) {
+    return $false
+  }
+  $path = Join-Path $ModulesDir "XlflowTrace.bas"
+  if (-not (Test-Path -LiteralPath $path)) {
+    return $false
+  }
+  $existing = (Get-XlflowUtf8Text -Path $path).Trim()
+  $expected = (Get-XlflowTraceModuleSourceText).Trim()
+  return $existing -eq $expected
+}
+
+function Remove-XlflowTraceModule {
+  param($VBProject)
+
+  try {
+    $existing = $VBProject.VBComponents.Item("XlflowTrace")
+    $VBProject.VBComponents.Remove($existing)
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 function Test-XlflowTraceModuleInjected {

@@ -276,7 +276,7 @@ xlflow run Report.Generate --save --json
 xlflow run Report.Generate --save-as build\Result.xlsm --json
 ```
 
-When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available.
+When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available. Runtime failures also include `run_diagnostic` when xlflow can match the failure to nearby source or a known VBA pattern such as a missing `Set` assignment.
 
 `--headless` rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries`. `--interactive` runs with Excel visible and alerts enabled for human operation. `--timeout` defaults to `5m` and returns `macro_timeout` when execution does not complete in time.
 
@@ -284,10 +284,11 @@ When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VB
 
 Collects log events from VBA during macro execution.
 
-First, inject the trace module:
+Enable the trace module when you want it persisted in the workbook and source tree:
 
 ```bash
-xlflow trace inject --json
+xlflow trace enable --json
+xlflow trace status --json
 ```
 
 Then write logs from VBA:
@@ -305,6 +306,8 @@ xlflow run Main.Run --trace --json
 ```
 
 Trace events are returned in the top-level JSON `trace` field. This helps identify how far execution progressed before a runtime error.
+
+`xlflow run --trace` can temporarily inject and revert the helper when it is missing. Trace logs are written under `.xlflow/traces`. Use `xlflow trace disable --json` to remove the persistent helper and `xlflow trace clean --json` to remove trace log files. `xlflow trace inject` remains as a compatibility alias for `trace enable`.
 
 ### `xlflow test`
 
@@ -370,6 +373,26 @@ It detects patterns that are unsafe or inconvenient for AI agents and unattended
 - Possible implicit `Variant`
 - Module-level `Public` variables
 - Interactive operations such as `Application.GetOpenFilename`, `Application.FileDialog`, `InputBox`, and modal `MsgBox`
+
+### `xlflow analyze`
+
+Analyzes VBA source for runtime-risk patterns without opening Excel.
+
+```bash
+xlflow analyze --json
+```
+
+The first analyzer rules report likely missing `Set` assignments for object variables and object-returning functions. Findings are returned in top-level `analysis` with file, module, procedure, line, nearby code, reason, and suggestion.
+
+### `xlflow check`
+
+Runs the standard preflight sequence:
+
+```bash
+xlflow check --keepalive --json
+```
+
+`check` runs `lint`, `analyze`, and `doctor`, then returns an aggregate top-level `check` object. It continues after lint/analyze findings so the report includes all cheap source feedback before the Excel COM doctor result.
 
 ### `xlflow inspect-gui`
 
@@ -500,7 +523,7 @@ Recommended workflow:
 5. Run xlflow lint --json and fix unsafe patterns
 6. Run xlflow test --json
 7. If no tests exist, run xlflow macros --json → xlflow run <qualified_name> --headless --json
-8. If runtime errors are unclear, use xlflow trace inject → xlflow run --trace --json
+8. If runtime errors are unclear, use xlflow run --trace --json and inspect run_diagnostic/trace output
 9. If workbook changes must be reviewed, use xlflow diff --json
 ```
 

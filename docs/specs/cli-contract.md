@@ -15,6 +15,10 @@ xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] pull [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] push [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace enable [workbook] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace disable [workbook] [--force] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace status [workbook] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace clean [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] trace inject [workbook] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--save | --save-as <path>] [--trace] [--headless | --interactive] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] macros [--keepalive] [--keepalive-interval <duration>]
@@ -25,6 +29,8 @@ xlflow [--json] test [--filter <name>] [--keepalive] [--keepalive-interval <dura
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
+xlflow [--json] analyze
+xlflow [--json] check [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 ```
 
@@ -32,7 +38,7 @@ xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
 
-Excel COM-backed commands support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. This includes `new`, `doctor`, `attach`, `pull`, `push`, `trace inject`, `run`, `macros`, `ui button add/list/remove`, and `test`. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=pull` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
+Excel COM-backed commands support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. This includes `new`, `doctor`, `attach`, `pull`, `push`, `trace enable/disable/status/inject/clean`, `run`, `macros`, `ui button add/list/remove`, `test`, and `check`. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=pull` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
 
 `new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`.
 
@@ -56,7 +62,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion.
 
-`trace inject` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml` and also writes the same bundled trace module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. This keeps a subsequent `push` from deleting the workbook trace module. JSON output for configured project injection includes top-level `source.path` and `source.updated` metadata. When `[workbook]` is provided and project configuration cannot be loaded, the command can run without source persistence. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
+`trace enable` injects or replaces the standard module `XlflowTrace` in the target workbook. When `[workbook]` is omitted, it uses `excel.path` from `xlflow.toml` and also writes the same bundled trace module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. This keeps a subsequent `push` from deleting the workbook trace module. JSON output for configured project injection includes top-level `source.path` and `source.updated` metadata. `trace inject` is a compatibility alias for `trace enable`. `trace disable` removes the workbook helper and removes source helper only when it matches xlflow's bundled helper, unless `--force` is set. `trace status` reports workbook and source helper presence plus whether the source matches the bundled helper. `trace clean` removes `.xlflow/traces`. The injected module provides `XlflowLog message` for user VBA code and `XlflowSetTraceFile path` for the run harness. `new` and `init` do not create this module by default because trace logging is opt-in debug instrumentation.
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
 
@@ -64,7 +70,11 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `run` adds a `macro` object with `name`, `args`, and `duration_ms`. Failed macro runs return `macro_failed` with `error.source`, `error.number`, `error.message`, `error.line` when VBA exposes a non-zero `Erl` value, and `error.phase` when the failed phase is known. Stable run phases are `open_workbook`, `prepare_vbide`, `inject_harness`, `invoke_macro`, `save_result`, and `read_trace`. When Excel exposes enough information to distinguish a missing or invalid target macro from user-code failure, `run` returns `macro_not_found` instead of `macro_failed`. Plain-text success output must include the elapsed duration and whether the workbook was saved, copied, or left unchanged. Plain-text failure output must use the formatted message `Module line <n> Err <n>: <description>` when line and error number are available, and otherwise omit the `line <n>` segment. Because `run` injects a temporary VBA harness to measure duration while avoiding modal VBA runtime error dialogs, VBIDE access failures return an environment error such as `vbide_access_denied` and exit code `3`.
 
-`run --trace` creates a fresh temp log under `%TEMP%\xlflow`, calls `XlflowTrace.XlflowSetTraceFile` before the target macro, then reads trace events after execution. User VBA code writes events with `Call XlflowLog("message")`. JSON output adds top-level `trace.enabled`, `trace.path`, `trace.events`, and optional `trace.read_error`; each event has `timestamp`, `message`, and `raw`. Plain-text output prints trace events as `[timestamp] message` after the normal run logs. If `XlflowTrace` is missing, `run --trace` returns `trace_not_injected` with exit code `1`. If the macro fails after writing trace events, those events are still returned. Trace read errors are reported in `trace.read_error` without changing the macro result. If a traced run fails with zero events, output should indicate that execution may have failed before reaching user trace calls.
+`run --trace` creates a fresh log under `.xlflow/traces`, calls `XlflowTrace.XlflowSetTraceFile` before the target macro, then reads trace events after execution. User VBA code writes events with `Call XlflowLog("message")`. If `XlflowTrace` is missing, `run --trace` temporarily injects it and reverts the helper before saving successful results. JSON output adds top-level `trace.enabled`, `trace.path`, `trace.events`, lifecycle metadata, and optional `trace.read_error`; each event has `timestamp`, `message`, and `raw`. Plain-text output prints trace events as `[timestamp] message` after the normal run logs. If the macro fails after writing trace events, those events are still returned. Trace read errors are reported in `trace.read_error` without changing the macro result. If a traced run fails with zero events, output should indicate that execution may have failed before reaching user trace calls.
+
+`analyze` scans configured source directories without Excel COM for runtime-risk patterns. It returns top-level `analysis`; findings contain `code`, `severity`, `file`, `module`, `procedure`, `line`, `message`, `reason`, `suggestion`, and `nearby_code`. Findings are validation failures with exit code `1`.
+
+`check` runs `lint`, `analyze`, then `doctor`. It continues after lint/analyze findings so source issues and environment status are returned together. JSON output includes top-level `check`, `issues`, `analysis`, and doctor diagnostics. Lint/analyze findings return exit code `1`; doctor/environment failure returns exit code `3`.
 
 `macros` opens the configured workbook and discovers public runnable VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. Agents should use this command before guessing a `run` target.
 
@@ -137,6 +147,9 @@ Command-specific fields are added at the top level:
 - `tests` for `test`
 - `diff` for `diff`
 - `issues` for `lint`
+- `analysis` for `analyze` and `check`
+- `check` for `check`
+- `run_diagnostic` for enriched `run` failures
 - `trace` for traced `run`
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
 - `ui` for `ui button` commands
@@ -150,7 +163,7 @@ Command-specific fields are added at the top level:
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings, GUI boundary preflight failures, macro failure, macro timeout, missing macro target, missing trace module, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, and duplicate test names
+- `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, missing macro target, trace source removal refusal, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, and duplicate test names
 - `2`: CLI argument or configuration error
 - `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
 
@@ -177,3 +190,9 @@ End Sub
 - `VB005`: possible implicit `Variant`
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. JSON findings may include `kind`, `symbol`, and `suggestion`.
+
+## Analysis Rules
+
+- `VBA101`: object variable assignment likely missing `Set`
+- `VBA102`: object-returning function assignment likely missing `Set`
+- `VBA103`: object-returning function body likely missing `Set <FunctionName> = ...`

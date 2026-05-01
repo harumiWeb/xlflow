@@ -48,6 +48,9 @@ type Envelope struct {
 	Trace         any `json:"trace,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
 	UI            any `json:"ui,omitempty"`
+	Analysis      any `json:"analysis,omitempty"`
+	Check         any `json:"check,omitempty"`
+	RunDiagnostic any `json:"run_diagnostic,omitempty"`
 }
 
 type Options struct {
@@ -168,6 +171,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTest(env))
 	case "lint":
 		b.WriteString(r.renderLint(env))
+	case "analyze":
+		b.WriteString(r.renderAnalysis(env))
+	case "check":
+		b.WriteString(r.renderCheck(env))
 	case "inspect-gui":
 		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
@@ -292,7 +299,7 @@ func (r renderer) renderRun(env Envelope) string {
 	macro := objectMap(env.Macro)
 	workbook := objectMap(env.Workbook)
 	trace := objectMap(env.Trace)
-	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 {
+	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && env.RunDiagnostic == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -330,6 +337,39 @@ func (r renderer) renderRun(env Envelope) string {
 			}
 			b.WriteString(stringValue(event, "message"))
 			b.WriteString("\n")
+		}
+	}
+	if diag := objectMap(env.RunDiagnostic); len(diag) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.style("Diagnostic", "", true))
+		b.WriteString("\n")
+		if loc := objectMap(diag["location"]); len(loc) > 0 {
+			parts := []string{}
+			for _, key := range []string{"module", "procedure", "file"} {
+				if v := stringValue(loc, key); v != "" {
+					parts = append(parts, v)
+				}
+			}
+			if n, ok := numberValue(loc, "line"); ok && n > 0 {
+				parts = append(parts, fmt.Sprintf("line %d", int(n)))
+			}
+			if len(parts) > 0 {
+				b.WriteString(kv("Location", strings.Join(parts, " ")))
+			}
+		}
+		if cause := stringValue(diag, "likely_cause"); cause != "" {
+			b.WriteString(kv("Likely cause", cause))
+		}
+		if suggestion := stringValue(diag, "suggestion"); suggestion != "" {
+			b.WriteString(kv("Suggestion", suggestion))
+		}
+		if nearby := stringList(diag["nearby_code"]); len(nearby) > 0 {
+			b.WriteString("Nearby code:\n")
+			for _, line := range nearby {
+				b.WriteString("  ")
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
 		}
 	}
 	return b.String()
@@ -405,6 +445,59 @@ func (r renderer) renderLint(env Envelope) string {
 		}
 		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(issue, "severity")+"]", "214", true), stringValue(issue, "code"), loc, stringValue(issue, "message"))
 	}
+	return b.String()
+}
+
+func (r renderer) renderAnalysis(env Envelope) string {
+	findings := listOfObjects(env.Analysis)
+	if env.Analysis == nil && env.Status == StatusFailed {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(findings) == 0 {
+		b.WriteString("No analysis findings found.\n")
+		return b.String()
+	}
+	b.WriteString(kv("Findings", fmt.Sprintf("%d", len(findings))))
+	for _, finding := range findings {
+		loc := stringValue(finding, "file")
+		if n, ok := numberValue(finding, "line"); ok && n > 0 {
+			loc = fmt.Sprintf("%s:%d", loc, int(n))
+		}
+		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(finding, "severity")+"]", "214", true), stringValue(finding, "code"), loc, stringValue(finding, "message"))
+		if suggestion := stringValue(finding, "suggestion"); suggestion != "" {
+			b.WriteString("  ")
+			b.WriteString(suggestion)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func (r renderer) renderCheck(env Envelope) string {
+	check := objectMap(env.Check)
+	if len(check) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, name := range []string{"lint", "analyze", "doctor"} {
+		item := objectMap(check[name])
+		if len(item) == 0 {
+			continue
+		}
+		status := stringValue(item, "status")
+		if status == "" {
+			status = "ok"
+		}
+		count := ""
+		if n, ok := numberValue(item, "count"); ok {
+			count = fmt.Sprintf(" (%d)", int(n))
+		}
+		b.WriteString(kv(name, status+count))
+	}
+	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
 

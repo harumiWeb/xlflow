@@ -57,7 +57,10 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
-	for _, path := range []string{destPath, configPath, assertPath} {
+	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
+	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
+	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
+	for _, path := range []string{destPath, configPath, assertPath, mainPath, appPath, uiPath} {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -100,6 +103,19 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 		return result, err
 	}
 	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, assertPath)))
+	for _, item := range []struct {
+		path string
+		body string
+	}{
+		{mainPath, defaultMainModule},
+		{appPath, defaultAppModule},
+		{uiPath, defaultUiModule},
+	} {
+		if err := writeExclusive(item.path, item.body); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
+	}
 
 	gitignorePath := filepath.Join(cwd, ".gitignore")
 	updatedGitignore, err := ensureGitignore(gitignorePath)
@@ -312,4 +328,28 @@ Private Function DescribeAssertValue(ByVal value As Variant) As String
     DescribeAssertValue = CStr(value)
   End If
 End Function
+`
+
+const defaultMainModule = `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+  App.RunCore ThisWorkbook
+End Sub
+`
+
+const defaultAppModule = `Attribute VB_Name = "App"
+Option Explicit
+
+Public Sub RunCore(ByVal wb As Workbook)
+  ' Put workbook automation here.
+End Sub
+`
+
+const defaultUiModule = `Attribute VB_Name = "Ui"
+Option Explicit
+
+Public Sub RunFromButton()
+  Main.Run
+End Sub
 `

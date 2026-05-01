@@ -92,6 +92,26 @@ func TestWriteJSONEnvelopeIncludesTrace(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
+	env := New("check")
+	env.Analysis = []map[string]any{{"code": "VBA101"}}
+	env.Check = map[string]any{"analyze": map[string]any{"status": "failed", "count": 1}}
+	env.RunDiagnostic = map[string]any{"likely_cause": "missing Set"}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"analysis", "check", "run_diagnostic"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWritePlainFailureIncludesLogsBeforeError(t *testing.T) {
 	env := Failure("run", Error{Message: "macro failed"})
 	env.Logs = []string{"[2026-04-29 21:12:03] start"}
@@ -165,6 +185,26 @@ func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
 	for _, want := range []string{"Main.Run", "42ms", "left unchanged", "Trace", "start"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRunDiagnostic(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_failed", Message: "Main Err 450", Source: "Main", Number: 450, Phase: "invoke_macro"})
+	env.RunDiagnostic = map[string]any{
+		"location":     map[string]any{"file": "src/modules/Main.bas", "module": "Main", "procedure": "Run", "line": 4},
+		"likely_cause": "missing Set",
+		"suggestion":   "Use Set result = ...",
+		"nearby_code":  []string{"> 4 | result = FindRange()"},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Diagnostic", "missing Set", "Use Set result", "result = FindRange()"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run diagnostic output missing %q:\n%s", want, got)
 		}
 	}
 }

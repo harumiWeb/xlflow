@@ -19,6 +19,7 @@ $workbook = $null
 $vbProject = $null
 $runnerComponent = $null
 $traceRequested = ConvertTo-XlflowBool $TraceEnabled
+$traceTempInjected = $false
 $currentPhase = "initialize"
 
 try {
@@ -58,8 +59,12 @@ try {
     $currentPhase = "prepare_vbide"
     $vbProject = $workbook.VBProject
     if ($traceRequested -and -not (Test-XlflowTraceModuleInjected -VBProject $vbProject)) {
-      Set-XlflowError -Result $result -Code "trace_not_injected" -Message "XlflowTrace module is not injected. Run xlflow trace inject before xlflow run --trace." -Source "xlflow" -Phase $currentPhase
-      throw "XlflowTrace module is not injected"
+      $traceComponent = $vbProject.VBComponents.Add(1)
+      $traceComponent.Name = "XlflowTrace"
+      $traceComponent.CodeModule.AddFromString((New-XlflowTraceModuleCode))
+      $traceTempInjected = $true
+      $result.trace.lifecycle = "temporary"
+      $result.trace.temporary_injected = $true
     }
     $currentPhase = "inject_harness"
     $runnerComponent = $vbProject.VBComponents.Add(1)
@@ -80,6 +85,13 @@ try {
   if ($null -ne $runnerComponent) {
     $vbProject.VBComponents.Remove($runnerComponent)
     $runnerComponent = $null
+  }
+  if ($traceTempInjected -and $null -ne $vbProject) {
+    [void](Remove-XlflowTraceModule -VBProject $vbProject)
+    $traceTempInjected = $false
+    if ($null -ne $result.trace) {
+      $result.trace.temporary_reverted = $true
+    }
   }
   $result.macro = [ordered]@{
     name = $MacroName
@@ -129,6 +141,14 @@ try {
 } finally {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch {}
+  }
+  if ($traceTempInjected -and $null -ne $vbProject) {
+    try {
+      [void](Remove-XlflowTraceModule -VBProject $vbProject)
+      if ($null -ne $result.trace) {
+        $result.trace.temporary_reverted = $true
+      }
+    } catch {}
   }
   Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
   if ($traceRequested) {

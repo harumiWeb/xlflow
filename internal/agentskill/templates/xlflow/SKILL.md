@@ -133,7 +133,7 @@ Expected markers include `XLFLOW_DONE status=success command=pull`, `XLFLOW_DONE
 
 ## Trace Rules
 
-Before using trace logging, run `xlflow trace inject --keepalive --json` once for the configured workbook. In configured projects this also writes `src/modules/XlflowTrace.bas`, so later `xlflow push` keeps the trace module. If `xlflow run --trace --json` reports `trace_not_injected`, inject the trace module first, then rerun the macro.
+Use `xlflow run --trace --keepalive --json` when you need trace events; xlflow can temporarily inject and revert the helper if it is missing. Use `xlflow trace enable --keepalive --json` when you want the helper persisted in the configured workbook and source tree. Use `xlflow trace status --json`, `xlflow trace disable --json`, and `xlflow trace clean --json` to inspect or remove trace state. `xlflow trace inject` is an older alias for `trace enable`.
 
 When debugging, add `XlflowLog` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
 
@@ -149,13 +149,15 @@ Call XlflowLog("finished GenerateReport")
 
 If `xlflow test` fails, read the failing test name, module, VBA error number, description, and line. Patch the smallest relevant area, rerun the focused test first, then run the full test suite.
 
-If `xlflow run` fails, inspect `error.code` and `error.phase`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --keepalive --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
+If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --keepalive --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
 
 If `xlflow run --headless --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. Either refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop.
 
 If `xlflow run --trace` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --keepalive --json`.
 
 If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`.
+
+Run `xlflow analyze --json` or `xlflow check --keepalive --json` before changing object-heavy VBA. Analyzer findings such as `VBA101`, `VBA102`, and `VBA103` usually mean a missing `Set` assignment.
 
 ## Final Response
 

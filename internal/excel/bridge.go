@@ -45,6 +45,7 @@ type RunOptions struct {
 	Mode         string
 	Timeout      time.Duration
 	Keepalive    CommandOptions
+	TraceDir     string
 }
 
 type CommandOptions struct {
@@ -68,6 +69,9 @@ type ScriptResult struct {
 	Trace         any           `json:"trace,omitempty"`
 	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
 	UI            any           `json:"ui,omitempty"`
+	Analysis      any           `json:"analysis,omitempty"`
+	Check         any           `json:"check,omitempty"`
+	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
 }
 
 type UIButtonAddOptions struct {
@@ -128,19 +132,40 @@ func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope
 }
 
 func (r Runner) TraceInject(cfg config.Config, workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
-	return r.run("trace", buildTraceInjectScriptArgs(r.RootDir, cfg, workbook), opts...)
+	return r.Trace(cfg, TraceOptions{Action: "enable", Workbook: workbook}, opts...)
+}
+
+type TraceOptions struct {
+	Action   string
+	Workbook string
+	Force    bool
+}
+
+func (r Runner) Trace(cfg config.Config, traceOpts TraceOptions, opts ...CommandOptions) (output.Envelope, int, error) {
+	return r.run("trace", buildTraceScriptArgs(r.RootDir, cfg, traceOpts), opts...)
 }
 
 func buildTraceInjectScriptArgs(root string, cfg config.Config, workbook string) map[string]string {
-	if workbook == "" {
+	return buildTraceScriptArgs(root, cfg, TraceOptions{Action: "enable", Workbook: workbook})
+}
+
+func buildTraceScriptArgs(root string, cfg config.Config, traceOpts TraceOptions) map[string]string {
+	action := traceOpts.Action
+	if action == "" || action == "inject" {
+		action = "enable"
+	}
+	workbook := traceOpts.Workbook
+	if workbook == "" && action != "clean" {
 		workbook = cfg.Excel.Path
 	}
 	args := map[string]string{
-		"Action":       "inject",
+		"Action":       action,
 		"WorkbookPath": workbookPath(root, workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Force":        strconv.FormatBool(traceOpts.Force),
+		"TraceDir":     filepath.Join(root, ".xlflow", "traces"),
 	}
-	if workbook == cfg.Excel.Path {
+	if workbook == cfg.Excel.Path && action != "clean" {
 		args["ModulesDir"] = filepath.Join(root, cfg.Src.Modules)
 	}
 	return args
@@ -181,7 +206,11 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		scriptArgs["SaveAsPath"] = workbookPath(root, opts.SaveAs)
 	}
 	if opts.Trace {
-		scriptArgs["TraceFile"] = filepath.Join(os.TempDir(), "xlflow", fmt.Sprintf("trace-%d.log", time.Now().UnixNano()))
+		traceDir := opts.TraceDir
+		if traceDir == "" {
+			traceDir = filepath.Join(root, ".xlflow", "traces")
+		}
+		scriptArgs["TraceFile"] = filepath.Join(traceDir, fmt.Sprintf("trace-%d.log", time.Now().UnixNano()))
 	}
 	return scriptArgs, nil
 }
@@ -368,6 +397,9 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Trace = result.Trace
 	env.GUIBoundaries = result.GUIBoundaries
 	env.UI = result.UI
+	env.Analysis = result.Analysis
+	env.Check = result.Check
+	env.RunDiagnostic = result.RunDiagnostic
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
@@ -435,7 +467,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
+	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment

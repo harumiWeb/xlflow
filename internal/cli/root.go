@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/harumiWeb/xlflow/internal/agentskill"
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
@@ -67,6 +68,8 @@ func (a *app) rootCommand() *cobra.Command {
 		a.diffCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
+		a.analyzeCommand(),
+		a.checkCommand(),
 		a.skillCommand(),
 	)
 	return root
@@ -704,6 +707,9 @@ func (a *app) runCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if env.Status == output.StatusFailed && env.Error != nil && env.Error.Code == "macro_failed" && env.Error.Phase == "invoke_macro" {
+				env.RunDiagnostic = a.buildRunDiagnostic(cfg, env)
+			}
 			return a.write(env, code)
 		},
 	}
@@ -725,15 +731,28 @@ func (a *app) traceCommand() *cobra.Command {
 		Use:   "trace",
 		Short: "Manage workbook trace logging support",
 	}
-	trace.AddCommand(a.traceInjectCommand())
+	trace.AddCommand(
+		a.traceLifecycleCommand("enable", "Enable the XlflowTrace VBA module"),
+		a.traceLifecycleCommand("disable", "Disable the XlflowTrace VBA module"),
+		a.traceLifecycleCommand("status", "Report XlflowTrace status"),
+		a.traceLifecycleCommand("clean", "Remove xlflow trace log files"),
+		a.traceInjectCommand(),
+	)
 	return trace
 }
 
 func (a *app) traceInjectCommand() *cobra.Command {
+	cmd := a.traceLifecycleCommand("inject", "Deprecated alias for trace enable")
+	cmd.Use = "inject [workbook]"
+	return cmd
+}
+
+func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 	var keepalive keepaliveFlags
+	var force bool
 	cmd := &cobra.Command{
-		Use:   "inject [workbook]",
-		Short: "Inject the XlflowTrace VBA module into a workbook",
+		Use:   action + " [workbook]",
+		Short: short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
@@ -746,16 +765,24 @@ func (a *app) traceInjectCommand() *cobra.Command {
 				workbook = args[0]
 			}
 			if err != nil {
-				if workbook == "" {
+				if workbook == "" && action != "clean" {
 					return a.writeFailure("trace", output.ExitConfig, "config_error", err)
 				}
 				cfg = config.Default()
 			}
+			traceAction := action
+			if traceAction == "inject" {
+				traceAction = "enable"
+			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Injecting trace module", keepaliveOpts, func() error {
+			label := "Managing trace module"
+			if traceAction == "clean" {
+				label = "Cleaning trace logs"
+			}
+			err = a.withExcelProgress(label, keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TraceInject(cfg, workbook, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force}, keepaliveOpts)
 				return runErr
 			})
 			if err != nil {
@@ -763,6 +790,9 @@ func (a *app) traceInjectCommand() *cobra.Command {
 			}
 			return a.write(env, code)
 		},
+	}
+	if action == "disable" {
+		cmd.Flags().BoolVar(&force, "force", false, "remove modified trace helper source")
 	}
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
@@ -890,6 +920,101 @@ func (a *app) lintCommand() *cobra.Command {
 	}
 }
 
+func (a *app) analyzeCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "analyze",
+		Short: "Analyze VBA source for runtime-risk patterns",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("analyze")
+			if err != nil {
+				return err
+			}
+			findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			if err != nil {
+				return a.writeFailure("analyze", output.ExitEnvironment, "analyze_failed", err)
+			}
+			env := output.New("analyze")
+			env.Analysis = findings
+			if len(findings) > 0 {
+				env.Status = output.StatusFailed
+				env.Error = &output.Error{Code: "analyze_failed", Message: fmt.Sprintf("%d analysis finding(s) found", len(findings))}
+				return a.write(env, output.ExitValidation)
+			}
+			env.Logs = []string{"no analysis findings found"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func (a *app) checkCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Run lint, analyze, and doctor",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("check", output.ExitConfig, "check_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("check")
+			if err != nil {
+				return err
+			}
+			env := output.New("check")
+			check := map[string]any{}
+			issues, err := lint.Linter{RootDir: a.cwd, Config: cfg}.Run()
+			if err != nil {
+				return a.writeFailure("check", output.ExitEnvironment, "lint_failed", err)
+			}
+			check["lint"] = map[string]any{"status": statusForCount(len(issues)), "count": len(issues)}
+			findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			if err != nil {
+				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
+			}
+			check["analyze"] = map[string]any{"status": statusForCount(len(findings)), "count": len(findings)}
+			var doctor output.Envelope
+			var doctorCode int
+			err = a.withExcelProgress("Checking Excel automation", keepaliveOpts, func() error {
+				var runErr error
+				doctor, doctorCode, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, keepaliveOpts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			check["doctor"] = map[string]any{"status": doctor.Status, "code": doctorCode}
+			env.Check = check
+			env.Issues = issues
+			env.Analysis = findings
+			env.Diagnostics = doctor.Diagnostics
+			env.Workbook = doctor.Workbook
+			if doctor.Status == output.StatusFailed {
+				env.Status = output.StatusFailed
+				env.Error = doctor.Error
+				return a.write(env, output.ExitEnvironment)
+			}
+			if len(issues) > 0 || len(findings) > 0 {
+				env.Status = output.StatusFailed
+				env.Error = &output.Error{Code: "check_failed", Message: "lint or analysis findings found", Source: "xlflow"}
+				return a.write(env, output.ExitValidation)
+			}
+			env.Logs = []string{"all checks passed"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func statusForCount(count int) string {
+	if count == 0 {
+		return output.StatusOK
+	}
+	return output.StatusFailed
+}
+
 func (a *app) inspectGUICommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "inspect-gui",
@@ -935,6 +1060,62 @@ func withGUIBoundarySummary(value any, boundaries []gui.Boundary) any {
 	return diag
 }
 
+func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[string]any {
+	diag := map[string]any{
+		"likely_cause": "The macro failed while running user VBA code.",
+		"suggestion":   "Inspect the failing procedure and rerun with --trace if the last successful step is unclear.",
+	}
+	if env.Error != nil {
+		diag["location"] = map[string]any{
+			"module": env.Error.Source,
+			"line":   env.Error.Line,
+		}
+		if env.Error.Number == 450 {
+			diag["likely_cause"] = "VBA runtime error 450 often means an invalid property assignment, wrong argument count, or missing Set for an object assignment."
+			diag["suggestion"] = "Check object assignments near the reported line; use Set when assigning Workbook, Worksheet, Range, or other object references."
+		}
+	}
+	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+	if err == nil && env.Error != nil {
+		for _, finding := range findings {
+			if finding.Module != "" && env.Error.Source != "" && !strings.EqualFold(finding.Module, env.Error.Source) {
+				continue
+			}
+			if env.Error.Line > 0 && finding.Line > 0 && absInt(finding.Line-env.Error.Line) > 3 {
+				continue
+			}
+			diag["location"] = map[string]any{
+				"file":      finding.File,
+				"module":    finding.Module,
+				"procedure": finding.Procedure,
+				"line":      finding.Line,
+			}
+			diag["nearby_code"] = finding.NearbyCode
+			diag["likely_cause"] = finding.Reason
+			diag["suggestion"] = finding.Suggestion
+			break
+		}
+	}
+	if trace := cliObjectMap(env.Trace); len(trace) > 0 {
+		events := cliListOfObjects(trace["events"])
+		if len(events) > 0 {
+			last := events[len(events)-1]
+			diag["trace_context"] = map[string]any{
+				"last_event": stringValueForCLI(last, "message"),
+				"timestamp":  stringValueForCLI(last, "timestamp"),
+			}
+		}
+	}
+	return diag
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func cliObjectMap(value any) map[string]any {
 	if value == nil {
 		return map[string]any{}
@@ -962,6 +1143,37 @@ func cliObjectMap(value any) map[string]any {
 		}
 		return out
 	}
+}
+
+func cliListOfObjects(value any) []map[string]any {
+	switch v := value.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, cliObjectMap(item))
+		}
+		return out
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var out []map[string]any
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil
+		}
+		return out
+	}
+}
+
+func stringValueForCLI(m map[string]any, key string) string {
+	value, ok := m[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
 }
 
 func (a *app) skillCommand() *cobra.Command {

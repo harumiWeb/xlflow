@@ -62,6 +62,7 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"ui", "button", "add"},
 		{"ui", "button", "list"},
 		{"ui", "button", "remove"},
+		{"check"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd, _, err := root.Find(args)
@@ -84,6 +85,7 @@ func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"init"},
 		{"lint"},
+		{"analyze"},
 		{"diff"},
 		{"inspect-gui"},
 		{"skill", "install"},
@@ -205,12 +207,28 @@ func TestRootCommandIncludesTraceInjectCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 
-	cmd, _, err := root.Find([]string{"trace", "inject"})
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"enable", "disable", "status", "clean", "inject"} {
+		cmd, _, err := root.Find([]string{"trace", name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd == nil || cmd.Name() != name {
+			t.Fatalf("expected trace %s command, got %#v", name, cmd)
+		}
 	}
-	if cmd == nil || cmd.Name() != "inject" {
-		t.Fatalf("expected trace inject command, got %#v", cmd)
+}
+
+func TestRootCommandIncludesAnalyzeAndCheckCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	for _, name := range []string{"analyze", "check"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd == nil || cmd.Name() != name {
+			t.Fatalf("expected %s command, got %#v", name, cmd)
+		}
 	}
 }
 
@@ -541,6 +559,29 @@ func TestRunHeadlessPreflightRejectsGUIBoundariesBeforeExcel(t *testing.T) {
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {
 		t.Fatalf("expected validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  ws = ThisWorkbook.Worksheets(1)\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected analysis validation failure, got err=%v exit=%d", err, output.ExitCode(err))
 	}
 }
 

@@ -191,8 +191,8 @@ func TestBuildRunScriptArgsEnablesTrace(t *testing.T) {
 	if args["TraceFile"] == "" {
 		t.Fatal("expected trace file path")
 	}
-	if filepath.Base(filepath.Dir(args["TraceFile"])) != "xlflow" {
-		t.Fatalf("trace file path = %q, expected xlflow temp directory", args["TraceFile"])
+	if filepath.Base(filepath.Dir(args["TraceFile"])) != "traces" || filepath.Base(filepath.Dir(filepath.Dir(args["TraceFile"]))) != ".xlflow" {
+		t.Fatalf("trace file path = %q, expected .xlflow traces directory", args["TraceFile"])
 	}
 }
 

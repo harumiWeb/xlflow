@@ -668,6 +668,44 @@ try {
 	}
 }
 
+func TestTraceModuleSourceMatchDetectsModifiedHelper(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $path = Write-XlflowTraceModuleSource -ModulesDir $root
+  $before = Test-XlflowTraceModuleSourceMatches -ModulesDir $root
+  Add-Content -LiteralPath $path -Value "' user edit"
+  $after = Test-XlflowTraceModuleSourceMatches -ModulesDir $root
+  [ordered]@{ before = $before; after = $after } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace source match check failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Before bool `json:"before"`
+		After  bool `json:"after"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trace source match output: %v\n%s", err, out)
+	}
+	if !got.Before || got.After {
+		t.Fatalf("expected bundled source to match before modification only: %+v", got)
+	}
+}
+
 func TestTraceInjectThenPushPreservesTraceModule(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

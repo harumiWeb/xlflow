@@ -1,25 +1,34 @@
-# UI Button Spec
+# Runtime Diagnostics Spec
 
 ## Goal
 
-Allow agents and users to place a runnable entrypoint on a workbook sheet by creating an Excel form-control button and assigning an existing macro to its `OnAction`.
+Make xlflow failures easier to repair by combining lightweight VBA source analysis, aggregate preflight checks, lower-friction trace commands, and enriched `run` failure diagnostics.
 
 ## CLI Contract
 
-- `xlflow ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]`
-- `xlflow ui button list [--sheet <name>]`
-- `xlflow ui button remove --id <id> [--sheet <name>]`
-- `add` creates or updates an Excel form-control button named `xlflow.button.<id>`.
-- `--id` is normalized to a lowercase ASCII slug. When omitted, it is derived from `--macro`.
-- `--width` defaults to `160`; `--height` defaults to `40`.
-- `--verify-macro` checks VBIDE for the macro before saving; without it, the button is added even if the macro cannot be inspected.
+- `xlflow analyze [--json]`
+- `xlflow check [--json] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow trace enable [workbook] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow trace disable [workbook] [--force] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow trace status [workbook] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow trace clean [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow trace inject [workbook]` remains a compatibility alias for `trace enable`.
 
 ## Output Contract
 
-JSON output adds a top-level `ui` field. `add` and `remove` return `ui.button`; `list` returns `ui.buttons`. Button objects include `id`, `name`, `sheet`, `text`, `macro`, `cell`, `left`, `top`, `width`, `height`, and `updated`.
+- `analyze` returns top-level `analysis`.
+- `check` returns top-level `check`, plus `issues`, `analysis`, and doctor diagnostics where available.
+- Failed `run` results may include top-level `run_diagnostic`.
+- Trace commands return lifecycle/status/clean metadata under top-level `trace`.
+
+## Analyzer Rules
+
+- `VBA101`: object variable assignment likely missing `Set`.
+- `VBA102`: object-returning function assignment likely missing `Set`.
+- `VBA103`: object-returning function body likely missing `Set <FunctionName> = ...`.
 
 ## Failure Contract
 
-- CLI argument errors return exit code `2`.
-- Missing sheets, missing buttons, invalid cells, and missing macros under `--verify-macro` are validation failures.
-- Excel COM, workbook open, PowerShell, and VBIDE access failures are environment failures.
+- Analyzer findings exit `1`.
+- `check` exits `1` for lint/analyze findings and `3` for doctor/environment failure.
+- `trace disable` refuses to delete a modified `XlflowTrace.bas` unless `--force` is set.
