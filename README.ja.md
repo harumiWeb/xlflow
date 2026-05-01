@@ -77,6 +77,10 @@ pull → edit → push → lint → test/run → trace → diff
 
 > [!WARNING]
 > Excel の設定で **VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** を有効にしてください。これが無効だと、Excel がインストールされていても `pull` / `push` / `run` などが失敗する場合があります。
+> <details>
+> <summary>詳細</summary>
+> Excel のオプションで「トラスト センター」→「マクロの設定」→「VBA プロジェクト オブジェクト モデルへのアクセスを信頼する」を有効にしてください。
+> </details>
 
 ---
 
