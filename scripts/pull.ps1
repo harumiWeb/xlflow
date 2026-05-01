@@ -5,7 +5,8 @@ param(
   [string]$FormsDir,
   [string]$WorkbookDir,
   [string]$Visible = "false",
-  [string]$UseSession = "false"
+  [string]$UseSession = "false",
+  [string]$MetadataPath = ""
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -17,13 +18,12 @@ $workbook = $null
 try {
   New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
   if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowActiveExcel
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
     $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
   } else {
     $excel = New-Object -ComObject Excel.Application
     $excel.Visible = ConvertTo-XlflowBool $Visible
-    $excel.DisplayAlerts = $false
-    $workbook = $excel.Workbooks.Open($WorkbookPath)
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
   }
 
   $exported = @()

@@ -1,3 +1,12 @@
+﻿try {
+  $script:XlflowConsoleUtf8 = New-Object System.Text.UTF8Encoding($false)
+  [Console]::InputEncoding = $script:XlflowConsoleUtf8
+  [Console]::OutputEncoding = $script:XlflowConsoleUtf8
+  $OutputEncoding = $script:XlflowConsoleUtf8
+} catch {
+  Write-Verbose ("failed to configure UTF-8 console encoding: " + $_.Exception.Message)
+}
+
 function New-XlflowResult {
   param([string]$Command)
   return [ordered]@{
@@ -74,6 +83,40 @@ function Release-XlflowComReferences {
   [GC]::WaitForPendingFinalizers()
 }
 
+function Set-XlflowExcelAutomationDefaults {
+  param($Excel, [bool]$DisplayAlerts = $false)
+
+  if ($null -eq $Excel) {
+    return
+  }
+  try { $Excel.DisplayAlerts = $DisplayAlerts } catch { Write-Verbose ("failed to set DisplayAlerts: " + $_.Exception.Message) }
+  try { $Excel.EnableEvents = $false } catch { Write-Verbose ("failed to disable Excel events: " + $_.Exception.Message) }
+}
+
+function Disable-XlflowExcelAutomationMacros {
+  param($Excel)
+
+  if ($null -eq $Excel) {
+    return
+  }
+  try { $Excel.AutomationSecurity = 3 } catch { Write-Verbose ("failed to force-disable automation macros: " + $_.Exception.Message) }
+}
+
+function Open-XlflowWorkbookWithXlflowDefaults {
+  param(
+    $Excel,
+    [string]$WorkbookPath,
+    [bool]$DisplayAlerts = $false,
+    [bool]$DisableAutomationMacros = $true
+  )
+
+  Set-XlflowExcelAutomationDefaults -Excel $Excel -DisplayAlerts $DisplayAlerts
+  if ($DisableAutomationMacros) {
+    Disable-XlflowExcelAutomationMacros -Excel $Excel
+  }
+  return $Excel.Workbooks.Open($WorkbookPath)
+}
+
 function Get-XlflowActiveExcel {
   $sessionExcel = Get-Variable -Name "XlflowSessionExcel" -Scope Global -ValueOnly -ErrorAction SilentlyContinue
   if ($null -ne $sessionExcel) {
@@ -100,6 +143,21 @@ function Get-XlflowOpenWorkbook {
       Write-Verbose ("failed to inspect in-process session workbook: " + $_.Exception.Message)
     }
   }
+  try {
+    $bound = [System.Runtime.InteropServices.Marshal]::BindToMoniker($target)
+    if ($null -ne $bound) {
+      try {
+        if ([System.IO.Path]::GetFullPath([string]$bound.FullName) -ieq $target) {
+          return $bound
+        }
+      } catch {
+        Write-Verbose ("failed to inspect moniker-bound workbook: " + $_.Exception.Message)
+      }
+      try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($bound) | Out-Null } catch { Write-Verbose ("failed to release moniker-bound workbook: " + $_.Exception.Message) }
+    }
+  } catch {
+    Write-Verbose ("failed to bind open workbook by path: " + $_.Exception.Message)
+  }
   foreach ($candidate in @($Excel.Workbooks)) {
     try {
       if ([System.IO.Path]::GetFullPath([string]$candidate.FullName) -ieq $target) {
@@ -110,6 +168,200 @@ function Get-XlflowOpenWorkbook {
     }
   }
   throw "xlflow session workbook is not open: $WorkbookPath"
+}
+
+function Add-XlflowNativeMethods {
+  if ("XlflowNativeMethods" -as [type]) {
+    return
+  }
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class XlflowNativeMethods {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+  [DllImport("oleacc.dll")]
+  public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint dwObjectId, ref Guid riid, [MarshalAs(UnmanagedType.IDispatch)] out object ppvObject);
+
+  public static IntPtr[] GetWindowsForProcess(uint targetProcessId) {
+    List<IntPtr> windows = new List<IntPtr>();
+    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+      uint processId = 0;
+      GetWindowThreadProcessId(hWnd, out processId);
+      if (processId == targetProcessId) {
+        windows.Add(hWnd);
+      }
+      return true;
+    }, IntPtr.Zero);
+    return windows.ToArray();
+  }
+
+  public static IntPtr[] GetChildWindows(IntPtr parentHwnd) {
+    List<IntPtr> windows = new List<IntPtr>();
+    EnumWindowsProc callback = delegate(IntPtr hWnd, IntPtr lParam) {
+      windows.Add(hWnd);
+      return true;
+    };
+    EnumChildWindows(parentHwnd, callback, IntPtr.Zero);
+    return windows.ToArray();
+  }
+
+  [DllImport("user32.dll")]
+  public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc enumProc, IntPtr lParam);
+}
+"@
+}
+
+function Get-XlflowExcelProcessId {
+  param($Excel)
+
+  if ($null -eq $Excel) {
+    return 0
+  }
+  try {
+    Add-XlflowNativeMethods
+    $hwnd = [IntPtr]([int64]$Excel.Hwnd)
+    $processId = [uint32]0
+    [void][XlflowNativeMethods]::GetWindowThreadProcessId($hwnd, [ref]$processId)
+    return [int]$processId
+  } catch {
+    Write-Verbose ("failed to resolve Excel process id: " + $_.Exception.Message)
+    return 0
+  }
+}
+
+function Get-XlflowExcelByProcessId {
+  param([int]$ProcessId)
+
+  if ($ProcessId -le 0) {
+    return $null
+  }
+  try {
+    Add-XlflowNativeMethods
+    $iid = [Guid]"00020400-0000-0000-C000-000000000046"
+    foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$ProcessId)) {
+      $dispatch = $null
+      $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($hwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+      if ($hr -ne 0 -or $null -eq $dispatch) {
+        continue
+      }
+      $candidate = $dispatch
+      try {
+        $candidate = $dispatch.Application
+      } catch {
+        $candidate = $dispatch
+      }
+      try {
+        if ($candidate.Workbooks.Count -gt 0) {
+          return $candidate
+        }
+      } catch {
+        Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to resolve Excel by process id: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowExcelByHwnd {
+  param([int64]$Hwnd)
+
+  if ($Hwnd -eq 0) {
+    return $null
+  }
+  try {
+    Add-XlflowNativeMethods
+    $iid = [Guid]"00020400-0000-0000-C000-000000000046"
+    foreach ($candidateHwnd in @([IntPtr]$Hwnd) + @([XlflowNativeMethods]::GetChildWindows([IntPtr]$Hwnd))) {
+      $dispatch = $null
+      $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($candidateHwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+      if ($hr -ne 0 -or $null -eq $dispatch) {
+        continue
+      }
+      $candidate = $dispatch
+      try {
+        $candidate = $dispatch.Application
+      } catch {
+        $candidate = $dispatch
+      }
+      try {
+        if ($candidate.Workbooks.Count -gt 0) {
+          return $candidate
+        }
+      } catch {
+        Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to resolve Excel by hwnd: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowExcelFromSessionMetadata {
+  param([string]$MetadataPath)
+
+  if ([string]::IsNullOrWhiteSpace($MetadataPath) -or -not (Test-Path -LiteralPath $MetadataPath)) {
+    return $null
+  }
+  try {
+    $metadata = Get-Content -LiteralPath $MetadataPath -Raw | ConvertFrom-Json
+    if ($null -ne $metadata -and $null -ne $metadata.hwnd -and $metadata.hwnd -ne 0) {
+      $excel = Get-XlflowExcelByHwnd -Hwnd ([int64]$metadata.hwnd)
+      if ($null -ne $excel) {
+        return $excel
+      }
+    }
+    if ($null -ne $metadata -and $metadata.pid -gt 0) {
+      return Get-XlflowExcelByProcessId -ProcessId ([int]$metadata.pid)
+    }
+  } catch {
+    Write-Verbose ("failed to read session metadata for Excel lookup: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowSessionExcel {
+  param([string]$MetadataPath)
+
+  $excel = Get-XlflowExcelFromSessionMetadata -MetadataPath $MetadataPath
+  if ($null -ne $excel) {
+    return $excel
+  }
+  return Get-XlflowActiveExcel
+}
+
+function Close-XlflowSessionWorkbook {
+  param([string]$WorkbookPath, [string]$MetadataPath, [bool]$Save)
+
+  $workbook = $null
+  $excel = $null
+  try {
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
+    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+    try { $excel = $workbook.Application } catch { $excel = $null }
+    $workbook.Close($Save) | Out-Null
+    if ($null -ne $excel) {
+      $excel.Quit() | Out-Null
+    }
+  } catch {
+    Write-Verbose ("failed to close xlflow session workbook: " + $_.Exception.Message)
+  } finally {
+    if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
+      Remove-Item -LiteralPath $MetadataPath -Force -ErrorAction SilentlyContinue
+    }
+    Release-XlflowComReferences -Workbook $workbook -Excel $excel
+  }
 }
 
 function Get-XlflowFileHash {
@@ -777,7 +1029,31 @@ function Test-XlflowMacroTargetFailure {
   if ($Description -match '(?i)(cannot run the macro|sub or function not defined|macro may not be available|unable to run)') {
     return $true
   }
+  if ($Description -match 'マクロ.*(実行できません|使用できない|利用できない)' -or $Description -match 'Sub または Function が定義されていません') {
+    return $true
+  }
   if ($Number -eq 1004 -and $Description -match '(?i)macro') {
+    return $true
+  }
+  return $false
+}
+
+function Test-XlflowMacroDisabledFailure {
+  param(
+    [int]$Number,
+    [string]$Description
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Description)) {
+    return $false
+  }
+  if ($Description -match '(?i)(security settings.*macro|macros? (?:have been|were|are) disabled|disable all macros|because of your security settings|security warning)') {
+    return $true
+  }
+  if ($Description -match 'セキュリティ.*マクロ.*無効' -or $Description -match 'マクロ.*無効.*セキュリティ') {
+    return $true
+  }
+  if ($Number -eq 1004 -and $Description -match 'セキュリティ') {
     return $true
   }
   return $false
@@ -895,16 +1171,19 @@ function New-XlflowRunHarnessCode {
   foreach ($argument in $Arguments) {
     $literals.Add((ConvertTo-XlflowVBALiteral -Type ([string]$argument.type) -Value ([string]$argument.value)))
   }
-  $invocation = $MacroName
+  $macroLiteral = ConvertTo-XlflowVBALiteral -Type "string" -Value $MacroName
+  $invocation = "Application.Run targetMacro"
   if ($literals.Count -gt 0) {
-    $invocation += " " + ($literals -join ", ")
+    $invocation += ", " + ($literals -join ", ")
   }
 
   [void]$builder.AppendLine("Option Explicit")
   [void]$builder.AppendLine("")
   [void]$builder.AppendLine("Public Function RunMacro() As Variant")
   [void]$builder.AppendLine("  Dim startedAt As Double")
+  [void]$builder.AppendLine("  Dim targetMacro As String")
   [void]$builder.AppendLine("  startedAt = Timer")
+  [void]$builder.AppendLine("  targetMacro = ""'"" & ThisWorkbook.Name & ""'!"" & " + $macroLiteral)
   [void]$builder.AppendLine("  On Error GoTo Handler")
   if ($TraceEnabled) {
     [void]$builder.AppendLine("  XlflowTrace.XlflowSetTraceFile " + (ConvertTo-XlflowVBALiteral -Type "string" -Value $TraceFile))

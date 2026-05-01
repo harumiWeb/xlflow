@@ -10,6 +10,7 @@ param(
   [string]$TraceFile = "",
   [string]$Direct = "false",
   [string]$UseSession = "false",
+  [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
 )
 
@@ -48,13 +49,12 @@ try {
 
   $currentPhase = "open_workbook"
   if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowActiveExcel
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
     $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
   } else {
     $excel = New-Object -ComObject Excel.Application
     $excel.Visible = ConvertTo-XlflowBool $Visible
-    $excel.DisplayAlerts = ConvertTo-XlflowBool $DisplayAlerts
-    $workbook = $excel.Workbooks.Open($WorkbookPath)
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros $false
   }
 
   $typedValues = @(ConvertFrom-XlflowRunArgumentsJson -Json $MacroArgsJson)
@@ -120,6 +120,11 @@ try {
       $result.trace.lifecycle = "temporary"
       $result.trace.temporary_injected = $true
     }
+    $currentPhase = "verify_macro"
+    if (-not (Test-XlflowMacroExists -Workbook $workbook -MacroName $MacroName)) {
+      Set-XlflowError -Result $result -Code "macro_not_found" -Message ("Macro not found: " + $MacroName) -Source "Excel" -Phase $currentPhase
+      throw "macro target missing"
+    }
     $currentPhase = "inject_harness"
     $runnerComponent = $vbProject.VBComponents.Add(1)
   } catch {
@@ -184,8 +189,12 @@ try {
 } catch {
   if ($null -eq $result.error) {
     $errorCode = "macro_failed"
-    if ($currentPhase -eq "invoke_macro" -and (Test-XlflowMacroTargetFailure -Number ([int]$_.Exception.HResult) -Description $_.Exception.Message)) {
-      $errorCode = "macro_not_found"
+    if ($currentPhase -eq "invoke_macro") {
+      if (Test-XlflowMacroDisabledFailure -Number ([int]$_.Exception.HResult) -Description $_.Exception.Message) {
+        $errorCode = "macro_disabled"
+      } elseif (Test-XlflowMacroTargetFailure -Number ([int]$_.Exception.HResult) -Description $_.Exception.Message) {
+        $errorCode = "macro_not_found"
+      }
     }
     Set-XlflowError -Result $result -Code $errorCode -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult -Phase $currentPhase
   }

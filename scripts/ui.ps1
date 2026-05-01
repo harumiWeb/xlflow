@@ -39,8 +39,7 @@ try {
 
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
-  $excel.DisplayAlerts = $false
-  $workbook = $excel.Workbooks.Open($WorkbookPath)
+  $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
   $result.workbook = [ordered]@{ path = $WorkbookPath }
 
   switch ($Action) {

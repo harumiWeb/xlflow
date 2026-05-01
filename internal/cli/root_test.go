@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -649,6 +650,54 @@ func TestRunHeadlessPreflightRejectsGUIBoundariesBeforeExcel(t *testing.T) {
 	}
 }
 
+func TestPushRejectsTypographicQuotesBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  If Mid$(text, index, 1) <> “\"\" Then\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestPushRejectsLikelyCStyleQuoteEscapesBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  If Mid$(text, index, 1) <> \"\\\"\" Then\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
 func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
@@ -669,6 +718,54 @@ func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {
 		t.Fatalf("expected analysis validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestPushCommandReturnsValidationForBlockingAnalysisFindings(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  With ws\n    .DisplayGridlines = False\n  End With\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestRunCommandReturnsValidationForBlockingAnalysisFindings(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = False\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--interactive"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected run preflight validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
 	}
 }
 
@@ -716,5 +813,24 @@ func TestBuildKeepaliveOptionsRejectsNonPositiveIntervalWhenEnabled(t *testing.T
 	_, err := buildKeepaliveOptions(true, 0)
 	if err == nil || !strings.Contains(err.Error(), "--keepalive-interval") {
 		t.Fatalf("expected keepalive interval error, got %v", err)
+	}
+}
+
+func TestFilterAnalysisFindingsIgnoresTraceHelperCodesForTraceRun(t *testing.T) {
+	findings := []analyze.Finding{
+		{Code: "VBA104", Severity: "error"},
+		{Code: "VBA105", Severity: "error"},
+		{Code: "VBA106", Severity: "error"},
+	}
+
+	filtered := filterAnalysisFindings(findings, ignoredRunPreflightAnalysisCodes(excel.RunOptions{Trace: true}))
+	if len(filtered) != 1 || filtered[0].Code != "VBA104" {
+		t.Fatalf("unexpected filtered findings: %+v", filtered)
+	}
+}
+
+func TestIgnoredRunPreflightAnalysisCodesEmptyWithoutTrace(t *testing.T) {
+	if got := ignoredRunPreflightAnalysisCodes(excel.RunOptions{}); got != nil {
+		t.Fatalf("expected nil ignored codes without trace, got %+v", got)
 	}
 }

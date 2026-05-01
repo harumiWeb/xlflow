@@ -10,7 +10,8 @@ param(
   [string]$BackupMode = "always",
   [string]$ChangedOnly = "false",
   [string]$UseSession = "false",
-  [string]$NoSave = "false"
+  [string]$NoSave = "false",
+  [string]$MetadataPath = ""
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -19,6 +20,8 @@ $result = New-XlflowResult -Command "push"
 $excel = $null
 $workbook = $null
 $tmpImportDir = $null
+$sessionAttached = $false
+$sessionInvalidated = $false
 
 try {
   if ($BackupMode -ne "always" -and $BackupMode -ne "never") {
@@ -44,13 +47,14 @@ try {
   New-Item -ItemType Directory -Force -Path $tmpImportDir | Out-Null
 
   if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowActiveExcel
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
     $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+    try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
+    $sessionAttached = $true
   } else {
     $excel = New-Object -ComObject Excel.Application
     $excel.Visible = ConvertTo-XlflowBool $Visible
-    $excel.DisplayAlerts = $false
-    $workbook = $excel.Workbooks.Open($WorkbookPath)
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
   }
 
   foreach ($component in @($workbook.VBProject.VBComponents)) {
@@ -110,8 +114,25 @@ try {
   )
 } catch {
   Set-XlflowError -Result $result -Code "excel_import_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
+  if ((ConvertTo-XlflowBool $UseSession) -and $sessionAttached) {
+    try {
+      if ($null -ne $workbook) {
+        $workbook.Close($false) | Out-Null
+      }
+      if ($null -ne $excel) {
+        $excel.Quit() | Out-Null
+      }
+      if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
+        Remove-Item -LiteralPath $MetadataPath -Force -ErrorAction SilentlyContinue
+      }
+      $sessionInvalidated = $true
+      $result.logs = @("invalidated xlflow session after failed workbook import")
+    } catch {
+      $result.logs = @("failed to invalidate xlflow session after import failure: " + $_.Exception.Message)
+    }
+  }
 } finally {
-  if (ConvertTo-XlflowBool $UseSession) {
+  if ((ConvertTo-XlflowBool $UseSession) -and -not $sessionInvalidated) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false

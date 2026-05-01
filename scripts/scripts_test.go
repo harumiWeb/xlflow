@@ -279,6 +279,65 @@ func TestSetXlflowErrorIncludesPhase(t *testing.T) {
 	}
 }
 
+func TestSetXlflowExcelAutomationDefaultsLeavesAutomationSecurityUnchanged(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $excel = [pscustomobject]@{ DisplayAlerts = $true; EnableEvents = $true; AutomationSecurity = 2 }; Set-XlflowExcelAutomationDefaults -Excel $excel -DisplayAlerts $false; [ordered]@{ DisplayAlerts = $excel.DisplayAlerts; EnableEvents = $excel.EnableEvents; AutomationSecurity = $excel.AutomationSecurity } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Set-XlflowExcelAutomationDefaults failed: %v\n%s", err, out)
+	}
+	var got struct {
+		DisplayAlerts      bool `json:"DisplayAlerts"`
+		EnableEvents       bool `json:"EnableEvents"`
+		AutomationSecurity int  `json:"AutomationSecurity"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse helper state: %v\n%s", err, out)
+	}
+	if got.DisplayAlerts || got.EnableEvents || got.AutomationSecurity != 2 {
+		t.Fatalf("unexpected helper state: %+v", got)
+	}
+}
+
+func TestDisableXlflowExcelAutomationMacrosForcesDisable(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $excel = [pscustomobject]@{ AutomationSecurity = 2 }; Disable-XlflowExcelAutomationMacros -Excel $excel; $excel.AutomationSecurity",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Disable-XlflowExcelAutomationMacros failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "3" {
+		t.Fatalf("automation security = %q, want 3", out)
+	}
+}
+
+func TestMacroDisabledFailureDetectionRecognizesJapaneseSecurityMessage(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Test-XlflowMacroDisabledFailure -Number 1004 -Description 'セキュリティの設定により、マクロが無効になりました。マクロを実行するには、このブックを開き直してマクロを有効にしてください。'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro disabled classification failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "True" {
+		t.Fatalf("expected localized macro-disabled detection, got %q", out)
+	}
+}
+
 func TestSourceTextEncodingHelpersRoundTripJapaneseViaCp932(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -624,7 +683,7 @@ func TestRunHarnessCodeIncludesMacroInvocationAndErrorLine(t *testing.T) {
 		t.Fatalf("run harness code generation failed: %v\n%s", err, out)
 	}
 	got := string(out)
-	for _, want := range []string{"Report.Generate \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)", "Err.Description", "Erl"} {
+	for _, want := range []string{"Dim targetMacro As String", `targetMacro = "'" & ThisWorkbook.Name & "'!" & "Report.Generate"`, "Application.Run targetMacro, \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)", "Err.Description", "Erl"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected run harness code to contain %q:\n%s", want, got)
 		}
@@ -858,6 +917,110 @@ try {
 	}
 }
 
+func TestTraceEnableAutoAttachesToMatchingSessionWorkbook(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  enableStatus = ''
+  statusWorkbookInjected = $false
+  statusSession = $false
+  sourceExists = $false
+}
+$excel = $null
+$workbook = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'trace-session.xlsm'
+  $modulesDir = Join-Path $root 'src/modules'
+  $metadataPath = Join-Path $root '.xlflow/session.json'
+  New-Item -ItemType Directory -Force -Path $modulesDir | Out-Null
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $metadataPath) | Out-Null
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+  try {
+    $null = $workbook.VBProject
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $workbook.SaveAs($wbPath, 52)
+  $processId = Get-XlflowExcelProcessId -Excel $excel
+  $hwnd = [int64]$excel.Hwnd
+  [ordered]@{
+    pid = $processId
+    hwnd = $hwnd
+    workbook_path = [System.IO.Path]::GetFullPath($wbPath)
+    port = 0
+    token = [guid]::NewGuid().ToString('N')
+    started_at = (Get-Date).ToString('o')
+  } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+
+  $enable = & ./trace.ps1 -Action enable -WorkbookPath $wbPath -ModulesDir $modulesDir -MetadataPath $metadataPath | ConvertFrom-Json
+  $status = & ./trace.ps1 -Action status -WorkbookPath $wbPath -ModulesDir $modulesDir -MetadataPath $metadataPath | ConvertFrom-Json
+  $result.enableStatus = $enable.status
+  $result.statusWorkbookInjected = [bool]$status.trace.workbook_injected
+  $result.statusSession = [bool]$status.workbook.session
+  $result.sourceExists = Test-Path -LiteralPath (Join-Path $modulesDir 'XlflowTrace.bas')
+  $result | ConvertTo-Json -Compress
+} finally {
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trace auto-session attach failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip                   bool   `json:"skip"`
+		SkipReason             string `json:"skipReason"`
+		EnableStatus           string `json:"enableStatus"`
+		StatusWorkbookInjected bool   `json:"statusWorkbookInjected"`
+		StatusSession          bool   `json:"statusSession"`
+		SourceExists           bool   `json:"sourceExists"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trace auto-session attach output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skipf("skipped: %s", got.SkipReason)
+	}
+	if got.EnableStatus != "ok" || !got.StatusWorkbookInjected || !got.StatusSession || !got.SourceExists {
+		t.Fatalf("expected trace command to auto-attach to matching session workbook, got %+v output=%s", got, out)
+	}
+}
+
 func TestRunHarnessCodeConfiguresTraceBeforeMacro(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -872,7 +1035,7 @@ func TestRunHarnessCodeConfiguresTraceBeforeMacro(t *testing.T) {
 	}
 	got := string(out)
 	setup := `XlflowTrace.XlflowSetTraceFile "C:\Temp\xlflow\trace.log"`
-	invocation := "Report.Generate"
+	invocation := "Application.Run targetMacro"
 	if !strings.Contains(got, setup) {
 		t.Fatalf("expected trace setup %q:\n%s", setup, got)
 	}
@@ -933,6 +1096,76 @@ func TestRunTraceFailureWithNoEventsIncludesHint(t *testing.T) {
 	}
 	if got.Status != "failed" || got.Trace == nil || len(got.Trace.Events) != 0 || !strings.Contains(got.Trace.Hint, "no trace events") {
 		t.Fatalf("expected empty trace hint, got %+v", got)
+	}
+}
+
+func TestRunTraceBlankWorkbookReturnsMacroNotFound(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  status = ''
+  errorCode = ''
+  phase = ''
+}
+$excel = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  try {
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Quit()
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
+    $excel = $null
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'blank.xlsm'
+  ./new.ps1 -WorkbookPath $wbPath | Out-Null
+  $run = ./run.ps1 -WorkbookPath $wbPath -MacroName 'Main.Run' -MacroArgsJson 'W10=' -TraceEnabled true | ConvertFrom-Json
+  $result.status = $run.status
+  $result.errorCode = $run.error.code
+  $result.phase = $run.error.phase
+} finally {
+  if ($null -ne $excel) {
+    try { $excel.Quit() } catch {}
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
+  }
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+  [gc]::Collect()
+  [gc]::WaitForPendingFinalizers()
+}
+$result | ConvertTo-Json -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("blank workbook run command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip       bool   `json:"skip"`
+		SkipReason string `json:"skipReason"`
+		Status     string `json:"status"`
+		ErrorCode  string `json:"errorCode"`
+		Phase      string `json:"phase"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse blank workbook run output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if got.Status != "failed" || got.ErrorCode != "macro_not_found" || got.Phase != "verify_macro" {
+		t.Fatalf("expected macro_not_found during verify_macro, got %+v", got)
 	}
 }
 
@@ -1107,7 +1340,7 @@ func TestRunHarnessCodeAcceptsDecodedJSONArgumentArrays(t *testing.T) {
 		t.Fatalf("run harness code generation from decoded JSON failed: %v\n%s", err, out)
 	}
 	got := string(out)
-	for _, want := range []string{"Report.Generate \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)"} {
+	for _, want := range []string{`targetMacro = "'" & ThisWorkbook.Name & "'!" & "Report.Generate"`, "Application.Run targetMacro, \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected run harness code to contain %q:\n%s", want, got)
 		}

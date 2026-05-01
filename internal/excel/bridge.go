@@ -148,6 +148,7 @@ func (r Runner) PullWithOptions(cfg config.Config, opts SessionCommandOptions) (
 		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
 }
 
@@ -182,6 +183,7 @@ func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Env
 		"ChangedOnly":  strconv.FormatBool(changedOnly),
 		"UseSession":   strconv.FormatBool(opts.Session),
 		"NoSave":       strconv.FormatBool(opts.NoSave),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
 }
 
@@ -219,6 +221,7 @@ func buildTraceScriptArgs(root string, cfg config.Config, traceOpts TraceOptions
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"Force":        strconv.FormatBool(traceOpts.Force),
 		"UseSession":   strconv.FormatBool(traceOpts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 		"TraceDir":     filepath.Join(root, ".xlflow", "traces"),
 	}
 	if workbook == cfg.Excel.Path && action != "clean" {
@@ -252,6 +255,7 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"TraceEnabled":  strconv.FormatBool(opts.Trace),
 		"Direct":        strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace)),
 		"UseSession":    strconv.FormatBool(opts.Session),
+		"MetadataPath":  filepath.Join(root, ".xlflow", "session.json"),
 	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
@@ -337,6 +341,7 @@ func (r Runner) TestWithOptions(cfg config.Config, filter string, opts SessionCo
 		"Filter":       filter,
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
 }
 
@@ -353,6 +358,7 @@ func (r Runner) MacrosWithOptions(cfg config.Config, opts SessionCommandOptions)
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
 }
 
@@ -574,7 +580,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_not_found", "macro_timeout", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
 		return output.ExitValidation
 	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid":
 		return output.ExitConfig

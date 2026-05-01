@@ -117,3 +117,49 @@ End Sub
 		}
 	}
 }
+
+func TestLinterFindsTypographicQuotesThatTriggerVBECompileDialogs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  If Mid$(text, index, 1) <> “\"\" Then\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := PushBlockingIssues(issues)
+	if len(blocking) != 1 {
+		t.Fatalf("expected one push-blocking typographic quote issue, got %+v", blocking)
+	}
+	if blocking[0].Code != "VB008" || blocking[0].Severity != "error" || blocking[0].Line != 3 {
+		t.Fatalf("unexpected typographic quote issue: %+v", blocking[0])
+	}
+}
+
+func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  If Mid$(text, index, 1) <> \"\\\"\" Then\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := PushBlockingIssues(issues)
+	if len(blocking) != 1 {
+		t.Fatalf("expected one push-blocking C-style escape issue, got %+v", blocking)
+	}
+	if blocking[0].Code != "VB009" || blocking[0].Severity != "error" || blocking[0].Line != 3 {
+		t.Fatalf("unexpected C-style escape issue: %+v", blocking[0])
+	}
+}

@@ -566,6 +566,9 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
+			if err := a.runSourcePreflight("push", cfg, "pushing to Excel", nil); err != nil {
+				return err
+			}
 			var env output.Envelope
 			var code int
 			run := func() error {
@@ -809,6 +812,11 @@ func (a *app) runCommand() *cobra.Command {
 			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, direct, fast, session, timeout, keepalive, keepaliveInterval)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
+			}
+			if a.shouldRunSourcePreflight(cfg, opts) {
+				if err := a.runSourcePreflight("run", cfg, "running macros", ignoredRunPreflightAnalysisCodes(opts)); err != nil {
+					return err
+				}
 			}
 			if opts.Mode == "headless" {
 				boundaries, err := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
@@ -1254,6 +1262,81 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 		}
 	}
 	return diag
+}
+
+func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool) error {
+	issues, err := lint.Linter{RootDir: a.cwd, Config: cfg}.Run()
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
+	}
+	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
+	}
+	blockingIssues := lint.PushBlockingIssues(issues)
+	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
+	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
+		return nil
+	}
+	count := len(blockingIssues) + len(blockingFindings)
+	errorCode := "source_preflight_failed"
+	if len(blockingFindings) == 0 {
+		errorCode = "lint_failed"
+	} else if len(blockingIssues) == 0 {
+		errorCode = "analyze_failed"
+	}
+	env := output.Failure(command, output.Error{
+		Code:    errorCode,
+		Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid a VBA editor dialog", count, action),
+		Source:  "xlflow",
+		Phase:   "preflight",
+	})
+	if len(blockingIssues) > 0 {
+		env.Issues = blockingIssues
+	}
+	if len(blockingFindings) > 0 {
+		env.Analysis = blockingFindings
+	}
+	env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
+	return a.write(env, output.ExitValidation)
+}
+
+func ignoredRunPreflightAnalysisCodes(opts excel.RunOptions) map[string]bool {
+	if !opts.Trace {
+		return nil
+	}
+	return map[string]bool{
+		"VBA105": true,
+		"VBA106": true,
+	}
+}
+
+func filterAnalysisFindings(findings []analyze.Finding, ignoredCodes map[string]bool) []analyze.Finding {
+	if len(ignoredCodes) == 0 {
+		return findings
+	}
+	filtered := make([]analyze.Finding, 0, len(findings))
+	for _, finding := range findings {
+		if ignoredCodes[finding.Code] {
+			continue
+		}
+		filtered = append(filtered, finding)
+	}
+	return filtered
+}
+
+func (a *app) shouldRunSourcePreflight(cfg config.Config, opts excel.RunOptions) bool {
+	if opts.Session {
+		return true
+	}
+	workbook := cfg.Excel.Path
+	if opts.WorkbookPath != "" {
+		workbook = opts.WorkbookPath
+	}
+	if workbook == "" || cfg.Excel.Path == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(workbookArgPath(a.cwd, workbook)), filepath.Clean(workbookArgPath(a.cwd, cfg.Excel.Path)))
 }
 
 func absInt(v int) int {

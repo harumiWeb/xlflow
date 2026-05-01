@@ -104,6 +104,98 @@ End Sub
 	}
 }
 
+func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  ws.DisplayGridlines = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA104", 5)
+}
+
+func TestAnalyzerFindsWorksheetMemberAssignedInsideWithBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  With ws
+    .DisplayGridlines = False
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA104", 6)
+}
+
+func TestAnalyzerFindsMissingXlflowLogHelperSource(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Call XlflowLog("start")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA105", 3)
+}
+
+func TestAnalyzerFindsMissingXlflowSetTraceFileHelperSource(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  XlflowTrace.XlflowSetTraceFile "C:\Temp\xlflow\trace.log"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA106", 3)
+}
+
+func TestAnalyzerDoesNotFlagTraceHelperCallsWhenHelperSourceExists(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Call XlflowLog("start")
+  XlflowTrace.XlflowSetTraceFile "C:\Temp\xlflow\trace.log"
+End Sub
+`)
+	writeModule(t, dir, "XlflowTrace.bas", `Option Explicit
+Public Sub XlflowLog(ByVal message As String)
+End Sub
+Public Sub XlflowSetTraceFile(ByVal path As String)
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findings {
+		if finding.Code == "VBA105" || finding.Code == "VBA106" {
+			t.Fatalf("unexpected missing trace helper finding: %+v", findings)
+		}
+	}
+}
+
 func writeModule(t *testing.T, dir, name, body string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "modules")

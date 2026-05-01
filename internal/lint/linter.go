@@ -122,6 +122,12 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 		if l.Config.Lint.ForbidPublicModuleFields && looksPublicVariable(trimmed) {
 			issues = append(issues, l.issue(path, lineNo, "VB006", "warning", "Avoid Public module variables; pass state explicitly."))
 		}
+		if containsTypographicQuote(code) {
+			issues = append(issues, l.issue(path, lineNo, "VB008", "error", "Typographic quote found in VBA source. Use straight double quotes for string delimiters before pushing to Excel."))
+		}
+		if containsLikelyCStyleQuoteEscape(code) {
+			issues = append(issues, l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character."))
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		if closeErr := f.Close(); closeErr != nil {
@@ -156,6 +162,16 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 	return issues, nil
 }
 
+func PushBlockingIssues(issues []Issue) []Issue {
+	blocking := make([]Issue, 0)
+	for _, issue := range issues {
+		if issue.Code == "VB008" || issue.Code == "VB009" {
+			blocking = append(blocking, issue)
+		}
+	}
+	return blocking
+}
+
 func (l Linter) issue(path string, line int, code, severity, message string) Issue {
 	file, err := filepath.Rel(l.RootDir, path)
 	if err != nil {
@@ -183,6 +199,26 @@ func looksImplicitVariant(line string) bool {
 		!strings.HasPrefix(lower, "public function ") &&
 		!strings.HasPrefix(lower, "private sub ") &&
 		!strings.HasPrefix(lower, "private function ")
+}
+
+func containsTypographicQuote(line string) bool {
+	return strings.ContainsAny(line, "“”‘’")
+}
+
+func containsLikelyCStyleQuoteEscape(line string) bool {
+	for i := 0; i < len(line)-2; i++ {
+		if line[i] != '\\' || line[i+1] != '"' {
+			continue
+		}
+		quoteCount := 0
+		for j := i + 1; j < len(line) && line[j] == '"'; j++ {
+			quoteCount++
+		}
+		if quoteCount >= 2 {
+			return true
+		}
+	}
+	return false
 }
 
 func looksPublicVariable(line string) bool {

@@ -182,7 +182,11 @@ func renderHuman(env Envelope, opts Options) string {
 	case "macros":
 		b.WriteString(r.renderMacros(env))
 	case "pull", "push", "trace", "attach":
-		b.WriteString(r.renderWorkbookSource(env))
+		if env.Issues != nil {
+			b.WriteString(r.renderLint(env))
+		} else {
+			b.WriteString(r.renderWorkbookSource(env))
+		}
 	case "diff":
 		b.WriteString(r.renderDiff(env))
 	case "new", "init", "skill install":

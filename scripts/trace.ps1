@@ -5,7 +5,8 @@ param(
   [string]$Visible = "false",
   [string]$Force = "false",
   [string]$TraceDir = "",
-  [string]$UseSession = "false"
+  [string]$UseSession = "false",
+  [string]$MetadataPath = ""
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -14,6 +15,7 @@ $result = New-XlflowResult -Command "trace"
 $excel = $null
 $workbook = $null
 $forceRemove = ConvertTo-XlflowBool $Force
+$sessionAttached = $false
 
 try {
   if ($Action -eq "inject") {
@@ -42,13 +44,43 @@ try {
   }
 
   if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowActiveExcel
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
     $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+    $sessionAttached = $true
   } else {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = ConvertTo-XlflowBool $Visible
-    $excel.DisplayAlerts = $false
-    $workbook = $excel.Workbooks.Open($WorkbookPath)
+    $resolvedWorkbookPath = $null
+    $sessionWorkbookPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+      $resolvedWorkbookPath = [System.IO.Path]::GetFullPath($WorkbookPath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
+      try {
+        $sessionMetadata = Get-Content -LiteralPath $MetadataPath -Raw | ConvertFrom-Json
+        if ($null -ne $sessionMetadata -and -not [string]::IsNullOrWhiteSpace([string]$sessionMetadata.workbook_path)) {
+          $sessionWorkbookPath = [System.IO.Path]::GetFullPath([string]$sessionMetadata.workbook_path)
+        }
+      } catch {
+        Write-Verbose ("failed to read trace session metadata: " + $_.Exception.Message)
+      }
+    }
+    if ($null -ne $resolvedWorkbookPath -and $null -ne $sessionWorkbookPath -and $resolvedWorkbookPath -ieq $sessionWorkbookPath) {
+      $excel = Get-XlflowExcelFromSessionMetadata -MetadataPath $MetadataPath
+      if ($null -ne $excel) {
+        try {
+          $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+          $sessionAttached = $true
+        } catch {
+          Write-Verbose ("failed to attach trace command to active session workbook: " + $_.Exception.Message)
+          $workbook = $null
+          $excel = $null
+        }
+      }
+    }
+    if (-not $sessionAttached) {
+      $excel = New-Object -ComObject Excel.Application
+      $excel.Visible = ConvertTo-XlflowBool $Visible
+      $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
+    }
   }
 
   try {
@@ -69,7 +101,7 @@ try {
       $sourcePath = Write-XlflowTraceModuleSource -ModulesDir $ModulesDir
       $result.source = [ordered]@{ path = $sourcePath; updated = $true }
     }
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; session = $sessionAttached }
     $result.trace = [ordered]@{ lifecycle = "enabled"; workbook_injected = $true; log_dir = $TraceDir }
     $result.logs = @("enabled XlflowTrace in " + $WorkbookPath)
     if ($null -ne $result.source) {
@@ -94,7 +126,7 @@ try {
     if ($removedWorkbook) {
       $workbook.Save()
     }
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $removedWorkbook; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $removedWorkbook; session = $sessionAttached }
     $result.trace = [ordered]@{ lifecycle = "disabled"; workbook_removed = $removedWorkbook; source_removed = $sourceRemoved; log_dir = $TraceDir }
     $result.logs = @("disabled XlflowTrace in " + $WorkbookPath)
   } else {
@@ -107,7 +139,7 @@ try {
       $sourceMatches = Test-XlflowTraceModuleSourceMatches -ModulesDir $ModulesDir
     }
     $workbookInjected = Test-XlflowTraceModuleInjected -VBProject $vbProject
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; session = $sessionAttached }
     $result.source = [ordered]@{ path = $sourcePath; exists = $sourceExists; matches_bundled = $sourceMatches }
     $result.trace = [ordered]@{ status = "ok"; workbook_injected = $workbookInjected; source_exists = $sourceExists; source_matches_bundled = $sourceMatches; log_dir = $TraceDir }
     $result.logs = @("reported XlflowTrace status for " + $WorkbookPath)
@@ -117,10 +149,10 @@ try {
     Set-XlflowError -Result $result -Code "trace_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
   }
   if ($null -eq $result.workbook -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; session = $sessionAttached }
   }
 } finally {
-  if (ConvertTo-XlflowBool $UseSession) {
+  if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false

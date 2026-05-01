@@ -1,8 +1,7 @@
 param(
   [string]$Action,
   [string]$WorkbookPath,
-  [string]$MetadataPath,
-  [string]$Visible = "false"
+  [string]$MetadataPath
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -20,17 +19,12 @@ function Write-XlflowSessionMetadata {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
   }
   $pidValue = 0
-  try {
-    $hwnd = [int64]$Excel.Hwnd
-    $proc = Get-Process | Where-Object { $_.MainWindowHandle -eq $hwnd } | Select-Object -First 1
-    if ($null -ne $proc) {
-      $pidValue = [int]$proc.Id
-    }
-  } catch {
-    Write-Verbose ("failed to resolve Excel process id: " + $_.Exception.Message)
-  }
+  $hwndValue = 0
+  try { $hwndValue = [int64]$Excel.Hwnd } catch { Write-Verbose ("failed to read Excel hwnd: " + $_.Exception.Message) }
+  $pidValue = Get-XlflowExcelProcessId -Excel $Excel
   [ordered]@{
     pid = $pidValue
+    hwnd = $hwndValue
     workbook_path = [System.IO.Path]::GetFullPath($WorkbookPath)
     port = 0
     token = [guid]::NewGuid().ToString("N")
@@ -49,10 +43,12 @@ function Read-XlflowSessionMetadata {
 try {
   switch ($Action) {
     "start" {
+      if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
+        Close-XlflowSessionWorkbook -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath -Save $false
+      }
       $excel = New-Object -ComObject Excel.Application
-      $excel.Visible = ConvertTo-XlflowBool $Visible
-      $excel.DisplayAlerts = $false
-      $workbook = $excel.Workbooks.Open($WorkbookPath)
+      $excel.Visible = $true
+      $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $false
       Write-XlflowSessionMetadata -Excel $excel -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath
       $sessionStarted = $true
       $result.workbook = [ordered]@{ path = $WorkbookPath; session = $true }
@@ -67,7 +63,7 @@ try {
       $open = $false
       if ($running -or $null -ne $metadata) {
         try {
-          $excel = Get-XlflowActiveExcel
+          $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
           $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
           $open = $true
           $running = $true
@@ -80,15 +76,16 @@ try {
       $result.logs = @($(if ($running -and $open) { "xlflow session is running" } else { "xlflow session is not running" }))
     }
     "save" {
-      $excel = Get-XlflowActiveExcel
+      $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
       $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
       $workbook.Save()
       $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; session = $true }
       $result.logs = @("saved xlflow session workbook")
     }
     "stop" {
-      $excel = Get-XlflowActiveExcel
+      $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
       $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+      try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
       $workbook.Close($true) | Out-Null
       $excel.Quit() | Out-Null
       if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {

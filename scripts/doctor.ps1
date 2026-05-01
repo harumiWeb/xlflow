@@ -12,7 +12,6 @@ $workbook = $null
 try {
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
-  $excel.DisplayAlerts = $false
 
   $diagnostics = [ordered]@{
     excel_installed = $true
@@ -22,7 +21,7 @@ try {
   }
 
   if ($WorkbookPath -and (Test-Path -LiteralPath $WorkbookPath)) {
-    $workbook = $excel.Workbooks.Open($WorkbookPath)
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
     $diagnostics.workbook_openable = $true
     try {
       $null = $workbook.VBProject.VBComponents.Count
@@ -30,6 +29,8 @@ try {
     } catch {
       $diagnostics.fix = "Enable 'Trust access to the VBA project object model' in Excel Trust Center."
     }
+  } else {
+    Set-XlflowExcelAutomationDefaults -Excel $excel -DisplayAlerts $false
   }
 
   $result.diagnostics = $diagnostics

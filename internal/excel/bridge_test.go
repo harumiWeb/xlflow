@@ -167,6 +167,9 @@ func TestBuildRunScriptArgsPassesFastDirectAndSession(t *testing.T) {
 	if args["Direct"] != "true" || args["UseSession"] != "true" {
 		t.Fatalf("unexpected args: %+v", args)
 	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("metadata path = %q", args["MetadataPath"])
+	}
 }
 
 func TestMacroFailureIsValidationFailure(t *testing.T) {
@@ -176,6 +179,16 @@ func TestMacroFailureIsValidationFailure(t *testing.T) {
 	}
 	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
 		t.Fatalf("exitCodeForScriptResult(macro_failed) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestMacroDisabledIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "macro_disabled", Message: "disabled"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(macro_disabled) = %d, want %d", got, output.ExitValidation)
 	}
 }
 
@@ -250,6 +263,9 @@ func TestTraceScriptArgsPassSessionFlag(t *testing.T) {
 	args := buildTraceScriptArgs(root, cfg, TraceOptions{Action: "status", Session: true})
 	if args["UseSession"] != "true" {
 		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("metadata path = %q", args["MetadataPath"])
 	}
 }
 
