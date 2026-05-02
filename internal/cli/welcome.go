@@ -29,7 +29,14 @@ var (
 	welcomeBadgeColor = rgbColor{r: 184, g: 245, b: 162}
 	welcomeTitleStart = rgbColor{r: 143, g: 211, b: 255}
 	welcomeTitleEnd   = rgbColor{r: 184, g: 245, b: 162}
+	welcomeInfoColor  = rgbColor{r: 208, g: 214, b: 220}
+	welcomeAlertColor = rgbColor{r: 255, g: 165, b: 0}
 )
+
+type scaffoldWelcomeModel struct {
+	Version       string
+	UpdateVersion string
+}
 
 func shouldRenderScaffoldWelcome(command string, opts output.Options) bool {
 	if opts.JSON || !opts.Interactive {
@@ -43,9 +50,10 @@ func shouldRenderScaffoldWelcome(command string, opts output.Options) bool {
 	}
 }
 
-func renderScaffoldWelcome(color bool) string {
-	badge := renderScaffoldWelcomeBadge("* Welcome to xlflow")
+func renderScaffoldWelcome(model scaffoldWelcomeModel, color bool) string {
+	badge := renderScaffoldWelcomeBadge("🏄‍♂️ Welcome to xlflow")
 	logo := strings.Join(scaffoldWelcomeLogo, "\n")
+	meta := renderScaffoldWelcomeMeta(model, color)
 	if color {
 		badge = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(welcomeBadgeColor.hex())).
@@ -53,12 +61,39 @@ func renderScaffoldWelcome(color bool) string {
 			Render(badge)
 		logo = renderGradientBlock(scaffoldWelcomeLogo, welcomeTitleStart, welcomeTitleEnd)
 	}
-	return badge + "\n\n" + logo + "\n\n"
+	if meta == "" {
+		return badge + "\n\n" + logo + "\n\n"
+	}
+	return badge + "\n\n" + logo + "\n\n" + meta + "\n\n"
 }
 
 func renderScaffoldWelcomeBadge(text string) string {
-	border := strings.Repeat("-", len(text)+2)
+	border := strings.Repeat("-", lipgloss.Width(text)+2)
 	return "+" + border + "+\n| " + text + " |\n+" + border + "+"
+}
+
+func renderScaffoldWelcomeMeta(model scaffoldWelcomeModel, color bool) string {
+	lines := make([]string, 0, 2)
+	if version := strings.TrimSpace(model.Version); version != "" {
+		line := "Version: " + version
+		if color {
+			line = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(welcomeInfoColor.hex())).
+				Render(line)
+		}
+		lines = append(lines, line)
+	}
+	if updateVersion := strings.TrimSpace(model.UpdateVersion); updateVersion != "" {
+		line := "Update available: " + updateVersion
+		if color {
+			line = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(welcomeAlertColor.hex())).
+				Bold(true).
+				Render(line)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderGradientBlock(lines []string, start, end rgbColor) string {

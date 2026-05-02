@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +19,15 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
 )
+
+type stubReleaseChecker struct {
+	release latestRelease
+	err     error
+}
+
+func (s stubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {
+	return s.release, s.err
+}
 
 func TestRootCommandIncludesTestCommand(t *testing.T) {
 	a := &app{}
@@ -563,6 +574,8 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		stderr:         &bytes.Buffer{},
 		stdoutTerminal: func() bool { return true },
 		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{},
 	}
 	root := a.rootCommand()
 	root.SetArgs([]string{"init", workbook})
@@ -570,7 +583,7 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	got := stdout.String()
-	for _, want := range []string{"Welcome to xlflow", "copied workbook to build/Input.xlsm"} {
+	for _, want := range []string{"Welcome to xlflow", "Version: 1.2.3", "copied workbook to build/Input.xlsm"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("interactive init output missing %q:\n%s", want, got)
 		}
@@ -608,6 +621,60 @@ func TestInitCommandSkipsWelcomeForJSONOutput(t *testing.T) {
 	}
 	if env["command"] != "init" {
 		t.Fatalf("json command = %#v, want init", env["command"])
+	}
+}
+
+func TestInitCommandShowsUpdateNoticeWhenNewReleaseIsAvailable(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "Update available: v1.2.4") {
+		t.Fatalf("interactive init output missing update notice:\n%s", got)
+	}
+}
+
+func TestInitCommandSilentlySkipsFailedUpdateCheck(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{err: errors.New("network down")},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if strings.Contains(got, "Update available:") {
+		t.Fatalf("interactive init output should skip failed update checks:\n%s", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
@@ -56,14 +57,55 @@ func TestShouldRenderScaffoldWelcome(t *testing.T) {
 }
 
 func TestRenderScaffoldWelcomeIncludesBadgeAndLogo(t *testing.T) {
-	got := renderScaffoldWelcome(false)
+	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
 	for _, want := range []string{
-		"* Welcome to xlflow",
+		"🏄‍♂️ Welcome to xlflow",
+		"Version: 1.2.3",
 		" ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗",
 		" ╚═╝  ╚═╝ ╚══════╝ ╚═╝      ╚══════╝  ╚═════╝   ╚══╝╚══╝",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("welcome output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderScaffoldWelcomePlacesVersionBelowLogo(t *testing.T) {
+	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
+	versionIndex := strings.Index(got, "Version: 1.2.3")
+	logoIndex := strings.Index(got, " ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗")
+	if versionIndex < 0 || logoIndex < 0 {
+		t.Fatalf("welcome output missing logo or version:\n%s", got)
+	}
+	if versionIndex < logoIndex {
+		t.Fatalf("expected version below logo:\n%s", got)
+	}
+}
+
+func TestRenderScaffoldWelcomeIncludesUpdateNotice(t *testing.T) {
+	got := renderScaffoldWelcome(scaffoldWelcomeModel{
+		Version:       "1.2.3",
+		UpdateVersion: "v1.2.4",
+	}, false)
+	for _, want := range []string{
+		"Version: 1.2.3",
+		"Update available: v1.2.4",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("welcome output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderScaffoldWelcomeBadgeUsesDisplayWidthForEmoji(t *testing.T) {
+	got := renderScaffoldWelcomeBadge("🏄‍♂️ Welcome to xlflow")
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("badge line count = %d, want 3", len(lines))
+	}
+	for _, line := range lines[1:] {
+		if lipgloss.Width(line) != lipgloss.Width(lines[0]) {
+			t.Fatalf("badge widths should match:\n%s", got)
 		}
 	}
 }

@@ -32,6 +32,7 @@ type app struct {
 	stdoutTerminal func() bool
 	stderrTerminal func() bool
 	buildInfo      BuildInfo
+	updateChecker  releaseChecker
 }
 
 const defaultKeepaliveInterval = 5 * time.Second
@@ -75,6 +76,10 @@ func (info BuildInfo) withDefaults() BuildInfo {
 }
 
 func (a *app) rootCommand() *cobra.Command {
+	a.buildInfo = a.buildInfo.withDefaults()
+	if a.updateChecker == nil {
+		a.updateChecker = newGitHubReleaseChecker(nil)
+	}
 	root := &cobra.Command{
 		Use:           "xlflow",
 		Short:         "Agent-ready VBA development framework",
@@ -1600,7 +1605,7 @@ func (a *app) writeScaffoldWelcome(command string) error {
 	if !shouldRenderScaffoldWelcome(command, opts) {
 		return nil
 	}
-	_, err := fmt.Fprint(a.stdoutWriter(), renderScaffoldWelcome(opts.Color))
+	_, err := fmt.Fprint(a.stdoutWriter(), renderScaffoldWelcome(a.scaffoldWelcomeModel(), opts.Color))
 	return err
 }
 
