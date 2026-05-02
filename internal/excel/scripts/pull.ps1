@@ -14,17 +14,16 @@ param(
 $result = New-XlflowResult -Command "pull"
 $excel = $null
 $workbook = $null
+$sessionAttached = $false
+$sessionMode = "none"
 
 try {
   New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
-  if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
-    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
-  } else {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = ConvertTo-XlflowBool $Visible
-    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
-  }
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
+  $excel = $openResult.excel
+  $workbook = $openResult.workbook
+  $sessionAttached = [bool]$openResult.session_attached
+  $sessionMode = [string]$openResult.session_mode
 
   $exported = @()
   foreach ($component in $workbook.VBProject.VBComponents) {
@@ -42,12 +41,12 @@ try {
     }
   }
 
-  $result.workbook = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
-  $result.logs = @("exported $($exported.Count) VBA component(s)")
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
+  $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported $($exported.Count) VBA component(s)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {
   Set-XlflowError -Result $result -Code "excel_export_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
 } finally {
-  if (ConvertTo-XlflowBool $UseSession) {
+  if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false

@@ -318,8 +318,18 @@ func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions
 	}, cmdOpts)
 }
 
-func (r Runner) SaveSession(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
-	return r.Session(cfg, "save", opts...)
+func (r Runner) SaveSession(cfg config.Config, opts ...SessionCommandOptions) (output.Envelope, int, error) {
+	cmdOpts := SessionCommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts = opts[0]
+	}
+	return r.run("session", map[string]string{
+		"Action":       "save",
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":   strconv.FormatBool(cmdOpts.Session),
+	}, cmdOpts.Keepalive)
 }
 
 func (r Runner) RunnerModule(cfg config.Config, action string, opts ...CommandOptions) (output.Envelope, int, error) {

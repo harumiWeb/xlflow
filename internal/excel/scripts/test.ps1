@@ -12,22 +12,21 @@ $result = New-XlflowResult -Command "test"
 $excel = $null
 $workbook = $null
 $runnerComponent = $null
+$sessionAttached = $false
+$sessionMode = "none"
 
 try {
-  if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
-    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
-  } else {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = ConvertTo-XlflowBool $Visible
-    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $false
-  }
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "false" -UseSession $UseSession -MetadataPath $MetadataPath
+  $excel = $openResult.excel
+  $workbook = $openResult.workbook
+  $sessionAttached = [bool]$openResult.session_attached
+  $sessionMode = [string]$openResult.session_mode
 
   try {
     $project = $workbook.VBProject
   } catch {
     Set-XlflowError -Result $result -Code "vbide_access_denied" -Message "VBIDE access is not available." -Source "Excel"
-    $result.workbook = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
     Write-XlflowJson -Result $result
     exit
   }
@@ -45,7 +44,7 @@ try {
 
   if ($discovered.Count -eq 0) {
     Set-XlflowError -Result $result -Code "no_tests_found" -Message "no VBA tests found"
-    $result["workbook"] = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+    $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
     $result["tests"] = @()
     Write-XlflowJson -Result $result
     exit
@@ -55,7 +54,7 @@ try {
   if ($duplicates.Count -gt 0) {
     $names = ($duplicates | ForEach-Object { $_.Name }) -join ", "
     Set-XlflowError -Result $result -Code "duplicate_test_name" -Message ("duplicate VBA test name(s): " + $names)
-    $result["workbook"] = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+    $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
     $result["tests"] = $discovered.ToArray()
     Write-XlflowJson -Result $result
     exit
@@ -64,7 +63,7 @@ try {
   $selected = @(Select-XlflowTests -Tests $discovered -Filter $Filter)
   if ($selected.Count -eq 0) {
     Set-XlflowError -Result $result -Code "test_not_found" -Message ("test not found: " + $Filter)
-    $result["workbook"] = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+    $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
     $result["tests"] = @()
     Write-XlflowJson -Result $result
     exit
@@ -133,20 +132,20 @@ try {
   $project.VBComponents.Remove($runnerComponent)
   $runnerComponent = $null
   $workbook.Save()
-  $result["workbook"] = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+  $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -NeedsSave $false -Dirty $false
   $result["tests"] = $results.ToArray()
-  $result.logs = $logs.ToArray()
+  $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode)) + $logs.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
   if ($failed -gt 0) {
     Set-XlflowError -Result $result -Code "test_failed" -Message ("$failed of $($selected.Count) test(s) failed")
   }
 } catch {
   Set-XlflowError -Result $result -Code "test_environment_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
-  $result["workbook"] = [ordered]@{ path = $WorkbookPath; session = (ConvertTo-XlflowBool $UseSession) }
+  $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
 } finally {
   if ($null -ne $runnerComponent) {
     try { $workbook.VBProject.VBComponents.Remove($runnerComponent) | Out-Null } catch { Write-Verbose ("failed to remove test harness module: " + $_.Exception.Message) }
   }
-  if (ConvertTo-XlflowBool $UseSession) {
+  if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false

@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +45,32 @@ type BuildInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
 	Date    string `json:"date"`
+}
+
+type versionFeature struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type versionScriptInfo struct {
+	Command string `json:"command"`
+	Source  string `json:"source"`
+	Path    string `json:"path,omitempty"`
+}
+
+type versionBuildSetting struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type versionVerbosePayload struct {
+	BuildInfo
+	ExecutablePath string                `json:"executable_path,omitempty"`
+	GoVersion      string                `json:"go_version,omitempty"`
+	ModulePath     string                `json:"module_path,omitempty"`
+	BuildSettings  []versionBuildSetting `json:"build_settings,omitempty"`
+	Scripts        []versionScriptInfo   `json:"scripts,omitempty"`
+	Features       []versionFeature      `json:"features,omitempty"`
 }
 
 type keepaliveFlags struct {
@@ -114,22 +144,130 @@ func (a *app) rootCommand() *cobra.Command {
 }
 
 func (a *app) versionCommand() *cobra.Command {
-	return &cobra.Command{
+	var verbose bool
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Show xlflow build information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			info := a.buildInfo
 			env := output.New("version")
-			env.Version = info
-			env.Logs = []string{
-				"version: " + info.Version,
-				"commit: " + info.Commit,
-				"date: " + info.Date,
-			}
+			env.Version = a.versionPayload(verbose)
+			env.Logs = a.versionLogs(verbose)
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "show executable path, build settings, script resolution, and supported features")
+	return cmd
+}
+
+func (a *app) versionPayload(verbose bool) any {
+	info := a.buildInfo.withDefaults()
+	if !verbose {
+		return info
+	}
+	payload := versionVerbosePayload{
+		BuildInfo:      info,
+		ExecutablePath: resolvedExecutablePath(),
+		Features:       supportedVersionFeatures(),
+		Scripts:        resolvedVersionScripts(a.cwd),
+	}
+	if buildInfo, ok := debug.ReadBuildInfo(); ok {
+		payload.GoVersion = buildInfo.GoVersion
+		payload.ModulePath = buildInfo.Main.Path
+		payload.BuildSettings = buildSettingsFromInfo(buildInfo)
+	}
+	return payload
+}
+
+func (a *app) versionLogs(verbose bool) []string {
+	info := a.buildInfo.withDefaults()
+	logs := []string{
+		"version: " + info.Version,
+		"commit: " + info.Commit,
+		"date: " + info.Date,
+	}
+	if !verbose {
+		return logs
+	}
+	if exe := resolvedExecutablePath(); exe != "" {
+		logs = append(logs, "executable: "+exe)
+	}
+	if features := supportedVersionFeatures(); len(features) > 0 {
+		logs = append(logs, fmt.Sprintf("features: %d supported", len(features)))
+	}
+	return logs
+}
+
+func resolvedExecutablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
+}
+
+func supportedVersionFeatures() []versionFeature {
+	return []versionFeature{
+		{Name: "version-verbose", Description: "Show executable path, build settings, script resolution, and supported features."},
+		{Name: "auto-session-reuse", Description: "Reuse a matching active xlflow session workbook when --session is omitted for workbook-backed commands."},
+		{Name: "save-state-visibility", Description: "Return structured save-required state when a live session workbook differs from disk."},
+		{Name: "push-save-default", Description: "Save workbook changes by default after push unless --no-save opts out during a session."},
+		{Name: "run-entry-fallback", Description: "Use project.entry from xlflow.toml when xlflow run is invoked without a macro argument."},
+		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
+		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
+	}
+}
+
+func resolvedVersionScripts(root string) []versionScriptInfo {
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session"}
+	scripts := make([]versionScriptInfo, 0, len(commands))
+	for _, command := range commands {
+		info := versionScriptInfo{Command: command, Source: "embedded"}
+		if path, ok := resolvedVersionScriptPath(root, command); ok {
+			info.Source = "override"
+			info.Path = path
+		}
+		scripts = append(scripts, info)
+	}
+	return scripts
+}
+
+func resolvedVersionScriptPath(root, command string) (string, bool) {
+	name := command + ".ps1"
+	candidates := []string{}
+	if root != "" {
+		candidates = append(candidates, filepath.Join(root, "scripts", name))
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "scripts", name))
+	}
+	for _, candidate := range candidates {
+		clean := filepath.Clean(candidate)
+		if _, err := os.Stat(clean); err == nil {
+			return clean, true
+		}
+	}
+	return "", false
+}
+
+func buildSettingsFromInfo(info *debug.BuildInfo) []versionBuildSetting {
+	if info == nil || len(info.Settings) == 0 {
+		return nil
+	}
+	settings := make([]versionBuildSetting, 0, len(info.Settings))
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs", "vcs.revision", "vcs.time", "vcs.modified", "GOARCH", "GOOS":
+			settings = append(settings, versionBuildSetting{Key: setting.Key, Value: setting.Value})
+		}
+	}
+	slices.SortFunc(settings, func(a, b versionBuildSetting) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
+	return settings
 }
 
 func (a *app) macrosCommand() *cobra.Command {
@@ -161,7 +299,7 @@ func (a *app) macrosCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -596,7 +734,7 @@ func (a *app) pullCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -646,7 +784,7 @@ func (a *app) pushCommand() *cobra.Command {
 	cmd.Flags().StringVar(&backupMode, "backup", "always", "backup policy: always or never")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast push defaults")
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
-	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
@@ -674,6 +812,10 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 		NoSave:      noSave,
 		Keepalive:   keepalive,
 	}, nil
+}
+
+func sessionUsageHint() string {
+	return "reuse the matching xlflow session workbook when available"
 }
 
 func addKeepaliveFlags(cmd *cobra.Command, keepalive *keepaliveFlags) {
@@ -804,25 +946,22 @@ func (a *app) sessionCommand() *cobra.Command {
 func (a *app) saveCommand() *cobra.Command {
 	var session bool
 	cmd := &cobra.Command{
-		Use:   "save --session",
+		Use:   "save",
 		Short: "Save the current xlflow session workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !session {
-				return a.writeFailure("save", output.ExitConfig, "save_args_invalid", fmt.Errorf("--session is required"))
-			}
 			cfg, err := a.loadConfig("save")
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.SaveSession(cfg)
+			env, code, err := excel.Runner{RootDir: a.cwd}.SaveSession(cfg, excel.SessionCommandOptions{Session: session})
 			if err != nil {
 				return err
 			}
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().BoolVar(&session, "session", false, "save the workbook held by xlflow session")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	return cmd
 }
 
@@ -945,7 +1084,7 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast run defaults")
 	cmd.Flags().BoolVar(&diagnostic, "diagnostic", true, "compile VBA before running and return structured compile diagnostics (default true)")
 	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBE compile errors to surface via GUI dialogs instead of structured diagnostics")
-	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
 	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
@@ -1022,7 +1161,7 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 		cmd.Flags().BoolVar(&force, "force", false, "remove modified trace helper source")
 	}
 	if action != "clean" {
-		cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+		cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	}
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
@@ -1059,7 +1198,7 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
-	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }

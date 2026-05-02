@@ -42,3 +42,13 @@
 - [x] E2E workspace: `C:\dev\go\xlflow\tmp_workspaces\manual-regression-e2e`.
 - [x] Verified `new`, `doctor`, `pull`, `lint`, `push`, `macros`, `session start`, delayed `session status`, `push --fast --session --no-save`, harness `run --session`, direct `run --fast --session`, `save --session`, `session stop`, and workbook cell state.
 - [x] Re-verified diagnostic compile failure in `C:\dev\go\xlflow\tmp_workspaces\diagnostic-run-e2e`; no VBE dialog remained afterward.
+
+# xlflow Session-Aware Defaults Todo
+
+- [ ] Add `version --verbose` payload and human output.
+- [ ] Auto-reuse matching sessions for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`.
+- [ ] Promote unsaved live-session state to structured `needs_save` metadata and stronger human output.
+- [ ] Report dirty/save-required state from `session status`.
+- [ ] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
+- [ ] Update the bundled skill for auto session reuse and `run` macro omission fallback.
+- [ ] Add focused Go and PowerShell regression coverage.

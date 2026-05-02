@@ -116,6 +116,43 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestVersionCommandVerboseIncludesExecutableAndFeatures(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		stdout:    &stdout,
+		stderr:    &bytes.Buffer{},
+		buildInfo: BuildInfo{Version: "1.2.3", Commit: "abc123", Date: "2026-05-02T00:00:00Z"},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "version", "--verbose"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("version verbose command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Version struct {
+			Version        string `json:"version"`
+			ExecutablePath string `json:"executable_path"`
+			Features       []struct {
+				Name string `json:"name"`
+			} `json:"features"`
+		} `json:"version"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Version.Version != "1.2.3" {
+		t.Fatalf("version = %q", got.Version.Version)
+	}
+	if got.Version.ExecutablePath == "" {
+		t.Fatal("expected executable path in verbose version payload")
+	}
+	if len(got.Version.Features) == 0 {
+		t.Fatal("expected supported features in verbose version payload")
+	}
+}
+
 func TestRootCommandIncludesRunFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

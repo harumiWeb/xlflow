@@ -57,3 +57,32 @@ Add an opt-in diagnostic run mode that converts VBE compile dialogs and VBA runt
 - Compile failure returns `error.code = "vba_compile_failed"`, `error.phase = "compile_vba"`, validation exit code `1`, and top-level `run_diagnostic`.
 - Compile `run_diagnostic` includes `kind`, `message`, `location`, and `nearby_code` when VBE exposes them.
 - Runtime `run_diagnostic` includes `kind = "runtime"` plus existing likely cause, suggestion, nearby source, and trace context fields.
+
+# xlflow Session-Aware Defaults Spec
+
+## Goal
+
+Tighten the normal session workflow so agents can discover the active session automatically, surface save-required state clearly, and inspect richer runtime/build metadata from the CLI.
+
+## CLI Contract
+
+- `xlflow version [--verbose]`
+- `xlflow save [--session]`
+- `xlflow run [macro] [--session]`
+- `xlflow pull|push|macros|test|trace ... [--session]`
+
+## Behavior
+
+- `version --verbose` includes the executable path, Go/build settings, PowerShell script resolution details, and a supported-feature list.
+- When `run` is called without a macro argument, it uses `project.entry` from `xlflow.toml`.
+- For `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`, omitting `--session` still reuses the matching live session workbook when `.xlflow/session.json` points at the configured workbook and the session is still open.
+- Explicit `--session` and implicit auto-reuse are both preserved in result payloads via workbook session metadata.
+- When a session-backed command leaves the live workbook newer than disk, the result includes structured `workbook.needs_save = true` and human output must make the save requirement obvious.
+- `session status` includes whether the managed workbook is dirty and whether saving is currently required.
+- `push` still saves by default; `--no-save` remains the session-only opt-out.
+
+## Outputs
+
+- Verbose version output may include `version.executable_path`, `version.go_version`, `version.module_path`, `version.build_settings`, `version.scripts`, and `version.features`.
+- Workbook-backed commands may include `workbook.session_mode = explicit|auto|managed|none`, plus `workbook.session_requested`, `workbook.auto_session`, and `workbook.needs_save`.
+- `session status` may include top-level `session.dirty` and `session.needs_save`.

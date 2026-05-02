@@ -13,21 +13,22 @@ Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --keepalive --json`.
-- If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --session --json`.
+- If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
+- When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.
 
 ## Session Lifecycle
 
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
-2. Use `--session` on workbook-backed commands during the task, including `pull`, `push`, `macros`, `run`, `trace`, and `test`.
-3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run <MacroName> --session --keepalive --json` or `--headless --session --keepalive --json` for execution because structured compile diagnostics are on by default.
-4. End with `xlflow save --session --json` when workbook changes must persist, then always run `xlflow session stop`.
+2. Matching sessions are auto-reused for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
+3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run --session --keepalive --json` or `xlflow run --headless --session --keepalive --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
+4. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
 
 Use isolated non-session commands only for one-shot CI-style verification, release checks, suspicious session state, or when the user explicitly asks not to keep Excel open.
 
-If `xlflow push --session --no-save` succeeds, or `xlflow run --session` completes without `--save` or `--save-as`, treat the live workbook as potentially newer than the `.xlsm` on disk until `xlflow save --session` runs.
+If `xlflow push --session --no-save` succeeds, or `xlflow run --session` completes without `--save` or `--save-as`, treat the live workbook as potentially newer than the `.xlsm` on disk until `xlflow save` runs.
 
 ## Standard Workflow
 
@@ -51,8 +52,10 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Prefer `xlflow test --session --keepalive --json`.
    - Use `xlflow test --filter <name> --session --keepalive --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --session --keepalive --json` before choosing a target.
-   - If no tests exist, run the target macro with `xlflow run <MacroName> --session --keepalive --json` when a session is active.
-   - Prefer `xlflow run <MacroName> --headless --session --keepalive --json` for unattended agent work that should still use the open session.
+   - If no tests exist and `project.entry` is the intended target, run `xlflow run --session --keepalive --json`.
+   - Use `xlflow run <MacroName> --session --keepalive --json` when you need a non-default entrypoint.
+   - Prefer `xlflow run --headless --session --keepalive --json` when `project.entry` is correct for unattended agent work that should still use the open session.
+   - Use `xlflow run <MacroName> --headless --session --keepalive --json` when you need a non-default headless entrypoint.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
@@ -61,7 +64,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Add `--vba-before <dir> --vba-after <dir>` when exported source changes also need review.
 
 6. Repeat until the command results prove the task.
-   - Finish every normal AI-agent development task with `xlflow save --session --json` when workbook changes must persist, then `xlflow session stop`.
+   - Finish every normal AI-agent development task with `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
 
 ## Project Orientation
 
@@ -74,7 +77,8 @@ Before editing, decide what is authoritative:
 
 Before running a macro, decide the runnable entrypoint:
 
-- Run `xlflow macros --session --keepalive --json` when the macro name is not already proven by tests, docs, or prior command output.
+- Run `xlflow macros --session --keepalive --json` when the macro name is not already proven by tests, docs, prior command output, or `project.entry`.
+- If `project.entry` is the intended entrypoint, prefer plain `xlflow run --session --keepalive --json` over repeating the macro name.
 - Use a listed `qualified_name` from `xlflow macros --session --json`; do not assume names such as `Main.Run`.
 - If the desired entrypoint is missing, add or fix the source module, run `xlflow push --fast --session --json` when a session is active, then rediscover macros before running.
 
@@ -96,8 +100,8 @@ When the user asks to create or change VBA behavior:
 5. Run `xlflow push --fast --session --no-save --keepalive --json`.
 6. Run `xlflow lint --json`.
 7. Run `xlflow test --session --keepalive --json` when tests exist.
-8. If tests do not cover the behavior, run `xlflow macros --session --keepalive --json`, then `xlflow run <qualified_name> --headless --session --keepalive --json` or `xlflow run <qualified_name> --trace --session --keepalive --json`.
-9. Run `xlflow save --session --json` when workbook changes must persist, then `xlflow session stop`.
+8. If tests do not cover the behavior, run `xlflow macros --session --keepalive --json`, then `xlflow run --headless --session --keepalive --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --keepalive --json` / `xlflow run <qualified_name> --trace --session --keepalive --json` for non-default entrypoints.
+9. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
 10. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
@@ -117,13 +121,13 @@ When the user reports a runtime failure:
 - Use plain `xlflow push --keepalive` when you need the safe isolated path with backup and save.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --session --keepalive --json` as the primary correctness signal when tests exist.
-- Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a `run` target.
+- Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
-- Plain `xlflow run --session --keepalive --json` already compiles first and returns structured compile diagnostics by default.
+- Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
-- Use explicit `--session` on `push` and `run`; normal commands do not auto-attach to an existing session.
+- Matching workbook sessions auto-reuse on `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.

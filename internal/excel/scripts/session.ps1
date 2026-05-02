@@ -1,7 +1,8 @@
 param(
   [string]$Action,
   [string]$WorkbookPath,
-  [string]$MetadataPath
+  [string]$MetadataPath,
+  [string]$UseSession = "false"
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -10,6 +11,7 @@ $result = New-XlflowResult -Command "session"
 $excel = $null
 $workbook = $null
 $sessionStarted = $false
+$sessionMode = "managed"
 
 function Write-XlflowSessionMetadata {
   param($Excel, [string]$WorkbookPath, [string]$MetadataPath)
@@ -52,7 +54,7 @@ try {
       $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $false
       Write-XlflowSessionMetadata -Excel $excel -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath
       $sessionStarted = $true
-      $result.workbook = [ordered]@{ path = $WorkbookPath; session = $true }
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode
       $result.logs = @("started xlflow Excel session")
     }
     "status" {
@@ -72,39 +74,43 @@ try {
           $open = $false
         }
       }
-      $result.session = [ordered]@{ running = $running; workbook_open = $open; metadata = $metadata }
-      $result.workbook = [ordered]@{ path = $WorkbookPath; session = $running }
+      $dirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
+      $needsSave = $running -and $open -and ($null -ne $dirty) -and [bool]$dirty
+      $result.session = [ordered]@{ running = $running; workbook_open = $open; metadata = $metadata; dirty = $dirty; needs_save = $needsSave }
+      if ($running -and $open) {
+        $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Dirty $dirty -NeedsSave $needsSave
+      } else {
+        $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none"
+      }
       $result.logs = @($(if ($running -and $open) { "xlflow session is running" } else { "xlflow session is not running" }))
     }
     "save" {
-      $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
-      $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+      $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -UseSession $UseSession -MetadataPath $MetadataPath -AllowIsolatedOpen $false
+      $excel = $openResult.excel
+      $workbook = $openResult.workbook
+      $sessionMode = [string]$openResult.session_mode
       $workbook.Save()
-      $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; session = $true }
-      $result.logs = @("saved xlflow session workbook")
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Saved $true -Dirty $false -NeedsSave $false
+      $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "saved xlflow session workbook") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     "stop" {
       $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
       $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
-      $wasDirty = $false
-      try { $wasDirty = -not [bool]$workbook.Saved } catch { Write-Verbose ("failed to inspect workbook dirty state: " + $_.Exception.Message) }
+      $wasDirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
+      if ($null -eq $wasDirty) {
+        $wasDirty = $false
+      }
       try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
       $workbook.Close($true) | Out-Null
       $excel.Quit() | Out-Null
       if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
         Remove-Item -LiteralPath $MetadataPath -Force -ErrorAction SilentlyContinue
       }
-      $result.workbook = [ordered]@{
-        path = $WorkbookPath
-        saved = $true
-        session = $false
-        dirty_before_stop = $wasDirty
-        auto_saved_on_stop = $wasDirty
-      }
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $true -DirtyBeforeStop $wasDirty -AutoSavedOnStop $wasDirty
       $result.logs = @(
         @(
           $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),
-          $(if ($wasDirty) { "auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop" } else { $null }),
+          $(if ($wasDirty) { "auto-saved workbook while stopping xlflow session; prefer xlflow save before stop" } else { $null }),
           "stopped xlflow Excel session"
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
       )

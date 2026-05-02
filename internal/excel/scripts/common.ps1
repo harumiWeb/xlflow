@@ -712,6 +712,170 @@ function Get-XlflowSessionExcel {
   return Get-XlflowActiveExcel
 }
 
+function Test-XlflowSessionMetadataMatchesWorkbook {
+  param([string]$MetadataPath, [string]$WorkbookPath)
+
+  if ([string]::IsNullOrWhiteSpace($MetadataPath) -or [string]::IsNullOrWhiteSpace($WorkbookPath) -or -not (Test-Path -LiteralPath $MetadataPath)) {
+    return $false
+  }
+  try {
+    $metadata = Get-Content -LiteralPath $MetadataPath -Raw | ConvertFrom-Json
+    if ($null -eq $metadata -or [string]::IsNullOrWhiteSpace([string]$metadata.workbook_path)) {
+      return $false
+    }
+    return [System.IO.Path]::GetFullPath([string]$metadata.workbook_path) -ieq [System.IO.Path]::GetFullPath($WorkbookPath)
+  } catch {
+    Write-Verbose ("failed to compare session metadata workbook path: " + $_.Exception.Message)
+    return $false
+  }
+}
+
+function Get-XlflowWorkbookDirtyState {
+  param($Workbook)
+
+  if ($null -eq $Workbook) {
+    return $null
+  }
+  try {
+    return -not [bool]$Workbook.Saved
+  } catch {
+    Write-Verbose ("failed to inspect workbook dirty state: " + $_.Exception.Message)
+    return $null
+  }
+}
+
+function Get-XlflowWorkbookSaveState {
+  param($Workbook, [bool]$SessionAttached = $false)
+
+  $dirty = $false
+  $needsSave = $false
+  if ($SessionAttached) {
+    $dirtyState = Get-XlflowWorkbookDirtyState -Workbook $Workbook
+    if ($null -ne $dirtyState) {
+      $dirty = [bool]$dirtyState
+      $needsSave = [bool]$dirtyState
+    } else {
+      $dirty = $true
+      $needsSave = $true
+    }
+  }
+
+  return [ordered]@{
+    dirty = $dirty
+    needs_save = $needsSave
+  }
+}
+
+function New-XlflowWorkbookResult {
+  param(
+    [string]$WorkbookPath,
+    [bool]$SessionAttached = $false,
+    [string]$SessionMode = "none",
+    [AllowNull()]$Saved = $null,
+    [string]$SaveAsPath = "",
+    [AllowNull()]$Dirty = $null,
+    [AllowNull()]$NeedsSave = $null,
+    [AllowNull()]$DirtyBeforeStop = $null,
+    [AllowNull()]$AutoSavedOnStop = $null
+  )
+
+  $workbook = [ordered]@{
+    path = $WorkbookPath
+    session = $SessionAttached
+    session_mode = $SessionMode
+    session_requested = ($SessionMode -eq "explicit")
+    auto_session = ($SessionMode -eq "auto")
+  }
+  if ($PSBoundParameters.ContainsKey("Saved") -and $null -ne $Saved) {
+    $workbook.saved = [bool]$Saved
+  }
+  if ($PSBoundParameters.ContainsKey("SaveAsPath")) {
+    if ([string]::IsNullOrWhiteSpace($SaveAsPath)) {
+      $workbook.save_as = $null
+    } else {
+      $workbook.save_as = $SaveAsPath
+    }
+  }
+  if ($PSBoundParameters.ContainsKey("Dirty") -and $null -ne $Dirty) {
+    $workbook.dirty = [bool]$Dirty
+  }
+  if ($PSBoundParameters.ContainsKey("NeedsSave") -and $null -ne $NeedsSave) {
+    $workbook.needs_save = [bool]$NeedsSave
+  }
+  if ($PSBoundParameters.ContainsKey("DirtyBeforeStop") -and $null -ne $DirtyBeforeStop) {
+    $workbook.dirty_before_stop = [bool]$DirtyBeforeStop
+  }
+  if ($PSBoundParameters.ContainsKey("AutoSavedOnStop") -and $null -ne $AutoSavedOnStop) {
+    $workbook.auto_saved_on_stop = [bool]$AutoSavedOnStop
+  }
+  return $workbook
+}
+
+function Get-XlflowSessionUsageLog {
+  param([string]$SessionMode)
+
+  switch ($SessionMode) {
+    "explicit" { return "using xlflow session workbook (--session)" }
+    "auto" { return "auto-reused matching xlflow session workbook" }
+    "managed" { return "using managed xlflow session workbook" }
+    default { return $null }
+  }
+}
+
+function Open-XlflowWorkbookForCommand {
+  param(
+    [string]$WorkbookPath,
+    [string]$Visible = "false",
+    [string]$DisplayAlerts = "false",
+    [string]$DisableAutomationMacros = "true",
+    [string]$UseSession = "false",
+    [string]$MetadataPath = "",
+    [bool]$AllowIsolatedOpen = $true
+  )
+
+  if (ConvertTo-XlflowBool $UseSession) {
+    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
+    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+    return [pscustomobject][ordered]@{
+      excel = $excel
+      workbook = $workbook
+      session_attached = $true
+      session_mode = "explicit"
+    }
+  }
+
+  if (Test-XlflowSessionMetadataMatchesWorkbook -MetadataPath $MetadataPath -WorkbookPath $WorkbookPath) {
+    $excel = Get-XlflowExcelFromSessionMetadata -MetadataPath $MetadataPath
+    if ($null -ne $excel) {
+      try {
+        $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+        return [pscustomobject][ordered]@{
+          excel = $excel
+          workbook = $workbook
+          session_attached = $true
+          session_mode = "auto"
+        }
+      } catch {
+        Write-Verbose ("failed to attach to matching xlflow session workbook: " + $_.Exception.Message)
+      }
+    }
+  }
+
+  if (-not $AllowIsolatedOpen) {
+    throw "no matching xlflow session workbook is running; run xlflow session start or use the configured workbook session"
+  }
+
+  $excel = New-Object -ComObject Excel.Application
+  $excel.Visible = ConvertTo-XlflowBool $Visible
+  $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+  return [pscustomobject][ordered]@{
+    excel = $excel
+    workbook = $workbook
+    session_attached = $false
+    session_mode = "none"
+  }
+}
+
 function Close-XlflowSessionWorkbook {
   param([string]$WorkbookPath, [string]$MetadataPath, [bool]$Save)
 
