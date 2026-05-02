@@ -19,3 +19,4 @@
 - In PowerShell, wrap function calls in parentheses before combining them with `-and` / `-or`. `Func $a -and Func $b` can pass the operator tokens as arguments to the first function and invert validation behavior.
 - VBE compile dialog watchers need a real post-compile wait window. Do not stop the watcher immediately after `CommandBarControl.Execute()` returns because the modal dialog can appear slightly later.
 - AI-agent workbook execution must prefer `xlflow run --diagnostic` unless GUI compile dialogs are explicitly desired. Plain `run` can leave the agent blind to modal VBE compile errors and cause false progress or debugging dead-ends.
+- When changing CLI defaults, audit legacy opt-in flags and script-only paths together. New defaults must not silently break established modes such as `run --direct`, and session-specific warnings must not leak into non-session script output.

@@ -9,13 +9,20 @@ description: Use when Codex or another AI agent needs to edit, test, debug, or v
 
 Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as complete until the workbook has been exported or inspected, source has been changed, changes have been imported, and the relevant macro or tests have been run.
 
+Default safety rules for AI-agent work:
+
+- Usually start with `xlflow session start` and stay in that session until the task is done.
+- If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --keepalive --json`.
+- If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --session --json`.
+- `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
+
 ## Session Lifecycle
 
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
 2. Use `--session` on workbook-backed commands during the task, including `pull`, `push`, `macros`, `run`, `trace`, and `test`.
-3. Prefer fast session commands such as `xlflow push --fast --session --no-save --keepalive --json` and `xlflow run <MacroName> --fast --session --keepalive --json` while iterating.
+3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run <MacroName> --session --keepalive --json` or `--headless --session --keepalive --json` for execution because structured compile diagnostics are on by default.
 4. End with `xlflow save --session --json` when workbook changes must persist, then always run `xlflow session stop`.
 
 Use isolated non-session commands only for one-shot CI-style verification, release checks, suspicious session state, or when the user explicitly asks not to keep Excel open.
@@ -44,7 +51,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Prefer `xlflow test --session --keepalive --json`.
    - Use `xlflow test --filter <name> --session --keepalive --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --session --keepalive --json` before choosing a target.
-   - If no tests exist, run the target macro with `xlflow run <MacroName> --fast --session --keepalive --json` when a session is active.
+   - If no tests exist, run the target macro with `xlflow run <MacroName> --session --keepalive --json` when a session is active.
    - Prefer `xlflow run <MacroName> --headless --session --keepalive --json` for unattended agent work that should still use the open session.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
@@ -113,8 +120,9 @@ When the user reports a runtime failure:
 - Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a `run` target.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
-- Use `xlflow run --fast --session --keepalive` for argument-free, trace-disabled smoke checks during tight iteration.
-- Use `xlflow run --diagnostic --session --keepalive --json` when a run appears blocked by a VBE compile dialog or you need compile-first module/line diagnostics.
+- Plain `xlflow run --session --keepalive --json` already compiles first and returns structured compile diagnostics by default.
+- Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
+- Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
 - Use explicit `--session` on `push` and `run`; normal commands do not auto-attach to an existing session.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
@@ -182,7 +190,7 @@ When workbook code launches an external PowerShell process, separate xlflow's br
 
 If `xlflow test` fails, read the failing test name, module, VBA error number, description, and line. Patch the smallest relevant area, rerun the focused test first, then run the full test suite.
 
-If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --keepalive --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
+If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --keepalive --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls. Plain `run` already includes compile-first diagnostics by default; do not switch to `--gui-compile-errors` unless a human explicitly wants GUI dialogs.
 
 If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. Either refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop.
 

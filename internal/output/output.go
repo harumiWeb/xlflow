@@ -753,7 +753,7 @@ func summarizeRunWorkbookResult(workbook map[string]any) string {
 		return "saved in place"
 	}
 	if session {
-		return "live session workbook may differ from disk; use xlflow save --session to persist"
+		return "UNSAVED session changes: live workbook differs from disk; run xlflow save --session before session stop"
 	}
 	return "left unchanged on disk"
 }
@@ -794,7 +794,7 @@ func summarizeWorkbookSourceResult(command string, workbook, source map[string]a
 			return "saved workbook in place"
 		}
 		if session {
-			return "updated live session workbook only; use xlflow save --session to persist"
+			return "UNSAVED session changes: live workbook differs from disk; run xlflow save --session before session stop"
 		}
 	case "pull":
 		if session {

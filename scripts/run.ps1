@@ -108,7 +108,14 @@ try {
       $result.logs = @($successLog, ("wrote workbook copy to " + $SaveAsPath))
     } else {
       $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
-      $result.logs = @($successLog, "left workbook unchanged on disk")
+      $result.logs = @(
+        $successLog,
+        $(if (ConvertTo-XlflowBool $UseSession) {
+          "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
+        } else {
+          "left workbook unchanged on disk"
+        })
+      )
     }
     Write-XlflowJson -Result $result
     return
@@ -217,7 +224,14 @@ try {
     $result.logs = @($successLog, ("wrote workbook copy to " + $SaveAsPath))
   } else {
     $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
-    $result.logs = @($successLog, "left workbook unchanged on disk")
+    $result.logs = @(
+      $successLog,
+      $(if (ConvertTo-XlflowBool $UseSession) {
+        "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
+      } else {
+        "left workbook unchanged on disk"
+      })
+    )
   }
 } catch {
   if ($null -eq $result.error) {

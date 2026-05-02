@@ -197,19 +197,22 @@ xlflow test --json
 
 ```text
 1. xlflow.toml を読む
-2. workbook が変更されている可能性があれば xlflow pull --json を実行する
-3. src/ 配下の .bas / .cls / .frm を編集する
-4. xlflow push --json で workbook へ反映する
-5. xlflow lint --json を実行する
-6. xlflow test --json を実行する
-7. xlflow macros --json を実行する
-8. xlflow run <qualified_name> --headless --json を実行する
-9. 実行時エラーが分かりにくい場合は xlflow run --trace --json を使う
-10. workbook の変更確認が必要なら xlflow diff --json を使う
+2. 通常の編集作業では xlflow session start を実行する
+3. どちらが最新か曖昧なら xlflow pull --session --json を実行する
+4. src/ 配下の .bas / .cls / .frm を編集する
+5. xlflow push --fast --session --no-save --json で workbook へ反映する
+6. xlflow lint --json を実行する
+7. xlflow test --session --json を実行する
+8. xlflow macros --session --json を実行する
+9. xlflow run <qualified_name> --headless --session --json を実行する
+10. 実行時エラーが分かりにくい場合は xlflow run --trace --session --json を使う
+11. xlflow session stop の前に xlflow save --session --json を実行する
+12. workbook の変更確認が必要なら xlflow diff --json を使う
 ```
 
 > [!IMPORTANT]
 > AIエージェントや CI 風のスクリプトでは `--json` を使うことを推奨します。JSON envelope は人間向け標準出力よりも安定して扱えるように設計されています。
+> `xlflow run` は既定で VBA を compile し、構造化された compile diagnostic を返します。生の Excel / VBE ダイアログを出したい場合だけ `--gui-compile-errors` を使ってください。
 
 ### 人間が Excel を操作しながら進める
 
@@ -402,17 +405,18 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 
 実行に失敗した場合は、`macro_failed` または `macro_not_found` として、VBA エラー番号、説明、モジュール名、フェーズ、可能であれば行番号を JSON で返します。
 近傍ソースや `Set` 抜けなどの既知パターンに一致した場合は、top-level `run_diagnostic` も返します。
-VBE のコンパイルダイアログまで構造化したい場合は `--diagnostic` を使います。実行前に VBA project を compile し、取得できた module、行、列、message、近傍コードを `vba_compile_failed` として返します。
+既定では `run` が実行前に VBA project を compile し、取得できた module、行、列、message、近傍コードを `vba_compile_failed` として構造化して返します。生の Excel / VBE compile ダイアログをそのまま出したい場合だけ `--gui-compile-errors` を使います。
 
-| Mode            | 挙動                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `--headless`    | Excel 起動前に GUI boundary を検出し、見つかった場合は `gui_boundary_detected` と top-level `gui_boundaries` を返す |
-| `--interactive` | Excel を表示し、alerts を有効にして人間が操作できる状態で実行する                                                   |
-| `--direct`      | 引数なし・trace 無効の macro を temporary harness 注入なしで実行する                                                |
-| `--fast`        | 可能な場合は direct 実行し、それ以外は通常実行へ戻る                                                                |
-| `--diagnostic`  | 実行前に VBE Compile を実行し、compile error を構造化して返す                                                       |
-| `--session`     | `xlflow session start` で開いた workbook を使う                                                                     |
-| `--timeout 5m`  | 指定時間内に終わらない場合は停止し、`macro_timeout` を返す                                                          |
+| Mode                   | 挙動                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `--headless`           | Excel 起動前に GUI boundary を検出し、見つかった場合は `gui_boundary_detected` と top-level `gui_boundaries` を返す |
+| `--interactive`        | Excel を表示し、alerts を有効にして人間が操作できる状態で実行する                                                   |
+| `--direct`             | 引数なし・trace 無効の macro を temporary harness 注入なしで実行する。単独指定なら既定diagnosticを自動で無効化する  |
+| `--fast`               | diagnostic を無効化したうえで条件を満たす場合は direct 実行し、それ以外は通常実行へ戻る                             |
+| `--diagnostic`         | 構造化 compile diagnostic を有効のまま明示する（既定で true）                                                       |
+| `--gui-compile-errors` | 構造化 compile diagnostic を opt-out し、Excel / VBE の compile dialog を表示する                                   |
+| `--session`            | `xlflow session start` で開いた workbook を使う                                                                     |
+| `--timeout 5m`         | 指定時間内に終わらない場合は停止し、`macro_timeout` を返す                                                          |
 
 ### `xlflow session`
 
@@ -420,8 +424,9 @@ Excel と設定済み workbook を開いたままにします。
 
 ```bash
 xlflow session start
+xlflow pull --session --json   # workbook 側が新しいかもしれない場合
 xlflow push --fast --session --no-save --json
-xlflow run Main.Run --fast --session --json
+xlflow run Main.Run --headless --session --json
 xlflow save --session --json
 xlflow session stop
 ```
@@ -429,6 +434,7 @@ xlflow session stop
 session mode は明示的に opt-in です。通常の `push` / `run` は従来どおり1回ごとに Excel を開閉します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
+xlflow はこの未保存 session 状態を以前より強く警告しますが、`session stop` 前に明示的に `xlflow save --session` する運用が基本です。
 
 </details>
 

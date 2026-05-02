@@ -86,14 +86,26 @@ try {
     "stop" {
       $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
       $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+      $wasDirty = $false
+      try { $wasDirty = -not [bool]$workbook.Saved } catch { Write-Verbose ("failed to inspect workbook dirty state: " + $_.Exception.Message) }
       try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
       $workbook.Close($true) | Out-Null
       $excel.Quit() | Out-Null
       if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and (Test-Path -LiteralPath $MetadataPath)) {
         Remove-Item -LiteralPath $MetadataPath -Force -ErrorAction SilentlyContinue
       }
-      $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; session = $false }
-      $result.logs = @("stopped xlflow Excel session")
+      $result.workbook = [ordered]@{
+        path = $WorkbookPath
+        saved = $true
+        session = $false
+        dirty_before_stop = $wasDirty
+        auto_saved_on_stop = $wasDirty
+      }
+      $result.logs = @(
+        $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),
+        $(if ($wasDirty) { "auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop" } else { $null }),
+        "stopped xlflow Excel session"
+      ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     }
     default {
       Set-XlflowError -Result $result -Code "session_args_invalid" -Message "-Action must be start, status, stop, or save." -Source "xlflow"

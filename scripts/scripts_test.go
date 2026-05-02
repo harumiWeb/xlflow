@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -186,6 +187,20 @@ func TestRunScriptAllowsDirectWhenDiagnosticFalse(t *testing.T) {
 	}
 	if got.Error == nil || got.Error.Code == "run_args_invalid" {
 		t.Fatalf("expected direct run to pass diagnostic=false validation, got %+v", got)
+	}
+}
+
+func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "push.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "elseif (ConvertTo-XlflowBool $UseSession)") {
+		t.Fatalf("push.ps1 should guard the save-session warning behind UseSession:\n%s", text)
+	}
+	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
+		t.Fatalf("push.ps1 should preserve the non-session unchanged-disk log:\n%s", text)
 	}
 }
 

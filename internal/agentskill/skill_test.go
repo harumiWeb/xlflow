@@ -32,7 +32,9 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"Run `xlflow doctor --keepalive --json` for setup phases",
 		"xlflow session start",
 		"xlflow pull --session --keepalive --json",
+		"xlflow save --session --json",
 		"xlflow push --fast --session --no-save --keepalive --json",
+		"--gui-compile-errors",
 		"xlflow session stop",
 		"XLFLOW_DONE status=success command=pull",
 	} {

@@ -632,18 +632,27 @@ func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.Comman
 	}, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
 	if headless && interactive {
 		return excel.RunOptions{}, fmt.Errorf("--headless and --interactive cannot be combined")
 	}
+	if guiCompileErrors && diagnosticExplicit && diagnostic {
+		return excel.RunOptions{}, fmt.Errorf("--diagnostic and --gui-compile-errors cannot be combined")
+	}
+	if guiCompileErrors {
+		diagnostic = false
+	}
 	if direct && trace {
 		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --trace")
 	}
 	if direct && diagnostic {
-		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --diagnostic")
+		if diagnosticExplicit {
+			return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with diagnostic mode; omit --diagnostic or use --gui-compile-errors")
+		}
+		diagnostic = false
 	}
 	keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
 	if err != nil {
@@ -796,6 +805,7 @@ func (a *app) runCommand() *cobra.Command {
 	var direct bool
 	var fast bool
 	var diagnostic bool
+	var guiCompileErrors bool
 	var session bool
 	var timeout time.Duration
 	var keepalive bool
@@ -814,7 +824,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, session, timeout, keepalive, keepaliveInterval)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -873,7 +883,8 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
 	cmd.Flags().BoolVar(&direct, "direct", false, "run an argument-free macro without injecting a temporary harness")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast run defaults")
-	cmd.Flags().BoolVar(&diagnostic, "diagnostic", false, "compile VBA before running and return structured compile diagnostics")
+	cmd.Flags().BoolVar(&diagnostic, "diagnostic", true, "compile VBA before running and return structured compile diagnostics (default true)")
+	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBE compile errors to surface via GUI dialogs instead of structured diagnostics")
 	cmd.Flags().BoolVar(&session, "session", false, "use an existing xlflow session workbook")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")

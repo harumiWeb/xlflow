@@ -40,10 +40,27 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "session", "timeout", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"arg", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestRunCommandDiagnosticDefaultsTrue(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("diagnostic")
+	if flag == nil {
+		t.Fatal("expected --diagnostic flag")
+	}
+	if flag.DefValue != "true" {
+		t.Fatalf("diagnostic default = %q, want true", flag.DefValue)
 	}
 }
 
@@ -537,7 +554,7 @@ func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err == nil || !strings.Contains(err.Error(), "--save and --save-as cannot be combined") {
 		t.Fatalf("expected save conflict error, got %v", err)
 	}
@@ -545,7 +562,7 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "", true, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, false, "", true, true, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,7 +600,7 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "", false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +611,7 @@ func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 
 func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, true, true, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, true, true, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err == nil || !strings.Contains(err.Error(), "--headless and --interactive") {
 		t.Fatalf("expected run mode conflict error, got %v", err)
 	}
@@ -602,11 +619,11 @@ func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
 
 func TestBuildRunOptionsRejectsDirectWithTraceOrArgs(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", true, false, false, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", true, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --trace") {
 		t.Fatalf("expected direct trace conflict, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, false, "", false, false, false, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, false, "", false, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be used with --arg") {
 		t.Fatalf("expected direct arg conflict, got %v", err)
 	}
@@ -614,20 +631,48 @@ func TestBuildRunOptionsRejectsDirectWithTraceOrArgs(t *testing.T) {
 
 func TestBuildRunOptionsRejectsDirectWithDiagnostic(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, true, false, true, false, 5*time.Minute, false, defaultKeepaliveInterval)
-	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --diagnostic") {
+	_, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, true, false, true, true, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	if err == nil || !strings.Contains(err.Error(), "--gui-compile-errors") {
 		t.Fatalf("expected direct diagnostic conflict, got %v", err)
+	}
+}
+
+func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForDirect(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, true, false, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Diagnostic {
+		t.Fatalf("diagnostic = true, want false for default direct run: %#v", opts)
+	}
+	if !opts.Direct {
+		t.Fatalf("direct = false, want true: %#v", opts)
 	}
 }
 
 func TestBuildRunOptionsAllowsFastDiagnostic(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, false, true, true, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, false, true, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !opts.Fast || !opts.Diagnostic {
 		t.Fatalf("unexpected fast diagnostic options: %#v", opts)
+	}
+}
+
+func TestBuildRunOptionsAllowsDirectWhenGUICompileErrorsOptOutIsSet(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, true, false, true, false, true, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Diagnostic {
+		t.Fatalf("diagnostic = true, want false with gui compile error opt-out: %#v", opts)
+	}
+	if !opts.Direct {
+		t.Fatalf("direct = false, want true: %#v", opts)
 	}
 }
 
@@ -788,6 +833,25 @@ func TestRunCommandReturnsValidationForBlockingAnalysisFindings(t *testing.T) {
 	}
 }
 
+func TestRunCommandRejectsDiagnosticAndGUICompileErrorsTogether(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--diagnostic", "--gui-compile-errors"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected run flag conflict, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "--gui-compile-errors") {
+		t.Fatalf("error = %v, want gui compile error conflict", err)
+	}
+}
+
 func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	cfg := config.Default()
 	tests := []struct {
@@ -803,7 +867,7 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.literal, func(t *testing.T) {
-			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "", false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
 			if err == nil {
 				t.Fatalf("expected %q to fail", tt.literal)
 			}
@@ -816,7 +880,7 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsEnablesKeepalive(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, false, false, false, false, 5*time.Minute, true, 3*time.Second)
+	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, true, 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

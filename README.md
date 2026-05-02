@@ -195,19 +195,22 @@ xlflow test --json
 
 ```text
 1. Read xlflow.toml
-2. Run xlflow pull --json when the workbook may have changed
-3. Edit files under src/
-4. Run xlflow push --json
-5. Run xlflow lint --json
-6. Run xlflow test --json
-7. Run xlflow macros --json
-8. Run xlflow run <qualified_name> --headless --json
-9. Use xlflow run --trace --json when runtime failures are unclear
-10. Use xlflow diff --json when workbook changes must be reviewed
+2. Start xlflow session start for normal editing work
+3. If the latest source of truth is unclear, run xlflow pull --session --json
+4. Edit files under src/
+5. Run xlflow push --fast --session --no-save --json
+6. Run xlflow lint --json
+7. Run xlflow test --session --json
+8. Run xlflow macros --session --json
+9. Run xlflow run <qualified_name> --headless --session --json
+10. Use xlflow run --trace --session --json when runtime failures are unclear
+11. Run xlflow save --session --json before xlflow session stop
+12. Use xlflow diff --json when workbook changes must be reviewed
 ```
 
 > [!IMPORTANT]
 > AI agents and CI-like scripts should prefer `--json`. The JSON envelope is designed to be stable and easier to parse than human-readable output.
+> `xlflow run` now compiles VBA and returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE dialogs.
 
 ### Human-assisted Excel sessions
 
@@ -399,17 +402,18 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 
 When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available.
 Runtime failures also include `run_diagnostic` when xlflow can match the failure to nearby source or a known VBA pattern such as a missing `Set` assignment.
-Use `--diagnostic` when you need xlflow to compile the VBA project first and convert VBE compile dialogs into `vba_compile_failed` JSON with module, line, column, message, and nearby code when available.
+By default, `run` compiles the VBA project first and converts VBE compile dialogs into structured `vba_compile_failed` JSON with module, line, column, message, and nearby code when available. Use `--gui-compile-errors` only when you intentionally want Excel/VBE compile dialogs to appear instead.
 
-| Mode            | Behavior                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--headless`    | Rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries` |
-| `--interactive` | Runs with Excel visible and alerts enabled for human operation                                                 |
-| `--direct`      | Runs an argument-free, trace-disabled macro without temporary harness injection                                |
-| `--fast`        | Uses direct execution when eligible, otherwise falls back to normal run                                        |
-| `--diagnostic`  | Runs VBE Compile before invocation and returns structured compile diagnostics                                  |
-| `--session`     | Uses the workbook opened by `xlflow session start`                                                             |
-| `--timeout 5m`  | Stops execution if it does not complete in time and returns `macro_timeout`                                    |
+| Mode                   | Behavior                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--headless`           | Rejects GUI boundaries before Excel starts and returns `gui_boundary_detected` with top-level `gui_boundaries`                              |
+| `--interactive`        | Runs with Excel visible and alerts enabled for human operation                                                                              |
+| `--direct`             | Runs an argument-free, trace-disabled macro without temporary harness injection; plain `--direct` auto-disables default compile diagnostics |
+| `--fast`               | Uses direct execution when eligible and diagnostic mode is disabled, otherwise falls back to normal run                                     |
+| `--diagnostic`         | Explicitly keeps structured compile diagnostics enabled (default true)                                                                      |
+| `--gui-compile-errors` | Opts out of structured compile diagnostics and allows Excel/VBE compile dialogs to appear                                                   |
+| `--session`            | Uses the workbook opened by `xlflow session start`                                                                                          |
+| `--timeout 5m`         | Stops execution if it does not complete in time and returns `macro_timeout`                                                                 |
 
 ### `xlflow session`
 
@@ -417,8 +421,9 @@ Keeps Excel and the configured workbook open between commands:
 
 ```bash
 xlflow session start
+xlflow pull --session --json   # when the workbook may be newer than src/
 xlflow push --fast --session --no-save --json
-xlflow run Main.Run --fast --session --json
+xlflow run Main.Run --headless --session --json
 xlflow save --session --json
 xlflow session stop
 ```
@@ -426,6 +431,7 @@ xlflow session stop
 Session mode is explicit. Normal `push` and `run` still open and close Excel for one isolated operation.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
+xlflow now warns more aggressively about this unsaved session state, but `xlflow save --session` remains the canonical persistence step before `session stop`.
 
 </details>
 

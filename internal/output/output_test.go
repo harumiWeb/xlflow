@@ -305,9 +305,25 @@ func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"updated live session workbook only", "xlflow save --session"} {
+	for _, want := range []string{"UNSAVED session changes", "xlflow save --session", "before session stop"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("push output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRunSessionUnsavedWarning(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"UNSAVED session changes", "xlflow save --session", "before session stop"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run output missing %q:\n%s", want, got)
 		}
 	}
 }

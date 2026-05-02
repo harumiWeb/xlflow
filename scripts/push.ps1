@@ -117,7 +117,13 @@ try {
     $(if ($BackupMode -eq "always") { "backed up existing VBA components" } else { "skipped VBA backup" }),
     "imported $($imported.Count) source file(s)",
     "updated $($updatedDocumentModules.Count) workbook module(s)",
-    $(if ($saved) { "saved workbook in place" } else { "left session workbook unsaved" })
+    $(if ($saved) {
+      "saved workbook in place"
+    } elseif (ConvertTo-XlflowBool $UseSession) {
+      "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
+    } else {
+      "left workbook unchanged on disk"
+    })
   )
 } catch {
   Set-XlflowError -Result $result -Code "excel_import_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
