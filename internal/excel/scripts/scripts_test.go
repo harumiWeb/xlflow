@@ -434,6 +434,29 @@ func TestSetXlflowErrorIncludesPhase(t *testing.T) {
 	}
 }
 
+func TestSessionStopSingleLogSerializesAsArray(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $wasDirty = $false; $result = New-XlflowResult -Command 'session'; $result.logs = @(@($(if ($wasDirty) { 'warning: session workbook had unsaved changes before stop' } else { $null }), $(if ($wasDirty) { 'auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop' } else { $null }), 'stopped xlflow Excel session') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }); Write-XlflowJson -Result $result",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("session stop log serialization failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse serialized logs: %v\n%s", err, out)
+	}
+	if len(got.Logs) != 1 || got.Logs[0] != "stopped xlflow Excel session" {
+		t.Fatalf("expected single-item logs array, got %+v", got.Logs)
+	}
+}
+
 func TestSetXlflowExcelAutomationDefaultsLeavesAutomationSecurityUnchanged(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

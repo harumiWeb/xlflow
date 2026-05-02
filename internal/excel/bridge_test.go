@@ -3,6 +3,8 @@ package excel
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,33 +15,68 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
-func TestScriptPathFindsRepositoryScripts(t *testing.T) {
-	path, err := scriptPath(t.TempDir(), "run")
-	if err != nil {
-		t.Fatal(err)
+func TestExternalScriptPathFindsRepositoryScripts(t *testing.T) {
+	path, ok := externalScriptPath(t.TempDir(), "run")
+	if !ok {
+		t.Fatal("expected repository script path")
 	}
 	if path == "" {
 		t.Fatal("expected script path")
 	}
 }
 
-func TestRunnerTestFindsRepositoryScript(t *testing.T) {
-	path, err := scriptPath(t.TempDir(), "test")
+func TestScriptPathPrefersRootScriptsDirectory(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(scriptsDir, "run.ps1")
+	if err := os.WriteFile(want, []byte("Write-Output 'override'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path, cleanup, err := scriptPath(root, "run")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path == "" {
-		t.Fatal("expected test script path")
+	if cleanup != nil {
+		t.Fatal("expected on-disk override without cleanup")
+	}
+	if path != want {
+		t.Fatalf("script path = %q, want %q", path, want)
 	}
 }
 
-func TestRunnerUIFindsRepositoryScript(t *testing.T) {
-	path, err := scriptPath(t.TempDir(), "ui")
+func TestMaterializeBundledScriptWritesCompleteBundle(t *testing.T) {
+	path, cleanup, err := materializeBundledScript("ui")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path == "" {
-		t.Fatal("expected ui script path")
+	if cleanup == nil {
+		t.Fatal("expected cleanup for materialized bundle")
+	}
+	dir := filepath.Dir(path)
+	if filepath.Base(path) != "ui.ps1" {
+		t.Fatalf("script path = %q, want bundled ui.ps1", path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "common.ps1")); err != nil {
+		t.Fatalf("expected bundled common.ps1: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected cleanup to remove %q, got %v", dir, err)
+	}
+}
+
+func TestScriptResultAcceptsScalarLogString(t *testing.T) {
+	var result ScriptResult
+	body := []byte(`{"status":"ok","command":"session","logs":"stopped xlflow Excel session"}`)
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Logs) != 1 || result.Logs[0] != "stopped xlflow Excel session" {
+		t.Fatalf("unexpected logs: %+v", result.Logs)
 	}
 }
 

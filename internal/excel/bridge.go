@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	bundledscripts "github.com/harumiWeb/xlflow/internal/excel/scripts"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
@@ -76,11 +77,35 @@ type CommandOptions struct {
 	Stderr            io.Writer
 }
 
+type ScriptLogs []string
+
+func (l *ScriptLogs) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*l = nil
+		return nil
+	}
+
+	var logs []string
+	if err := json.Unmarshal(trimmed, &logs); err == nil {
+		*l = ScriptLogs(logs)
+		return nil
+	}
+
+	var single string
+	if err := json.Unmarshal(trimmed, &single); err == nil {
+		*l = ScriptLogs{single}
+		return nil
+	}
+
+	return fmt.Errorf("expected logs to be a string array or single string, got %s", string(trimmed))
+}
+
 type ScriptResult struct {
 	Status        string        `json:"status"`
 	Command       string        `json:"command"`
 	Error         *output.Error `json:"error"`
-	Logs          []string      `json:"logs"`
+	Logs          ScriptLogs    `json:"logs"`
 	Diagnostics   any           `json:"diagnostics,omitempty"`
 	Workbook      any           `json:"workbook,omitempty"`
 	Backup        any           `json:"backup,omitempty"`
@@ -433,10 +458,13 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		return env, output.ExitEnvironment, nil
 	}
 
-	script, err := scriptPath(r.RootDir, commandName)
+	script, cleanup, err := scriptPath(r.RootDir, commandName)
 	if err != nil {
 		env = output.Failure(commandName, output.Error{Code: "script_not_found", Message: err.Error(), Source: "xlflow"})
 		return env, output.ExitEnvironment, nil
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	cmdArgs := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}
 	for k, v := range args {
@@ -497,7 +525,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Status = result.Status
 	env.Command = commandName
 	env.Error = result.Error
-	env.Logs = result.Logs
+	env.Logs = []string(result.Logs)
 	if env.Logs == nil {
 		env.Logs = []string{}
 	}
@@ -600,13 +628,30 @@ func workbookPath(root, path string) string {
 	return filepath.Join(root, path)
 }
 
-func scriptPath(root, commandName string) (string, error) {
+func scriptPath(root, commandName string) (string, func(), error) {
+	if path, ok := externalScriptPath(root, commandName); ok {
+		return path, nil, nil
+	}
+	return materializeBundledScript(commandName)
+}
+
+func materializeBundledScript(commandName string) (string, func(), error) {
 	name := commandName + ".ps1"
-	candidates := []string{
-		filepath.Join(root, "scripts", name),
+	path, cleanup, err := bundledscripts.Materialize(commandName)
+	if err != nil {
+		return "", nil, fmt.Errorf("script %s was not available from on-disk script locations or embedded runtime assets: %w", name, err)
+	}
+	return path, cleanup, nil
+}
+
+func externalScriptPath(root, commandName string) (string, bool) {
+	name := commandName + ".ps1"
+	candidates := []string{}
+	if root != "" {
+		candidates = append(candidates, filepath.Join(root, "scripts", name))
 	}
 	if _, file, _, ok := runtime.Caller(0); ok {
-		candidates = append(candidates, filepath.Join(filepath.Dir(file), "..", "..", "scripts", name))
+		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
 	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "scripts", name))
@@ -614,8 +659,8 @@ func scriptPath(root, commandName string) (string, error) {
 	for _, candidate := range candidates {
 		clean := filepath.Clean(candidate)
 		if _, err := os.Stat(clean); err == nil {
-			return clean, nil
+			return clean, true
 		}
 	}
-	return "", fmt.Errorf("script %s was not found", name)
+	return "", false
 }

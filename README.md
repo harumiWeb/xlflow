@@ -112,6 +112,7 @@ Download prebuilt Windows binaries from:
 > [!IMPORTANT]
 > Current prebuilt distribution targets **Windows** only.
 > Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
+> The release binary already embeds the runtime PowerShell bridge scripts, so `xlflow.exe` can run workbook commands without sidecar `*.ps1` files.
 
 Verify the installation:
 

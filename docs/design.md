@@ -1,3 +1,5 @@
+> Implemented: runtime PowerShell scripts now live under `internal/excel/scripts`, are embedded into `xlflow.exe` with `go:embed`, and are materialized as a temporary bundle only when no on-disk override is present.
+
 現状、`scriptPath()` は次の順で `new.ps1` などを探しています。
 
 1. 実行カレント配下の `scripts/new.ps1`

@@ -102,10 +102,12 @@ try {
         auto_saved_on_stop = $wasDirty
       }
       $result.logs = @(
-        $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),
-        $(if ($wasDirty) { "auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop" } else { $null }),
-        "stopped xlflow Excel session"
-      ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        @(
+          $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),
+          $(if ($wasDirty) { "auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop" } else { $null }),
+          "stopped xlflow Excel session"
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+      )
     }
     default {
       Set-XlflowError -Result $result -Code "session_args_invalid" -Message "-Action must be start, status, stop, or save." -Source "xlflow"

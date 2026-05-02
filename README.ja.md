@@ -113,6 +113,7 @@ Windows 向けの事前ビルド済みバイナリは次のページから取得
 > [!IMPORTANT]
 > 現在の事前ビルド配布は **Windows 向けのみ** です。
 > Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
+> Release binary には runtime PowerShell bridge script が埋め込まれているため、`xlflow.exe` 単体で workbook command を実行できます。
 
 インストール後、次のコマンドで確認できます。
 

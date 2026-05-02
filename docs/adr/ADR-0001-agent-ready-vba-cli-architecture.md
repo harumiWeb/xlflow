@@ -52,7 +52,7 @@ Negative consequences:
 ## Rationale
 
 - Tests: Go unit tests for configuration, output, project scaffolding, and lint behavior; PowerShell syntax checks for bridge scripts.
-- Code: `cmd/xlflow`, `internal/cli`, `internal/excel`, `scripts/*.ps1`.
+- Code: `cmd/xlflow`, `internal/cli`, `internal/excel`, `internal/excel/scripts/*.ps1`.
 - Related specs: `docs/specs/cli-contract.md`, `docs/specs/runtime-debugging.md`, `docs/design.md`.
 
 ## Supersedes

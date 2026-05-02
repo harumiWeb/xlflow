@@ -44,7 +44,7 @@ Negative consequences:
 ## Rationale
 
 - Tests: CLI option tests, script syntax tests, and Excel COM-backed workflow tests.
-- Code: `internal/cli`, `internal/excel`, `scripts/session.ps1`, `scripts/push.ps1`, `scripts/run.ps1`.
+- Code: `internal/cli`, `internal/excel`, `internal/excel/scripts/session.ps1`, `internal/excel/scripts/push.ps1`, `internal/excel/scripts/run.ps1`.
 - Related specs: `docs/specs/cli-contract.md`, `docs/design.md`.
 
 ## Supersedes
