@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +89,65 @@ func TestUsedRangeAppliesLimits(t *testing.T) {
 	}
 	if len(got.Warnings) != 1 || !strings.Contains(got.Warnings[0], "truncated") {
 		t.Fatalf("warnings = %#v, want truncation warning", got.Warnings)
+	}
+}
+
+func TestUsedRangeUsesSparseBounds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Sparse.xlsx")
+	f := excelize.NewFile()
+	if err := f.SetCellValue("Sheet1", "D10", "value"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := UsedRange(path, "Sheet1", Limits{MaxRows: 10, MaxCols: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsedRange != "D10" {
+		t.Fatalf("used range = %q, want D10", got.UsedRange)
+	}
+	if got.ReturnedRange != "D10" {
+		t.Fatalf("returned range = %q, want D10", got.ReturnedRange)
+	}
+	if got.RowCount != 1 || got.ColumnCount != 1 {
+		t.Fatalf("size = %d x %d, want 1 x 1", got.RowCount, got.ColumnCount)
+	}
+}
+
+func TestUsedRangeEmptySheetEmitsEmptyValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Empty.xlsx")
+	f := excelize.NewFile()
+	if _, err := f.NewSheet("Blank"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := UsedRange(path, "Blank", Limits{MaxRows: 10, MaxCols: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"values":[]`) {
+		t.Fatalf("json = %s, want values array", data)
 	}
 }
 

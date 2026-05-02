@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/harumiWeb/xlflow/internal/agentskill"
 	"github.com/harumiWeb/xlflow/internal/analyze"
@@ -1532,13 +1533,10 @@ func buildInspectCellSelector(args []string, sheet, address string, allowRange b
 	if strings.TrimSpace(sheet) == "" || strings.TrimSpace(address) == "" {
 		return inspectCellSelector{}, fmt.Errorf("--sheet and --address are required when no positional selector is provided")
 	}
-	if !allowRange && strings.Contains(address, ":") {
-		return inspectCellSelector{}, fmt.Errorf("expected a single cell address, got %q", address)
-	}
-	return inspectCellSelector{
-		Sheet:   parseInspectSheetLiteral(sheet),
-		Address: strings.TrimSpace(address),
-	}, nil
+	return parseInspectSelectorLiteral(
+		fmt.Sprintf("%s!%s", parseInspectSheetLiteral(sheet), strings.TrimSpace(address)),
+		allowRange,
+	)
 }
 
 func parseInspectSelectorLiteral(literal string, allowRange bool) (inspectCellSelector, error) {
@@ -1556,10 +1554,69 @@ func parseInspectSelectorLiteral(literal string, allowRange bool) (inspectCellSe
 	if selector.Address == "" {
 		return inspectCellSelector{}, fmt.Errorf("address is required")
 	}
-	if !allowRange && strings.Contains(selector.Address, ":") {
-		return inspectCellSelector{}, fmt.Errorf("expected a single cell address, got %q", selector.Address)
+	if allowRange {
+		normalized, err := validateInspectRangeAddress(selector.Address)
+		if err != nil {
+			return inspectCellSelector{}, err
+		}
+		selector.Address = normalized
+		return selector, nil
 	}
+	normalized, err := validateInspectCellAddress(selector.Address)
+	if err != nil {
+		return inspectCellSelector{}, err
+	}
+	selector.Address = normalized
 	return selector, nil
+}
+
+func validateInspectCellAddress(address string) (string, error) {
+	clean := strings.ToUpper(strings.TrimSpace(strings.ReplaceAll(address, "$", "")))
+	if clean == "" {
+		return "", fmt.Errorf("address is required")
+	}
+	if strings.Contains(clean, ":") {
+		return "", fmt.Errorf("expected a single cell address, got %q", address)
+	}
+	if _, _, err := excelize.CellNameToCoordinates(clean); err != nil {
+		return "", fmt.Errorf("invalid address %q: %w", address, err)
+	}
+	return clean, nil
+}
+
+func validateInspectRangeAddress(address string) (string, error) {
+	parts := strings.SplitN(strings.TrimSpace(address), ":", 2)
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return "", fmt.Errorf("address is required")
+	}
+	first, err := validateInspectCellAddress(parts[0])
+	if err != nil {
+		return "", err
+	}
+	if len(parts) == 1 {
+		return first, nil
+	}
+	last, err := validateInspectCellAddress(parts[1])
+	if err != nil {
+		return "", err
+	}
+	firstCol, firstRow, _ := excelize.CellNameToCoordinates(first)
+	lastCol, lastRow, _ := excelize.CellNameToCoordinates(last)
+	if lastCol < firstCol {
+		firstCol, lastCol = lastCol, firstCol
+	}
+	if lastRow < firstRow {
+		firstRow, lastRow = lastRow, firstRow
+	}
+	start, err := excelize.CoordinatesToCellName(firstCol, firstRow)
+	if err != nil {
+		return "", err
+	}
+	end, err := excelize.CoordinatesToCellName(lastCol, lastRow)
+	if err != nil {
+		return "", err
+	}
+	return start + ":" + end, nil
 }
 
 func parseInspectSheetLiteral(sheet string) string {

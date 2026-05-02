@@ -1,8 +1,12 @@
 package inspect
 
 import (
+	"archive/zip"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -41,7 +45,7 @@ type RangeSnapshot struct {
 	ReturnedRange string   `json:"returned_range,omitempty"`
 	RowCount      int      `json:"row_count"`
 	ColumnCount   int      `json:"column_count"`
-	Values        [][]any  `json:"values,omitempty"`
+	Values        [][]any  `json:"values"`
 	Truncated     bool     `json:"truncated,omitempty"`
 	MaxRows       int      `json:"max_rows,omitempty"`
 	MaxCols       int      `json:"max_cols,omitempty"`
@@ -126,7 +130,7 @@ func UsedRange(path, sheet string, limits Limits) (RangeSnapshot, error) {
 			}
 			return nil
 		}
-		result, err = readRangeSnapshot(f, sheet, 1, 1, info.ColumnCount, info.RowCount, "", info.Address, limits)
+		result, err = readRangeSnapshot(f, sheet, info.StartCol, info.StartRow, info.EndCol, info.EndRow, "", info.Address, limits)
 		return err
 	})
 	return result, err
@@ -205,35 +209,124 @@ func activeSheetName(f *excelize.File, sheets []SheetSummary) string {
 
 type rangeInfo struct {
 	Address     string
+	StartCol    int
+	StartRow    int
+	EndCol      int
+	EndRow      int
 	RowCount    int
 	ColumnCount int
 }
 
 func usedRangeInfo(f *excelize.File, sheet string) (rangeInfo, error) {
-	rows, err := f.GetRows(sheet)
-	if err != nil {
-		return rangeInfo{}, fmt.Errorf("read worksheet %q: %w", sheet, err)
-	}
-	rowCount := len(rows)
-	colCount := 0
-	for _, row := range rows {
-		if len(row) > colCount {
-			colCount = len(row)
-		}
-	}
-	info := rangeInfo{
-		RowCount:    rowCount,
-		ColumnCount: colCount,
-	}
-	if rowCount == 0 || colCount == 0 {
-		return info, nil
-	}
-	address, err := addressFromBounds(1, 1, colCount, rowCount)
+	xmlPath, err := worksheetXMLPath(f, sheet)
 	if err != nil {
 		return rangeInfo{}, err
 	}
-	info.Address = address
-	return info, nil
+	reader, err := zip.OpenReader(f.Path)
+	if err != nil {
+		return rangeInfo{}, fmt.Errorf("open workbook archive: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
+	var ws *zip.File
+	for _, file := range reader.File {
+		if file.Name == xmlPath {
+			ws = file
+			break
+		}
+	}
+	if ws == nil {
+		return rangeInfo{}, fmt.Errorf("worksheet xml %q not found", xmlPath)
+	}
+	rc, err := ws.Open()
+	if err != nil {
+		return rangeInfo{}, fmt.Errorf("open worksheet xml %q: %w", xmlPath, err)
+	}
+	defer func() { _ = rc.Close() }()
+	decoder := xml.NewDecoder(rc)
+	seen := false
+	minRow, minCol := 0, 0
+	maxRow, maxCol := 0, 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return rangeInfo{}, fmt.Errorf("scan worksheet %q: %w", sheet, err)
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "c" {
+			continue
+		}
+		ref := ""
+		for _, attr := range start.Attr {
+			if attr.Name.Local == "r" {
+				ref = attr.Value
+				break
+			}
+		}
+		if ref == "" {
+			continue
+		}
+		col, row, err := excelize.CellNameToCoordinates(ref)
+		if err != nil {
+			return rangeInfo{}, fmt.Errorf("scan worksheet %q cell %q: %w", sheet, ref, err)
+		}
+		if !seen {
+			minRow, maxRow = row, row
+			minCol, maxCol = col, col
+			seen = true
+			continue
+		}
+		if row < minRow {
+			minRow = row
+		}
+		if row > maxRow {
+			maxRow = row
+		}
+		if col < minCol {
+			minCol = col
+		}
+		if col > maxCol {
+			maxCol = col
+		}
+	}
+	if !seen {
+		return rangeInfo{}, nil
+	}
+	address, err := addressFromBounds(minCol, minRow, maxCol, maxRow)
+	if err != nil {
+		return rangeInfo{}, err
+	}
+	return rangeInfo{
+		Address:     address,
+		StartCol:    minCol,
+		StartRow:    minRow,
+		EndCol:      maxCol,
+		EndRow:      maxRow,
+		RowCount:    maxRow - minRow + 1,
+		ColumnCount: maxCol - minCol + 1,
+	}, nil
+}
+
+func worksheetXMLPath(f *excelize.File, sheet string) (string, error) {
+	if f == nil {
+		return "", fmt.Errorf("workbook is nil")
+	}
+	value := reflect.ValueOf(f).Elem().FieldByName("sheetMap")
+	if !value.IsValid() || value.Kind() != reflect.Map {
+		return "", fmt.Errorf("workbook does not expose sheet map")
+	}
+	for _, key := range value.MapKeys() {
+		if key.Kind() != reflect.String {
+			continue
+		}
+		if key.String() != sheet {
+			continue
+		}
+		return value.MapIndex(key).String(), nil
+	}
+	return "", fmt.Errorf("sheet %q not found", sheet)
 }
 
 func requireSheet(f *excelize.File, sheet string) error {

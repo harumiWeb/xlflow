@@ -2,6 +2,12 @@
 
 All notable changes to xlflow will be documented in this file.
 
+## v0.4.0
+
+- Added `xlflow inspect` with workbook, sheet, range, used-range, and cell inspection for saved workbook snapshots.
+- Added inspect-specific formatting and range limits so agents can read workbook structure and output without opening Excel.
+- Updated the bundled xlflow agent skill and CLI contract docs to teach snapshot-first inspect workflows.
+
 ## v0.3.0
 
 - Added automatic reuse of a matching live xlflow session workbook for workbook-backed commands when `--session` is omitted.

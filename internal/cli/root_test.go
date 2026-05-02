@@ -805,6 +805,13 @@ func TestBuildInspectCellSelectorParsesQuotedSheetNames(t *testing.T) {
 	}
 }
 
+func TestBuildInspectCellSelectorRejectsInvalidAddressSyntax(t *testing.T) {
+	_, err := buildInspectCellSelector(nil, "Visible", "nope", false)
+	if err == nil || !strings.Contains(err.Error(), "invalid address") {
+		t.Fatalf("expected invalid address error, got %v", err)
+	}
+}
+
 func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 	dir := t.TempDir()
 	beforePath := filepath.Join(dir, "before.xlsx")
