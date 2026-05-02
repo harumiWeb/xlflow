@@ -59,11 +59,42 @@ func TestRenderScaffoldWelcomeIncludesBadgeAndLogo(t *testing.T) {
 	got := renderScaffoldWelcome(false)
 	for _, want := range []string{
 		"* Welcome to xlflow",
-		"XX   XX LL      FFFFFF LL       OOOOO  WW      WW",
-		"XXXXXXX LL      FFFF   LL      OO   OO WW  WW  WW",
+		" ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗",
+		" ╚═╝  ╚═╝ ╚══════╝ ╚═╝      ╚══════╝  ╚═════╝   ╚══╝╚══╝",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("welcome output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestInterpolateColorPreservesGradientEndpoints(t *testing.T) {
+	if got := interpolateColor(welcomeTitleStart, welcomeTitleEnd, 0, 10); got != welcomeTitleStart {
+		t.Fatalf("gradient start = %#v, want %#v", got, welcomeTitleStart)
+	}
+	if got := interpolateColor(welcomeTitleStart, welcomeTitleEnd, 9, 10); got != welcomeTitleEnd {
+		t.Fatalf("gradient end = %#v, want %#v", got, welcomeTitleEnd)
+	}
+}
+
+func TestRenderGradientBlockKeepsOriginalText(t *testing.T) {
+	got := renderGradientBlock([]string{"XL"}, welcomeTitleStart, welcomeTitleEnd)
+	for _, want := range []string{"X", "L"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("gradient output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestGradientColorsForLineUsesRunePositionsForUnicodeArt(t *testing.T) {
+	got := gradientColorsForLine("██", welcomeTitleStart, welcomeTitleEnd)
+	if len(got) != 2 {
+		t.Fatalf("gradient color count = %d, want 2", len(got))
+	}
+	if got[0] != welcomeTitleStart {
+		t.Fatalf("first unicode gradient color = %#v, want %#v", got[0], welcomeTitleStart)
+	}
+	if got[1] != welcomeTitleEnd {
+		t.Fatalf("last unicode gradient color = %#v, want %#v", got[1], welcomeTitleEnd)
 	}
 }
