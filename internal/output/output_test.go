@@ -328,6 +328,41 @@ func TestWriteWithOptionsRendersRunSessionUnsavedWarning(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersRunFailureSessionSaveRequirement(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_failed", Message: "macro failed"})
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true, "session_mode": "explicit", "needs_save": true}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"macro failed", "SAVE REQUIRED", "xlflow save before session stop"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run failure output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRunSaveAsAndSaveRequirement(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "save_as": "build/Copy.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"copied to build/Copy.xlsm", "SAVE REQUIRED", "xlflow save before session stop"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("run save-as output missing %q:\n%s", want, got)
+		}
+	}
+	if saveIdx, resultIdx := strings.Index(got, "Save:"), strings.Index(got, "Result:"); saveIdx == -1 || resultIdx == -1 || saveIdx > resultIdx {
+		t.Fatalf("expected Save warning before Result summary:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersVersionVerboseDetails(t *testing.T) {
 	env := New("version")
 	env.Version = map[string]any{

@@ -744,6 +744,28 @@ function Get-XlflowWorkbookDirtyState {
   }
 }
 
+function Get-XlflowWorkbookSaveState {
+  param($Workbook, [bool]$SessionAttached = $false)
+
+  $dirty = $false
+  $needsSave = $false
+  if ($SessionAttached) {
+    $dirtyState = Get-XlflowWorkbookDirtyState -Workbook $Workbook
+    if ($null -ne $dirtyState) {
+      $dirty = [bool]$dirtyState
+      $needsSave = [bool]$dirtyState
+    } else {
+      $dirty = $true
+      $needsSave = $true
+    }
+  }
+
+  return [ordered]@{
+    dirty = $dirty
+    needs_save = $needsSave
+  }
+}
+
 function New-XlflowWorkbookResult {
   param(
     [string]$WorkbookPath,

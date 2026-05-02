@@ -417,6 +417,9 @@ func (r renderer) renderRun(env Envelope) string {
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		b.WriteString(kv("Session", sessionSummary))
 	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
 	if summary := summarizeRunWorkbookResult(workbook); summary != "" {
 		b.WriteString(kv("Result", summary))
 	}
@@ -886,9 +889,6 @@ func summarizeRunWorkbookResult(workbook map[string]any) string {
 	}
 	if saveAs := stringValue(workbook, "save_as"); saveAs != "" {
 		return "copied to " + saveAs
-	}
-	if save := summarizeSaveRequirement(workbook); save != "" {
-		return save
 	}
 	saved, ok := boolValueOK(workbook, "saved")
 	if !ok {

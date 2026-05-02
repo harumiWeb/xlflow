@@ -220,7 +220,8 @@ try {
       $errorCode = "macro_not_found"
     }
     Set-XlflowError -Result $result -Code $errorCode -Message $failureMessage -Source ([string]$runResult[1]) -Number ([int]$runResult[2]) -Line ([int]$runResult[4]) -Phase $currentPhase
-    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
+    $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
     $currentPhase = "save_result"
     $workbook.Save()
@@ -277,7 +278,8 @@ try {
   if ($null -eq $result.macro) {
     $result.macro = [ordered]@{ name = $MacroName; args = @(); duration_ms = 0; direct = (ConvertTo-XlflowBool $Direct) }
   }
-  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
+  $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
 } finally {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch { Write-Verbose ("failed to remove run harness module: " + $_.Exception.Message) }
