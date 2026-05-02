@@ -39,8 +39,15 @@ try {
   }
 
   $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-  $backupDir = Join-Path $BackupRoot $timestamp
-  $tmpImportDir = Join-Path (Join-Path (Split-Path -Parent $BackupRoot) "tmp") (Join-Path "import" $timestamp)
+  $backupRootFull = [System.IO.Path]::GetFullPath($BackupRoot)
+  $xlflowRoot = Split-Path -Parent $backupRootFull
+  if ([string]::IsNullOrWhiteSpace($xlflowRoot)) {
+    throw "backup root parent could not be resolved: $BackupRoot"
+  }
+  $backupDir = Join-Path $backupRootFull $timestamp
+  $tmpRoot = Join-Path $xlflowRoot "tmp"
+  $tmpImportRoot = Join-Path $tmpRoot "import"
+  $tmpImportDir = Join-Path $tmpImportRoot $timestamp
   if ($BackupMode -eq "always") {
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
   }

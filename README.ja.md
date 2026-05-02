@@ -402,6 +402,7 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 
 実行に失敗した場合は、`macro_failed` または `macro_not_found` として、VBA エラー番号、説明、モジュール名、フェーズ、可能であれば行番号を JSON で返します。
 近傍ソースや `Set` 抜けなどの既知パターンに一致した場合は、top-level `run_diagnostic` も返します。
+VBE のコンパイルダイアログまで構造化したい場合は `--diagnostic` を使います。実行前に VBA project を compile し、取得できた module、行、列、message、近傍コードを `vba_compile_failed` として返します。
 
 | Mode            | 挙動                                                                                                                |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -409,6 +410,7 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 | `--interactive` | Excel を表示し、alerts を有効にして人間が操作できる状態で実行する                                                   |
 | `--direct`      | 引数なし・trace 無効の macro を temporary harness 注入なしで実行する                                                |
 | `--fast`        | 可能な場合は direct 実行し、それ以外は通常実行へ戻る                                                                |
+| `--diagnostic`  | 実行前に VBE Compile を実行し、compile error を構造化して返す                                                       |
 | `--session`     | `xlflow session start` で開いた workbook を使う                                                                     |
 | `--timeout 5m`  | 指定時間内に終わらない場合は停止し、`macro_timeout` を返す                                                          |
 

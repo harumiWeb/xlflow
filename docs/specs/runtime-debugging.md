@@ -33,6 +33,7 @@ JSON output for configured project injection includes source metadata:
 
 - `open_workbook`
 - `prepare_vbide`
+- `compile_vba`
 - `verify_macro`
 - `inject_harness`
 - `invoke_macro`
@@ -44,6 +45,14 @@ The phase is included in JSON error metadata. Plain-text output remains short, b
 When Excel exposes enough information to distinguish a missing or invalid macro target from user-code failure, xlflow reports a target-specific error code instead of generic `macro_failed`.
 
 For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, trace context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern.
+
+## Diagnostic Compile Mode
+
+`xlflow run --diagnostic` adds a VBE compile step before macro verification and invocation. It is intended for agent debugging when source preflight did not catch a compile-time issue but Excel would otherwise surface a modal VBE dialog.
+
+Diagnostic mode starts a Win32 watcher for top-level windows owned by the Excel process, executes VBE Compile through the VBE command bars, and closes the compile dialog after collecting its child control text. Dialog text is returned as localized opaque text; xlflow does not parse or translate Japanese or English compile messages.
+
+Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`. `run_diagnostic.kind = "compile"` includes the dialog message, VBE selection location, nearby code, and dialog metadata when available. `--diagnostic --direct` is invalid. `--diagnostic --fast` remains valid but disables the direct fast path so the run can keep structured diagnostics.
 
 ## Runtime Source Analysis
 

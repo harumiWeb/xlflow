@@ -31,3 +31,29 @@ Speed up repeated agent development loops while preserving the current safe defa
 - `run.macro.direct` indicates whether the direct path was used.
 - `session` commands may include top-level `session`.
 - `runner` commands may include top-level `runner`.
+
+# xlflow Diagnostic Run Spec
+
+## Goal
+
+Add an opt-in diagnostic run mode that converts VBE compile dialogs and VBA runtime failures into structured CLI output for AI agents.
+
+## CLI Contract
+
+- `xlflow run [macro] --diagnostic [--session] [--trace] [--headless | --interactive] [--timeout <duration>]`
+- `--diagnostic --direct` is invalid.
+- `--diagnostic --fast` is valid, but disables the fast direct path and uses the temporary harness.
+
+## Behavior
+
+- Diagnostic runs keep existing source preflight and GUI-boundary behavior.
+- Before harness injection and macro invocation, diagnostic runs execute VBE Compile for the workbook VBA project.
+- If VBE raises a modal compile dialog, xlflow reads the dialog text, closes the dialog, reads `ActiveCodePane.GetSelection`, and returns without invoking the macro.
+- Runtime failures keep the existing harness-based `macro_failed` result and add `run_diagnostic.kind = "runtime"` when enriched diagnostics are available.
+- v1 does not inject line numbers. Runtime line is reported only when VBA `Erl` is non-zero.
+
+## Outputs
+
+- Compile failure returns `error.code = "vba_compile_failed"`, `error.phase = "compile_vba"`, validation exit code `1`, and top-level `run_diagnostic`.
+- Compile `run_diagnostic` includes `kind`, `message`, `location`, and `nearby_code` when VBE exposes them.
+- Runtime `run_diagnostic` includes `kind = "runtime"` plus existing likely cause, suggestion, nearby source, and trace context fields.

@@ -29,6 +29,8 @@ VBA source-controlled files use UTF-8 without BOM. The Excel COM bridge treats V
 
 GUI-dependent VBA calls are treated as explicit automation boundaries. xlflow detects patterns such as file pickers, modal dialogs, UserForms, message pumps, and external process launches in source code. Headless runs reject these boundaries before Excel starts. Interactive runs make the human participation explicit by showing Excel and allowing alerts. xlflow does not attempt to silently automate arbitrary Excel dialogs or UserForms.
 
+VBE compile-error dialogs are a narrow exception because they are editor diagnostics, not workbook business UI. `run --diagnostic` may execute VBE Compile, read and close the VBE modal compile dialog for the owned Excel process, and return structured compile diagnostics. This does not extend to user-code prompts such as `MsgBox`, file pickers, or UserForms.
+
 ## Consequences
 
 Positive consequences:
@@ -44,6 +46,7 @@ Negative consequences:
 - PowerShell and COM behavior must be tested separately from pure Go logic.
 - Japanese and other non-ASCII VBA source depends on the bridge conversion staying explicit at import and export boundaries.
 - Static GUI boundary detection can produce conservative findings and does not prove that a specific macro path will show a dialog.
+- VBE compile dialog handling is Windows-specific and depends on Win32 window enumeration in addition to Excel/VBIDE COM.
 - Future non-Windows backends may require a new ADR before expanding the adapter boundary.
 
 ## Rationale

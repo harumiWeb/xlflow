@@ -263,6 +263,37 @@ public static class XlflowNativeMethods {
 
   [DllImport("user32.dll")]
   public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc enumProc, IntPtr lParam);
+
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern int GetWindowTextW(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern int GetWindowTextLengthW(IntPtr hWnd);
+
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern IntPtr SendMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+  public static string GetWindowTextString(IntPtr hWnd) {
+    int length = GetWindowTextLengthW(hWnd);
+    System.Text.StringBuilder builder = new System.Text.StringBuilder(Math.Max(length + 1, 256));
+    GetWindowTextW(hWnd, builder, builder.Capacity);
+    return builder.ToString();
+  }
+
+  public static string GetClassNameString(IntPtr hWnd) {
+    System.Text.StringBuilder builder = new System.Text.StringBuilder(256);
+    GetClassNameW(hWnd, builder, builder.Capacity);
+    return builder.ToString();
+  }
 }
 "@
 }
@@ -283,6 +314,299 @@ function Get-XlflowExcelProcessId {
     Write-Verbose ("failed to resolve Excel process id: " + $_.Exception.Message)
     return 0
   }
+}
+
+function Start-XlflowVBEDialogWatcher {
+  param(
+    [int]$ProcessId,
+    [int]$TimeoutMilliseconds = 10000,
+    [int]$PollMilliseconds = 50
+  )
+
+  Add-XlflowNativeMethods
+  if ($ProcessId -le 0) {
+    return $null
+  }
+
+  $ps = [PowerShell]::Create()
+  $null = $ps.AddScript({
+    param([int]$TargetProcessId, [int]$TimeoutMs, [int]$PollMs)
+
+    $bmClick = [uint32]0x00F5
+    $wmClose = [uint32]0x0010
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+
+    while ([DateTime]::UtcNow -lt $deadline) {
+      foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$TargetProcessId)) {
+        if (-not [XlflowNativeMethods]::IsWindowVisible($hwnd)) {
+          continue
+        }
+
+        $title = [XlflowNativeMethods]::GetWindowTextString($hwnd)
+        $className = [XlflowNativeMethods]::GetClassNameString($hwnd)
+        $childInfos = New-Object System.Collections.Generic.List[object]
+        $staticTexts = New-Object System.Collections.Generic.List[string]
+        $buttons = New-Object System.Collections.Generic.List[object]
+
+        foreach ($child in [XlflowNativeMethods]::GetChildWindows($hwnd)) {
+          $childText = [XlflowNativeMethods]::GetWindowTextString($child)
+          $childClass = [XlflowNativeMethods]::GetClassNameString($child)
+          $info = [pscustomobject][ordered]@{
+            hwnd = [int64]$child
+            class_name = $childClass
+            text = $childText
+          }
+          $childInfos.Add($info)
+          if ($childClass -eq "Static" -and -not [string]::IsNullOrWhiteSpace($childText)) {
+            $staticTexts.Add($childText)
+          }
+          if ($childClass -eq "Button" -and -not [string]::IsNullOrWhiteSpace($childText)) {
+            $buttons.Add($info)
+          }
+        }
+
+        $looksLikeDialog = $className -eq "#32770" -and $buttons.Count -gt 0 -and ($staticTexts.Count -gt 0 -or $title -match "(?i)(visual basic|excel|vba)")
+        if (-not $looksLikeDialog) {
+          continue
+        }
+
+        $buttonToClick = $null
+        foreach ($button in $buttons) {
+          if ($button.text -match "(?i)^(OK|はい|閉じる|Close)$") {
+            $buttonToClick = $button
+            break
+          }
+        }
+        if ($null -eq $buttonToClick -and $buttons.Count -gt 0) {
+          $buttonToClick = $buttons[0]
+        }
+
+        if ($null -ne $buttonToClick) {
+          [void][XlflowNativeMethods]::SendMessageW([IntPtr]([int64]$buttonToClick.hwnd), $bmClick, [IntPtr]::Zero, [IntPtr]::Zero)
+        } else {
+          [void][XlflowNativeMethods]::PostMessageW($hwnd, $wmClose, [IntPtr]::Zero, [IntPtr]::Zero)
+        }
+
+        return [pscustomobject][ordered]@{
+          found = $true
+          hwnd = [int64]$hwnd
+          title = $title
+          class_name = $className
+          text = @($staticTexts.ToArray())
+          buttons = @($buttons | ForEach-Object { $_.text })
+          children = @($childInfos.ToArray())
+        }
+      }
+      Start-Sleep -Milliseconds $PollMs
+    }
+
+    return [pscustomobject][ordered]@{
+      found = $false
+      hwnd = 0
+      title = ""
+      class_name = ""
+      text = @()
+      buttons = @()
+      children = @()
+    }
+  })
+  $null = $ps.AddArgument($ProcessId)
+  $null = $ps.AddArgument($TimeoutMilliseconds)
+  $null = $ps.AddArgument($PollMilliseconds)
+
+  return [pscustomobject][ordered]@{
+    powershell = $ps
+    async = $ps.BeginInvoke()
+  }
+}
+
+function Receive-XlflowVBEDialogWatcher {
+  param(
+    $Watcher,
+    [int]$WaitMilliseconds = 250
+  )
+
+  if ($null -eq $Watcher) {
+    return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+  }
+
+  try {
+    if ($WaitMilliseconds -gt 0 -and -not $Watcher.async.AsyncWaitHandle.WaitOne($WaitMilliseconds)) {
+      try { $Watcher.powershell.Stop() } catch { Write-Verbose ("failed to stop VBE dialog watcher: " + $_.Exception.Message) }
+      return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+    }
+    $items = @($Watcher.powershell.EndInvoke($Watcher.async))
+    if ($items.Count -gt 0) {
+      return $items[0]
+    }
+  } catch {
+    Write-Verbose ("failed to receive VBE dialog watcher result: " + $_.Exception.Message)
+  } finally {
+    try { $Watcher.powershell.Dispose() } catch { Write-Verbose ("failed to dispose VBE dialog watcher: " + $_.Exception.Message) }
+  }
+
+  return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+}
+
+function Get-XlflowVBECompileControl {
+  param($VBE)
+
+  $captions = @("Compile VBAProject", "Compile Project", "コンパイル", "VBAProject のコンパイル")
+  try {
+    $commandBars = $VBE.CommandBars
+    foreach ($barName in @("Debug", "デバッグ")) {
+      try {
+        $bar = $commandBars.Item($barName)
+        foreach ($caption in $captions) {
+          try {
+            return $bar.Controls.Item($caption)
+          } catch {
+            Write-Verbose ("compile control was not found by caption " + $caption + ": " + $_.Exception.Message)
+          }
+        }
+        foreach ($control in @($bar.Controls)) {
+          try {
+            $caption = ([string]$control.Caption).Replace("&", "")
+            if ($caption -match "(?i)compile" -or $caption -match "コンパイル") {
+              return $control
+            }
+          } catch {
+            Write-Verbose ("failed to inspect VBE Debug control: " + $_.Exception.Message)
+          }
+        }
+      } catch {
+        Write-Verbose ("VBE command bar was not found: " + $_.Exception.Message)
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to inspect VBE command bars: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowVBESelectionDiagnostic {
+  param($VBE)
+
+  $location = [ordered]@{
+    module = ""
+    line = 0
+    column = 0
+    end_line = 0
+    end_column = 0
+    token = ""
+  }
+  $nearby = @()
+
+  try {
+    $pane = $VBE.ActiveCodePane
+    if ($null -eq $pane) {
+      return [ordered]@{ location = $location; nearby_code = @() }
+    }
+    $module = $pane.CodeModule
+    if ($null -ne $module) {
+      $location.module = [string]$module.Name
+    }
+    $startLine = 0
+    $startColumn = 0
+    $endLine = 0
+    $endColumn = 0
+    $pane.GetSelection([ref]$startLine, [ref]$startColumn, [ref]$endLine, [ref]$endColumn)
+    $location.line = [int]$startLine
+    $location.column = [int]$startColumn
+    $location.end_line = [int]$endLine
+    $location.end_column = [int]$endColumn
+
+    if ($null -ne $module -and $startLine -gt 0 -and $startLine -le $module.CountOfLines) {
+      $lineText = [string]$module.Lines($startLine, 1)
+      if ($startColumn -gt 0 -and $startColumn -le $lineText.Length) {
+        $tokenStart = $startColumn - 1
+        $tokenLength = 1
+        if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
+          $tokenLength = [Math]::Min($endColumn - $startColumn, $lineText.Length - $tokenStart)
+        } else {
+          while ($tokenStart -gt 0 -and $lineText[$tokenStart - 1] -match "[A-Za-z0-9_]") {
+            $tokenStart--
+          }
+          $tokenEnd = $startColumn - 1
+          while ($tokenEnd -lt $lineText.Length -and $lineText[$tokenEnd] -match "[A-Za-z0-9_]") {
+            $tokenEnd++
+          }
+          $tokenLength = [Math]::Max(1, $tokenEnd - $tokenStart)
+        }
+        $location.token = $lineText.Substring($tokenStart, $tokenLength).Trim()
+      }
+
+      $first = [Math]::Max(1, $startLine - 2)
+      $last = [Math]::Min($module.CountOfLines, $startLine + 2)
+      $items = New-Object System.Collections.Generic.List[string]
+      for ($lineNo = $first; $lineNo -le $last; $lineNo++) {
+        $prefix = "  "
+        if ($lineNo -eq $startLine) {
+          $prefix = "> "
+        }
+        $items.Add($prefix + $lineNo + " | " + [string]$module.Lines($lineNo, 1))
+        if ($lineNo -eq $startLine -and $startColumn -gt 0) {
+          $caretWidth = 1
+          if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
+            $caretWidth = [Math]::Max(1, $endColumn - $startColumn)
+          } elseif (-not [string]::IsNullOrWhiteSpace($location.token)) {
+            $caretWidth = $location.token.Length
+          }
+          $items.Add("    | " + (" " * [Math]::Max(0, $startColumn - 1)) + ("^" * $caretWidth))
+        }
+      }
+      $nearby = @($items.ToArray())
+    }
+  } catch {
+    Write-Verbose ("failed to read VBE selection diagnostic: " + $_.Exception.Message)
+  }
+
+  return [ordered]@{
+    location = $location
+    nearby_code = @($nearby)
+  }
+}
+
+function Invoke-XlflowVBECompile {
+  param($Excel, $Workbook)
+
+  $result = [ordered]@{
+    ok = $true
+    dialog = [ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+    selection = [ordered]@{ location = [ordered]@{}; nearby_code = @() }
+    error = ""
+  }
+
+  $watcher = $null
+  try {
+    $processId = Get-XlflowExcelProcessId -Excel $Excel
+    $watcher = Start-XlflowVBEDialogWatcher -ProcessId $processId
+    $control = Get-XlflowVBECompileControl -VBE $Workbook.VBProject.VBE
+    if ($null -eq $control) {
+      throw "VBE Compile command was not found."
+    }
+    $null = $control.Execute()
+  } catch {
+    $result.error = $_.Exception.Message
+  } finally {
+    $dialog = Receive-XlflowVBEDialogWatcher -Watcher $watcher -WaitMilliseconds 3000
+    if ($null -ne $dialog) {
+      $result.dialog = $dialog
+    }
+  }
+
+  if ($null -ne $result.dialog -and $result.dialog.found) {
+    $result.ok = $false
+    try {
+      $result.selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
+    } catch {
+      Write-Verbose ("failed to collect compile selection diagnostic: " + $_.Exception.Message)
+    }
+  } elseif (-not [string]::IsNullOrWhiteSpace($result.error)) {
+    throw $result.error
+  }
+
+  return $result
 }
 
 function Get-XlflowExcelByProcessId {

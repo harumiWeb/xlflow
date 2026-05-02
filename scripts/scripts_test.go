@@ -119,6 +119,119 @@ func TestRunScriptAcceptsTimeoutParameter(t *testing.T) {
 	}
 }
 
+func TestRunScriptAcceptsDiagnosticParameter(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$command = Get-Command ./run.ps1; $command.Parameters.ContainsKey('Diagnostic')",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run script diagnostic parameter check failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "True" {
+		t.Fatalf("expected run.ps1 to expose Diagnostic, got %q", out)
+	}
+}
+
+func TestRunScriptRejectsDirectDiagnosticBeforeOpeningWorkbook(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./run.ps1 -WorkbookPath 'C:\\missing.xlsm' -MacroName 'Main.Run' -Direct true -Diagnostic true | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run direct diagnostic command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse run output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "run_args_invalid" || got.Error.Phase != "initialize" {
+		t.Fatalf("expected direct diagnostic argument failure, got %+v", got)
+	}
+}
+
+func TestRunScriptAllowsDirectWhenDiagnosticFalse(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./run.ps1 -WorkbookPath 'C:\\missing.xlsm' -MacroName 'Main.Run' -MacroArgsJson 'W10=' -Direct true -Diagnostic false | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run direct diagnostic=false command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Error *struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse run output: %v\n%s", err, out)
+	}
+	if got.Error == nil || got.Error.Code == "run_args_invalid" {
+		t.Fatalf("expected direct run to pass diagnostic=false validation, got %+v", got)
+	}
+}
+
+func TestRunScriptAllowsFastDirectWhenDiagnosticFalse(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; (ConvertTo-XlflowBool 'true') -and (ConvertTo-XlflowBool 'false')",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bool expression command failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "False" {
+		t.Fatalf("expected explicit bool expression to be false, got %q", out)
+	}
+}
+
+func TestVBESelectionDiagnosticHandlesMissingPane(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Get-XlflowVBESelectionDiagnostic -VBE ([pscustomobject]@{}) | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("selection diagnostic command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Location struct {
+			Line int `json:"line"`
+		} `json:"location"`
+		NearbyCode []string `json:"nearby_code"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse selection diagnostic output: %v\n%s", err, out)
+	}
+	if got.Location.Line != 0 || len(got.NearbyCode) != 0 {
+		t.Fatalf("expected empty selection diagnostic, got %+v", got)
+	}
+}
+
 func TestAttachActiveWithoutWorkbookReturnsStructuredFailure(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

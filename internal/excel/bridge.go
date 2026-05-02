@@ -45,6 +45,7 @@ type RunOptions struct {
 	Mode         string
 	Direct       bool
 	Fast         bool
+	Diagnostic   bool
 	Session      bool
 	Timeout      time.Duration
 	Keepalive    CommandOptions
@@ -254,7 +255,8 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"DisplayAlerts": strconv.FormatBool(cfg.Excel.DisplayAlerts),
 		"SaveWorkbook":  strconv.FormatBool(opts.Save),
 		"TraceEnabled":  strconv.FormatBool(opts.Trace),
-		"Direct":        strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace)),
+		"Direct":        strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace && !opts.Diagnostic)),
+		"Diagnostic":    strconv.FormatBool(opts.Diagnostic),
 		"UseSession":    strconv.FormatBool(opts.Session),
 		"MetadataPath":  filepath.Join(root, ".xlflow", "session.json"),
 	}
@@ -582,7 +584,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
 		return output.ExitValidation
 	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid":
 		return output.ExitConfig

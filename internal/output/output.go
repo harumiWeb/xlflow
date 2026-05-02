@@ -377,6 +377,19 @@ func (r renderer) renderRun(env Envelope) string {
 		b.WriteString("\n")
 		b.WriteString(r.style("Diagnostic", "", true))
 		b.WriteString("\n")
+		if kind := stringValue(diag, "kind"); kind != "" {
+			b.WriteString(kv("Kind", kind))
+		}
+		if messages := stringList(diag["message"]); len(messages) > 0 {
+			b.WriteString("Message:\n")
+			for _, line := range messages {
+				b.WriteString("  ")
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+		} else if message := stringValue(diag, "message"); message != "" {
+			b.WriteString(kv("Message", message))
+		}
 		if loc := objectMap(diag["location"]); len(loc) > 0 {
 			parts := []string{}
 			for _, key := range []string{"module", "procedure", "file"} {
@@ -386,6 +399,12 @@ func (r renderer) renderRun(env Envelope) string {
 			}
 			if n, ok := numberValue(loc, "line"); ok && n > 0 {
 				parts = append(parts, fmt.Sprintf("line %d", int(n)))
+			}
+			if n, ok := numberValue(loc, "column"); ok && n > 0 {
+				parts = append(parts, fmt.Sprintf("column %d", int(n)))
+			}
+			if token := stringValue(loc, "token"); token != "" {
+				parts = append(parts, token)
 			}
 			if len(parts) > 0 {
 				b.WriteString(kv("Location", strings.Join(parts, " ")))

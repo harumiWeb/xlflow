@@ -48,6 +48,7 @@ try {
       }
       $excel = New-Object -ComObject Excel.Application
       $excel.Visible = $true
+      try { $excel.UserControl = $true } catch { Write-Verbose ("failed to set Excel UserControl: " + $_.Exception.Message) }
       $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $false
       Write-XlflowSessionMetadata -Excel $excel -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath
       $sessionStarted = $true

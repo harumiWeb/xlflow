@@ -399,6 +399,7 @@ xlflow run Report.Generate --save-as build\Result.xlsm --json
 
 When execution fails, xlflow returns `macro_failed` or `macro_not_found` with VBA error number, description, module name, phase, and line number when available.
 Runtime failures also include `run_diagnostic` when xlflow can match the failure to nearby source or a known VBA pattern such as a missing `Set` assignment.
+Use `--diagnostic` when you need xlflow to compile the VBA project first and convert VBE compile dialogs into `vba_compile_failed` JSON with module, line, column, message, and nearby code when available.
 
 | Mode            | Behavior                                                                                                       |
 | --------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -406,6 +407,7 @@ Runtime failures also include `run_diagnostic` when xlflow can match the failure
 | `--interactive` | Runs with Excel visible and alerts enabled for human operation                                                 |
 | `--direct`      | Runs an argument-free, trace-disabled macro without temporary harness injection                                |
 | `--fast`        | Uses direct execution when eligible, otherwise falls back to normal run                                        |
+| `--diagnostic`  | Runs VBE Compile before invocation and returns structured compile diagnostics                                  |
 | `--session`     | Uses the workbook opened by `xlflow session start`                                                             |
 | `--timeout 5m`  | Stops execution if it does not complete in time and returns `macro_timeout`                                    |
 

@@ -9,6 +9,7 @@ param(
   [string]$TraceEnabled = "false",
   [string]$TraceFile = "",
   [string]$Direct = "false",
+  [string]$Diagnostic = "false",
   [string]$UseSession = "false",
   [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
@@ -29,6 +30,10 @@ try {
   if ($TimeoutSeconds -lt 0) {
     Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-TimeoutSeconds must be greater than or equal to 0." -Source "xlflow"
     throw "invalid timeout"
+  }
+  if ((ConvertTo-XlflowBool $Direct) -and (ConvertTo-XlflowBool $Diagnostic)) {
+    Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-Direct cannot be used with diagnostic mode." -Source "xlflow" -Phase $currentPhase
+    throw "invalid direct run"
   }
   if ($traceRequested) {
     if ([string]::IsNullOrWhiteSpace($TraceFile)) {
@@ -121,6 +126,32 @@ try {
       $result.trace.temporary_injected = $true
     } elseif ($traceRequested) {
       $result.trace.lifecycle = "existing"
+    }
+    if (ConvertTo-XlflowBool $Diagnostic) {
+      $currentPhase = "compile_vba"
+      $compileResult = Invoke-XlflowVBECompile -Excel $excel -Workbook $workbook
+      if (-not [bool]$compileResult.ok) {
+        $location = $compileResult.selection.location
+        $messageLines = @($compileResult.dialog.text)
+        if ($messageLines.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($compileResult.dialog.title)) {
+          $messageLines = @([string]$compileResult.dialog.title)
+        }
+        $message = ($messageLines -join [Environment]::NewLine)
+        if ([string]::IsNullOrWhiteSpace($message)) {
+          $message = "VBA compile failed."
+        }
+        Set-XlflowError -Result $result -Code "vba_compile_failed" -Message $message -Source ([string]$location.module) -Line ([int]$location.line) -Phase $currentPhase
+        $result.run_diagnostic = [ordered]@{
+          kind = "compile"
+          message = @($messageLines)
+          location = $location
+          nearby_code = @($compileResult.selection.nearby_code)
+          dialog = $compileResult.dialog
+        }
+        $result.macro = [ordered]@{ name = $MacroName; args = @($typedValues); duration_ms = 0; direct = $false }
+        $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+        throw "vba compile failed"
+      }
     }
     $currentPhase = "verify_macro"
     if (-not (Test-XlflowMacroExists -Workbook $workbook -MacroName $MacroName)) {

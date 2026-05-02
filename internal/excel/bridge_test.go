@@ -172,6 +172,25 @@ func TestBuildRunScriptArgsPassesFastDirectAndSession(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsDiagnosticDisablesFastDirect(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:      "Main.Run",
+		Fast:       true,
+		Diagnostic: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["Diagnostic"] != "true" {
+		t.Fatalf("Diagnostic = %q, want true", args["Diagnostic"])
+	}
+	if args["Direct"] != "false" {
+		t.Fatalf("Direct = %q, want false for diagnostic fast run", args["Direct"])
+	}
+}
+
 func TestMacroFailureIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,
@@ -235,6 +254,16 @@ func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
 	}
 	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
 		t.Fatalf("exitCodeForScriptResult(trace_not_injected) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestVBACompileFailedIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "vba_compile_failed", Message: "compile failed"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(vba_compile_failed) = %d, want %d", got, output.ExitValidation)
 	}
 }
 

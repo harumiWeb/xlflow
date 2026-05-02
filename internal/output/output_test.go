@@ -273,6 +273,29 @@ func TestWriteWithOptionsRendersRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersCompileDiagnostic(t *testing.T) {
+	env := Failure("run", Error{Code: "vba_compile_failed", Message: "Compile error", Source: "Main", Phase: "compile_vba", Line: 8})
+	env.RunDiagnostic = map[string]any{
+		"kind":        "compile",
+		"message":     []string{"Compile error:", "Method or data member not found"},
+		"location":    map[string]any{"module": "Main", "line": 8, "column": 5, "token": "DisplayGridlines"},
+		"nearby_code": []string{"> 8 |   .DisplayGridlines = False", "    |     ^^^^^^^^^^^^^^^^"},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Kind", "compile", "Method or data member not found", "Main line 8 column 5 DisplayGridlines", ".DisplayGridlines"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("compile diagnostic output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Message") != 1 {
+		t.Fatalf("compile diagnostic should render one message block:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
 	env := New("push")
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true}

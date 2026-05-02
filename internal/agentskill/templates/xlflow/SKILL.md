@@ -114,6 +114,7 @@ When the user reports a runtime failure:
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
 - Use `xlflow run --fast --session --keepalive` for argument-free, trace-disabled smoke checks during tight iteration.
+- Use `xlflow run --diagnostic --session --keepalive --json` when a run appears blocked by a VBE compile dialog or you need compile-first module/line diagnostics.
 - Use explicit `--session` on `push` and `run`; normal commands do not auto-attach to an existing session.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
@@ -184,6 +185,8 @@ If `xlflow test` fails, read the failing test name, module, VBA error number, de
 If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --keepalive --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls.
 
 If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. Either refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop.
+
+If `xlflow run --diagnostic --session --json` fails with `vba_compile_failed`, inspect `run_diagnostic.kind`, `run_diagnostic.message`, `run_diagnostic.location`, and `run_diagnostic.nearby_code` before changing source. Treat dialog text as localized opaque text and fix the selected source location when available.
 
 If `xlflow run --trace --session` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --session --keepalive --json`.
 
