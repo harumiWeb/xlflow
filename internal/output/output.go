@@ -46,6 +46,7 @@ type Envelope struct {
 	Issues        any `json:"issues,omitempty"`
 	Tests         any `json:"tests,omitempty"`
 	Diff          any `json:"diff,omitempty"`
+	Inspect       any `json:"inspect,omitempty"`
 	Trace         any `json:"trace,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
 	UI            any `json:"ui,omitempty"`
@@ -160,6 +161,9 @@ func WriteWithOptions(w io.Writer, env Envelope, opts Options) error {
 
 func renderHuman(env Envelope, opts Options) string {
 	r := renderer{color: opts.Color}
+	if standalone := r.renderInspectStandalone(env); standalone != "" {
+		return standalone
+	}
 	var b strings.Builder
 	b.WriteString(r.title(env))
 	b.WriteString("\n")
@@ -224,6 +228,8 @@ func renderHuman(env Envelope, opts Options) string {
 		}
 	case "diff":
 		b.WriteString(r.renderDiff(env))
+	case "inspect":
+		b.WriteString(r.renderInspect(env))
 	case "new", "init", "skill install":
 		b.WriteString(r.renderCreated(env))
 	default:
@@ -760,6 +766,242 @@ func (r renderer) renderDiff(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderInspectStandalone(env Envelope) string {
+	if env.Command != "inspect" || env.Status != StatusOK {
+		return ""
+	}
+	payload := objectMap(env.Inspect)
+	if len(payload) == 0 {
+		return ""
+	}
+	switch stringValue(payload, "format") {
+	case "json":
+		data, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return ""
+		}
+		return string(data) + "\n"
+	case "markdown":
+		text := strings.TrimRight(r.renderInspectMarkdown(payload), "\n")
+		if text == "" {
+			return ""
+		}
+		return text + "\n"
+	default:
+		return ""
+	}
+}
+
+func (r renderer) renderInspect(env Envelope) string {
+	payload := objectMap(env.Inspect)
+	if len(payload) == 0 {
+		return r.renderLogs(env)
+	}
+	switch stringValue(payload, "target") {
+	case "workbook":
+		return r.renderInspectWorkbook(payload)
+	case "sheets":
+		return r.renderInspectSheets(payload)
+	case "range", "used-range":
+		return r.renderInspectRange(payload)
+	case "cell":
+		return r.renderInspectCell(payload)
+	default:
+		return r.renderLogs(env)
+	}
+}
+
+func (r renderer) renderInspectWorkbook(payload map[string]any) string {
+	workbook := objectMap(payload["workbook"])
+	if len(workbook) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if name := stringValue(workbook, "name"); name != "" {
+		b.WriteString(kv("Name", name))
+	}
+	if active := stringValue(workbook, "active_sheet"); active != "" {
+		b.WriteString(kv("Active sheet", active))
+	}
+	sheets := listOfObjects(workbook["sheets"])
+	b.WriteString(kv("Sheets", fmt.Sprintf("%d", len(sheets))))
+	for _, sheet := range sheets {
+		fmt.Fprintf(
+			&b,
+			"- %d. %s (%s, used %s, %d row(s) x %d column(s))\n",
+			intNumber(sheet, "index"),
+			stringValue(sheet, "name"),
+			visibleLabel(sheet),
+			emptyDash(stringValue(sheet, "used_range")),
+			intNumber(sheet, "row_count"),
+			intNumber(sheet, "column_count"),
+		)
+	}
+	return b.String()
+}
+
+func (r renderer) renderInspectSheets(payload map[string]any) string {
+	sheets := listOfObjects(payload["sheets"])
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(kv("Sheets", fmt.Sprintf("%d", len(sheets))))
+	for _, sheet := range sheets {
+		fmt.Fprintf(
+			&b,
+			"- %d. %s (%s, used %s, %d row(s) x %d column(s))\n",
+			intNumber(sheet, "index"),
+			stringValue(sheet, "name"),
+			visibleLabel(sheet),
+			emptyDash(stringValue(sheet, "used_range")),
+			intNumber(sheet, "row_count"),
+			intNumber(sheet, "column_count"),
+		)
+	}
+	return b.String()
+}
+
+func (r renderer) renderInspectRange(payload map[string]any) string {
+	snapshot := objectMap(payload["range"])
+	if len(snapshot) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if sheet := stringValue(snapshot, "sheet"); sheet != "" {
+		b.WriteString(kv("Sheet", sheet))
+	}
+	if value := stringValue(snapshot, "range"); value != "" {
+		b.WriteString(kv("Range", value))
+	}
+	if value := stringValue(snapshot, "used_range"); value != "" {
+		b.WriteString(kv("Used range", value))
+	}
+	if value := stringValue(snapshot, "returned_range"); value != "" {
+		b.WriteString(kv("Returned", value))
+	}
+	b.WriteString(kv("Size", fmt.Sprintf("%d row(s) x %d column(s)", intNumber(snapshot, "row_count"), intNumber(snapshot, "column_count"))))
+	if boolValue(snapshot, "truncated") {
+		b.WriteString(kv("Truncated", "true"))
+	}
+	for _, warning := range stringList(snapshot["warnings"]) {
+		b.WriteString("! ")
+		b.WriteString(warning)
+		b.WriteString("\n")
+	}
+	values := matrixStrings(snapshot["values"])
+	if len(values) == 0 {
+		b.WriteString("Values: <empty>\n")
+		return b.String()
+	}
+	b.WriteString("Values:\n")
+	for _, row := range values {
+		b.WriteString("  ")
+		b.WriteString(strings.Join(row, " | "))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (r renderer) renderInspectCell(payload map[string]any) string {
+	cell := objectMap(payload["cell"])
+	if len(cell) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if sheet := stringValue(cell, "sheet"); sheet != "" {
+		b.WriteString(kv("Sheet", sheet))
+	}
+	if address := stringValue(cell, "address"); address != "" {
+		b.WriteString(kv("Cell", address))
+	}
+	b.WriteString(kv("Value", emptyDash(stringValue(cell, "value"))))
+	return b.String()
+}
+
+func (r renderer) renderInspectMarkdown(payload map[string]any) string {
+	switch stringValue(payload, "target") {
+	case "workbook":
+		workbook := objectMap(payload["workbook"])
+		if len(workbook) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		if path := stringValue(workbook, "path"); path != "" {
+			b.WriteString("Workbook: ")
+			b.WriteString(path)
+			b.WriteString("\n")
+		}
+		if active := stringValue(workbook, "active_sheet"); active != "" {
+			b.WriteString("Active sheet: ")
+			b.WriteString(active)
+			b.WriteString("\n\n")
+		} else {
+			b.WriteString("\n")
+		}
+		b.WriteString(markdownSheetTable(listOfObjects(workbook["sheets"])))
+		return b.String()
+	case "sheets":
+		return markdownSheetTable(listOfObjects(payload["sheets"]))
+	case "range", "used-range":
+		snapshot := objectMap(payload["range"])
+		if len(snapshot) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		if sheet := stringValue(snapshot, "sheet"); sheet != "" {
+			b.WriteString("Sheet: ")
+			b.WriteString(sheet)
+			b.WriteString("\n")
+		}
+		if value := stringValue(snapshot, "range"); value != "" {
+			b.WriteString("Range: ")
+			b.WriteString(value)
+			b.WriteString("\n")
+		}
+		if value := stringValue(snapshot, "used_range"); value != "" {
+			b.WriteString("Used range: ")
+			b.WriteString(value)
+			b.WriteString("\n")
+		}
+		if value := stringValue(snapshot, "returned_range"); value != "" {
+			b.WriteString("Returned range: ")
+			b.WriteString(value)
+			b.WriteString("\n")
+		}
+		for _, warning := range stringList(snapshot["warnings"]) {
+			b.WriteString("\n> ")
+			b.WriteString(warning)
+			b.WriteString("\n")
+		}
+		values := matrixStrings(snapshot["values"])
+		if len(values) == 0 {
+			b.WriteString("\n_No values_\n")
+			return b.String()
+		}
+		b.WriteString("\n")
+		b.WriteString(markdownMatrixTable(values))
+		return b.String()
+	case "cell":
+		cell := objectMap(payload["cell"])
+		if len(cell) == 0 {
+			return ""
+		}
+		rows := [][]string{
+			{"Sheet", stringValue(cell, "sheet")},
+			{"Cell", stringValue(cell, "address")},
+			{"Value", emptyDash(stringValue(cell, "value"))},
+		}
+		return markdownTable([]string{"Field", "Value"}, rows)
+	default:
+		return ""
+	}
+}
+
 func (r renderer) renderCreated(env Envelope) string {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -1039,6 +1281,144 @@ func summarizeSaveRequirement(workbook map[string]any) string {
 		return ""
 	}
 	return "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+}
+
+func visibleLabel(m map[string]any) string {
+	if boolValue(m, "visible") {
+		return "visible"
+	}
+	return "hidden"
+}
+
+func emptyDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func intNumber(m map[string]any, key string) int {
+	n, _ := numberValue(m, key)
+	return int(n)
+}
+
+func matrixStrings(value any) [][]string {
+	if value == nil {
+		return nil
+	}
+	rows, ok := value.([]any)
+	if !ok {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		if err := json.Unmarshal(data, &rows); err != nil {
+			return nil
+		}
+	}
+	out := make([][]string, 0, len(rows))
+	for _, rawRow := range rows {
+		row, ok := rawRow.([]any)
+		if !ok {
+			data, err := json.Marshal(rawRow)
+			if err != nil {
+				continue
+			}
+			if err := json.Unmarshal(data, &row); err != nil {
+				continue
+			}
+		}
+		line := make([]string, 0, len(row))
+		for _, cell := range row {
+			if cell == nil {
+				line = append(line, "")
+				continue
+			}
+			line = append(line, fmt.Sprint(cell))
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func markdownSheetTable(sheets []map[string]any) string {
+	rows := make([][]string, 0, len(sheets))
+	for _, sheet := range sheets {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", intNumber(sheet, "index")),
+			stringValue(sheet, "name"),
+			fmt.Sprintf("%t", boolValue(sheet, "visible")),
+			emptyDash(stringValue(sheet, "used_range")),
+			fmt.Sprintf("%d", intNumber(sheet, "row_count")),
+			fmt.Sprintf("%d", intNumber(sheet, "column_count")),
+		})
+	}
+	return markdownTable([]string{"Index", "Name", "Visible", "Used range", "Rows", "Columns"}, rows)
+}
+
+func markdownMatrixTable(values [][]string) string {
+	width := 0
+	for _, row := range values {
+		if len(row) > width {
+			width = len(row)
+		}
+	}
+	if width == 0 {
+		return "_No values_\n"
+	}
+	headers := make([]string, 0, width)
+	rows := make([][]string, 0, len(values))
+	for i := 1; i <= width; i++ {
+		headers = append(headers, fmt.Sprintf("C%d", i))
+	}
+	for _, row := range values {
+		line := make([]string, width)
+		copy(line, row)
+		rows = append(rows, line)
+	}
+	return markdownTable(headers, rows)
+}
+
+func markdownTable(headers []string, rows [][]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("| ")
+	for i, header := range headers {
+		if i > 0 {
+			b.WriteString(" | ")
+		}
+		b.WriteString(escapeMarkdownTableCell(header))
+	}
+	b.WriteString(" |\n| ")
+	for i := range headers {
+		if i > 0 {
+			b.WriteString(" | ")
+		}
+		b.WriteString("---")
+	}
+	b.WriteString(" |\n")
+	for _, row := range rows {
+		b.WriteString("| ")
+		for i := range headers {
+			if i > 0 {
+				b.WriteString(" | ")
+			}
+			value := ""
+			if i < len(row) {
+				value = row[i]
+			}
+			b.WriteString(escapeMarkdownTableCell(value))
+		}
+		b.WriteString(" |\n")
+	}
+	return b.String()
+}
+
+func escapeMarkdownTableCell(value string) string {
+	replacer := strings.NewReplacer("|", "\\|", "\n", "<br>", "\r", "")
+	return replacer.Replace(value)
 }
 
 func yesNo(v bool) string {

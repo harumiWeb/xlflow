@@ -263,6 +263,10 @@ func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
 		{"lint"},
 		{"analyze"},
 		{"diff"},
+		{"inspect", "workbook"},
+		{"inspect", "range"},
+		{"inspect", "used-range"},
+		{"inspect", "cell"},
 		{"inspect-gui"},
 		{"skill", "install"},
 	} {
@@ -360,6 +364,27 @@ func TestRootCommandIncludesInspectGUICommand(t *testing.T) {
 	}
 	if cmd == nil || cmd.Name() != "inspect-gui" {
 		t.Fatalf("expected inspect-gui command, got %#v", cmd)
+	}
+}
+
+func TestRootCommandIncludesInspectSubcommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"inspect", "workbook"},
+		{"inspect", "sheets"},
+		{"inspect", "range"},
+		{"inspect", "used-range"},
+		{"inspect", "cell"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("expected inspect command %v, got %#v", args, cmd)
+		}
 	}
 }
 
@@ -763,6 +788,23 @@ func TestBuildDiffOptionsRejectsUnsupportedWorkbookExtensions(t *testing.T) {
 	}
 }
 
+func TestBuildInspectCellSelectorRejectsMixedSelectorForms(t *testing.T) {
+	_, err := buildInspectCellSelector([]string{"Sheet1!A1"}, "Sheet1", "A1", false)
+	if err == nil || !strings.Contains(err.Error(), "cannot combine") {
+		t.Fatalf("expected selector conflict, got %v", err)
+	}
+}
+
+func TestBuildInspectCellSelectorParsesQuotedSheetNames(t *testing.T) {
+	got, err := buildInspectCellSelector([]string{"'World News'!A1:F3"}, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Sheet != "World News" || got.Address != "A1:F3" {
+		t.Fatalf("selector = %#v, want World News A1:F3", got)
+	}
+}
+
 func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 	dir := t.TempDir()
 	beforePath := filepath.Join(dir, "before.xlsx")
@@ -787,6 +829,71 @@ func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 	root.SetArgs([]string{"diff", beforePath, afterPath})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("diff command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+}
+
+func TestInspectRangeCommandWritesJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	createInspectCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "range", "--sheet", "Visible", "--address", "A1:C2"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect range error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Command string         `json:"command"`
+		Inspect map[string]any `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Command != "inspect" {
+		t.Fatalf("command = %q, want inspect", got.Command)
+	}
+	if got.Inspect["target"] != "range" {
+		t.Fatalf("target = %#v, want range", got.Inspect["target"])
+	}
+	rangeMap, ok := got.Inspect["range"].(map[string]any)
+	if !ok {
+		t.Fatalf("range payload = %#v", got.Inspect["range"])
+	}
+	if rangeMap["range"] != "A1:C2" {
+		t.Fatalf("range = %#v, want A1:C2", rangeMap["range"])
+	}
+}
+
+func TestInspectRangeCommandWritesMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	createInspectCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "range", "--sheet", "Visible", "--address", "A1:C2", "--format", "markdown"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect range markdown error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	text := stdout.String()
+	if !strings.Contains(text, "Sheet: Visible") {
+		t.Fatalf("markdown output = %q, want sheet header", text)
+	}
+	if !strings.Contains(text, "| C1 | C2 | C3 |") {
+		t.Fatalf("markdown output = %q, want markdown table", text)
 	}
 }
 
@@ -925,6 +1032,47 @@ func TestBuildPushOptionsExpandsFastAndRequiresSessionForNoSave(t *testing.T) {
 	_, err = buildPushOptions("always", false, false, false, true, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "--no-save requires --session") {
 		t.Fatalf("expected no-save session error, got %v", err)
+	}
+}
+
+func createInspectCommandFixture(t *testing.T, dir string) {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsx")
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	buildDir := filepath.Join(dir, "build")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(buildDir, "Book.xlsx")
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "Visible"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.NewSheet("Hidden"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellValue("Visible", "A1", "A1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellValue("Visible", "C1", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellValue("Visible", "B2", "B2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetVisible("Hidden", false); err != nil {
+		t.Fatal(err)
+	}
+	f.SetActiveSheet(0)
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -263,28 +263,29 @@ xlflow inspect-gui --json
 
 ## Command map
 
-| Command         | Purpose                                             | Typical usage                               |
-| --------------- | --------------------------------------------------- | ------------------------------------------- |
-| `new`           | Create a new xlflow project and `.xlsm` workbook    | `xlflow new Book.xlsm`                      |
-| `init`          | Initialize xlflow from an existing workbook         | `xlflow init Book.xlsm`                     |
-| `doctor`        | Diagnose Excel, COM, PowerShell, and VBIDE access   | `xlflow doctor --json`                      |
-| `attach`        | Validate the workbook currently active in Excel     | `xlflow attach --active --json`             |
-| `pull`          | Export VBA components into `src/`                   | `xlflow pull --json`                        |
-| `push`          | Import VBA source back into the workbook            | `xlflow push --json`                        |
-| `session`       | Keep the configured workbook open for fast loops    | `xlflow session start`                      |
-| `save`          | Save the workbook held by a session                 | `xlflow save --session --json`              |
-| `runner`        | Manage the persistent xlflow runner marker module   | `xlflow runner install --json`              |
-| `macros`        | Discover runnable macro entrypoints                 | `xlflow macros --json`                      |
-| `run`           | Execute a macro from the CLI                        | `xlflow run Main.Run --json`                |
-| `trace`         | Enable, collect, and clean VBA trace logs           | `xlflow trace enable --json`                |
-| `test`          | Run VBA tests                                       | `xlflow test --json`                        |
-| `diff`          | Compare workbook content and optional VBA source    | `xlflow diff before.xlsm after.xlsm --json` |
-| `lint`          | Lint VBA source                                     | `xlflow lint --json`                        |
-| `analyze`       | Analyze runtime-risk patterns without opening Excel | `xlflow analyze --json`                     |
-| `check`         | Run `lint`, `analyze`, and `doctor` as a preflight  | `xlflow check --keepalive --json`           |
-| `inspect-gui`   | Detect GUI interaction boundaries                   | `xlflow inspect-gui --json`                 |
-| `skill install` | Install the bundled xlflow Skill for AI agents      | `xlflow skill install --agent codex`        |
-| `version`       | Show the installed xlflow build metadata            | `xlflow version`                            |
+| Command         | Purpose                                             | Typical usage                                                 |
+| --------------- | --------------------------------------------------- | ------------------------------------------------------------- |
+| `new`           | Create a new xlflow project and `.xlsm` workbook    | `xlflow new Book.xlsm`                                        |
+| `init`          | Initialize xlflow from an existing workbook         | `xlflow init Book.xlsm`                                       |
+| `doctor`        | Diagnose Excel, COM, PowerShell, and VBIDE access   | `xlflow doctor --json`                                        |
+| `attach`        | Validate the workbook currently active in Excel     | `xlflow attach --active --json`                               |
+| `pull`          | Export VBA components into `src/`                   | `xlflow pull --json`                                          |
+| `push`          | Import VBA source back into the workbook            | `xlflow push --json`                                          |
+| `session`       | Keep the configured workbook open for fast loops    | `xlflow session start`                                        |
+| `save`          | Save the workbook held by a session                 | `xlflow save --session --json`                                |
+| `runner`        | Manage the persistent xlflow runner marker module   | `xlflow runner install --json`                                |
+| `macros`        | Discover runnable macro entrypoints                 | `xlflow macros --json`                                        |
+| `run`           | Execute a macro from the CLI                        | `xlflow run Main.Run --json`                                  |
+| `trace`         | Enable, collect, and clean VBA trace logs           | `xlflow trace enable --json`                                  |
+| `test`          | Run VBA tests                                       | `xlflow test --json`                                          |
+| `diff`          | Compare workbook content and optional VBA source    | `xlflow diff before.xlsm after.xlsm --json`                   |
+| `inspect`       | Inspect saved workbook snapshots without Excel COM  | `xlflow inspect range --sheet Result --address A1:F20 --json` |
+| `lint`          | Lint VBA source                                     | `xlflow lint --json`                                          |
+| `analyze`       | Analyze runtime-risk patterns without opening Excel | `xlflow analyze --json`                                       |
+| `check`         | Run `lint`, `analyze`, and `doctor` as a preflight  | `xlflow check --keepalive --json`                             |
+| `inspect-gui`   | Detect GUI interaction boundaries                   | `xlflow inspect-gui --json`                                   |
+| `skill install` | Install the bundled xlflow Skill for AI agents      | `xlflow skill install --agent codex`                          |
+| `version`       | Show the installed xlflow build metadata            | `xlflow version`                                              |
 
 ---
 
@@ -589,6 +590,21 @@ xlflow check --keepalive --json
 
 `check` runs `lint`, `analyze`, and `doctor`, then returns an aggregate top-level `check` object.
 It continues after lint/analyze findings so the report includes all cheap source feedback before the Excel COM doctor result.
+
+### `xlflow inspect`
+
+Reads the saved workbook file directly without opening Excel.
+
+```bash
+xlflow inspect workbook --json
+xlflow inspect sheets --format markdown
+xlflow inspect range --sheet "Result" --address "A1:F20" --json
+xlflow inspect used-range "Result" --max-rows 50 --max-cols 10 --format markdown
+xlflow inspect cell "Result!B3" --json
+```
+
+Use it to inspect workbook structure and cell output after `push` / `run` workflows when the workbook state has been saved to disk.
+`inspect` is a file snapshot reader, so unsaved changes in an already-open Excel window are intentionally out of scope for this command family.
 
 ### `xlflow inspect-gui`
 

@@ -23,6 +23,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/project"
@@ -133,6 +134,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.uiCommand(),
 		a.testCommand(),
 		a.diffCommand(),
+		a.inspectCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
 		a.analyzeCommand(),
@@ -1230,6 +1232,223 @@ func (a *app) diffCommand() *cobra.Command {
 	return cmd
 }
 
+type inspectSharedFlags struct {
+	format string
+}
+
+func (a *app) inspectCommand() *cobra.Command {
+	flags := &inspectSharedFlags{}
+	cmd := &cobra.Command{
+		Use:   "inspect",
+		Short: "Inspect saved workbook state",
+	}
+	cmd.PersistentFlags().StringVar(&flags.format, "format", "text", "output format: text, json, or markdown")
+	cmd.AddCommand(
+		a.inspectWorkbookCommand(flags),
+		a.inspectSheetsCommand(flags),
+		a.inspectRangeCommand(flags),
+		a.inspectUsedRangeCommand(flags),
+		a.inspectCellCommand(flags),
+	)
+	return cmd
+}
+
+func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "workbook",
+		Short: "Inspect workbook summary information",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			workbook, err := workbookinspect.Workbook(workbookArgPath(a.cwd, cfg.Excel.Path))
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Inspect = workbookinspect.Payload{
+				Target:   "workbook",
+				Format:   format,
+				Source:   "file",
+				Workbook: &workbook,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected workbook %s", workbook.Path)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sheets",
+		Short: "Inspect workbook worksheets",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			sheets, err := workbookinspect.Sheets(workbookArgPath(a.cwd, cfg.Excel.Path))
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Inspect = workbookinspect.Payload{
+				Target: "sheets",
+				Format: format,
+				Source: "file",
+				Sheets: sheets,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected %d worksheet(s)", len(sheets))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
+	var sheet string
+	var address string
+	var maxRows int
+	var maxCols int
+	cmd := &cobra.Command{
+		Use:   "range [<sheet!A1:B2>]",
+		Short: "Inspect a worksheet range",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			limits, err := buildInspectLimits(maxRows, maxCols)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			selector, err := buildInspectCellSelector(args, sheet, address, true)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			snapshot, err := workbookinspect.Range(workbookArgPath(a.cwd, cfg.Excel.Path), selector.Sheet, selector.Address, limits)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Inspect = workbookinspect.Payload{
+				Target: "range",
+				Format: format,
+				Source: "file",
+				Range:  &snapshot,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected range %s!%s", selector.Sheet, snapshot.Range)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&address, "address", "", "range address such as A1:F20")
+	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
+	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
+	return cmd
+}
+
+func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command {
+	var sheet string
+	var maxRows int
+	var maxCols int
+	cmd := &cobra.Command{
+		Use:   "used-range [<sheet>]",
+		Short: "Inspect the lightweight used range for a worksheet",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			limits, err := buildInspectLimits(maxRows, maxCols)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			targetSheet, err := buildInspectSheetSelector(args, sheet)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			snapshot, err := workbookinspect.UsedRange(workbookArgPath(a.cwd, cfg.Excel.Path), targetSheet, limits)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Inspect = workbookinspect.Payload{
+				Target: "used-range",
+				Format: format,
+				Source: "file",
+				Range:  &snapshot,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected used range for %s", targetSheet)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
+	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
+	return cmd
+}
+
+func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
+	var sheet string
+	var address string
+	cmd := &cobra.Command{
+		Use:   "cell [<sheet!A1>]",
+		Short: "Inspect a single worksheet cell",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			selector, err := buildInspectCellSelector(args, sheet, address, false)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			cell, err := workbookinspect.Cell(workbookArgPath(a.cwd, cfg.Excel.Path), selector.Sheet, selector.Address)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Inspect = workbookinspect.Payload{
+				Target: "cell",
+				Format: format,
+				Source: "file",
+				Cell:   &cell,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected cell %s!%s", selector.Sheet, selector.Address)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&address, "address", "", "cell address such as A1")
+	return cmd
+}
+
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {
 	if (vbaBefore == "") != (vbaAfter == "") {
 		return diff.Options{}, fmt.Errorf("--vba-before and --vba-after must be provided together")
@@ -1262,6 +1481,94 @@ func workbookArgPath(root, path string) string {
 		return path
 	}
 	return filepath.Join(root, path)
+}
+
+type inspectCellSelector struct {
+	Sheet   string
+	Address string
+}
+
+func validateInspectFormat(format string) (string, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(format)); normalized {
+	case "", "text":
+		return "text", nil
+	case "json", "markdown":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported inspect format %q; expected text, json, or markdown", format)
+	}
+}
+
+func buildInspectLimits(maxRows, maxCols int) (workbookinspect.Limits, error) {
+	if maxRows <= 0 {
+		return workbookinspect.Limits{}, fmt.Errorf("--max-rows must be greater than 0")
+	}
+	if maxCols <= 0 {
+		return workbookinspect.Limits{}, fmt.Errorf("--max-cols must be greater than 0")
+	}
+	return workbookinspect.Limits{MaxRows: maxRows, MaxCols: maxCols}, nil
+}
+
+func buildInspectSheetSelector(args []string, sheet string) (string, error) {
+	if len(args) > 0 {
+		if strings.TrimSpace(sheet) != "" {
+			return "", fmt.Errorf("cannot combine a positional sheet selector with --sheet")
+		}
+		return parseInspectSheetLiteral(args[0]), nil
+	}
+	if strings.TrimSpace(sheet) == "" {
+		return "", fmt.Errorf("worksheet name is required")
+	}
+	return parseInspectSheetLiteral(sheet), nil
+}
+
+func buildInspectCellSelector(args []string, sheet, address string, allowRange bool) (inspectCellSelector, error) {
+	if len(args) > 0 {
+		if strings.TrimSpace(sheet) != "" || strings.TrimSpace(address) != "" {
+			return inspectCellSelector{}, fmt.Errorf("cannot combine a positional selector with --sheet or --address")
+		}
+		return parseInspectSelectorLiteral(args[0], allowRange)
+	}
+	if strings.TrimSpace(sheet) == "" || strings.TrimSpace(address) == "" {
+		return inspectCellSelector{}, fmt.Errorf("--sheet and --address are required when no positional selector is provided")
+	}
+	if !allowRange && strings.Contains(address, ":") {
+		return inspectCellSelector{}, fmt.Errorf("expected a single cell address, got %q", address)
+	}
+	return inspectCellSelector{
+		Sheet:   parseInspectSheetLiteral(sheet),
+		Address: strings.TrimSpace(address),
+	}, nil
+}
+
+func parseInspectSelectorLiteral(literal string, allowRange bool) (inspectCellSelector, error) {
+	index := strings.LastIndex(literal, "!")
+	if index <= 0 || index == len(literal)-1 {
+		return inspectCellSelector{}, fmt.Errorf("expected selector in the form Sheet!A1")
+	}
+	selector := inspectCellSelector{
+		Sheet:   parseInspectSheetLiteral(literal[:index]),
+		Address: strings.TrimSpace(literal[index+1:]),
+	}
+	if selector.Sheet == "" {
+		return inspectCellSelector{}, fmt.Errorf("worksheet name is required")
+	}
+	if selector.Address == "" {
+		return inspectCellSelector{}, fmt.Errorf("address is required")
+	}
+	if !allowRange && strings.Contains(selector.Address, ":") {
+		return inspectCellSelector{}, fmt.Errorf("expected a single cell address, got %q", selector.Address)
+	}
+	return selector, nil
+}
+
+func parseInspectSheetLiteral(sheet string) string {
+	trimmed := strings.TrimSpace(sheet)
+	if len(trimmed) >= 2 && trimmed[0] == '\'' && trimmed[len(trimmed)-1] == '\'' {
+		trimmed = trimmed[1 : len(trimmed)-1]
+		trimmed = strings.ReplaceAll(trimmed, "''", "'")
+	}
+	return trimmed
 }
 
 func (a *app) lintCommand() *cobra.Command {
