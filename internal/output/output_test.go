@@ -298,14 +298,14 @@ func TestWriteWithOptionsRendersCompileDiagnostic(t *testing.T) {
 
 func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
 	env := New("push")
-	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true, "session_mode": "auto", "needs_save": true}
 	env.Source = map[string]any{"changed_only": true, "changed": true}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"UNSAVED session changes", "xlflow save --session", "before session stop"} {
+	for _, want := range []string{"SAVE REQUIRED", "xlflow save before session stop", "auto-reused matching xlflow session workbook"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("push output missing %q:\n%s", want, got)
 		}
@@ -315,15 +315,56 @@ func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
 func TestWriteWithOptionsRendersRunSessionUnsavedWarning(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
-	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true, "session_mode": "explicit", "needs_save": true}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"UNSAVED session changes", "xlflow save --session", "before session stop"} {
+	for _, want := range []string{"SAVE REQUIRED", "xlflow save before session stop", "explicit xlflow session workbook"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersVersionVerboseDetails(t *testing.T) {
+	env := New("version")
+	env.Version = map[string]any{
+		"version":         "1.2.3",
+		"commit":          "abc123",
+		"date":            "2026-05-02T00:00:00Z",
+		"executable_path": `C:\tools\xlflow.exe`,
+		"go_version":      "go1.25.0",
+		"module_path":     "github.com/harumiWeb/xlflow",
+		"build_settings":  []map[string]any{{"key": "vcs.revision", "value": "abc123"}},
+		"scripts":         []map[string]any{{"command": "run", "source": "embedded"}, {"command": "push", "source": "override", "path": `C:\dev\go\xlflow\scripts\push.ps1`}},
+		"features":        []map[string]any{{"name": "run-entry-fallback", "description": "Use project.entry when the macro is omitted."}},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Executable:", `C:\tools\xlflow.exe`, "Build settings", "Scripts", "run-entry-fallback", "Use project.entry"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("version verbose output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersSessionStatusSaveRequirement(t *testing.T) {
+	env := New("session")
+	env.Session = map[string]any{"running": true, "workbook_open": true, "needs_save": true}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "needs_save": true}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Running:", "Workbook open:", "SAVE REQUIRED", "xlflow save before session stop"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("session status output missing %q:\n%s", want, got)
 		}
 	}
 }

@@ -21,6 +21,7 @@ $excel = $null
 $workbook = $null
 $tmpImportDir = $null
 $sessionAttached = $false
+$sessionMode = "none"
 $sessionInvalidated = $false
 
 try {
@@ -30,7 +31,7 @@ try {
   }
   $fingerprint = Get-XlflowSourceFingerprint -WorkbookPath $WorkbookPath -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
   if ((ConvertTo-XlflowBool $ChangedOnly) -and (Test-XlflowFingerprintMatchesState -Fingerprint $fingerprint -StatePath $StatePath)) {
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $false -NeedsSave $false -Dirty $false
     $result.backup = [ordered]@{ path = $null; mode = $BackupMode }
     $result.source = [ordered]@{ changed_only = $true; changed = $false; state = $StatePath }
     $result.logs = @("source state unchanged; skipped workbook import")
@@ -53,15 +54,13 @@ try {
   }
   New-Item -ItemType Directory -Force -Path $tmpImportDir | Out-Null
 
-  if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
-    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
+  $excel = $openResult.excel
+  $workbook = $openResult.workbook
+  $sessionAttached = [bool]$openResult.session_attached
+  $sessionMode = [string]$openResult.session_mode
+  if ($sessionAttached) {
     try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
-    $sessionAttached = $true
-  } else {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = ConvertTo-XlflowBool $Visible
-    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
   }
 
   foreach ($component in @($workbook.VBProject.VBComponents)) {
@@ -110,24 +109,28 @@ try {
     $saved = $true
   }
   Write-XlflowFingerprintState -Fingerprint $fingerprint -StatePath $StatePath
-  $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $saved; session = (ConvertTo-XlflowBool $UseSession) }
+  $needsSave = $sessionAttached -and -not $saved
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $saved -NeedsSave $needsSave -Dirty $needsSave
   $result.backup = [ordered]@{ path = $(if ($BackupMode -eq "always") { $backupDir } else { $null }); mode = $BackupMode }
   $result.source = [ordered]@{ changed_only = (ConvertTo-XlflowBool $ChangedOnly); changed = $true; state = $StatePath }
   $result.logs = @(
-    $(if ($BackupMode -eq "always") { "backed up existing VBA components" } else { "skipped VBA backup" }),
-    "imported $($imported.Count) source file(s)",
-    "updated $($updatedDocumentModules.Count) workbook module(s)",
-    $(if ($saved) {
-      "saved workbook in place"
-    } elseif (ConvertTo-XlflowBool $UseSession) {
-      "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
-    } else {
-      "left workbook unchanged on disk"
-    })
+    @(
+      $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+      $(if ($BackupMode -eq "always") { "backed up existing VBA components" } else { "skipped VBA backup" }),
+      "imported $($imported.Count) source file(s)",
+      "updated $($updatedDocumentModules.Count) workbook module(s)",
+      $(if ($saved) {
+        "saved workbook in place"
+      } elseif ($sessionAttached) {
+        "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+      } else {
+        "left workbook unchanged on disk"
+      })
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
   )
 } catch {
   Set-XlflowError -Result $result -Code "excel_import_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
-  if ((ConvertTo-XlflowBool $UseSession) -and $sessionAttached) {
+  if ($sessionAttached) {
     try {
       if ($null -ne $workbook) {
         $workbook.Close($false) | Out-Null
@@ -145,7 +148,7 @@ try {
     }
   }
 } finally {
-  if ((ConvertTo-XlflowBool $UseSession) -and -not $sessionInvalidated) {
+  if ($sessionAttached -and -not $sessionInvalidated) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false

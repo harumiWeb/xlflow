@@ -168,6 +168,8 @@ func renderHuman(env Envelope, opts Options) string {
 	}
 	b.WriteString(r.renderBridge(env))
 	switch env.Command {
+	case "version":
+		b.WriteString(r.renderVersion(env))
 	case "doctor":
 		b.WriteString(r.renderDoctor(env))
 	case "run":
@@ -196,6 +198,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
 		b.WriteString(r.renderMacros(env))
+	case "session":
+		b.WriteString(r.renderSession(env))
+	case "save":
+		b.WriteString(r.renderSave(env))
 	case "trace":
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
@@ -322,6 +328,66 @@ func (r renderer) renderDoctor(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderVersion(env Envelope) string {
+	version := objectMap(env.Version)
+	if len(version) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if value := stringValue(version, "version"); value != "" {
+		b.WriteString(kv("Version", value))
+	}
+	if value := stringValue(version, "commit"); value != "" {
+		b.WriteString(kv("Commit", value))
+	}
+	if value := stringValue(version, "date"); value != "" {
+		b.WriteString(kv("Date", value))
+	}
+	if value := stringValue(version, "executable_path"); value != "" {
+		b.WriteString(kv("Executable", value))
+	}
+	if value := stringValue(version, "go_version"); value != "" {
+		b.WriteString(kv("Go", value))
+	}
+	if value := stringValue(version, "module_path"); value != "" {
+		b.WriteString(kv("Module", value))
+	}
+	settings := listOfObjects(version["build_settings"])
+	if len(settings) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.style("Build settings", "", true))
+		b.WriteString("\n")
+		for _, setting := range settings {
+			b.WriteString(kv(stringValue(setting, "key"), stringValue(setting, "value")))
+		}
+	}
+	scripts := listOfObjects(version["scripts"])
+	if len(scripts) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.style("Scripts", "", true))
+		b.WriteString("\n")
+		for _, script := range scripts {
+			label := stringValue(script, "command")
+			summary := stringValue(script, "source")
+			if path := stringValue(script, "path"); path != "" {
+				summary += " (" + path + ")"
+			}
+			b.WriteString(kv(label, summary))
+		}
+	}
+	features := listOfObjects(version["features"])
+	if len(features) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.style("Features", "", true))
+		b.WriteString("\n")
+		for _, feature := range features {
+			fmt.Fprintf(&b, "- %s: %s\n", stringValue(feature, "name"), stringValue(feature, "description"))
+		}
+	}
+	return b.String()
+}
+
 func (r renderer) checkLine(ok bool, name, detail string) string {
 	marker := r.style("[x]", "196", true)
 	if ok {
@@ -347,6 +413,9 @@ func (r renderer) renderRun(env Envelope) string {
 	}
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
 	}
 	if summary := summarizeRunWorkbookResult(workbook); summary != "" {
 		b.WriteString(kv("Result", summary))
@@ -434,6 +503,7 @@ func (r renderer) renderTest(env Envelope) string {
 	if env.Tests == nil {
 		return r.renderLogs(env)
 	}
+	workbook := objectMap(env.Workbook)
 	passed := 0
 	failed := 0
 	notRun := 0
@@ -449,6 +519,15 @@ func (r renderer) renderTest(env Envelope) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if needsSave := summarizeSaveRequirement(workbook); needsSave != "" {
+		b.WriteString(kv("Save", needsSave))
+	}
 	summary := fmt.Sprintf("%d passed, %d failed", passed, failed)
 	if notRun > 0 {
 		summary += fmt.Sprintf(", %d not run", notRun)
@@ -560,8 +639,15 @@ func (r renderer) renderMacros(env Envelope) string {
 	if env.Macros == nil && env.Status == StatusFailed {
 		return r.renderLogs(env)
 	}
+	workbook := objectMap(env.Workbook)
 	var b strings.Builder
 	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
 	b.WriteString(kv("Entrypoints", fmt.Sprintf("%d", len(macros))))
 	for _, macro := range macros {
 		name := stringValue(macro, "qualified_name")
@@ -599,8 +685,14 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	if path := stringValue(source, "path"); path != "" {
 		b.WriteString(kv("Source", path))
 	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
 	if summary := summarizeWorkbookSourceResult(env.Command, workbook, source); summary != "" {
 		b.WriteString(kv("Result", summary))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
 	}
 	if updated, ok := boolValueOK(source, "updated"); ok {
 		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
@@ -624,8 +716,14 @@ func (r renderer) renderTraceCommand(env Envelope) string {
 	if path := stringValue(source, "path"); path != "" {
 		b.WriteString(kv("Source", path))
 	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
 	if summary := summarizeTraceCommandResult(workbook, trace); summary != "" {
 		b.WriteString(kv("Result", summary))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
 	}
 	if helper := summarizeTraceCommandHelper(trace, source); helper != "" {
 		b.WriteString(kv("Trace helper", helper))
@@ -670,6 +768,53 @@ func (r renderer) renderCreated(env Envelope) string {
 			}
 		}
 	}
+	return b.String()
+}
+
+func (r renderer) renderSession(env Envelope) string {
+	session := objectMap(env.Session)
+	workbook := objectMap(env.Workbook)
+	if len(session) == 0 && len(workbook) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if running, ok := boolValueOK(session, "running"); ok {
+		b.WriteString(kv("Running", fmt.Sprintf("%t", running)))
+	}
+	if open, ok := boolValueOK(session, "workbook_open"); ok {
+		b.WriteString(kv("Workbook open", fmt.Sprintf("%t", open)))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderSave(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	if len(workbook) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if saved, ok := boolValueOK(workbook, "saved"); ok && saved {
+		b.WriteString(kv("Result", "saved live session workbook to disk"))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
 
@@ -742,6 +887,9 @@ func summarizeRunWorkbookResult(workbook map[string]any) string {
 	if saveAs := stringValue(workbook, "save_as"); saveAs != "" {
 		return "copied to " + saveAs
 	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		return save
+	}
 	saved, ok := boolValueOK(workbook, "saved")
 	if !ok {
 		return ""
@@ -752,9 +900,6 @@ func summarizeRunWorkbookResult(workbook map[string]any) string {
 			return "saved live session workbook to disk"
 		}
 		return "saved in place"
-	}
-	if session {
-		return "UNSAVED session changes: live workbook differs from disk; run xlflow save --session before session stop"
 	}
 	return "left unchanged on disk"
 }
@@ -780,6 +925,9 @@ func summarizeWorkbookSourceResult(command string, workbook, source map[string]a
 		return ""
 	}
 	session := boolValue(workbook, "session")
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		return save
+	}
 	saved, savedKnown := boolValueOK(workbook, "saved")
 	switch command {
 	case "push":
@@ -793,9 +941,6 @@ func summarizeWorkbookSourceResult(command string, workbook, source map[string]a
 				return "saved live session workbook to disk"
 			}
 			return "saved workbook in place"
-		}
-		if session {
-			return "UNSAVED session changes: live workbook differs from disk; run xlflow save --session before session stop"
 		}
 	case "pull":
 		if session {
@@ -871,6 +1016,29 @@ func summarizeTraceCommandHelper(trace, source map[string]any) string {
 		)
 	}
 	return ""
+}
+
+func summarizeSessionUsage(workbook map[string]any) string {
+	if len(workbook) == 0 || !boolValue(workbook, "session") {
+		return ""
+	}
+	switch stringValue(workbook, "session_mode") {
+	case "explicit":
+		return "explicit xlflow session workbook"
+	case "auto":
+		return "auto-reused matching xlflow session workbook"
+	case "managed":
+		return "managed xlflow session workbook"
+	default:
+		return "xlflow session workbook"
+	}
+}
+
+func summarizeSaveRequirement(workbook map[string]any) string {
+	if len(workbook) == 0 || !boolValue(workbook, "needs_save") {
+		return ""
+	}
+	return "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
 }
 
 func yesNo(v bool) string {

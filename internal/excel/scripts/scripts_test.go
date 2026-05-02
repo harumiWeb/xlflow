@@ -196,8 +196,11 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	if !strings.Contains(text, "elseif (ConvertTo-XlflowBool $UseSession)") {
-		t.Fatalf("push.ps1 should guard the save-session warning behind UseSession:\n%s", text)
+	if !strings.Contains(text, "Open-XlflowWorkbookForCommand") {
+		t.Fatalf("push.ps1 should use the shared workbook-open helper for session reuse:\n%s", text)
+	}
+	if !strings.Contains(text, "\"SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop\"") {
+		t.Fatalf("push.ps1 should emit the strengthened save-required guidance:\n%s", text)
 	}
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
 		t.Fatalf("push.ps1 should preserve the non-session unchanged-disk log:\n%s", text)
@@ -439,7 +442,7 @@ func TestSessionStopSingleLogSerializesAsArray(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $wasDirty = $false; $result = New-XlflowResult -Command 'session'; $result.logs = @(@($(if ($wasDirty) { 'warning: session workbook had unsaved changes before stop' } else { $null }), $(if ($wasDirty) { 'auto-saved workbook while stopping xlflow session; prefer xlflow save --session before stop' } else { $null }), 'stopped xlflow Excel session') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }); Write-XlflowJson -Result $result",
+		". ./common.ps1; $wasDirty = $false; $result = New-XlflowResult -Command 'session'; $result.logs = @(@($(if ($wasDirty) { 'warning: session workbook had unsaved changes before stop' } else { $null }), $(if ($wasDirty) { 'auto-saved workbook while stopping xlflow session; prefer xlflow save before stop' } else { $null }), 'stopped xlflow Excel session') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }); Write-XlflowJson -Result $result",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()

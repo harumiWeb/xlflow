@@ -25,6 +25,8 @@ $runnerComponent = $null
 $traceRequested = ConvertTo-XlflowBool $TraceEnabled
 $traceTempInjected = $false
 $currentPhase = "initialize"
+$sessionAttached = $false
+$sessionMode = "none"
 
 try {
   if ($TimeoutSeconds -lt 0) {
@@ -53,14 +55,11 @@ try {
   }
 
   $currentPhase = "open_workbook"
-  if (ConvertTo-XlflowBool $UseSession) {
-    $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
-    $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
-  } else {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = ConvertTo-XlflowBool $Visible
-    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros $false
-  }
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts $DisplayAlerts -DisableAutomationMacros "false" -UseSession $UseSession -MetadataPath $MetadataPath
+  $excel = $openResult.excel
+  $workbook = $openResult.workbook
+  $sessionAttached = [bool]$openResult.session_attached
+  $sessionMode = [string]$openResult.session_mode
 
   $typedValues = @(ConvertFrom-XlflowRunArgumentsJson -Json $MacroArgsJson)
   $argumentSpecs = @()
@@ -94,8 +93,14 @@ try {
     if (ConvertTo-XlflowBool $SaveWorkbook) {
       $currentPhase = "save_result"
       $workbook.Save()
-      $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
-      $result.logs = @($successLog, "saved workbook in place")
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
+      $result.logs = @(
+        @(
+          $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+          $successLog,
+          "saved workbook in place"
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+      )
     } elseif (-not [string]::IsNullOrWhiteSpace($SaveAsPath)) {
       $currentPhase = "save_result"
       Assert-XlflowSaveAsExtension -WorkbookPath $WorkbookPath -SaveAsPath $SaveAsPath
@@ -104,17 +109,26 @@ try {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
       }
       $workbook.SaveCopyAs($SaveAsPath)
-      $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $SaveAsPath; session = (ConvertTo-XlflowBool $UseSession) }
-      $result.logs = @($successLog, ("wrote workbook copy to " + $SaveAsPath))
-    } else {
-      $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
       $result.logs = @(
-        $successLog,
-        $(if (ConvertTo-XlflowBool $UseSession) {
-          "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
-        } else {
-          "left workbook unchanged on disk"
-        })
+        @(
+          $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+          $successLog,
+          ("wrote workbook copy to " + $SaveAsPath)
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+      )
+    } else {
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $sessionAttached -Dirty $sessionAttached
+      $result.logs = @(
+        @(
+          $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+          $successLog,
+          $(if ($sessionAttached) {
+            "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+          } else {
+            "left workbook unchanged on disk"
+          })
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
       )
     }
     Write-XlflowJson -Result $result
@@ -156,7 +170,7 @@ try {
           dialog = $compileResult.dialog
         }
         $result.macro = [ordered]@{ name = $MacroName; args = @($typedValues); duration_ms = 0; direct = $false }
-        $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+        $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
         throw "vba compile failed"
       }
     }
@@ -206,12 +220,18 @@ try {
       $errorCode = "macro_not_found"
     }
     Set-XlflowError -Result $result -Code $errorCode -Message $failureMessage -Source ([string]$runResult[1]) -Number ([int]$runResult[2]) -Line ([int]$runResult[4]) -Phase $currentPhase
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
     $currentPhase = "save_result"
     $workbook.Save()
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $true; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
-    $result.logs = @($successLog, "saved workbook in place")
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
+    $result.logs = @(
+      @(
+        $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+        $successLog,
+        "saved workbook in place"
+      ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
   } elseif (-not [string]::IsNullOrWhiteSpace($SaveAsPath)) {
     $currentPhase = "save_result"
     Assert-XlflowSaveAsExtension -WorkbookPath $WorkbookPath -SaveAsPath $SaveAsPath
@@ -220,17 +240,26 @@ try {
       New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
     }
     $workbook.SaveCopyAs($SaveAsPath)
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $SaveAsPath; session = (ConvertTo-XlflowBool $UseSession) }
-    $result.logs = @($successLog, ("wrote workbook copy to " + $SaveAsPath))
-  } else {
-    $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
     $result.logs = @(
-      $successLog,
-      $(if (ConvertTo-XlflowBool $UseSession) {
-        "warning: live session workbook now differs from disk; run xlflow save --session before session stop"
-      } else {
-        "left workbook unchanged on disk"
-      })
+      @(
+        $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+        $successLog,
+        ("wrote workbook copy to " + $SaveAsPath)
+      ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+  } else {
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $sessionAttached -Dirty $sessionAttached
+    $result.logs = @(
+      @(
+        $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+        $successLog,
+        $(if ($sessionAttached) {
+          "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+        } else {
+          "left workbook unchanged on disk"
+        })
+      ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
   }
 } catch {
@@ -248,7 +277,7 @@ try {
   if ($null -eq $result.macro) {
     $result.macro = [ordered]@{ name = $MacroName; args = @(); duration_ms = 0; direct = (ConvertTo-XlflowBool $Direct) }
   }
-  $result.workbook = [ordered]@{ path = $WorkbookPath; saved = $false; save_as = $null; session = (ConvertTo-XlflowBool $UseSession) }
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
 } finally {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch { Write-Verbose ("failed to remove run harness module: " + $_.Exception.Message) }
@@ -263,7 +292,7 @@ try {
       Write-Verbose ("failed to remove temporary trace module: " + $_.Exception.Message)
     }
   }
-  if (ConvertTo-XlflowBool $UseSession) {
+  if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
