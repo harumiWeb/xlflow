@@ -90,15 +90,33 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Installation
 
-Install xlflow with Go:
+### Go install
 
 ```bash
 go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
+### Scoop
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
+```
+
+### GitHub Releases
+
+Download prebuilt Windows binaries from:
+
+[https://github.com/harumiWeb/xlflow/releases](https://github.com/harumiWeb/xlflow/releases)
+
+> [!IMPORTANT]
+> Current prebuilt distribution targets **Windows** only.
+> Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
+
 Verify the installation:
 
 ```bash
+xlflow version
 xlflow --help
 ```
 
@@ -265,6 +283,7 @@ xlflow inspect-gui --json
 | `check`         | Run `lint`, `analyze`, and `doctor` as a preflight  | `xlflow check --keepalive --json`           |
 | `inspect-gui`   | Detect GUI interaction boundaries                   | `xlflow inspect-gui --json`                 |
 | `skill install` | Install the bundled xlflow Skill for AI agents      | `xlflow skill install --agent codex`        |
+| `version`       | Show the installed xlflow build metadata            | `xlflow version`                            |
 
 ---
 

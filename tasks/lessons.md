@@ -21,3 +21,4 @@
 - AI-agent workbook execution must prefer `xlflow run --diagnostic` unless GUI compile dialogs are explicitly desired. Plain `run` can leave the agent blind to modal VBE compile errors and cause false progress or debugging dead-ends.
 - When changing CLI defaults, audit legacy opt-in flags and script-only paths together. New defaults must not silently break established modes such as `run --direct`, and session-specific warnings must not leak into non-session script output.
 - When applying per-character terminal styling to Unicode art, use rune positions for gradient math instead of Go string byte offsets. Byte-based indices can push color interpolation past the intended range and produce broken colors on multibyte glyphs.
+- Apply default normalization in one place and treat the normalized value as authoritative. Avoid re-running the same `withDefaults`/normalizer in individual command handlers once construction-time initialization has already done it.

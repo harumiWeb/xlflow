@@ -31,9 +31,16 @@ type app struct {
 	stderr         io.Writer
 	stdoutTerminal func() bool
 	stderrTerminal func() bool
+	buildInfo      BuildInfo
 }
 
 const defaultKeepaliveInterval = 5 * time.Second
+
+type BuildInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+}
 
 type keepaliveFlags struct {
 	enabled  bool
@@ -41,13 +48,30 @@ type keepaliveFlags struct {
 }
 
 func Execute() error {
+	return ExecuteWithBuildInfo(BuildInfo{})
+}
+
+func ExecuteWithBuildInfo(info BuildInfo) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return output.WithExitCode(output.ExitEnvironment, err)
 	}
-	a := &app{cwd: cwd}
+	a := &app{cwd: cwd, buildInfo: info.withDefaults()}
 	root := a.rootCommand()
 	return root.Execute()
+}
+
+func (info BuildInfo) withDefaults() BuildInfo {
+	if strings.TrimSpace(info.Version) == "" {
+		info.Version = "dev"
+	}
+	if strings.TrimSpace(info.Commit) == "" {
+		info.Commit = "none"
+	}
+	if strings.TrimSpace(info.Date) == "" {
+		info.Date = "unknown"
+	}
+	return info
 }
 
 func (a *app) rootCommand() *cobra.Command {
@@ -79,8 +103,28 @@ func (a *app) rootCommand() *cobra.Command {
 		a.analyzeCommand(),
 		a.checkCommand(),
 		a.skillCommand(),
+		a.versionCommand(),
 	)
 	return root
+}
+
+func (a *app) versionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Show xlflow build information",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info := a.buildInfo
+			env := output.New("version")
+			env.Version = info
+			env.Logs = []string{
+				"version: " + info.Version,
+				"commit: " + info.Commit,
+				"date: " + info.Date,
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 }
 
 func (a *app) macrosCommand() *cobra.Command {

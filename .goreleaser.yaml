@@ -1,0 +1,66 @@
+version: 2
+
+project_name: xlflow
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: xlflow
+    main: ./cmd/xlflow
+    binary: xlflow
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.date={{ .Date }}
+    goos:
+      - windows
+    goarch:
+      - amd64
+
+archives:
+  - id: xlflow
+    ids:
+      - xlflow
+    formats:
+      - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+scoops:
+  - name: xlflow
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    repository:
+      owner: harumiWeb
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/harumiWeb/xlflow
+    description: Excel VBA development framework for CLI-first humans and AI agents.
+    license: MIT

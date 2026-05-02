@@ -91,15 +91,33 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## インストール
 
-Go が利用できる環境では、次のコマンドでインストールできます。
+### Go install
 
 ```bash
 go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
-インストール後、コマンドが使えることを確認します。
+### Scoop
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
+```
+
+### GitHub Releases
+
+Windows 向けの事前ビルド済みバイナリは次のページから取得できます。
+
+[https://github.com/harumiWeb/xlflow/releases](https://github.com/harumiWeb/xlflow/releases)
+
+> [!IMPORTANT]
+> 現在の事前ビルド配布は **Windows 向けのみ** です。
+> Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
+
+インストール後、次のコマンドで確認できます。
 
 ```bash
+xlflow version
 xlflow --help
 ```
 
@@ -267,6 +285,7 @@ xlflow inspect-gui --json
 | `check`         | `lint` / `analyze` / `doctor` をまとめて実行         | `xlflow check --keepalive --json`           |
 | `inspect-gui`   | GUI interaction boundary を検出                      | `xlflow inspect-gui --json`                 |
 | `skill install` | AI エージェント向け Skill をインストール             | `xlflow skill install --agent codex`        |
+| `version`       | インストール済み xlflow の build metadata を表示     | `xlflow version`                            |
 
 ---
 

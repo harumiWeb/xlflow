@@ -34,6 +34,77 @@ func TestRootCommandIncludesTestCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesVersionCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "version" {
+		t.Fatalf("expected version command, got %#v", cmd)
+	}
+}
+
+func TestVersionCommandWritesBuildInfoJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		stdout:    &stdout,
+		stderr:    &bytes.Buffer{},
+		buildInfo: BuildInfo{Version: "1.2.3", Commit: "abc123", Date: "2026-05-02T00:00:00Z"},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "version"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("version command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status  string    `json:"status"`
+		Command string    `json:"command"`
+		Version BuildInfo `json:"version"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != output.StatusOK {
+		t.Fatalf("status = %q, want %q", got.Status, output.StatusOK)
+	}
+	if got.Command != "version" {
+		t.Fatalf("command = %q, want version", got.Command)
+	}
+	if got.Version.Version != "1.2.3" || got.Version.Commit != "abc123" || got.Version.Date != "2026-05-02T00:00:00Z" {
+		t.Fatalf("unexpected version payload: %#v", got.Version)
+	}
+}
+
+func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		stdout:    &stdout,
+		stderr:    &bytes.Buffer{},
+		buildInfo: BuildInfo{}.withDefaults(),
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "version"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("version command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Version BuildInfo `json:"version"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Version.Version != "dev" || got.Version.Commit != "none" || got.Version.Date != "unknown" {
+		t.Fatalf("unexpected default version payload: %#v", got.Version)
+	}
+}
+
 func TestRootCommandIncludesRunFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

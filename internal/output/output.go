@@ -53,6 +53,7 @@ type Envelope struct {
 	Runner        any `json:"runner,omitempty"`
 	Analysis      any `json:"analysis,omitempty"`
 	Check         any `json:"check,omitempty"`
+	Version       any `json:"version,omitempty"`
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`
 }
 
