@@ -1,710 +1,518 @@
-具体的には、**3層構成**で実現するのが現実的です。
+# デザインドキュメント
 
-```txt
-1. VBA側ハーネス層
-   実行時エラーを捕捉する
+## 全体方針
 
-2. VBE/COM層
-   コンパイル・選択中のコード位置・モジュール情報を取得する
+まず `xlflow` は Go 製 CLI なので、基本はこの構成がよいです。
 
-3. Win32/UI Automation層
-   VBEのモーダルダイアログを検出・読み取り・閉じる
+```bash
+go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
-xlflowの実装言語が Go/Rust なら、Windows専用部分として **COM + Win32 API + UI Automation** を使う設計になります。
+GitHub Releases では以下を配布します。
+
+```text
+xlflow_Windows_x86_64.zip
+checksums.txt
+```
+
+Windows は `.zip`、macOS/Linux は `.tar.gz` が無難です。
+
+Scoop は GitHub Release の Windows zip を参照する manifest を生成します。
 
 ---
 
-# 1. 実行時エラーは「VBAラッパーモジュール」で捕捉する
+# 1. GoReleaser の基本構成
 
-これは一番素直です。
+`.goreleaser.yaml` はまずこのくらいからで十分です。
 
-xlflowが一時的に以下のような標準モジュールをVBAプロジェクトに注入します。
+```yaml
+version: 2
 
-```vb
-Option Explicit
+project_name: xlflow
 
-Public Sub __xlflow_run(ByVal entryPoint As String)
-    On Error GoTo EH
+before:
+  hooks:
+    - go mod tidy
 
-    Application.DisplayAlerts = False
-    Application.EnableEvents = False
-    Application.ScreenUpdating = False
+builds:
+  - id: xlflow
+    main: ./cmd/xlflow
+    binary: xlflow
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    goos:
+      - windows
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
 
-    Application.Run entryPoint
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
 
-CleanUp:
-    Application.DisplayAlerts = True
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-    Exit Sub
+checksum:
+  name_template: checksums.txt
 
-EH:
-    __xlflow_write_error _
-        "runtime", _
-        Err.Number, _
-        Err.Description, _
-        Err.Source, _
-        Erl
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
-    Resume CleanUp
-End Sub
-
-Private Sub __xlflow_write_error( _
-    ByVal kind As String, _
-    ByVal number As Long, _
-    ByVal description As String, _
-    ByVal source As String, _
-    ByVal lineNumber As Long)
-
-    Dim path As String
-    path = Environ$("TEMP") & "\xlflow-last-error.json"
-
-    Dim f As Integer
-    f = FreeFile
-
-    Open path For Output As #f
-    Print #f, "{"
-    Print #f, "  ""kind"": """ & kind & ""","
-    Print #f, "  ""number"": " & CStr(number) & ","
-    Print #f, "  ""description"": """ & Replace(description, """", "\""") & ""","
-    Print #f, "  ""source"": """ & Replace(source, """", "\""") & ""","
-    Print #f, "  ""erl"": " & CStr(lineNumber)
-    Print #f, "}"
-    Close #f
-End Sub
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
 ```
 
-CLI側は、実行後にこのJSONを読むだけです。
-
-```txt
-%TEMP%\xlflow-last-error.json
-```
-
-出力例:
-
-```txt
-✖ VBA runtime error
-
-Error     : 11
-Message   : Division by zero
-Source    : VBAProject
-Line/Erl  : 120
-```
-
-## ただし行番号には「行番号注入」が必要
-
-`Erl` は、VBAコードに行番号がないとほぼ `0` になります。
-
-なので `xlflow run --diagnostic` では、実行前に一時的にこう変換します。
-
-元コード:
-
-```vb
-Public Sub Main()
-    Dim x As Long
-    x = 1 / 0
-End Sub
-```
-
-診断用コード:
-
-```vb
-Public Sub Main()
-10  Dim x As Long
-20  x = 1 / 0
-End Sub
-```
-
-この状態なら `Erl = 20` が取れます。
-
-xlflowとしては、元ソースを書き換えるのではなく、
-
-```txt
-source/*.bas
-  ↓
-一時ディレクトリにコピー
-  ↓
-行番号を注入
-  ↓
-Excelにpush
-  ↓
-実行
-  ↓
-終わったら元に戻す/破棄
-```
-
-が安全です。
-
----
-
-# 2. コンパイルエラーは「VBE COM操作」で検出する
-
-スクショのようなエラーはこれです。
-
-```txt
-コンパイル エラー:
-メソッドまたはデータ メンバーが見つかりません。
-```
-
-これは実行時エラーではなく、**VBAプロジェクトのコンパイルエラー**です。
-
-そのため `On Error GoTo` では捕まえられません。
-対策は、実行前にVBEのコンパイルを走らせます。
-
-## 技術的には VBE のメニューコマンドを実行する
-
-Excel COMからVBEにアクセスして、VBEの「Debug > Compile VBAProject」を実行します。
-
-概念的にはこうです。
-
-```txt
-Excel.Application
-  └ VBE
-      └ CommandBars("Debug")
-          └ Controls("Compile VBAProject")
-```
-
-疑似コード:
+`main.version` などは、実装側でこう受ける形にします。
 
 ```go
-excel := com.CreateObject("Excel.Application")
-vbe := excel.Get("VBE")
+package main
 
-commandBars := vbe.Get("CommandBars")
-debugBar := commandBars.Call("Item", "Debug")
-compileButton := debugBar.Get("Controls").Call("Item", "Compile VBAProject")
-
-compileButton.Call("Execute")
-```
-
-これでコンパイルが走ります。
-
-コンパイル成功なら何も起きずに戻る。
-コンパイル失敗なら、VBEがスクショのようなダイアログを出します。
-
----
-
-# 3. コンパイルエラー箇所は「VBEの選択状態」から取る
-
-コンパイルエラーが起きると、VBE上では問題箇所が選択されます。
-
-スクショならここです。
-
-```vb
-.DisplayGridlines
-```
-
-つまり、ダイアログを閉じた後にVBEの `ActiveCodePane` を見ると、
-
-```txt
-どのモジュールか
-何行目か
-何列目か
-どのトークンが選択されているか
-```
-
-を取れる可能性があります。
-
-概念的にはこうです。
-
-```go
-activeCodePane := vbe.Get("ActiveCodePane")
-codeModule := activeCodePane.Get("CodeModule")
-
-var startLine, startColumn, endLine, endColumn int
-activeCodePane.Call(
-    "GetSelection",
-    &startLine,
-    &startColumn,
-    &endLine,
-    &endColumn,
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
-
-moduleName := codeModule.Get("Name")
-lineText := codeModule.Call("Lines", startLine, 1)
 ```
 
-CLI出力:
+CLI 側に `xlflow version` があると、配布後の検証がかなり楽です。
 
-```txt
-✖ VBA compile error
-
-Module : WeatherDashboard
-Line   : 86
-Column : 10
-Token  : DisplayGridlines
-
-Code:
-  .DisplayGridlines = False
-   ^^^^^^^^^^^^^^^^
+```bash
+xlflow version
 ```
-
-ここまで取れれば、AIエージェントには十分使いやすいです。
 
 ---
 
-# 4. ダイアログ本文は「UI Automation」か「Win32 API」で読む
+# 2. GitHub Actions
 
-一番厄介なのが、ダイアログの本文です。
+`.github/workflows/release.yml` は以下でよいです。
 
-```txt
-コンパイル エラー:
-メソッドまたはデータ メンバーが見つかりません。
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-これはExcel COMのエラーとして綺麗に返ってくるとは限りません。
-そのため、Windows側からダイアログを読む必要があります。
+これで以下を実行するとリリースされます。
 
-候補は2つです。
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ---
 
-## 方法: Win32 API
+# 3. Scoop 配布の考え方
 
-使うAPIはこのあたりです。
+Scoop には大きく 2 パターンあります。
 
-```txt
-EnumWindows
-FindWindow
-FindWindowEx
-GetWindowTextW
-GetClassNameW
-SendMessageW
-PostMessageW
-SetForegroundWindow
+## パターン A: 自分の bucket を作る
+
+最初はこれが一番おすすめです。
+
+```text
+harumiWeb/scoop-bucket
 ```
 
-流れはこうです。
+ユーザーにはこう案内します。
 
-```txt
-1. Excel/VBEプロセスIDを把握する
-2. そのプロセスに属するトップレベルウィンドウを列挙する
-3. タイトルが "Microsoft Visual Basic for Applications" のダイアログを探す
-4. 子ウィンドウを列挙する
-5. Staticコントロールのテキストを読む
-6. OKボタンに BM_CLICK を送る
+```bash
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
 ```
 
-疑似コード:
+メリットは、審査待ちがなく、すぐ配布できることです。
 
-```go
-EnumWindows(func(hwnd HWND) bool {
-    pid := GetWindowThreadProcessId(hwnd)
+## パターン B: Scoop 本家 bucket に PR する
 
-    if pid != excelPid {
-        return true
-    }
+将来的にはありですが、最初から狙わなくてよいです。
 
-    title := GetWindowText(hwnd)
-    className := GetClassName(hwnd)
+本家 bucket に入れるにはある程度の実績、安定性、命名、manifest 品質が見られます。`xlflow` は開発者向け CLI なので、まずは自前 bucket で十分です。
 
-    if title == "Microsoft Visual Basic for Applications" {
-        // 子コントロールを列挙
-        EnumChildWindows(hwnd, func(child HWND) bool {
-            text := GetWindowText(child)
-            cls := GetClassName(child)
+---
 
-            // Static: メッセージ本文
-            // Button: OK / ヘルプ
-            collect(cls, text)
-            return true
-        })
+# 4. Scoop bucket を作る
 
-        // OKボタンを探してクリック
-        okButton := FindChildButton(hwnd, "OK")
-        SendMessage(okButton, BM_CLICK, 0, 0)
+新しい GitHub リポジトリを作ります。
 
-        return false
-    }
-
-    return true
-})
+```text
+harumiWeb/scoop-bucket
 ```
 
-取れる情報例:
+構成はシンプルです。
+
+```text
+scoop-bucket/
+├─ bucket/
+│  └─ xlflow.json
+└─ README.md
+```
+
+`bucket/xlflow.json` はこのような内容になります。
 
 ```json
 {
-  "title": "Microsoft Visual Basic for Applications",
-  "text": ["コンパイル エラー:", "メソッドまたはデータ メンバーが見つかりません。"],
-  "buttons": ["OK", "ヘルプ"]
+  "version": "0.1.0",
+  "description": "AI-Agent-ready CLI framework for editing, testing, running, tracing, and diffing Excel VBA projects.",
+  "homepage": "https://github.com/harumiWeb/xlflow",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/harumiWeb/xlflow/releases/download/v0.1.0/xlflow_windows_x86_64.zip",
+      "hash": "sha256:REPLACE_ME"
+    }
+  },
+  "bin": "xlflow.exe",
+  "checkver": {
+    "github": "https://github.com/harumiWeb/xlflow"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/harumiWeb/xlflow/releases/download/v$version/xlflow_windows_x86_64.zip"
+      }
+    }
+  }
 }
 ```
 
----
+ただし、重要なのは **GoReleaser の archive 名と Scoop manifest の URL を必ず一致させること**です。
 
-# 5. 「GUI完全抑制」は実際には watcher 方式になる
+上の GoReleaser 設定だと Windows artifact 名はおそらく以下になります。
 
-完全にダイアログを出さない、というより、実装上はこうなります。
-
-```txt
-xlflow run
-  ↓
-Excel起動
-  ↓
-別スレッドでダイアログ監視開始
-  ↓
-compile実行
-  ↓
-ダイアログが出た瞬間に検出
-  ↓
-本文を読む
-  ↓
-OKを押して閉じる
-  ↓
-VBEの選択位置を読む
-  ↓
-CLIに出す
+```text
+xlflow_windows_x86_64.zip
 ```
 
-つまり、ユーザーから見ると一瞬で閉じるため「GUIが出ていない」ように見えます。
-ただし技術的には、**出たダイアログを即座に捕まえて閉じる**方式です。
-
-これはかなり現実的です。
+Scoop の URL もそれに合わせます。
 
 ---
 
-# 6. 実行フロー全体
+# 5. GoReleaser で Scoop manifest を自動更新する
 
-xlflowとしてはこういう実装がよいです。
+GoReleaser には Scoop manifest を別リポジトリに更新する機能があります。
 
-```txt
-xlflow run Main --diagnostic
+`.goreleaser.yaml` に `scoops` を追加します。
 
-1. Excelを非表示で起動
-   Application.Visible = False
-   DisplayAlerts = False
-   EnableEvents = False
-
-2. 対象ブックを開く
-
-3. ソースをpush
-   必要なら行番号注入済みソースをpush
-
-4. VBEダイアログ監視スレッドを開始
-
-5. Compile VBAProject を実行
-
-6. コンパイルエラーが出たら
-   - ダイアログ本文を読む
-   - OKを押して閉じる
-   - ActiveCodePaneから行・列・モジュール名を読む
-   - CLIに出して終了
-
-7. コンパイル成功なら
-   __xlflow_run 経由で Application.Run
-
-8. 実行時エラーが出たら
-   - VBAハーネスがJSONに保存
-   - CLIがJSONを読む
-   - CLIに出す
-
-9. Excel状態を復元して終了
+```yaml
+scoops:
+  - name: xlflow
+    repository:
+      owner: harumiWeb
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/harumiWeb/xlflow
+    description: AI-Agent-ready CLI framework for editing, testing, running, tracing, and diffing Excel VBA projects.
+    license: MIT
 ```
 
-図にするとこうです。
+GitHub Actions 側に token を追加します。
 
-```txt
-┌─────────────┐
-│ xlflow CLI  │
-└──────┬──────┘
-       │
-       v
-┌──────────────────────┐
-│ Excel COM Automation  │
-└──────┬───────────────┘
-       │
-       ├─ push VBA source
-       │
-       ├─ inject __xlflow_run
-       │
-       ├─ run VBE compile
-       │
-       │
-       ├──────────────┐
-       │              v
-       │      ┌────────────────┐
-       │      │ Dialog Watcher │
-       │      │ Win32 / UIA    │
-       │      └────────────────┘
-       │
-       ├─ read VBE selection
-       │
-       └─ Application.Run
+```yaml
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
 ```
+
+全体ではこのようになります。
+
+```yaml
+- name: Run GoReleaser
+  uses: goreleaser/goreleaser-action@v6
+  with:
+    distribution: goreleaser
+    version: "~> v2"
+    args: release --clean
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
+```
+
+`SCOOP_BUCKET_GITHUB_TOKEN` は Personal Access Token で、`scoop-bucket` リポジトリへ push できる権限が必要です。
+
+fine-grained PAT なら対象リポジトリを `scoop-bucket` に限定し、Contents read/write を付ければ十分です。
 
 ---
 
-# 7. Goで実装する場合の技術候補
+# 6. Scoop の README
 
-Goなら、おそらくこの構成です。
+`scoop-bucket` の README は最低限これでよいです。
 
-## COM操作
+````md
+# harumiWeb Scoop Bucket
 
-候補:
-
-```txt
-github.com/go-ole/go-ole
-github.com/go-ole/go-ole/oleutil
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
 ```
+````
 
-用途:
+## Packages
 
-```txt
-Excel.Application 操作
-Workbook.Open
-Application.Run
-VBE操作
-CommandBars操作
-VBComponents操作
-CodeModule操作
-```
+- `xlflow` - AI-Agent-ready CLI framework for Excel VBA development
 
-## Win32 API
+````
 
-候補:
+`xlflow` 本体 README にはこう書くとよいです。
 
-```txt
-golang.org/x/sys/windows
-github.com/lxn/win
-```
+```md
+## Installation
 
-用途:
-
-```txt
-EnumWindows
-EnumChildWindows
-GetWindowTextW
-GetClassNameW
-SendMessageW
-PostMessageW
-GetWindowThreadProcessId
-```
-
----
-
-# 8. 一番堅いMVP
-
-いきなり完全対応を狙うより、MVPはこれがよいです。
-
-## MVP 1: runtime error CLI化
-
-```txt
-- __xlflow_run を注入
-- Err.Number / Err.Description / Erl をJSON出力
-- CLIで表示
-```
-
-これは比較的すぐ実装できます。
-
-## MVP 2: compile-first
-
-```txt
-- VBEのCompileコマンドを実行
-- 失敗時はダイアログ監視で閉じる
-- ActiveCodePaneからモジュール・行・列を読む
-```
-
-これでスクショのようなエラーに対応できます。
-
-## MVP 3: ダイアログ本文取得
-
-```txt
-- Win32 APIでVBEダイアログを列挙
-- Staticテキストを読む
-- OKボタンを押す
-```
-
-CLI出力が一気に実用的になります。
-
----
-
-# 9. 実装上の注意点
-
-## 1. 「VBAプロジェクト オブジェクト モデルへのアクセスを信頼する」が必要
-
-VBEのコードモジュールを操作する場合、Excel側の設定で
-
-```txt
-VBAプロジェクト オブジェクト モデルへのアクセスを信頼する
-```
-
-が有効である必要があります。
-
-xlflowの `doctor` でチェックすべきです。
-
-```txt
-xlflow doctor
-
-✓ Excel installed
-✓ COM automation available
-✓ Trust access to VBA project object model enabled
-```
-
-## 2. 言語環境でダイアログ文言が変わる
-
-日本語環境:
-
-```txt
-Microsoft Visual Basic for Applications
-コンパイル エラー:
-メソッドまたはデータ メンバーが見つかりません。
-OK
-ヘルプ
-```
-
-英語環境:
-
-```txt
-Microsoft Visual Basic for Applications
-Compile error:
-Method or data member not found
-OK
-Help
-```
-
-なので、メッセージ本文のパースは多言語対応を考える必要があります。
-
-ただし、最低限は本文をそのままCLIに出すだけで十分です。
-
-## 3. `DisplayAlerts = False` だけでは無理
-
-これは重要です。
-
-```vb
-Application.DisplayAlerts = False
-```
-
-だけでは、VBEのコンパイルエラーダイアログや `MsgBox` は消えません。
-
-したがって、以下を分けて考える必要があります。
-
-```txt
-Excel標準警告:
-  DisplayAlerts = False
-
-VBA実行時エラー:
-  On Error GoTo + Err
-
-VBEコンパイルエラー:
-  VBE Compile + Win32/UIA dialog watcher
-
-ユーザーコードのMsgBox/FileDialog:
-  lint検出 + headless-strictで禁止
-```
-
----
-
-# 10. CLI設計案
-
-こういう出力にするとAIエージェントに効きます。
+### Go install
 
 ```bash
-xlflow run Main --diagnostic
+go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
+````
+
+### Scoop
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
 ```
 
-コンパイルエラー:
+### GitHub Releases
 
-```txt
-✖ VBA compile error
+Download prebuilt binaries from:
 
-Workbook : weather.xlsm
-Module   : WeatherDashboard
-Line     : 86
-Column   : 10
-Token    : DisplayGridlines
+[https://github.com/harumiWeb/xlflow/releases](https://github.com/harumiWeb/xlflow/releases)
 
-Message:
-  コンパイル エラー:
-  メソッドまたはデータ メンバーが見つかりません。
+````
 
-Code:
-  With ws
-      .DisplayGridlines = False
-       ^^^^^^^^^^^^^^^^
-  End With
+---
 
-Hint:
-  DisplayGridlines is a Window property, not a Worksheet property.
-  Try:
-    ws.Activate
-    ActiveWindow.DisplayGridlines = False
+# 7. Scoop のローカル検証
+
+Scoop manifest はローカルで検証できます。
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
+xlflow version
+````
+
+更新テストはこうです。
+
+```powershell
+scoop update
+scoop update xlflow
 ```
 
-実行時エラー:
+manifest の構文チェックには以下も使えます。
 
-```txt
-✖ VBA runtime error
-
-Workbook : weather.xlsm
-Entry    : Main
-Error    : 1004
-Message  : Application-defined or object-defined error
-Source   : VBAProject
-Line     : 230
-
-Code:
-  .Range("A1").Value = data("title")
+```powershell
+scoop checkup
 ```
 
-GUI依存検出:
+また、自前 bucket 開発中は直接 manifest を試せます。
 
-```txt
-✖ Headless run blocked
-
-The macro contains GUI-dependent APIs.
-
-Module : ImportDialog
-Line   : 42
-Code   : Application.FileDialog(msoFileDialogFilePicker).Show
-
-Use:
-  xlflow run Main --interactive
+```powershell
+scoop install .\bucket\xlflow.json
 ```
 
 ---
 
-# 11. 私ならこう実装します
+# 8. winget は Scoop の後でよい
 
-xlflowのロードマップとしては、この順番が一番安全です。
+winget は Windows 一般ユーザー向けには強いですが、初回 PR は少し面倒です。
 
-```txt
-Phase 1:
-  runtime error harness
-  Err.Number / Err.Description / Erl JSON出力
+流れはこうです。
 
-Phase 2:
-  diagnostic line-number injection
-  実行時エラー行のCLI表示
+1. GitHub Releases で Windows zip または installer を出す
+2. `wingetcreate` を使う
+3. `microsoft/winget-pkgs` に PR
+4. CLA 同意
+5. Validation 待ち
+6. マージ待ち
 
-Phase 3:
-  compile-first
-  VBE Compile実行
+ただし CLI ツールの場合、winget より Scoop のほうが開発者には自然です。
 
-Phase 4:
-  VBE dialog watcher
-  Win32 APIでダイアログ本文取得・OK自動クリック
+`xlflow` のような AI agent / Excel VBA 開発者向け CLI なら、最初の告知導線は以下で十分です。
 
-Phase 5:
-  ActiveCodePane解析
-  Module / Line / Column / Token 表示
-
-Phase 6:
-  GUI-dependent API lint
-  MsgBox / InputBox / FileDialog / UserForm.Show 検出
-
-Phase 7:
-  --headless-strict / --interactive 分岐
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
 ```
 
-この構成なら、スクショのようなコンパイルエラーも、VBA実行中のランタイムエラーも、AIエージェントが読めるCLI出力に変換できます。
+その後、落ち着いてから winget 対応でよいです。
 
-技術的な核はこの4つです。
+---
 
-```txt
-Excel COM
-VBE COM
-Win32 API or UI Automation
-VBA実行ハーネス
+# 9. 推奨リリース順
+
+現実的にはこの順番が一番安全です。
+
+## Step 1: GitHub Releases だけ完成させる
+
+まず GoReleaser で release artifact が正しく出ることを確認します。
+
+```bash
+goreleaser release --snapshot --clean
+```
+
+ローカルで成功したらタグを切ります。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+## Step 2: Scoop bucket を手動で作る
+
+最初の `xlflow.json` は手で作ってもよいです。
+
+```text
+harumiWeb/scoop-bucket
+```
+
+## Step 3: Scoop でインストール確認
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
+xlflow version
+xlflow doctor
+```
+
+## Step 4: GoReleaser から Scoop bucket 自動更新
+
+`v0.1.1` 以降で自動更新を試すのが安全です。
+
+## Step 5: winget
+
+Scoop と GitHub Releases が安定してからで十分です。
+
+---
+
+# 10. xlflow で特に注意すべき点
+
+`xlflow` は Excel/VBA を扱う CLI なので、配布前に Windows で次を確認した方がよいです。
+
+```powershell
+xlflow version
+xlflow doctor
+xlflow init
+xlflow pull
+xlflow lint
+xlflow push
+xlflow run
+```
+
+特に `doctor` は重要です。
+
+Scoop 経由のユーザーは、Excel COM、VBA プロジェクトへのアクセス許可、Trust Center 設定、Office のビット数などで詰まる可能性があります。
+
+なので README に以下のような注意書きを入れるとよいです。
+
+```md
+> [!IMPORTANT]
+> xlflow requires Microsoft Excel on Windows for commands that interact with workbooks through Excel COM automation.
+>
+> Some commands may require enabling "Trust access to the VBA project object model" in Excel Trust Center settings.
+```
+
+GitHub README では Alerts を使うと見やすいです。
+
+---
+
+## 結論
+
+`xlflow` の配布はこの構成がかなり良いです。
+
+```text
+GitHub Releases
+  └─ GoReleaser で自動生成
+
+go install
+  └─ Go ユーザー向け
+
+Scoop
+  └─ 自前 bucket から開始
+  └─ GoReleaser で manifest 自動更新
+
+winget
+  └─ Scoop 安定後に追加
+```
+
+特に Scoop は、最初から本家 bucket を狙わずに、
+
+```text
+harumiWeb/scoop-bucket
+```
+
+を作るのがよいです。
+
+そして README にはこの一行を大きく出すのが一番わかりやすいです。
+
+```powershell
+scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+scoop install xlflow
 ```
