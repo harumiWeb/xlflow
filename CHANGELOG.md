@@ -17,4 +17,3 @@ All notable changes to xlflow will be documented in this file.
 - Bundled the PowerShell scripts used by xlflow for Excel session management, testing, tracing, and UI button manipulation.
 - Added the initial session-aware command surface for opening, reusing, saving, and stopping Excel workbooks.
 - Added trace, run, pull, push, test, and UI button workflows built on the bundled PowerShell bridge.
-
