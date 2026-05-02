@@ -12,6 +12,12 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+<div align="center" style="max-width: 600px; margin: auto;">
+
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
+
+</div>
+
 # :surfing_man: xlflow
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
