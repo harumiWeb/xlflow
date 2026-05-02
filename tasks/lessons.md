@@ -18,3 +18,4 @@
 - Trace lifecycle commands must not silently edit a hidden second copy of the configured workbook while an xlflow session already has that workbook open. Reuse the matching session workbook automatically so `trace inject/status/disable` reflect the live workbook the user is looking at.
 - In PowerShell, wrap function calls in parentheses before combining them with `-and` / `-or`. `Func $a -and Func $b` can pass the operator tokens as arguments to the first function and invert validation behavior.
 - VBE compile dialog watchers need a real post-compile wait window. Do not stop the watcher immediately after `CommandBarControl.Execute()` returns because the modal dialog can appear slightly later.
+- AI-agent workbook execution must prefer `xlflow run --diagnostic` unless GUI compile dialogs are explicitly desired. Plain `run` can leave the agent blind to modal VBE compile errors and cause false progress or debugging dead-ends.
