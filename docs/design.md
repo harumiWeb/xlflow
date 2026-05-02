@@ -1,375 +1,710 @@
-# xlflow の高速化設計
-
-現状コードを見る限り、特に重そうなのは以下です。
-
-- Go 側は毎回 PowerShell を起動して `.ps1` を実行している
-- `push` は毎回 Excel を新規起動し、ブックを開き、既存 VBA コンポーネントを全 export バックアップし、非ドキュメントモジュールを全削除して全 import している
-- `run` も毎回 Excel を新規起動し、ブックを開き、実行用 harness module を VBProject に注入してから `Excel.Run` している
-- 最後にブック/Excel を閉じているため、次回も同じ初期化コストが発生する
-
-`push` は現在、バックアップディレクトリと一時 import ディレクトリを作り、Excel COM でブックを開いたあと、全コンポーネントをバックアップし、非ドキュメントモジュールを削除してから全 import しています。これは安全ですが、差分が小さくても毎回フルリビルドに近い動きになります。
-
-`run` も毎回 Excel COM を起動してブックを開き、VBIDE に harness module を追加して、実行後に削除しています。これも安定性は高いですが、反復実行ではかなり重いです。
-
-## 一番効く改善は「daemon / session mode」です
-
-最も効果が大きいのは、`xlflow daemon` または `xlflow session` の導入です。
-
-現在はおそらく毎回こうです。
+具体的には、**3層構成**で実現するのが現実的です。
 
 ```txt
-xlflow run
-  -> powershell起動
-  -> Excel.Application 起動
-  -> workbook open
-  -> harness inject
-  -> macro run
-  -> workbook close
-  -> Excel quit
+1. VBA側ハーネス層
+   実行時エラーを捕捉する
+
+2. VBE/COM層
+   コンパイル・選択中のコード位置・モジュール情報を取得する
+
+3. Win32/UI Automation層
+   VBEのモーダルダイアログを検出・読み取り・閉じる
 ```
 
-これを次のようにします。
+xlflowの実装言語が Go/Rust なら、Windows専用部分として **COM + Win32 API + UI Automation** を使う設計になります。
+
+---
+
+# 1. 実行時エラーは「VBAラッパーモジュール」で捕捉する
+
+これは一番素直です。
+
+xlflowが一時的に以下のような標準モジュールをVBAプロジェクトに注入します。
+
+```vb
+Option Explicit
+
+Public Sub __xlflow_run(ByVal entryPoint As String)
+    On Error GoTo EH
+
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    Application.Run entryPoint
+
+CleanUp:
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    Exit Sub
+
+EH:
+    __xlflow_write_error _
+        "runtime", _
+        Err.Number, _
+        Err.Description, _
+        Err.Source, _
+        Erl
+
+    Resume CleanUp
+End Sub
+
+Private Sub __xlflow_write_error( _
+    ByVal kind As String, _
+    ByVal number As Long, _
+    ByVal description As String, _
+    ByVal source As String, _
+    ByVal lineNumber As Long)
+
+    Dim path As String
+    path = Environ$("TEMP") & "\xlflow-last-error.json"
+
+    Dim f As Integer
+    f = FreeFile
+
+    Open path For Output As #f
+    Print #f, "{"
+    Print #f, "  ""kind"": """ & kind & ""","
+    Print #f, "  ""number"": " & CStr(number) & ","
+    Print #f, "  ""description"": """ & Replace(description, """", "\""") & ""","
+    Print #f, "  ""source"": """ & Replace(source, """", "\""") & ""","
+    Print #f, "  ""erl"": " & CStr(lineNumber)
+    Print #f, "}"
+    Close #f
+End Sub
+```
+
+CLI側は、実行後にこのJSONを読むだけです。
 
 ```txt
-xlflow session start
-  -> Excel.Application 起動
-  -> workbook open
-  -> keep alive
-
-xlflow run
-  -> 既存Excel/既存workbookに対して macro run
-
-xlflow push
-  -> 既存Excel/既存workbookに対して source sync
-
-xlflow session stop
-  -> workbook close
-  -> Excel quit
+%TEMP%\xlflow-last-error.json
 ```
 
-コマンド例はこうです。
+出力例:
 
-```bash
-xlflow session start
-xlflow push
-xlflow run Main.Run
-xlflow run Main.Run
-xlflow push
-xlflow run Main.Run
-xlflow session stop
+```txt
+✖ VBA runtime error
+
+Error     : 11
+Message   : Division by zero
+Source    : VBAProject
+Line/Erl  : 120
 ```
 
-これができると、1回ごとの Excel 起動・ブック open・close を省けます。
-体感では、現在 30〜60秒かかる処理が、ケースによっては数秒〜十数秒まで落ちる可能性があります。
+## ただし行番号には「行番号注入」が必要
 
-特に AIエージェントが `push -> run -> 修正 -> push -> run` を何度も繰り返す用途では、これはかなり効きます。
+`Erl` は、VBAコードに行番号がないとほぼ `0` になります。
 
-## 次に効くのは `push` の差分更新です
+なので `xlflow run --diagnostic` では、実行前に一時的にこう変換します。
 
-現状の `push` はかなり安全側です。
-毎回バックアップして、既存コンポーネントを export して、削除して、再 import しています。
+元コード:
 
-これは初期実装としては正しいですが、開発ループでは重いです。
-
-改善するなら、`push` にモードを分けるとよいです。
-
-```bash
-xlflow push
-xlflow push --fast
-xlflow push --full
-xlflow push --no-backup
-xlflow push --changed-only
+```vb
+Public Sub Main()
+    Dim x As Long
+    x = 1 / 0
+End Sub
 ```
 
-おすすめは、デフォルトは安全なままにして、開発時だけ高速モードを使えるようにすることです。
+診断用コード:
 
-### `push --changed-only`
+```vb
+Public Sub Main()
+10  Dim x As Long
+20  x = 1 / 0
+End Sub
+```
 
-ファイルの hash を `.xlflow/state.json` に保存して、変更された `.bas` / `.cls` / `.frm` だけ反映します。
+この状態なら `Erl = 20` が取れます。
+
+xlflowとしては、元ソースを書き換えるのではなく、
+
+```txt
+source/*.bas
+  ↓
+一時ディレクトリにコピー
+  ↓
+行番号を注入
+  ↓
+Excelにpush
+  ↓
+実行
+  ↓
+終わったら元に戻す/破棄
+```
+
+が安全です。
+
+---
+
+# 2. コンパイルエラーは「VBE COM操作」で検出する
+
+スクショのようなエラーはこれです。
+
+```txt
+コンパイル エラー:
+メソッドまたはデータ メンバーが見つかりません。
+```
+
+これは実行時エラーではなく、**VBAプロジェクトのコンパイルエラー**です。
+
+そのため `On Error GoTo` では捕まえられません。
+対策は、実行前にVBEのコンパイルを走らせます。
+
+## 技術的には VBE のメニューコマンドを実行する
+
+Excel COMからVBEにアクセスして、VBEの「Debug > Compile VBAProject」を実行します。
+
+概念的にはこうです。
+
+```txt
+Excel.Application
+  └ VBE
+      └ CommandBars("Debug")
+          └ Controls("Compile VBAProject")
+```
+
+疑似コード:
+
+```go
+excel := com.CreateObject("Excel.Application")
+vbe := excel.Get("VBE")
+
+commandBars := vbe.Get("CommandBars")
+debugBar := commandBars.Call("Item", "Debug")
+compileButton := debugBar.Get("Controls").Call("Item", "Compile VBAProject")
+
+compileButton.Call("Execute")
+```
+
+これでコンパイルが走ります。
+
+コンパイル成功なら何も起きずに戻る。
+コンパイル失敗なら、VBEがスクショのようなダイアログを出します。
+
+---
+
+# 3. コンパイルエラー箇所は「VBEの選択状態」から取る
+
+コンパイルエラーが起きると、VBE上では問題箇所が選択されます。
+
+スクショならここです。
+
+```vb
+.DisplayGridlines
+```
+
+つまり、ダイアログを閉じた後にVBEの `ActiveCodePane` を見ると、
+
+```txt
+どのモジュールか
+何行目か
+何列目か
+どのトークンが選択されているか
+```
+
+を取れる可能性があります。
+
+概念的にはこうです。
+
+```go
+activeCodePane := vbe.Get("ActiveCodePane")
+codeModule := activeCodePane.Get("CodeModule")
+
+var startLine, startColumn, endLine, endColumn int
+activeCodePane.Call(
+    "GetSelection",
+    &startLine,
+    &startColumn,
+    &endLine,
+    &endColumn,
+)
+
+moduleName := codeModule.Get("Name")
+lineText := codeModule.Call("Lines", startLine, 1)
+```
+
+CLI出力:
+
+```txt
+✖ VBA compile error
+
+Module : WeatherDashboard
+Line   : 86
+Column : 10
+Token  : DisplayGridlines
+
+Code:
+  .DisplayGridlines = False
+   ^^^^^^^^^^^^^^^^
+```
+
+ここまで取れれば、AIエージェントには十分使いやすいです。
+
+---
+
+# 4. ダイアログ本文は「UI Automation」か「Win32 API」で読む
+
+一番厄介なのが、ダイアログの本文です。
+
+```txt
+コンパイル エラー:
+メソッドまたはデータ メンバーが見つかりません。
+```
+
+これはExcel COMのエラーとして綺麗に返ってくるとは限りません。
+そのため、Windows側からダイアログを読む必要があります。
+
+候補は2つです。
+
+---
+
+## 方法: Win32 API
+
+使うAPIはこのあたりです。
+
+```txt
+EnumWindows
+FindWindow
+FindWindowEx
+GetWindowTextW
+GetClassNameW
+SendMessageW
+PostMessageW
+SetForegroundWindow
+```
+
+流れはこうです。
+
+```txt
+1. Excel/VBEプロセスIDを把握する
+2. そのプロセスに属するトップレベルウィンドウを列挙する
+3. タイトルが "Microsoft Visual Basic for Applications" のダイアログを探す
+4. 子ウィンドウを列挙する
+5. Staticコントロールのテキストを読む
+6. OKボタンに BM_CLICK を送る
+```
+
+疑似コード:
+
+```go
+EnumWindows(func(hwnd HWND) bool {
+    pid := GetWindowThreadProcessId(hwnd)
+
+    if pid != excelPid {
+        return true
+    }
+
+    title := GetWindowText(hwnd)
+    className := GetClassName(hwnd)
+
+    if title == "Microsoft Visual Basic for Applications" {
+        // 子コントロールを列挙
+        EnumChildWindows(hwnd, func(child HWND) bool {
+            text := GetWindowText(child)
+            cls := GetClassName(child)
+
+            // Static: メッセージ本文
+            // Button: OK / ヘルプ
+            collect(cls, text)
+            return true
+        })
+
+        // OKボタンを探してクリック
+        okButton := FindChildButton(hwnd, "OK")
+        SendMessage(okButton, BM_CLICK, 0, 0)
+
+        return false
+    }
+
+    return true
+})
+```
+
+取れる情報例:
 
 ```json
 {
-  "components": {
-    "Main.bas": {
-      "hash": "abc123",
-      "component": "Main",
-      "type": "standard"
-    }
-  }
+  "title": "Microsoft Visual Basic for Applications",
+  "text": ["コンパイル エラー:", "メソッドまたはデータ メンバーが見つかりません。"],
+  "buttons": ["OK", "ヘルプ"]
 }
 ```
 
-変更がないファイルは import しない。
-変更があるファイルだけ remove/import する。
+---
 
-これだけでかなり速くなります。
+# 5. 「GUI完全抑制」は実際には watcher 方式になる
 
-### `push --no-backup`
-
-開発中は毎回バックアップ不要な場面も多いです。
-
-```bash
-xlflow push --no-backup
-```
-
-または、
-
-```bash
-xlflow push --backup=auto
-xlflow push --backup=always
-xlflow push --backup=never
-```
-
-がよさそうです。
-
-個人的にはこれが良いです。
-
-```bash
-xlflow push --fast
-```
-
-`--fast` の中身は、
+完全にダイアログを出さない、というより、実装上はこうなります。
 
 ```txt
-- changed-only
-- no full export backup
-- no full component rebuild
+xlflow run
+  ↓
+Excel起動
+  ↓
+別スレッドでダイアログ監視開始
+  ↓
+compile実行
+  ↓
+ダイアログが出た瞬間に検出
+  ↓
+本文を読む
+  ↓
+OKを押して閉じる
+  ↓
+VBEの選択位置を読む
+  ↓
+CLIに出す
 ```
 
-にする。
+つまり、ユーザーから見ると一瞬で閉じるため「GUIが出ていない」ように見えます。
+ただし技術的には、**出たダイアログを即座に捕まえて閉じる**方式です。
 
-ただし事故防止のため、`--fast` は `.xlflow/backups` に頼らない代わりに、Git 管理前提であることを明記した方がよいです。
+これはかなり現実的です。
 
-## `run` は harness 注入を毎回やめると速くなります
+---
 
-`run.ps1` は毎回 VBProject に一時 module を追加し、そこに harness code を入れて、実行後に削除しています。
+# 6. 実行フロー全体
 
-これは柔軟ですが、VBIDE 操作は遅いです。
-しかも「VBA プロジェクト オブジェクト モデルへのアクセス」も必要になります。
+xlflowとしてはこういう実装がよいです。
 
-改善案は2つあります。
+```txt
+xlflow run Main --diagnostic
 
-## 案A: 永続 runner module を入れる
+1. Excelを非表示で起動
+   Application.Visible = False
+   DisplayAlerts = False
+   EnableEvents = False
 
-初回だけ `XlflowRunner.bas` を注入して、以後はそれを使い回します。
+2. 対象ブックを開く
 
-```bash
-xlflow runner install
-xlflow run Main.Run
-xlflow runner remove
+3. ソースをpush
+   必要なら行番号注入済みソースをpush
+
+4. VBEダイアログ監視スレッドを開始
+
+5. Compile VBAProject を実行
+
+6. コンパイルエラーが出たら
+   - ダイアログ本文を読む
+   - OKを押して閉じる
+   - ActiveCodePaneから行・列・モジュール名を読む
+   - CLIに出して終了
+
+7. コンパイル成功なら
+   __xlflow_run 経由で Application.Run
+
+8. 実行時エラーが出たら
+   - VBAハーネスがJSONに保存
+   - CLIがJSONを読む
+   - CLIに出す
+
+9. Excel状態を復元して終了
 ```
 
-内部的には毎回 temporary module を作らず、
+図にするとこうです。
+
+```txt
+┌─────────────┐
+│ xlflow CLI  │
+└──────┬──────┘
+       │
+       v
+┌──────────────────────┐
+│ Excel COM Automation  │
+└──────┬───────────────┘
+       │
+       ├─ push VBA source
+       │
+       ├─ inject __xlflow_run
+       │
+       ├─ run VBE compile
+       │
+       │
+       ├──────────────┐
+       │              v
+       │      ┌────────────────┐
+       │      │ Dialog Watcher │
+       │      │ Win32 / UIA    │
+       │      └────────────────┘
+       │
+       ├─ read VBE selection
+       │
+       └─ Application.Run
+```
+
+---
+
+# 7. Goで実装する場合の技術候補
+
+Goなら、おそらくこの構成です。
+
+## COM操作
+
+候補:
+
+```txt
+github.com/go-ole/go-ole
+github.com/go-ole/go-ole/oleutil
+```
+
+用途:
+
+```txt
+Excel.Application 操作
+Workbook.Open
+Application.Run
+VBE操作
+CommandBars操作
+VBComponents操作
+CodeModule操作
+```
+
+## Win32 API
+
+候補:
+
+```txt
+golang.org/x/sys/windows
+github.com/lxn/win
+```
+
+用途:
+
+```txt
+EnumWindows
+EnumChildWindows
+GetWindowTextW
+GetClassNameW
+SendMessageW
+PostMessageW
+GetWindowThreadProcessId
+```
+
+---
+
+# 8. 一番堅いMVP
+
+いきなり完全対応を狙うより、MVPはこれがよいです。
+
+## MVP 1: runtime error CLI化
+
+```txt
+- __xlflow_run を注入
+- Err.Number / Err.Description / Erl をJSON出力
+- CLIで表示
+```
+
+これは比較的すぐ実装できます。
+
+## MVP 2: compile-first
+
+```txt
+- VBEのCompileコマンドを実行
+- 失敗時はダイアログ監視で閉じる
+- ActiveCodePaneからモジュール・行・列を読む
+```
+
+これでスクショのようなエラーに対応できます。
+
+## MVP 3: ダイアログ本文取得
+
+```txt
+- Win32 APIでVBEダイアログを列挙
+- Staticテキストを読む
+- OKボタンを押す
+```
+
+CLI出力が一気に実用的になります。
+
+---
+
+# 9. 実装上の注意点
+
+## 1. 「VBAプロジェクト オブジェクト モデルへのアクセスを信頼する」が必要
+
+VBEのコードモジュールを操作する場合、Excel側の設定で
+
+```txt
+VBAプロジェクト オブジェクト モデルへのアクセスを信頼する
+```
+
+が有効である必要があります。
+
+xlflowの `doctor` でチェックすべきです。
+
+```txt
+xlflow doctor
+
+✓ Excel installed
+✓ COM automation available
+✓ Trust access to VBA project object model enabled
+```
+
+## 2. 言語環境でダイアログ文言が変わる
+
+日本語環境:
+
+```txt
+Microsoft Visual Basic for Applications
+コンパイル エラー:
+メソッドまたはデータ メンバーが見つかりません。
+OK
+ヘルプ
+```
+
+英語環境:
+
+```txt
+Microsoft Visual Basic for Applications
+Compile error:
+Method or data member not found
+OK
+Help
+```
+
+なので、メッセージ本文のパースは多言語対応を考える必要があります。
+
+ただし、最低限は本文をそのままCLIに出すだけで十分です。
+
+## 3. `DisplayAlerts = False` だけでは無理
+
+これは重要です。
 
 ```vb
-Application.Run "XlflowRunner.RunMacro", "Main.Run", argsJson
+Application.DisplayAlerts = False
 ```
 
-のようにする。
+だけでは、VBEのコンパイルエラーダイアログや `MsgBox` は消えません。
 
-これにより、
+したがって、以下を分けて考える必要があります。
 
 ```txt
-毎回 add module
-毎回 AddFromString
-毎回 remove module
+Excel標準警告:
+  DisplayAlerts = False
+
+VBA実行時エラー:
+  On Error GoTo + Err
+
+VBEコンパイルエラー:
+  VBE Compile + Win32/UIA dialog watcher
+
+ユーザーコードのMsgBox/FileDialog:
+  lint検出 + headless-strictで禁止
 ```
 
-を省けます。
+---
 
-## 案B: 引数なし・単純実行なら harness なしで直接 `Excel.Run`
+# 10. CLI設計案
 
-引数なしの macro であれば、そもそも harness module が不要な場合があります。
-
-```powershell
-$excel.Run($MacroName)
-```
-
-で済むなら、`--direct` を用意できます。
+こういう出力にするとAIエージェントに効きます。
 
 ```bash
-xlflow run Main.Run --direct
+xlflow run Main --diagnostic
 ```
 
-ただし、現在の harness はエラー捕捉や実行時間測定、trace 連携の役割を持っているはずなので、`--direct` は高速だが診断は弱いモードになります。
-
-```bash
-xlflow run Main.Run
-xlflow run Main.Run --fast
-xlflow run Main.Run --direct
-```
-
-という設計が良いです。
-
-## PowerShell 起動コストも削れるが、優先度は少し下
-
-現状 Go 側では、コマンドごとに `powershell -NoProfile -ExecutionPolicy Bypass -File ...` を起動しています。
-
-これ自体も数百 ms 〜 数秒のコストになります。
-
-ただ、1分かかる原因としては、PowerShell より Excel COM / workbook open / VBIDE 操作 / save の方が大きい可能性が高いです。
-
-とはいえ、daemon 化するなら PowerShell を毎回起動しない構成にできます。
-
-選択肢は3つです。
+コンパイルエラー:
 
 ```txt
-A. Go process が PowerShell を毎回起動する
-   現状。単純だが遅い。
+✖ VBA compile error
 
-B. PowerShell daemon を常駐させる
-   実装しやすい。Excel COM を保持できる。
+Workbook : weather.xlsm
+Module   : WeatherDashboard
+Line     : 86
+Column   : 10
+Token    : DisplayGridlines
 
-C. Go から直接 COM を叩く
-   高速化余地はあるが実装難度が上がる。
+Message:
+  コンパイル エラー:
+  メソッドまたはデータ メンバーが見つかりません。
+
+Code:
+  With ws
+      .DisplayGridlines = False
+       ^^^^^^^^^^^^^^^^
+  End With
+
+Hint:
+  DisplayGridlines is a Window property, not a Worksheet property.
+  Try:
+    ws.Activate
+    ActiveWindow.DisplayGridlines = False
 ```
 
-現実的には、まず **B: PowerShell daemon** がよいと思います。
-今の `.ps1` 資産を活かしながら、Excel Application と Workbook を保持できます。
-
-## 保存を減らすのも効きます
-
-`push` は最後に `$workbook.Save()` しています。
-`run` も `--save` 指定時は保存します。
-
-Excel の保存はブックサイズやネットワークドライブ次第で重いです。
-なので開発ループでは保存タイミングを制御できるとよいです。
-
-```bash
-xlflow push --no-save
-xlflow save
-```
-
-ただし、`push --no-save` はブックを閉じたら消える変更になります。
-daemon/session mode とセットなら有効です。
-
-```bash
-xlflow session start
-xlflow push --no-save
-xlflow run Main.Run
-xlflow push --no-save
-xlflow run Main.Run
-xlflow save
-xlflow session stop
-```
-
-これはかなり速い開発ループになります。
-
-## おすすめ設計
-
-最終的にはこういう階層がよいと思います。
-
-### 安全モード
-
-```bash
-xlflow push
-xlflow run Main.Run
-```
-
-特徴：
+実行時エラー:
 
 ```txt
-- 毎回ブックを開く
-- 毎回バックアップ
-- 毎回保存
-- 診断重視
-- CI/リリース前向け
+✖ VBA runtime error
+
+Workbook : weather.xlsm
+Entry    : Main
+Error    : 1004
+Message  : Application-defined or object-defined error
+Source   : VBAProject
+Line     : 230
+
+Code:
+  .Range("A1").Value = data("title")
 ```
 
-### 高速開発モード
-
-```bash
-xlflow dev
-```
-
-または、
-
-```bash
-xlflow session start
-xlflow push --fast
-xlflow run Main.Run --fast
-xlflow session stop
-```
-
-特徴：
+GUI依存検出:
 
 ```txt
-- Excel/Workbookを保持
-- 変更ファイルだけ反映
-- バックアップを省略または軽量化
-- harnessを使い回す
-- 保存を必要時だけ行う
+✖ Headless run blocked
+
+The macro contains GUI-dependent APIs.
+
+Module : ImportDialog
+Line   : 42
+Code   : Application.FileDialog(msoFileDialogFilePicker).Show
+
+Use:
+  xlflow run Main --interactive
 ```
 
-### CI/検証モード
+---
 
-```bash
-xlflow check
-xlflow push --full
-xlflow run Main.Run --timeout 60
-```
+# 11. 私ならこう実装します
 
-特徴：
+xlflowのロードマップとしては、この順番が一番安全です。
 
 ```txt
-- 再現性重視
-- クリーンな Excel 起動
-- フルバックアップ
-- フル同期
+Phase 1:
+  runtime error harness
+  Err.Number / Err.Description / Erl JSON出力
+
+Phase 2:
+  diagnostic line-number injection
+  実行時エラー行のCLI表示
+
+Phase 3:
+  compile-first
+  VBE Compile実行
+
+Phase 4:
+  VBE dialog watcher
+  Win32 APIでダイアログ本文取得・OK自動クリック
+
+Phase 5:
+  ActiveCodePane解析
+  Module / Line / Column / Token 表示
+
+Phase 6:
+  GUI-dependent API lint
+  MsgBox / InputBox / FileDialog / UserForm.Show 検出
+
+Phase 7:
+  --headless-strict / --interactive 分岐
 ```
 
-## 実装優先度
+この構成なら、スクショのようなコンパイルエラーも、VBA実行中のランタイムエラーも、AIエージェントが読めるCLI出力に変換できます。
 
-私ならこの順でやります。
+技術的な核はこの4つです。
 
 ```txt
-1. push --no-backup
-2. push --changed-only
-3. run --direct / run --fast
-4. persistent runner module
-5. session/daemon mode
-6. push --no-save + explicit xlflow save
+Excel COM
+VBE COM
+Win32 API or UI Automation
+VBA実行ハーネス
 ```
-
-ただし、効果が一番大きいのは `session/daemon mode` です。
-実装が軽い順なら `push --no-backup` と `run --direct` が先です。
-
-## 現実的な落としどころ
-
-短期ではこれが良いです。
-
-```bash
-xlflow push --fast
-xlflow run Main.Run --fast
-```
-
-`push --fast` は、
-
-```txt
-- バックアップ省略
-- 変更ファイルのみ import
-- 必要なコンポーネントだけ remove/import
-```
-
-`run --fast` は、
-
-```txt
-- 引数なしなら Excel.Run を直接呼ぶ
-- trace なし
-- harness 注入なし、または永続 runner を利用
-```
-
-中期でこれです。
-
-```bash
-xlflow session start
-xlflow push --fast
-xlflow run Main.Run --fast
-xlflow session stop
-```
-
-この方向に進めば、「1回1分かかるけど待てるようにする」から、
-**「そもそも反復開発ループを速くする」** に進化できます。
-
-特に xlflow は AIエージェント向けの開発ハーネスなので、`push -> run -> 修正` のループが速いことはかなり重要です。
-体験価値としては、keepalive 改善と同じか、それ以上に重要だと思います。
