@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,8 +25,12 @@ import (
 )
 
 type app struct {
-	json bool
-	cwd  string
+	json           bool
+	cwd            string
+	stdout         io.Writer
+	stderr         io.Writer
+	stdoutTerminal func() bool
+	stderrTerminal func() bool
 }
 
 const defaultKeepaliveInterval = 5 * time.Second
@@ -324,6 +329,9 @@ func (a *app) newCommand() *cobra.Command {
 		Short: "Create a new xlflow project and macro workbook",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.writeScaffoldWelcome("new"); err != nil {
+				return output.WithExitCode(output.ExitEnvironment, err)
+			}
 			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
 			if err != nil {
 				return a.writeFailure("new", output.ExitConfig, "new_args_invalid", err)
@@ -399,6 +407,9 @@ func (a *app) initCommand() *cobra.Command {
 		Short: "Create an xlflow project from an existing macro workbook",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.writeScaffoldWelcome("init"); err != nil {
+				return output.WithExitCode(output.ExitEnvironment, err)
+			}
 			var skillOpts agentskill.InstallOptions
 			if withSkill {
 				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
@@ -1504,6 +1515,34 @@ func stderrIsTerminal() bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+func (a *app) stdoutWriter() io.Writer {
+	if a.stdout != nil {
+		return a.stdout
+	}
+	return os.Stdout
+}
+
+func (a *app) stderrWriter() io.Writer {
+	if a.stderr != nil {
+		return a.stderr
+	}
+	return os.Stderr
+}
+
+func (a *app) stdoutIsInteractive() bool {
+	if a.stdoutTerminal != nil {
+		return a.stdoutTerminal()
+	}
+	return stdoutIsTerminal()
+}
+
+func (a *app) stderrIsInteractive() bool {
+	if a.stderrTerminal != nil {
+		return a.stderrTerminal()
+	}
+	return stderrIsTerminal()
+}
+
 func (a *app) loadConfig(command string) (config.Config, error) {
 	cfg, err := config.Load(a.cwd)
 	if err != nil {
@@ -1512,16 +1551,25 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 	return cfg, nil
 }
 
+func (a *app) writeScaffoldWelcome(command string) error {
+	opts := a.outputOptions()
+	if !shouldRenderScaffoldWelcome(command, opts) {
+		return nil
+	}
+	_, err := fmt.Fprint(a.stdoutWriter(), renderScaffoldWelcome(opts.Color))
+	return err
+}
+
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
 	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
-	if writeErr := output.WriteWithOptions(os.Stdout, env, a.outputOptions()); writeErr != nil {
+	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
 		return output.WithExitCode(code, writeErr)
 	}
 	return output.WithExitCode(code, err)
 }
 
 func (a *app) write(env output.Envelope, code int) error {
-	if err := output.WriteWithOptions(os.Stdout, env, a.outputOptions()); err != nil {
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
 		return output.WithExitCode(code, err)
 	}
 	if code != output.ExitSuccess {
@@ -1531,7 +1579,7 @@ func (a *app) write(env output.Envelope, code int) error {
 }
 
 func (a *app) outputOptions() output.Options {
-	interactive := !a.json && stdoutIsTerminal()
+	interactive := !a.json && a.stdoutIsInteractive()
 	return output.Options{
 		JSON:        a.json,
 		Interactive: interactive,
@@ -1558,8 +1606,8 @@ func (a *app) withExcelProgress(label string, opts excel.CommandOptions, fn func
 }
 
 func (a *app) withSpinner(label string, fn func() error) error {
-	if a.json || !stdoutIsTerminal() || !stderrIsTerminal() {
+	if a.json || !a.stdoutIsInteractive() || !a.stderrIsInteractive() {
 		return fn()
 	}
-	return runSpinner(os.Stderr, label, fn)
+	return runSpinner(a.stderrWriter(), label, fn)
 }

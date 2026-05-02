@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -474,6 +476,67 @@ func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "prompts", "agent.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected prompts/agent.md not to be scaffolded, got %v", err)
+	}
+}
+
+func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{"Welcome to xlflow", "copied workbook to build/Input.xlsm"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("interactive init output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "Welcome to xlflow") > strings.Index(got, "xlflow init") {
+		t.Fatalf("expected welcome before command summary:\n%s", got)
+	}
+}
+
+func TestInitCommandSkipsWelcomeForJSONOutput(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if strings.Contains(stdout.String(), "Welcome to xlflow") {
+		t.Fatalf("json output should not include welcome UI:\n%s", stdout.String())
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should remain valid: %v\n%s", err, stdout.String())
+	}
+	if env["command"] != "init" {
+		t.Fatalf("json command = %#v, want init", env["command"])
 	}
 }
 
