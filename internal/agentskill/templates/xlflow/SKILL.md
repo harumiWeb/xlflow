@@ -14,6 +14,7 @@ Default safety rules for AI-agent work:
 - Usually start with `xlflow session start` and stay in that session until the task is done.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --keepalive --json`.
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
+- `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
 - When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.
 
@@ -24,7 +25,8 @@ For normal AI-agent development tasks, use an explicit xlflow session from task 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
 2. Matching sessions are auto-reused for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run --session --keepalive --json` or `xlflow run --headless --session --keepalive --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
-4. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
+4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
+5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
 
 Use isolated non-session commands only for one-shot CI-style verification, release checks, suspicious session state, or when the user explicitly asks not to keep Excel open.
 
@@ -59,11 +61,20 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
-5. Compare results.
+5. Inspect workbook results.
+   - Use `xlflow inspect workbook --json` to confirm workbook path, active sheet metadata, and per-sheet used ranges.
+   - Use `xlflow inspect sheets --json` to verify sheet creation/removal, visibility, row counts, and column counts.
+   - Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output range is known.
+   - Use `xlflow inspect used-range --sheet <name> --json` when the output bounds are unknown and you need the current data rectangle.
+   - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for targeted assertions on one cell.
+   - Prefer global `--json` for agent parsing. Use `--format markdown` only when you intentionally want a compact human/LLM-facing table.
+   - If the live session workbook is newer than disk, run `xlflow save --json` before relying on any `inspect` result.
+
+6. Compare results.
    - Use `xlflow diff <before> <after> --json` for workbook state changes.
    - Add `--vba-before <dir> --vba-after <dir>` when exported source changes also need review.
 
-6. Repeat until the command results prove the task.
+7. Repeat until the command results prove the task.
    - Finish every normal AI-agent development task with `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
 
 ## Project Orientation
@@ -74,6 +85,7 @@ Before editing, decide what is authoritative:
 - If the user says the workbook has the latest VBA, or source files are missing or stale, run `xlflow pull --session --keepalive --json` after starting the session, then edit source files.
 - Do not mix direct workbook edits with source edits in the same task unless the requested change is workbook-state only and no VBA source change is needed.
 - After `xlflow trace inject --keepalive --json`, remember that `XlflowTrace.bas` is generated xlflow support code. Do not rewrite it by hand unless the user is changing xlflow itself.
+- Treat `xlflow inspect` as a disk snapshot reader, not a live Excel inspector. If the task depends on unsaved session changes, save first or use session-aware execution commands to reproduce the state again.
 
 Before running a macro, decide the runnable entrypoint:
 
@@ -101,8 +113,9 @@ When the user asks to create or change VBA behavior:
 6. Run `xlflow lint --json`.
 7. Run `xlflow test --session --keepalive --json` when tests exist.
 8. If tests do not cover the behavior, run `xlflow macros --session --keepalive --json`, then `xlflow run --headless --session --keepalive --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --keepalive --json` / `xlflow run <qualified_name> --trace --session --keepalive --json` for non-default entrypoints.
-9. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
-10. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
+9. When workbook output matters, run `xlflow save --json` if needed, then inspect the result with `xlflow inspect workbook|sheets|range|used-range|cell --json`.
+10. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
+11. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
 
@@ -122,6 +135,12 @@ When the user reports a runtime failure:
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --session --keepalive --json` as the primary correctness signal when tests exist.
 - Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
+- Use `xlflow inspect workbook --json` to confirm workbook-level metadata after save.
+- Use `xlflow inspect sheets --json` to verify expected worksheet names, visibility, and lightweight used ranges.
+- Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output rectangle is known.
+- Use `xlflow inspect used-range --sheet <name> --json` when the output rectangle is unknown or may expand.
+- Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
+- Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
 - Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
@@ -205,6 +224,10 @@ If `xlflow run --trace --session` fails, read trace events from top to bottom, i
 If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`.
 
 Run `xlflow analyze --json` or `xlflow check --keepalive --json` before changing object-heavy VBA. Analyzer findings such as `VBA101`, `VBA102`, and `VBA103` usually mean a missing `Set` assignment.
+
+If `xlflow inspect` does not show the workbook changes you expected, first decide whether disk is stale. A prior `xlflow push --session --no-save` or `xlflow run --session` can leave the live Excel workbook newer than the saved `.xlsm`; run `xlflow save --json` and inspect again before assuming the macro logic failed.
+
+If `xlflow inspect used-range` is truncated, use the reported `returned_range` and warnings to choose a narrower follow-up `xlflow inspect range` query instead of blindly increasing prompt size.
 
 ## Final Response
 
