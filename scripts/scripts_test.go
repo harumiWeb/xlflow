@@ -806,6 +806,9 @@ func TestRunArgumentConversionSupportsExplicitTypes(t *testing.T) {
 }
 
 func TestRunArgumentConversionSupportsExplicitTypesInWindowsPowerShell(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available in this environment")
+	}
 	json := `[{"type":"string","value":"hello"},{"type":"int","value":"7"},{"type":"bool","value":"true"}]`
 	json64 := base64.StdEncoding.EncodeToString([]byte(json))
 	cmd := exec.Command(

@@ -22,3 +22,5 @@
 - When changing CLI defaults, audit legacy opt-in flags and script-only paths together. New defaults must not silently break established modes such as `run --direct`, and session-specific warnings must not leak into non-session script output.
 - When applying per-character terminal styling to Unicode art, use rune positions for gradient math instead of Go string byte offsets. Byte-based indices can push color interpolation past the intended range and produce broken colors on multibyte glyphs.
 - Apply default normalization in one place and treat the normalized value as authoritative. Avoid re-running the same `withDefaults`/normalizer in individual command handlers once construction-time initialization has already done it.
+- Keep unit tests cross-platform unless the behavior is intentionally OS-specific. Do not hardcode Windows path separators in generic Go tests when `filepath.Join` can express the same case portably.
+- Gate shell-specific tests on actual tool availability. Tests that invoke `powershell` or other non-portable executables should `t.Skip` when the binary is absent so Linux CI can still validate the rest of the package.

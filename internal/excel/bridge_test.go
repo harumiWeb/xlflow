@@ -120,13 +120,13 @@ func TestBuildRunScriptArgsSerializesArgumentsAndSaveAs(t *testing.T) {
 	cfg := config.Default()
 	args, err := buildRunScriptArgs(root, cfg, RunOptions{
 		Macro:        "Report.Generate",
-		WorkbookPath: "fixtures\\Book.xlsm",
+		WorkbookPath: filepath.Join("fixtures", "Book.xlsm"),
 		Args: []RunArgument{
 			{Type: "string", Value: "fixtures\\sample.xlsx"},
 			{Type: "int", Value: "3"},
 			{Type: "bool", Value: "true"},
 		},
-		SaveAs: "build\\Result.xlsm",
+		SaveAs: filepath.Join("build", "Result.xlsm"),
 	})
 	if err != nil {
 		t.Fatal(err)
