@@ -73,7 +73,6 @@ pull → edit → push → lint → test/run → trace → diff
 | Microsoft Excel                              | `new`, `init`, `pull`, `push`, `run`, `test`, `macros`, `trace`, `doctor` |
 | PowerShell                                   | Excel automation bridge                                                   |
 | Trust access to the VBA project object model | Reading and writing VBA projects                                          |
-| Go                                           | Installing from source with `go install`                                  |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.

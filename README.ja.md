@@ -74,7 +74,6 @@ pull → edit → push → lint → test/run → trace → diff
 | Microsoft Excel                                            | `new`, `init`, `pull`, `push`, `run`, `test`, `macros`, `trace`, `doctor` |
 | PowerShell                                                 | Excel automation bridge                                                   |
 | VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                |
-| Go                                                         | `go install` によるインストール                                           |
 
 > [!NOTE]
 > `lint`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。
