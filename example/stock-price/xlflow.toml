@@ -1,23 +1,23 @@
 [project]
-  name = "Book"
-  entry = "Main.Run"
+name = "Book"
+entry = "Main.Run"
 
 [excel]
-  path = "build/Book.xlsm"
-  visible = false
-  display_alerts = false
+path = "build/Book.xlsm"
+visible = false
+display_alerts = false
 
 [src]
-  modules = "src/modules"
-  classes = "src/classes"
-  forms = "src/forms"
-  workbook = "src/workbook"
+modules = "src/modules"
+classes = "src/classes"
+forms = "src/forms"
+workbook = "src/workbook"
 
 [lint]
-  require_option_explicit = true
-  forbid_select = true
-  forbid_activate = true
-  forbid_on_error_resume_next = true
-  detect_implicit_variant = true
-  forbid_public_module_fields = true
-  forbid_interactive_input = true
+require_option_explicit = true
+forbid_select = true
+forbid_activate = true
+forbid_on_error_resume_next = true
+detect_implicit_variant = true
+forbid_public_module_fields = true
+forbid_interactive_input = true

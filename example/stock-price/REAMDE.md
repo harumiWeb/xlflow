@@ -29,7 +29,7 @@ It retrieves stock and cryptocurrency information from the Twelve Data API and d
 When running from xlflow, use `xlflow run --diagnostic` in this folder.
 
 ## Customizable Areas
-  
+
 - `src/modules/App.bas`
   - Contains the API key reading logic and the entry point for running the dashboard.
 - `src/modules/MarketDashboard.bas`
