@@ -27,6 +27,20 @@ It turns `.xlsm` workbooks into a source-controlled, CLI-driven development work
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
 
+<div align="center" style="display: flex; gap: 16px; margin-top: 24px; justify-content: center;">
+  <div>
+    <img style="width: auto; max-height: 400px;" alt="world-news-project" src="docs/images/world-news.png" />
+    <em style="display: block; text-align: center; margin-top: 4px; color: #666;">Project to fetch and display News API</em>
+  </div>
+  <div>
+    <img style="width: auto; max-height: 400px;" alt="stock-price-project" src="docs/images/stock-price.png" />
+    <em style="display: block; text-align: center; margin-top: 4px; color: #666;">Project to fetch and analyze stock price information</em>
+  </div>
+</div>
+<p align="center" style="margin-top: 12px;">
+  These samples were created by AI agents using only minimal natural language instructions with xlflow.
+</p>
+
 ---
 
 ## Why xlflow?
