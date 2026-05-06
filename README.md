@@ -12,6 +12,8 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
+
 # :surfing_man: xlflow
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
@@ -20,6 +22,13 @@ It turns `.xlsm` workbooks into a source-controlled, CLI-driven development work
 
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
+
+| world-news                                        | stock-price                                          |
+| ------------------------------------------------- | ---------------------------------------------------- |
+| ![world-news-project](docs/images/world-news.png) | ![stock-price-project](docs/images/stock-price.png)  |
+| Project to fetch and display News API             | Project to fetch and analyze stock price information |
+
+These samples were created by AI agents using only minimal natural language instructions with xlflow.
 
 ---
 

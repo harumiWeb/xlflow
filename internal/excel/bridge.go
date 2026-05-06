@@ -37,20 +37,21 @@ type RunArgument struct {
 }
 
 type RunOptions struct {
-	Macro        string
-	WorkbookPath string
-	Args         []RunArgument
-	Save         bool
-	SaveAs       string
-	Trace        bool
-	Mode         string
-	Direct       bool
-	Fast         bool
-	Diagnostic   bool
-	Session      bool
-	Timeout      time.Duration
-	Keepalive    CommandOptions
-	TraceDir     string
+	Macro               string
+	WorkbookPath        string
+	Args                []RunArgument
+	Save                bool
+	SaveAs              string
+	Trace               bool
+	Mode                string
+	Direct              bool
+	Fast                bool
+	Diagnostic          bool
+	SuppressModalErrors bool
+	Session             bool
+	Timeout             time.Duration
+	Keepalive           CommandOptions
+	TraceDir            string
 }
 
 type PushOptions struct {
@@ -273,17 +274,18 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	// Base64-encode the JSON to avoid PowerShell command-line parsing issues
 	argsJSON64 := base64.StdEncoding.EncodeToString(argsJSON)
 	scriptArgs := map[string]string{
-		"WorkbookPath":  workbookPath(root, workbook),
-		"MacroName":     opts.Macro,
-		"MacroArgsJSON": string(argsJSON64),
-		"Visible":       strconv.FormatBool(cfg.Excel.Visible),
-		"DisplayAlerts": strconv.FormatBool(cfg.Excel.DisplayAlerts),
-		"SaveWorkbook":  strconv.FormatBool(opts.Save),
-		"TraceEnabled":  strconv.FormatBool(opts.Trace),
-		"Direct":        strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace && !opts.Diagnostic)),
-		"Diagnostic":    strconv.FormatBool(opts.Diagnostic),
-		"UseSession":    strconv.FormatBool(opts.Session),
-		"MetadataPath":  filepath.Join(root, ".xlflow", "session.json"),
+		"WorkbookPath":        workbookPath(root, workbook),
+		"MacroName":           opts.Macro,
+		"MacroArgsJSON":       string(argsJSON64),
+		"Visible":             strconv.FormatBool(cfg.Excel.Visible),
+		"DisplayAlerts":       strconv.FormatBool(cfg.Excel.DisplayAlerts),
+		"SaveWorkbook":        strconv.FormatBool(opts.Save),
+		"TraceEnabled":        strconv.FormatBool(opts.Trace),
+		"Direct":              strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Trace && !opts.Diagnostic)),
+		"Diagnostic":          strconv.FormatBool(opts.Diagnostic),
+		"SuppressModalErrors": strconv.FormatBool(opts.SuppressModalErrors),
+		"UseSession":          strconv.FormatBool(opts.Session),
+		"MetadataPath":        filepath.Join(root, ".xlflow", "session.json"),
 	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"

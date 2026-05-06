@@ -902,19 +902,20 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		mode = "interactive"
 	}
 	return excel.RunOptions{
-		Macro:        macro,
-		WorkbookPath: input,
-		Args:         args,
-		Save:         save,
-		SaveAs:       saveAs,
-		Trace:        trace,
-		Mode:         mode,
-		Direct:       direct,
-		Fast:         fast,
-		Diagnostic:   diagnostic,
-		Session:      session,
-		Timeout:      timeout,
-		Keepalive:    keepaliveOpts,
+		Macro:               macro,
+		WorkbookPath:        input,
+		Args:                args,
+		Save:                save,
+		SaveAs:              saveAs,
+		Trace:               trace,
+		Mode:                mode,
+		Direct:              direct,
+		Fast:                fast,
+		Diagnostic:          diagnostic,
+		SuppressModalErrors: !guiCompileErrors,
+		Session:             session,
+		Timeout:             timeout,
+		Keepalive:           keepaliveOpts,
 	}, nil
 }
 
@@ -1086,7 +1087,7 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&direct, "direct", false, "run an argument-free macro without injecting a temporary harness")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast run defaults")
 	cmd.Flags().BoolVar(&diagnostic, "diagnostic", true, "compile VBA before running and return structured compile diagnostics (default true)")
-	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBE compile errors to surface via GUI dialogs instead of structured diagnostics")
+	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBA compile and runtime error dialogs to surface via the GUI instead of structured diagnostics")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
@@ -1796,17 +1797,27 @@ func withGUIBoundarySummary(value any, boundaries []gui.Boundary) any {
 }
 
 func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[string]any {
-	diag := map[string]any{
-		"kind":         "runtime",
-		"likely_cause": "The macro failed while running user VBA code.",
-		"suggestion":   "Inspect the failing procedure and rerun with --trace if the last successful step is unclear.",
+	diag := map[string]any{}
+	for key, item := range cliObjectMap(env.RunDiagnostic) {
+		diag[key] = item
+	}
+	if _, ok := diag["kind"]; !ok {
+		diag["kind"] = "runtime"
+	}
+	if _, ok := diag["likely_cause"]; !ok {
+		diag["likely_cause"] = "The macro failed while running user VBA code."
+	}
+	if _, ok := diag["suggestion"]; !ok {
+		diag["suggestion"] = "Inspect the failing procedure and rerun with --trace if the last successful step is unclear."
 	}
 	if env.Error != nil {
-		diag["location"] = map[string]any{
-			"module": env.Error.Source,
-			"line":   env.Error.Line,
+		if !cliLocationHasMeaningfulData(diag["location"]) {
+			diag["location"] = map[string]any{
+				"module": env.Error.Source,
+				"line":   env.Error.Line,
+			}
 		}
-		if env.Error.Number == 450 {
+		if env.Error.Number == 450 && diag["likely_cause"] == "The macro failed while running user VBA code." {
 			diag["likely_cause"] = "VBA runtime error 450 often means an invalid property assignment, wrong argument count, or missing Set for an object assignment."
 			diag["suggestion"] = "Check object assignments near the reported line; use Set when assigning Workbook, Worksheet, Range, or other object references."
 		}
@@ -1925,6 +1936,20 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+func cliLocationHasMeaningfulData(value any) bool {
+	location := cliObjectMap(value)
+	if len(location) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringValueForCLI(location, "module")) != "" ||
+		strings.TrimSpace(stringValueForCLI(location, "file")) != "" ||
+		strings.TrimSpace(stringValueForCLI(location, "procedure")) != "" {
+		return true
+	}
+	line := strings.TrimSpace(stringValueForCLI(location, "line"))
+	return line != "" && line != "0"
 }
 
 func cliObjectMap(value any) map[string]any {

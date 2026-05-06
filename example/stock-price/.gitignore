@@ -1,0 +1,9 @@
+# Excel
+~$*.xls*
+*.tmp
+
+# xlflow
+.xlflow/
+build/
+
+.agents
