@@ -1001,6 +1001,9 @@ func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForDirect(t *testing.T) {
 	if !opts.Direct {
 		t.Fatalf("direct = false, want true: %#v", opts)
 	}
+	if !opts.SuppressModalErrors {
+		t.Fatalf("SuppressModalErrors = false, want true for default direct run: %#v", opts)
+	}
 }
 
 func TestBuildRunOptionsAllowsFastDiagnostic(t *testing.T) {
@@ -1025,6 +1028,9 @@ func TestBuildRunOptionsAllowsDirectWhenGUICompileErrorsOptOutIsSet(t *testing.T
 	}
 	if !opts.Direct {
 		t.Fatalf("direct = false, want true: %#v", opts)
+	}
+	if opts.SuppressModalErrors {
+		t.Fatalf("SuppressModalErrors = true, want false with gui error opt-out: %#v", opts)
 	}
 }
 
@@ -1242,6 +1248,33 @@ func TestRunCommandRejectsDiagnosticAndGUICompileErrorsTogether(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--gui-compile-errors") {
 		t.Fatalf("error = %v, want gui compile error conflict", err)
+	}
+}
+
+func TestBuildRunDiagnosticPreservesExistingScriptDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	a := &app{cwd: dir}
+	env := output.Failure("run", output.Error{Code: "macro_failed", Message: "runtime modal", Source: "Main", Number: 438, Line: 12, Phase: "invoke_macro"})
+	env.RunDiagnostic = map[string]any{
+		"kind":     "runtime",
+		"message":  []string{"Run-time error '438':", "Object doesn't support this property or method."},
+		"dialog":   map[string]any{"title": "Microsoft Visual Basic"},
+		"location": map[string]any{"module": "Main", "line": 12},
+	}
+
+	diag := a.buildRunDiagnostic(cfg, env)
+	if got := cliObjectMap(diag["dialog"]); got["title"] != "Microsoft Visual Basic" {
+		t.Fatalf("dialog metadata was not preserved: %#v", diag)
+	}
+	if got := cliObjectMap(diag["location"]); got["module"] != "Main" {
+		t.Fatalf("location metadata was not preserved: %#v", diag)
+	}
+	if got := diag["kind"]; got != "runtime" {
+		t.Fatalf("kind = %#v, want runtime", got)
+	}
+	if got := diag["likely_cause"]; got == nil || got == "" {
+		t.Fatalf("likely_cause was not populated: %#v", diag)
 	}
 }
 

@@ -137,6 +137,23 @@ func TestRunScriptAcceptsDiagnosticParameter(t *testing.T) {
 	}
 }
 
+func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$command = Get-Command ./run.ps1; $command.Parameters.ContainsKey('SuppressModalErrors')",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run script suppress modal parameter check failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "True" {
+		t.Fatalf("expected run.ps1 to expose SuppressModalErrors, got %q", out)
+	}
+}
+
 func TestRunScriptRejectsDirectDiagnosticBeforeOpeningWorkbook(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -247,6 +264,44 @@ func TestVBESelectionDiagnosticHandlesMissingPane(t *testing.T) {
 	}
 	if got.Location.Line != 0 || len(got.NearbyCode) != 0 {
 		t.Fatalf("expected empty selection diagnostic, got %+v", got)
+	}
+}
+
+func TestExcelDialogMessageLinesPreferDialogText(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $dialog = [pscustomobject]@{ title = 'Microsoft Visual Basic'; text = @('Run-time error ''438'':', 'Object does not support this property or method.'); buttons = @(); children = @() }; Get-XlflowExcelDialogMessageLines -Dialog $dialog | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dialog message extraction failed: %v\n%s", err, out)
+	}
+	var got []string
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse dialog message lines: %v\n%s", err, out)
+	}
+	if len(got) != 2 || got[0] != "Run-time error '438':" {
+		t.Fatalf("unexpected dialog message lines: %+v", got)
+	}
+}
+
+func TestVBARuntimeDialogErrorNumberRecognizesLocalizedText(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $dialog = [pscustomobject]@{ title = 'Microsoft Visual Basic'; text = @('実行時エラー ''438'':', 'オブジェクトは、このプロパティまたはメソッドをサポートしていません。') }; Get-XlflowVBARuntimeDialogErrorNumber -Dialog $dialog",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime dialog error number parsing failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "438" {
+		t.Fatalf("expected runtime dialog error number 438, got %q", out)
 	}
 }
 

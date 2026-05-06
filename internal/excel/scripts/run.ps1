@@ -10,6 +10,7 @@ param(
   [string]$TraceFile = "",
   [string]$Direct = "false",
   [string]$Diagnostic = "false",
+  [string]$SuppressModalErrors = "true",
   [string]$UseSession = "false",
   [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
@@ -27,6 +28,76 @@ $traceTempInjected = $false
 $currentPhase = "initialize"
 $sessionAttached = $false
 $sessionMode = "none"
+$suppressModalErrors = ConvertTo-XlflowBool $SuppressModalErrors
+
+function Get-XlflowRunFailureCode {
+  param(
+    [int]$Number,
+    [string]$Description
+  )
+
+  if (Test-XlflowMacroDisabledFailure -Number $Number -Description $Description) {
+    return "macro_disabled"
+  }
+  if (Test-XlflowMacroTargetFailure -Number $Number -Description $Description) {
+    return "macro_not_found"
+  }
+  return "macro_failed"
+}
+
+function New-XlflowRuntimeDialogDiagnostic {
+  param($Dialog, $Selection)
+
+  $diag = [ordered]@{
+    kind = "runtime"
+    dialog = $Dialog
+  }
+  $messageLines = @(Get-XlflowExcelDialogMessageLines -Dialog $Dialog)
+  if ($messageLines.Count -gt 0) {
+    $diag.message = @($messageLines)
+  }
+  if ($null -ne $Selection) {
+    $diag.location = $Selection.location
+    $diag.nearby_code = @($Selection.nearby_code)
+  }
+  return $diag
+}
+
+function Set-XlflowRuntimeDialogFailure {
+  param(
+    [string]$ErrorCode,
+    [string]$FallbackSource,
+    [int]$FallbackNumber,
+    [int]$FallbackLine,
+    $Dialog,
+    $Selection
+  )
+
+  $messageLines = @(Get-XlflowExcelDialogMessageLines -Dialog $Dialog)
+  $message = ($messageLines -join [Environment]::NewLine)
+  if ([string]::IsNullOrWhiteSpace($message)) {
+    $message = "VBA runtime error dialog was shown."
+  }
+
+  $source = $FallbackSource
+  $line = $FallbackLine
+  if ($null -ne $Selection -and $null -ne $Selection.location) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$Selection.location.module)) {
+      $source = [string]$Selection.location.module
+    }
+    if ([int]$Selection.location.line -gt 0) {
+      $line = [int]$Selection.location.line
+    }
+  }
+
+  $number = Get-XlflowVBARuntimeDialogErrorNumber -Dialog $Dialog
+  if ($number -eq 0) {
+    $number = $FallbackNumber
+  }
+
+  Set-XlflowError -Result $result -Code $ErrorCode -Message $message -Source $source -Number $number -Line $line -Phase $currentPhase
+  $result.run_diagnostic = New-XlflowRuntimeDialogDiagnostic -Dialog $Dialog -Selection $Selection
+}
 
 try {
   if ($TimeoutSeconds -lt 0) {
@@ -81,8 +152,31 @@ try {
     }
     $currentPhase = "invoke_macro"
     $startedAt = Get-Date
-    $null = $excel.Run($MacroName)
+    $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($MacroName) } -DialogKind "runtime" -CaptureDialogs ([bool]$suppressModalErrors)
     $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
+    if ([bool]$invokeResult.dialog.found) {
+      $errorCode = "macro_failed"
+      $failureNumber = 0
+      $failureDescription = ""
+      if ($null -ne $invokeResult.exception -and $null -ne $invokeResult.exception.Exception) {
+        $failureNumber = [int]$invokeResult.exception.Exception.HResult
+        $failureDescription = [string]$invokeResult.exception.Exception.Message
+        $errorCode = Get-XlflowRunFailureCode -Number $failureNumber -Description $failureDescription
+      }
+      Set-XlflowRuntimeDialogFailure -ErrorCode $errorCode -FallbackSource (Get-XlflowMacroModuleName -MacroName $MacroName) -FallbackNumber $failureNumber -FallbackLine 0 -Dialog $invokeResult.dialog -Selection $invokeResult.selection
+      $result.macro = [ordered]@{
+        name = $MacroName
+        args = @($typedValues)
+        duration_ms = $durationMs
+        direct = $true
+      }
+      $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+      throw "runtime dialog shown"
+    }
+    if ($null -ne $invokeResult.exception) {
+      throw $invokeResult.exception.Exception
+    }
     $successLog = "ran " + $MacroName + " directly in " + $durationMs + "ms"
     $result.macro = [ordered]@{
       name = $MacroName
@@ -193,8 +287,46 @@ try {
   $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs -TraceEnabled $traceRequested -TraceFile $TraceFile))
 
   $currentPhase = "invoke_macro"
-  $runResult = $excel.Run($runnerName + ".RunMacro")
-  $successLog = "ran " + $MacroName + " in " + ([int]$runResult[5]) + "ms"
+  $startedAt = Get-Date
+  $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($runnerName + ".RunMacro") } -DialogKind "runtime" -CaptureDialogs ([bool]$suppressModalErrors)
+  $runResult = $invokeResult.value
+  $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
+  if ($null -ne $runResult -and $runResult.Count -gt 5) {
+    $durationMs = [int]$runResult[5]
+  }
+  if ([bool]$invokeResult.dialog.found) {
+    $errorCode = "macro_failed"
+    $failureSource = Get-XlflowMacroModuleName -MacroName $MacroName
+    $failureNumber = 0
+    $failureLine = 0
+    $failureDescription = ""
+    if ($null -ne $runResult -and $runResult.Count -gt 4) {
+      $failureSource = [string]$runResult[1]
+      $failureNumber = [int]$runResult[2]
+      $failureDescription = [string]$runResult[3]
+      $failureLine = [int]$runResult[4]
+      $errorCode = Get-XlflowRunFailureCode -Number $failureNumber -Description $failureDescription
+    } elseif ($null -ne $invokeResult.exception -and $null -ne $invokeResult.exception.Exception) {
+      $failureSource = [string]$invokeResult.exception.Exception.Source
+      $failureNumber = [int]$invokeResult.exception.Exception.HResult
+      $failureDescription = [string]$invokeResult.exception.Exception.Message
+      $errorCode = Get-XlflowRunFailureCode -Number $failureNumber -Description $failureDescription
+    }
+    Set-XlflowRuntimeDialogFailure -ErrorCode $errorCode -FallbackSource $failureSource -FallbackNumber $failureNumber -FallbackLine $failureLine -Dialog $invokeResult.dialog -Selection $invokeResult.selection
+    $result.macro = [ordered]@{
+      name = $MacroName
+      args = @($typedValues)
+      duration_ms = $durationMs
+      direct = $false
+    }
+    $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+    throw "runtime dialog shown"
+  }
+  if ($null -ne $invokeResult.exception) {
+    throw $invokeResult.exception.Exception
+  }
+  $successLog = "ran " + $MacroName + " in " + $durationMs + "ms"
   if ($null -ne $runnerComponent) {
     $vbProject.VBComponents.Remove($runnerComponent)
     $runnerComponent = $null
@@ -209,7 +341,7 @@ try {
   $result.macro = [ordered]@{
     name = $MacroName
     args = @($typedValues)
-    duration_ms = [int]$runResult[5]
+    duration_ms = $durationMs
     direct = $false
   }
 

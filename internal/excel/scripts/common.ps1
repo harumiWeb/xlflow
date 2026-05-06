@@ -316,9 +316,69 @@ function Get-XlflowExcelProcessId {
   }
 }
 
-function Start-XlflowVBEDialogWatcher {
+function New-XlflowExcelDialogWatcherResult {
+  return [pscustomobject][ordered]@{
+    found = $false
+    kind = ""
+    hwnd = 0
+    title = ""
+    class_name = ""
+    text = @()
+    buttons = @()
+    children = @()
+    clicked_button = ""
+    action = ""
+  }
+}
+
+function Get-XlflowExcelDialogMessageLines {
+  param($Dialog)
+
+  if ($null -eq $Dialog) {
+    return @()
+  }
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($line in @($Dialog.text)) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+      $lines.Add([string]$line)
+    }
+  }
+  if ($lines.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$Dialog.title)) {
+    $lines.Add([string]$Dialog.title)
+  }
+  return @($lines.ToArray())
+}
+
+function Get-XlflowVBARuntimeDialogErrorNumber {
+  param($Dialog)
+
+  $message = ((Get-XlflowExcelDialogMessageLines -Dialog $Dialog) -join [Environment]::NewLine)
+  if ([string]::IsNullOrWhiteSpace($message)) {
+    return 0
+  }
+
+  $patterns = @(
+    "(?i)(?:run-?time error|runtime error)\s*'?(?<number>-?\d+)'?",
+    "実行時エラー\s*'?(?<number>-?\d+)'?"
+  )
+  foreach ($pattern in $patterns) {
+    $match = [regex]::Match($message, $pattern)
+    if (-not $match.Success) {
+      continue
+    }
+    $parsed = 0
+    if ([int]::TryParse($match.Groups["number"].Value, [ref]$parsed)) {
+      return $parsed
+    }
+  }
+  return 0
+}
+
+function Start-XlflowExcelDialogWatcher {
   param(
     [int]$ProcessId,
+    [string]$Kind = "compile",
     [int]$TimeoutMilliseconds = 10000,
     [int]$PollMilliseconds = 50
   )
@@ -330,7 +390,7 @@ function Start-XlflowVBEDialogWatcher {
 
   $ps = [PowerShell]::Create()
   $null = $ps.AddScript({
-    param([int]$TargetProcessId, [int]$TimeoutMs, [int]$PollMs)
+    param([int]$TargetProcessId, [string]$DialogKind, [int]$TimeoutMs, [int]$PollMs)
 
     $bmClick = [uint32]0x00F5
     $wmClose = [uint32]0x0010
@@ -365,36 +425,86 @@ function Start-XlflowVBEDialogWatcher {
           }
         }
 
-        $looksLikeDialog = $className -eq "#32770" -and $buttons.Count -gt 0 -and ($staticTexts.Count -gt 0 -or $title -match "(?i)(visual basic|excel|vba)")
-        if (-not $looksLikeDialog) {
-          continue
-        }
+        $buttonTexts = @($buttons | ForEach-Object { [string]$_.text })
+        $joinedButtonText = ($buttonTexts -join [Environment]::NewLine)
+        $joinedStaticText = (@($staticTexts.ToArray()) -join [Environment]::NewLine)
+        $looksLikeVBAHostDialog = $className -eq "#32770" -and $buttons.Count -gt 0 -and ($staticTexts.Count -gt 0 -or $title -match "(?i)(visual basic|excel|vba)")
+        $looksLikeRuntimeDialog = $looksLikeVBAHostDialog -and (
+          $joinedStaticText -match "(?i)(run-?time error|runtime error)" -or
+          $joinedStaticText -match "実行時エラー" -or
+          $joinedButtonText -match "(?i)(Debug|End|Continue)" -or
+          $joinedButtonText -match "(デバッグ|終了|継続)"
+        )
+        $looksLikeCompileDialog = $looksLikeVBAHostDialog
 
         $buttonToClick = $null
-        foreach ($button in $buttons) {
-          if ($button.text -match "(?i)^(OK|はい|閉じる|Close)$") {
-            $buttonToClick = $button
-            break
+        $action = ""
+        switch ($DialogKind) {
+          "runtime" {
+            if (-not $looksLikeRuntimeDialog) {
+              continue
+            }
+            foreach ($button in $buttons) {
+              if ($button.text -match "(?i)End" -or $button.text -match "終了") {
+                $buttonToClick = $button
+                $action = "runtime_end"
+                break
+              }
+            }
+            if ($null -eq $buttonToClick) {
+              foreach ($button in $buttons) {
+                if ($button.text -match "(?i)^(OK|Close)$" -or $button.text -match "はい|閉じる") {
+                  $buttonToClick = $button
+                  $action = "runtime_close"
+                  break
+                }
+              }
+            }
           }
+          default {
+            if (-not $looksLikeCompileDialog) {
+              continue
+            }
+            foreach ($button in $buttons) {
+              if ($button.text -match "(?i)^(OK|Close)$" -or $button.text -match "はい|閉じる") {
+                $buttonToClick = $button
+                $action = "compile_close"
+                break
+              }
+            }
+          }
+        }
+
+        if (-not $looksLikeCompileDialog -and -not $looksLikeRuntimeDialog) {
+          continue
         }
         if ($null -eq $buttonToClick -and $buttons.Count -gt 0) {
           $buttonToClick = $buttons[0]
+          if ([string]::IsNullOrWhiteSpace($action)) {
+            $action = $DialogKind + "_first_button"
+          }
         }
 
         if ($null -ne $buttonToClick) {
           [void][XlflowNativeMethods]::SendMessageW([IntPtr]([int64]$buttonToClick.hwnd), $bmClick, [IntPtr]::Zero, [IntPtr]::Zero)
         } else {
           [void][XlflowNativeMethods]::PostMessageW($hwnd, $wmClose, [IntPtr]::Zero, [IntPtr]::Zero)
+          if ([string]::IsNullOrWhiteSpace($action)) {
+            $action = $DialogKind + "_close"
+          }
         }
 
         return [pscustomobject][ordered]@{
           found = $true
+          kind = $DialogKind
           hwnd = [int64]$hwnd
           title = $title
           class_name = $className
           text = @($staticTexts.ToArray())
           buttons = @($buttons | ForEach-Object { $_.text })
           children = @($childInfos.ToArray())
+          clicked_button = $(if ($null -ne $buttonToClick) { [string]$buttonToClick.text } else { "" })
+          action = $action
         }
       }
       Start-Sleep -Milliseconds $PollMs
@@ -402,15 +512,19 @@ function Start-XlflowVBEDialogWatcher {
 
     return [pscustomobject][ordered]@{
       found = $false
+      kind = $DialogKind
       hwnd = 0
       title = ""
       class_name = ""
       text = @()
       buttons = @()
       children = @()
+      clicked_button = ""
+      action = ""
     }
   })
   $null = $ps.AddArgument($ProcessId)
+  $null = $ps.AddArgument($Kind)
   $null = $ps.AddArgument($TimeoutMilliseconds)
   $null = $ps.AddArgument($PollMilliseconds)
 
@@ -420,32 +534,106 @@ function Start-XlflowVBEDialogWatcher {
   }
 }
 
-function Receive-XlflowVBEDialogWatcher {
+function Receive-XlflowExcelDialogWatcher {
   param(
     $Watcher,
     [int]$WaitMilliseconds = 250
   )
 
   if ($null -eq $Watcher) {
-    return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+    return (New-XlflowExcelDialogWatcherResult)
   }
 
   try {
     if ($WaitMilliseconds -gt 0 -and -not $Watcher.async.AsyncWaitHandle.WaitOne($WaitMilliseconds)) {
-      try { $Watcher.powershell.Stop() } catch { Write-Verbose ("failed to stop VBE dialog watcher: " + $_.Exception.Message) }
-      return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+      try { $Watcher.powershell.Stop() } catch { Write-Verbose ("failed to stop Excel dialog watcher: " + $_.Exception.Message) }
+      return (New-XlflowExcelDialogWatcherResult)
     }
     $items = @($Watcher.powershell.EndInvoke($Watcher.async))
     if ($items.Count -gt 0) {
       return $items[0]
     }
   } catch {
-    Write-Verbose ("failed to receive VBE dialog watcher result: " + $_.Exception.Message)
+    Write-Verbose ("failed to receive Excel dialog watcher result: " + $_.Exception.Message)
   } finally {
-    try { $Watcher.powershell.Dispose() } catch { Write-Verbose ("failed to dispose VBE dialog watcher: " + $_.Exception.Message) }
+    try { $Watcher.powershell.Dispose() } catch { Write-Verbose ("failed to dispose Excel dialog watcher: " + $_.Exception.Message) }
   }
 
-  return [pscustomobject][ordered]@{ found = $false; text = @(); buttons = @(); children = @() }
+  return (New-XlflowExcelDialogWatcherResult)
+}
+
+function Start-XlflowVBEDialogWatcher {
+  param(
+    [int]$ProcessId,
+    [int]$TimeoutMilliseconds = 10000,
+    [int]$PollMilliseconds = 50
+  )
+
+  return Start-XlflowExcelDialogWatcher -ProcessId $ProcessId -Kind "compile" -TimeoutMilliseconds $TimeoutMilliseconds -PollMilliseconds $PollMilliseconds
+}
+
+function Receive-XlflowVBEDialogWatcher {
+  param(
+    $Watcher,
+    [int]$WaitMilliseconds = 250
+  )
+
+  return Receive-XlflowExcelDialogWatcher -Watcher $Watcher -WaitMilliseconds $WaitMilliseconds
+}
+
+function Invoke-XlflowExcelCallWithDialogWatch {
+  param(
+    $Excel,
+    $Workbook,
+    [scriptblock]$Invocation,
+    [string]$DialogKind = "runtime",
+    [bool]$CaptureDialogs = $true,
+    [int]$WaitMilliseconds = 3000
+  )
+
+  $watcher = $null
+  $caught = $null
+  $value = $null
+  $dialog = New-XlflowExcelDialogWatcherResult
+  $selection = [ordered]@{
+    location = [ordered]@{
+      module = ""
+      line = 0
+      column = 0
+      end_line = 0
+      end_column = 0
+      token = ""
+    }
+    nearby_code = @()
+  }
+
+  try {
+    if ($CaptureDialogs) {
+      $processId = Get-XlflowExcelProcessId -Excel $Excel
+      $watcher = Start-XlflowExcelDialogWatcher -ProcessId $processId -Kind $DialogKind
+    }
+    try {
+      $value = & $Invocation
+    } catch {
+      $caught = $_
+    }
+  } finally {
+    $dialog = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds $WaitMilliseconds
+    if ($null -ne $Workbook -and [bool]$dialog.found) {
+      try {
+        $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
+      } catch {
+        Write-Verbose ("failed to capture VBE selection after Excel dialog: " + $_.Exception.Message)
+      }
+    }
+  }
+
+  return [pscustomobject][ordered]@{
+    value = $value
+    exception = $caught
+    dialog = $dialog
+    selection = $selection
+  }
 }
 
 function Get-XlflowVBECompileControl {

@@ -194,15 +194,19 @@ func TestBuildRunScriptArgsPassesFastDirectAndSession(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	args, err := buildRunScriptArgs(root, cfg, RunOptions{
-		Macro:   "Main.Run",
-		Fast:    true,
-		Session: true,
+		Macro:               "Main.Run",
+		Fast:                true,
+		Session:             true,
+		SuppressModalErrors: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if args["Direct"] != "true" || args["UseSession"] != "true" {
 		t.Fatalf("unexpected args: %+v", args)
+	}
+	if args["SuppressModalErrors"] != "true" {
+		t.Fatalf("SuppressModalErrors = %q, want true", args["SuppressModalErrors"])
 	}
 	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
 		t.Fatalf("metadata path = %q", args["MetadataPath"])
@@ -225,6 +229,21 @@ func TestBuildRunScriptArgsDiagnosticDisablesFastDirect(t *testing.T) {
 	}
 	if args["Direct"] != "false" {
 		t.Fatalf("Direct = %q, want false for diagnostic fast run", args["Direct"])
+	}
+}
+
+func TestBuildRunScriptArgsPropagatesSuppressModalErrors(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:               "Main.Run",
+		SuppressModalErrors: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["SuppressModalErrors"] != "true" {
+		t.Fatalf("SuppressModalErrors = %q, want true", args["SuppressModalErrors"])
 	}
 }
 
