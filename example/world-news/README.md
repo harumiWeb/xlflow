@@ -20,11 +20,12 @@ It fetches the latest world news from NewsAPI and lists the results on the `News
 ## How to run
 
 1. Set the `NEWSAPI_KEY` environment variable.
-2. Open `build/Book.xlsm`.
-3. The workbook refreshes automatically on open.  
+2. Run `xlflow run --diagnostic` in this folder to generate or update `build/Book.xlsm`.
+3. Open `build/Book.xlsm`.
+4. The workbook refreshes automatically on open.  
    To refresh manually, run `Main.Run` or `Ui.RefreshNews`.
 
-If you run it through xlflow, use `xlflow run --diagnostic` from this folder.
+To refresh it again from the CLI, use `xlflow run --diagnostic` from this folder.
 
 ## Easy places to change
 

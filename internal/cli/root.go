@@ -1811,7 +1811,7 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 		diag["suggestion"] = "Inspect the failing procedure and rerun with --trace if the last successful step is unclear."
 	}
 	if env.Error != nil {
-		if len(cliObjectMap(diag["location"])) == 0 {
+		if !cliLocationHasMeaningfulData(diag["location"]) {
 			diag["location"] = map[string]any{
 				"module": env.Error.Source,
 				"line":   env.Error.Line,
@@ -1936,6 +1936,20 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+func cliLocationHasMeaningfulData(value any) bool {
+	location := cliObjectMap(value)
+	if len(location) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringValueForCLI(location, "module")) != "" ||
+		strings.TrimSpace(stringValueForCLI(location, "file")) != "" ||
+		strings.TrimSpace(stringValueForCLI(location, "procedure")) != "" {
+		return true
+	}
+	line := strings.TrimSpace(stringValueForCLI(location, "line"))
+	return line != "" && line != "0"
 }
 
 func cliObjectMap(value any) map[string]any {

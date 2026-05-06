@@ -42,6 +42,9 @@ End Function
 Private Function DecodeUtf8Response(ByVal responseBody As Variant) As String
   Dim stream As Object
   Dim streamOpened As Boolean
+  Dim errNumber As Long
+  Dim errSource As String
+  Dim errDescription As String
 
   On Error GoTo ErrHandler
 
@@ -63,8 +66,20 @@ CleanExit:
   Exit Function
 
 ErrHandler:
-  If streamOpened Then
-    stream.Close
+  errNumber = Err.Number
+  errSource = Err.Source
+  errDescription = Err.Description
+  If Not streamOpened Then
+    Err.Raise errNumber, errSource, errDescription
   End If
-  Err.Raise Err.Number, Err.Source, Err.Description
+
+  On Error GoTo CloseFailed
+  stream.Close
+  On Error GoTo 0
+  Err.Raise errNumber, errSource, errDescription
+
+CloseFailed:
+    On Error GoTo 0
+  Err.Clear
+  Err.Raise errNumber, errSource, errDescription
 End Function

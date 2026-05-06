@@ -215,9 +215,22 @@ Private Function ParseNumberLiteral() As Variant
 
   If InStr(1, token, ".", vbBinaryCompare) > 0 Or InStr(1, token, "e", vbTextCompare) > 0 Then
     ParseNumberLiteral = CDbl(token)
-  Else
-    ParseNumberLiteral = CLng(token)
+    Exit Function
   End If
+
+  On Error GoTo IntegerOverflow
+  ParseNumberLiteral = CLng(token)
+  On Error GoTo 0
+  Exit Function
+
+IntegerOverflow:
+  If Err.Number = 6 Then
+    Err.Clear
+    ParseNumberLiteral = CDbl(token)
+    On Error GoTo 0
+    Exit Function
+  End If
+  RaiseParseError "Invalid number literal '" & token & "'."
 End Function
 
 Private Sub ConsumeDigits()

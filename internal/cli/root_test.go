@@ -1278,6 +1278,28 @@ func TestBuildRunDiagnosticPreservesExistingScriptDiagnostic(t *testing.T) {
 	}
 }
 
+func TestBuildRunDiagnosticBackfillsBlankScriptLocation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	a := &app{cwd: dir}
+	env := output.Failure("run", output.Error{Code: "macro_failed", Message: "runtime modal", Source: "Main", Number: 438, Line: 12, Phase: "invoke_macro"})
+	env.RunDiagnostic = map[string]any{
+		"kind":     "runtime",
+		"message":  []string{"Run-time error '438':", "Object doesn't support this property or method."},
+		"dialog":   map[string]any{"title": "Microsoft Visual Basic"},
+		"location": map[string]any{"module": "", "line": 0},
+	}
+
+	diag := a.buildRunDiagnostic(cfg, env)
+	location := cliObjectMap(diag["location"])
+	if got := location["module"]; got != "Main" {
+		t.Fatalf("module = %#v, want Main: %#v", got, diag)
+	}
+	if got := location["line"]; got != 12 {
+		t.Fatalf("line = %#v, want 12: %#v", got, diag)
+	}
+}
+
 func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	cfg := config.Default()
 	tests := []struct {

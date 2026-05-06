@@ -79,6 +79,8 @@ Public Sub RefreshDashboard(ByVal wb As Workbook, ByVal apiKey As String)
 
     quoteTable = CsvUtil.ParseCsvText(TwelveDataClient.FetchQuoteCsv(symbol, apiKey))
     seriesTable = CsvUtil.ParseCsvText(TwelveDataClient.FetchTimeSeriesCsv(symbol, apiKey, interval, outputSize))
+    ValidateCsvTable quoteTable, "quote"
+    ValidateCsvTable seriesTable, "time_series"
     percentChangeValue = QuoteNumber(quoteTable, "percent_change") / 100#
     weeklyChangeValue = CalculateSeriesChange(seriesTable, 7)
     totalPercentChange = totalPercentChange + percentChangeValue
@@ -329,7 +331,7 @@ Private Sub WriteDetailRow(ByVal ws As Worksheet, ByVal rowNumber As Long, ByVal
   high52 = QuoteNumber(quoteTable, "fifty_two_week_high")
   currentClose = QuoteNumber(quoteTable, "close")
   volumeText = QuoteTextOrDefault(quoteTable, "volume", "-")
-  avgText = QuoteTextOrDefault(quoteTable, "average_volume", Format$(weeklyChangeValue, "+0.00%;-0.00%;0.00%"))
+  avgText = QuoteTextOrDefault(quoteTable, "average_volume", "-")
 
   ws.Cells(rowNumber, 1).Value2 = symbol
   ws.Cells(rowNumber, 2).Value2 = prevClose
@@ -626,6 +628,16 @@ Private Function QuoteTextOrDefault(ByVal quoteTable As Variant, ByVal headerNam
     QuoteTextOrDefault = CStr(quoteTable(2, columnIndex))
   End If
 End Function
+
+Private Sub ValidateCsvTable(ByVal csvTable As Variant, ByVal sourceName As String)
+  If Not IsArray(csvTable) Then
+    Err.Raise vbObjectError + 1700, "MarketDashboard.ValidateCsvTable", sourceName & " did not return a table."
+  End If
+
+  If UBound(csvTable, 1) < 2 Or UBound(csvTable, 2) < 1 Then
+    Err.Raise vbObjectError + 1701, "MarketDashboard.ValidateCsvTable", sourceName & " returned no data rows."
+  End If
+End Sub
 
 Private Function QuoteNumber(ByVal quoteTable As Variant, ByVal headerName As String) As Double
   QuoteNumber = Val(QuoteTextOrDefault(quoteTable, headerName, "0"))

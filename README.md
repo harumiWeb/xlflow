@@ -12,11 +12,7 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
-<div align="center" style="max-width: 600px; margin: auto;">
-
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
-
-</div>
 
 # :surfing_man: xlflow
 
@@ -27,19 +23,12 @@ It turns `.xlsm` workbooks into a source-controlled, CLI-driven development work
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
 
-<div align="center" style="display: flex; gap: 16px; margin-top: 24px; justify-content: center;">
-  <div>
-    <img style="width: auto; max-height: 400px;" alt="world-news-project" src="docs/images/world-news.png" />
-    <em style="display: block; text-align: center; margin-top: 4px; color: #666;">Project to fetch and display News API</em>
-  </div>
-  <div>
-    <img style="width: auto; max-height: 400px;" alt="stock-price-project" src="docs/images/stock-price.png" />
-    <em style="display: block; text-align: center; margin-top: 4px; color: #666;">Project to fetch and analyze stock price information</em>
-  </div>
-</div>
-<p align="center" style="margin-top: 12px;">
-  These samples were created by AI agents using only minimal natural language instructions with xlflow.
-</p>
+| world-news                                        | stock-price                                          |
+| ------------------------------------------------- | ---------------------------------------------------- |
+| ![world-news-project](docs/images/world-news.png) | ![stock-price-project](docs/images/stock-price.png)  |
+| Project to fetch and display News API             | Project to fetch and analyze stock price information |
+
+These samples were created by AI agents using only minimal natural language instructions with xlflow.
 
 ---
 

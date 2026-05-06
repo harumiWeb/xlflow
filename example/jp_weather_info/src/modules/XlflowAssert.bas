@@ -17,6 +17,13 @@ Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Opti
     RaiseAssertEqualsFailure expected, actual, message
   End If
 
+  If IsEmpty(expected) Or IsEmpty(actual) Then
+    If IsEmpty(expected) And IsEmpty(actual) Then
+      Exit Sub
+    End If
+    RaiseAssertEqualsFailure expected, actual, message
+  End If
+
   If expected <> actual Then
     RaiseAssertEqualsFailure expected, actual, message
   End If

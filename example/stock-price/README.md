@@ -22,11 +22,12 @@ It retrieves stock and cryptocurrency information from the Twelve Data API and d
 ## How to Run
 
 1. Set `TWELVE_DATA_API_KEY` as an environment variable.
-2. Open `build/Book.xlsm`.
-3. Execute `Main.Run`.
+2. Run `xlflow run --diagnostic` in this folder to generate or update `build/Book.xlsm`.
+3. Open `build/Book.xlsm`.
+4. Execute `Main.Run`.
    If you want to launch it from a button, you can use `Ui.RunFromButton`.
 
-When running from xlflow, use `xlflow run --diagnostic` in this folder.
+To refresh it again from the CLI, use `xlflow run --diagnostic` in this folder.
 
 ## Customizable Areas
 

@@ -375,6 +375,29 @@ function Get-XlflowVBARuntimeDialogErrorNumber {
   return 0
 }
 
+function Test-XlflowCompileDialogSignals {
+  param(
+    [string]$Title,
+    [string]$StaticText,
+    [string]$ButtonText
+  )
+
+  return (
+    $StaticText -match "(?i)(compile|syntax error|expected)" -or
+    $StaticText -match "コンパイル|構文エラー|必要です" -or
+    $ButtonText -match "(?i)(Debug|Compile)" -or
+    $ButtonText -match "(デバッグ|コンパイル)" -or
+    $Title -match "(?i)(compile|syntax error)" -or
+    $Title -match "コンパイル|構文エラー"
+  )
+}
+
+function Test-XlflowAllowDialogFirstButtonFallback {
+  param([string]$DialogKind)
+
+  return $DialogKind -ne "compile"
+}
+
 function Start-XlflowExcelDialogWatcher {
   param(
     [int]$ProcessId,
@@ -435,7 +458,9 @@ function Start-XlflowExcelDialogWatcher {
           $joinedButtonText -match "(?i)(Debug|End|Continue)" -or
           $joinedButtonText -match "(デバッグ|終了|継続)"
         )
-        $looksLikeCompileDialog = $looksLikeVBAHostDialog
+        $looksLikeCompileDialog = $looksLikeVBAHostDialog -and (
+          Test-XlflowCompileDialogSignals -Title $title -StaticText $joinedStaticText -ButtonText $joinedButtonText
+        )
 
         $buttonToClick = $null
         $action = ""
@@ -478,7 +503,7 @@ function Start-XlflowExcelDialogWatcher {
         if (-not $looksLikeCompileDialog -and -not $looksLikeRuntimeDialog) {
           continue
         }
-        if ($null -eq $buttonToClick -and $buttons.Count -gt 0) {
+        if ((Test-XlflowAllowDialogFirstButtonFallback -DialogKind $DialogKind) -and $null -eq $buttonToClick -and $buttons.Count -gt 0) {
           $buttonToClick = $buttons[0]
           if ([string]::IsNullOrWhiteSpace($action)) {
             $action = $DialogKind + "_first_button"
@@ -588,7 +613,7 @@ function Invoke-XlflowExcelCallWithDialogWatch {
     [scriptblock]$Invocation,
     [string]$DialogKind = "runtime",
     [bool]$CaptureDialogs = $true,
-    [int]$WaitMilliseconds = 3000
+    [int]$WaitMilliseconds = 250
   )
 
   $watcher = $null

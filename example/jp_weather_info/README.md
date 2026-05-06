@@ -8,15 +8,16 @@
 - Tsukumijima Weather API から天気予報を取得
 - 既定の都市コード `130010`（東京）の予報を表示
 - 3日分の予報、天気アイコン、降水確率、最低/最高気温を表示
-- 取得失敗時はシート上にエラー内容を表示
+- xlflow からは `--diagnostic` で失敗箇所を確認可能
 
 ## 実行方法
 
-1. `build/Book.xlsm` を開きます。
-2. `Main.Run` を実行します。
-3. 必要に応じて `Ui.RunFromButton` をボタンに割り当てて使えます。
+1. このフォルダで `xlflow run --diagnostic` を実行して `build/Book.xlsm` を生成または更新します。
+2. `build/Book.xlsm` を開きます。
+3. `Main.Run` を実行します。
+4. 必要に応じて `Ui.RunFromButton` をボタンに割り当てて使えます。
 
-xlflow から実行する場合は、このフォルダで `xlflow run --diagnostic` を使います。
+CLI から再実行する場合も、このフォルダで `xlflow run --diagnostic` を使います。
 
 ## 変更しやすい場所
 
