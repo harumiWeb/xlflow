@@ -13,6 +13,7 @@ Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --keepalive --json`.
+- When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
 - `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
@@ -43,6 +44,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
 
 2. Edit source files.
    - Prefer `.bas`, `.cls`, and `.frm` files under the configured source directories.
+   - In folder mode, move files by directory when you want to change Rubberduck folder organization; `push` rewrites `@Folder(...)` from path in temporary import copies.
    - Do not edit binary workbooks directly unless the task is explicitly workbook-state only.
 
 3. Import and check.

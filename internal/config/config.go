@@ -15,6 +15,7 @@ type Config struct {
 	Project ProjectConfig `toml:"project"`
 	Excel   ExcelConfig   `toml:"excel"`
 	Src     SourceConfig  `toml:"src"`
+	VBA     VBAConfig     `toml:"vba"`
 	Lint    LintConfig    `toml:"lint"`
 }
 
@@ -34,6 +35,12 @@ type SourceConfig struct {
 	Classes  string `toml:"classes"`
 	Forms    string `toml:"forms"`
 	Workbook string `toml:"workbook"`
+}
+
+type VBAConfig struct {
+	Folders                 bool   `toml:"folders"`
+	FolderAnnotation        string `toml:"folder_annotation"`
+	DefaultComponentFolders bool   `toml:"default_component_folders"`
 }
 
 type LintConfig struct {
@@ -62,6 +69,11 @@ func Default() Config {
 			Classes:  filepath.ToSlash(filepath.Join("src", "classes")),
 			Forms:    filepath.ToSlash(filepath.Join("src", "forms")),
 			Workbook: filepath.ToSlash(filepath.Join("src", "workbook")),
+		},
+		VBA: VBAConfig{
+			Folders:                 true,
+			FolderAnnotation:        "update",
+			DefaultComponentFolders: true,
 		},
 		Lint: LintConfig{
 			RequireOptionExplicit:    true,
@@ -111,6 +123,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Src.Workbook == "" {
 		cfg.Src.Workbook = defaults.Src.Workbook
 	}
+	if cfg.VBA.FolderAnnotation == "" {
+		cfg.VBA.FolderAnnotation = defaults.VBA.FolderAnnotation
+	}
 }
 
 func validate(cfg Config) error {
@@ -119,6 +134,11 @@ func validate(cfg Config) error {
 	}
 	if cfg.Excel.Path == "" {
 		return errors.New("excel.path is required")
+	}
+	switch cfg.VBA.FolderAnnotation {
+	case "update", "preserve", "ignore":
+	default:
+		return fmt.Errorf("vba.folder_annotation must be one of update, preserve, ignore")
 	}
 	return nil
 }

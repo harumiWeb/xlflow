@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -330,6 +331,34 @@ func TestMacroNotFoundIsValidationFailure(t *testing.T) {
 	}
 	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
 		t.Fatalf("exitCodeForScriptResult(macro_not_found) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "duplicate_module_name", Message: "duplicate"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(duplicate_module_name) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := map[string]string{
+		"WorkbookPath":            filepath.Join(root, "build", "Book.xlsm"),
+		"ModulesDir":              filepath.Join(root, "src", "modules"),
+		"ClassesDir":              filepath.Join(root, "src", "classes"),
+		"FormsDir":                filepath.Join(root, "src", "forms"),
+		"WorkbookDir":             filepath.Join(root, "src", "workbook"),
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
+	}
+	if args["Folders"] != "true" || args["FolderAnnotation"] != "update" || args["DefaultComponentFolders"] != "true" {
+		t.Fatalf("unexpected folder config args: %+v", args)
 	}
 }
 

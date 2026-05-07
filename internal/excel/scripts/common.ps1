@@ -90,6 +90,37 @@ function ConvertTo-XlflowBool {
   return $Value -eq "true" -or $Value -eq "True" -or $Value -eq "1"
 }
 
+function Get-XlflowRelativePath {
+  param(
+    [string]$BasePath,
+    [string]$TargetPath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($BasePath) -or [string]::IsNullOrWhiteSpace($TargetPath)) {
+    return ""
+  }
+
+  $baseFullPath = [System.IO.Path]::GetFullPath($BasePath)
+  $targetFullPath = [System.IO.Path]::GetFullPath($TargetPath)
+  $directorySeparator = [System.IO.Path]::DirectorySeparatorChar
+  $altDirectorySeparator = [System.IO.Path]::AltDirectorySeparatorChar
+
+  if (-not $baseFullPath.EndsWith([string]$directorySeparator) -and -not $baseFullPath.EndsWith([string]$altDirectorySeparator)) {
+    $baseFullPath += $directorySeparator
+  }
+
+  $baseUri = New-Object System.Uri($baseFullPath)
+  $targetUri = New-Object System.Uri($targetFullPath)
+  $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+  $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString()).Replace("/", "\")
+
+  if ([string]::IsNullOrWhiteSpace($relativePath)) {
+    return "."
+  }
+
+  return $relativePath
+}
+
 function Close-XlflowCom {
   param($Workbook, $Excel, [bool]$Save)
   if ($null -ne $Workbook) {
@@ -1131,9 +1162,291 @@ function Get-XlflowFileHash {
   }
 }
 
-function Get-XlflowSourceFingerprint {
+function Get-XlflowFolderConfig {
   param(
-    [string]$WorkbookPath,
+    [string]$Folders = "true",
+    [string]$FolderAnnotation = "update",
+    [string]$DefaultComponentFolders = "true"
+  )
+
+  return [pscustomobject][ordered]@{
+    folders = (ConvertTo-XlflowBool $Folders)
+    folder_annotation = [string]$FolderAnnotation
+    default_component_folders = (ConvertTo-XlflowBool $DefaultComponentFolders)
+  }
+}
+
+function Get-XlflowComponentExtension {
+  param([int]$ComponentType)
+
+  switch ($ComponentType) {
+    1 { return ".bas" }
+    2 { return ".cls" }
+    3 { return ".frm" }
+    100 { return ".bas" }
+    default { return "" }
+  }
+}
+
+function Get-XlflowComponentRootDir {
+  param(
+    [int]$ComponentType,
+    [string]$ModulesDir,
+    [string]$ClassesDir,
+    [string]$FormsDir,
+    [string]$WorkbookDir
+  )
+
+  switch ($ComponentType) {
+    1 { return $ModulesDir }
+    2 { return $ClassesDir }
+    3 { return $FormsDir }
+    100 { return $WorkbookDir }
+    default { return "" }
+  }
+}
+
+function Get-XlflowContentNewline {
+  param([string]$Text)
+
+  if ($Text -match "`r`n") {
+    return "`r`n"
+  }
+  return "`n"
+}
+
+function ConvertTo-XlflowFolderPathSegment {
+  param([string]$Segment)
+
+  $clean = [string]$Segment
+  $clean = $clean.Trim()
+  if ([string]::IsNullOrWhiteSpace($clean)) {
+    return ""
+  }
+  $clean = [regex]::Replace($clean, '[<>:"/\\|?*\x00-\x1f]', "_")
+  $clean = $clean.Trim(" ", ".")
+  if ($clean -eq "." -or $clean -eq "..") {
+    return ""
+  }
+  return $clean
+}
+
+function ConvertFrom-XlflowFolderAnnotation {
+  param([string]$Annotation)
+
+  if ([string]::IsNullOrWhiteSpace($Annotation)) {
+    return @()
+  }
+
+  $segments = New-Object System.Collections.Generic.List[string]
+  foreach ($part in ([string]$Annotation).Split(".")) {
+    $segment = ConvertTo-XlflowFolderPathSegment -Segment $part
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      return $null
+    }
+    $segments.Add($segment)
+  }
+  return @($segments.ToArray())
+}
+
+function ConvertTo-XlflowFolderAnnotation {
+  param([string[]]$Segments)
+
+  if ($null -eq $Segments -or $Segments.Count -eq 0) {
+    return ""
+  }
+
+  $clean = New-Object System.Collections.Generic.List[string]
+  foreach ($segment in $Segments) {
+    $part = ConvertTo-XlflowFolderPathSegment -Segment $segment
+    if ([string]::IsNullOrWhiteSpace($part)) {
+      continue
+    }
+    $clean.Add($part)
+  }
+  if ($clean.Count -eq 0) {
+    return ""
+  }
+  return ($clean -join ".")
+}
+
+function Test-XlflowFolderAnnotationHeaderLine {
+  param([string]$TrimmedLine)
+
+  if ([string]::IsNullOrWhiteSpace($TrimmedLine)) {
+    return $true
+  }
+  if ($TrimmedLine.StartsWith("'")) {
+    return $true
+  }
+  if ($TrimmedLine -match '^Attribute\s+VB_') {
+    return $true
+  }
+  if ($TrimmedLine -match '^(Option\s+Explicit|VERSION\s+1\.0\s+CLASS|BEGIN\b|END\b|MultiUse\b)') {
+    return $true
+  }
+  return $false
+}
+
+function Find-XlflowFolderAnnotation {
+  param(
+    [string]$Text,
+    [int]$MaxLines = 50
+  )
+
+  $lines = $Text -split "`r?`n"
+  $max = [Math]::Min($lines.Count, $MaxLines)
+  for ($i = 0; $i -lt $max; $i++) {
+    $line = [string]$lines[$i]
+    $trimmed = $line.Trim()
+    if ($trimmed -match "^'\s*@Folder\(""([^""]+)""\)\s*$") {
+      $segments = ConvertFrom-XlflowFolderAnnotation -Annotation $matches[1]
+      return [pscustomobject][ordered]@{
+        found = $true
+        valid = ($null -ne $segments)
+        malformed = ($null -eq $segments)
+        annotation = $(if ($null -ne $segments) { $matches[1] } else { "" })
+        line_index = $i
+      }
+    }
+    if ($trimmed -match "@Folder") {
+      return [pscustomobject][ordered]@{
+        found = $true
+        valid = $false
+        malformed = $true
+        annotation = ""
+        line_index = $i
+      }
+    }
+    if (-not (Test-XlflowFolderAnnotationHeaderLine -TrimmedLine $trimmed)) {
+      break
+    }
+  }
+
+  return [pscustomobject][ordered]@{
+    found = $false
+    valid = $false
+    malformed = $false
+    annotation = ""
+    line_index = -1
+  }
+}
+
+function Get-XlflowFolderAnnotationInsertIndex {
+  param([string[]]$Lines)
+
+  $index = 0
+  if ($Lines.Count -gt 0 -and $Lines[0].Trim() -eq "VERSION 1.0 CLASS") {
+    $index = 1
+    while ($index -lt $Lines.Count) {
+      $trimmed = $Lines[$index].Trim()
+      $index++
+      if ($trimmed -eq "END") {
+        break
+      }
+    }
+  }
+  while ($index -lt $Lines.Count -and $Lines[$index].Trim() -match '^Attribute\s+VB_') {
+    $index++
+  }
+  return $index
+}
+
+function Update-XlflowFolderAnnotationText {
+  param(
+    [string]$Text,
+    [string]$FolderAnnotationMode = "update",
+    [string]$DesiredAnnotation = ""
+  )
+
+  if ($FolderAnnotationMode -eq "ignore" -or $FolderAnnotationMode -eq "preserve") {
+    return $Text
+  }
+
+  $newline = Get-XlflowContentNewline -Text $Text
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($line in ($Text -split "`r?`n")) {
+    $lines.Add([string]$line)
+  }
+  $annotationInfo = Find-XlflowFolderAnnotation -Text $Text
+  $annotationLine = ""
+  if (-not [string]::IsNullOrWhiteSpace($DesiredAnnotation)) {
+    $annotationLine = "'@Folder(""$DesiredAnnotation"")"
+  }
+
+  if ($annotationInfo.found) {
+    if ([string]::IsNullOrWhiteSpace($annotationLine)) {
+      $lines.RemoveAt([int]$annotationInfo.line_index)
+    } else {
+      $lines[[int]$annotationInfo.line_index] = $annotationLine
+    }
+  } elseif (-not [string]::IsNullOrWhiteSpace($annotationLine)) {
+    $insertIndex = Get-XlflowFolderAnnotationInsertIndex -Lines @($lines.ToArray())
+    $lines.Insert([int]$insertIndex, $annotationLine)
+  }
+
+  return (@($lines.ToArray()) -join $newline)
+}
+
+function Get-XlflowRelativePathSegments {
+  param(
+    [string]$RootDir,
+    [string]$Path
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RootDir) -or [string]::IsNullOrWhiteSpace($Path)) {
+    return @()
+  }
+
+  $relativeDir = Split-Path -Parent (Get-XlflowRelativePath -BasePath $RootDir -TargetPath $Path)
+  if ([string]::IsNullOrWhiteSpace($relativeDir) -or $relativeDir -eq ".") {
+    return @()
+  }
+
+  $segments = New-Object System.Collections.Generic.List[string]
+  foreach ($part in ($relativeDir -split '[\\/]')) {
+    $segment = ConvertTo-XlflowFolderPathSegment -Segment $part
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $segments.Add($segment)
+  }
+  return @($segments.ToArray())
+}
+
+function Get-XlflowFolderAnnotationForPath {
+  param(
+    [string]$RootDir,
+    [string]$Path
+  )
+
+  return ConvertTo-XlflowFolderAnnotation -Segments (Get-XlflowRelativePathSegments -RootDir $RootDir -Path $Path)
+}
+
+function Get-XlflowFolderAnnotationForComponent {
+  param(
+    $Component,
+    [string]$FolderAnnotationMode = "update"
+  )
+
+  if ($FolderAnnotationMode -eq "ignore") {
+    return ""
+  }
+
+  try {
+    $text = Get-XlflowCodeModuleText -CodeModule $Component.CodeModule
+    $annotation = Find-XlflowFolderAnnotation -Text $text
+    if ($annotation.valid) {
+      return [string]$annotation.annotation
+    }
+  } catch {
+    Write-Verbose ("failed to inspect folder annotation from code module: " + $_.Exception.Message)
+  }
+  return ""
+}
+
+function Get-XlflowSourceComponentFiles {
+  param(
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
@@ -1145,25 +1458,58 @@ function Get-XlflowSourceFingerprint {
     @{ kind = "module"; dir = $ModulesDir },
     @{ kind = "class"; dir = $ClassesDir },
     @{ kind = "form"; dir = $FormsDir },
-    @{ kind = "workbook"; dir = $WorkbookDir }
+    @{ kind = "document"; dir = $WorkbookDir }
   )) {
     $dir = [string]$entry.dir
     if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) {
       continue
     }
-    foreach ($file in Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -in @(".bas", ".cls", ".frm", ".frx") } | Sort-Object FullName) {
-      $base = [System.IO.Path]::GetFullPath($dir).TrimEnd("\", "/")
-      $full = [System.IO.Path]::GetFullPath($file.FullName)
-      $relative = $full
-      if ($full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $relative = $full.Substring($base.Length).TrimStart("\", "/")
+    foreach ($file in Get-ChildItem -LiteralPath $dir -Recurse -File | Sort-Object FullName) {
+      if ($file.Extension -notin @(".bas", ".cls", ".frm", ".frx")) {
+        continue
       }
-      $files.Add([ordered]@{
+      $files.Add([pscustomobject][ordered]@{
         kind = [string]$entry.kind
-        path = $relative.Replace("\", "/")
-        hash = Get-XlflowFileHash -Path $file.FullName
+        root_dir = $dir
+        full_name = $file.FullName
+        relative_path = (Get-XlflowRelativePath -BasePath $dir -TargetPath $file.FullName).Replace("\", "/")
+        extension = [string]$file.Extension.ToLowerInvariant()
+        module_name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
       })
     }
+  }
+  return @($files.ToArray())
+}
+
+function Clear-XlflowSourceComponentFiles {
+  param(
+    [string]$ModulesDir,
+    [string]$ClassesDir,
+    [string]$FormsDir,
+    [string]$WorkbookDir
+  )
+
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+    Remove-Item -LiteralPath $file.full_name -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Get-XlflowSourceFingerprint {
+  param(
+    [string]$WorkbookPath,
+    [string]$ModulesDir,
+    [string]$ClassesDir,
+    [string]$FormsDir,
+    [string]$WorkbookDir
+  )
+
+  $files = New-Object System.Collections.Generic.List[object]
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+    $files.Add([ordered]@{
+      kind = [string]$file.kind
+      path = [string]$file.relative_path
+      hash = Get-XlflowFileHash -Path $file.full_name
+    })
   }
   return [pscustomobject][ordered]@{
     workbook_path = [System.IO.Path]::GetFullPath($WorkbookPath)
@@ -1201,15 +1547,40 @@ function Write-XlflowFingerprintState {
 }
 
 function Get-XlflowComponentPath {
-  param($Component, [string]$ModulesDir, [string]$ClassesDir, [string]$FormsDir, [string]$WorkbookDir)
-  $name = $Component.Name
-  switch ($Component.Type) {
-    1 { return Join-Path $ModulesDir ($name + ".bas") }
-    2 { return Join-Path $ClassesDir ($name + ".cls") }
-    3 { return Join-Path $FormsDir ($name + ".frm") }
-    100 { return Join-Path $WorkbookDir ($name + ".bas") }
-    default { return $null }
+  param(
+    $Component,
+    [string]$ModulesDir,
+    [string]$ClassesDir,
+    [string]$FormsDir,
+    [string]$WorkbookDir,
+    [string]$Folders = "true",
+    [string]$FolderAnnotation = "update",
+    [string]$DefaultComponentFolders = "true"
+  )
+
+  $rootDir = Get-XlflowComponentRootDir -ComponentType $Component.Type -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+  $extension = Get-XlflowComponentExtension -ComponentType $Component.Type
+  if ([string]::IsNullOrWhiteSpace($rootDir) -or [string]::IsNullOrWhiteSpace($extension)) {
+    return $null
   }
+
+  $segments = @()
+  $folderConfig = Get-XlflowFolderConfig -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
+  if ($folderConfig.folders -and $folderConfig.folder_annotation -ne "ignore") {
+    $annotation = Get-XlflowFolderAnnotationForComponent -Component $Component -FolderAnnotationMode $folderConfig.folder_annotation
+    if (-not [string]::IsNullOrWhiteSpace($annotation)) {
+      $parsed = ConvertFrom-XlflowFolderAnnotation -Annotation $annotation
+      if ($null -ne $parsed) {
+        $segments = $parsed
+      }
+    }
+  }
+
+  $path = $rootDir
+  foreach ($segment in $segments) {
+    $path = Join-Path $path $segment
+  }
+  return Join-Path $path ($Component.Name + $extension)
 }
 
 function Get-XlflowUtf8Encoding {
@@ -1256,7 +1627,12 @@ function Convert-XlflowExportedSourceToUtf8 {
 }
 
 function Copy-XlflowSourceForImport {
-  param([string]$SourcePath, [string]$DestinationPath)
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath,
+    [string]$RootDir = "",
+    [string]$FolderAnnotationMode = "update"
+  )
 
   $parent = Split-Path -Parent $DestinationPath
   if (-not [string]::IsNullOrWhiteSpace($parent)) {
@@ -1269,6 +1645,10 @@ function Copy-XlflowSourceForImport {
   }
 
   $content = Get-XlflowUtf8Text -Path $SourcePath
+  if (-not [string]::IsNullOrWhiteSpace($RootDir)) {
+    $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $RootDir -Path $SourcePath
+    $content = Update-XlflowFolderAnnotationText -Text $content -FolderAnnotationMode $FolderAnnotationMode -DesiredAnnotation $desiredAnnotation
+  }
   Set-XlflowCp932Text -Path $DestinationPath -Text $content
 }
 
@@ -1416,20 +1796,37 @@ function Get-XlflowDocumentModuleContent {
 }
 
 function Normalize-XlflowDocumentModuleFile {
-  param([string]$Path)
+  param(
+    [string]$Path,
+    [string]$RootDir = "",
+    [string]$FolderAnnotationMode = "update"
+  )
 
   $content = Get-XlflowDocumentModuleContent -Path $Path
+  if (-not [string]::IsNullOrWhiteSpace($RootDir)) {
+    $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $RootDir -Path $Path
+    $content = Update-XlflowFolderAnnotationText -Text $content -FolderAnnotationMode $FolderAnnotationMode -DesiredAnnotation $desiredAnnotation
+  }
   Set-XlflowUtf8Text -Path $Path -Text $content
 }
 
 function Sync-XlflowDocumentModule {
-  param($Component, [string]$Path)
+  param(
+    $Component,
+    [string]$Path,
+    [string]$RootDir = "",
+    [string]$FolderAnnotationMode = "update"
+  )
 
   if (-not (Test-Path -LiteralPath $Path)) {
     return $false
   }
 
   $code = Get-XlflowDocumentModuleContent -Path $Path
+  if (-not [string]::IsNullOrWhiteSpace($RootDir)) {
+    $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $RootDir -Path $Path
+    $code = Update-XlflowFolderAnnotationText -Text $code -FolderAnnotationMode $FolderAnnotationMode -DesiredAnnotation $desiredAnnotation
+  }
   $module = $Component.CodeModule
   $lineCount = $module.CountOfLines
 
@@ -1442,6 +1839,52 @@ function Sync-XlflowDocumentModule {
   }
 
   return $true
+}
+
+function Find-XlflowDuplicateModuleNames {
+  param($Files)
+
+  $seen = @{}
+  foreach ($file in @($Files)) {
+    if ($file.extension -eq ".frx") {
+      continue
+    }
+    $key = ([string]$file.module_name).ToLowerInvariant()
+    if (-not $seen.ContainsKey($key)) {
+      $seen[$key] = New-Object System.Collections.Generic.List[string]
+    }
+    $seen[$key].Add([string]$file.relative_path)
+  }
+
+  $duplicates = New-Object System.Collections.Generic.List[object]
+  foreach ($key in $seen.Keys | Sort-Object) {
+    if ($seen[$key].Count -lt 2) {
+      continue
+    }
+    $duplicates.Add([pscustomobject][ordered]@{
+      module_name = $key
+      paths = @($seen[$key].ToArray())
+    })
+  }
+  return @($duplicates.ToArray())
+}
+
+function Find-XlflowDocumentModulePath {
+  param(
+    [string]$WorkbookDir,
+    [string]$ComponentName
+  )
+
+  if ([string]::IsNullOrWhiteSpace($WorkbookDir) -or -not (Test-Path -LiteralPath $WorkbookDir)) {
+    return ""
+  }
+
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir "" -ClassesDir "" -FormsDir "" -WorkbookDir $WorkbookDir)) {
+    if ($file.extension -eq ".bas" -and $file.module_name -ieq $ComponentName) {
+      return [string]$file.full_name
+    }
+  }
+  return ""
 }
 
 function ConvertFrom-XlflowRunArgumentsJson {

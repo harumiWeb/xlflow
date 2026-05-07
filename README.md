@@ -203,7 +203,7 @@ xlflow doctor --json
 xlflow pull --json
 ```
 
-Edit the exported `.bas`, `.cls`, and `.frm` files under `src/` with your normal editor.
+Edit the exported `.bas`, `.cls`, and `.frm` files under `src/` with your normal editor. When folder mode is enabled, nested directories under each configured source root are mapped to Rubberduck-compatible `@Folder(...)` annotations during `push`.
 
 ### 4. Import edited source back into the workbook
 
@@ -704,6 +704,11 @@ modules = "src/modules"
 classes = "src/classes"
 forms = "src/forms"
 workbook = "src/workbook"
+
+[vba]
+folders = true
+folder_annotation = "update"
+default_component_folders = true
 
 [lint]
 require_option_explicit = true

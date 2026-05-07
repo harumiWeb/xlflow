@@ -1,3 +1,13 @@
+# xlflow Folder Structure Todo
+
+- [x] Add `[vba]` config defaults and validation.
+- [x] Make `pull` folder-aware and clear stale recursive exports.
+- [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.
+- [x] Rewrite temporary import annotations from filesystem paths in `update` mode.
+- [x] Detect duplicate VBA module names before Excel import.
+- [x] Add focused Go and PowerShell regression coverage for folder-aware behavior.
+- [ ] Update broader docs and examples if folder mode UX changes further.
+
 # xlflow Performance Mode Todo
 
 - [x] Add push fast flags and Go option validation.

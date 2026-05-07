@@ -5,6 +5,9 @@ param(
   [string]$FormsDir,
   [string]$WorkbookDir,
   [string]$BackupRoot,
+  [string]$Folders = "true",
+  [string]$FolderAnnotation = "update",
+  [string]$DefaultComponentFolders = "true",
   [string]$StatePath = "",
   [string]$Visible = "false",
   [string]$BackupMode = "always",
@@ -28,6 +31,20 @@ try {
   if ($BackupMode -ne "always" -and $BackupMode -ne "never") {
     Set-XlflowError -Result $result -Code "push_args_invalid" -Message "-BackupMode must be always or never." -Source "xlflow"
     throw "invalid backup mode"
+  }
+  $sourceFiles = @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)
+  $duplicates = @(Find-XlflowDuplicateModuleNames -Files $sourceFiles)
+  if ($duplicates.Count -gt 0) {
+    $messages = New-Object System.Collections.Generic.List[string]
+    foreach ($duplicate in $duplicates) {
+      $messages.Add(($duplicate.paths -join ", "))
+    }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $false -NeedsSave $false -Dirty $false
+    $result.source = [ordered]@{ changed_only = $false; changed = $false; state = $StatePath }
+    Set-XlflowError -Result $result -Code "duplicate_module_name" -Message "Duplicate VBA module names detected in source tree. Rename the conflicting files before push." -Source "xlflow"
+    $result.logs = @($messages.ToArray())
+    Write-XlflowJson -Result $result
+    exit 0
   }
   $fingerprint = Get-XlflowSourceFingerprint -WorkbookPath $WorkbookPath -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
   if ((ConvertTo-XlflowBool $ChangedOnly) -and (Test-XlflowFingerprintMatchesState -Fingerprint $fingerprint -StatePath $StatePath)) {
@@ -65,8 +82,12 @@ try {
 
   foreach ($component in @($workbook.VBProject.VBComponents)) {
     if ($BackupMode -eq "always") {
-      $backupPath = Get-XlflowComponentPath -Component $component -ModulesDir $backupDir -ClassesDir $backupDir -FormsDir $backupDir -WorkbookDir $backupDir
+      $backupPath = Get-XlflowComponentPath -Component $component -ModulesDir $backupDir -ClassesDir $backupDir -FormsDir $backupDir -WorkbookDir $backupDir -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
       if ($null -ne $backupPath) {
+        $backupParent = Split-Path -Parent $backupPath
+        if (-not [string]::IsNullOrWhiteSpace($backupParent)) {
+          New-Item -ItemType Directory -Force -Path $backupParent | Out-Null
+        }
         $component.Export($backupPath)
       }
     }
@@ -77,27 +98,23 @@ try {
 
   $imported = @()
   $updatedDocumentModules = @()
-  foreach ($dir in @($ModulesDir, $ClassesDir, $FormsDir)) {
-    if (Test-Path -LiteralPath $dir) {
-      foreach ($file in Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -in @(".bas", ".cls", ".frm") }) {
-        $importPath = Join-Path $tmpImportDir $file.Name
-        Copy-XlflowSourceForImport -SourcePath $file.FullName -DestinationPath $importPath
-        if ($file.Extension -ieq ".frm") {
-          $frxPath = [System.IO.Path]::ChangeExtension($file.FullName, ".frx")
-          if (Test-Path -LiteralPath $frxPath) {
-            $importFrxPath = [System.IO.Path]::ChangeExtension($importPath, ".frx")
-            Copy-XlflowSourceForImport -SourcePath $frxPath -DestinationPath $importFrxPath
-          }
-        }
-        $workbook.VBProject.VBComponents.Import($importPath) | Out-Null
-        $imported += $file.FullName
+  foreach ($file in $sourceFiles | Where-Object { $_.kind -in @("module", "class", "form") -and $_.extension -in @(".bas", ".cls", ".frm") }) {
+    $importPath = Join-Path $tmpImportDir $file.relative_path
+    Copy-XlflowSourceForImport -SourcePath $file.full_name -DestinationPath $importPath -RootDir $file.root_dir -FolderAnnotationMode $FolderAnnotation
+    if ($file.extension -eq ".frm") {
+      $frxSource = [System.IO.Path]::ChangeExtension($file.full_name, ".frx")
+      if (Test-Path -LiteralPath $frxSource) {
+        $importFrxPath = [System.IO.Path]::ChangeExtension($importPath, ".frx")
+        Copy-XlflowSourceForImport -SourcePath $frxSource -DestinationPath $importFrxPath
       }
     }
+    $workbook.VBProject.VBComponents.Import($importPath) | Out-Null
+    $imported += $file.full_name
   }
   if (Test-Path -LiteralPath $WorkbookDir) {
     foreach ($component in @($workbook.VBProject.VBComponents | Where-Object { $_.Type -eq 100 })) {
-      $sourcePath = Join-Path $WorkbookDir ($component.Name + ".bas")
-      if (Sync-XlflowDocumentModule -Component $component -Path $sourcePath) {
+      $sourcePath = Find-XlflowDocumentModulePath -WorkbookDir $WorkbookDir -ComponentName $component.Name
+      if (-not [string]::IsNullOrWhiteSpace($sourcePath) -and (Sync-XlflowDocumentModule -Component $component -Path $sourcePath -RootDir $WorkbookDir -FolderAnnotationMode $FolderAnnotation)) {
         $updatedDocumentModules += $sourcePath
       }
     }

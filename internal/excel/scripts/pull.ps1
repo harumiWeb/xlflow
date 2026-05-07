@@ -4,6 +4,9 @@ param(
   [string]$ClassesDir,
   [string]$FormsDir,
   [string]$WorkbookDir,
+  [string]$Folders = "true",
+  [string]$FolderAnnotation = "update",
+  [string]$DefaultComponentFolders = "true",
   [string]$Visible = "false",
   [string]$UseSession = "false",
   [string]$MetadataPath = ""
@@ -25,17 +28,29 @@ try {
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
 
+  Clear-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+
   $exported = @()
   foreach ($component in $workbook.VBProject.VBComponents) {
-    $path = Get-XlflowComponentPath -Component $component -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+    $path = Get-XlflowComponentPath -Component $component -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
     if ($null -ne $path) {
+      $parent = Split-Path -Parent $path
+      if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+      }
       if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Force
       }
       $component.Export($path)
       Convert-XlflowExportedSourceToUtf8 -Path $path
       if ($component.Type -eq 100) {
-        Normalize-XlflowDocumentModuleFile -Path $path
+        Normalize-XlflowDocumentModuleFile -Path $path -RootDir $WorkbookDir -FolderAnnotationMode $FolderAnnotation
+      } elseif ($FolderAnnotation -eq "update") {
+        $rootDir = Get-XlflowComponentRootDir -ComponentType $component.Type -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+        $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $rootDir -Path $path
+        $content = Get-XlflowUtf8Text -Path $path
+        $content = Update-XlflowFolderAnnotationText -Text $content -FolderAnnotationMode $FolderAnnotation -DesiredAnnotation $desiredAnnotation
+        Set-XlflowUtf8Text -Path $path -Text $content
       }
       $exported += $path
     }

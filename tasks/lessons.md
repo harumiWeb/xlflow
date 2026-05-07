@@ -24,3 +24,4 @@
 - Apply default normalization in one place and treat the normalized value as authoritative. Avoid re-running the same `withDefaults`/normalizer in individual command handlers once construction-time initialization has already done it.
 - Keep unit tests cross-platform unless the behavior is intentionally OS-specific. Do not hardcode Windows path separators in generic Go tests when `filepath.Join` can express the same case portably.
 - Gate shell-specific tests on actual tool availability. Tests that invoke `powershell` or other non-portable executables should `t.Skip` when the binary is absent so Linux CI can still validate the rest of the package.
+- Do not use .NET APIs that exist only in PowerShell Core / newer runtimes inside shared Excel bridge scripts. Helpers under `internal/excel/scripts/common.ps1` must remain compatible with Windows PowerShell 5.1, and path utilities need explicit regression coverage there.
