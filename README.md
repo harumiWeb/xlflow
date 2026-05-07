@@ -122,6 +122,25 @@ Download prebuilt Windows binaries from:
 > Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
 > The release binary already embeds the runtime PowerShell bridge scripts, so `xlflow.exe` can run workbook commands without sidecar `*.ps1` files.
 
+Verify the downloaded ZIP against the published `checksums.txt` file:
+
+```powershell
+Get-FileHash .\xlflow_windows_x86_64.zip -Algorithm SHA256
+certutil -hashfile .\xlflow_windows_x86_64.zip SHA256
+```
+
+The reported SHA256 must match the entry for `xlflow_windows_x86_64.zip` in `checksums.txt`.
+This confirms file integrity against the published checksum file. It does not prove publisher identity and is not a substitute for Windows Authenticode signing.
+
+Verify the GitHub Actions provenance attestation with GitHub CLI:
+
+```powershell
+gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
+```
+
+This confirms the artifact attestation published for the release artifact. It does not mean the ZIP is Authenticode-signed by a Windows publisher certificate.
+Authenticode signing is a possible future hardening step, but it is not part of the current release process.
+
 Verify the installation:
 
 ```bash

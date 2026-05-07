@@ -123,6 +123,25 @@ Windows 向けの事前ビルド済みバイナリは次のページから取得
 > Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
 > Release binary には runtime PowerShell bridge script が埋め込まれているため、`xlflow.exe` 単体で workbook command を実行できます。
 
+ダウンロードした ZIP は、公開されている `checksums.txt` と照合して SHA256 を確認できます。
+
+```powershell
+Get-FileHash .\xlflow_windows_x86_64.zip -Algorithm SHA256
+certutil -hashfile .\xlflow_windows_x86_64.zip SHA256
+```
+
+表示された SHA256 が `checksums.txt` 内の `xlflow_windows_x86_64.zip` の値と一致することを確認してください。
+この確認で分かるのは、ダウンロードしたファイルが公開された checksum file と一致していることです。配布者の本人性を証明するものではなく、Windows の Authenticode signing の代替でもありません。
+
+GitHub CLI では、GitHub Actions provenance attestation も検証できます。
+
+```powershell
+gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
+```
+
+この検証で分かるのは、release artifact に対する GitHub artifact attestation が存在し、検証できることです。Windows の publisher certificate による Authenticode signing を意味するものではありません。
+Authenticode signing は将来の hardening 候補ですが、現在の release process には含めていません。
+
 インストール後、次のコマンドで確認できます。
 
 ```bash
