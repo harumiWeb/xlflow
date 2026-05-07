@@ -26,6 +26,48 @@ func TestPowerShellScriptsParse(t *testing.T) {
 	}
 }
 
+func TestCommonScriptRelativePathHelperWorksInWindowsPowerShell(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available")
+	}
+
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Get-XlflowRelativePath -BasePath 'C:\\repo\\src\\modules' -TargetPath 'C:\\repo\\src\\modules\\Domain\\Services\\Main.bas'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("relative path helper failed in Windows PowerShell: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "Domain\\Services\\Main.bas" {
+		t.Fatalf("relative path = %q, want %q", out, "Domain\\Services\\Main.bas")
+	}
+}
+
+func TestCommonScriptRelativePathHelperPreservesAbsoluteTargetAcrossDrives(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available")
+	}
+
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Get-XlflowRelativePath -BasePath 'C:\\repo\\src\\modules' -TargetPath 'D:\\shared\\Main.bas'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cross-drive relative path helper failed in Windows PowerShell: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "D:\\shared\\Main.bas" {
+		t.Fatalf("relative path = %q, want %q", out, "D:\\shared\\Main.bas")
+	}
+}
+
 func TestUIButtonIdAndNameNormalization(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -295,6 +337,22 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 	}
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
 		t.Fatalf("push.ps1 should preserve the non-session unchanged-disk log:\n%s", text)
+	}
+}
+
+func TestPullScriptClearsSourcesOnlyAfterWorkbookOpen(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "pull.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	openIdx := strings.Index(text, "Open-XlflowWorkbookForCommand")
+	clearIdx := strings.Index(text, "Clear-XlflowSourceComponentFiles")
+	if openIdx < 0 || clearIdx < 0 {
+		t.Fatalf("expected pull.ps1 to call workbook open and source cleanup:\n%s", text)
+	}
+	if clearIdx < openIdx {
+		t.Fatalf("pull.ps1 clears exported sources before opening the workbook, which can destroy the source tree on open failure:\n%s", text)
 	}
 }
 
@@ -848,6 +906,132 @@ func TestGetXlflowComponentPathMapsClassUserFormAndDocumentModules(t *testing.T)
 	}
 	if !strings.HasSuffix(normalizedDocumentPath, "workbook/ThisWorkbook.bas") {
 		t.Fatalf("expected document module path to end with workbook\\ThisWorkbook.bas: %q", lines[2])
+	}
+}
+
+func TestGetXlflowComponentPathUsesFolderAnnotation(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`. ./common.ps1
+$codeModule = New-Object PSObject -Property @{ CountOfLines = 2 }
+$scriptBlock = { param($start, $count) "'@Folder(""Domain.Services"")" + [Environment]::NewLine + 'Option Explicit' }
+$codeModule | Add-Member -MemberType ScriptMethod -Name Lines -Value $scriptBlock
+$component = [pscustomobject]@{ Name = 'StockService'; Type = 1; CodeModule = $codeModule }
+Get-XlflowComponentPath -Component $component -ModulesDir 'src/modules' -ClassesDir 'src/classes' -FormsDir 'src/forms' -WorkbookDir 'src/workbook'`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("component path mapping with folder annotation failed: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(strings.ReplaceAll(string(out), "\\", "/"))
+	if !strings.HasSuffix(got, "src/modules/Domain/Services/StockService.bas") {
+		t.Fatalf("expected nested path, got %q", got)
+	}
+}
+
+func TestCopyXlflowSourceForImportUpdatesFolderAnnotationFromPath(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  $sourceDir = Join-Path $root 'src\modules\Domain\Services'
+  $importPath = Join-Path $root 'import\StockService.bas'
+  New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
+  $sourcePath = Join-Path $sourceDir 'StockService.bas'
+  Set-XlflowUtf8Text -Path $sourcePath -Text (@('Attribute VB_Name = "StockService"', '''@Folder("Legacy")', 'Option Explicit') -join [Environment]::NewLine)
+  Copy-XlflowSourceForImport -SourcePath $sourcePath -DestinationPath $importPath -RootDir (Join-Path $root 'src\modules') -FolderAnnotationMode 'update'
+  Get-XlflowCp932Text -Path $importPath
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("folder annotation import update failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `'@Folder("Domain.Services")`) {
+		t.Fatalf("expected updated folder annotation, got %q", got)
+	}
+	if strings.Contains(got, `'@Folder("Legacy")`) {
+		t.Fatalf("expected legacy annotation to be replaced, got %q", got)
+	}
+}
+
+func TestGetXlflowFolderAnnotationForPathRejectsOutOfRootPaths(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+try {
+  Get-XlflowFolderAnnotationForPath -RootDir 'C:\repo\src\modules' -Path 'C:\repo\helpers\Util.bas'
+  throw 'expected out-of-root path to fail'
+} catch {
+  $_.Exception.Message
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("out-of-root folder annotation check failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "resolves outside root") {
+		t.Fatalf("expected out-of-root failure message, got %q", out)
+	}
+}
+
+func TestFindXlflowDuplicateModuleNamesDetectsRecursiveConflicts(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  $modulesDir = Join-Path $root 'src\modules'
+  New-Item -ItemType Directory -Force -Path (Join-Path $modulesDir 'Domain'), (Join-Path $modulesDir 'Infrastructure') | Out-Null
+  Set-XlflowUtf8Text -Path (Join-Path $modulesDir 'Domain\User.bas') -Text 'Attribute VB_Name = "User"'
+  Set-XlflowUtf8Text -Path (Join-Path $modulesDir 'Infrastructure\User.bas') -Text 'Attribute VB_Name = "User"'
+  $files = Get-XlflowSourceComponentFiles -ModulesDir $modulesDir -ClassesDir '' -FormsDir '' -WorkbookDir ''
+  Find-XlflowDuplicateModuleNames -Files $files | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("duplicate detection failed: %v\n%s", err, out)
+	}
+	type duplicateResult struct {
+		ModuleName string   `json:"module_name"`
+		Paths      []string `json:"paths"`
+	}
+	var got []duplicateResult
+	if err := json.Unmarshal(out, &got); err != nil {
+		var single duplicateResult
+		if singleErr := json.Unmarshal(out, &single); singleErr != nil {
+			t.Fatalf("failed to parse duplicate detection output: %v\n%s", err, out)
+		}
+		got = []duplicateResult{single}
+	}
+	if len(got) != 1 || got[0].ModuleName != "User" || len(got[0].Paths) != 2 {
+		t.Fatalf("unexpected duplicate detection result: %+v", got)
 	}
 }
 

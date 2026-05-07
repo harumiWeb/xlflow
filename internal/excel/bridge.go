@@ -168,16 +168,7 @@ func (r Runner) Pull(cfg config.Config, opts ...CommandOptions) (output.Envelope
 }
 
 func (r Runner) PullWithOptions(cfg config.Config, opts SessionCommandOptions) (output.Envelope, int, error) {
-	return r.run("pull", map[string]string{
-		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
-		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
-		"ClassesDir":   filepath.Join(r.RootDir, cfg.Src.Classes),
-		"FormsDir":     filepath.Join(r.RootDir, cfg.Src.Forms),
-		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"UseSession":   strconv.FormatBool(opts.Session),
-		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
-	}, opts.Keepalive)
+	return r.run("pull", buildPullScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
 }
 
 func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -199,20 +190,39 @@ func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Env
 		changedOnly = true
 	}
 	return r.run("push", map[string]string{
-		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
-		"ModulesDir":   filepath.Join(r.RootDir, cfg.Src.Modules),
-		"ClassesDir":   filepath.Join(r.RootDir, cfg.Src.Classes),
-		"FormsDir":     filepath.Join(r.RootDir, cfg.Src.Forms),
-		"WorkbookDir":  filepath.Join(r.RootDir, cfg.Src.Workbook),
-		"BackupRoot":   filepath.Join(r.RootDir, ".xlflow", "backups"),
-		"StatePath":    filepath.Join(r.RootDir, ".xlflow", "state", "push.json"),
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"BackupMode":   backupMode,
-		"ChangedOnly":  strconv.FormatBool(changedOnly),
-		"UseSession":   strconv.FormatBool(opts.Session),
-		"NoSave":       strconv.FormatBool(opts.NoSave),
-		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"WorkbookPath":            workbookPath(r.RootDir, cfg.Excel.Path),
+		"ModulesDir":              filepath.Join(r.RootDir, cfg.Src.Modules),
+		"ClassesDir":              filepath.Join(r.RootDir, cfg.Src.Classes),
+		"FormsDir":                filepath.Join(r.RootDir, cfg.Src.Forms),
+		"WorkbookDir":             filepath.Join(r.RootDir, cfg.Src.Workbook),
+		"BackupRoot":              filepath.Join(r.RootDir, ".xlflow", "backups"),
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
+		"StatePath":               filepath.Join(r.RootDir, ".xlflow", "state", "push.json"),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"BackupMode":              backupMode,
+		"ChangedOnly":             strconv.FormatBool(changedOnly),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"NoSave":                  strconv.FormatBool(opts.NoSave),
+		"MetadataPath":            filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
+}
+
+func buildPullScriptArgs(root string, cfg config.Config, opts SessionCommandOptions) map[string]string {
+	return map[string]string{
+		"WorkbookPath":            workbookPath(root, cfg.Excel.Path),
+		"ModulesDir":              filepath.Join(root, cfg.Src.Modules),
+		"ClassesDir":              filepath.Join(root, cfg.Src.Classes),
+		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
+		"WorkbookDir":             filepath.Join(root, cfg.Src.Workbook),
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+	}
 }
 
 func (r Runner) TraceInject(cfg config.Config, workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -624,7 +634,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name":
 		return output.ExitValidation
 	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid":
 		return output.ExitConfig

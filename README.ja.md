@@ -205,6 +205,7 @@ xlflow pull --json
 ```
 
 エクスポートされた `.bas` / `.cls` / `.frm` は `src/` 配下に出力されます。
+folder mode が有効な場合、各 source root 配下のネストしたディレクトリは `push` 時に Rubberduck 互換の `@Folder(...)` annotation へマッピングされます。
 通常のエディタや AI エージェントで編集できます。
 
 ### 4. 編集したソースを workbook に反映する
@@ -707,6 +708,11 @@ modules = "src/modules"
 classes = "src/classes"
 forms = "src/forms"
 workbook = "src/workbook"
+
+[vba]
+folders = true
+folder_annotation = "update"
+default_component_folders = true
 
 [lint]
 require_option_explicit = true

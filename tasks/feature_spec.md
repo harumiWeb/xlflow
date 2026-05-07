@@ -1,3 +1,41 @@
+# xlflow Folder Structure Spec
+
+## Goal
+
+Support Rubberduck-compatible `@Folder(...)` annotations and nested source directories while preserving the existing type-specific `[src]` roots.
+
+## Config Contract
+
+```toml
+[vba]
+folders = true
+folder_annotation = "update"
+default_component_folders = true
+```
+
+- `folders`: enables folder-aware pull/push behavior.
+- `folder_annotation`: one of `update`, `preserve`, `ignore`.
+- `default_component_folders`: reserved compatibility flag; current typed `[src]` defaults remain the effective fallback roots when no annotation/path nesting exists.
+
+## Behavior
+
+- `pull` exports modules recursively under the configured root for each component type.
+- When a valid `@Folder("Domain.Services")` annotation exists near the top of a component, `pull` writes the file under `.../Domain/Services/<Component>.<ext>`.
+- Invalid or malformed annotations are ignored for path resolution.
+- `pull` clears stale exported `.bas`, `.cls`, `.frm`, and `.frx` files under the configured source roots before re-export.
+- `push` treats filesystem location as authoritative and rewrites folder annotations in temporary import copies when `folder_annotation = "update"`.
+- `push` preserves annotations as-is when `folder_annotation = "preserve"` and does not read/write them when `folder_annotation = "ignore"`.
+- UserForm `.frm` and `.frx` companions must remain siblings after nested moves.
+- Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
+
+## Verification
+
+- Config defaults and validation for `[vba]`.
+- Recursive source fingerprint coverage.
+- Annotation-aware component path resolution.
+- Temporary import annotation rewrite from path.
+- Recursive duplicate detection before Excel import.
+
 # xlflow Performance Mode Spec
 
 ## Goal

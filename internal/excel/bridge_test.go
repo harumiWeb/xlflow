@@ -333,6 +333,25 @@ func TestMacroNotFoundIsValidationFailure(t *testing.T) {
 	}
 }
 
+func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "duplicate_module_name", Message: "duplicate"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(duplicate_module_name) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildPullScriptArgs(root, cfg, SessionCommandOptions{})
+	if args["Folders"] != "true" || args["FolderAnnotation"] != "update" || args["DefaultComponentFolders"] != "true" {
+		t.Fatalf("unexpected folder config args: %+v", args)
+	}
+}
+
 func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
