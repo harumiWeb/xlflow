@@ -12,7 +12,11 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+<div align="center">
+
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
+
+</div>
 
 # :surfing_man: xlflow
 
@@ -130,7 +134,8 @@ certutil -hashfile .\xlflow_windows_x86_64.zip SHA256
 ```
 
 The reported SHA256 must match the entry for `xlflow_windows_x86_64.zip` in `checksums.txt`.
-This confirms file integrity against the published checksum file. It does not prove publisher identity and is not a substitute for Windows Authenticode signing.
+
+> This confirms file integrity against the published checksum file. It does not prove publisher identity and is not a substitute for Windows Authenticode signing.
 
 Verify the GitHub Actions provenance attestation with GitHub CLI:
 
@@ -138,8 +143,7 @@ Verify the GitHub Actions provenance attestation with GitHub CLI:
 gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
 ```
 
-This confirms the artifact attestation published for the release artifact. It does not mean the ZIP is Authenticode-signed by a Windows publisher certificate.
-Authenticode signing is a possible future hardening step, but it is not part of the current release process.
+> This confirms the artifact attestation published for the release artifact. It does not mean the ZIP is Authenticode-signed by a Windows publisher certificate.
 
 Verify the installation:
 
