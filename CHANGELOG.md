@@ -2,6 +2,12 @@
 
 All notable changes to xlflow will be documented in this file.
 
+## v0.5.0
+
+- Added richer sample VBA projects, including the `world-news` NewsAPI example and the `stock-price` dashboard example, plus accompanying screenshots and README updates.
+- Improved runtime error handling and diagnostics so CLI runs surface failures more clearly across the Go and PowerShell execution bridge.
+- Refined release documentation and sample project metadata with formatting fixes and README polish, including Japanese README badge updates.
+
 ## v0.4.0
 
 - Added `xlflow inspect` with workbook, sheet, range, used-range, and cell inspection for saved workbook snapshots.
