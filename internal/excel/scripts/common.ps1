@@ -112,7 +112,11 @@ function Get-XlflowRelativePath {
   $baseUri = New-Object System.Uri($baseFullPath)
   $targetUri = New-Object System.Uri($targetFullPath)
   $relativeUri = $baseUri.MakeRelativeUri($targetUri)
-  $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString()).Replace("/", "\")
+  $relativeUriText = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+  if ($relativeUri.IsAbsoluteUri -or $relativeUriText -match '^[A-Za-z]+:') {
+    return $targetFullPath
+  }
+  $relativePath = $relativeUriText.Replace("/", "\")
 
   if ([string]::IsNullOrWhiteSpace($relativePath)) {
     return "."
@@ -1405,6 +1409,9 @@ function Get-XlflowRelativePathSegments {
 
   $segments = New-Object System.Collections.Generic.List[string]
   foreach ($part in ($relativeDir -split '[\\/]')) {
+    if ($part -eq "..") {
+      throw "path '$Path' resolves outside root '$RootDir' (relative: '$relativeDir')"
+    }
     $segment = ConvertTo-XlflowFolderPathSegment -Segment $part
     if ([string]::IsNullOrWhiteSpace($segment)) {
       continue
@@ -1845,6 +1852,7 @@ function Find-XlflowDuplicateModuleNames {
   param($Files)
 
   $seen = @{}
+  $originalNames = @{}
   foreach ($file in @($Files)) {
     if ($file.extension -eq ".frx") {
       continue
@@ -1852,6 +1860,7 @@ function Find-XlflowDuplicateModuleNames {
     $key = ([string]$file.module_name).ToLowerInvariant()
     if (-not $seen.ContainsKey($key)) {
       $seen[$key] = New-Object System.Collections.Generic.List[string]
+      $originalNames[$key] = [string]$file.module_name
     }
     $seen[$key].Add([string]$file.relative_path)
   }
@@ -1862,7 +1871,7 @@ function Find-XlflowDuplicateModuleNames {
       continue
     }
     $duplicates.Add([pscustomobject][ordered]@{
-      module_name = $key
+      module_name = [string]$originalNames[$key]
       paths = @($seen[$key].ToArray())
     })
   }

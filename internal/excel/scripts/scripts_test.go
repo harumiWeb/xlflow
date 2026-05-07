@@ -47,6 +47,27 @@ func TestCommonScriptRelativePathHelperWorksInWindowsPowerShell(t *testing.T) {
 	}
 }
 
+func TestCommonScriptRelativePathHelperPreservesAbsoluteTargetAcrossDrives(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available")
+	}
+
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; Get-XlflowRelativePath -BasePath 'C:\\repo\\src\\modules' -TargetPath 'D:\\shared\\Main.bas'",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cross-drive relative path helper failed in Windows PowerShell: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "D:\\shared\\Main.bas" {
+		t.Fatalf("relative path = %q, want %q", out, "D:\\shared\\Main.bas")
+	}
+}
+
 func TestUIButtonIdAndNameNormalization(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -947,6 +968,30 @@ try {
 	}
 }
 
+func TestGetXlflowFolderAnnotationForPathRejectsOutOfRootPaths(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+try {
+  Get-XlflowFolderAnnotationForPath -RootDir 'C:\repo\src\modules' -Path 'C:\repo\helpers\Util.bas'
+  throw 'expected out-of-root path to fail'
+} catch {
+  $_.Exception.Message
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("out-of-root folder annotation check failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "resolves outside root") {
+		t.Fatalf("expected out-of-root failure message, got %q", out)
+	}
+}
+
 func TestFindXlflowDuplicateModuleNamesDetectsRecursiveConflicts(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -985,7 +1030,7 @@ try {
 		}
 		got = []duplicateResult{single}
 	}
-	if len(got) != 1 || got[0].ModuleName != "user" || len(got[0].Paths) != 2 {
+	if len(got) != 1 || got[0].ModuleName != "User" || len(got[0].Paths) != 2 {
 		t.Fatalf("unexpected duplicate detection result: %+v", got)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -347,16 +346,7 @@ func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
 func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
-	args := map[string]string{
-		"WorkbookPath":            filepath.Join(root, "build", "Book.xlsm"),
-		"ModulesDir":              filepath.Join(root, "src", "modules"),
-		"ClassesDir":              filepath.Join(root, "src", "classes"),
-		"FormsDir":                filepath.Join(root, "src", "forms"),
-		"WorkbookDir":             filepath.Join(root, "src", "workbook"),
-		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
-		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
-		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
-	}
+	args := buildPullScriptArgs(root, cfg, SessionCommandOptions{})
 	if args["Folders"] != "true" || args["FolderAnnotation"] != "update" || args["DefaultComponentFolders"] != "true" {
 		t.Fatalf("unexpected folder config args: %+v", args)
 	}
