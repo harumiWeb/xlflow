@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,6 +37,9 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Set up Syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -43,3 +49,47 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
+
+      - name: Discover release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          checksum_path="dist/checksums.txt"
+          archive_path="$(find dist -maxdepth 1 -type f -name '*.zip' | sort | head -n 1)"
+          sbom_path="$(find dist -maxdepth 1 -type f -name '*.sbom.json' | sort | head -n 1)"
+
+          if [[ ! -f "$checksum_path" ]]; then
+            echo "missing checksums.txt" >&2
+            exit 1
+          fi
+
+          if [[ -z "$archive_path" ]]; then
+            echo "missing release archive" >&2
+            exit 1
+          fi
+
+          if [[ -z "$sbom_path" ]]; then
+            echo "missing SBOM artifact" >&2
+            exit 1
+          fi
+
+          echo "checksum_path=$checksum_path" >> "$GITHUB_OUTPUT"
+          echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
+          echo "sbom_path=$sbom_path" >> "$GITHUB_OUTPUT"
+
+      - name: Attest release archives
+        uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ steps.artifacts.outputs.checksum_path }}
+
+      - name: Attest checksums file
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.artifacts.outputs.checksum_path }}
+
+      - name: Attest SBOM artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.artifacts.outputs.sbom_path }}

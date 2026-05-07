@@ -86,3 +86,23 @@ Tighten the normal session workflow so agents can discover the active session au
 - Verbose version output may include `version.executable_path`, `version.go_version`, `version.module_path`, `version.build_settings`, `version.scripts`, and `version.features`.
 - Workbook-backed commands may include `workbook.session_mode = explicit|auto|managed|none`, plus `workbook.session_requested`, `workbook.auto_session`, and `workbook.needs_save`.
 - `session status` may include top-level `session.dirty` and `session.needs_save`.
+
+# Release Artifact Trust Hardening Spec
+
+## Goal
+
+Strengthen trust signals for GitHub Release artifacts without changing the current Windows-first packaging model.
+
+## Release Contract
+
+- GitHub Releases continue to publish `xlflow_windows_x86_64.zip`.
+- Releases publish a stable top-level checksum file named `checksums.txt`.
+- `checksums.txt` uses SHA256.
+- Releases publish SBOM files generated from archive artifacts.
+- Release workflow publishes GitHub artifact attestations for release archives, `checksums.txt`, and generated SBOM artifacts.
+
+## User Verification Contract
+
+- Integrity verification: compare the ZIP SHA256 against `checksums.txt`.
+- Provenance verification: run `gh attestation verify <zip> --repo harumiWeb/xlflow`.
+- Non-claim: neither verification step is documented as proof of Windows publisher identity or Authenticode signing.

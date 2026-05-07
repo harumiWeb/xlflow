@@ -52,3 +52,29 @@
 - [ ] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
 - [ ] Update the bundled skill for auto session reuse and `run` macro omission fallback.
 - [ ] Add focused Go and PowerShell regression coverage.
+
+# Release Artifact Trust Hardening Todo
+
+- [x] Add `checksum.algorithm: sha256` to `.goreleaser.yaml` while keeping `checksums.txt` stable.
+- [x] Enable GoReleaser SBOM generation for archive artifacts.
+- [x] Extend `release.yml` permissions for artifact attestation.
+- [x] Install Syft in the release workflow before GoReleaser runs.
+- [x] Attest release archives via `dist/checksums.txt`.
+- [x] Attest `dist/checksums.txt` itself.
+- [x] Attest generated SBOM artifacts.
+- [x] Document SHA256 verification in `README.md`.
+- [x] Document SHA256 verification in `README.ja.md`.
+- [x] Document attestation verification and the Authenticode non-claim in both READMEs.
+- [x] Run `goreleaser check`.
+- [x] Run `goreleaser release --snapshot --clean --skip=publish`.
+- [x] Run `go test ./...`.
+- [x] Validate workflow syntax with `actionlint` if available.
+
+## Verification Notes
+
+- `goreleaser check` passed.
+- `actionlint .github/workflows/release.yml` passed.
+- `go test ./...` passed.
+- `goreleaser release --snapshot --clean --skip=publish` passed after installing a working `syft` binary.
+- Snapshot artifacts included `dist/checksums.txt`, `dist/xlflow_windows_x86_64.zip`, and `dist/xlflow_windows_x86_64.zip.sbom.json`.
+- `dist/checksums.txt` contained SHA256 entries for both the release ZIP and the generated SBOM file.

@@ -37,6 +37,12 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - id: archives
+    artifacts: archive
+    disable: false
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

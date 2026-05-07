@@ -12,7 +12,11 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+<div align="center">
+
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
+
+</div>
 
 # :surfing_man: xlflow
 
@@ -122,6 +126,25 @@ Windows 向けの事前ビルド済みバイナリは次のページから取得
 > 現在の事前ビルド配布は **Windows 向けのみ** です。
 > Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
 > Release binary には runtime PowerShell bridge script が埋め込まれているため、`xlflow.exe` 単体で workbook command を実行できます。
+
+ダウンロードした ZIP は、公開されている `checksums.txt` と照合して SHA256 を確認できます。
+
+```powershell
+Get-FileHash .\xlflow_windows_x86_64.zip -Algorithm SHA256
+certutil -hashfile .\xlflow_windows_x86_64.zip SHA256
+```
+
+表示された SHA256 が `checksums.txt` 内の `xlflow_windows_x86_64.zip` の値と一致することを確認してください。
+
+> この確認で分かるのは、ダウンロードしたファイルが公開された checksum file と一致していることです。配布者の本人性を証明するものではなく、Windows の Authenticode signing の代替でもありません。
+
+GitHub CLI では、GitHub Actions provenance attestation も検証できます。
+
+```powershell
+gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
+```
+
+> この検証で分かるのは、release artifact に対する GitHub artifact attestation が存在し、検証できることです。Windows の publisher certificate による Authenticode signing を意味するものではありません。
 
 インストール後、次のコマンドで確認できます。
 
