@@ -76,6 +76,7 @@ Repository tooling and guidance should direct contributors toward the same quali
 - use the repo-local `xlflow-tmp-workspace-e2e` skill for real workbook validation
 - keep `tasks/lessons.md` in sync with new Excel/VBIDE failure patterns
 - provide one obvious command or short sequence for local post-change verification
+- treat Windows + Excel real-workbook E2E as a manual release gate for Excel COM changes, not as a normal CI substitute
 
 ## Non-Goals
 
@@ -90,6 +91,7 @@ Repository tooling and guidance should direct contributors toward the same quali
 - updated docs/specs where behavior is clarified
 - contributor-facing verification guidance or wrapper commands
 - repeatable manual verification evidence using `tmp_workspaces`
+- release-preflight guidance that points agents and humans at the same `xlflow-tmp-workspace-e2e` workflow
 
 ## Exit Criteria
 

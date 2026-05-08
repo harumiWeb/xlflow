@@ -114,6 +114,26 @@ task verify:security
 
 Excel COM E2E verification should be done on Windows with Microsoft Excel installed and **Trust access to the VBA project object model** enabled.
 
+## Release preflight
+
+Before a release that touches workbook automation, VBA import/export, run/test behavior, session handling, or other Excel COM paths, do not rely on CI alone.
+
+Run the repo-local `xlflow-tmp-workspace-e2e` skill against fresh `tmp_workspaces` and verify at least:
+
+- blank workbook scaffold: `new`, `doctor`, `pull`, `lint`
+- standard module round-trip: `push`, `run`, workbook-state verification, `pull`, `lint`
+- class module round-trip
+- UserForm round-trip including `.frm` and `.frx`
+- `init` from an existing workbook
+
+If the release changes session behavior, also verify the session loop:
+
+- `session start`
+- `push --fast --session --no-save`
+- `run --session` and/or `test --session`
+- `save --session`
+- `session stop`
+
 ## Pull request guidelines
 
 Pull requests are welcome.
