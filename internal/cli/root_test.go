@@ -740,6 +740,60 @@ func TestInitCommandSilentlySkipsFailedUpdateCheck(t *testing.T) {
 	}
 }
 
+func TestInitCommandSkipsUpdateCheckWithFlag(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook, "--no-update-check"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if strings.Contains(stdout.String(), "Update available:") {
+		t.Fatalf("interactive init output should skip update notice when --no-update-check is set:\n%s", stdout.String())
+	}
+}
+
+func TestInitCommandSkipsUpdateCheckWithEnv(t *testing.T) {
+	t.Setenv(noUpdateCheckEnvVar, "1")
+
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if strings.Contains(stdout.String(), "Update available:") {
+		t.Fatalf("interactive init output should skip update notice when %s is set:\n%s", noUpdateCheckEnvVar, stdout.String())
+	}
+}
+
 func TestSkillInstallCommandRefusesOverwriteUnlessForced(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cwd: dir}

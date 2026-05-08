@@ -55,13 +55,19 @@
 
 # xlflow Session-Aware Defaults Todo
 
-- [ ] Add `version --verbose` payload and human output.
-- [ ] Auto-reuse matching sessions for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`.
-- [ ] Promote unsaved live-session state to structured `needs_save` metadata and stronger human output.
-- [ ] Report dirty/save-required state from `session status`.
-- [ ] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
-- [ ] Update the bundled skill for auto session reuse and `run` macro omission fallback.
-- [ ] Add focused Go and PowerShell regression coverage.
+- [x] Add `version --verbose` payload and human output.
+- [x] Auto-reuse matching sessions for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`.
+- [x] Promote unsaved live-session state to structured `needs_save` metadata and stronger human output.
+- [x] Report dirty/save-required state from `session status`.
+- [x] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
+- [x] Update the bundled skill for auto session reuse and `run` macro omission fallback.
+- [x] Add focused Go and PowerShell regression coverage.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestVersionCommandVerboseIncludesExecutableAndFeatures|TestWriteWithOptionsRendersVersionVerboseDetails|TestWriteWithOptionsRendersSessionOnlyPushResult|TestWriteWithOptionsRendersSessionStatusSaveRequirement|TestBuildRunOptions|TestBuildPushOptions|TestRootCommandIncludesSessionFlagsForWorkbookReaders|TestTraceScriptArgsPassSessionFlag|TestBuildRunScriptArgsPassesFastDirectAndSession"` passed.
+- Auto-reuse is implemented in `internal/excel/scripts/common.ps1` via `Open-XlflowWorkbookForCommand`, `Test-XlflowSessionMetadataMatchesWorkbook`, and session-mode result metadata.
+- Human output and JSON now distinguish `session_mode=explicit|auto|managed|none` and surface `workbook.needs_save`, `workbook.dirty`, `session.needs_save`, and `session.dirty`.
 
 # Release Artifact Trust Hardening Todo
 

@@ -103,3 +103,30 @@ func TestGitHubReleaseCheckerRejectsUnexpectedStatus(t *testing.T) {
 		t.Fatal("LatestRelease() error = nil, want non-nil")
 	}
 }
+
+func TestShouldSkipScaffoldUpdateCheck(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv(noUpdateCheckEnvVar, "")
+		if shouldSkipScaffoldUpdateCheck() {
+			t.Fatal("shouldSkipScaffoldUpdateCheck() = true, want false")
+		}
+	})
+
+	for _, raw := range []string{"1", "true", "TRUE", "yes", "on"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(noUpdateCheckEnvVar, raw)
+			if !shouldSkipScaffoldUpdateCheck() {
+				t.Fatalf("shouldSkipScaffoldUpdateCheck() = false for %q, want true", raw)
+			}
+		})
+	}
+
+	for _, raw := range []string{"0", "false", "FALSE", "no", "off", "   "} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(noUpdateCheckEnvVar, raw)
+			if shouldSkipScaffoldUpdateCheck() {
+				t.Fatalf("shouldSkipScaffoldUpdateCheck() = true for %q, want false", raw)
+			}
+		})
+	}
+}

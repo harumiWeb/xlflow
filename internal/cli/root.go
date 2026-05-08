@@ -512,6 +512,7 @@ func normalizeUIButtonID(value string) string {
 func (a *app) newCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
+	var noUpdateCheck bool
 	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
@@ -519,7 +520,7 @@ func (a *app) newCommand() *cobra.Command {
 		Short: "Create a new xlflow project and macro workbook",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := a.writeScaffoldWelcome("new"); err != nil {
+			if err := a.writeScaffoldWelcome("new", noUpdateCheck); err != nil {
 				return output.WithExitCode(output.ExitEnvironment, err)
 			}
 			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
@@ -584,6 +585,7 @@ func (a *app) newCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
+	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -591,13 +593,14 @@ func (a *app) newCommand() *cobra.Command {
 func (a *app) initCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
+	var noUpdateCheck bool
 
 	cmd := &cobra.Command{
 		Use:   "init <workbook>",
 		Short: "Create an xlflow project from an existing macro workbook",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := a.writeScaffoldWelcome("init"); err != nil {
+			if err := a.writeScaffoldWelcome("init", noUpdateCheck); err != nil {
 				return output.WithExitCode(output.ExitEnvironment, err)
 			}
 			var skillOpts agentskill.InstallOptions
@@ -633,6 +636,7 @@ func (a *app) initCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
+	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
 	return cmd
 }
 
@@ -2128,12 +2132,12 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 	return cfg, nil
 }
 
-func (a *app) writeScaffoldWelcome(command string) error {
+func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
 	opts := a.outputOptions()
 	if !shouldRenderScaffoldWelcome(command, opts) {
 		return nil
 	}
-	_, err := fmt.Fprint(a.stdoutWriter(), renderScaffoldWelcome(a.scaffoldWelcomeModel(), opts.Color))
+	_, err := fmt.Fprint(a.stdoutWriter(), renderScaffoldWelcome(a.scaffoldWelcomeModel(skipUpdateCheck), opts.Color))
 	return err
 }
 

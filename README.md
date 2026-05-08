@@ -108,6 +108,8 @@ pull → edit → push → lint → test/run → trace → diff
 go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
+`go install` may contact the Go module mirror and checksum database configured in your Go environment. For direct source checkout development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth; the repository CI and release workflows resolve Go from that file.
+
 ### Scoop
 
 ```powershell
@@ -187,6 +189,8 @@ Install the AI agent Skill during project creation:
 ```bash
 xlflow new Book.xlsm --with-skill --agent codex
 ```
+
+Interactive `xlflow new` and `xlflow init` render a welcome banner and may check the latest GitHub Release through the GitHub Releases API. Disable that request for one invocation with `--no-update-check`, or set `XLFLOW_NO_UPDATE_CHECK=1` to disable it for interactive scaffolding in your environment.
 
 ### 2. Check the Excel automation environment
 
@@ -338,6 +342,7 @@ xlflow new Sales.xlsm
 When no argument is provided, xlflow creates `build/Book.xlsm`.
 When the name has no extension, `.xlsm` is appended.
 `new` creates a macro-enabled workbook, so extensions other than `.xlsm` are rejected.
+Pass `--no-update-check` when you want to skip the interactive GitHub Release lookup during scaffolding.
 
 `new` creates the project structure, including `xlflow.toml`, `src/`, `tests/`, `build/`, and `.xlflow/`.
 It also creates or updates `.gitignore` to ignore Excel temporary files and xlflow-generated artifacts.
@@ -351,6 +356,7 @@ xlflow init Book.xlsm
 ```
 
 The given workbook is copied under `build/`, and its project-local path is recorded in `[excel].path` in `xlflow.toml`.
+Pass `--no-update-check` when you want to skip the interactive GitHub Release lookup during scaffolding.
 
 ### `xlflow doctor`
 
@@ -387,7 +393,7 @@ xlflow pull --json
 ```
 
 It exports standard modules, class modules, UserForms, and document modules such as Workbook and Worksheet modules into `src/`.
-Use `xlflow pull --session --json` when an xlflow session is already open.
+Use `xlflow pull --session --json` when you want to require the recorded session workbook explicitly. If `.xlflow/session.json` already points at the configured workbook, plain `xlflow pull --json` auto-reuses that matching live workbook.
 
 ### `xlflow push`
 
@@ -422,7 +428,7 @@ xlflow macros --json
 
 > [!TIP]
 > AI agents and automation scripts should run this command before guessing a macro name. Use the returned `qualified_name` with `xlflow run` to avoid entrypoint mistakes.
-> During session-based development, use `xlflow macros --session --json`.
+> During session-based development, `xlflow macros --json` already auto-reuses a matching recorded session workbook; add `--session` when you want that requirement to be explicit.
 
 ### `xlflow run`
 
@@ -480,7 +486,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-Session mode is explicit. Normal `push` and `run` still open and close Excel for one isolated operation.
+`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
 xlflow now warns more aggressively about this unsaved session state, but `xlflow save --session` remains the canonical persistence step before `session stop`.

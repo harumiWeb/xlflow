@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 const (
 	gitHubLatestReleaseURL = "https://api.github.com/repos/harumiWeb/xlflow/releases/latest"
 	updateCheckTimeout     = 3 * time.Second
+	noUpdateCheckEnvVar    = "XLFLOW_NO_UPDATE_CHECK"
 )
 
 type releaseChecker interface {
@@ -49,11 +51,11 @@ func newGitHubReleaseChecker(client *http.Client) gitHubReleaseChecker {
 	}
 }
 
-func (a *app) scaffoldWelcomeModel() scaffoldWelcomeModel {
+func (a *app) scaffoldWelcomeModel(skipUpdateCheck bool) scaffoldWelcomeModel {
 	model := scaffoldWelcomeModel{
 		Version: a.buildInfo.Version,
 	}
-	if a.updateChecker == nil {
+	if skipUpdateCheck || shouldSkipScaffoldUpdateCheck() || a.updateChecker == nil {
 		return model
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
@@ -64,6 +66,20 @@ func (a *app) scaffoldWelcomeModel() scaffoldWelcomeModel {
 	}
 	model.UpdateVersion = update.LatestVersion
 	return model
+}
+
+func shouldSkipScaffoldUpdateCheck() bool {
+	value, ok := os.LookupEnv(noUpdateCheckEnvVar)
+	if !ok {
+		return false
+	}
+	value = strings.TrimSpace(strings.ToLower(value))
+	switch value {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func checkForUpdate(ctx context.Context, checker releaseChecker, currentVersion string) (scaffoldUpdateInfo, error) {

@@ -84,6 +84,10 @@ Install locally:
 go install ./cmd/xlflow
 ```
 
+For development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth. Repository CI and release workflows resolve Go from that file rather than duplicating a version string elsewhere.
+
+`go install` may contact the Go module mirror and checksum database configured in your Go environment. Interactive `xlflow new` and `xlflow init` may also query the latest GitHub Release to render an update notice in the scaffold welcome banner; use `--no-update-check` or `XLFLOW_NO_UPDATE_CHECK=1` when you need to suppress that network call.
+
 Repository linting uses `golangci-lint` and `PSScriptAnalyzer`. Ensure `Invoke-ScriptAnalyzer` is available in your PowerShell environment before running the lint task or pre-commit hook.
 
 ```bash
