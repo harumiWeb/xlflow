@@ -974,6 +974,9 @@ func TestInspectRangeCommandIncludesStyleMetadataInJSONEnvelope(t *testing.T) {
 	if _, ok := rangeMap["columns"].([]any); !ok {
 		t.Fatalf("columns payload missing from include-style output: %s", stdout.String())
 	}
+	if _, ok := rangeMap["merged_ranges"].([]any); !ok {
+		t.Fatalf("merged_ranges payload missing from include-style output: %s", stdout.String())
+	}
 }
 
 func TestInspectRangeCommandWritesMarkdown(t *testing.T) {

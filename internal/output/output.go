@@ -956,7 +956,7 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 		b.WriteString(markdownSheetTable(listOfObjects(workbook["sheets"])))
 		return b.String()
 	case "sheets":
-		return markdownSheetTable(listOfObjects(payload["sheets"]))
+		return renderInspectTargetInfoMarkdown(payload) + markdownSheetTable(listOfObjects(payload["sheets"]))
 	case "range", "used-range":
 		snapshot := objectMap(payload["range"])
 		if len(snapshot) == 0 {
@@ -985,6 +985,9 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 			b.WriteString("Returned range: ")
 			b.WriteString(value)
 			b.WriteString("\n")
+		}
+		if boolValue(snapshot, "style_included") {
+			b.WriteString("Style: included\n")
 		}
 		for _, warning := range stringList(snapshot["warnings"]) {
 			b.WriteString("\n> ")
@@ -1029,6 +1032,9 @@ func renderInspectTargetInfo(payload map[string]any) string {
 		}
 		b.WriteString(kv("Snapshot", label))
 	}
+	if path := stringValue(info, "path"); path != "" {
+		b.WriteString(kv("Path", path))
+	}
 	if note := stringValue(info, "note"); note != "" {
 		b.WriteString(kv("Note", note))
 	}
@@ -1048,6 +1054,11 @@ func renderInspectTargetInfoMarkdown(payload map[string]any) string {
 		}
 		b.WriteString("Snapshot: ")
 		b.WriteString(label)
+		b.WriteString("\n")
+	}
+	if path := stringValue(info, "path"); path != "" {
+		b.WriteString("Path: ")
+		b.WriteString(path)
 		b.WriteString("\n")
 	}
 	if note := stringValue(info, "note"); note != "" {

@@ -295,7 +295,7 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Snapshot", "saved workbook file", "Style", "included"} {
+	for _, want := range []string{"Snapshot", "saved workbook file", "Style:         included"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inspect output missing %q:\n%s", want, got)
 		}
