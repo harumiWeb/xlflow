@@ -1279,10 +1279,11 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			env := output.New("inspect")
 			env.Inspect = workbookinspect.Payload{
-				Target:   "workbook",
-				Format:   format,
-				Source:   "file",
-				Workbook: &workbook,
+				Target:     "workbook",
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbook.Path),
+				Format:     format,
+				Source:     "file",
+				Workbook:   &workbook,
 			}
 			env.Logs = []string{fmt.Sprintf("inspected workbook %s", workbook.Path)}
 			return a.write(env, output.ExitSuccess)
@@ -1310,10 +1311,11 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			env := output.New("inspect")
 			env.Inspect = workbookinspect.Payload{
-				Target: "sheets",
-				Format: format,
-				Source: "file",
-				Sheets: sheets,
+				Target:     "sheets",
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookArgPath(a.cwd, cfg.Excel.Path)),
+				Format:     format,
+				Source:     "file",
+				Sheets:     sheets,
 			}
 			env.Logs = []string{fmt.Sprintf("inspected %d worksheet(s)", len(sheets))}
 			return a.write(env, output.ExitSuccess)
@@ -1326,6 +1328,7 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	var address string
 	var maxRows int
 	var maxCols int
+	var includeStyle bool
 	cmd := &cobra.Command{
 		Use:   "range [<sheet!A1:B2>]",
 		Short: "Inspect a worksheet range",
@@ -1347,16 +1350,21 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			snapshot, err := workbookinspect.Range(workbookArgPath(a.cwd, cfg.Excel.Path), selector.Sheet, selector.Address, limits)
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			snapshot, err := workbookinspect.Range(workbookPath, selector.Sheet, selector.Address, workbookinspect.RangeOptions{
+				Limits:       limits,
+				IncludeStyle: includeStyle,
+			})
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
 			env.Inspect = workbookinspect.Payload{
-				Target: "range",
-				Format: format,
-				Source: "file",
-				Range:  &snapshot,
+				Target:     "range",
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
+				Format:     format,
+				Source:     "file",
+				Range:      &snapshot,
 			}
 			env.Logs = []string{fmt.Sprintf("inspected range %s!%s", selector.Sheet, snapshot.Range)}
 			return a.write(env, output.ExitSuccess)
@@ -1366,6 +1374,7 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().StringVar(&address, "address", "", "range address such as A1:F20")
 	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
+	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	return cmd
 }
 
@@ -1373,6 +1382,7 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	var sheet string
 	var maxRows int
 	var maxCols int
+	var includeStyle bool
 	cmd := &cobra.Command{
 		Use:   "used-range [<sheet>]",
 		Short: "Inspect the lightweight used range for a worksheet",
@@ -1394,16 +1404,21 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			snapshot, err := workbookinspect.UsedRange(workbookArgPath(a.cwd, cfg.Excel.Path), targetSheet, limits)
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			snapshot, err := workbookinspect.UsedRange(workbookPath, targetSheet, workbookinspect.RangeOptions{
+				Limits:       limits,
+				IncludeStyle: includeStyle,
+			})
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
 			env.Inspect = workbookinspect.Payload{
-				Target: "used-range",
-				Format: format,
-				Source: "file",
-				Range:  &snapshot,
+				Target:     "used-range",
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
+				Format:     format,
+				Source:     "file",
+				Range:      &snapshot,
 			}
 			env.Logs = []string{fmt.Sprintf("inspected used range for %s", targetSheet)}
 			return a.write(env, output.ExitSuccess)
@@ -1412,6 +1427,7 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
 	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
+	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	return cmd
 }
 
@@ -1441,10 +1457,11 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			env := output.New("inspect")
 			env.Inspect = workbookinspect.Payload{
-				Target: "cell",
-				Format: format,
-				Source: "file",
-				Cell:   &cell,
+				Target:     "cell",
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookArgPath(a.cwd, cfg.Excel.Path)),
+				Format:     format,
+				Source:     "file",
+				Cell:       &cell,
 			}
 			env.Logs = []string{fmt.Sprintf("inspected cell %s!%s", selector.Sheet, selector.Address)}
 			return a.write(env, output.ExitSuccess)

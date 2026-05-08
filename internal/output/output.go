@@ -818,6 +818,7 @@ func (r renderer) renderInspectWorkbook(payload map[string]any) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(renderInspectTargetInfo(payload))
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(kv("Workbook", path))
 	}
@@ -848,6 +849,7 @@ func (r renderer) renderInspectSheets(payload map[string]any) string {
 	sheets := listOfObjects(payload["sheets"])
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(renderInspectTargetInfo(payload))
 	b.WriteString(kv("Sheets", fmt.Sprintf("%d", len(sheets))))
 	for _, sheet := range sheets {
 		fmt.Fprintf(
@@ -871,6 +873,7 @@ func (r renderer) renderInspectRange(payload map[string]any) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(renderInspectTargetInfo(payload))
 	if sheet := stringValue(snapshot, "sheet"); sheet != "" {
 		b.WriteString(kv("Sheet", sheet))
 	}
@@ -886,6 +889,9 @@ func (r renderer) renderInspectRange(payload map[string]any) string {
 	b.WriteString(kv("Size", fmt.Sprintf("%d row(s) x %d column(s)", intNumber(snapshot, "row_count"), intNumber(snapshot, "column_count"))))
 	if boolValue(snapshot, "truncated") {
 		b.WriteString(kv("Truncated", "true"))
+	}
+	if boolValue(snapshot, "style_included") {
+		b.WriteString(kv("Style", "included"))
 	}
 	for _, warning := range stringList(snapshot["warnings"]) {
 		b.WriteString("! ")
@@ -913,6 +919,7 @@ func (r renderer) renderInspectCell(payload map[string]any) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(renderInspectTargetInfo(payload))
 	if sheet := stringValue(cell, "sheet"); sheet != "" {
 		b.WriteString(kv("Sheet", sheet))
 	}
@@ -931,6 +938,9 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 			return ""
 		}
 		var b strings.Builder
+		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
+			b.WriteString(info)
+		}
 		if path := stringValue(workbook, "path"); path != "" {
 			b.WriteString("Workbook: ")
 			b.WriteString(path)
@@ -946,13 +956,16 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 		b.WriteString(markdownSheetTable(listOfObjects(workbook["sheets"])))
 		return b.String()
 	case "sheets":
-		return markdownSheetTable(listOfObjects(payload["sheets"]))
+		return renderInspectTargetInfoMarkdown(payload) + markdownSheetTable(listOfObjects(payload["sheets"]))
 	case "range", "used-range":
 		snapshot := objectMap(payload["range"])
 		if len(snapshot) == 0 {
 			return ""
 		}
 		var b strings.Builder
+		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
+			b.WriteString(info)
+		}
 		if sheet := stringValue(snapshot, "sheet"); sheet != "" {
 			b.WriteString("Sheet: ")
 			b.WriteString(sheet)
@@ -973,6 +986,9 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 			b.WriteString(value)
 			b.WriteString("\n")
 		}
+		if boolValue(snapshot, "style_included") {
+			b.WriteString("Style: included\n")
+		}
 		for _, warning := range stringList(snapshot["warnings"]) {
 			b.WriteString("\n> ")
 			b.WriteString(warning)
@@ -991,15 +1007,66 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 		if len(cell) == 0 {
 			return ""
 		}
+		prefix := renderInspectTargetInfoMarkdown(payload)
 		rows := [][]string{
 			{"Sheet", stringValue(cell, "sheet")},
 			{"Cell", stringValue(cell, "address")},
 			{"Value", emptyDash(stringValue(cell, "value"))},
 		}
-		return markdownTable([]string{"Field", "Value"}, rows)
+		return prefix + markdownTable([]string{"Field", "Value"}, rows)
 	default:
 		return ""
 	}
+}
+
+func renderInspectTargetInfo(payload map[string]any) string {
+	info := objectMap(payload["target_info"])
+	if len(info) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if kind := stringValue(info, "kind"); kind != "" {
+		label := kind
+		if kind == "file" {
+			label = "saved workbook file"
+		}
+		b.WriteString(kv("Snapshot", label))
+	}
+	if path := stringValue(info, "path"); path != "" {
+		b.WriteString(kv("Path", path))
+	}
+	if note := stringValue(info, "note"); note != "" {
+		b.WriteString(kv("Note", note))
+	}
+	return b.String()
+}
+
+func renderInspectTargetInfoMarkdown(payload map[string]any) string {
+	info := objectMap(payload["target_info"])
+	if len(info) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if kind := stringValue(info, "kind"); kind != "" {
+		label := kind
+		if kind == "file" {
+			label = "saved workbook file"
+		}
+		b.WriteString("Snapshot: ")
+		b.WriteString(label)
+		b.WriteString("\n")
+	}
+	if path := stringValue(info, "path"); path != "" {
+		b.WriteString("Path: ")
+		b.WriteString(path)
+		b.WriteString("\n")
+	}
+	if note := stringValue(info, "note"); note != "" {
+		b.WriteString("Note: ")
+		b.WriteString(note)
+		b.WriteString("\n\n")
+	}
+	return b.String()
 }
 
 func (r renderer) renderCreated(env Envelope) string {

@@ -932,6 +932,53 @@ func TestInspectRangeCommandWritesJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestInspectRangeCommandIncludesStyleMetadataInJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	createInspectCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "range", "--sheet", "Visible", "--address", "A1:C2", "--include-style"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect range include-style error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Inspect map[string]any `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Inspect["target_info"] == nil {
+		t.Fatalf("target_info missing from inspect payload: %s", stdout.String())
+	}
+	rangeMap, ok := got.Inspect["range"].(map[string]any)
+	if !ok {
+		t.Fatalf("range payload = %#v", got.Inspect["range"])
+	}
+	if rangeMap["style_included"] != true {
+		t.Fatalf("style_included = %#v, want true", rangeMap["style_included"])
+	}
+	if _, ok := rangeMap["cells"].([]any); !ok {
+		t.Fatalf("cells payload missing from include-style output: %s", stdout.String())
+	}
+	if _, ok := rangeMap["rows"].([]any); !ok {
+		t.Fatalf("rows payload missing from include-style output: %s", stdout.String())
+	}
+	if _, ok := rangeMap["columns"].([]any); !ok {
+		t.Fatalf("columns payload missing from include-style output: %s", stdout.String())
+	}
+	if _, ok := rangeMap["merged_ranges"].([]any); !ok {
+		t.Fatalf("merged_ranges payload missing from include-style output: %s", stdout.String())
+	}
+}
+
 func TestInspectRangeCommandWritesMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	createInspectCommandFixture(t, dir)
@@ -950,6 +997,9 @@ func TestInspectRangeCommandWritesMarkdown(t *testing.T) {
 	}
 
 	text := stdout.String()
+	if !strings.Contains(text, "Snapshot: saved workbook file") {
+		t.Fatalf("markdown output = %q, want snapshot note", text)
+	}
 	if !strings.Contains(text, "Sheet: Visible") {
 		t.Fatalf("markdown output = %q, want sheet header", text)
 	}
@@ -1129,6 +1179,27 @@ func createInspectCommandFixture(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	if err := f.SetCellValue("Visible", "B2", "B2"); err != nil {
+		t.Fatal(err)
+	}
+	styleID, err := f.NewStyle(&excelize.Style{
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"000000"}},
+		Font: &excelize.Font{Family: "Calibri", Size: 11, Bold: true, Color: "FFFFFF"},
+		Border: []excelize.Border{
+			{Type: "right", Style: 1, Color: "D9D9D9"},
+		},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+		NumFmt:    10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellStyle("Visible", "A1", "A1", styleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetRowHeight("Visible", 2, 25); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetColWidth("Visible", "B", "B", 20); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.SetSheetVisible("Hidden", false); err != nil {

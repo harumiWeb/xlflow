@@ -100,3 +100,16 @@
 - [x] Add a CI `govulncheck` job on Windows using the Go toolchain from `go.mod`.
 - [x] Add a repo-local licence inventory checker for `THIRD_PARTY_LICENCES.md` against `go list -deps ./cmd/xlflow`.
 - [x] Expose the same checks through `task verify:security`.
+
+# xlflow Style-Aware Inspect Todo
+
+- [x] Add `--include-style` plumbing to `inspect range` and `inspect used-range`.
+- [x] Extend file-based inspect snapshots with target metadata and style-aware range payloads.
+- [x] Add focused inspect and CLI regression coverage for styled ranges, merged cells, row/column metadata, and compatibility without `--include-style`.
+- [x] Update CLI contract, README files, and bundled xlflow skill guidance for style-aware inspect.
+- [x] Run focused tests plus `go test ./...` and record results.
+
+## Verification Notes
+
+- `go test ./internal/inspect ./internal/cli ./internal/output` passed.
+- `go test ./...` passed.

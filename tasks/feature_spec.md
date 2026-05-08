@@ -144,3 +144,102 @@ Strengthen trust signals for GitHub Release artifacts without changing the curre
 - Integrity verification: compare the ZIP SHA256 against `checksums.txt`.
 - Provenance verification: run `gh attestation verify <zip> --repo harumiWeb/xlflow`.
 - Non-claim: neither verification step is documented as proof of Windows publisher identity or Authenticode signing.
+
+# xlflow Style-Aware Inspect Spec
+
+## Goal
+
+Extend file-based `inspect` so agents can verify worksheet output that depends on styling, layout, and merged-cell structure in addition to cell values.
+
+## CLI Contract
+
+- `xlflow inspect range [<sheet!A1:B2>] [--sheet <name> --address <A1:B2>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--format text|json|markdown]`
+- `xlflow inspect used-range [<sheet>] [--sheet <name>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--format text|json|markdown]`
+
+## Function and Type Contracts
+
+```go
+type TargetInfo struct {
+    Kind string
+    Path string
+    Note string
+}
+
+type Limits struct {
+    MaxRows int
+    MaxCols int
+}
+
+type RangeOptions struct {
+    Limits       Limits
+    IncludeStyle bool
+}
+
+func SavedFileTargetInfo(path string) *TargetInfo
+func Range(path, sheet, address string, opts RangeOptions) (RangeSnapshot, error)
+func UsedRange(path, sheet string, opts RangeOptions) (RangeSnapshot, error)
+```
+
+- `SavedFileTargetInfo` returns the inspect target descriptor for saved workbook snapshots.
+- `Range` accepts a workbook path, sheet name, A1 range selector, and bounded style options; it returns a file-based `RangeSnapshot`.
+- `UsedRange` accepts a workbook path, sheet name, and bounded style options; it returns the lightweight used-range snapshot for the saved workbook file.
+
+```go
+type RangeSnapshot struct {
+    Sheet         string
+    Range         string
+    UsedRange     string
+    ReturnedRange string
+    RowCount      int
+    ColumnCount   int
+    Values        [][]any
+    Truncated     bool
+    MaxRows       int
+    MaxCols       int
+    Warnings      []string
+    StyleIncluded bool
+    Cells         []StyledCellSnapshot
+    Columns       []ColumnSnapshot
+    Rows          []RowSnapshot
+    MergedRanges  []string
+}
+
+type StyledCellSnapshot struct {
+    Address             string
+    Row                 int
+    Column              int
+    Value               any
+    Formula             *string
+    Fill                *CellFillSnapshot
+    Font                *CellFontSnapshot
+    Border              CellBorderSnapshot
+    NumberFormat        *string
+    HorizontalAlignment *string
+    VerticalAlignment   *string
+    Merged              bool
+    MergeRange          *string
+}
+```
+
+- `RangeSnapshot.Values` remains the compatibility matrix for existing inspect consumers.
+- `RangeSnapshot.StyleIncluded` is omitted unless `RangeOptions.IncludeStyle` is true; when present it is always `true`.
+- When `RangeOptions.IncludeStyle` is true, `Cells`, `Rows`, `Columns`, and `MergedRanges` are always present in JSON; empty selections serialize them as empty arrays.
+- `StyledCellSnapshot` represents one returned cell in the truncated/output range, not the full unbounded workbook range.
+
+## Behavior
+
+- `inspect` continues to read the configured saved workbook file directly without starting Excel COM.
+- `--include-style` is opt-in and only affects range-based inspect commands.
+- Existing `values` matrix output remains unchanged for compatibility.
+- When `--include-style` is set, range output also includes per-cell style metadata, row metadata, column metadata, and merged-range metadata for the returned range after truncation.
+- Style-aware inspect reports the target as the saved workbook file and includes a note that unsaved live-session state is not being inspected.
+- Empty cells are still included in the returned range and may carry style metadata even when `value` is `null`.
+- Conditional formatting evaluation is out of scope for v1; output reflects stored cell styles in the saved workbook file.
+
+## Outputs
+
+- `inspect.target` remains the command target string such as `range` or `used-range`.
+- `inspect.target_info` may include `kind`, `path`, and `note`.
+- When `--include-style` is set, range snapshots deterministically include `style_included=true`, `cells`, `rows`, `columns`, and `merged_ranges`.
+- When `--include-style` is absent, `style_included`, `cells`, `rows`, `columns`, and `merged_ranges` are omitted from JSON.
+- Style cell objects include `address`, `row`, `column`, `value`, `formula`, `fill`, `font`, `border`, `number_format`, `horizontal_alignment`, `vertical_alignment`, `merged`, and `merge_range`.

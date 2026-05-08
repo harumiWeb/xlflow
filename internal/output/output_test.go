@@ -273,6 +273,35 @@ func TestWriteWithOptionsRendersRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
+	env := New("inspect")
+	env.Inspect = map[string]any{
+		"target": "range",
+		"target_info": map[string]any{
+			"kind": "file",
+			"note": "This command inspected the saved workbook file, not an unsaved live Excel session.",
+		},
+		"range": map[string]any{
+			"sheet":          "Visible",
+			"range":          "A1:B2",
+			"row_count":      2,
+			"column_count":   2,
+			"style_included": true,
+			"values":         [][]any{{"A1", nil}, {"A2", "B2"}},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Snapshot", "saved workbook file", "Style:         included"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersCompileDiagnostic(t *testing.T) {
 	env := Failure("run", Error{Code: "vba_compile_failed", Message: "Compile error", Source: "Main", Phase: "compile_vba", Line: 8})
 	env.RunDiagnostic = map[string]any{
