@@ -106,6 +106,12 @@ The fast verification path currently runs non-COM test coverage via:
 go test ./...
 ```
 
+Run vulnerability and third-party licence inventory checks with:
+
+```bash
+task verify:security
+```
+
 Excel COM E2E verification should be done on Windows with Microsoft Excel installed and **Trust access to the VBA project object model** enabled.
 
 ## Pull request guidelines

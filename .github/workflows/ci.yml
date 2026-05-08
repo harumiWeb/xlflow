@@ -38,3 +38,23 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
+
+  security:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        shell: pwsh
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        shell: pwsh
+        run: |
+          $govulncheck = Join-Path (go env GOPATH) "bin\govulncheck.exe"
+          & $govulncheck ./...
+      - name: Check third-party licence inventory
+        shell: pwsh
+        run: .\scripts\dev\check-third-party-licences.ps1

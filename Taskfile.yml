@@ -35,6 +35,12 @@ tasks:
     cmds:
       - go test ./...
 
+  verify:security:
+    desc: Run vulnerability and third-party licence inventory checks
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\check-third-party-licences.ps1'
+
   verify:
     desc: Fast local verification (non-COM)
     cmds:

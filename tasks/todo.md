@@ -94,3 +94,9 @@
 - `goreleaser release --snapshot --clean --skip=publish` passed after installing a working `syft` binary.
 - Snapshot artifacts included `dist/checksums.txt`, `dist/xlflow_windows_x86_64.zip`, and `dist/xlflow_windows_x86_64.zip.sbom.json`.
 - `dist/checksums.txt` contained SHA256 entries for both the release ZIP and the generated SBOM file.
+
+# Security and Licence Automation Todo
+
+- [x] Add a CI `govulncheck` job on Windows using the Go toolchain from `go.mod`.
+- [x] Add a repo-local licence inventory checker for `THIRD_PARTY_LICENCES.md` against `go list -deps ./cmd/xlflow`.
+- [x] Expose the same checks through `task verify:security`.
