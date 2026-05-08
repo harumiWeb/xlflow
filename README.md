@@ -636,12 +636,14 @@ Reads the saved workbook file directly without opening Excel.
 xlflow inspect workbook --json
 xlflow inspect sheets --format markdown
 xlflow inspect range --sheet "Result" --address "A1:F20" --json
+xlflow inspect range --sheet "QR" --address "A1:AE31" --include-style --json
 xlflow inspect used-range "Result" --max-rows 50 --max-cols 10 --format markdown
 xlflow inspect cell "Result!B3" --json
 ```
 
 Use it to inspect workbook structure and cell output after `push` / `run` workflows when the workbook state has been saved to disk.
 `inspect` is a file snapshot reader, so unsaved changes in an already-open Excel window are intentionally out of scope for this command family.
+Add `--include-style` on `inspect range` or `inspect used-range` when the workbook meaning depends on fill colors, borders, merged cells, row heights, or column widths.
 
 ### `xlflow inspect-gui`
 

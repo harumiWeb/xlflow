@@ -144,3 +144,31 @@ Strengthen trust signals for GitHub Release artifacts without changing the curre
 - Integrity verification: compare the ZIP SHA256 against `checksums.txt`.
 - Provenance verification: run `gh attestation verify <zip> --repo harumiWeb/xlflow`.
 - Non-claim: neither verification step is documented as proof of Windows publisher identity or Authenticode signing.
+
+# xlflow Style-Aware Inspect Spec
+
+## Goal
+
+Extend file-based `inspect` so agents can verify worksheet output that depends on styling, layout, and merged-cell structure in addition to cell values.
+
+## CLI Contract
+
+- `xlflow inspect range [<sheet!A1:B2>] [--sheet <name> --address <A1:B2>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--format text|json|markdown]`
+- `xlflow inspect used-range [<sheet>] [--sheet <name>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--format text|json|markdown]`
+
+## Behavior
+
+- `inspect` continues to read the configured saved workbook file directly without starting Excel COM.
+- `--include-style` is opt-in and only affects range-based inspect commands.
+- Existing `values` matrix output remains unchanged for compatibility.
+- When `--include-style` is set, range output also includes per-cell style metadata, row metadata, column metadata, and merged-range metadata for the returned range after truncation.
+- Style-aware inspect reports the target as the saved workbook file and includes a note that unsaved live-session state is not being inspected.
+- Empty cells are still included in the returned range and may carry style metadata even when `value` is `null`.
+- Conditional formatting evaluation is out of scope for v1; output reflects stored cell styles in the saved workbook file.
+
+## Outputs
+
+- `inspect.target` remains the command target string such as `range` or `used-range`.
+- `inspect.target_info` may include `kind`, `path`, and `note`.
+- Range snapshots may include `style_included`, `cells`, `rows`, `columns`, and `merged_ranges`.
+- Style cell objects may include `address`, `row`, `column`, `value`, `formula`, `fill`, `font`, `border`, `number_format`, `horizontal_alignment`, `vertical_alignment`, `merged`, and `merge_range`.

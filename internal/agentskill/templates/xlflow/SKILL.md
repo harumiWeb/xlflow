@@ -67,6 +67,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow inspect workbook --json` to confirm workbook path, active sheet metadata, and per-sheet used ranges.
    - Use `xlflow inspect sheets --json` to verify sheet creation/removal, visibility, row counts, and column counts.
    - Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output range is known.
+   - Add `--include-style` when visual correctness depends on fill colors, borders, merged cells, row heights, or column widths.
    - Use `xlflow inspect used-range --sheet <name> --json` when the output bounds are unknown and you need the current data rectangle.
    - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for targeted assertions on one cell.
    - Prefer global `--json` for agent parsing. Use `--format markdown` only when you intentionally want a compact human/LLM-facing table.
