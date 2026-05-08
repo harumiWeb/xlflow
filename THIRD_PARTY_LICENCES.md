@@ -1,8 +1,8 @@
 # Third Party Licences
 
-This document lists third-party Go modules used by xlflow.
+This document lists third-party Go modules in the runtime and build dependency closure of `./cmd/xlflow`.
 
-The list is based on `go.mod` and was cross-checked with `go-licenses report ./cmd/xlflow`. Direct dependencies are modules explicitly required by xlflow. Indirect dependencies are transitive dependencies resolved by the Go module graph.
+The list is cross-checked against `go list -deps ./cmd/xlflow` and `go-licenses report ./cmd/xlflow`. Direct dependencies are modules explicitly required by xlflow. Indirect dependencies are transitive dependencies reached by the `./cmd/xlflow` package dependency graph.
 
 This file is provided for attribution and licence review. It is not a substitute for the original licence files distributed by each upstream project.
 
@@ -69,10 +69,10 @@ The Apache License 2.0 is a permissive licence. It generally allows use, reprodu
 
 ## Review checklist before release
 
-Before publishing a binary release, verify this file against the module cache or an automated licence scanner.
+Before publishing a binary release, verify this file against the `./cmd/xlflow` dependency closure or an automated licence scanner.
 
 ```bash
-go list -m all
+go list -deps ./cmd/xlflow
 ```
 
 For a stricter release check, use a licence scanning tool such as `go-licenses` or an equivalent SBOM/licence scanner and compare the result with this file.

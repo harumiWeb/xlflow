@@ -49,12 +49,17 @@ jobs:
           cache: true
       - name: Install govulncheck
         shell: pwsh
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          $gobin = go env GOBIN
+          if ([string]::IsNullOrWhiteSpace($gobin)) {
+            $gopath = (go env GOPATH).Split([System.IO.Path]::PathSeparator)[0]
+            $gobin = Join-Path $gopath "bin"
+          }
+          $gobin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Run govulncheck
         shell: pwsh
-        run: |
-          $govulncheck = Join-Path (go env GOPATH) "bin\govulncheck.exe"
-          & $govulncheck ./...
+        run: govulncheck ./...
       - name: Check third-party licence inventory
         shell: pwsh
         run: .\scripts\dev\check-third-party-licences.ps1

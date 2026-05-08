@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
@@ -106,6 +107,27 @@ func TestGitHubReleaseCheckerRejectsUnexpectedStatus(t *testing.T) {
 
 func TestShouldSkipScaffoldUpdateCheck(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
+		prev, had := os.LookupEnv(noUpdateCheckEnvVar)
+		if err := os.Unsetenv(noUpdateCheckEnvVar); err != nil {
+			t.Fatalf("os.Unsetenv(%q) error = %v", noUpdateCheckEnvVar, err)
+		}
+		t.Cleanup(func() {
+			var err error
+			if had {
+				err = os.Setenv(noUpdateCheckEnvVar, prev)
+			} else {
+				err = os.Unsetenv(noUpdateCheckEnvVar)
+			}
+			if err != nil {
+				t.Fatalf("restore %q error = %v", noUpdateCheckEnvVar, err)
+			}
+		})
+		if shouldSkipScaffoldUpdateCheck() {
+			t.Fatal("shouldSkipScaffoldUpdateCheck() = true, want false")
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
 		t.Setenv(noUpdateCheckEnvVar, "")
 		if shouldSkipScaffoldUpdateCheck() {
 			t.Fatal("shouldSkipScaffoldUpdateCheck() = true, want false")

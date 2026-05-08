@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# This check intentionally validates the dependency closure of ./cmd/xlflow,
+# which matches the published licence inventory contract in THIRD_PARTY_LICENCES.md.
+
 function Get-TrackedModules {
   param([string]$Path)
 
