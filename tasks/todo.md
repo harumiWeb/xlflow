@@ -55,13 +55,19 @@
 
 # xlflow Session-Aware Defaults Todo
 
-- [ ] Add `version --verbose` payload and human output.
-- [ ] Auto-reuse matching sessions for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`.
-- [ ] Promote unsaved live-session state to structured `needs_save` metadata and stronger human output.
-- [ ] Report dirty/save-required state from `session status`.
-- [ ] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
-- [ ] Update the bundled skill for auto session reuse and `run` macro omission fallback.
-- [ ] Add focused Go and PowerShell regression coverage.
+- [x] Add `version --verbose` payload and human output.
+- [x] Auto-reuse matching sessions for `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save`.
+- [x] Promote unsaved live-session state to structured `needs_save` metadata and stronger human output.
+- [x] Report dirty/save-required state from `session status`.
+- [x] Keep `push` save-by-default semantics while preserving `--no-save` as the session opt-out.
+- [x] Update the bundled skill for auto session reuse and `run` macro omission fallback.
+- [x] Add focused Go and PowerShell regression coverage.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestVersionCommandVerboseIncludesExecutableAndFeatures|TestWriteWithOptionsRendersVersionVerboseDetails|TestWriteWithOptionsRendersSessionOnlyPushResult|TestWriteWithOptionsRendersSessionStatusSaveRequirement|TestBuildRunOptions|TestBuildPushOptions|TestRootCommandIncludesSessionFlagsForWorkbookReaders|TestTraceScriptArgsPassSessionFlag|TestBuildRunScriptArgsPassesFastDirectAndSession"` passed.
+- Auto-reuse is implemented in `internal/excel/scripts/common.ps1` via `Open-XlflowWorkbookForCommand`, `Test-XlflowSessionMetadataMatchesWorkbook`, and session-mode result metadata.
+- Human output and JSON now distinguish `session_mode=explicit|auto|managed|none` and surface `workbook.needs_save`, `workbook.dirty`, `session.needs_save`, and `session.dirty`.
 
 # Release Artifact Trust Hardening Todo
 
@@ -88,3 +94,9 @@
 - `goreleaser release --snapshot --clean --skip=publish` passed after installing a working `syft` binary.
 - Snapshot artifacts included `dist/checksums.txt`, `dist/xlflow_windows_x86_64.zip`, and `dist/xlflow_windows_x86_64.zip.sbom.json`.
 - `dist/checksums.txt` contained SHA256 entries for both the release ZIP and the generated SBOM file.
+
+# Security and Licence Automation Todo
+
+- [x] Add a CI `govulncheck` job on Windows using the Go toolchain from `go.mod`.
+- [x] Add a repo-local licence inventory checker for `THIRD_PARTY_LICENCES.md` against `go list -deps ./cmd/xlflow`.
+- [x] Expose the same checks through `task verify:security`.

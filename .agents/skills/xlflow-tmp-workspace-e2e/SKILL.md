@@ -9,6 +9,8 @@ Execute the repository-standard `xlflow` verification flow in isolated workspace
 
 Follow the workflow exactly unless the user narrows scope.
 
+When the task is release preparation, treat this skill as a release gate rather than an optional spot check.
+
 ## Preconditions
 
 - Read `tasks/lessons.md` before creating the workspace.
@@ -144,6 +146,38 @@ xlflow pull --json
 
 Verify the copied workbook exists under the second workspace `build/` directory and that exported components appear under `src/`.
 
+### 6. Release-gate coverage
+
+Use this section when the user asks for release readiness, release preflight, or "before release" verification.
+
+Release-gate verification must cover:
+
+- blank workbook scaffold:
+  - `new`
+  - `doctor`
+  - `pull`
+  - `lint`
+- standard module round-trip:
+  - `push`
+  - `run`
+  - workbook-state verification through Excel COM
+  - `pull`
+  - `lint`
+- class module round-trip
+- UserForm round-trip, including `.frm` and `.frx`
+- `init` from an existing workbook
+
+When the release includes session-related changes, also cover:
+
+- `session start`
+- `push --fast --session --no-save`
+- `run --session` and/or `test --session`
+- `save --session`
+- `session stop`
+- explicit confirmation of any save-required warnings or session metadata that changed
+
+Do not report release readiness if one of these paths was skipped without calling it out explicitly.
+
 ## Failure Handling
 
 Treat verification failures as product bugs unless evidence shows test setup is wrong.
@@ -166,6 +200,7 @@ Always report:
 - whether blank-workbook verification ran
 - whether macro round-trip verification ran
 - whether `init` verification ran
+- whether release-gate coverage was complete, partial, or intentionally narrowed
 - concrete evidence:
   - command results
   - generated artifact checks

@@ -80,6 +80,7 @@ root: .
 - 必要に応じて main ブランチと変更内容を比較すること
 - 「これを staff engineer が見て承認するか？」を自問すること
 - テスト実行、ログ確認、正しく動くことの提示まで行うこと
+- リリース前の確認では、CI だけで十分だとみなさないこと。Windows + Excel の実機 E2E が必要な変更は、`xlflow-tmp-workspace-e2e` skill を使って `tmp_workspaces` で release 前検証を行うこと
 
 ### 5. バランスを保ちながら、よりエレガントな解決を目指す
 
@@ -110,6 +111,13 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 7. **テストの生成**：必要に応じてテストコードを生成します。
 8. **テストを実行する**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
 9. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
+
+### リリース前 E2E
+
+- Windows + Excel COM / VBIDE access が関わる変更をリリースする前には、repo-local の `xlflow-tmp-workspace-e2e` skill を使って実機 E2E を実施すること
+- 少なくとも blank workbook、standard module round-trip、class module round-trip、UserForm + `.frx` round-trip、`init` の各経路を確認すること
+- session-aware workflow を変更した場合は、`session start -> push --fast --session --no-save -> run/test -> save -> session stop` も release gate に含めること
+- 検証に使った `tmp_workspaces` の絶対パス、実行コマンド、結果、未検証項目を最終報告へ残すこと
 
 ---
 

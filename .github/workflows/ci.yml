@@ -38,3 +38,28 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
+
+  security:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        shell: pwsh
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          $gobin = go env GOBIN
+          if ([string]::IsNullOrWhiteSpace($gobin)) {
+            $gopath = (go env GOPATH).Split([System.IO.Path]::PathSeparator)[0]
+            $gobin = Join-Path $gopath "bin"
+          }
+          $gobin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Run govulncheck
+        shell: pwsh
+        run: govulncheck ./...
+      - name: Check third-party licence inventory
+        shell: pwsh
+        run: .\scripts\dev\check-third-party-licences.ps1

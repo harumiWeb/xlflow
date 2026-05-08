@@ -109,6 +109,8 @@ pull → edit → push → lint → test/run → trace → diff
 go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
+`go install` は Go 環境に設定された module mirror や checksum database へアクセスすることがあります。source checkout からの開発や CI では、`go.mod` に書かれた Go version を正式サポート toolchain の source of truth としてください。リポジトリの CI / release workflow もその値から Go を解決します。
+
 ### Scoop
 
 ```powershell
@@ -188,6 +190,8 @@ AI エージェント向けの Skill も同時にインストールする場合:
 ```bash
 xlflow new Book.xlsm --with-skill --agent codex
 ```
+
+interactive な `xlflow new` / `xlflow init` では welcome banner を表示し、最新 GitHub Release を GitHub Releases API で確認することがあります。このリクエストを今回だけ止めたい場合は `--no-update-check`、環境全体で止めたい場合は `XLFLOW_NO_UPDATE_CHECK=1` を使ってください。
 
 ### 2. Excel automation 環境を確認する
 
@@ -341,6 +345,7 @@ xlflow new Sales.xlsm
 引数を省略した場合は `build/Book.xlsm` が作成されます。
 拡張子なしの名前を指定した場合は `.xlsm` が付与されます。
 `new` は macro-enabled workbook を作成するため、`.xlsm` 以外の拡張子は受け付けません。
+scaffolding 時の interactive な GitHub Release 確認を止めたい場合は `--no-update-check` を付けます。
 
 `new` は `xlflow.toml`、`src/`、`tests/`、`build/`、`.xlflow/` などのプロジェクト構造を作成します。
 また、Excel 一時ファイルや xlflow の生成物を無視するための `.gitignore` も作成または更新します。
@@ -354,6 +359,7 @@ xlflow init Book.xlsm
 ```
 
 指定した workbook は `build/` 配下へコピーされ、`xlflow.toml` の `[excel].path` に記録されます。
+scaffolding 時の interactive な GitHub Release 確認を止めたい場合は `--no-update-check` を付けます。
 
 ### `xlflow doctor`
 
@@ -390,7 +396,7 @@ xlflow pull --json
 ```
 
 標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet などの document module を `src/` 配下へ出力します。
-xlflow session が開いている場合は `xlflow pull --session --json` を使います。
+recorded session workbook を明示的に要求したい場合は `xlflow pull --session --json` を使います。`.xlflow/session.json` が設定済み workbook を指している場合、通常の `xlflow pull --json` でもその live workbook を自動再利用します。
 
 ### `xlflow push`
 
@@ -425,7 +431,7 @@ xlflow macros --json
 
 > [!TIP]
 > AIエージェントや自動化スクリプトは、macro 名を推測する前にこのコマンドを実行してください。返された `qualified_name` を `xlflow run` に渡すことで、entrypoint の指定ミスを減らせます。
-> session 中の開発では `xlflow macros --session --json` を使います。
+> session 中の開発では、通常の `xlflow macros --json` でも一致する recorded session workbook を自動再利用します。明示的にその workbook を要求したい場合だけ `--session` を付けます。
 
 ### `xlflow run`
 
@@ -484,7 +490,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-session mode は明示的に opt-in です。通常の `push` / `run` は従来どおり1回ごとに Excel を開閉します。
+`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `pull` / `push` / `macros` / `run` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
 xlflow はこの未保存 session 状態を以前より強く警告しますが、`session stop` 前に明示的に `xlflow save --session` する運用が基本です。

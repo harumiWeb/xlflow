@@ -1,8 +1,8 @@
 # Third Party Licences
 
-This document lists third-party Go modules used by xlflow.
+This document lists third-party Go modules in the runtime and build dependency closure of `./cmd/xlflow`.
 
-The list is based on `go.mod` and was cross-checked with `go-licenses report ./cmd/xlflow`. Direct dependencies are modules explicitly required by xlflow. Indirect dependencies are transitive dependencies resolved by the Go module graph.
+The list is cross-checked against `go list -deps ./cmd/xlflow` and `go-licenses report ./cmd/xlflow`. Direct dependencies are modules explicitly required by xlflow. Indirect dependencies are transitive dependencies reached by the `./cmd/xlflow` package dependency graph.
 
 This file is provided for attribution and licence review. It is not a substitute for the original licence files distributed by each upstream project.
 
@@ -42,10 +42,10 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/xo/terminfo`                |    `v0.0.0-20220910002029-abceb7e1c41e` | MIT          | `https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE`                |
 | `github.com/xuri/efp`                   |                                `v0.0.1` | BSD-3-Clause | `https://github.com/xuri/efp/blob/v0.0.1/LICENSE`                         |
 | `github.com/xuri/nfp`                   |  `v0.0.2-0.20250530014748-2ddeb826f9a9` | BSD-3-Clause | `https://github.com/xuri/nfp/blob/2ddeb826f9a9/LICENSE`                   |
-| `golang.org/x/crypto`                   |                               `v0.48.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.48.0:LICENSE`              |
-| `golang.org/x/net`                      |                               `v0.50.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.50.0:LICENSE`                 |
-| `golang.org/x/sys`                      |                               `v0.41.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.41.0:LICENSE`                 |
-| `golang.org/x/text`                     |                               `v0.34.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.34.0:LICENSE`                |
+| `golang.org/x/crypto`                   |                               `v0.50.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.50.0:LICENSE`              |
+| `golang.org/x/net`                      |                               `v0.53.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.53.0:LICENSE`                 |
+| `golang.org/x/sys`                      |                               `v0.43.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.43.0:LICENSE`                 |
+| `golang.org/x/text`                     |                               `v0.36.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.36.0:LICENSE`                |
 
 ## Scanner output notes
 
@@ -69,10 +69,10 @@ The Apache License 2.0 is a permissive licence. It generally allows use, reprodu
 
 ## Review checklist before release
 
-Before publishing a binary release, verify this file against the module cache or an automated licence scanner.
+Before publishing a binary release, verify this file against the `./cmd/xlflow` dependency closure or an automated licence scanner.
 
 ```bash
-go list -m all
+go list -deps ./cmd/xlflow
 ```
 
 For a stricter release check, use a licence scanning tool such as `go-licenses` or an equivalent SBOM/licence scanner and compare the result with this file.

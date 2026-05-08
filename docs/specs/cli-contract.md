@@ -9,8 +9,8 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
-xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] init <workbook> [--with-skill] [--agent <provider>]
+xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] pull [--session] [--keepalive] [--keepalive-interval <duration>]
@@ -18,7 +18,7 @@ xlflow [--json] push [--backup always|never] [--fast] [--changed-only] [--sessio
 xlflow [--json] session start
 xlflow [--json] session status
 xlflow [--json] session stop
-xlflow [--json] save --session
+xlflow [--json] save [--session]
 xlflow [--json] runner install
 xlflow [--json] runner remove
 xlflow [--json] runner status
@@ -44,6 +44,7 @@ xlflow [--json] lint
 xlflow [--json] analyze
 xlflow [--json] check [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
+xlflow [--json] version [--verbose]
 ```
 
 `--json` is a persistent global flag and can be used with every command, including `new` and `init`.
@@ -62,6 +63,8 @@ Excel COM-backed commands also include top-level `bridge` metadata with `host`, 
 
 `new` and `init` do not create `prompts/agent.md`. Use `--with-skill` to install the bundled `xlflow` AI agent skill during project creation. `--agent` selects one of `agents`, `codex`, `claude`, `cursor`, or `gemini`. When `--with-skill` is used without `--agent` in an interactive terminal, xlflow opens a Bubble Tea provider selector. With `--json` or non-interactive input, `--agent` is required.
 
+Interactive `new` and `init` runs may show a welcome banner that checks the latest GitHub Release via the GitHub Releases API. `--no-update-check` disables that network request for the current invocation. Setting `XLFLOW_NO_UPDATE_CHECK=1` also disables it. JSON and non-interactive runs do not render the welcome banner and do not perform this update check.
+
 `skill install` installs the bundled `xlflow` skill without creating or changing an xlflow project scaffold. Provider targets are:
 
 - `agents`: `.agents/skills/xlflow`
@@ -72,13 +75,15 @@ Excel COM-backed commands also include top-level `bridge` metadata with `host`, 
 
 For GitHub Copilot, use `agents` because Copilot reads repository instructions from `.agents`. `--target <dir>` installs to `<dir>/xlflow` instead of a provider default. `--agent` and `--target` cannot be combined. Existing skill directories are not overwritten unless `--force` is set. If neither `--agent` nor `--target` is provided, interactive terminals use the Bubble Tea provider selector; `--json` and non-interactive runs return a configuration error instead.
 
+`version` reports build metadata. `version --verbose` additionally includes the resolved executable path, Go/build information when available, embedded-versus-override PowerShell script resolution details, and a supported-feature list. This command does not require Excel COM.
+
 `pull` exports standard modules, class modules, userforms, and workbook document modules into the configured source directories. Userforms may emit both `.frm` and `.frx` artifacts. Document modules are exported as source text suitable for linting and re-import. Source-controlled `.bas`, `.cls`, and `.frm` files are UTF-8 without BOM. Excel/VBIDE import and export files are treated as CP932 at the bridge boundary, and `pull` converts exported text to UTF-8 before writing the source tree. When `[vba].folders=true`, xlflow reads Rubberduck-style `@Folder("A.B")` annotations near the top of each component and exports nested files under the configured type root, for example `src/modules/A/B/Main.bas`. Before re-export, `pull` removes existing exported `.bas`, `.cls`, `.frm`, and `.frx` files under the configured source roots so moved components do not leave stale paths behind. `pull --session` exports from the workbook opened by `session start`.
 
 `push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion. Source enumeration is recursive under each configured `[src]` root. When `[vba].folder_annotation="update"`, xlflow rewrites `@Folder("A.B")` comments in temporary import copies from the file's relative directory below its configured root; the tracked source file itself is not rewritten during `push`. When `folder_annotation="preserve"`, existing annotations are kept as-is; `ignore` disables folder annotation read/write. Before starting Excel, `push` runs fatal source preflight checks for patterns that are known to surface as VBE modal dialogs instead of COM errors, including typographic quote characters, likely C-style quote escapes, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and missing xlflow trace-helper definitions for `XlflowLog` / `XlflowSetTraceFile`. Recursive source trees are also validated for duplicate VBA component basenames; conflicts fail with `duplicate_module_name` before Excel opens. These failures return `lint_failed`, `analyze_failed`, `source_preflight_failed`, or `duplicate_module_name`, include top-level `issues` and/or `analysis` when applicable, and use validation exit code `1`. By default `push` creates a timestamped backup under `.xlflow/backups`, replaces non-document VBA components, updates document modules, saves the workbook, and writes source fingerprints to `.xlflow/state/push.json`.
 
-`push --backup=never` skips the export backup. `push --fast` is a development-mode shorthand for `--backup=never --changed-only`. `push --changed-only` compares source fingerprints against `.xlflow/state/push.json`; when unchanged, it skips Excel/VBIDE import and returns `source.changed=false`. When changed or state is missing, v1 safely falls back to the normal full component replacement and refreshes the state file after success. `push --session` attaches to the workbook kept open by `xlflow session start` instead of opening a fresh Excel instance. `push --no-save` is allowed only with `--session` and leaves workbook changes unsaved until `xlflow save --session` or `xlflow session stop`. Human output must distinguish skipped imports, saved workbook updates, and live-session-only updates that have not yet been written back to disk.
+`push --backup=never` skips the export backup. `push --fast` is a development-mode shorthand for `--backup=never --changed-only`. `push --changed-only` compares source fingerprints against `.xlflow/state/push.json`; when unchanged, it skips Excel/VBIDE import and returns `source.changed=false`. When changed or state is missing, v1 safely falls back to the normal full component replacement and refreshes the state file after success. `push --session` forces attachment to the workbook kept open by `xlflow session start`. When `--session` is omitted and `.xlflow/session.json` points at the configured workbook, xlflow auto-reuses that matching live session workbook instead of opening a fresh hidden instance. `push --no-save` is allowed only with `--session` and leaves workbook changes unsaved until `xlflow save` or `xlflow session stop`. Human output must distinguish skipped imports, saved workbook updates, and live-session-only updates that have not yet been written back to disk.
 
-`session start` opens the configured workbook in Excel and writes `.xlflow/session.json` with process metadata. Session Excel is kept visible even when `excel.visible=false`, because later CLI invocations must reattach to that specific Excel instance through its window handle. xlflow disables events while opening the workbook, but it must keep workbook macros executable afterward so `run --session` and `test --session` can invoke user VBA against the same open workbook. Commands that only inspect or rewrite workbook structure without running user VBA force-disable automation macros before opening. `session status` reports whether the recorded process is running and the configured workbook is open. `session stop` saves and closes the workbook, quits Excel, and removes the metadata. Session v1 is explicit opt-in: normal `push` and `run` do not auto-attach to sessions. `save --session` saves the workbook held by the active session.
+`session start` opens the configured workbook in Excel and writes `.xlflow/session.json` with process metadata. Session Excel is kept visible even when `excel.visible=false`, because later CLI invocations must reattach to that specific Excel instance through its window handle. xlflow disables events while opening the workbook, but it must keep workbook macros executable afterward so `run --session` and `test --session` can invoke user VBA against the same open workbook. Commands that only inspect or rewrite workbook structure without running user VBA force-disable automation macros before opening. `session status` reports whether the recorded process is running, whether the configured workbook is open, and whether the live workbook is dirty and needs `xlflow save`. `session stop` saves and closes the workbook, quits Excel, and removes the metadata. `save` saves the matching live session workbook when `.xlflow/session.json` points at the configured workbook; `save --session` forces that same path and fails if no matching session workbook is running.
 
 `runner install`, `runner remove`, and `runner status` manage the persistent workbook module `XlflowRunner`. In v1 this module is a stable marker for fast-run workflows; argument-free `run --fast` uses direct execution when eligible and otherwise keeps the normal temporary harness path.
 
@@ -86,7 +91,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `run` uses the positional macro argument when provided. Otherwise it uses `project.entry` from `xlflow.toml`. `--input` overrides `excel.path` for one invocation. `--arg` may be repeated and must use explicit prefixes: `string:hello`, `string:`, `int:7`, and `bool:true`. Empty values are valid only for `string:` arguments. Malformed `int:` and `bool:` values are rejected by the CLI before Excel starts and exit with code `2`. The default run never saves. `--save` persists the opened workbook in place after a successful run. `--save-as` writes a copy after a successful run and must keep the same workbook extension as the opened workbook. `--save` and `--save-as` cannot be combined.
 
-`run --direct` executes an argument-free, trace-disabled macro through `Excel.Run($MacroName)` without injecting the temporary harness module. It cannot be combined with `--arg`, `--trace`, or `--diagnostic`; those combinations fail before Excel starts. Direct runs return weaker VBA diagnostics than the harness path, but default `run` still suppresses Excel-owned VBA runtime error dialogs and routes them back to structured CLI output unless `--gui-compile-errors` is set. `run --fast` uses direct execution when the macro has no CLI arguments, trace is disabled, and diagnostic mode is not requested; otherwise it falls back to the normal harness. `run --session` attaches to the workbook opened by `session start` via the recorded session metadata rather than an arbitrary active Excel instance.
+`run --direct` executes an argument-free, trace-disabled macro through `Excel.Run($MacroName)` without injecting the temporary harness module. It cannot be combined with `--arg`, `--trace`, or `--diagnostic`; those combinations fail before Excel starts. Direct runs return weaker VBA diagnostics than the harness path, but default `run` still suppresses Excel-owned VBA runtime error dialogs and routes them back to structured CLI output unless `--gui-compile-errors` is set. `run --fast` uses direct execution when the macro has no CLI arguments, trace is disabled, and diagnostic mode is not requested; otherwise it falls back to the normal harness. `run --session` forces attachment to the workbook opened by `session start`. When `--session` is omitted and `.xlflow/session.json` points at the configured workbook, xlflow auto-reuses that matching live session workbook rather than an arbitrary active Excel instance.
 
 `run` performs the same fatal source preflight checks as `push` before Excel starts whenever it targets the configured project workbook, including `--session` runs. If that preflight finds known VBE-dialog-causing source problems, the run fails with validation exit code `1` and top-level `issues` and/or `analysis` instead of launching Excel. When `--trace` is set, configured runs may ignore only the missing-helper findings that can be satisfied by temporary `XlflowTrace` injection; other blocking source findings still prevent Excel launch. `run --headless` is for AI agents, tests, and CI. Before Excel starts, xlflow also scans the configured VBA source tree for GUI boundaries. If any boundary is found, the run fails with `gui_boundary_detected`, exit code `1`, and top-level `gui_boundaries` containing the detected file, line, kind, symbol, severity, message, and suggestion. `run --interactive` is for human-assisted Excel workflows. It runs with Excel visible and alerts enabled so a person can complete dialogs, message boxes, or forms. `--headless` and `--interactive` cannot be combined. `--timeout` defaults to `5m`; if a run exceeds the timeout, xlflow returns `macro_timeout` with exit code `1` and guidance that a dialog, form, file picker, or loop may still be waiting. Running without either mode keeps the legacy behavior except for the timeout.
 
@@ -185,6 +190,7 @@ Command-specific fields are added at the top level:
 - `trace` for traced `run`
 - `session` for session status metadata
 - `runner` for persistent runner module status
+- `version` for `version`
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
 - `ui` for `ui button` commands
 
