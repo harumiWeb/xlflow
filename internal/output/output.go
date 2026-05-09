@@ -56,6 +56,9 @@ type Envelope struct {
 	Check         any `json:"check,omitempty"`
 	Version       any `json:"version,omitempty"`
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`
+	Target        any `json:"target,omitempty"`
+	Output        any `json:"output,omitempty"`
+	Warnings      any `json:"warnings,omitempty"`
 }
 
 type Options struct {
@@ -214,6 +217,8 @@ func renderHuman(env Envelope, opts Options) string {
 			b.WriteString(r.renderAnalysis(env))
 		}
 		b.WriteString(r.renderTraceCommand(env))
+	case "export-image":
+		b.WriteString(r.renderExportImage(env))
 	case "pull", "push", "attach":
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
@@ -747,6 +752,61 @@ func (r renderer) renderTraceCommand(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderExportImage(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	outputPayload := objectMap(env.Output)
+	warnings := listOfObjects(env.Warnings)
+	if len(workbook) == 0 && len(target) == 0 && len(outputPayload) == 0 && len(warnings) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeExportImageTarget(target); summary != "" {
+		b.WriteString(kv("Target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if sheet := stringValue(target, "sheet"); sheet != "" {
+		b.WriteString(kv("Sheet", sheet))
+	}
+	if cellRange := stringValue(target, "range"); cellRange != "" {
+		b.WriteString(kv("Range", cellRange))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if path := stringValue(outputPayload, "path"); path != "" {
+		b.WriteString(kv("Output", path))
+	}
+	if format := stringValue(outputPayload, "format"); format != "" {
+		b.WriteString(kv("Format", strings.ToUpper(format)))
+	}
+	if width, ok := numberValue(outputPayload, "width_px"); ok {
+		if height, ok := numberValue(outputPayload, "height_px"); ok {
+			b.WriteString(kv("Size", fmt.Sprintf("%d x %d px", int(width), int(height))))
+		}
+	}
+	if value, ok := boolValueOK(outputPayload, "default"); ok {
+		b.WriteString(kv("Default path", fmt.Sprintf("%t", value)))
+	}
+	if value, ok := boolValueOK(outputPayload, "created_parent_dirs"); ok {
+		b.WriteString(kv("Created dirs", fmt.Sprintf("%t", value)))
+	}
+	if renderedWarnings := renderWarningList(warnings); renderedWarnings != "" {
+		b.WriteString("Warnings:\n")
+		b.WriteString(renderedWarnings)
+	}
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
 func (r renderer) renderDiff(env Envelope) string {
 	diff := objectMap(env.Diff)
 	if len(diff) == 0 {
@@ -1166,6 +1226,24 @@ func traceEventLogLines(events []map[string]any) map[string]bool {
 	return lines
 }
 
+func renderWarningList(warnings []map[string]any) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, warning := range warnings {
+		b.WriteString("- ")
+		if code := stringValue(warning, "code"); code != "" {
+			b.WriteString("[")
+			b.WriteString(code)
+			b.WriteString("] ")
+		}
+		b.WriteString(stringValue(warning, "message"))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func (r renderer) renderBridge(env Envelope) string {
 	bridge := objectMap(env.Bridge)
 	if len(bridge) == 0 {
@@ -1259,6 +1337,17 @@ func summarizeWorkbookSourceResult(command string, workbook, source map[string]a
 		return "inspected the active workbook"
 	}
 	return ""
+}
+
+func summarizeExportImageTarget(target map[string]any) string {
+	switch stringValue(target, "kind") {
+	case "live_session":
+		return "live session workbook"
+	case "file":
+		return "saved workbook file"
+	default:
+		return ""
+	}
 }
 
 func summarizeTraceCommandResult(workbook, trace map[string]any) string {

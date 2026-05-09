@@ -101,12 +101,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## 動作要件
 
-| 要件                                                       | 必要になる場面                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Windows                                                    | Excel COM automation                                                      |
-| Microsoft Excel                                            | `new`, `init`, `pull`, `push`, `run`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                                 | Excel automation bridge                                                   |
-| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                |
+| 要件                                                       | 必要になる場面                                                                            |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Windows                                                    | Excel COM automation                                                                      |
+| Microsoft Excel                                            | `new`, `init`, `pull`, `push`, `run`, `export-image`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell                                                 | Excel automation bridge                                                                   |
+| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                |
 
 > [!NOTE]
 > `lint`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。
@@ -334,6 +334,7 @@ xlflow inspect-gui --json
 | `runner`        | 永続 xlflow runner marker module を管理              | `xlflow runner install --json`                                |
 | `macros`        | 実行可能な macro entrypoint を検出                   | `xlflow macros --json`                                        |
 | `run`           | CLI から macro を実行                                | `xlflow run Main.Run --json`                                  |
+| `export-image`  | worksheet range を PNG 画像として出力                | `xlflow export-image --sheet QR --range A1:AE31 --json`       |
 | `trace`         | VBA trace log を有効化・収集・削除                   | `xlflow trace enable --json`                                  |
 | `test`          | VBA test を実行                                      | `xlflow test --json`                                          |
 | `diff`          | workbook 内容と任意の VBA source を比較              | `xlflow diff before.xlsm after.xlsm --json`                   |
@@ -510,7 +511,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `pull` / `push` / `macros` / `run` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
+`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `pull` / `push` / `macros` / `run` / `export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
 xlflow はこの未保存 session 状態を以前より強く警告しますが、`session stop` 前に明示的に `xlflow save --session` する運用が基本です。
@@ -668,6 +669,21 @@ xlflow inspect cell "Result!B3" --json
 `push` / `run` 後に保存済み workbook の構造やセル出力を確認したいときに使います。
 `inspect` は file snapshot reader なので、Excel 上で未保存の変更はこのコマンド群では見えません。
 塗りつぶし色、罫線、結合セル、行高、列幅まで確認したい場合は、`inspect range` または `inspect used-range` に `--include-style` を付けます。
+
+### `xlflow export-image`
+
+Excel COM 経由で worksheet range を PNG として出力します。
+
+```bash
+xlflow export-image --sheet "QR" --range "A1:AE31" --json
+xlflow export-image --sheet "QR" --range "A1:AE31" --out artifacts\qr.png --overwrite --json
+```
+
+`inspect` の補完として使います。チャート、塗りつぶし、レイアウト、帳票、QRコードのセル描画など、保存済み workbook snapshot だけでは十分に検証できない見た目を確認したいときに向いています。
+
+`--out` を省略した場合は `.xlflow/artifacts/images/<workbook-name>/` 配下へ生成名で保存します。`--output-dir` はディレクトリだけ、`--name` はファイル名だけを指定します。v1 では PNG のみ対応です。
+
+他の workbook-backed command と同様に、`.xlflow/session.json` が設定済み workbook を指していれば `export-image` も一致する recorded session workbook を自動再利用します。明示的にその前提を要求したい場合は `--session` を付けます。成功時の JSON には top-level `target`、`output`、必要に応じて `warnings` が含まれます。
 
 ### `xlflow inspect-gui`
 

@@ -243,3 +243,74 @@ type StyledCellSnapshot struct {
 - When `--include-style` is set, range snapshots deterministically include `style_included=true`, `cells`, `rows`, `columns`, and `merged_ranges`.
 - When `--include-style` is absent, `style_included`, `cells`, `rows`, `columns`, and `merged_ranges` are omitted from JSON.
 - Style cell objects include `address`, `row`, `column`, `value`, `formula`, `fill`, `font`, `border`, `number_format`, `horizontal_alignment`, `vertical_alignment`, `merged`, and `merge_range`.
+
+# xlflow Range Image Export Spec
+
+## Goal
+
+Export a worksheet range as a PNG image through Excel COM so agents and users can visually verify workbook output that depends on layout, formatting, charts, fills, and sizing.
+
+## CLI Contract
+
+- `xlflow export-image [workbook] --sheet <name> --range <A1:B2> [--out <path> | --output-dir <dir>] [--name <filename>] [--format png] [--overwrite] [--session]`
+
+## Function and Type Contracts
+
+```go
+type ExportImageOptions struct {
+    WorkbookPath string
+    Sheet        string
+    Range        string
+    OutPath      string
+    OutputDir    string
+    Name         string
+    Format       string
+    Overwrite    bool
+    Session      bool
+    Keepalive    CommandOptions
+}
+
+type ExportImageResolvedOutput struct {
+    Path                 string
+    Format               string
+    Default              bool
+    CreatedParentDirs    bool
+}
+
+func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.Envelope, int, error)
+```
+
+- `WorkbookPath` overrides `excel.path` for a one-off export target.
+- `Range` must be validated and normalized to an uppercased A1 range before Excel opens when possible.
+- `OutPath`, `OutputDir`, and `Name` determine the final output file path; `--out` takes precedence.
+- `Format` is PNG-only in v1 and must agree with the chosen file extension when an extension is present.
+
+## Behavior
+
+- `export-image` follows the existing workbook-backed command behavior for sessions: when `.xlflow/session.json` points at the same workbook, omitting `--session` still auto-reuses that matching live session workbook.
+- `--session` remains the explicit assertion mode and should fail if the matching session workbook is not available.
+- Without `--out` or `--output-dir`, the default output directory is `.xlflow/artifacts/images/<workbook-name>/`.
+- The default generated filename format is `<sheet>_<range>_<timestamp>.png`, with filesystem-safe sheet and range components.
+- `--output-dir` chooses the directory while xlflow still generates the filename unless `--name` is also provided.
+- `--name` chooses only the filename and uses the default workbook image directory unless `--output-dir` is also provided.
+- Parent directories for the final output path are created automatically when missing.
+- Existing output files fail with `output_file_exists` unless `--overwrite` is set.
+- The implementation uses Excel COM `Range.CopyPicture`, pastes into a temporary `ChartObject`, exports via `Chart.Export`, then removes the temporary chart object.
+- The temporary chart object must be removed on both success and failure paths when it has been created; cleanup failures after a successful export should surface as warnings rather than turning the command into a failure.
+- For session-backed exports, result payloads should preserve the existing workbook save-state metadata such as `workbook.session_mode`, `workbook.dirty`, and `workbook.needs_save`.
+
+## Outputs
+
+- JSON output uses the existing top-level xlflow envelope fields `status`, `command`, `error`, and `logs`.
+- `export-image` adds top-level `target`, `output`, and optional `warnings`.
+- `target` includes the export source kind and workbook path; for session-backed results it may indicate `live_session`.
+- `output` includes `path`, `format`, `default`, optional `created_parent_dirs`, and image dimensions when available.
+- Human output should show the export target, workbook session/save-required state, output path, format, and dimensions when available.
+
+## Error Contract
+
+- Missing worksheet: `sheet_not_found`
+- Invalid range selector: `invalid_range`
+- Existing output without overwrite: `output_file_exists`
+- Unsupported format or mismatched extension: `unsupported_image_format`
+- Temporary chart cleanup after successful export: warning code `temporary_object_cleanup_failed`

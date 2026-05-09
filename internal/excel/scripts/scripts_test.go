@@ -12,7 +12,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -65,6 +65,23 @@ func TestCommonScriptRelativePathHelperPreservesAbsoluteTargetAcrossDrives(t *te
 	}
 	if strings.TrimSpace(string(out)) != "D:\\shared\\Main.bas" {
 		t.Fatalf("relative path = %q, want %q", out, "D:\\shared\\Main.bas")
+	}
+}
+
+func TestCommonScriptExposesReleaseComObjectHelper(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; (Get-Command Release-XlflowComObject).CommandType",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Release-XlflowComObject helper check failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "Function" {
+		t.Fatalf("expected Release-XlflowComObject helper, got %q", out)
 	}
 }
 
@@ -193,6 +210,31 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "True" {
 		t.Fatalf("expected run.ps1 to expose SuppressModalErrors, got %q", out)
+	}
+}
+
+func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
+	data, err := os.ReadFile("export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read export-image.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "$range.CopyPicture(2, -4147) | Out-Null") {
+		t.Fatalf("expected export-image.ps1 to use printer-picture CopyPicture mode and suppress pipeline output")
+	}
+	for _, needle := range []string{
+		"$range.Select() | Out-Null",
+		"$excel.Visible = $true",
+		"Release-XlflowComObject -Object $chart",
+		"Release-XlflowComObject -Object $chartObject",
+		"Release-XlflowComObject -Object $chartObjects",
+		"Release-XlflowComObject -Object $range",
+		"Release-XlflowComObject -Object $worksheet",
+		"Release-XlflowComObject -Object $savedSheet",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected export-image.ps1 to release %q", needle)
+		}
 	}
 }
 

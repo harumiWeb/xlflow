@@ -113,3 +113,20 @@
 
 - `go test ./internal/inspect ./internal/cli ./internal/output` passed.
 - `go test ./...` passed.
+
+# xlflow Range Image Export Todo
+
+- [x] Add `export-image` CLI command and flag validation.
+- [x] Add Go-side export-image option/path resolution and PowerShell bridge plumbing.
+- [x] Add `export-image.ps1` Excel COM implementation with temporary chart cleanup.
+- [x] Extend output envelope and human rendering for export target/output/warnings metadata.
+- [x] Update CLI contract, README files, bundled skill guidance, and ADR session-reuse note.
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Run focused verification and full `go test ./...`.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/scripts -run TestPowerShellScriptsParse` passed.
+- `go test ./...` passed.
+- Excel COM-backed end-to-end export verification was not run in a disposable workbook workspace during this pass.

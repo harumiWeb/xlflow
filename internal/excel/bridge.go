@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	bundledscripts "github.com/harumiWeb/xlflow/internal/excel/scripts"
@@ -61,6 +63,19 @@ type PushOptions struct {
 	Session     bool
 	NoSave      bool
 	Keepalive   CommandOptions
+}
+
+type ExportImageOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Range        string
+	OutPath      string
+	OutputDir    string
+	Name         string
+	Format       string
+	Overwrite    bool
+	Session      bool
+	Keepalive    CommandOptions
 }
 
 type SessionCommandOptions struct {
@@ -123,6 +138,9 @@ type ScriptResult struct {
 	Analysis      any           `json:"analysis,omitempty"`
 	Check         any           `json:"check,omitempty"`
 	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
+	Target        any           `json:"target,omitempty"`
+	Output        any           `json:"output,omitempty"`
+	Warnings      any           `json:"warnings,omitempty"`
 }
 
 type UIButtonAddOptions struct {
@@ -450,6 +468,14 @@ func (r Runner) UIButtonRemove(cfg config.Config, opts UIButtonRemoveOptions, cm
 	return r.run("ui", buildUIButtonRemoveScriptArgs(r.RootDir, cfg, opts), cmdOpts...)
 }
 
+func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildExportImageScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		return output.Failure("export-image", output.Error{Code: "export_image_args_invalid", Message: err.Error(), Source: "xlflow"}), output.ExitConfig, nil
+	}
+	return r.run("export-image", scriptArgs, opts.Keepalive)
+}
+
 func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButtonRemoveOptions) map[string]string {
 	return map[string]string{
 		"Action":       "remove",
@@ -458,6 +484,141 @@ func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButton
 		"Sheet":        opts.Sheet,
 		"Id":           opts.ID,
 	}
+}
+
+type exportImageResolvedOutput struct {
+	Path    string
+	Format  string
+	Default bool
+}
+
+func buildExportImageScriptArgs(root string, cfg config.Config, opts ExportImageOptions) (map[string]string, error) {
+	workbook := cfg.Excel.Path
+	if opts.WorkbookPath != "" {
+		workbook = opts.WorkbookPath
+	}
+	outputPath, err := resolveExportImageOutput(root, workbook, opts)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"WorkbookPath":    workbookPath(root, workbook),
+		"Visible":         strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":           opts.Sheet,
+		"RangeAddress":    opts.Range,
+		"OutputPath":      outputPath.Path,
+		"OutputIsDefault": strconv.FormatBool(outputPath.Default),
+		"ImageFormat":     outputPath.Format,
+		"Overwrite":       strconv.FormatBool(opts.Overwrite),
+		"UseSession":      strconv.FormatBool(opts.Session),
+		"MetadataPath":    filepath.Join(root, ".xlflow", "session.json"),
+	}, nil
+}
+
+func resolveExportImageOutput(root, workbook string, opts ExportImageOptions) (exportImageResolvedOutput, error) {
+	format, err := normalizeExportImageFormat(opts.Format)
+	if err != nil {
+		return exportImageResolvedOutput{}, err
+	}
+	if opts.OutPath != "" {
+		if opts.OutputDir != "" || opts.Name != "" {
+			return exportImageResolvedOutput{}, fmt.Errorf("--out cannot be combined with --output-dir or --name")
+		}
+		path, format, err := normalizeExportImagePath(root, opts.OutPath, format)
+		if err != nil {
+			return exportImageResolvedOutput{}, err
+		}
+		return exportImageResolvedOutput{Path: path, Format: format, Default: false}, nil
+	}
+
+	dir := opts.OutputDir
+	if dir == "" {
+		dir = filepath.Join(".xlflow", "artifacts", "images", sanitizeExportImageComponent(strings.TrimSuffix(filepath.Base(workbook), filepath.Ext(workbook)), "workbook"))
+	}
+	filename := opts.Name
+	if filename == "" {
+		filename = defaultExportImageFilename(opts.Sheet, opts.Range, format)
+	}
+	path, format, err := normalizeExportImagePath(root, filepath.Join(dir, filename), format)
+	if err != nil {
+		return exportImageResolvedOutput{}, err
+	}
+	return exportImageResolvedOutput{
+		Path:    path,
+		Format:  format,
+		Default: opts.OutputDir == "" && opts.Name == "",
+	}, nil
+}
+
+func normalizeExportImageFormat(format string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "png":
+		return "png", nil
+	default:
+		return "", fmt.Errorf("unsupported image format %q; supported formats: png", format)
+	}
+}
+
+func normalizeExportImagePath(root, path, format string) (string, string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", "", fmt.Errorf("output path is required")
+	}
+	resolved := path
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(root, resolved)
+	}
+	ext := strings.ToLower(filepath.Ext(resolved))
+	switch ext {
+	case "":
+		resolved += "." + format
+	case ".png":
+		format = "png"
+	default:
+		return "", "", fmt.Errorf("unsupported image format %q; supported formats: png", strings.TrimPrefix(ext, "."))
+	}
+	return filepath.Clean(resolved), format, nil
+}
+
+func defaultExportImageFilename(sheet, cellRange, format string) string {
+	name := sanitizeExportImageComponent(sheet, "sheet")
+	rangeName := sanitizeExportImageComponent(strings.ReplaceAll(cellRange, ":", "-"), "range")
+	return fmt.Sprintf("%s_%s_%s.%s", name, rangeName, time.Now().Format("20060102-150405"), format)
+}
+
+func sanitizeExportImageComponent(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range trimmed {
+		switch {
+		case r == ':' || r == '-' || r == '_':
+			if b.Len() > 0 && !lastUnderscore {
+				b.WriteRune(r)
+				lastUnderscore = r == '_'
+			}
+		case unicode.IsSpace(r):
+			if b.Len() > 0 && !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		case strings.ContainsRune(`\/:*?"<>|`, r):
+			if b.Len() > 0 && !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		default:
+			b.WriteRune(r)
+			lastUnderscore = false
+		}
+	}
+	out := strings.Trim(b.String(), "._- ")
+	if out == "" {
+		return fallback
+	}
+	return out
 }
 
 func (r Runner) run(commandName string, args map[string]string, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -567,6 +728,9 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Analysis = result.Analysis
 	env.Check = result.Check
 	env.RunDiagnostic = result.RunDiagnostic
+	env.Target = result.Target
+	env.Output = result.Output
+	env.Warnings = result.Warnings
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
@@ -634,9 +798,9 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid":
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

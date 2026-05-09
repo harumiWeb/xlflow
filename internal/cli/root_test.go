@@ -232,6 +232,7 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"attach"},
 		{"pull"},
 		{"push"},
+		{"export-image"},
 		{"trace", "inject"},
 		{"macros"},
 		{"test"},
@@ -454,6 +455,7 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 	root := a.rootCommand()
 	for _, args := range [][]string{
 		{"pull"},
+		{"export-image"},
 		{"test"},
 		{"trace", "enable"},
 		{"trace", "disable"},
@@ -467,6 +469,65 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		if cmd.Flags().Lookup("session") == nil {
 			t.Fatalf("expected %v command to define --session", args)
 		}
+	}
+}
+
+func TestRootCommandIncludesExportImageCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"export-image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "export-image" {
+		t.Fatalf("expected export-image command, got %#v", cmd)
+	}
+	for _, name := range []string{"sheet", "range", "out", "output-dir", "name", "format", "overwrite", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected export-image command to define --%s", name)
+		}
+	}
+}
+
+func TestBuildExportImageOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildExportImageOptions(" build\\Book.xlsm ", " QR ", "ae31:a1", "", " artifacts\\images ", " qr-demo ", " png ", true, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkbookPath != "build\\Book.xlsm" {
+		t.Fatalf("workbook = %q", opts.WorkbookPath)
+	}
+	if opts.Sheet != "QR" {
+		t.Fatalf("sheet = %q", opts.Sheet)
+	}
+	if opts.Range != "A1:AE31" {
+		t.Fatalf("range = %q, want A1:AE31", opts.Range)
+	}
+	if opts.OutputDir != "artifacts\\images" || opts.Name != "qr-demo" || opts.Format != "png" {
+		t.Fatalf("unexpected output opts: %#v", opts)
+	}
+	if !opts.Overwrite || !opts.Session {
+		t.Fatalf("expected overwrite/session to be preserved: %#v", opts)
+	}
+}
+
+func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
+	_, err := buildExportImageOptions("", "", "A1:B2", "", "", "", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--sheet is required") {
+		t.Fatalf("expected missing sheet error, got %v", err)
+	}
+	_, err = buildExportImageOptions("", "QR", "bad", "", "", "", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--range") {
+		t.Fatalf("expected range validation error, got %v", err)
+	}
+	_, err = buildExportImageOptions("", "QR", "A1:B2", "out.png", "artifacts", "", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--out cannot be combined") {
+		t.Fatalf("expected out/output-dir conflict, got %v", err)
+	}
+	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "nested\\qr.png", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--name must be a filename") {
+		t.Fatalf("expected name validation error, got %v", err)
 	}
 }
 

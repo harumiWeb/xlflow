@@ -85,6 +85,22 @@ function Set-XlflowError {
   }
 }
 
+function Add-XlflowWarning {
+  param(
+    $Result,
+    [string]$Code,
+    [string]$Message
+  )
+
+  if (-not $Result.ContainsKey("warnings") -or $null -eq $Result.warnings) {
+    $Result.warnings = @()
+  }
+  $Result.warnings += [ordered]@{
+    code = $Code
+    message = $Message
+  }
+}
+
 function ConvertTo-XlflowBool {
   param([string]$Value)
   return $Value -eq "true" -or $Value -eq "True" -or $Value -eq "1"
@@ -127,20 +143,59 @@ function Get-XlflowRelativePath {
 
 function Close-XlflowCom {
   param($Workbook, $Excel, [bool]$Save)
+  $excelProcessId = 0
+  if ($null -ne $Excel) {
+    $excelProcessId = Get-XlflowExcelProcessId -Excel $Excel
+  }
   if ($null -ne $Workbook) {
     try { $Workbook.Close($Save) | Out-Null } catch { Write-Verbose ("failed to close workbook: " + $_.Exception.Message) }
   }
   if ($null -ne $Excel) {
     try { $Excel.Quit() | Out-Null } catch { Write-Verbose ("failed to quit Excel: " + $_.Exception.Message) }
   }
-  if ($null -ne $Workbook) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Workbook) | Out-Null } catch { Write-Verbose ("failed to release workbook COM object: " + $_.Exception.Message) }
-  }
-  if ($null -ne $Excel) {
-    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel) | Out-Null } catch { Write-Verbose ("failed to release Excel COM object: " + $_.Exception.Message) }
-  }
+  Release-XlflowComObject -Object $Workbook -Name "workbook COM object"
+  Release-XlflowComObject -Object $Excel -Name "Excel COM object"
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
+  if ($excelProcessId -gt 0) {
+    $stillRunning = $false
+    for ($i = 0; $i -lt 20; $i++) {
+      if (-not (Get-Process -Id $excelProcessId -ErrorAction SilentlyContinue)) {
+        $stillRunning = $false
+        break
+      }
+      $stillRunning = $true
+      Start-Sleep -Milliseconds 100
+    }
+    if ($stillRunning) {
+      try {
+        Stop-Process -Id $excelProcessId -Force
+      } catch {
+        Write-Verbose ("failed to stop lingering Excel process " + $excelProcessId + ": " + $_.Exception.Message)
+      }
+    }
+  }
+}
+
+function Release-XlflowComObject {
+  param(
+    $Object,
+    [string]$Name = "COM object"
+  )
+
+  if ($null -eq $Object) {
+    return
+  }
+
+  try {
+    if (-not [System.Runtime.InteropServices.Marshal]::IsComObject($Object)) {
+      return
+    }
+    while ([System.Runtime.InteropServices.Marshal]::ReleaseComObject($Object) -gt 0) {
+    }
+  } catch {
+    Write-Verbose ("failed to release " + $Name + ": " + $_.Exception.Message)
+  }
 }
 
 function Release-XlflowComReferences {
@@ -2288,12 +2343,11 @@ function ConvertTo-XlflowUIButtonName {
 function Get-XlflowWorksheet {
   param($Workbook, [string]$Sheet)
 
-  foreach ($worksheet in @($Workbook.Worksheets)) {
-    if ($worksheet.Name -eq $Sheet) {
-      return $worksheet
-    }
+  try {
+    return $Workbook.Worksheets.Item($Sheet)
+  } catch {
+    return $null
   }
-  return $null
 }
 
 function Get-XlflowUIButton {
