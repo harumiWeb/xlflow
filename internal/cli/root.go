@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
@@ -131,6 +132,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.runnerCommand(),
 		a.traceCommand(),
 		a.runCommand(),
+		a.exportImageCommand(),
 		a.macrosCommand(),
 		a.uiCommand(),
 		a.testCommand(),
@@ -218,11 +220,12 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "run-entry-fallback", Description: "Use project.entry from xlflow.toml when xlflow run is invoked without a macro argument."},
 		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
 		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
+		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
 	}
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -821,6 +824,56 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 	}, nil
 }
 
+func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format string, overwrite bool, session bool, keepalive excel.CommandOptions) (excel.ExportImageOptions, error) {
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.ExportImageOptions{}, fmt.Errorf("--sheet is required")
+	}
+	normalizedRange, err := validateInspectRangeAddress(cellRange)
+	if err != nil {
+		return excel.ExportImageOptions{}, fmt.Errorf("--range %w", err)
+	}
+	outPath = strings.TrimSpace(outPath)
+	outputDir = strings.TrimSpace(outputDir)
+	name = strings.TrimSpace(name)
+	if outPath != "" && (outputDir != "" || name != "") {
+		return excel.ExportImageOptions{}, fmt.Errorf("--out cannot be combined with --output-dir or --name")
+	}
+	if err := validateWindowsFilename(name); err != nil {
+		return excel.ExportImageOptions{}, err
+	}
+	return excel.ExportImageOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Range:        normalizedRange,
+		OutPath:      outPath,
+		OutputDir:    outputDir,
+		Name:         name,
+		Format:       strings.TrimSpace(format),
+		Overwrite:    overwrite,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func validateWindowsFilename(name string) error {
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Base(name) != name {
+		return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+	}
+	if strings.ContainsAny(name, `<>:"|?*`) {
+		return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+		}
+	}
+	return nil
+}
+
 func sessionUsageHint() string {
 	return "reuse the matching xlflow session workbook when available"
 }
@@ -1096,6 +1149,63 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
 	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
+	return cmd
+}
+
+func (a *app) exportImageCommand() *cobra.Command {
+	var sheet string
+	var cellRange string
+	var outPath string
+	var outputDir string
+	var name string
+	var format string
+	var overwrite bool
+	var session bool
+	var keepalive keepaliveFlags
+
+	cmd := &cobra.Command{
+		Use:   "export-image [workbook]",
+		Short: "Export a worksheet range as an image",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("export-image", output.ExitConfig, "export_image_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("export-image")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			opts, err := buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format, overwrite, session, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("export-image", output.ExitConfig, "export_image_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Exporting worksheet range image", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.ExportImage(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&cellRange, "range", "", "range address such as A1:AE31")
+	cmd.Flags().StringVar(&outPath, "out", "", "write the image to an explicit file path")
+	cmd.Flags().StringVar(&outputDir, "output-dir", "", "write the image into this directory using a generated filename")
+	cmd.Flags().StringVar(&name, "name", "", "output filename only; uses the default image directory unless --output-dir is set")
+	cmd.Flags().StringVar(&format, "format", "png", "image format; only png is currently supported")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -68,6 +68,23 @@ func TestCommonScriptRelativePathHelperPreservesAbsoluteTargetAcrossDrives(t *te
 	}
 }
 
+func TestCommonScriptExposesReleaseComObjectHelper(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; (Get-Command Release-XlflowComObject).CommandType",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Release-XlflowComObject helper check failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "Function" {
+		t.Fatalf("expected Release-XlflowComObject helper, got %q", out)
+	}
+}
+
 func TestUIButtonIdAndNameNormalization(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -116,6 +133,61 @@ func TestNewXlflowResultIncludesBridgeMetadata(t *testing.T) {
 	}
 	if got.Bridge == nil || got.Bridge.Host == "" || got.Bridge.Edition == "" || got.Bridge.Version == "" {
 		t.Fatalf("expected bridge metadata, got %+v", got)
+	}
+}
+
+func TestAddXlflowWarningAppendsToOrderedResult(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $r = New-XlflowResult -Command 'export-image'; Add-XlflowWarning -Result $r -Code 'cleanup_failed' -Message 'warning'; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Add-XlflowWarning command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Warnings []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse warning output: %v\n%s", err, out)
+	}
+	if len(got.Warnings) != 1 || got.Warnings[0].Code != "cleanup_failed" || got.Warnings[0].Message != "warning" {
+		t.Fatalf("unexpected warnings: %+v", got.Warnings)
+	}
+}
+
+func TestCloseXlflowComSkipsForceKillAfterGracefulCloseFailure(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"$script:stopCalled = $false; "+
+			"function Get-XlflowExcelProcessId { param($Excel) return 123 }; "+
+			"function Get-Process { param([int]$Id) [pscustomobject]@{ Id = $Id } }; "+
+			"function Stop-Process { param([int]$Id, [switch]$Force) $script:stopCalled = $true }; "+
+			"function Start-Sleep { param([int]$Milliseconds) }; "+
+			"function Release-XlflowComObject { param($Object, [string]$Name = 'COM object') }; "+
+			"$workbook = New-Object psobject; "+
+			"$workbook | Add-Member -MemberType ScriptMethod -Name Close -Value { param($Save) throw 'close failed' }; "+
+			"$excel = New-Object psobject; "+
+			"$excel | Add-Member -MemberType ScriptMethod -Name Quit -Value { return $null }; "+
+			"Close-XlflowCom -Workbook $workbook -Excel $excel -Save $true; "+
+			"$script:stopCalled | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Close-XlflowCom failure handling command failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "false" {
+		t.Fatalf("expected Close-XlflowCom to skip force kill after graceful failure, got %q", out)
 	}
 }
 
@@ -193,6 +265,36 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "True" {
 		t.Fatalf("expected run.ps1 to expose SuppressModalErrors, got %q", out)
+	}
+}
+
+func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
+	data, err := os.ReadFile("export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read export-image.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "$range.CopyPicture(2, -4147) | Out-Null") {
+		t.Fatalf("expected export-image.ps1 to use printer-picture CopyPicture mode and suppress pipeline output")
+	}
+	for _, needle := range []string{
+		"$range.Select() | Out-Null",
+		"$excel.Visible = $true",
+		"Test-Path -LiteralPath $resolvedOutputPath -PathType Container",
+		"Move-Item -LiteralPath $temporaryExportPath -Destination $resolvedOutputPath -Force",
+		"Release-XlflowComObject -Object $chart",
+		"Release-XlflowComObject -Object $chartObject",
+		"Release-XlflowComObject -Object $chartObjects",
+		"Release-XlflowComObject -Object $range",
+		"Release-XlflowComObject -Object $worksheet",
+		"Release-XlflowComObject -Object $savedSheet",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected export-image.ps1 to release %q", needle)
+		}
+	}
+	if strings.Contains(text, "Remove-Item -LiteralPath $resolvedOutputPath -Force") {
+		t.Fatalf("expected export-image.ps1 to avoid deleting the destination before export succeeds")
 	}
 }
 

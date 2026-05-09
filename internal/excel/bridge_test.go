@@ -108,6 +108,123 @@ func TestBuildUIButtonAddScriptArgs(t *testing.T) {
 	}
 }
 
+func TestBuildExportImageScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildExportImageScriptArgs(root, cfg, ExportImageOptions{
+		WorkbookPath: filepath.Join("fixtures", "Book.xlsm"),
+		Sheet:        "QR",
+		Range:        "A1:AE31",
+		OutputDir:    filepath.Join("artifacts", "images"),
+		Name:         "qr-demo",
+		Format:       "png",
+		Overwrite:    true,
+		Session:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["WorkbookPath"] != filepath.Join(root, "fixtures", "Book.xlsm") {
+		t.Fatalf("workbook path = %q", args["WorkbookPath"])
+	}
+	if args["Sheet"] != "QR" || args["RangeAddress"] != "A1:AE31" {
+		t.Fatalf("unexpected sheet/range args: %+v", args)
+	}
+	if args["OutputPath"] != filepath.Join(root, "artifacts", "images", "qr-demo.png") {
+		t.Fatalf("output path = %q", args["OutputPath"])
+	}
+	if args["ImageFormat"] != "png" || args["Overwrite"] != "true" || args["UseSession"] != "true" {
+		t.Fatalf("unexpected export args: %+v", args)
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("metadata path = %q", args["MetadataPath"])
+	}
+}
+
+func TestResolveExportImageOutputDefaultPath(t *testing.T) {
+	root := t.TempDir()
+	resolved, err := resolveExportImageOutput(root, filepath.Join("build", "Book.xlsm"), ExportImageOptions{
+		Sheet:  "Sheet 1",
+		Range:  "A1:AE31",
+		Format: "png",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.Default {
+		t.Fatal("expected default output path")
+	}
+	wantDir := filepath.Join(root, ".xlflow", "artifacts", "images", "Book")
+	if filepath.Dir(resolved.Path) != wantDir {
+		t.Fatalf("dir = %q, want %q", filepath.Dir(resolved.Path), wantDir)
+	}
+	base := filepath.Base(resolved.Path)
+	if !strings.HasPrefix(base, "Sheet_1_A1-AE31_") || !strings.HasSuffix(base, ".png") {
+		t.Fatalf("unexpected default filename %q", base)
+	}
+}
+
+func TestNormalizeExportImagePathRejectsUnsupportedExtension(t *testing.T) {
+	_, _, err := normalizeExportImagePath(t.TempDir(), "artifacts\\qr.webp", "png")
+	if err == nil || !strings.Contains(err.Error(), "supported formats: png") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
+func TestRunnerExportImageReturnsValidationFailureForUnsupportedFormat(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.ExportImage(config.Default(), ExportImageOptions{
+		Sheet:  "QR",
+		Range:  "A1:B2",
+		Format: "webp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerExportImageReturnsValidationFailureForUnsupportedExtension(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.ExportImage(config.Default(), ExportImageOptions{
+		Sheet:   "QR",
+		Range:   "A1:B2",
+		OutPath: "artifacts\\qr.webp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestOutputFileExistsIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "output_file_exists", Message: "exists"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(output_file_exists) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestUnsupportedImageFormatIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "unsupported_image_format", Message: "bad format"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(unsupported_image_format) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
 func TestUIValidationFailureCodesAreValidationFailures(t *testing.T) {
 	for _, code := range []string{"sheet_not_found", "button_not_found", "ui_button_args_invalid"} {
 		t.Run(code, func(t *testing.T) {

@@ -100,12 +100,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Requirements
 
-| Requirement                                  | Needed for                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------- |
-| Windows                                      | Excel COM automation                                                      |
-| Microsoft Excel                              | `new`, `init`, `pull`, `push`, `run`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                   |
-| Trust access to the VBA project object model | Reading and writing VBA projects                                          |
+| Requirement                                  | Needed for                                                                                |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Windows                                      | Excel COM automation                                                                      |
+| Microsoft Excel                              | `new`, `init`, `pull`, `push`, `run`, `export-image`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell                                   | Excel automation bridge                                                                   |
+| Trust access to the VBA project object model | Reading and writing VBA projects                                                          |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
@@ -331,6 +331,7 @@ xlflow inspect-gui --json
 | `runner`        | Manage the persistent xlflow runner marker module   | `xlflow runner install --json`                                |
 | `macros`        | Discover runnable macro entrypoints                 | `xlflow macros --json`                                        |
 | `run`           | Execute a macro from the CLI                        | `xlflow run Main.Run --json`                                  |
+| `export-image`  | Export a worksheet range to a PNG image             | `xlflow export-image --sheet QR --range A1:AE31 --json`       |
 | `trace`         | Enable, collect, and clean VBA trace logs           | `xlflow trace enable --json`                                  |
 | `test`          | Run VBA tests                                       | `xlflow test --json`                                          |
 | `diff`          | Compare workbook content and optional VBA source    | `xlflow diff before.xlsm after.xlsm --json`                   |
@@ -506,7 +507,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `pull`, `push`, `macros`, `run`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
+`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
 xlflow now warns more aggressively about this unsaved session state, but `xlflow save --session` remains the canonical persistence step before `session stop`.
@@ -664,6 +665,21 @@ xlflow inspect cell "Result!B3" --json
 Use it to inspect workbook structure and cell output after `push` / `run` workflows when the workbook state has been saved to disk.
 `inspect` is a file snapshot reader, so unsaved changes in an already-open Excel window are intentionally out of scope for this command family.
 Add `--include-style` on `inspect range` or `inspect used-range` when the workbook meaning depends on fill colors, borders, merged cells, row heights, or column widths.
+
+### `xlflow export-image`
+
+Exports a worksheet range as a PNG through Excel COM.
+
+```bash
+xlflow export-image --sheet "QR" --range "A1:AE31" --json
+xlflow export-image --sheet "QR" --range "A1:AE31" --out artifacts\qr.png --overwrite --json
+```
+
+This is the visual verification companion to `inspect`. Use it when workbook correctness depends on charts, fills, layout, printable forms, QR-code cells, or other rendering details that a saved-file snapshot is not enough to prove.
+
+Without `--out`, xlflow writes under `.xlflow/artifacts/images/<workbook-name>/` using a generated filename. `--output-dir` selects only the directory, and `--name` selects only the filename. Only PNG is supported in v1.
+
+Like other workbook-backed commands, `export-image` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit. Successful JSON includes top-level `target`, `output`, and optional `warnings`.
 
 ### `xlflow inspect-gui`
 

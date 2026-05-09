@@ -112,6 +112,26 @@ func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
+	env := New("export-image")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "sheet": "QR", "range": "A1:AE31"}
+	env.Output = map[string]any{"path": ".xlflow/artifacts/images/Book/qr.png", "format": "png", "default": true}
+	env.Warnings = []map[string]any{{"code": "temporary_object_cleanup_failed", "message": "cleanup failed"}}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "output", "warnings"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWritePlainFailureIncludesLogsBeforeError(t *testing.T) {
 	env := Failure("run", Error{Message: "macro failed"})
 	env.Logs = []string{"[2026-04-29 21:12:03] start"}
@@ -446,6 +466,24 @@ func TestWriteWithOptionsRendersTraceCommandSummary(t *testing.T) {
 	for _, want := range []string{"saved live session workbook with trace helper", "persisted in workbook and source", "Trace dir"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("trace output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
+	env := New("export-image")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "sheet": "QR", "range": "A1:AE31"}
+	env.Output = map[string]any{"path": ".xlflow/artifacts/images/Book/QR_A1-AE31_20260509-083012.png", "format": "png", "default": true, "width_px": 620, "height_px": 620}
+	env.Warnings = []map[string]any{{"code": "temporary_object_cleanup_failed", "message": "The image was exported, but xlflow could not delete a temporary chart object."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"live session workbook", "QR", "A1:AE31", "PNG", "620 x 620 px", "SAVE REQUIRED", "temporary_object_cleanup_failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("export-image output missing %q:\n%s", want, got)
 		}
 	}
 }
