@@ -53,11 +53,11 @@ Public Sub Tick()
 End Sub
 
 Public Sub MoveLeftKey()
-    HandleMove -1, 0
+    HandleMove 0, -1
 End Sub
 
 Public Sub MoveRightKey()
-    HandleMove 1, 0
+    HandleMove 0, 1
 End Sub
 
 Public Sub SoftDropKey()
@@ -120,10 +120,10 @@ Private Sub EnsureInitialized()
     gShapeMaps(3, 2) = "........XXX.X..."
     gShapeMaps(3, 3) = "XX...X...X......"
 
-    gShapeMaps(4, 0) = ".XX.XX.........."
-    gShapeMaps(4, 1) = ".XX.XX.........."
-    gShapeMaps(4, 2) = ".XX.XX.........."
-    gShapeMaps(4, 3) = ".XX.XX.........."
+    gShapeMaps(4, 0) = ".XX..XX........."
+    gShapeMaps(4, 1) = ".XX..XX........."
+    gShapeMaps(4, 2) = ".XX..XX........."
+    gShapeMaps(4, 3) = ".XX..XX........."
 
     gShapeMaps(5, 0) = ".XX.XX.........."
     gShapeMaps(5, 1) = ".X..XX..X......."
@@ -459,8 +459,14 @@ Private Sub RenderGame()
     Dim columnIndex As Long
     Dim cell As Range
     Dim boardValue As Long
+    Dim screenUpdatingWasEnabled As Boolean
 
     If gGameSheet Is Nothing Then Exit Sub
+
+    screenUpdatingWasEnabled = Application.ScreenUpdating
+    On Error GoTo CleanFail
+
+    Application.ScreenUpdating = False
 
     For rowIndex = 1 To BOARD_ROWS
         For columnIndex = 1 To BOARD_COLUMNS
@@ -476,14 +482,22 @@ Private Sub RenderGame()
         Next columnIndex
     Next rowIndex
 
-    gGameSheet.Range("M11").Value2 = gScore
-    gGameSheet.Range("M12").Value2 = gLinesCleared
+    gGameSheet.Range("N10").Value2 = gScore
+    gGameSheet.Range("N11").Value2 = gLinesCleared
 
     If gIsRunning Then
         gGameSheet.Range("B24").Value2 = "Playing"
     Else
         gGameSheet.Range("B24").Value2 = "Game Over - press R to restart"
     End If
+
+CleanExit:
+    Application.ScreenUpdating = screenUpdatingWasEnabled
+    Exit Sub
+
+CleanFail:
+    Application.ScreenUpdating = screenUpdatingWasEnabled
+    Err.Raise Err.Number, Err.source, Err.Description
 End Sub
 
 Private Function EffectiveBoardValue(ByVal rowIndex As Long, ByVal columnIndex As Long) As Long
@@ -519,7 +533,7 @@ Private Function PieceCellFilled(ByVal pieceIndex As Long, ByVal rotationIndex A
     PieceCellFilled = Mid$(gShapeMaps(pieceIndex, rotationIndex), position, 1) = "X"
 End Function
 
-Private Sub HandleMove(ByVal columnOffset As Long, ByVal rowOffset As Long)
+Private Sub HandleMove(ByVal rowOffset As Long, ByVal columnOffset As Long)
     If Not gIsRunning Then Exit Sub
 
     If TryMovePiece(rowOffset, columnOffset, gCurrentRotation) Then

@@ -17,7 +17,7 @@ It generates a QR code from a string entered into a cell and draws it directly o
 2. Enter the string you want to convert into a QR code in cell B2 of the sheet.
 3. The QR code will be generated automatically based on the input.
 
-Main.Run is also executed immediately after opening the workbook. To re-run from the CLI, use `xlflow run --diagnostic` in this folder.
+Main.Run is also executed immediately after opening the workbook. To re-run from the CLI, use `xlflow run --diagnostic` in this folder; `xlflow.toml` already configures `entry = "Main.Run"`, so no extra macro argument is needed.
 
 ## Areas to customize
 
