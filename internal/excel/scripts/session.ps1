@@ -77,7 +77,7 @@ try {
         }
       }
       $dirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
-      $needsSave = $running -and $open -and ($null -ne $dirty) -and [bool]$dirty
+      $needsSave = $running -and $open -and (($null -eq $dirty) -or [bool]$dirty)
       $result.session = [ordered]@{
         running = $running
         workbook_open = $open

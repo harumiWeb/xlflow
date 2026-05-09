@@ -812,6 +812,33 @@ func TestSessionStopSingleLogSerializesAsArray(t *testing.T) {
 	}
 }
 
+func TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "session.ps1"))
+	if err != nil {
+		t.Fatalf("read session.ps1: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "$needsSave = $running -and $open -and (($null -eq $dirty) -or [bool]$dirty)") {
+		t.Fatalf("session.ps1 should conservatively treat unknown dirty state as save-required:\n%s", text)
+	}
+}
+
+func TestMacrosScriptVBIDEAccessDenialStillIncludesTargetAndSession(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "macros.ps1"))
+	if err != nil {
+		t.Fatalf("read macros.ps1: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"$result.target = New-XlflowTargetResult",
+		"$result.session = New-XlflowSessionResult",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("macros.ps1 should preserve target/session on VBIDE denial, missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestSetXlflowExcelAutomationDefaultsLeavesAutomationSecurityUnchanged(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

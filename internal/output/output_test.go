@@ -134,6 +134,43 @@ func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsInspectJSONIncludesTargetStateAndWarnings(t *testing.T) {
+	env := New("inspect")
+	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Warnings = []map[string]any{{"code": "live_session_dirty", "message": "stale"}}
+	env.Hints = []map[string]any{{"code": "next_step", "message": "save first"}}
+	env.Inspect = map[string]any{
+		"target": "workbook",
+		"format": "json",
+		"workbook": map[string]any{
+			"path":   "build/Book.xlsm",
+			"name":   "Book.xlsm",
+			"sheets": []map[string]any{},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["target_state"].(map[string]any); !ok {
+		t.Fatalf("expected target_state in inspect json: %s", buf.String())
+	}
+	if _, ok := decoded["session"].(map[string]any); !ok {
+		t.Fatalf("expected session in inspect json: %s", buf.String())
+	}
+	if _, ok := decoded["warnings"].([]any); !ok {
+		t.Fatalf("expected warnings in inspect json: %s", buf.String())
+	}
+	if _, ok := decoded["hints"].([]any); !ok {
+		t.Fatalf("expected hints in inspect json: %s", buf.String())
+	}
+}
+
 func TestWritePlainFailureIncludesLogsBeforeError(t *testing.T) {
 	env := Failure("run", Error{Message: "macro failed"})
 	env.Logs = []string{"[2026-04-29 21:12:03] start"}
@@ -350,6 +387,36 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 			t.Fatalf("inspect output missing %q:\n%s", want, got)
 		}
 	}
+	if strings.Count(got, "Target:") != 1 || strings.Count(got, "Session state:") != 1 {
+		t.Fatalf("inspect output should render target/session once:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersInspectEmptyRangeWarnings(t *testing.T) {
+	env := New("inspect")
+	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Warnings = []map[string]any{{"code": "live_session_dirty", "message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook."}}
+	env.Inspect = map[string]any{
+		"target": "range",
+		"range": map[string]any{
+			"sheet":        "Visible",
+			"range":        "A1:A1",
+			"row_count":    0,
+			"column_count": 0,
+			"values":       [][]any{},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Values: <empty>", "Warnings:", "live_session_dirty"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect empty range output missing %q:\n%s", want, got)
+		}
+	}
 }
 
 func TestWriteWithOptionsRendersCompileDiagnostic(t *testing.T) {
@@ -511,10 +578,13 @@ func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"live session workbook", "QR", "A1:AE31", "PNG", "620 x 620 px", "SAVE REQUIRED", "temporary_object_cleanup_failed"} {
+	for _, want := range []string{"Export target:", "live session workbook", "QR", "Selection:", "A1:AE31", "PNG", "620 x 620 px", "SAVE REQUIRED", "temporary_object_cleanup_failed"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("export-image output missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Count(got, "Target:") != 1 {
+		t.Fatalf("export-image output should render one Target label:\n%s", got)
 	}
 }
 

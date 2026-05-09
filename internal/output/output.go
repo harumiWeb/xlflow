@@ -175,7 +175,9 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.errorBlock(env))
 	}
 	b.WriteString(r.renderBridge(env))
-	b.WriteString(r.renderTargetSession(env))
+	if env.Command != "inspect" {
+		b.WriteString(r.renderTargetSession(env))
+	}
 	switch env.Command {
 	case "version":
 		b.WriteString(r.renderVersion(env))
@@ -774,7 +776,7 @@ func (r renderer) renderExportImage(env Envelope) string {
 		b.WriteString(kv("Workbook", path))
 	}
 	if summary := summarizeExportImageTarget(target); summary != "" {
-		b.WriteString(kv("Target", summary))
+		b.WriteString(kv("Export target", summary))
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		b.WriteString(kv("Session", sessionSummary))
@@ -783,7 +785,7 @@ func (r renderer) renderExportImage(env Envelope) string {
 		b.WriteString(kv("Sheet", sheet))
 	}
 	if cellRange := stringValue(target, "range"); cellRange != "" {
-		b.WriteString(kv("Range", cellRange))
+		b.WriteString(kv("Selection", cellRange))
 	}
 	if save := summarizeSaveRequirement(workbook); save != "" {
 		b.WriteString(kv("Save", save))
@@ -985,6 +987,7 @@ func (r renderer) renderInspectRange(env Envelope, payload map[string]any) strin
 	values := matrixStrings(snapshot["values"])
 	if len(values) == 0 {
 		b.WriteString("Values: <empty>\n")
+		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
 	b.WriteString("Values:\n")
@@ -1087,6 +1090,7 @@ func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) st
 		values := matrixStrings(snapshot["values"])
 		if len(values) == 0 {
 			b.WriteString("\n_No values_\n")
+			b.WriteString(renderWarningsAndHintsMarkdown(env))
 			return b.String()
 		}
 		b.WriteString("\n")
