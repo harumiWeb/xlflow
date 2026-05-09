@@ -149,11 +149,18 @@
 
 # xlflow Workbook Edit Commands Todo
 
-- [ ] Add `edit cell|range|rows|columns` CLI commands and flag validation.
-- [ ] Add Go-side edit option types, argument normalization, and bridge plumbing.
-- [ ] Add `edit.ps1` session-only Excel COM implementation with event-state restore.
-- [ ] Extend the JSON envelope and human renderer with top-level `edit` metadata.
-- [ ] Update CLI contract, README files, and any required workflow guidance.
-- [ ] Decide whether this policy change needs an ADR update and record the result.
-- [ ] Add focused Go and PowerShell regression coverage.
-- [ ] Run focused `go test` targets, full `go test ./...`, and Windows Excel COM E2E verification.
+- [x] Add `edit cell|range|rows|columns` CLI commands and flag validation.
+- [x] Add Go-side edit option types, argument normalization, and bridge plumbing.
+- [x] Add `edit.ps1` session-only Excel COM implementation with event-state restore.
+- [x] Extend the JSON envelope and human renderer with top-level `edit` metadata.
+- [x] Update CLI contract, README files, and any required workflow guidance.
+- [x] Decide whether this policy change needs an ADR update and record the result (`docs/adr/ADR-0004-explicit-excel-session-mode.md` updated in this PR).
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Run focused `go test` targets, full `go test ./...`, and Windows Excel COM E2E verification.
+
+## Verification Notes
+
+- `go test ./...` passed.
+- `task lint` passed.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\edit-review-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, `session start`, `push --fast --session --no-save`, `edit cell|range|rows|columns --session`, `run Main.Run --session`, `save --session`, `session stop`, `pull`, and final `lint` all passed.
+- Excel COM workbook-state check after save/stop confirmed `A1="xlflow ok"`, `B2Formula="=1+2"`, `B2Value=3`, `C1Color=65280`, `Row1Height=24`, and `ColumnBWidth=22`.

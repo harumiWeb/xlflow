@@ -593,6 +593,9 @@ func TestBuildEditCellOptionsValidatesAndNormalizes(t *testing.T) {
 func TestBuildEditCellOptionsRejectsInvalidCombinations(t *testing.T) {
 	value := "ABC123"
 	formula := "=A1+B1"
+	if _, err := buildEditCellOptions("", "Input", "B2", "", "keep", &value, nil, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
 	if _, err := buildEditCellOptions("", "Input", "B2", "", "keep", nil, nil, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("expected missing mutation error, got %v", err)
 	}
@@ -615,6 +618,9 @@ func TestBuildEditRangeOptionsValidatesAndNormalizes(t *testing.T) {
 	if opts.WorkbookPath != "build\\Book.xlsm" || opts.Sheet != "QR" || opts.Range != "A1:AE31" || opts.Fill != "#FFFFFF" {
 		t.Fatalf("unexpected edit range opts: %#v", opts)
 	}
+	if _, err := buildEditRangeOptions("", "QR", "A1:B2", "#fff", "", false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
 }
 
 func TestBuildEditRowsAndColumnsOptionsValidateSelectors(t *testing.T) {
@@ -631,6 +637,12 @@ func TestBuildEditRowsAndColumnsOptionsValidateSelectors(t *testing.T) {
 	}
 	if columns.Columns != "A:AE" {
 		t.Fatalf("columns selector = %q", columns.Columns)
+	}
+	if _, err := buildEditRowsOptions("", "QR", "1:31", 12, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditColumnsOptions("", "QR", "A:AE", 2.2, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
 	}
 	if _, err := buildEditRowsOptions("", "QR", "0", 12, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--rows") {
 		t.Fatalf("expected invalid rows error, got %v", err)

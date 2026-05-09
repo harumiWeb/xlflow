@@ -859,6 +859,9 @@ func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, nam
 }
 
 func buildEditCellOptions(workbook, sheet, cell, fill, events string, value *string, formula *string, session bool, keepalive excel.CommandOptions) (excel.EditCellOptions, error) {
+	if !session {
+		return excel.EditCellOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
 	sheet = strings.TrimSpace(sheet)
 	if sheet == "" {
 		return excel.EditCellOptions{}, fmt.Errorf("--sheet is required")
@@ -912,6 +915,9 @@ func buildEditCellOptions(workbook, sheet, cell, fill, events string, value *str
 }
 
 func buildEditRangeOptions(workbook, sheet, cellRange, fill, clear string, session bool, keepalive excel.CommandOptions) (excel.EditRangeOptions, error) {
+	if !session {
+		return excel.EditRangeOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
 	sheet = strings.TrimSpace(sheet)
 	if sheet == "" {
 		return excel.EditRangeOptions{}, fmt.Errorf("--sheet is required")
@@ -950,6 +956,9 @@ func buildEditRangeOptions(workbook, sheet, cellRange, fill, clear string, sessi
 }
 
 func buildEditRowsOptions(workbook, sheet, rows string, height float64, session bool, keepalive excel.CommandOptions) (excel.EditRowsOptions, error) {
+	if !session {
+		return excel.EditRowsOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
 	sheet = strings.TrimSpace(sheet)
 	if sheet == "" {
 		return excel.EditRowsOptions{}, fmt.Errorf("--sheet is required")
@@ -972,6 +981,9 @@ func buildEditRowsOptions(workbook, sheet, rows string, height float64, session 
 }
 
 func buildEditColumnsOptions(workbook, sheet, columns string, width float64, session bool, keepalive excel.CommandOptions) (excel.EditColumnsOptions, error) {
+	if !session {
+		return excel.EditColumnsOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
 	sheet = strings.TrimSpace(sheet)
 	if sheet == "" {
 		return excel.EditColumnsOptions{}, fmt.Errorf("--sheet is required")

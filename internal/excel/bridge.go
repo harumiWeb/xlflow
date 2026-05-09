@@ -529,11 +529,21 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 }
 
 func (r Runner) EditCell(cfg config.Config, opts EditCellOptions) (output.Envelope, int, error) {
-	return r.run("edit", buildEditCellScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	scriptArgs, err := buildEditCellScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := editArgFailure(err)
+		return output.Failure("edit", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	return r.run("edit", scriptArgs, opts.Keepalive)
 }
 
 func (r Runner) EditRange(cfg config.Config, opts EditRangeOptions) (output.Envelope, int, error) {
-	return r.run("edit", buildEditRangeScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	scriptArgs, err := buildEditRangeScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := editArgFailure(err)
+		return output.Failure("edit", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	return r.run("edit", scriptArgs, opts.Keepalive)
 }
 
 func (r Runner) EditRows(cfg config.Config, opts EditRowsOptions) (output.Envelope, int, error) {
@@ -554,7 +564,20 @@ func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButton
 	}
 }
 
-func buildEditCellScriptArgs(root string, cfg config.Config, opts EditCellOptions) map[string]string {
+func buildEditCellScriptArgs(root string, cfg config.Config, opts EditCellOptions) (map[string]string, error) {
+	mutations := 0
+	if opts.Value != nil {
+		mutations++
+	}
+	if opts.Formula != nil {
+		mutations++
+	}
+	if opts.Fill != "" {
+		mutations++
+	}
+	if mutations != 1 {
+		return nil, editArgError{message: "exactly one of value, formula, or fill is required"}
+	}
 	args := map[string]string{
 		"Action":       "cell",
 		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
@@ -574,10 +597,13 @@ func buildEditCellScriptArgs(root string, cfg config.Config, opts EditCellOption
 	if opts.Fill != "" {
 		args["Fill"] = opts.Fill
 	}
-	return args
+	return args, nil
 }
 
-func buildEditRangeScriptArgs(root string, cfg config.Config, opts EditRangeOptions) map[string]string {
+func buildEditRangeScriptArgs(root string, cfg config.Config, opts EditRangeOptions) (map[string]string, error) {
+	if opts.Fill != "" && opts.Clear != "" {
+		return nil, editArgError{message: "fill and clear cannot be combined"}
+	}
 	args := map[string]string{
 		"Action":       "range",
 		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
@@ -593,7 +619,7 @@ func buildEditRangeScriptArgs(root string, cfg config.Config, opts EditRangeOpti
 	if opts.Clear != "" {
 		args["Clear"] = opts.Clear
 	}
-	return args
+	return args, nil
 }
 
 func buildEditRowsScriptArgs(root string, cfg config.Config, opts EditRowsOptions) map[string]string {
@@ -651,6 +677,22 @@ func exportImageArgFailure(err error) (string, int) {
 		return argErr.code, argErr.exitCode
 	}
 	return "export_image_args_invalid", output.ExitConfig
+}
+
+type editArgError struct {
+	message string
+}
+
+func (e editArgError) Error() string {
+	return e.message
+}
+
+func editArgFailure(err error) (string, int) {
+	var argErr editArgError
+	if errors.As(err, &argErr) {
+		return "edit_args_invalid", output.ExitConfig
+	}
+	return "edit_args_invalid", output.ExitConfig
 }
 
 func buildExportImageScriptArgs(root string, cfg config.Config, opts ExportImageOptions) (map[string]string, error) {

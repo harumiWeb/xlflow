@@ -1567,11 +1567,11 @@ func summarizeEditMutation(edit map[string]any) string {
 	if len(mutation) == 0 {
 		return ""
 	}
-	if value := objectMap(mutation["value"]); len(value) > 0 {
-		return "value -> " + stringValue(value, "after")
-	}
 	if formula := objectMap(mutation["formula"]); len(formula) > 0 {
 		return "formula -> " + stringValue(formula, "after")
+	}
+	if value := objectMap(mutation["value"]); len(value) > 0 {
+		return "value -> " + stringValue(value, "after")
 	}
 	if style := objectMap(mutation["style"]); len(style) > 0 {
 		if fill := objectMap(style["fill"]); len(fill) > 0 {

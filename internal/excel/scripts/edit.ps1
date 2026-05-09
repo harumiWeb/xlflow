@@ -209,8 +209,8 @@ function Set-XlflowEditResultContext {
   param([string]$Kind, [string]$SelectorName, [string]$SelectorValue)
 
   $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
-  $result.session = New-XlflowSessionResult -Active $true -WorkbookPath $WorkbookPath -Dirty $true -SaveRequired $true -Mode $sessionMode
-  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Dirty $true -NeedsSave $true
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
   $edit = [ordered]@{
     kind = $Kind
     sheet = $worksheet.Name
@@ -219,6 +219,20 @@ function Set-XlflowEditResultContext {
     $edit[$SelectorName] = $SelectorValue
   }
   $result.edit = $edit
+}
+
+function Update-XlflowEditResultSaveState {
+  param($Workbook)
+
+  $script:saveState = Get-XlflowWorkbookSaveState -Workbook $Workbook -SessionAttached $sessionAttached
+  if ($null -ne $result.session) {
+    $result.session.dirty = $saveState.dirty
+    $result.session.save_required = $saveState.needs_save
+  }
+  if ($null -ne $result.workbook) {
+    $result.workbook.dirty = $saveState.dirty
+    $result.workbook.needs_save = $saveState.needs_save
+  }
 }
 
 try {
@@ -292,6 +306,7 @@ try {
             changed = ($beforeFill -ne $normalizedFill)
           }
         }
+        Update-XlflowEditResultSaveState -Workbook $workbook
         $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("edited {0}!{1} fill in the live Excel session" -f $worksheet.Name, $cellAddress), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         break
       }
@@ -299,6 +314,9 @@ try {
       $eventMode = ([string]$Events).Trim().ToLowerInvariant()
       if ([string]::IsNullOrWhiteSpace($eventMode)) {
         $eventMode = "keep"
+      } elseif ($eventMode -ne "keep" -and $eventMode -ne "on" -and $eventMode -ne "off") {
+        Set-EditValidationError -Code "edit_args_invalid" -Message "-Events must be keep, on, or off."
+        throw "edit_args_invalid"
       }
       try {
         $enableEventsBefore = [bool]$excel.EnableEvents
@@ -374,19 +392,22 @@ try {
         enable_events_after = $enableEventsAfter
         restored = $eventsRestored
       }
-      $result.edit.mutation = [ordered]@{
-        value = [ordered]@{
-          before = $beforeValue
-          after = $afterValue
+      if ($valueRequested) {
+        $result.edit.mutation = [ordered]@{
+          value = [ordered]@{
+            before = $beforeValue
+            after = $afterValue
+          }
         }
-        formula = [ordered]@{
-          before = $beforeFormula
-          after = $afterFormula
-        }
-        style = [ordered]@{
-          changed = $false
+      } else {
+        $result.edit.mutation = [ordered]@{
+          formula = [ordered]@{
+            before = $beforeFormula
+            after = $afterFormula
+          }
         }
       }
+      Update-XlflowEditResultSaveState -Workbook $workbook
       $mutationLabel = $(if ($valueRequested) { "value" } else { "formula" })
       $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("edited {0}!{1} {2} in the live Excel session" -f $worksheet.Name, $cellAddress, $mutationLabel), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     }
@@ -421,6 +442,7 @@ try {
           }
           affected_cells = $affectedCells
         }
+        Update-XlflowEditResultSaveState -Workbook $workbook
         $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("edited {0}!{1} fill in the live Excel session" -f $worksheet.Name, $normalizedRange), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
       } else {
         $clearMode = ([string]$Clear).Trim().ToLowerInvariant()
@@ -439,6 +461,7 @@ try {
           }
           affected_cells = $affectedCells
         }
+        Update-XlflowEditResultSaveState -Workbook $workbook
         $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("cleared {0} on {1}!{2} in the live Excel session" -f $clearMode, $worksheet.Name, $normalizedRange), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
       }
     }
@@ -462,6 +485,7 @@ try {
         }
         affected_rows = [int]$targetRange.Rows.Count
       }
+      Update-XlflowEditResultSaveState -Workbook $workbook
       $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("edited row height for {0}!{1} in the live Excel session" -f $worksheet.Name, $normalizedRows), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     }
     "columns" {
@@ -484,6 +508,7 @@ try {
         }
         affected_columns = [int]$targetRange.Columns.Count
       }
+      Update-XlflowEditResultSaveState -Workbook $workbook
       $result.logs = @($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ("edited column width for {0}!{1} in the live Excel session" -f $worksheet.Name, $normalizedColumns), $saveHint) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     }
   }

@@ -145,7 +145,7 @@ func TestBuildEditCellScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	value := "ABC123"
-	args := buildEditCellScriptArgs(root, cfg, EditCellOptions{
+	args, err := buildEditCellScriptArgs(root, cfg, EditCellOptions{
 		WorkbookPath: filepath.Join("fixtures", "Book.xlsm"),
 		Sheet:        "Input",
 		Cell:         "B2",
@@ -153,6 +153,9 @@ func TestBuildEditCellScriptArgs(t *testing.T) {
 		Events:       EditEventOn,
 		Session:      true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if args["Action"] != "cell" || args["WorkbookPath"] != filepath.Join(root, "fixtures", "Book.xlsm") {
 		t.Fatalf("unexpected edit cell args: %+v", args)
 	}
@@ -167,12 +170,15 @@ func TestBuildEditCellScriptArgs(t *testing.T) {
 func TestBuildEditRangeRowsAndColumnsScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
-	rangeArgs := buildEditRangeScriptArgs(root, cfg, EditRangeOptions{
+	rangeArgs, err := buildEditRangeScriptArgs(root, cfg, EditRangeOptions{
 		Sheet:   "QR",
 		Range:   "A1:AE31",
 		Fill:    "#FFFFFF",
 		Session: true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rangeArgs["Action"] != "range" || rangeArgs["RangeAddress"] != "A1:AE31" || rangeArgs["Fill"] != "#FFFFFF" {
 		t.Fatalf("unexpected edit range args: %+v", rangeArgs)
 	}
@@ -193,6 +199,31 @@ func TestBuildEditRangeRowsAndColumnsScriptArgs(t *testing.T) {
 	})
 	if columnArgs["Action"] != "columns" || columnArgs["Columns"] != "A:AE" || columnArgs["Width"] != "2.2" {
 		t.Fatalf("unexpected edit columns args: %+v", columnArgs)
+	}
+}
+
+func TestBuildEditScriptArgsRejectInvalidCombinations(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	value := "ABC123"
+	formula := "=A1+B1"
+	if _, err := buildEditCellScriptArgs(root, cfg, EditCellOptions{
+		Sheet:   "Input",
+		Cell:    "B2",
+		Value:   &value,
+		Formula: &formula,
+		Session: true,
+	}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected cell mutation conflict, got %v", err)
+	}
+	if _, err := buildEditRangeScriptArgs(root, cfg, EditRangeOptions{
+		Sheet:   "QR",
+		Range:   "A1:B2",
+		Fill:    "#FFFFFF",
+		Clear:   "all",
+		Session: true,
+	}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected range mutation conflict, got %v", err)
 	}
 }
 
@@ -305,6 +336,27 @@ func TestEditValidationFailureCodesAreValidationFailures(t *testing.T) {
 				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitValidation)
 			}
 		})
+	}
+}
+
+func TestRunnerEditReturnsConfigFailureForInvalidMutations(t *testing.T) {
+	value := "ABC123"
+	formula := "=A1+B1"
+	env, code, err := Runner{RootDir: t.TempDir()}.EditCell(config.Default(), EditCellOptions{
+		Sheet:   "Input",
+		Cell:    "B2",
+		Value:   &value,
+		Formula: &formula,
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+	}
+	if env.Error == nil || env.Error.Code != "edit_args_invalid" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 

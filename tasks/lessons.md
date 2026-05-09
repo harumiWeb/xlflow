@@ -29,3 +29,4 @@
 - Example sample docs must use `README.md` and stay aligned with the real startup path; if a sample claims it auto-runs on open or via `xlflow run`, wire the matching workbook event and keep the documented command consistent with the configured `entry`.
 - Worksheet change handlers for watched cells should rely on `Intersect(Target, watchedRange)` instead of rejecting multi-cell targets up front, so paste operations that include the watched cell still trigger the update.
 - In PowerShell bridge catch blocks, do not overwrite a previously classified structured error with a broader fallback code. Preserve explicit validation or domain-specific codes, and only assign a generic fallback when no structured error has been recorded yet.
+- Edit payloads should identify exactly one mutated operation. Do not emit both formula and calculated-value snapshots for a single cell edit when downstream output needs to report which mutation the user requested.

@@ -66,6 +66,23 @@ func TestEditScriptPreservesStructuredErrorBeforeFallbackCatch(t *testing.T) {
 	}
 }
 
+func TestEditScriptValidatesEventsAndUpdatesSaveStateAfterMutation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "edit.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read edit.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Set-EditValidationError -Code \"edit_args_invalid\" -Message \"-Events must be keep, on, or off.\"",
+		"function Update-XlflowEditResultSaveState",
+		"Update-XlflowEditResultSaveState -Workbook $workbook",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected edit.ps1 to contain %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestCommonScriptRelativePathHelperWorksInWindowsPowerShell(t *testing.T) {
 	if _, err := exec.LookPath("powershell"); err != nil {
 		t.Skip("powershell is not available")

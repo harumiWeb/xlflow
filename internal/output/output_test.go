@@ -646,6 +646,30 @@ func TestWriteWithOptionsRendersEditSummary(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersFormulaMutationAheadOfCalculatedValue(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":  "cell",
+		"sheet": "Input",
+		"cell":  "B2",
+		"mutation": map[string]any{
+			"value":   map[string]any{"before": "1", "after": "3"},
+			"formula": map[string]any{"before": "=1", "after": "=1+2"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "formula -> =1+2") {
+		t.Fatalf("expected formula summary, got:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersBridgeHost(t *testing.T) {
 	env := New("run")
 	env.Bridge = map[string]any{"host": "powershell.exe", "edition": "Desktop", "version": "5.1"}
