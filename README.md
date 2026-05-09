@@ -100,12 +100,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Requirements
 
-| Requirement                                  | Needed for                                                                                |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Windows                                      | Excel COM automation                                                                      |
-| Microsoft Excel                              | `new`, `init`, `pull`, `push`, `run`, `export-image`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                                   |
-| Trust access to the VBA project object model | Reading and writing VBA projects                                                          |
+| Requirement                                  | Needed for                                                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Windows                                      | Excel COM automation                                                                              |
+| Microsoft Excel                              | `new`, `init`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell                                   | Excel automation bridge                                                                           |
+| Trust access to the VBA project object model | Reading and writing VBA projects                                                                  |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
@@ -318,30 +318,31 @@ xlflow inspect-gui --json
 
 ## Command map
 
-| Command         | Purpose                                             | Typical usage                                                 |
-| --------------- | --------------------------------------------------- | ------------------------------------------------------------- |
-| `new`           | Create a new xlflow project and `.xlsm` workbook    | `xlflow new Book.xlsm`                                        |
-| `init`          | Initialize xlflow from an existing workbook         | `xlflow init Book.xlsm`                                       |
-| `doctor`        | Diagnose Excel, COM, PowerShell, and VBIDE access   | `xlflow doctor --json`                                        |
-| `attach`        | Validate the workbook currently active in Excel     | `xlflow attach --active --json`                               |
-| `pull`          | Export VBA components into `src/`                   | `xlflow pull --json`                                          |
-| `push`          | Import VBA source back into the workbook            | `xlflow push --json`                                          |
-| `session`       | Keep the configured workbook open for fast loops    | `xlflow session start`                                        |
-| `save`          | Save the workbook held by a session                 | `xlflow save --session --json`                                |
-| `runner`        | Manage the persistent xlflow runner marker module   | `xlflow runner install --json`                                |
-| `macros`        | Discover runnable macro entrypoints                 | `xlflow macros --json`                                        |
-| `run`           | Execute a macro from the CLI                        | `xlflow run Main.Run --json`                                  |
-| `export-image`  | Export a worksheet range to a PNG image             | `xlflow export-image --sheet QR --range A1:AE31 --json`       |
-| `trace`         | Enable, collect, and clean VBA trace logs           | `xlflow trace enable --json`                                  |
-| `test`          | Run VBA tests                                       | `xlflow test --json`                                          |
-| `diff`          | Compare workbook content and optional VBA source    | `xlflow diff before.xlsm after.xlsm --json`                   |
-| `inspect`       | Inspect saved workbook snapshots without Excel COM  | `xlflow inspect range --sheet Result --address A1:F20 --json` |
-| `lint`          | Lint VBA source                                     | `xlflow lint --json`                                          |
-| `analyze`       | Analyze runtime-risk patterns without opening Excel | `xlflow analyze --json`                                       |
-| `check`         | Run `lint`, `analyze`, and `doctor` as a preflight  | `xlflow check --keepalive --json`                             |
-| `inspect-gui`   | Detect GUI interaction boundaries                   | `xlflow inspect-gui --json`                                   |
-| `skill install` | Install the bundled xlflow Skill for AI agents      | `xlflow skill install --agent codex`                          |
-| `version`       | Show the installed xlflow build metadata            | `xlflow version`                                              |
+| Command         | Purpose                                             | Typical usage                                                              |
+| --------------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
+| `new`           | Create a new xlflow project and `.xlsm` workbook    | `xlflow new Book.xlsm`                                                     |
+| `init`          | Initialize xlflow from an existing workbook         | `xlflow init Book.xlsm`                                                    |
+| `doctor`        | Diagnose Excel, COM, PowerShell, and VBIDE access   | `xlflow doctor --json`                                                     |
+| `attach`        | Validate the workbook currently active in Excel     | `xlflow attach --active --json`                                            |
+| `pull`          | Export VBA components into `src/`                   | `xlflow pull --json`                                                       |
+| `push`          | Import VBA source back into the workbook            | `xlflow push --json`                                                       |
+| `session`       | Keep the configured workbook open for fast loops    | `xlflow session start`                                                     |
+| `save`          | Save the workbook held by a session                 | `xlflow save --session --json`                                             |
+| `runner`        | Manage the persistent xlflow runner marker module   | `xlflow runner install --json`                                             |
+| `macros`        | Discover runnable macro entrypoints                 | `xlflow macros --json`                                                     |
+| `run`           | Execute a macro from the CLI                        | `xlflow run Main.Run --json`                                               |
+| `export-image`  | Export a worksheet range to a PNG image             | `xlflow export-image --sheet QR --range A1:AE31 --json`                    |
+| `edit`          | Mutate a live session workbook for setup and tuning | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json` |
+| `trace`         | Enable, collect, and clean VBA trace logs           | `xlflow trace enable --json`                                               |
+| `test`          | Run VBA tests                                       | `xlflow test --json`                                                       |
+| `diff`          | Compare workbook content and optional VBA source    | `xlflow diff before.xlsm after.xlsm --json`                                |
+| `inspect`       | Inspect saved workbook snapshots without Excel COM  | `xlflow inspect range --sheet Result --address A1:F20 --json`              |
+| `lint`          | Lint VBA source                                     | `xlflow lint --json`                                                       |
+| `analyze`       | Analyze runtime-risk patterns without opening Excel | `xlflow analyze --json`                                                    |
+| `check`         | Run `lint`, `analyze`, and `doctor` as a preflight  | `xlflow check --keepalive --json`                                          |
+| `inspect-gui`   | Detect GUI interaction boundaries                   | `xlflow inspect-gui --json`                                                |
+| `skill install` | Install the bundled xlflow Skill for AI agents      | `xlflow skill install --agent codex`                                       |
+| `version`       | Show the installed xlflow build metadata            | `xlflow version`                                                           |
 
 ---
 
@@ -680,6 +681,19 @@ This is the visual verification companion to `inspect`. Use it when workbook cor
 Without `--out`, xlflow writes under `.xlflow/artifacts/images/<workbook-name>/` using a generated filename. `--output-dir` selects only the directory, and `--name` selects only the filename. Only PNG is supported in v1.
 
 Like other workbook-backed commands, `export-image` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit. Successful JSON includes top-level `target`, `output`, and optional `warnings`.
+
+### `xlflow edit`
+
+Mutates the live workbook held by an xlflow session for development-time setup and visual tuning.
+
+```bash
+xlflow edit cell --sheet "Input" --cell "B2" --value "ABC123" --events on --session --json
+xlflow edit range --sheet "QR" --range "A1:AE31" --fill "#FFFFFF" --session --json
+xlflow edit rows --sheet "QR" --rows "1:31" --height 12 --session --json
+xlflow edit columns --sheet "QR" --columns "A:AE" --width 2.2 --session --json
+```
+
+Use it to prepare workbook state before `run`, trigger `Worksheet_Change` handlers with `--events on`, clear or repaint regions between iterations, and tune row heights or column widths before exporting an image. MVP `edit` is intentionally session-only: `--session` is required, successful edits mark the live workbook dirty, and you must run `xlflow save --session` to persist the changes to disk.
 
 ### `xlflow inspect-gui`
 

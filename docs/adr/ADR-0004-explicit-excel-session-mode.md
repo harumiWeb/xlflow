@@ -19,7 +19,7 @@ Alternatives considered:
 
 Add explicit session mode for normal agent development, then extend workbook-backed commands to auto-reuse a matching recorded session workbook when that reuse is unambiguous.
 
-`xlflow session start` opens the configured workbook in Excel and records `.xlflow/session.json`. `xlflow push --session`, `xlflow run --session`, and `xlflow save --session` force attachment to that open workbook. When `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, or `save` target the configured workbook and `.xlflow/session.json` still points at the same live workbook, those commands auto-reuse that matching session even if `--session` is omitted. Result payloads and human output surface whether session usage was explicit or auto-reused. `xlflow session status` reports whether the recorded process still exists, whether the workbook is open, and whether the live workbook needs save. `xlflow session stop` saves, closes the workbook, quits Excel, and removes the metadata.
+`xlflow session start` opens the configured workbook in Excel and records `.xlflow/session.json`. `xlflow push --session`, `xlflow run --session`, `xlflow save --session`, and the development-time workbook mutation helpers under `xlflow edit ... --session` force attachment to that open workbook. When `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, or `save` target the configured workbook and `.xlflow/session.json` still points at the same live workbook, those commands auto-reuse that matching session even if `--session` is omitted. Result payloads and human output surface whether session usage was explicit or auto-reused. `xlflow session status` reports whether the recorded process still exists, whether the workbook is open, and whether the live workbook needs save. `xlflow session stop` saves, closes the workbook, quits Excel, and removes the metadata.
 
 `--session` remains available as an explicit, fail-fast assertion that the matching session workbook must already be running.
 
@@ -33,12 +33,14 @@ Positive consequences:
 - Agent development loops can avoid repeated Excel startup and workbook open costs.
 - Session ownership remains visible in CLI commands and JSON metadata even when auto-reuse occurs.
 - The existing script bridge remains the single Excel automation boundary.
+- Session-only `edit` commands can mutate workbook state for agent test setup and visual tuning without introducing a second file-mutation mode outside session management.
 
 Negative consequences:
 
 - Session state can become stale if Excel is killed externally.
 - Auto-reuse must be limited to the configured workbook path recorded in `.xlflow/session.json`; anything looser would risk mutating the wrong Excel instance.
 - `--session` commands must verify the configured workbook is actually open before mutating it.
+- Workbook mutation helpers that are intended only for development-time setup should prefer explicit `--session` over auto-reuse so they cannot silently edit a saved workbook or an unintended hidden Excel open.
 - Multiple user-opened Excel instances remain a Windows COM limitation; xlflow v1 validates by workbook path rather than providing a full IPC daemon.
 - Unsaved session changes require clear user discipline through `xlflow save` or `xlflow session stop`, plus strong save-required output when live workbook state differs from disk.
 

@@ -233,6 +233,10 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"pull"},
 		{"push"},
 		{"export-image"},
+		{"edit", "cell"},
+		{"edit", "range"},
+		{"edit", "rows"},
+		{"edit", "columns"},
 		{"trace", "inject"},
 		{"macros"},
 		{"test"},
@@ -490,6 +494,36 @@ func TestRootCommandIncludesExportImageCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesEditCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"edit", "cell"},
+		{"edit", "range"},
+		{"edit", "rows"},
+		{"edit", "columns"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("expected command %v, got %#v", args, cmd)
+		}
+	}
+
+	cell, _, err := root.Find([]string{"edit", "cell"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sheet", "cell", "value", "formula", "fill", "events", "session", "keepalive", "keepalive-interval"} {
+		if cell.Flags().Lookup(name) == nil {
+			t.Fatalf("expected edit cell to define --%s", name)
+		}
+	}
+}
+
 func TestBuildExportImageOptionsValidatesAndNormalizes(t *testing.T) {
 	opts, err := buildExportImageOptions(" build\\Book.xlsm ", " QR ", "ae31:a1", "", " artifacts\\images ", " qr-demo ", " png ", true, true, excel.CommandOptions{})
 	if err != nil {
@@ -536,6 +570,85 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "qr\x1fdemo", "png", false, false, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "invalid Windows characters") {
 		t.Fatalf("expected control-character validation error, got %v", err)
+	}
+}
+
+func TestBuildEditCellOptionsValidatesAndNormalizes(t *testing.T) {
+	value := "ABC123"
+	opts, err := buildEditCellOptions(" build\\Book.xlsm ", " Input ", " b2 ", "", " on ", &value, nil, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkbookPath != "build\\Book.xlsm" || opts.Sheet != "Input" || opts.Cell != "B2" {
+		t.Fatalf("unexpected normalized edit cell opts: %#v", opts)
+	}
+	if opts.Value == nil || *opts.Value != "ABC123" {
+		t.Fatalf("value = %#v", opts.Value)
+	}
+	if opts.Events != excel.EditEventOn || !opts.Session {
+		t.Fatalf("unexpected event/session opts: %#v", opts)
+	}
+}
+
+func TestBuildEditCellOptionsRejectsInvalidCombinations(t *testing.T) {
+	value := "ABC123"
+	formula := "=A1+B1"
+	if _, err := buildEditCellOptions("", "Input", "B2", "", "keep", &value, nil, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditCellOptions("", "Input", "B2", "", "keep", nil, nil, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected missing mutation error, got %v", err)
+	}
+	if _, err := buildEditCellOptions("", "Input", "B2", "", "keep", &value, &formula, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected multi mutation error, got %v", err)
+	}
+	if _, err := buildEditCellOptions("", "Input", "B2", "#12", "keep", nil, nil, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "#RGB") {
+		t.Fatalf("expected invalid color error, got %v", err)
+	}
+	if _, err := buildEditCellOptions("", "Input", "B2", "#fff", "off", nil, nil, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--events applies") {
+		t.Fatalf("expected fill/events conflict, got %v", err)
+	}
+}
+
+func TestBuildEditRangeOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildEditRangeOptions(" build\\Book.xlsm ", " QR ", "ae31:a1", "#fff", "", true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkbookPath != "build\\Book.xlsm" || opts.Sheet != "QR" || opts.Range != "A1:AE31" || opts.Fill != "#FFFFFF" {
+		t.Fatalf("unexpected edit range opts: %#v", opts)
+	}
+	if _, err := buildEditRangeOptions("", "QR", "A1:B2", "#fff", "", false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+}
+
+func TestBuildEditRowsAndColumnsOptionsValidateSelectors(t *testing.T) {
+	rows, err := buildEditRowsOptions("", "QR", "31:1", 12, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows.Rows != "1:31" {
+		t.Fatalf("rows selector = %q", rows.Rows)
+	}
+	columns, err := buildEditColumnsOptions("", "QR", "ae:a", 2.2, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columns.Columns != "A:AE" {
+		t.Fatalf("columns selector = %q", columns.Columns)
+	}
+	if _, err := buildEditRowsOptions("", "QR", "1:31", 12, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditColumnsOptions("", "QR", "A:AE", 2.2, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditRowsOptions("", "QR", "0", 12, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--rows") {
+		t.Fatalf("expected invalid rows error, got %v", err)
+	}
+	if _, err := buildEditColumnsOptions("", "QR", "A:3", 2.2, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--columns") {
+		t.Fatalf("expected invalid columns error, got %v", err)
 	}
 }
 

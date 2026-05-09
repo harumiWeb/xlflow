@@ -134,6 +134,33 @@ func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
+	env := New("edit")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":  "cell",
+		"sheet": "Input",
+		"cell":  "B2",
+		"mutation": map[string]any{
+			"value": map[string]any{"before": "", "after": "ABC123"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "session", "edit"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWriteWithOptionsInspectJSONIncludesTargetStateAndWarnings(t *testing.T) {
 	env := New("inspect")
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
@@ -585,6 +612,61 @@ func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
 	}
 	if strings.Count(got, "Target:") != 1 {
 		t.Fatalf("export-image output should render one Target label:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersEditSummary(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "description": "Workbook currently open through xlflow session"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":  "cell",
+		"sheet": "Input",
+		"cell":  "B2",
+		"mutation": map[string]any{
+			"value": map[string]any{"before": "", "after": "ABC123"},
+		},
+		"events": map[string]any{
+			"mode":                 "on",
+			"enable_events_before": true,
+			"enable_events_after":  true,
+			"restored":             true,
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow edit", "Edit target:", "Selection:", "Input!B2", "Mutation:", "ABC123", "Events:", "mode=on", "SAVE REQUIRED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("edit output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersFormulaMutationAheadOfCalculatedValue(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":  "cell",
+		"sheet": "Input",
+		"cell":  "B2",
+		"mutation": map[string]any{
+			"value":   map[string]any{"before": "1", "after": "3"},
+			"formula": map[string]any{"before": "=1", "after": "=1+2"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "formula -> =1+2") {
+		t.Fatalf("expected formula summary, got:\n%s", got)
 	}
 }
 

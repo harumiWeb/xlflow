@@ -79,6 +79,54 @@ type ExportImageOptions struct {
 	Keepalive    CommandOptions
 }
 
+type EditEventMode string
+
+const (
+	EditEventKeep EditEventMode = "keep"
+	EditEventOn   EditEventMode = "on"
+	EditEventOff  EditEventMode = "off"
+)
+
+type EditCellOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Cell         string
+	Value        *string
+	Formula      *string
+	Fill         string
+	Events       EditEventMode
+	Session      bool
+	Keepalive    CommandOptions
+}
+
+type EditRangeOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Range        string
+	Fill         string
+	Clear        string
+	Session      bool
+	Keepalive    CommandOptions
+}
+
+type EditRowsOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Rows         string
+	Height       float64
+	Session      bool
+	Keepalive    CommandOptions
+}
+
+type EditColumnsOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Columns      string
+	Width        float64
+	Session      bool
+	Keepalive    CommandOptions
+}
+
 type SessionCommandOptions struct {
 	Session   bool
 	Keepalive CommandOptions
@@ -141,6 +189,7 @@ type ScriptResult struct {
 	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
 	Target        any           `json:"target,omitempty"`
 	Output        any           `json:"output,omitempty"`
+	Edit          any           `json:"edit,omitempty"`
 	Warnings      any           `json:"warnings,omitempty"`
 	Hints         any           `json:"hints,omitempty"`
 }
@@ -479,6 +528,32 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 	return r.run("export-image", scriptArgs, opts.Keepalive)
 }
 
+func (r Runner) EditCell(cfg config.Config, opts EditCellOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildEditCellScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := editArgFailure(err)
+		return output.Failure("edit", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	return r.run("edit", scriptArgs, opts.Keepalive)
+}
+
+func (r Runner) EditRange(cfg config.Config, opts EditRangeOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildEditRangeScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := editArgFailure(err)
+		return output.Failure("edit", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	return r.run("edit", scriptArgs, opts.Keepalive)
+}
+
+func (r Runner) EditRows(cfg config.Config, opts EditRowsOptions) (output.Envelope, int, error) {
+	return r.run("edit", buildEditRowsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
+func (r Runner) EditColumns(cfg config.Config, opts EditColumnsOptions) (output.Envelope, int, error) {
+	return r.run("edit", buildEditColumnsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
 func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButtonRemoveOptions) map[string]string {
 	return map[string]string{
 		"Action":       "remove",
@@ -487,6 +562,97 @@ func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButton
 		"Sheet":        opts.Sheet,
 		"Id":           opts.ID,
 	}
+}
+
+func buildEditCellScriptArgs(root string, cfg config.Config, opts EditCellOptions) (map[string]string, error) {
+	mutations := 0
+	if opts.Value != nil {
+		mutations++
+	}
+	if opts.Formula != nil {
+		mutations++
+	}
+	if opts.Fill != "" {
+		mutations++
+	}
+	if mutations != 1 {
+		return nil, editArgError{message: "exactly one of value, formula, or fill is required"}
+	}
+	args := map[string]string{
+		"Action":       "cell",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"Cell":         opts.Cell,
+		"Events":       string(opts.Events),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+	if opts.Value != nil {
+		args["Value"] = *opts.Value
+	}
+	if opts.Formula != nil {
+		args["Formula"] = *opts.Formula
+	}
+	if opts.Fill != "" {
+		args["Fill"] = opts.Fill
+	}
+	return args, nil
+}
+
+func buildEditRangeScriptArgs(root string, cfg config.Config, opts EditRangeOptions) (map[string]string, error) {
+	if opts.Fill != "" && opts.Clear != "" {
+		return nil, editArgError{message: "fill and clear cannot be combined"}
+	}
+	args := map[string]string{
+		"Action":       "range",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"RangeAddress": opts.Range,
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+	if opts.Fill != "" {
+		args["Fill"] = opts.Fill
+	}
+	if opts.Clear != "" {
+		args["Clear"] = opts.Clear
+	}
+	return args, nil
+}
+
+func buildEditRowsScriptArgs(root string, cfg config.Config, opts EditRowsOptions) map[string]string {
+	return map[string]string{
+		"Action":       "rows",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"Rows":         opts.Rows,
+		"Height":       strconv.FormatFloat(opts.Height, 'f', -1, 64),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+}
+
+func buildEditColumnsScriptArgs(root string, cfg config.Config, opts EditColumnsOptions) map[string]string {
+	return map[string]string{
+		"Action":       "columns",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"Columns":      opts.Columns,
+		"Width":        strconv.FormatFloat(opts.Width, 'f', -1, 64),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+}
+
+func chooseEditWorkbook(cfg config.Config, workbook string) string {
+	if workbook != "" {
+		return workbook
+	}
+	return cfg.Excel.Path
 }
 
 type exportImageResolvedOutput struct {
@@ -511,6 +677,22 @@ func exportImageArgFailure(err error) (string, int) {
 		return argErr.code, argErr.exitCode
 	}
 	return "export_image_args_invalid", output.ExitConfig
+}
+
+type editArgError struct {
+	message string
+}
+
+func (e editArgError) Error() string {
+	return e.message
+}
+
+func editArgFailure(err error) (string, int) {
+	var argErr editArgError
+	if errors.As(err, &argErr) {
+		return "edit_args_invalid", output.ExitConfig
+	}
+	return "edit_args_invalid", output.ExitConfig
 }
 
 func buildExportImageScriptArgs(root string, cfg config.Config, opts ExportImageOptions) (map[string]string, error) {
@@ -759,6 +941,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.RunDiagnostic = result.RunDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
+	env.Edit = result.Edit
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints
 	writeDoneMarker(commandName, env, opts.Keepalive)
@@ -828,9 +1011,9 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid":
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

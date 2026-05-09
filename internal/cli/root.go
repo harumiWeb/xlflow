@@ -133,6 +133,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.traceCommand(),
 		a.runCommand(),
 		a.exportImageCommand(),
+		a.editCommand(),
 		a.macrosCommand(),
 		a.uiCommand(),
 		a.testCommand(),
@@ -221,11 +222,12 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
 		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
 		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
+		{Name: "workbook-edit-helpers", Description: "Mutate a live session workbook for agent-driven test setup, event triggering, and visual tuning."},
 	}
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image", "edit"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -856,6 +858,272 @@ func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, nam
 	}, nil
 }
 
+func buildEditCellOptions(workbook, sheet, cell, fill, events string, value *string, formula *string, session bool, keepalive excel.CommandOptions) (excel.EditCellOptions, error) {
+	if !session {
+		return excel.EditCellOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.EditCellOptions{}, fmt.Errorf("--sheet is required")
+	}
+	cellAddress, err := validateInspectCellAddress(cell)
+	if err != nil {
+		return excel.EditCellOptions{}, fmt.Errorf("--cell %w", err)
+	}
+	fill = strings.TrimSpace(fill)
+	events = strings.ToLower(strings.TrimSpace(events))
+	if events == "" {
+		events = string(excel.EditEventKeep)
+	}
+	if events != string(excel.EditEventKeep) && events != string(excel.EditEventOn) && events != string(excel.EditEventOff) {
+		return excel.EditCellOptions{}, fmt.Errorf("--events must be keep, on, or off")
+	}
+	mutations := 0
+	if value != nil {
+		mutations++
+	}
+	if formula != nil {
+		mutations++
+	}
+	if fill != "" {
+		mutations++
+	}
+	if mutations != 1 {
+		return excel.EditCellOptions{}, fmt.Errorf("exactly one of --value, --formula, or --fill is required")
+	}
+	if fill != "" {
+		normalized, err := normalizeEditColor(fill)
+		if err != nil {
+			return excel.EditCellOptions{}, err
+		}
+		fill = normalized
+	}
+	if fill != "" && events != string(excel.EditEventKeep) {
+		return excel.EditCellOptions{}, fmt.Errorf("--events applies only to --value or --formula edits")
+	}
+	return excel.EditCellOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Cell:         cellAddress,
+		Value:        value,
+		Formula:      formula,
+		Fill:         fill,
+		Events:       excel.EditEventMode(events),
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func buildEditRangeOptions(workbook, sheet, cellRange, fill, clear string, session bool, keepalive excel.CommandOptions) (excel.EditRangeOptions, error) {
+	if !session {
+		return excel.EditRangeOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.EditRangeOptions{}, fmt.Errorf("--sheet is required")
+	}
+	normalizedRange, err := validateInspectRangeAddress(cellRange)
+	if err != nil {
+		return excel.EditRangeOptions{}, fmt.Errorf("--range %w", err)
+	}
+	fill = strings.TrimSpace(fill)
+	clear = strings.ToLower(strings.TrimSpace(clear))
+	if fill != "" && clear != "" {
+		return excel.EditRangeOptions{}, fmt.Errorf("--fill and --clear cannot be combined")
+	}
+	if fill == "" && clear == "" {
+		return excel.EditRangeOptions{}, fmt.Errorf("one of --fill or --clear is required")
+	}
+	if fill != "" {
+		normalized, err := normalizeEditColor(fill)
+		if err != nil {
+			return excel.EditRangeOptions{}, err
+		}
+		fill = normalized
+	}
+	if clear != "" && clear != "contents" && clear != "formats" && clear != "all" {
+		return excel.EditRangeOptions{}, fmt.Errorf("--clear must be contents, formats, or all")
+	}
+	return excel.EditRangeOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Range:        normalizedRange,
+		Fill:         fill,
+		Clear:        clear,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func buildEditRowsOptions(workbook, sheet, rows string, height float64, session bool, keepalive excel.CommandOptions) (excel.EditRowsOptions, error) {
+	if !session {
+		return excel.EditRowsOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.EditRowsOptions{}, fmt.Errorf("--sheet is required")
+	}
+	normalizedRows, err := validateEditRowsSelector(rows)
+	if err != nil {
+		return excel.EditRowsOptions{}, err
+	}
+	if height <= 0 {
+		return excel.EditRowsOptions{}, fmt.Errorf("--height must be greater than 0")
+	}
+	return excel.EditRowsOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Rows:         normalizedRows,
+		Height:       height,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func buildEditColumnsOptions(workbook, sheet, columns string, width float64, session bool, keepalive excel.CommandOptions) (excel.EditColumnsOptions, error) {
+	if !session {
+		return excel.EditColumnsOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.EditColumnsOptions{}, fmt.Errorf("--sheet is required")
+	}
+	normalizedColumns, err := validateEditColumnsSelector(columns)
+	if err != nil {
+		return excel.EditColumnsOptions{}, err
+	}
+	if width <= 0 {
+		return excel.EditColumnsOptions{}, fmt.Errorf("--width must be greater than 0")
+	}
+	return excel.EditColumnsOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Columns:      normalizedColumns,
+		Width:        width,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func normalizeEditColor(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("--fill is required")
+	}
+	if !strings.HasPrefix(value, "#") {
+		return "", fmt.Errorf("--fill must use #RGB or #RRGGBB")
+	}
+	hex := strings.ToUpper(strings.TrimPrefix(value, "#"))
+	switch len(hex) {
+	case 3:
+		for _, r := range hex {
+			if !isHexDigit(r) {
+				return "", fmt.Errorf("--fill must use #RGB or #RRGGBB")
+			}
+		}
+		return fmt.Sprintf("#%c%c%c%c%c%c", hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]), nil
+	case 6:
+		for _, r := range hex {
+			if !isHexDigit(r) {
+				return "", fmt.Errorf("--fill must use #RGB or #RRGGBB")
+			}
+		}
+		return "#" + hex, nil
+	default:
+		return "", fmt.Errorf("--fill must use #RGB or #RRGGBB")
+	}
+}
+
+func isHexDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'A' && r <= 'F') || (r >= 'a' && r <= 'f')
+}
+
+func validateEditRowsSelector(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("--rows is required")
+	}
+	parts := strings.SplitN(value, ":", 2)
+	start, err := parsePositiveRow(parts[0])
+	if err != nil {
+		return "", err
+	}
+	end := start
+	if len(parts) == 2 {
+		end, err = parsePositiveRow(parts[1])
+		if err != nil {
+			return "", err
+		}
+	}
+	if end < start {
+		start, end = end, start
+	}
+	if start == end {
+		return strconv.Itoa(start), nil
+	}
+	return fmt.Sprintf("%d:%d", start, end), nil
+}
+
+func parsePositiveRow(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	row, err := strconv.Atoi(value)
+	if err != nil || row <= 0 {
+		return 0, fmt.Errorf("--rows must use a positive row selector such as 1 or 1:31")
+	}
+	return row, nil
+}
+
+func validateEditColumnsSelector(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("--columns is required")
+	}
+	parts := strings.SplitN(value, ":", 2)
+	start, err := parseColumnSelector(parts[0])
+	if err != nil {
+		return "", err
+	}
+	end := start
+	if len(parts) == 2 {
+		end, err = parseColumnSelector(parts[1])
+		if err != nil {
+			return "", err
+		}
+	}
+	if end < start {
+		start, end = end, start
+	}
+	first, err := excelize.ColumnNumberToName(start)
+	if err != nil {
+		return "", fmt.Errorf("--columns must use Excel column letters such as A or A:AE")
+	}
+	if start == end {
+		return first, nil
+	}
+	last, err := excelize.ColumnNumberToName(end)
+	if err != nil {
+		return "", fmt.Errorf("--columns must use Excel column letters such as A or A:AE")
+	}
+	return first + ":" + last, nil
+}
+
+func parseColumnSelector(value string) (int, error) {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return 0, fmt.Errorf("--columns must use Excel column letters such as A or A:AE")
+	}
+	for _, r := range value {
+		if r < 'A' || r > 'Z' {
+			return 0, fmt.Errorf("--columns must use Excel column letters such as A or A:AE")
+		}
+	}
+	column, err := excelize.ColumnNameToNumber(value)
+	if err != nil || column <= 0 {
+		return 0, fmt.Errorf("--columns must use Excel column letters such as A or A:AE")
+	}
+	return column, nil
+}
+
 func validateWindowsFilename(name string) error {
 	if name == "" {
 		return nil
@@ -1205,6 +1473,232 @@ func (a *app) exportImageCommand() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "png", "image format; only png is currently supported")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) editCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit",
+		Short: "Mutate a live session workbook for development and testing",
+	}
+	cmd.AddCommand(
+		a.editCellCommand(),
+		a.editRangeCommand(),
+		a.editRowsCommand(),
+		a.editColumnsCommand(),
+	)
+	return cmd
+}
+
+func (a *app) editCellCommand() *cobra.Command {
+	var sheet string
+	var cell string
+	var value string
+	var formula string
+	var fill string
+	var events string
+	var session bool
+	var keepalive keepaliveFlags
+
+	cmd := &cobra.Command{
+		Use:   "cell [workbook]",
+		Short: "Edit one live-session cell",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			var valuePtr *string
+			if cmd.Flags().Changed("value") {
+				valuePtr = &value
+			}
+			var formulaPtr *string
+			if cmd.Flags().Changed("formula") {
+				formulaPtr = &formula
+			}
+			opts, err := buildEditCellOptions(workbook, sheet, cell, fill, events, valuePtr, formulaPtr, session, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Editing workbook cell", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditCell(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&cell, "cell", "", "single cell address such as B2")
+	cmd.Flags().StringVar(&value, "value", "", "set a text value")
+	cmd.Flags().StringVar(&formula, "formula", "", "set a formula such as =A1+B1")
+	cmd.Flags().StringVar(&fill, "fill", "", "set fill color using #RGB or #RRGGBB")
+	cmd.Flags().StringVar(&events, "events", string(excel.EditEventKeep), "event mode for value/formula edits: keep, on, or off")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) editRangeCommand() *cobra.Command {
+	var sheet string
+	var cellRange string
+	var fill string
+	var clear string
+	var session bool
+	var keepalive keepaliveFlags
+
+	cmd := &cobra.Command{
+		Use:   "range [workbook]",
+		Short: "Edit one live-session range",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			opts, err := buildEditRangeOptions(workbook, sheet, cellRange, fill, clear, session, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Editing workbook range", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRange(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&cellRange, "range", "", "range address such as A1:AE31")
+	cmd.Flags().StringVar(&fill, "fill", "", "set fill color using #RGB or #RRGGBB")
+	cmd.Flags().StringVar(&clear, "clear", "", "clear contents, formats, or all")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) editRowsCommand() *cobra.Command {
+	var sheet string
+	var rows string
+	var height float64
+	var session bool
+	var keepalive keepaliveFlags
+
+	cmd := &cobra.Command{
+		Use:   "rows [workbook]",
+		Short: "Set row height on a live-session worksheet",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			opts, err := buildEditRowsOptions(workbook, sheet, rows, height, session, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Editing workbook row heights", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRows(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&rows, "rows", "", "row selector such as 1 or 1:31")
+	cmd.Flags().Float64Var(&height, "height", 0, "row height in points")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) editColumnsCommand() *cobra.Command {
+	var sheet string
+	var columns string
+	var width float64
+	var session bool
+	var keepalive keepaliveFlags
+
+	cmd := &cobra.Command{
+		Use:   "columns [workbook]",
+		Short: "Set column width on a live-session worksheet",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			opts, err := buildEditColumnsOptions(workbook, sheet, columns, width, session, keepaliveOpts)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Editing workbook column widths", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditColumns(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&columns, "columns", "", "column selector such as A or A:AE")
+	cmd.Flags().Float64Var(&width, "width", 0, "column width in Excel character units")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
