@@ -1387,7 +1387,11 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
+			target, session, warnings := a.inspectStateForWorkbook(cfg, workbook.Path)
 			env := output.New("inspect")
+			env.Target = target
+			env.Session = session
+			env.Warnings = warnings
 			env.Inspect = workbookinspect.Payload{
 				Target:     "workbook",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbook.Path),
@@ -1419,10 +1423,15 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			env := output.New("inspect")
+			env.Target = target
+			env.Session = session
+			env.Warnings = warnings
 			env.Inspect = workbookinspect.Payload{
 				Target:     "sheets",
-				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookArgPath(a.cwd, cfg.Excel.Path)),
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
 				Format:     format,
 				Source:     "file",
 				Sheets:     sheets,
@@ -1469,6 +1478,10 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
+			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			env.Target = target
+			env.Session = session
+			env.Warnings = warnings
 			env.Inspect = workbookinspect.Payload{
 				Target:     "range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -1523,6 +1536,10 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
+			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			env.Target = target
+			env.Session = session
+			env.Warnings = warnings
 			env.Inspect = workbookinspect.Payload{
 				Target:     "used-range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -1565,10 +1582,15 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			env := output.New("inspect")
+			env.Target = target
+			env.Session = session
+			env.Warnings = warnings
 			env.Inspect = workbookinspect.Payload{
 				Target:     "cell",
-				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookArgPath(a.cwd, cfg.Excel.Path)),
+				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
 				Format:     format,
 				Source:     "file",
 				Cell:       &cell,
@@ -1580,6 +1602,71 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
 	cmd.Flags().StringVar(&address, "address", "", "cell address such as A1")
 	return cmd
+}
+
+func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (map[string]any, map[string]any, []map[string]any) {
+	target := map[string]any{
+		"kind":        "file",
+		"path":        workbookPath,
+		"description": "Saved workbook file on disk",
+	}
+	session := map[string]any{
+		"active":        false,
+		"workbook_path": workbookPath,
+		"dirty":         false,
+		"save_required": false,
+	}
+	if runtime.GOOS != "windows" {
+		return target, session, nil
+	}
+	metadataPath := filepath.Join(a.cwd, ".xlflow", "session.json")
+	if !inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath) {
+		return target, session, nil
+	}
+	env, _, err := excel.Runner{RootDir: a.cwd}.Session(cfg, "status")
+	if err != nil {
+		return target, session, nil
+	}
+	status := cliObjectMap(env.Session)
+	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
+	dirty := boolValueForCLI(status, "dirty")
+	saveRequired := boolValueForCLI(status, "save_required") || boolValueForCLI(status, "needs_save")
+	session["active"] = active
+	session["dirty"] = dirty
+	session["save_required"] = saveRequired
+	if mode := stringValueForCLI(status, "mode"); mode != "" {
+		session["mode"] = mode
+	}
+	if !active || !dirty {
+		return target, session, nil
+	}
+	return target, session, []map[string]any{
+		{
+			"code":    "live_session_dirty",
+			"message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook.",
+		},
+		{
+			"code":    "command_reads_saved_file",
+			"message": "This inspect command read the saved workbook file on disk.",
+		},
+	}
+}
+
+func inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath string) bool {
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return false
+	}
+	var metadata struct {
+		WorkbookPath string `json:"workbook_path"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return false
+	}
+	if strings.TrimSpace(metadata.WorkbookPath) == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(metadata.WorkbookPath), filepath.Clean(workbookPath))
 }
 
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {
@@ -2141,6 +2228,21 @@ func stringValueForCLI(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprint(value)
+}
+
+func boolValueForCLI(m map[string]any, key string) bool {
+	value, ok := m[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	default:
+		return false
+	}
 }
 
 func (a *app) skillCommand() *cobra.Command {

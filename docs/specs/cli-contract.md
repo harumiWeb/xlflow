@@ -191,7 +191,8 @@ Command-specific fields are added at the top level:
 - `check` for `check`
 - `run_diagnostic` for enriched `run` failures
 - `trace` for traced `run`
-- `target`, `output`, and `warnings` for `export-image`
+- `target`, `session`, optional `warnings`, and optional `hints` for workbook-state-aware commands
+- `output` for `export-image`
 - `session` for session status metadata
 - `runner` for persistent runner module status
 - `version` for `version`
@@ -204,9 +205,11 @@ Command-specific fields are added at the top level:
 
 `diff` result objects contain `summary`, `sheets`, `cells`, and `vba`. Cell diffs contain `sheet`, `address`, `kind`, `before`, and `after`, where `kind` is `value` or `formula`. VBA diffs contain `file`, `kind`, and optional changed line details.
 
-`inspect` returns a top-level `inspect` object with `target`, optional `target_info`, `format`, `source`, and one of `workbook`, `sheets`, `range`, or `cell`. Workbook and sheet summaries contain `name`, `index`, `visible`, `used_range`, `row_count`, and `column_count`. Range snapshots contain `sheet`, `range` and/or `used_range`, `returned_range`, `row_count`, `column_count`, `values`, `truncated`, `max_rows`, `max_cols`, and optional `warnings`. When `--include-style` is set on range-based commands, range snapshots deterministically contain `style_included=true` plus `cells`, `rows`, `columns`, and `merged_ranges`; those arrays are empty when the returned range is empty or no merges are present. When `--include-style` is absent, those fields are omitted. Cell snapshots contain `sheet`, `address`, and `value`.
+`inspect` returns a top-level `inspect` object with `target`, optional `target_info`, `format`, `source`, and one of `workbook`, `sheets`, `range`, or `cell`. Workbook and sheet summaries contain `name`, `index`, `visible`, `used_range`, `row_count`, and `column_count`. Range snapshots contain `sheet`, `range` and/or `used_range`, `returned_range`, `row_count`, `column_count`, `values`, `truncated`, `max_rows`, `max_cols`, and optional `warnings`. When `--include-style` is set on range-based commands, range snapshots deterministically contain `style_included=true` plus `cells`, `rows`, `columns`, and `merged_ranges`; those arrays are empty when the returned range is empty or no merges are present. When `--include-style` is absent, those fields are omitted. Cell snapshots contain `sheet`, `address`, and `value`. `inspect --format json` keeps this standalone inspect payload shape and adds workbook-state metadata alongside it using top-level `target_state`, `session`, `warnings`, and `hints` fields when present.
 
 `export-image` success results add top-level `target` and `output`, plus optional top-level `warnings`. `target` contains `kind`, `path`, `sheet`, and `range`. `output` contains `path`, `format`, `default`, optional `created_parent_dirs`, and optional `width_px` / `height_px`. Warning objects contain `code` and `message`.
+
+Workbook-state-aware commands may return top-level `target`, `session`, `warnings`, and `hints`. `target.kind` uses the fixed vocabulary `source`, `file`, or `live_session`. `target` may also include `path`, `description`, and command-specific fields such as `sheet` and `range`. `session` may include `active`, `workbook_path`, `dirty`, `save_required`, and `mode`; `session status` also keeps `running`, `workbook_open`, and `metadata`. Warning and hint objects contain `code` and `message`. `push`, `pull`, `run`, `save`, `session`, `macros`, `inspect`, and `export-image` should use these fields to make workbook state explicit without removing the existing compatibility fields under `workbook`.
 
 ## Exit Codes
 

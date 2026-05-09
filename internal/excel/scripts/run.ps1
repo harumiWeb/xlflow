@@ -172,6 +172,8 @@ try {
       }
       $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
       throw "runtime dialog shown"
     }
     if ($null -ne $invokeResult.exception) {
@@ -188,6 +190,8 @@ try {
       $currentPhase = "save_result"
       $workbook.Save()
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
       $result.logs = @(
         @(
           $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -204,6 +208,11 @@ try {
       }
       $workbook.SaveCopyAs($SaveAsPath)
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
+      if ($sessionAttached) {
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. The saved workbook copy does not update the session workbook on disk."
+      }
       $result.logs = @(
         @(
           $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -213,6 +222,11 @@ try {
       )
     } else {
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $sessionAttached -Dirty $sessionAttached
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
+      if ($sessionAttached) {
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook, but the workbook file on disk has not been updated yet."
+      }
       $result.logs = @(
         @(
           $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -265,6 +279,8 @@ try {
         }
         $result.macro = [ordered]@{ name = $MacroName; args = @($typedValues); duration_ms = 0; direct = $false }
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $false -Dirty $false
+        $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+        $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
         throw "vba compile failed"
       }
     }
@@ -321,6 +337,8 @@ try {
     }
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
     throw "runtime dialog shown"
   }
   if ($null -ne $invokeResult.exception) {
@@ -354,10 +372,14 @@ try {
     Set-XlflowError -Result $result -Code $errorCode -Message $failureMessage -Source ([string]$runResult[1]) -Number ([int]$runResult[2]) -Line ([int]$runResult[4]) -Phase $currentPhase
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
     $currentPhase = "save_result"
     $workbook.Save()
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
     $result.logs = @(
       @(
         $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -374,6 +396,11 @@ try {
     }
     $workbook.SaveCopyAs($SaveAsPath)
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
+    if ($sessionAttached) {
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. The saved workbook copy does not update the session workbook on disk."
+    }
     $result.logs = @(
       @(
         $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -383,6 +410,11 @@ try {
     )
   } else {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $sessionAttached -Dirty $sessionAttached
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
+    if ($sessionAttached) {
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook, but the workbook file on disk has not been updated yet."
+    }
     $result.logs = @(
       @(
         $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
@@ -412,6 +444,8 @@ try {
   }
   $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+  $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
 } finally {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch { Write-Verbose ("failed to remove run harness module: " + $_.Exception.Message) }

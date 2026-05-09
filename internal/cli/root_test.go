@@ -1077,6 +1077,42 @@ func TestInspectRangeCommandWritesMarkdown(t *testing.T) {
 	}
 }
 
+func TestInspectWorkbookJSONIncludesTargetAndSessionState(t *testing.T) {
+	dir := t.TempDir()
+	createInspectCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "workbook"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect workbook json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Target  map[string]any `json:"target"`
+		Session map[string]any `json:"session"`
+		Inspect map[string]any `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Target["kind"] != "file" {
+		t.Fatalf("target = %#v", got.Target)
+	}
+	if got.Session["active"] != false {
+		t.Fatalf("session = %#v", got.Session)
+	}
+	if _, ok := got.Inspect["target_info"].(map[string]any); !ok {
+		t.Fatalf("inspect target_info missing: %s", stdout.String())
+	}
+}
+
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
 	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
