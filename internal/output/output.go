@@ -58,6 +58,7 @@ type Envelope struct {
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`
 	Target        any `json:"target,omitempty"`
 	Output        any `json:"output,omitempty"`
+	Edit          any `json:"edit,omitempty"`
 	Warnings      any `json:"warnings,omitempty"`
 	Hints         any `json:"hints,omitempty"`
 }
@@ -223,6 +224,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTraceCommand(env))
 	case "export-image":
 		b.WriteString(r.renderExportImage(env))
+	case "edit":
+		b.WriteString(r.renderEdit(env))
 	case "pull", "push", "attach":
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
@@ -806,6 +809,43 @@ func (r renderer) renderExportImage(env Envelope) string {
 	}
 	if value, ok := boolValueOK(outputPayload, "created_parent_dirs"); ok {
 		b.WriteString(kv("Created dirs", fmt.Sprintf("%t", value)))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderEdit(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	edit := objectMap(env.Edit)
+	if len(workbook) == 0 && len(target) == 0 && len(edit) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Edit target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if selector := summarizeEditSelector(edit); selector != "" {
+		b.WriteString(kv("Selection", selector))
+	}
+	if summary := summarizeEditMutation(edit); summary != "" {
+		b.WriteString(kv("Mutation", summary))
+	}
+	if events := summarizeEditEvents(edit); events != "" {
+		b.WriteString(kv("Events", events))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
@@ -1504,6 +1544,76 @@ func summarizeExportImageTarget(target map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+func summarizeEditSelector(edit map[string]any) string {
+	if len(edit) == 0 {
+		return ""
+	}
+	sheet := stringValue(edit, "sheet")
+	for _, key := range []string{"cell", "range", "rows", "columns"} {
+		if selector := stringValue(edit, key); selector != "" {
+			if sheet != "" {
+				return sheet + "!" + selector
+			}
+			return selector
+		}
+	}
+	return sheet
+}
+
+func summarizeEditMutation(edit map[string]any) string {
+	mutation := objectMap(edit["mutation"])
+	if len(mutation) == 0 {
+		return ""
+	}
+	if value := objectMap(mutation["value"]); len(value) > 0 {
+		return "value -> " + stringValue(value, "after")
+	}
+	if formula := objectMap(mutation["formula"]); len(formula) > 0 {
+		return "formula -> " + stringValue(formula, "after")
+	}
+	if style := objectMap(mutation["style"]); len(style) > 0 {
+		if fill := objectMap(style["fill"]); len(fill) > 0 {
+			return "fill -> " + stringValue(fill, "after")
+		}
+		if clear := stringValue(style, "cleared"); clear != "" {
+			return "clear " + clear
+		}
+	}
+	if clear := objectMap(mutation["clear"]); len(clear) > 0 {
+		if mode := stringValue(clear, "mode"); mode != "" {
+			return "clear " + mode
+		}
+	}
+	if rowHeight := objectMap(mutation["row_height"]); len(rowHeight) > 0 {
+		return "row height -> " + stringValue(rowHeight, "after")
+	}
+	if columnWidth := objectMap(mutation["column_width"]); len(columnWidth) > 0 {
+		return "column width -> " + stringValue(columnWidth, "after")
+	}
+	return ""
+}
+
+func summarizeEditEvents(edit map[string]any) string {
+	events := objectMap(edit["events"])
+	if len(events) == 0 {
+		return ""
+	}
+	parts := []string{}
+	if mode := stringValue(events, "mode"); mode != "" {
+		parts = append(parts, "mode="+mode)
+	}
+	if before, ok := boolValueOK(events, "enable_events_before"); ok {
+		parts = append(parts, "before="+yesNo(before))
+	}
+	if after, ok := boolValueOK(events, "enable_events_after"); ok {
+		parts = append(parts, "after="+yesNo(after))
+	}
+	if restored, ok := boolValueOK(events, "restored"); ok {
+		parts = append(parts, "restored="+yesNo(restored))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func summarizeTraceCommandResult(workbook, trace map[string]any) string {

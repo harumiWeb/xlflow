@@ -4,8 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.7.0
+
+- Added `xlflow edit cell`, `edit range`, `edit rows`, and `edit columns` as minimal workbook-mutation helpers for AI-agent testing and visual tuning in a live Excel session.
+- Added session-only workbook edit behavior for the new `edit` commands, including `--events keep|on|off` support for cell value and formula changes so `Worksheet_Change` flows can be exercised without generating temporary VBA.
 - Commands now display explicit workbook state, including whether reading from saved file or live Excel session
 - Added warnings when live session workbooks contain unsaved changes
+- Extended workbook-backed JSON and human output with explicit `target` / `session` metadata across session-aware commands, plus top-level `edit` payloads for workbook mutation summaries.
+- Updated the CLI contract, README files, ADR session policy note, and bundled xlflow skill guidance to cover the new edit workflow and session-state visibility.
 
 ## v0.6.0
 

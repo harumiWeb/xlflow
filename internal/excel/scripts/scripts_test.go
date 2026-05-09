@@ -12,7 +12,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -23,6 +23,46 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestEditScriptRequiresActiveSessionBeforeExcelMutation(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./edit.ps1 -Action cell -WorkbookPath 'C:\\missing.xlsm' -Sheet 'Input' -Cell 'B2' -Value 'ABC123' -UseSession false | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("edit session-required command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse edit output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "session_required" {
+		t.Fatalf("expected session_required failure, got %+v", got)
+	}
+}
+
+func TestEditScriptPreservesStructuredErrorBeforeFallbackCatch(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "edit.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read edit.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "if ($null -eq $result.error)") {
+		t.Fatalf("expected edit.ps1 to preserve pre-classified errors before assigning a fallback:\n%s", text)
+	}
+	if !strings.Contains(text, "Add-XlflowHint -Result $result -Code \"possible_event_handler_failure\"") {
+		t.Fatalf("expected edit.ps1 to keep event-handler context as a hint instead of forcing a new error code:\n%s", text)
 	}
 }
 

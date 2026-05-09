@@ -17,6 +17,7 @@ Default safety rules for AI-agent work:
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
 - `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
+- Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
 - When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.
 
@@ -65,6 +66,9 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
 5. Inspect workbook results.
+   - Use `xlflow edit cell --sheet <name> --cell <A1> --value <text> --events on --session --keepalive --json` to prepare input cells and trigger `Worksheet_Change` handlers during a session.
+   - Use `xlflow edit range --sheet <name> --range <A1:B2> --fill <#RRGGBB> --session --keepalive --json` or `--clear contents|formats|all` to reset workbook state between iterations.
+   - Use `xlflow edit rows --sheet <name> --rows <1:31> --height <points> --session --keepalive --json` and `xlflow edit columns --sheet <name> --columns <A:AE> --width <chars> --session --keepalive --json` for visual tuning before `export-image`.
    - Use `xlflow inspect workbook --json` to confirm workbook path, active sheet metadata, and per-sheet used ranges.
    - Use `xlflow inspect sheets --json` to verify sheet creation/removal, visibility, row counts, and column counts.
    - Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output range is known.
@@ -147,6 +151,7 @@ When the user reports a runtime failure:
 - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
 - Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
+- Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
 - Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.

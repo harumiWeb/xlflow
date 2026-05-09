@@ -322,3 +322,88 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 - Existing `workbook.session_mode`, `workbook.dirty`, and `workbook.needs_save` remain for compatibility; the new `target` and `session` blocks are the preferred stable contract for callers.
 - `macros` with zero results should emit actionable `hints` explaining that discovery reads workbook state, not source files, and may require `push`.
 - `inspect` keeps reading the saved workbook file directly, but when `.xlflow/session.json` points at the same live workbook it should surface session dirty state and warn when the saved file may be stale.
+
+# xlflow Workbook Edit Commands Spec
+
+## Goal
+
+Add a minimal, session-only workbook mutation surface for AI-agent development loops so agents can prepare workbook state, trigger event-driven behavior, and tune layout without generating temporary VBA for every experiment.
+
+## CLI Contract
+
+- `xlflow edit cell [workbook] --sheet <name> --cell <A1> (--value <text> | --formula <formula> | --fill <#RGB|#RRGGBB>) --session [--events keep|on|off] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow edit range [workbook] --sheet <name> --range <A1:B2> (--fill <#RGB|#RRGGBB> | --clear contents|formats|all) --session [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow edit rows [workbook] --sheet <name> --rows <1:31> --height <points> --session [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow edit columns [workbook] --sheet <name> --columns <A:AE> --width <chars> --session [--keepalive] [--keepalive-interval <duration>]`
+
+## Function and Type Contracts
+
+```go
+type EditEventMode string
+
+const (
+    EditEventKeep EditEventMode = "keep"
+    EditEventOn   EditEventMode = "on"
+    EditEventOff  EditEventMode = "off"
+)
+
+type EditCellOptions struct {
+    WorkbookPath string
+    Sheet        string
+    Cell         string
+    Value        *string
+    Formula      *string
+    Fill         string
+    Events       EditEventMode
+    Session      bool
+    Keepalive    CommandOptions
+}
+
+type EditRangeOptions struct {
+    WorkbookPath string
+    Sheet        string
+    Range        string
+    Fill         string
+    Clear        string
+    Session      bool
+    Keepalive    CommandOptions
+}
+
+type EditRowsOptions struct {
+    WorkbookPath string
+    Sheet        string
+    Rows         string
+    Height       float64
+    Session      bool
+    Keepalive    CommandOptions
+}
+
+type EditColumnsOptions struct {
+    WorkbookPath string
+    Sheet        string
+    Columns      string
+    Width        float64
+    Session      bool
+    Keepalive    CommandOptions
+}
+```
+
+## Behavior
+
+- MVP requires `--session` for every `edit` command. xlflow must fail rather than silently editing a saved file or opening a hidden isolated workbook.
+- `edit cell` supports exactly one mutation: value, formula, or fill.
+- `edit range` supports exactly one mutation: fill or clear mode.
+- `edit rows` supports row height only.
+- `edit columns` supports column width only.
+- Supported fill input formats are `#RGB` and `#RRGGBB`; normalized output uses uppercase `#RRGGBB`.
+- `--events keep|on|off` applies only to `edit cell --value` and `edit cell --formula`.
+- When `--events on` or `--events off` is used, xlflow captures the current `Application.EnableEvents` state, applies the requested temporary state, performs the edit, and restores the prior state whenever possible.
+- Successful edits against a live session workbook must report dirty/save-required state and tell callers to use `xlflow save --session`.
+
+## Outputs
+
+- JSON keeps the existing xlflow top-level envelope.
+- `edit` adds top-level `edit` metadata with `kind`, target selector, mutation summary, and optional event-state details.
+- `target.kind` is always `live_session` in the MVP.
+- `session.active=true`, `session.dirty=true`, and `session.save_required=true` after any successful edit.
+- Human output must clearly report the edit target, mutation summary, and save-required state.

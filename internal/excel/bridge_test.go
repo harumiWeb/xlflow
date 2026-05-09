@@ -141,6 +141,61 @@ func TestBuildExportImageScriptArgs(t *testing.T) {
 	}
 }
 
+func TestBuildEditCellScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	value := "ABC123"
+	args := buildEditCellScriptArgs(root, cfg, EditCellOptions{
+		WorkbookPath: filepath.Join("fixtures", "Book.xlsm"),
+		Sheet:        "Input",
+		Cell:         "B2",
+		Value:        &value,
+		Events:       EditEventOn,
+		Session:      true,
+	})
+	if args["Action"] != "cell" || args["WorkbookPath"] != filepath.Join(root, "fixtures", "Book.xlsm") {
+		t.Fatalf("unexpected edit cell args: %+v", args)
+	}
+	if args["Sheet"] != "Input" || args["Cell"] != "B2" || args["Value"] != "ABC123" || args["Events"] != "on" {
+		t.Fatalf("unexpected edit cell payload: %+v", args)
+	}
+	if args["UseSession"] != "true" || args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("unexpected session args: %+v", args)
+	}
+}
+
+func TestBuildEditRangeRowsAndColumnsScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	rangeArgs := buildEditRangeScriptArgs(root, cfg, EditRangeOptions{
+		Sheet:   "QR",
+		Range:   "A1:AE31",
+		Fill:    "#FFFFFF",
+		Session: true,
+	})
+	if rangeArgs["Action"] != "range" || rangeArgs["RangeAddress"] != "A1:AE31" || rangeArgs["Fill"] != "#FFFFFF" {
+		t.Fatalf("unexpected edit range args: %+v", rangeArgs)
+	}
+	rowsArgs := buildEditRowsScriptArgs(root, cfg, EditRowsOptions{
+		Sheet:   "QR",
+		Rows:    "1:31",
+		Height:  12,
+		Session: true,
+	})
+	if rowsArgs["Action"] != "rows" || rowsArgs["Rows"] != "1:31" || rowsArgs["Height"] != "12" {
+		t.Fatalf("unexpected edit rows args: %+v", rowsArgs)
+	}
+	columnArgs := buildEditColumnsScriptArgs(root, cfg, EditColumnsOptions{
+		Sheet:   "QR",
+		Columns: "A:AE",
+		Width:   2.2,
+		Session: true,
+	})
+	if columnArgs["Action"] != "columns" || columnArgs["Columns"] != "A:AE" || columnArgs["Width"] != "2.2" {
+		t.Fatalf("unexpected edit columns args: %+v", columnArgs)
+	}
+}
+
 func TestResolveExportImageOutputDefaultPath(t *testing.T) {
 	root := t.TempDir()
 	resolved, err := resolveExportImageOutput(root, filepath.Join("build", "Book.xlsm"), ExportImageOptions{
@@ -227,6 +282,20 @@ func TestUnsupportedImageFormatIsValidationFailure(t *testing.T) {
 
 func TestUIValidationFailureCodesAreValidationFailures(t *testing.T) {
 	for _, code := range []string{"sheet_not_found", "button_not_found", "ui_button_args_invalid"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitValidation)
+			}
+		})
+	}
+}
+
+func TestEditValidationFailureCodesAreValidationFailures(t *testing.T) {
+	for _, code := range []string{"session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error"} {
 		t.Run(code, func(t *testing.T) {
 			result := ScriptResult{
 				Status: output.StatusFailed,
