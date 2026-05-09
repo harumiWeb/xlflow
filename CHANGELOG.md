@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Commands now display explicit workbook state, including whether reading from saved file or live Excel session
+- Added warnings when live session workbooks contain unsaved changes
+
 ## v0.6.0
 
 - Added `xlflow export-image` to export worksheet ranges as PNG images for visual verification, including session-aware targeting, structured `target` / `output` metadata, and reliability fixes so hidden-workbook captures do not produce blank images or leak Excel processes.
