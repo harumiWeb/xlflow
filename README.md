@@ -29,7 +29,7 @@ It turns `.xlsm` workbooks into a source-controlled, CLI-driven development work
 
 ## Demo
 
-These [samples](docs/example) were created by an AI agent using xlflow with only minimal natural language instructions.
+These [samples](example) were created by an AI agent using xlflow with only minimal natural language instructions.
 
 <table>
   <tr>
