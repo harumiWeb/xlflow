@@ -162,6 +162,69 @@ func TestAddXlflowWarningAppendsToOrderedResult(t *testing.T) {
 	}
 }
 
+func TestAddXlflowHintAppendsToOrderedResult(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $r = New-XlflowResult -Command 'macros'; Add-XlflowHint -Result $r -Code 'macros_empty_before_push' -Message 'push first'; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Add-XlflowHint command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Hints []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"hints"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse hint output: %v\n%s", err, out)
+	}
+	if len(got.Hints) != 1 || got.Hints[0].Code != "macros_empty_before_push" || got.Hints[0].Message != "push first" {
+		t.Fatalf("unexpected hints: %+v", got.Hints)
+	}
+}
+
+func TestNewXlflowTargetAndSessionResults(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; [ordered]@{ target = (New-XlflowTargetResult -Kind 'live_session' -Path 'build\\Book.xlsm'); session = (New-XlflowSessionResult -Active $true -WorkbookPath 'build\\Book.xlsm' -Dirty $true -SaveRequired $true -Mode 'explicit') } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("target/session helper command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Target struct {
+			Kind        string `json:"kind"`
+			Path        string `json:"path"`
+			Description string `json:"description"`
+		} `json:"target"`
+		Session struct {
+			Active       bool   `json:"active"`
+			WorkbookPath string `json:"workbook_path"`
+			Dirty        bool   `json:"dirty"`
+			SaveRequired bool   `json:"save_required"`
+			Mode         string `json:"mode"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse target/session output: %v\n%s", err, out)
+	}
+	if got.Target.Kind != "live_session" || got.Target.Path != "build\\Book.xlsm" || got.Target.Description == "" {
+		t.Fatalf("unexpected target: %+v", got.Target)
+	}
+	if !got.Session.Active || !got.Session.Dirty || !got.Session.SaveRequired || got.Session.Mode != "explicit" {
+		t.Fatalf("unexpected session: %+v", got.Session)
+	}
+}
+
 func TestCloseXlflowComSkipsForceKillAfterGracefulCloseFailure(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

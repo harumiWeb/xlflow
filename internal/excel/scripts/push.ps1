@@ -40,6 +40,8 @@ try {
       $messages.Add(($duplicate.paths -join ", "))
     }
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $false -NeedsSave $false -Dirty $false
+    $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $false -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode "none"
     $result.source = [ordered]@{ changed_only = $false; changed = $false; state = $StatePath }
     Set-XlflowError -Result $result -Code "duplicate_module_name" -Message "Duplicate VBA module names detected in source tree. Rename the conflicting files before push." -Source "xlflow"
     $result.logs = @($messages.ToArray())
@@ -49,6 +51,8 @@ try {
   $fingerprint = Get-XlflowSourceFingerprint -WorkbookPath $WorkbookPath -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
   if ((ConvertTo-XlflowBool $ChangedOnly) -and (Test-XlflowFingerprintMatchesState -Fingerprint $fingerprint -StatePath $StatePath)) {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $false -NeedsSave $false -Dirty $false
+    $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $false -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode "none"
     $result.backup = [ordered]@{ path = $null; mode = $BackupMode }
     $result.source = [ordered]@{ changed_only = $true; changed = $false; state = $StatePath }
     $result.logs = @("source state unchanged; skipped workbook import")
@@ -128,8 +132,13 @@ try {
   Write-XlflowFingerprintState -Fingerprint $fingerprint -StatePath $StatePath
   $needsSave = $sessionAttached -and -not $saved
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $saved -NeedsSave $needsSave -Dirty $needsSave
+  $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $needsSave -SaveRequired $needsSave -Mode $sessionMode
   $result.backup = [ordered]@{ path = $(if ($BackupMode -eq "always") { $backupDir } else { $null }); mode = $BackupMode }
   $result.source = [ordered]@{ changed_only = (ConvertTo-XlflowBool $ChangedOnly); changed = $true; state = $StatePath }
+  if ($needsSave) {
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Source files were pushed to the live workbook. The workbook file on disk has not been updated yet."
+  }
   $result.logs = @(
     @(
       $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),

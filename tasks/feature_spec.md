@@ -314,3 +314,11 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 - Existing output without overwrite: `output_file_exists`
 - Unsupported format or mismatched extension: `unsupported_image_format`
 - Temporary chart cleanup after successful export: warning code `temporary_object_cleanup_failed`
+
+## Explicit Workbook State Output
+
+- Workbook-backed commands must make their read/write target explicit through top-level `target.kind = source|file|live_session`.
+- Relevant commands must also return top-level `session.active`, `session.workbook_path`, `session.dirty`, and `session.save_required` when that state is knowable.
+- Existing `workbook.session_mode`, `workbook.dirty`, and `workbook.needs_save` remain for compatibility; the new `target` and `session` blocks are the preferred stable contract for callers.
+- `macros` with zero results should emit actionable `hints` explaining that discovery reads workbook state, not source files, and may require `push`.
+- `inspect` keeps reading the saved workbook file directly, but when `.xlflow/session.json` points at the same live workbook it should surface session dirty state and warn when the saved file may be stale.

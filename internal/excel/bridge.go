@@ -142,6 +142,7 @@ type ScriptResult struct {
 	Target        any           `json:"target,omitempty"`
 	Output        any           `json:"output,omitempty"`
 	Warnings      any           `json:"warnings,omitempty"`
+	Hints         any           `json:"hints,omitempty"`
 }
 
 type UIButtonAddOptions struct {
@@ -759,6 +760,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Target = result.Target
 	env.Output = result.Output
 	env.Warnings = result.Warnings
+	env.Hints = result.Hints
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil

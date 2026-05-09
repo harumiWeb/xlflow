@@ -55,6 +55,8 @@ try {
       Write-XlflowSessionMetadata -Excel $excel -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath
       $sessionStarted = $true
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode
+      $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $true -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
       $result.logs = @("started xlflow Excel session")
     }
     "status" {
@@ -76,11 +78,26 @@ try {
       }
       $dirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
       $needsSave = $running -and $open -and ($null -ne $dirty) -and [bool]$dirty
-      $result.session = [ordered]@{ running = $running; workbook_open = $open; metadata = $metadata; dirty = $dirty; needs_save = $needsSave }
+      $result.session = [ordered]@{
+        running = $running
+        workbook_open = $open
+        metadata = $metadata
+        active = ($running -and $open)
+        workbook_path = $WorkbookPath
+        dirty = $dirty
+        needs_save = $needsSave
+        save_required = $needsSave
+        mode = $(if ($running -and $open) { $sessionMode } else { "none" })
+      }
       if ($running -and $open) {
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Dirty $dirty -NeedsSave $needsSave
+        $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
       } else {
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none"
+        $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
+      }
+      if ($needsSave) {
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."
       }
       $result.logs = @($(if ($running -and $open) { "xlflow session is running" } else { "xlflow session is not running" }))
     }
@@ -91,6 +108,8 @@ try {
       $sessionMode = [string]$openResult.session_mode
       $workbook.Save()
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Saved $true -Dirty $false -NeedsSave $false
+      $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $true -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
       $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "saved xlflow session workbook") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     "stop" {
@@ -107,6 +126,8 @@ try {
         Remove-Item -LiteralPath $MetadataPath -Force -ErrorAction SilentlyContinue
       }
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $true -DirtyBeforeStop $wasDirty -AutoSavedOnStop $wasDirty
+      $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $false -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode "none"
       $result.logs = @(
         @(
           $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),
@@ -114,6 +135,9 @@ try {
           "stopped xlflow Excel session"
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
       )
+      if ($wasDirty) {
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook had unsaved changes and was saved while stopping the session."
+      }
     }
     default {
       Set-XlflowError -Result $result -Code "session_args_invalid" -Message "-Action must be start, status, stop, or save." -Source "xlflow"

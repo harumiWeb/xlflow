@@ -59,6 +59,7 @@ type Envelope struct {
 	Target        any `json:"target,omitempty"`
 	Output        any `json:"output,omitempty"`
 	Warnings      any `json:"warnings,omitempty"`
+	Hints         any `json:"hints,omitempty"`
 }
 
 type Options struct {
@@ -174,6 +175,7 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.errorBlock(env))
 	}
 	b.WriteString(r.renderBridge(env))
+	b.WriteString(r.renderTargetSession(env))
 	switch env.Command {
 	case "version":
 		b.WriteString(r.renderVersion(env))
@@ -509,6 +511,7 @@ func (r renderer) renderRun(env Envelope) string {
 			}
 		}
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
@@ -570,6 +573,7 @@ func (r renderer) renderTest(env Envelope) string {
 			b.WriteString("\n")
 		}
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
@@ -678,6 +682,7 @@ func (r renderer) renderMacros(env Envelope) string {
 		}
 		fmt.Fprintf(&b, "- %s%s%s\n", name, args, kind)
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
@@ -711,6 +716,7 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	if updated, ok := boolValueOK(source, "updated"); ok {
 		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
@@ -748,6 +754,7 @@ func (r renderer) renderTraceCommand(env Envelope) string {
 	if updated, ok := boolValueOK(source, "updated"); ok {
 		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
@@ -756,8 +763,7 @@ func (r renderer) renderExportImage(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	target := objectMap(env.Target)
 	outputPayload := objectMap(env.Output)
-	warnings := listOfObjects(env.Warnings)
-	if len(workbook) == 0 && len(target) == 0 && len(outputPayload) == 0 && len(warnings) == 0 {
+	if len(workbook) == 0 && len(target) == 0 && len(outputPayload) == 0 && env.Warnings == nil && env.Hints == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -799,10 +805,7 @@ func (r renderer) renderExportImage(env Envelope) string {
 	if value, ok := boolValueOK(outputPayload, "created_parent_dirs"); ok {
 		b.WriteString(kv("Created dirs", fmt.Sprintf("%t", value)))
 	}
-	if renderedWarnings := renderWarningList(warnings); renderedWarnings != "" {
-		b.WriteString("Warnings:\n")
-		b.WriteString(renderedWarnings)
-	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
@@ -836,13 +839,29 @@ func (r renderer) renderInspectStandalone(env Envelope) string {
 	}
 	switch stringValue(payload, "format") {
 	case "json":
-		data, err := json.MarshalIndent(payload, "", "  ")
+		standalone := map[string]any{}
+		for key, value := range payload {
+			standalone[key] = value
+		}
+		if env.Target != nil {
+			standalone["target_state"] = env.Target
+		}
+		if env.Session != nil {
+			standalone["session"] = env.Session
+		}
+		if env.Warnings != nil {
+			standalone["warnings"] = env.Warnings
+		}
+		if env.Hints != nil {
+			standalone["hints"] = env.Hints
+		}
+		data, err := json.MarshalIndent(standalone, "", "  ")
 		if err != nil {
 			return ""
 		}
 		return string(data) + "\n"
 	case "markdown":
-		text := strings.TrimRight(r.renderInspectMarkdown(payload), "\n")
+		text := strings.TrimRight(r.renderInspectMarkdown(env, payload), "\n")
 		if text == "" {
 			return ""
 		}
@@ -859,25 +878,26 @@ func (r renderer) renderInspect(env Envelope) string {
 	}
 	switch stringValue(payload, "target") {
 	case "workbook":
-		return r.renderInspectWorkbook(payload)
+		return r.renderInspectWorkbook(env, payload)
 	case "sheets":
-		return r.renderInspectSheets(payload)
+		return r.renderInspectSheets(env, payload)
 	case "range", "used-range":
-		return r.renderInspectRange(payload)
+		return r.renderInspectRange(env, payload)
 	case "cell":
-		return r.renderInspectCell(payload)
+		return r.renderInspectCell(env, payload)
 	default:
 		return r.renderLogs(env)
 	}
 }
 
-func (r renderer) renderInspectWorkbook(payload map[string]any) string {
+func (r renderer) renderInspectWorkbook(env Envelope, payload map[string]any) string {
 	workbook := objectMap(payload["workbook"])
 	if len(workbook) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
 	b.WriteString(renderInspectTargetInfo(payload))
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(kv("Workbook", path))
@@ -902,13 +922,15 @@ func (r renderer) renderInspectWorkbook(payload map[string]any) string {
 			intNumber(sheet, "column_count"),
 		)
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
-func (r renderer) renderInspectSheets(payload map[string]any) string {
+func (r renderer) renderInspectSheets(env Envelope, payload map[string]any) string {
 	sheets := listOfObjects(payload["sheets"])
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
 	b.WriteString(renderInspectTargetInfo(payload))
 	b.WriteString(kv("Sheets", fmt.Sprintf("%d", len(sheets))))
 	for _, sheet := range sheets {
@@ -923,16 +945,18 @@ func (r renderer) renderInspectSheets(payload map[string]any) string {
 			intNumber(sheet, "column_count"),
 		)
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
-func (r renderer) renderInspectRange(payload map[string]any) string {
+func (r renderer) renderInspectRange(env Envelope, payload map[string]any) string {
 	snapshot := objectMap(payload["range"])
 	if len(snapshot) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
 	b.WriteString(renderInspectTargetInfo(payload))
 	if sheet := stringValue(snapshot, "sheet"); sheet != "" {
 		b.WriteString(kv("Sheet", sheet))
@@ -969,16 +993,18 @@ func (r renderer) renderInspectRange(payload map[string]any) string {
 		b.WriteString(strings.Join(row, " | "))
 		b.WriteString("\n")
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
-func (r renderer) renderInspectCell(payload map[string]any) string {
+func (r renderer) renderInspectCell(env Envelope, payload map[string]any) string {
 	cell := objectMap(payload["cell"])
 	if len(cell) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
 	b.WriteString(renderInspectTargetInfo(payload))
 	if sheet := stringValue(cell, "sheet"); sheet != "" {
 		b.WriteString(kv("Sheet", sheet))
@@ -987,10 +1013,11 @@ func (r renderer) renderInspectCell(payload map[string]any) string {
 		b.WriteString(kv("Cell", address))
 	}
 	b.WriteString(kv("Value", emptyDash(stringValue(cell, "value"))))
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
-func (r renderer) renderInspectMarkdown(payload map[string]any) string {
+func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) string {
 	switch stringValue(payload, "target") {
 	case "workbook":
 		workbook := objectMap(payload["workbook"])
@@ -998,6 +1025,7 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 			return ""
 		}
 		var b strings.Builder
+		b.WriteString(renderInspectTargetSessionMarkdown(env))
 		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
 			b.WriteString(info)
 		}
@@ -1014,15 +1042,17 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 			b.WriteString("\n")
 		}
 		b.WriteString(markdownSheetTable(listOfObjects(workbook["sheets"])))
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
 		return b.String()
 	case "sheets":
-		return renderInspectTargetInfoMarkdown(payload) + markdownSheetTable(listOfObjects(payload["sheets"]))
+		return renderInspectTargetSessionMarkdown(env) + renderInspectTargetInfoMarkdown(payload) + markdownSheetTable(listOfObjects(payload["sheets"])) + renderWarningsAndHintsMarkdown(env)
 	case "range", "used-range":
 		snapshot := objectMap(payload["range"])
 		if len(snapshot) == 0 {
 			return ""
 		}
 		var b strings.Builder
+		b.WriteString(renderInspectTargetSessionMarkdown(env))
 		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
 			b.WriteString(info)
 		}
@@ -1061,19 +1091,20 @@ func (r renderer) renderInspectMarkdown(payload map[string]any) string {
 		}
 		b.WriteString("\n")
 		b.WriteString(markdownMatrixTable(values))
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
 		return b.String()
 	case "cell":
 		cell := objectMap(payload["cell"])
 		if len(cell) == 0 {
 			return ""
 		}
-		prefix := renderInspectTargetInfoMarkdown(payload)
+		prefix := renderInspectTargetSessionMarkdown(env) + renderInspectTargetInfoMarkdown(payload)
 		rows := [][]string{
 			{"Sheet", stringValue(cell, "sheet")},
 			{"Cell", stringValue(cell, "address")},
 			{"Value", emptyDash(stringValue(cell, "value"))},
 		}
-		return prefix + markdownTable([]string{"Field", "Value"}, rows)
+		return prefix + markdownTable([]string{"Field", "Value"}, rows) + renderWarningsAndHintsMarkdown(env)
 	default:
 		return ""
 	}
@@ -1163,6 +1194,7 @@ func (r renderer) renderSession(env Envelope) string {
 	if save := summarizeSaveRequirement(workbook); save != "" {
 		b.WriteString(kv("Save", save))
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
@@ -1186,6 +1218,7 @@ func (r renderer) renderSave(env Envelope) string {
 	if save := summarizeSaveRequirement(workbook); save != "" {
 		b.WriteString(kv("Save", save))
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
@@ -1240,6 +1273,125 @@ func renderWarningList(warnings []map[string]any) string {
 		}
 		b.WriteString(stringValue(warning, "message"))
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderHintList(hints []map[string]any) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, hint := range hints {
+		b.WriteString("- ")
+		if code := stringValue(hint, "code"); code != "" {
+			b.WriteString("[")
+			b.WriteString(code)
+			b.WriteString("] ")
+		}
+		b.WriteString(stringValue(hint, "message"))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (r renderer) renderTargetSession(env Envelope) string {
+	target := objectMap(env.Target)
+	session := objectMap(env.Session)
+	if len(target) == 0 && len(session) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if len(target) > 0 {
+		b.WriteString(kv("Target", summarizeTarget(target)))
+	}
+	if len(session) > 0 {
+		b.WriteString(kv("Session state", summarizeSessionState(session)))
+	}
+	return b.String()
+}
+
+func (r renderer) renderInspectTargetSession(env Envelope) string {
+	text := r.renderTargetSession(env)
+	if text == "" {
+		return ""
+	}
+	return text
+}
+
+func (r renderer) renderWarningsAndHints(env Envelope) string {
+	warnings := listOfObjects(env.Warnings)
+	hints := listOfObjects(env.Hints)
+	if len(warnings) == 0 && len(hints) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if renderedWarnings := renderWarningList(warnings); renderedWarnings != "" {
+		b.WriteString("Warnings:\n")
+		b.WriteString(renderedWarnings)
+	}
+	if renderedHints := renderHintList(hints); renderedHints != "" {
+		b.WriteString("Hints:\n")
+		b.WriteString(renderedHints)
+	}
+	return b.String()
+}
+
+func renderInspectTargetSessionMarkdown(env Envelope) string {
+	target := objectMap(env.Target)
+	session := objectMap(env.Session)
+	if len(target) == 0 && len(session) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if len(target) > 0 {
+		b.WriteString("Target: ")
+		b.WriteString(summarizeTarget(target))
+		b.WriteString("\n")
+	}
+	if len(session) > 0 {
+		b.WriteString("Session state: ")
+		b.WriteString(summarizeSessionState(session))
+		b.WriteString("\n")
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderWarningsAndHintsMarkdown(env Envelope) string {
+	warnings := listOfObjects(env.Warnings)
+	hints := listOfObjects(env.Hints)
+	if len(warnings) == 0 && len(hints) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if len(warnings) > 0 {
+		for _, warning := range warnings {
+			b.WriteString("\n> Warning")
+			if code := stringValue(warning, "code"); code != "" {
+				b.WriteString(" [")
+				b.WriteString(code)
+				b.WriteString("]")
+			}
+			b.WriteString(": ")
+			b.WriteString(stringValue(warning, "message"))
+			b.WriteString("\n")
+		}
+	}
+	if len(hints) > 0 {
+		for _, hint := range hints {
+			b.WriteString("\n> Hint")
+			if code := stringValue(hint, "code"); code != "" {
+				b.WriteString(" [")
+				b.WriteString(code)
+				b.WriteString("]")
+			}
+			b.WriteString(": ")
+			b.WriteString(stringValue(hint, "message"))
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
@@ -1430,6 +1582,56 @@ func summarizeSessionUsage(workbook map[string]any) string {
 	default:
 		return "xlflow session workbook"
 	}
+}
+
+func summarizeTarget(target map[string]any) string {
+	if len(target) == 0 {
+		return ""
+	}
+	kind := stringValue(target, "kind")
+	description := stringValue(target, "description")
+	path := stringValue(target, "path")
+	if description == "" {
+		switch kind {
+		case "source":
+			description = "source files"
+		case "file":
+			description = "saved file"
+		case "live_session":
+			description = "live session"
+		}
+	}
+	if path != "" {
+		if description != "" {
+			return description + " (" + path + ")"
+		}
+		return path
+	}
+	return description
+}
+
+func summarizeSessionState(session map[string]any) string {
+	if len(session) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if active, ok := boolValueOK(session, "active"); ok {
+		if active {
+			parts = append(parts, "active")
+		} else {
+			parts = append(parts, "inactive")
+		}
+	}
+	if dirty, ok := boolValueOK(session, "dirty"); ok && dirty {
+		parts = append(parts, "dirty")
+	}
+	if saveRequired, ok := boolValueOK(session, "save_required"); ok && saveRequired {
+		parts = append(parts, "SAVE REQUIRED")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ", ")
 }
 
 func summarizeSaveRequirement(workbook map[string]any) string {

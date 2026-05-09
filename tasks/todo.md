@@ -131,3 +131,18 @@
 - `go test ./internal/excel/scripts -run TestPowerShellScriptsParse` passed.
 - `go test ./...` passed.
 - Excel COM-backed end-to-end export verification was run in a disposable workbook workspace during this pass.
+
+# Explicit Workbook State Output Todo
+
+- [x] Add shared `target`, `session`, `warnings`, and `hints` result shape support in the PowerShell bridge and Go envelopes.
+- [x] Emit explicit target/session state from `session`, `push`, `pull`, `run`, `save`, `macros`, and `export-image`.
+- [x] Keep `inspect` file-based while probing the matching recorded session for dirty/save-required warnings when available.
+- [x] Extend human-readable output to show target and session state clearly, plus contextual warnings and hints.
+- [x] Add regression coverage for JSON envelope fields, inspect state output, and PowerShell helper serialization.
+- [x] Run focused verification plus full `go test ./...`.
+
+## Verification Notes
+
+- `go test ./internal/output ./internal/cli ./internal/excel` passed.
+- `go test ./internal/excel/scripts` passed.
+- `go test ./...` passed.

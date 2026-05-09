@@ -237,8 +237,13 @@ try {
   $result.target = [ordered]@{
     kind = $(if ($sessionAttached) { "live_session" } else { "file" })
     path = $WorkbookPath
+    description = $(Get-XlflowTargetDescription -Kind $(if ($sessionAttached) { "live_session" } else { "file" }))
     sheet = $worksheet.Name
     range = [string]$range.Address($false, $false)
+  }
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+  if ($saveState.needs_save) {
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `export-image` used the live workbook state."
   }
   $result.output = $output
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported " + $worksheet.Name + "!" + [string]$range.Address($false, $false) + " to " + $resolvedOutputPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -249,6 +254,12 @@ try {
   }
   if ($null -eq $result.workbook -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
+  }
+  if ($null -eq $result.target -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+  }
+  if ($null -eq $result.session) {
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   }
 } finally {
   if ($restoreVisible) {

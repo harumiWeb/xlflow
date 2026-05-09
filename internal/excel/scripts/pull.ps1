@@ -19,6 +19,7 @@ $excel = $null
 $workbook = $null
 $sessionAttached = $false
 $sessionMode = "none"
+$saveState = [ordered]@{ dirty = $false; needs_save = $false }
 
 try {
   New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
@@ -27,6 +28,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
 
   Clear-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
 
@@ -56,10 +58,17 @@ try {
     }
   }
 
-  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
+  $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+  if ($saveState.needs_save) {
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `pull` exported from the live workbook."
+  }
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported $($exported.Count) VBA component(s)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {
   Set-XlflowError -Result $result -Code "excel_export_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
+  $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+  $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
 } finally {
   if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel

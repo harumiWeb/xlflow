@@ -101,6 +101,32 @@ function Add-XlflowWarning {
   }
 }
 
+function Add-XlflowHint {
+  param(
+    $Result,
+    [string]$Code,
+    [string]$Message
+  )
+
+  if (-not $Result.Contains("hints") -or $null -eq $Result["hints"]) {
+    $Result["hints"] = @()
+  }
+  $Result["hints"] += [ordered]@{
+    code = $Code
+    message = $Message
+  }
+}
+
+function Add-XlflowStateWarning {
+  param(
+    $Result,
+    [string]$Code,
+    [string]$Message
+  )
+
+  Add-XlflowWarning -Result $Result -Code $Code -Message $Message
+}
+
 function ConvertTo-XlflowBool {
   param([string]$Value)
   return $Value -eq "true" -or $Value -eq "True" -or $Value -eq "1"
@@ -139,6 +165,78 @@ function Get-XlflowRelativePath {
   }
 
   return $relativePath
+}
+
+function Get-XlflowTargetDescription {
+  param([string]$Kind)
+
+  switch ($Kind) {
+    "source" { return "VBA source files in the project directory" }
+    "file" { return "Saved workbook file on disk" }
+    "live_session" { return "Workbook currently open through xlflow session" }
+    default { return "" }
+  }
+}
+
+function New-XlflowTargetResult {
+  param(
+    [string]$Kind,
+    [string]$Path = "",
+    [string]$Description = "",
+    [string]$Note = "",
+    [string]$Sheet = "",
+    [string]$Range = ""
+  )
+
+  $target = [ordered]@{
+    kind = $Kind
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Path)) {
+    $target.path = $Path
+  }
+  if ([string]::IsNullOrWhiteSpace($Description)) {
+    $Description = Get-XlflowTargetDescription -Kind $Kind
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Description)) {
+    $target.description = $Description
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Note)) {
+    $target.note = $Note
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Sheet)) {
+    $target.sheet = $Sheet
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Range)) {
+    $target.range = $Range
+  }
+  return $target
+}
+
+function New-XlflowSessionResult {
+  param(
+    [bool]$Active = $false,
+    [string]$WorkbookPath = "",
+    [AllowNull()]$Dirty = $null,
+    [AllowNull()]$SaveRequired = $null,
+    [string]$Mode = ""
+  )
+
+  $session = [ordered]@{
+    active = $Active
+  }
+  if (-not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+    $session.workbook_path = $WorkbookPath
+  }
+  if ($PSBoundParameters.ContainsKey("Dirty") -and $null -ne $Dirty) {
+    $session.dirty = [bool]$Dirty
+  }
+  if ($PSBoundParameters.ContainsKey("SaveRequired") -and $null -ne $SaveRequired) {
+    $session.save_required = [bool]$SaveRequired
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+    $session.mode = $Mode
+  }
+  return $session
 }
 
 function Close-XlflowCom {
