@@ -33,23 +33,23 @@ These [samples](docs/example) were created by an AI agent using xlflow with only
 
 <table>
   <tr>
-    <td align="center">
+    <td align="center" width="50%">
       <img src="docs/images/world-news.png" alt="world news" width="400">
-      <sub>Macro that summarizes world news in Excel using NewsAPI</sub>
+      <p>Macro that summarizes world news in Excel using NewsAPI</p>
     </td>
-    <td align="center">
+    <td align="center" width="50%">
       <img src="docs/images/stock-price.png" alt="stock price" width="400">
-      <sub>Macro that retrieves stock prices and displays them in Excel</sub>
+      <p>Macro that retrieves stock prices and displays them in Excel</p>
     </td>
   </tr>
   <tr>
-    <td align="center">
+    <td align="center" width="50%">
       <img src="docs/images/gen-qrcode.png" alt="generate qrcode" width="400">
-      <sub>Macro that generates QR codes using cell colors and displays them in Excel</sub>
+      <p>Macro that generates QR codes using cell colors and displays them in Excel</p>
     </td>
-    <td align="center">
+    <td align="center" width="50%">
       <img src="docs/images/tetris.gif" alt="tetris" width="400">
-      <sub>Macro that allows playing Tetris within Excel</sub>
+      <p>Macro that allows playing Tetris within Excel</p>
     </td>
   </tr>
 </table>
