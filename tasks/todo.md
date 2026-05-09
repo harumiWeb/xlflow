@@ -123,11 +123,11 @@
 - [x] Update CLI contract, README files, bundled skill guidance, and ADR session-reuse note.
 - [x] Add focused Go and PowerShell regression coverage.
 - [x] Run focused verification and full `go test ./...`.
-- [ ] Run Excel COM-backed end-to-end export verification in a disposable workbook workspace.
+- [x] Run Excel COM-backed end-to-end export verification in a disposable workbook workspace.
 
 ## Verification Notes
 
 - `go test ./internal/cli ./internal/excel ./internal/output` passed.
 - `go test ./internal/excel/scripts -run TestPowerShellScriptsParse` passed.
 - `go test ./...` passed.
-- Excel COM-backed end-to-end export verification was not run in a disposable workbook workspace during this pass.
+- Excel COM-backed end-to-end export verification was run in a disposable workbook workspace during this pass.
