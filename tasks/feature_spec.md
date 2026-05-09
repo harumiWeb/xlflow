@@ -1,5 +1,25 @@
 # xlflow Folder Structure Spec
 
+## UserForm Phase 1 Warning Spec
+
+## Goal
+
+Make UserForm risk visible in existing workflows before dedicated form commands exist.
+
+## Contract
+
+- `pull`, `push`, `save`, and `session start|status|stop` add top-level `warnings` and `hints` when UserForms are detected.
+- `inspect` remains file-based and detects UserForms from configured `src.forms` `.frm` files without opening Excel COM.
+- Phase 1 does not add new `form` subcommands.
+
+## Behavior
+
+- Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
+- Generic guidance hint uses `userform_planned_commands` and explicitly labels future commands such as `form snapshot`, `inspect form`, and `export-form-image` as planned/future.
+- `push --session --no-save` with detected UserForms adds `userform_unsaved_session_state` warning in addition to existing save-required state.
+- `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
+- UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
+
 ## Goal
 
 Support Rubberduck-compatible `@Folder(...)` annotations and nested source directories while preserving the existing type-specific `[src]` roots.

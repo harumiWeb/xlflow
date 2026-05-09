@@ -416,6 +416,7 @@ xlflow pull --json
 
 It exports standard modules, class modules, UserForms, and document modules such as Workbook and Worksheet modules into `src/`.
 Use `xlflow pull --session --json` when you want to require the recorded session workbook explicitly. If `.xlflow/session.json` already points at the configured workbook, plain `xlflow pull --json` auto-reuses that matching live workbook.
+When workbook UserForms are detected, `pull` adds warnings that `.frm` text alone may not capture `.frx` or Designer-backed state.
 
 ### `xlflow push`
 
@@ -428,6 +429,7 @@ xlflow push --json
 It reads `.bas`, `.cls`, and `.frm` files and imports them through VBIDE.
 UserForm `.frx` files are treated as binary companion files.
 By default, `push` creates a backup under `.xlflow/backups` and saves the workbook.
+When source UserForms are detected, `push` adds warnings and planned/future hints for deeper form inspection. `push --session --no-save` adds an extra warning that live workbook UserForm state may now differ from disk.
 
 For faster development loops:
 
@@ -511,6 +513,7 @@ xlflow session stop
 `--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
+If UserForms are involved, treat that save step as part of review hygiene before comparing `.frm` / `.frx` output.
 xlflow now warns more aggressively about this unsaved session state, but `xlflow save --session` remains the canonical persistence step before `session stop`.
 
 </details>
@@ -664,6 +667,7 @@ xlflow inspect cell "Result!B3" --json
 ```
 
 Use it to inspect workbook structure and cell output after `push` / `run` workflows when the workbook state has been saved to disk.
+If exported `.frm` files exist under `src/forms`, `inspect` warns that it did not verify live UserForm Designer/runtime state.
 `inspect` is a file snapshot reader, so unsaved changes in an already-open Excel window are intentionally out of scope for this command family.
 Add `--include-style` on `inspect range` or `inspect used-range` when the workbook meaning depends on fill colors, borders, merged cells, row heights, or column widths.
 

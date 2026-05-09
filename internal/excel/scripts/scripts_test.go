@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -560,6 +561,12 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
 		t.Fatalf("push.ps1 should preserve the non-session unchanged-disk log:\n%s", text)
 	}
+	if !strings.Contains(text, "Get-XlflowSourceUserFormNames") {
+		t.Fatalf("push.ps1 should inspect source UserForms during Phase 1 warnings:\n%s", text)
+	}
+	if !strings.Contains(text, "Add-XlflowUserFormSessionStaleWarning") {
+		t.Fatalf("push.ps1 should emit the UserForm stale-session warning for no-save pushes:\n%s", text)
+	}
 }
 
 func TestPullScriptClearsSourcesOnlyAfterWorkbookOpen(t *testing.T) {
@@ -575,6 +582,20 @@ func TestPullScriptClearsSourcesOnlyAfterWorkbookOpen(t *testing.T) {
 	}
 	if clearIdx < openIdx {
 		t.Fatalf("pull.ps1 clears exported sources before opening the workbook, which can destroy the source tree on open failure:\n%s", text)
+	}
+}
+
+func TestPullScriptTreatsUserFormInspectionAsBestEffort(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "pull.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "failed to inspect UserForms during pull") {
+		t.Fatalf("pull.ps1 should swallow auxiliary UserForm inspection failures:\n%s", text)
+	}
+	if !strings.Contains(text, "$userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)") {
+		t.Fatalf("pull.ps1 should still collect UserForm names when available:\n%s", text)
 	}
 }
 
@@ -878,6 +899,9 @@ func TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired(t *testing.T) {
 	if !strings.Contains(text, "$needsSave = $running -and $open -and (($null -eq $dirty) -or [bool]$dirty)") {
 		t.Fatalf("session.ps1 should conservatively treat unknown dirty state as save-required:\n%s", text)
 	}
+	if !strings.Contains(text, "Get-XlflowUserFormNames -Workbook $workbook") {
+		t.Fatalf("session.ps1 should probe workbook UserForms on a best-effort basis:\n%s", text)
+	}
 }
 
 func TestMacrosScriptVBIDEAccessDenialStillIncludesTargetAndSession(t *testing.T) {
@@ -1070,6 +1094,87 @@ try {
 	}
 	if got.Source != got.Copied {
 		t.Fatalf("expected .frx bytes to be copied unchanged, got source=%q copied=%q", got.Source, got.Copied)
+	}
+}
+
+func TestGetXlflowSourceUserFormNamesFindsRecursiveFrmFiles(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  $formsDir = Join-Path $root 'src\forms'
+  $nestedDir = Join-Path $formsDir 'Nested'
+  New-Item -ItemType Directory -Force -Path $nestedDir | Out-Null
+  Set-Content -LiteralPath (Join-Path $formsDir 'UserForm1.frm') -Value 'VERSION 5.00' -Encoding UTF8
+  Set-Content -LiteralPath (Join-Path $nestedDir 'UserForm2.frm') -Value 'VERSION 5.00' -Encoding UTF8
+  [ordered]@{ names = @(Get-XlflowSourceUserFormNames -FormsDir $formsDir) } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceUserFormNames failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse source UserForm names: %v\n%s", err, out)
+	}
+	if want := []string{"UserForm1", "UserForm2"}; !reflect.DeepEqual(got.Names, want) {
+		t.Fatalf("names = %#v, want %#v", got.Names, want)
+	}
+}
+
+func TestAddXlflowUserFormMessagesAddsDiscoveryAndStaleWarnings(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$result = New-XlflowResult -Command 'push'
+Add-XlflowUserFormDiscoveryMessages -Result $result -Names @('CustomerForm', 'OrderForm')
+Add-XlflowUserFormSessionStaleWarning -Result $result -Names @('CustomerForm', 'OrderForm')
+$result | ConvertTo-Json -Depth 6 -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("userform message helpers failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Warnings []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"warnings"`
+		Hints []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"hints"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse userform message helper output: %v\n%s", err, out)
+	}
+	if len(got.Warnings) != 2 {
+		t.Fatalf("warnings = %#v", got.Warnings)
+	}
+	if got.Warnings[0].Code != "userform_state_partial" || !strings.Contains(got.Warnings[0].Message, "CustomerForm, OrderForm") {
+		t.Fatalf("discovery warning = %#v", got.Warnings[0])
+	}
+	if got.Warnings[1].Code != "userform_unsaved_session_state" {
+		t.Fatalf("stale warning = %#v", got.Warnings[1])
+	}
+	if len(got.Hints) != 1 || got.Hints[0].Code != "userform_planned_commands" {
+		t.Fatalf("hints = %#v", got.Hints)
 	}
 }
 

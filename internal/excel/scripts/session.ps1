@@ -52,11 +52,18 @@ try {
       $excel.Visible = $true
       try { $excel.UserControl = $true } catch { Write-Verbose ("failed to set Excel UserControl: " + $_.Exception.Message) }
       $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $false
+      $userFormNames = @()
+      try {
+        $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+      } catch {
+        Write-Verbose ("failed to inspect UserForms during session start: " + $_.Exception.Message)
+      }
       Write-XlflowSessionMetadata -Excel $excel -WorkbookPath $WorkbookPath -MetadataPath $MetadataPath
       $sessionStarted = $true
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode
       $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
       $result.session = New-XlflowSessionResult -Active $true -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
+      Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
       $result.logs = @("started xlflow Excel session")
     }
     "status" {
@@ -90,8 +97,15 @@ try {
         mode = $(if ($running -and $open) { $sessionMode } else { "none" })
       }
       if ($running -and $open) {
+        $userFormNames = @()
+        try {
+          $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+        } catch {
+          Write-Verbose ("failed to inspect UserForms during session status: " + $_.Exception.Message)
+        }
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Dirty $dirty -NeedsSave $needsSave
         $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
+        Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
       } else {
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none"
         $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
@@ -106,15 +120,28 @@ try {
       $excel = $openResult.excel
       $workbook = $openResult.workbook
       $sessionMode = [string]$openResult.session_mode
+      $userFormNames = @()
+      try {
+        $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+      } catch {
+        Write-Verbose ("failed to inspect UserForms during session save: " + $_.Exception.Message)
+      }
       $workbook.Save()
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Saved $true -Dirty $false -NeedsSave $false
       $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
       $result.session = New-XlflowSessionResult -Active $true -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode $sessionMode
+      Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
       $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "saved xlflow session workbook") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     "stop" {
       $excel = Get-XlflowSessionExcel -MetadataPath $MetadataPath
       $workbook = Get-XlflowOpenWorkbook -Excel $excel -WorkbookPath $WorkbookPath
+      $userFormNames = @()
+      try {
+        $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+      } catch {
+        Write-Verbose ("failed to inspect UserForms during session stop: " + $_.Exception.Message)
+      }
       $wasDirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
       if ($null -eq $wasDirty) {
         $wasDirty = $false
@@ -128,6 +155,7 @@ try {
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $true -DirtyBeforeStop $wasDirty -AutoSavedOnStop $wasDirty
       $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
       $result.session = New-XlflowSessionResult -Active $false -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode "none"
+      Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
       $result.logs = @(
         @(
           $(if ($wasDirty) { "warning: session workbook had unsaved changes before stop" } else { $null }),

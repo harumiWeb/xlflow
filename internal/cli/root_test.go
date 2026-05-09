@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1045,6 +1046,51 @@ func TestBuildInspectCellSelectorRejectsInvalidAddressSyntax(t *testing.T) {
 	_, err := buildInspectCellSelector(nil, "Visible", "nope", false)
 	if err == nil || !strings.Contains(err.Error(), "invalid address") {
 		t.Fatalf("expected invalid address error, got %v", err)
+	}
+}
+
+func TestCollectSourceUserFormNamesFindsRecursiveFrmFiles(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms", "Nested")
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "CustomerForm.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "OrderForm.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "OrderForm.frx"), []byte{0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectSourceUserFormNames(filepath.Join(dir, "src", "forms"))
+	want := []string{"CustomerForm", "OrderForm"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("collectSourceUserFormNames() = %#v, want %#v", got, want)
+	}
+}
+
+func TestInspectSourceUserFormMessagesReturnsWarningAndHint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := os.MkdirAll(filepath.Join(dir, cfg.Src.Forms), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, cfg.Src.Forms, "UserForm1.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	warnings, hints := inspectSourceUserFormMessages(dir, cfg)
+	if len(warnings) != 1 || warnings[0]["code"] != "userform_inspect_saved_file" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if got := fmt.Sprint(warnings[0]["message"]); !strings.Contains(got, "UserForm1") {
+		t.Fatalf("warning message = %q", got)
+	}
+	if len(hints) != 1 || hints[0]["code"] != "userform_planned_commands" {
+		t.Fatalf("hints = %#v", hints)
 	}
 }
 

@@ -419,6 +419,7 @@ xlflow pull --json
 
 標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet などの document module を `src/` 配下へ出力します。
 recorded session workbook を明示的に要求したい場合は `xlflow pull --session --json` を使います。`.xlflow/session.json` が設定済み workbook を指している場合、通常の `xlflow pull --json` でもその live workbook を自動再利用します。
+workbook 内に UserForm が検出された場合、`pull` は `.frm` だけでは `.frx` や Designer state を完全には表せないことを warning として返します。
 
 ### `xlflow push`
 
@@ -430,6 +431,7 @@ xlflow push --json
 
 `.bas` / `.cls` / `.frm` を読み込み、VBIDE 経由で workbook へ反映します。
 UserForm の `.frx` は binary companion file として扱います。
+source 内に UserForm がある場合、`push` はより深い form inspection 用の planned/future hint を返します。`push --session --no-save` では live workbook の UserForm state と disk の差分に関する追加 warning も返します。
 デフォルトでは `.xlflow/backups` にバックアップを作成し、workbook を保存します。
 
 開発中の反復を速くしたい場合は次を使えます。
@@ -515,6 +517,7 @@ xlflow session stop
 `--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `pull` / `push` / `macros` / `run` / `export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
+UserForm を含む workbook では、`.frm` / `.frx` 差分を確認する前にその save を行う前提で考えてください。
 xlflow はこの未保存 session 状態を以前より強く警告しますが、`session stop` 前に明示的に `xlflow save --session` する運用が基本です。
 
 </details>
@@ -668,6 +671,7 @@ xlflow inspect cell "Result!B3" --json
 ```
 
 `push` / `run` 後に保存済み workbook の構造やセル出力を確認したいときに使います。
+`src/forms` 配下に `.frm` がある場合、`inspect` は live UserForm の Designer/runtime state を確認していないことを warning で明示します。
 `inspect` は file snapshot reader なので、Excel 上で未保存の変更はこのコマンド群では見えません。
 塗りつぶし色、罫線、結合セル、行高、列幅まで確認したい場合は、`inspect range` または `inspect used-range` に `--include-style` を付けます。
 

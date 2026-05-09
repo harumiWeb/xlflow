@@ -127,6 +127,86 @@ function Add-XlflowStateWarning {
   Add-XlflowWarning -Result $Result -Code $Code -Message $Message
 }
 
+function Get-XlflowUserFormComponents {
+  param($Workbook)
+
+  $forms = New-Object System.Collections.Generic.List[object]
+  if ($null -eq $Workbook) {
+    return @()
+  }
+  try {
+    foreach ($component in @($Workbook.VBProject.VBComponents)) {
+      if ($null -ne $component -and [int]$component.Type -eq 3) {
+        $forms.Add($component)
+      }
+    }
+  } catch {
+    throw
+  }
+  return @($forms.ToArray())
+}
+
+function Get-XlflowUserFormNames {
+  param($Workbook)
+
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($component in @(Get-XlflowUserFormComponents -Workbook $Workbook)) {
+    try {
+      $name = [string]$component.Name
+      if (-not [string]::IsNullOrWhiteSpace($name)) {
+        $names.Add($name)
+      }
+    } catch {
+      Write-Verbose ("failed to read UserForm component name: " + $_.Exception.Message)
+    }
+  }
+  return @($names.ToArray())
+}
+
+function Add-XlflowUserFormDiscoveryMessages {
+  param(
+    $Result,
+    [string[]]$Names
+  )
+
+  $normalized = @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+  if ($normalized.Count -eq 0) {
+    return
+  }
+  Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`."
+}
+
+function Add-XlflowUserFormSessionStaleWarning {
+  param(
+    $Result,
+    [string[]]$Names
+  )
+
+  $normalized = @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+  if ($normalized.Count -eq 0) {
+    return
+  }
+  Add-XlflowStateWarning -Result $Result -Code "userform_unsaved_session_state" -Message ("Workbook contains UserForms (" + ($normalized -join ", ") + ") and the current session changes are not saved. Disk `.frm`/`.frx` state may differ from the live workbook. Run `xlflow save --session` and `xlflow pull` before reviewing UserForm source differences.")
+}
+
+function Get-XlflowSourceUserFormNames {
+  param([string]$FormsDir)
+
+  if ([string]::IsNullOrWhiteSpace($FormsDir) -or -not (Test-Path -LiteralPath $FormsDir)) {
+    return @()
+  }
+
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($file in Get-ChildItem -LiteralPath $FormsDir -Recurse -File -Filter *.frm | Sort-Object FullName) {
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+    if (-not [string]::IsNullOrWhiteSpace($name)) {
+      $names.Add($name)
+    }
+  }
+  return @($names.ToArray() | Sort-Object -Unique)
+}
+
 function ConvertTo-XlflowBool {
   param([string]$Value)
   return $Value -eq "true" -or $Value -eq "True" -or $Value -eq "1"

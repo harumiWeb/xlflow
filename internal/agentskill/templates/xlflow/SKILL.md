@@ -150,6 +150,7 @@ When the user reports a runtime failure:
 - Use `xlflow inspect used-range --sheet <name> --json` when the output rectangle is unknown or may expand.
 - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
 - Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
+- When UserForms are involved, treat `pull` / `push` / `save` warnings about partial `.frm` fidelity and unsaved session state as actionable; do not review UserForm diffs until the live workbook has been saved and re-pulled.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.

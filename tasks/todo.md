@@ -1,5 +1,20 @@
 # xlflow Folder Structure Todo
 
+# UserForm Phase 1 Warning Todo
+
+- [x] Add shared UserForm detection/warning helpers in `internal/excel/scripts/common.ps1`.
+- [x] Surface UserForm warnings/hints in `pull`, `push`, and `session`/`save`.
+- [x] Add file-based inspect warnings from configured `src.forms` `.frm` detection without Excel COM.
+- [x] Add focused Go and PowerShell regression coverage for warning helpers and inspect/source detection.
+- [x] Run focused verification and `go test ./...`.
+- [x] Update CLI/README/skill docs for Phase 1 warning behavior.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestCollectSourceUserFormNamesFindsRecursiveFrmFiles|TestInspectSourceUserFormMessagesReturnsWarningAndHint|TestWriteWithOptionsRendersInspectSnapshotMetadata"` passed.
+- `go test ./internal/excel/scripts -run "TestGetXlflowSourceUserFormNamesFindsRecursiveFrmFiles|TestAddXlflowUserFormMessagesAddsDiscoveryAndStaleWarnings|TestPushScriptScopesSaveSessionWarningToSessionRuns|TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired|TestPowerShellScriptsParse"` passed.
+- `go test ./...` passed.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

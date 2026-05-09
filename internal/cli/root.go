@@ -1882,10 +1882,12 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbook.Path)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "workbook",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbook.Path),
@@ -1919,10 +1921,12 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "sheets",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -1973,9 +1977,11 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			env := output.New("inspect")
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2031,9 +2037,11 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 			}
 			env := output.New("inspect")
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "used-range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2078,10 +2086,12 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "cell",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2161,6 +2171,51 @@ func inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath string) bo
 		return false
 	}
 	return strings.EqualFold(filepath.Clean(metadata.WorkbookPath), filepath.Clean(workbookPath))
+}
+
+func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string]any, []map[string]any) {
+	names := collectSourceUserFormNames(workbookArgPath(root, cfg.Src.Forms))
+	if len(names) == 0 {
+		return nil, nil
+	}
+	warnings := []map[string]any{{
+		"code":    "userform_inspect_saved_file",
+		"message": fmt.Sprintf("UserForms detected in source (%s). File-based inspect reads the saved workbook and cannot verify live UserForm Designer/runtime state from `.frm` text alone.", strings.Join(names, ", ")),
+	}}
+	hints := []map[string]any{{
+		"code":    "userform_planned_commands",
+		"message": "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`.",
+	}}
+	return warnings, hints
+}
+
+func collectSourceUserFormNames(formsDir string) []string {
+	if strings.TrimSpace(formsDir) == "" {
+		return nil
+	}
+	names := map[string]struct{}{}
+	_ = filepath.WalkDir(formsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
+			return nil
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))
+		if name != "" {
+			names[name] = struct{}{}
+		}
+		return nil
+	})
+	if len(names) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	slices.Sort(result)
+	return result
 }
 
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {

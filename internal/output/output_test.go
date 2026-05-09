@@ -389,6 +389,7 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
 	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
 	env.Warnings = []map[string]any{{"code": "live_session_dirty", "message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook."}}
+	env.Hints = []map[string]any{{"code": "userform_planned_commands", "message": "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`."}}
 	env.Inspect = map[string]any{
 		"target": "range",
 		"target_info": map[string]any{
@@ -409,7 +410,7 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Target:", "Session state:", "Warnings:", "live_session_dirty", "Snapshot", "saved workbook file", "Style:         included"} {
+	for _, want := range []string{"Target:", "Session state:", "Warnings:", "Hints:", "live_session_dirty", "userform_planned_commands", "Snapshot", "saved workbook file", "Style:         included"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inspect output missing %q:\n%s", want, got)
 		}
