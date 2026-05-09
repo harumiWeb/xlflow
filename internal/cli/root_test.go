@@ -529,6 +529,14 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--name must be a filename") {
 		t.Fatalf("expected name validation error, got %v", err)
 	}
+	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "qr:demo", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "invalid Windows characters") {
+		t.Fatalf("expected invalid Windows character error, got %v", err)
+	}
+	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "qr\x1fdemo", "png", false, false, excel.CommandOptions{})
+	if err == nil || !strings.Contains(err.Error(), "invalid Windows characters") {
+		t.Fatalf("expected control-character validation error, got %v", err)
+	}
 }
 
 func TestRootCommandIncludesUIButtonCommands(t *testing.T) {

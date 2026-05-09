@@ -92,10 +92,10 @@ function Add-XlflowWarning {
     [string]$Message
   )
 
-  if (-not $Result.ContainsKey("warnings") -or $null -eq $Result.warnings) {
-    $Result.warnings = @()
+  if (-not $Result.Contains("warnings") -or $null -eq $Result["warnings"]) {
+    $Result["warnings"] = @()
   }
-  $Result.warnings += [ordered]@{
+  $Result["warnings"] += [ordered]@{
     code = $Code
     message = $Message
   }
@@ -144,14 +144,16 @@ function Get-XlflowRelativePath {
 function Close-XlflowCom {
   param($Workbook, $Excel, [bool]$Save)
   $excelProcessId = 0
+  $workbookCloseFailed = $false
+  $quitFailed = $false
   if ($null -ne $Excel) {
     $excelProcessId = Get-XlflowExcelProcessId -Excel $Excel
   }
   if ($null -ne $Workbook) {
-    try { $Workbook.Close($Save) | Out-Null } catch { Write-Verbose ("failed to close workbook: " + $_.Exception.Message) }
+    try { $Workbook.Close($Save) | Out-Null } catch { $workbookCloseFailed = $true; Write-Verbose ("failed to close workbook: " + $_.Exception.Message) }
   }
   if ($null -ne $Excel) {
-    try { $Excel.Quit() | Out-Null } catch { Write-Verbose ("failed to quit Excel: " + $_.Exception.Message) }
+    try { $Excel.Quit() | Out-Null } catch { $quitFailed = $true; Write-Verbose ("failed to quit Excel: " + $_.Exception.Message) }
   }
   Release-XlflowComObject -Object $Workbook -Name "workbook COM object"
   Release-XlflowComObject -Object $Excel -Name "Excel COM object"
@@ -168,10 +170,14 @@ function Close-XlflowCom {
       Start-Sleep -Milliseconds 100
     }
     if ($stillRunning) {
-      try {
-        Stop-Process -Id $excelProcessId -Force
-      } catch {
-        Write-Verbose ("failed to stop lingering Excel process " + $excelProcessId + ": " + $_.Exception.Message)
+      if ($workbookCloseFailed -or $quitFailed) {
+        Write-Verbose ("skipping force-stop for lingering Excel process " + $excelProcessId + " after graceful close failure")
+      } else {
+        try {
+          Stop-Process -Id $excelProcessId -Force
+        } catch {
+          Write-Verbose ("failed to stop lingering Excel process " + $excelProcessId + ": " + $_.Exception.Message)
+        }
       }
     }
   }

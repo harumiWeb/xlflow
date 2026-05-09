@@ -123,6 +123,7 @@
 - [x] Update CLI contract, README files, bundled skill guidance, and ADR session-reuse note.
 - [x] Add focused Go and PowerShell regression coverage.
 - [x] Run focused verification and full `go test ./...`.
+- [ ] Run Excel COM-backed end-to-end export verification in a disposable workbook workspace.
 
 ## Verification Notes
 

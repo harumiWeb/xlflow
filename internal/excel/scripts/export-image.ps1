@@ -30,6 +30,7 @@ $savedSheetName = ""
 $savedSelectionAddress = ""
 $createdParentDirs = $false
 $exported = $false
+$temporaryExportPath = ""
 
 function Set-ExportImageValidationError {
   param([string]$Code, [string]$Message)
@@ -90,6 +91,11 @@ try {
   }
 
   $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+  if (Test-Path -LiteralPath $resolvedOutputPath -PathType Container) {
+    Set-XlflowError -Result $result -Code "export_image_args_invalid" -Message ("Output path '" + $resolvedOutputPath + "' is a directory.") -Source "xlflow"
+    Write-XlflowJson -Result $result
+    exit
+  }
   $extension = [System.IO.Path]::GetExtension($resolvedOutputPath)
   if (-not [string]::IsNullOrWhiteSpace($extension) -and $extension.ToLowerInvariant() -ne ".png") {
     Set-ExportImageValidationError -Code "unsupported_image_format" -Message ("Image format '" + $extension.TrimStart(".") + "' is not supported. Supported formats: png.")
@@ -108,8 +114,10 @@ try {
     Write-XlflowJson -Result $result
     exit
   }
-  if ((Test-Path -LiteralPath $resolvedOutputPath) -and (ConvertTo-XlflowBool $Overwrite)) {
-    Remove-Item -LiteralPath $resolvedOutputPath -Force
+  $exportPath = $resolvedOutputPath
+  if ((Test-Path -LiteralPath $resolvedOutputPath -PathType Leaf) -and (ConvertTo-XlflowBool $Overwrite)) {
+    $temporaryExportPath = Join-Path $outputParent ("xlflow-export-" + [Guid]::NewGuid().ToString("N") + ".png")
+    $exportPath = $temporaryExportPath
   }
 
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
@@ -202,9 +210,13 @@ try {
     }
   }
 
-  $exportOk = $chart.Export($resolvedOutputPath, "PNG")
-  if (-not $exportOk -and -not (Test-Path -LiteralPath $resolvedOutputPath)) {
+  $exportOk = $chart.Export($exportPath, "PNG")
+  if (-not $exportOk -and -not (Test-Path -LiteralPath $exportPath)) {
     throw "Excel did not create the requested image file."
+  }
+  if (-not [string]::IsNullOrWhiteSpace($temporaryExportPath)) {
+    Move-Item -LiteralPath $temporaryExportPath -Destination $resolvedOutputPath -Force
+    $temporaryExportPath = ""
   }
 
   $output = [ordered]@{
@@ -287,6 +299,13 @@ try {
   Release-XlflowComObject -Object $chartObjects -Name "chart objects collection COM object"
   Release-XlflowComObject -Object $range -Name "range COM object"
   Release-XlflowComObject -Object $worksheet -Name "worksheet COM object"
+  if (-not [string]::IsNullOrWhiteSpace($temporaryExportPath) -and (Test-Path -LiteralPath $temporaryExportPath -PathType Leaf)) {
+    try {
+      Remove-Item -LiteralPath $temporaryExportPath -Force
+    } catch {
+      Write-Verbose ("failed to remove temporary export file: " + $_.Exception.Message)
+    }
+  }
 
   if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel

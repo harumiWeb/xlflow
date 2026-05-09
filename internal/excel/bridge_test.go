@@ -171,6 +171,40 @@ func TestNormalizeExportImagePathRejectsUnsupportedExtension(t *testing.T) {
 	}
 }
 
+func TestRunnerExportImageReturnsValidationFailureForUnsupportedFormat(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.ExportImage(config.Default(), ExportImageOptions{
+		Sheet:  "QR",
+		Range:  "A1:B2",
+		Format: "webp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerExportImageReturnsValidationFailureForUnsupportedExtension(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.ExportImage(config.Default(), ExportImageOptions{
+		Sheet:   "QR",
+		Range:   "A1:B2",
+		OutPath: "artifacts\\qr.webp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
 func TestOutputFileExistsIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,

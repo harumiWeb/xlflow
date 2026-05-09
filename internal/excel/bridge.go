@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -471,7 +472,8 @@ func (r Runner) UIButtonRemove(cfg config.Config, opts UIButtonRemoveOptions, cm
 func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.Envelope, int, error) {
 	scriptArgs, err := buildExportImageScriptArgs(r.RootDir, cfg, opts)
 	if err != nil {
-		return output.Failure("export-image", output.Error{Code: "export_image_args_invalid", Message: err.Error(), Source: "xlflow"}), output.ExitConfig, nil
+		code, exitCode := exportImageArgFailure(err)
+		return output.Failure("export-image", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
 	}
 	return r.run("export-image", scriptArgs, opts.Keepalive)
 }
@@ -490,6 +492,24 @@ type exportImageResolvedOutput struct {
 	Path    string
 	Format  string
 	Default bool
+}
+
+type exportImageArgError struct {
+	code     string
+	message  string
+	exitCode int
+}
+
+func (e exportImageArgError) Error() string {
+	return e.message
+}
+
+func exportImageArgFailure(err error) (string, int) {
+	var argErr exportImageArgError
+	if errors.As(err, &argErr) {
+		return argErr.code, argErr.exitCode
+	}
+	return "export_image_args_invalid", output.ExitConfig
 }
 
 func buildExportImageScriptArgs(root string, cfg config.Config, opts ExportImageOptions) (map[string]string, error) {
@@ -555,7 +575,11 @@ func normalizeExportImageFormat(format string) (string, error) {
 	case "", "png":
 		return "png", nil
 	default:
-		return "", fmt.Errorf("unsupported image format %q; supported formats: png", format)
+		return "", exportImageArgError{
+			code:     "unsupported_image_format",
+			message:  fmt.Sprintf("unsupported image format %q; supported formats: png", format),
+			exitCode: output.ExitValidation,
+		}
 	}
 }
 
@@ -574,7 +598,11 @@ func normalizeExportImagePath(root, path, format string) (string, string, error)
 	case ".png":
 		format = "png"
 	default:
-		return "", "", fmt.Errorf("unsupported image format %q; supported formats: png", strings.TrimPrefix(ext, "."))
+		return "", "", exportImageArgError{
+			code:     "unsupported_image_format",
+			message:  fmt.Sprintf("unsupported image format %q; supported formats: png", strings.TrimPrefix(ext, ".")),
+			exitCode: output.ExitValidation,
+		}
 	}
 	return filepath.Clean(resolved), format, nil
 }

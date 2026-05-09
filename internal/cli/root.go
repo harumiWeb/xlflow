@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
@@ -832,25 +833,45 @@ func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, nam
 	if err != nil {
 		return excel.ExportImageOptions{}, fmt.Errorf("--range %w", err)
 	}
+	outPath = strings.TrimSpace(outPath)
+	outputDir = strings.TrimSpace(outputDir)
+	name = strings.TrimSpace(name)
 	if outPath != "" && (outputDir != "" || name != "") {
 		return excel.ExportImageOptions{}, fmt.Errorf("--out cannot be combined with --output-dir or --name")
 	}
-	name = strings.TrimSpace(name)
-	if name != "" && (strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Base(name) != name) {
-		return excel.ExportImageOptions{}, fmt.Errorf("--name must be a filename without path separators")
+	if err := validateWindowsFilename(name); err != nil {
+		return excel.ExportImageOptions{}, err
 	}
 	return excel.ExportImageOptions{
 		WorkbookPath: strings.TrimSpace(workbook),
 		Sheet:        sheet,
 		Range:        normalizedRange,
-		OutPath:      strings.TrimSpace(outPath),
-		OutputDir:    strings.TrimSpace(outputDir),
+		OutPath:      outPath,
+		OutputDir:    outputDir,
 		Name:         name,
 		Format:       strings.TrimSpace(format),
 		Overwrite:    overwrite,
 		Session:      session,
 		Keepalive:    keepalive,
 	}, nil
+}
+
+func validateWindowsFilename(name string) error {
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Base(name) != name {
+		return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+	}
+	if strings.ContainsAny(name, `<>:"|?*`) {
+		return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("--name must be a filename without path separators or invalid Windows characters")
+		}
+	}
+	return nil
 }
 
 func sessionUsageHint() string {
