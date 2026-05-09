@@ -14,7 +14,7 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) ![Ask DeepWiki](https://deepwiki.com/badge.svg)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
 
@@ -27,12 +27,32 @@ It turns `.xlsm` workbooks into a source-controlled, CLI-driven development work
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
 
-| world-news                                        | stock-price                                          |
-| ------------------------------------------------- | ---------------------------------------------------- |
-| ![world-news-project](docs/images/world-news.png) | ![stock-price-project](docs/images/stock-price.png)  |
-| Project to fetch and display News API             | Project to fetch and analyze stock price information |
+## Demo
 
-These samples were created by AI agents using only minimal natural language instructions with xlflow.
+These [samples](docs/example) were created by an AI agent using xlflow with only minimal natural language instructions.
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/images/world-news.png" alt="world news" width="400">
+      <sub>Macro that summarizes world news in Excel using NewsAPI</sub>
+    </td>
+    <td align="center">
+      <img src="docs/images/stock-price.png" alt="stock price" width="400">
+      <sub>Macro that retrieves stock prices and displays them in Excel</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/images/gen-qrcode.png" alt="generate qrcode" width="400">
+      <sub>Macro that generates QR codes using cell colors and displays them in Excel</sub>
+    </td>
+    <td align="center">
+      <img src="docs/images/tetris.gif" alt="tetris" width="400">
+      <sub>Macro that allows playing Tetris within Excel</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
