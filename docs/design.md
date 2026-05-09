@@ -167,10 +167,10 @@ Return structured information about a UserForm and its controls.
 
 There should be two inspection modes:
 
-| Mode | Source | Purpose |
-|---|---|---|
-| `designer` | `VBComponent.Designer` | Inspect design-time layout |
-| `runtime` | `UserForms.Add(name)` | Inspect actual loaded runtime state |
+| Mode       | Source                 | Purpose                             |
+| ---------- | ---------------------- | ----------------------------------- |
+| `designer` | `VBComponent.Designer` | Inspect design-time layout          |
+| `runtime`  | `UserForms.Add(name)`  | Inspect actual loaded runtime state |
 
 Default mode should likely be `runtime`, because AI agents usually need to verify the actual displayed result.
 
@@ -306,9 +306,7 @@ Example warning:
 
 ```json
 {
-  "warnings": [
-    "Runtime inspection loads the form and executes UserForm_Initialize."
-  ]
+  "warnings": ["Runtime inspection loads the form and executes UserForm_Initialize."]
 }
 ```
 
@@ -335,9 +333,7 @@ Example warning:
       }
     ]
   },
-  "warnings": [
-    "Runtime inspection executed UserForm_Initialize."
-  ]
+  "warnings": ["Runtime inspection executed UserForm_Initialize."]
 }
 ```
 
