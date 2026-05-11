@@ -13,7 +13,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -24,6 +24,69 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestListScriptValidatesActionBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./list.ps1 -Action nope -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list action validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse list output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "list_args_invalid" {
+		t.Fatalf("expected list_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestListScriptUsesFormComponentPathAndPortableRelativePaths(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "list.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read list.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Get-XlflowComponentPath -Component $component",
+		"ConvertTo-XlflowPortableRelativePath",
+		"component_type = \"MSForm\"",
+		"Get-XlflowUserFormComponents -Workbook $workbook",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("list.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestListScriptPreservesSaveRequiredWarningOnFailurePaths(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "list.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read list.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"function Add-XlflowListSaveRequiredWarning",
+		"Add-XlflowListSaveRequiredWarning -Result $result -SaveState $saveState",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("list.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if count := strings.Count(text, "Add-XlflowListSaveRequiredWarning -Result $result -SaveState $saveState"); count < 3 {
+		t.Fatalf("expected save-required warning helper on success and failure paths, found %d:\n%s", count, text)
 	}
 }
 

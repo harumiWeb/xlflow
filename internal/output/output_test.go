@@ -300,6 +300,47 @@ func TestWriteWithOptionsRendersMacrosHintsAndWarnings(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersListFormsSummary(t *testing.T) {
+	env := New("list")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Forms = []map[string]any{
+		{"name": "CustomerForm", "component_type": "MSForm", "has_frx": true, "source_path": "src/forms/CustomerForm.frm"},
+		{"name": "OrderForm", "component_type": "MSForm", "has_frx": false, "source_path": "src/forms/Sales/OrderForm.frm"},
+	}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow list", "Forms:", "2", "CustomerForm", "has .frx", "src/forms/Sales/OrderForm.frm", "SAVE REQUIRED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsDoesNotRenderZeroFormsWhenListFailed(t *testing.T) {
+	env := Failure("list", Error{Code: "vbproject_access_denied", Message: "VBProject access is denied."})
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Forms:", "unavailable", "SAVE REQUIRED", "Warnings:", "save_required"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failed list output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Forms:          0") || strings.Contains(got, "Forms:\t0") {
+		t.Fatalf("failed list output should not render zero forms:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersRunTraceHelperLifecycle(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -20,6 +20,33 @@ Make UserForm risk visible in existing workflows before dedicated form commands 
 - `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
 - UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
 
+## UserForm Phase 2 List Forms Spec
+
+## Goal
+
+List workbook UserForms through Excel COM so agents can discover form names and expected source companion paths before deeper inspection commands exist.
+
+## CLI Contract
+
+- `xlflow list forms [--session] [--keepalive] [--keepalive-interval <duration>]`
+
+## Behavior
+
+- `list forms` opens the configured workbook through the normal session-aware Excel bridge.
+- It inspects `VBProject.VBComponents` and returns only components with type `3` (`vbext_ct_MSForm`).
+- It does not load forms at runtime and does not execute `UserForm_Initialize`.
+- Each form result includes `name`, `component_type = "MSForm"`, `has_frx`, `source_path`, and optional `frx_path`.
+- `source_path` and `frx_path` are expected project-relative source tree paths derived with the same folder-aware path resolution as `pull`.
+- `has_frx` reports whether the expected `.frx` sibling currently exists in the source tree.
+- VBProject access denial fails with `vbproject_access_denied` and a Trust Center hint.
+- When a matching live session workbook is reused and newer than disk, the result includes the normal save-required metadata and warning.
+
+## Verification
+
+- CLI exposes `list forms` with `--session` and keepalive flags.
+- Bridge args include workbook path, source roots, folder config, session metadata path, and project root for relative path resolution.
+- PowerShell bridge returns filtered UserForm components plus expected `.frm` / `.frx` source paths.
+
 ## Goal
 
 Support Rubberduck-compatible `@Folder(...)` annotations and nested source directories while preserving the existing type-specific `[src]` roots.

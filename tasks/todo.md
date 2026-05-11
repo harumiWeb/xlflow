@@ -15,6 +15,21 @@
 - `go test ./internal/excel/scripts -run "TestGetXlflowSourceUserFormNamesFindsRecursiveFrmFiles|TestAddXlflowUserFormMessagesAddsDiscoveryAndStaleWarnings|TestPushScriptScopesSaveSessionWarningToSessionRuns|TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired|TestPowerShellScriptsParse"` passed.
 - `go test ./...` passed.
 
+# UserForm Phase 2 List Forms Todo
+
+- [x] Add `xlflow list forms` CLI command and session/keepalive flag plumbing.
+- [x] Add Go bridge support plus top-level `forms` envelope/output rendering.
+- [x] Add `internal/excel/scripts/list.ps1` for workbook UserForm discovery and folder-aware source path reporting.
+- [x] Add focused Go and PowerShell regression coverage for args, parsing, and human output.
+- [x] Update CLI contract, README files, and bundled xlflow skill guidance.
+- [x] Run focused verification plus `go test ./...`.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestRootCommandIncludesListFormsCommand|TestRootCommandIncludesExcelCommandKeepaliveFlags|TestRootCommandIncludesSessionFlagsForWorkbookReaders|TestListFormsScriptArgsIncludeFolderAndSessionConfig|TestWriteWithOptionsRendersListFormsSummary"` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestListScriptValidatesActionBeforeWorkbookOpen|TestListScriptUsesFormComponentPathAndPortableRelativePaths"` passed.
+- `go test ./...` passed.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

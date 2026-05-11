@@ -231,6 +231,7 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"new"},
 		{"doctor"},
 		{"attach"},
+		{"list", "forms"},
 		{"pull"},
 		{"push"},
 		{"export-image"},
@@ -459,6 +460,7 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 	for _, args := range [][]string{
+		{"list", "forms"},
 		{"pull"},
 		{"export-image"},
 		{"test"},
@@ -473,6 +475,24 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		}
 		if cmd.Flags().Lookup("session") == nil {
 			t.Fatalf("expected %v command to define --session", args)
+		}
+	}
+}
+
+func TestRootCommandIncludesListFormsCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"list", "forms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "forms" {
+		t.Fatalf("expected list forms command, got %#v", cmd)
+	}
+	for _, name := range []string{"session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected list forms command to define --%s", name)
 		}
 	}
 }

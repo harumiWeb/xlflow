@@ -590,6 +590,30 @@ func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	}
 }
 
+func TestListFormsScriptArgsIncludeFolderAndSessionConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildListFormsScriptArgs(root, cfg, SessionCommandOptions{Session: true})
+	if args["Action"] != "forms" {
+		t.Fatalf("Action = %q, want forms", args["Action"])
+	}
+	if args["ProjectRoot"] != root {
+		t.Fatalf("ProjectRoot = %q, want %q", args["ProjectRoot"], root)
+	}
+	if args["FormsDir"] != filepath.Join(root, "src", "forms") {
+		t.Fatalf("FormsDir = %q", args["FormsDir"])
+	}
+	if args["FolderAnnotation"] != "update" || args["Folders"] != "true" || args["DefaultComponentFolders"] != "true" {
+		t.Fatalf("unexpected folder config args: %+v", args)
+	}
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
 func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

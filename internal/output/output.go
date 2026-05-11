@@ -43,6 +43,7 @@ type Envelope struct {
 	Bridge        any `json:"bridge,omitempty"`
 	Macro         any `json:"macro,omitempty"`
 	Macros        any `json:"macros,omitempty"`
+	Forms         any `json:"forms,omitempty"`
 	Issues        any `json:"issues,omitempty"`
 	Tests         any `json:"tests,omitempty"`
 	Diff          any `json:"diff,omitempty"`
@@ -210,6 +211,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
 		b.WriteString(r.renderMacros(env))
+	case "list":
+		b.WriteString(r.renderList(env))
 	case "session":
 		b.WriteString(r.renderSession(env))
 	case "save":
@@ -688,6 +691,51 @@ func (r renderer) renderMacros(env Envelope) string {
 		fmt.Fprintf(&b, "- %s%s%s\n", name, args, kind)
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
+func (r renderer) renderList(env Envelope) string {
+	forms := listOfObjects(env.Forms)
+	workbook := objectMap(env.Workbook)
+	if env.Forms == nil && len(workbook) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if env.Forms == nil {
+		b.WriteString(kv("Forms", "unavailable"))
+	} else {
+		b.WriteString(kv("Forms", fmt.Sprintf("%d", len(forms))))
+	}
+	for _, form := range forms {
+		name := stringValue(form, "name")
+		if name == "" {
+			continue
+		}
+		details := []string{}
+		if value, ok := boolValueOK(form, "has_frx"); ok && value {
+			details = append(details, "has .frx")
+		}
+		if path := stringValue(form, "source_path"); path != "" {
+			details = append(details, path)
+		}
+		if len(details) == 0 {
+			fmt.Fprintf(&b, "- %s\n", name)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s (%s)\n", name, strings.Join(details, ", "))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
 

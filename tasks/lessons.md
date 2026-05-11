@@ -30,3 +30,4 @@
 - Worksheet change handlers for watched cells should rely on `Intersect(Target, watchedRange)` instead of rejecting multi-cell targets up front, so paste operations that include the watched cell still trigger the update.
 - In PowerShell bridge catch blocks, do not overwrite a previously classified structured error with a broader fallback code. Preserve explicit validation or domain-specific codes, and only assign a generic fallback when no structured error has been recorded yet.
 - Edit payloads should identify exactly one mutated operation. Do not emit both formula and calculated-value snapshots for a single cell edit when downstream output needs to report which mutation the user requested.
+- Human output for inspection/list commands must distinguish "unavailable due to failure" from a real empty result set, and save-required warnings for dirty auto-reused sessions must be preserved on failure paths as well as success paths.

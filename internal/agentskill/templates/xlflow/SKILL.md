@@ -16,6 +16,7 @@ Default safety rules for AI-agent work:
 - When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
 - `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
+- Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names or expected `.frm` / `.frx` source paths without loading the form at runtime.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
@@ -26,7 +27,7 @@ Default safety rules for AI-agent work:
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
-2. Matching sessions are auto-reused for `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
+2. Matching sessions are auto-reused for `list forms`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run --session --keepalive --json` or `xlflow run --headless --session --keepalive --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
 5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
@@ -66,6 +67,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
 5. Inspect workbook results.
+   - Use `xlflow list forms --session --keepalive --json` when the workbook contains UserForms and you need the authoritative form names before planning `inspect form`, snapshot, or source review work.
    - Use `xlflow edit cell --sheet <name> --cell <A1> --value <text> --events on --session --keepalive --json` to prepare input cells and trigger `Worksheet_Change` handlers during a session.
    - Use `xlflow edit range --sheet <name> --range <A1:B2> --fill <#RRGGBB> --session --keepalive --json` or `--clear contents|formats|all` to reset workbook state between iterations.
    - Use `xlflow edit rows --sheet <name> --rows <1:31> --height <points> --session --keepalive --json` and `xlflow edit columns --sheet <name> --columns <A:AE> --width <chars> --session --keepalive --json` for visual tuning before `export-image`.
@@ -157,7 +159,7 @@ When the user reports a runtime failure:
 - Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
-- Matching workbook sessions auto-reuse on `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
+- Matching workbook sessions auto-reuse on `list forms`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
@@ -190,7 +192,7 @@ End Sub
 
 ## Keepalive Rules
 
-Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
+Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow list forms`, `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
 
 After starting a keepalive command, wait until the process exits and stderr contains a line beginning with `XLFLOW_DONE`. Do not begin the next workbook-dependent step just because stdout has not changed for a while.
 

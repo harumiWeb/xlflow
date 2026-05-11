@@ -125,6 +125,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.initCommand(),
 		a.doctorCommand(),
 		a.attachCommand(),
+		a.listCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.sessionCommand(),
@@ -299,6 +300,49 @@ func (a *app) macrosCommand() *cobra.Command {
 			err = a.withExcelProgress("Reading VBA project", keepaliveOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) listCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List workbook resources",
+	}
+	cmd.AddCommand(a.listFormsCommand())
+	return cmd
+}
+
+func (a *app) listFormsCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	cmd := &cobra.Command{
+		Use:   "forms",
+		Short: "List workbook UserForms",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("list", output.ExitConfig, "list_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("list")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Listing workbook forms", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
 				return runErr
 			})
 			if err != nil {
