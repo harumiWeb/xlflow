@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added UserForm Phase 1 warnings and hints across `pull`, `push`, `save`, `session`, and file-based `inspect` so xlflow now makes `.frm` / `.frx` fidelity limits, live-vs-disk state, and planned deeper form workflows explicit before dedicated form commands run.
+- Added UserForm Phase 2 discovery with `xlflow list forms`, including session-aware workbook reuse, keepalive support, VBIDE-backed form enumeration, and expected `.frm` / `.frx` source-path reporting without loading forms at runtime.
+- Added UserForm Phase 3 inspection with `xlflow inspect form`, including `--runtime`, `--designer`, `--both`, optional `--initializer`, structured form/control snapshots, and temp-copy runtime execution so form initialization can be inspected without mutating the source workbook or attached live session.
+- Updated the CLI contract, READMEs, bundled xlflow skill guidance, and internal feature specs to document the new UserForm warning, discovery, and inspection workflows.
+
 ## v0.7.0
 
 - Added `xlflow edit cell`, `edit range`, `edit rows`, and `edit columns` as minimal workbook-mutation helpers for AI-agent testing and visual tuning in a live Excel session.
