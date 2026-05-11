@@ -132,6 +132,14 @@ type SessionCommandOptions struct {
 	Keepalive CommandOptions
 }
 
+type InspectFormOptions struct {
+	Name        string
+	Basis       string
+	Initializer string
+	Session     bool
+	Keepalive   CommandOptions
+}
+
 type SessionOptions struct {
 	Action string
 }
@@ -486,6 +494,10 @@ func (r Runner) ListForms(cfg config.Config, opts SessionCommandOptions) (output
 	return r.run("list", buildListFormsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
 }
 
+func (r Runner) InspectForm(cfg config.Config, opts InspectFormOptions) (output.Envelope, int, error) {
+	return r.run("inspect-form", buildInspectFormScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
 func buildListFormsScriptArgs(root string, cfg config.Config, opts SessionCommandOptions) map[string]string {
 	return map[string]string{
 		"Action":                  "forms",
@@ -501,6 +513,18 @@ func buildListFormsScriptArgs(root string, cfg config.Config, opts SessionComman
 		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":              strconv.FormatBool(opts.Session),
 		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+	}
+}
+
+func buildInspectFormScriptArgs(root string, cfg config.Config, opts InspectFormOptions) map[string]string {
+	return map[string]string{
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+		"FormName":     opts.Name,
+		"Basis":        opts.Basis,
+		"Initializer":  opts.Initializer,
 	}
 }
 
@@ -1035,9 +1059,9 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid":
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_form_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

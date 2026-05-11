@@ -22,6 +22,8 @@ type Payload struct {
 	Sheets     []SheetSummary   `json:"sheets,omitempty"`
 	Range      *RangeSnapshot   `json:"range,omitempty"`
 	Cell       *CellSnapshot    `json:"cell,omitempty"`
+	Form       any              `json:"form,omitempty"`
+	Forms      any              `json:"forms,omitempty"`
 }
 
 type TargetInfo struct {

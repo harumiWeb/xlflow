@@ -971,6 +971,8 @@ func (r renderer) renderInspect(env Envelope) string {
 		return r.renderInspectWorkbook(env, payload)
 	case "sheets":
 		return r.renderInspectSheets(env, payload)
+	case "form":
+		return r.renderInspectForm(env, payload)
 	case "range", "used-range":
 		return r.renderInspectRange(env, payload)
 	case "cell":
@@ -1108,6 +1110,34 @@ func (r renderer) renderInspectCell(env Envelope, payload map[string]any) string
 	return b.String()
 }
 
+func (r renderer) renderInspectForm(env Envelope, payload map[string]any) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
+	b.WriteString(renderInspectTargetInfo(payload))
+	if form := objectMap(payload["form"]); len(form) > 0 {
+		b.WriteString(renderInspectFormSnapshot(form, ""))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
+	}
+	forms := objectMap(payload["forms"])
+	if len(forms) == 0 {
+		return ""
+	}
+	for _, basis := range []string{"runtime", "designer"} {
+		snapshot := objectMap(forms[basis])
+		if len(snapshot) == 0 {
+			continue
+		}
+		if b.Len() > 1 {
+			b.WriteString("\n")
+		}
+		b.WriteString(renderInspectFormSnapshot(snapshot, basis))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
 func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) string {
 	switch stringValue(payload, "target") {
 	case "workbook":
@@ -1197,9 +1227,144 @@ func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) st
 			{"Value", emptyDash(stringValue(cell, "value"))},
 		}
 		return prefix + markdownTable([]string{"Field", "Value"}, rows) + renderWarningsAndHintsMarkdown(env)
+	case "form":
+		var b strings.Builder
+		b.WriteString(renderInspectTargetSessionMarkdown(env))
+		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
+			b.WriteString(info)
+		}
+		if form := objectMap(payload["form"]); len(form) > 0 {
+			b.WriteString(markdownInspectFormSnapshot(form, ""))
+			b.WriteString(renderWarningsAndHintsMarkdown(env))
+			return b.String()
+		}
+		forms := objectMap(payload["forms"])
+		for _, basis := range []string{"runtime", "designer"} {
+			snapshot := objectMap(forms[basis])
+			if len(snapshot) == 0 {
+				continue
+			}
+			b.WriteString(markdownInspectFormSnapshot(snapshot, basis))
+		}
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
+		return b.String()
 	default:
 		return ""
 	}
+}
+
+func renderInspectFormSnapshot(snapshot map[string]any, heading string) string {
+	var b strings.Builder
+	label := stringValue(snapshot, "basis")
+	if heading != "" {
+		label = heading
+	}
+	if label != "" {
+		b.WriteString(kv("Basis", label))
+	}
+	if name := stringValue(snapshot, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if caption := stringValue(snapshot, "caption"); caption != "" {
+		b.WriteString(kv("Caption", caption))
+	}
+	if width, ok := numberValue(snapshot, "width"); ok {
+		if height, okHeight := numberValue(snapshot, "height"); okHeight {
+			b.WriteString(kv("Size", fmt.Sprintf("%.0f x %.0f", width, height)))
+		}
+	}
+	if coord := stringValue(snapshot, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	controls := listOfObjects(snapshot["controls"])
+	b.WriteString(kv("Controls", fmt.Sprintf("%d", len(controls))))
+	for _, control := range controls {
+		renderInspectControlLine(&b, control, 0)
+	}
+	return b.String()
+}
+
+func renderInspectControlLine(b *strings.Builder, control map[string]any, depth int) {
+	indent := strings.Repeat("  ", depth)
+	name := stringValue(control, "name")
+	kind := stringValue(control, "type")
+	summary := inspectControlSummary(control)
+	if name == "" {
+		name = "<unnamed>"
+	}
+	line := fmt.Sprintf("%s- %s [%s]", indent, name, kind)
+	if summary != "" {
+		line += " " + summary
+	}
+	b.WriteString(line)
+	b.WriteString("\n")
+	for _, child := range listOfObjects(control["controls"]) {
+		renderInspectControlLine(b, child, depth+1)
+	}
+}
+
+func inspectControlSummary(control map[string]any) string {
+	parts := make([]string, 0, 4)
+	if caption := stringValue(control, "caption"); caption != "" {
+		parts = append(parts, "caption="+caption)
+	}
+	if value := stringValue(control, "value"); value != "" {
+		parts = append(parts, "value="+value)
+	}
+	if text := stringValue(control, "text"); text != "" && text != stringValue(control, "value") {
+		parts = append(parts, "text="+text)
+	}
+	if left, ok := numberValue(control, "left"); ok {
+		if top, okTop := numberValue(control, "top"); okTop {
+			parts = append(parts, fmt.Sprintf("@ %.0f,%.0f", left, top))
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+func markdownInspectFormSnapshot(snapshot map[string]any, heading string) string {
+	var b strings.Builder
+	label := stringValue(snapshot, "basis")
+	if heading != "" {
+		label = heading
+	}
+	if label != "" {
+		b.WriteString("Basis: ")
+		b.WriteString(label)
+		b.WriteString("\n")
+	}
+	rows := [][]string{
+		{"Form", stringValue(snapshot, "name")},
+		{"Caption", stringValue(snapshot, "caption")},
+		{"Coordinates", stringValue(snapshot, "coordinate_system")},
+		{"Controls", fmt.Sprintf("%d", len(listOfObjects(snapshot["controls"])))},
+	}
+	if width, ok := numberValue(snapshot, "width"); ok {
+		if height, okHeight := numberValue(snapshot, "height"); okHeight {
+			rows = append(rows, []string{"Size", fmt.Sprintf("%.0f x %.0f", width, height)})
+		}
+	}
+	b.WriteString(markdownTable([]string{"Field", "Value"}, rows))
+	controls := flattenInspectControls(listOfObjects(snapshot["controls"]), 0)
+	if len(controls) > 0 {
+		b.WriteString("\n")
+		b.WriteString(markdownTable([]string{"Control", "Type", "Summary"}, controls))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func flattenInspectControls(controls []map[string]any, depth int) [][]string {
+	rows := make([][]string, 0, len(controls))
+	for _, control := range controls {
+		rows = append(rows, []string{
+			strings.Repeat("  ", depth) + stringValue(control, "name"),
+			stringValue(control, "type"),
+			inspectControlSummary(control),
+		})
+		rows = append(rows, flattenInspectControls(listOfObjects(control["controls"]), depth+1)...)
+	}
+	return rows
 }
 
 func renderInspectTargetInfo(payload map[string]any) string {

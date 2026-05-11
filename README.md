@@ -469,6 +469,23 @@ Each result includes the form name, whether the expected `.frx` companion exists
 
 Like other workbook-backed read commands, `list forms` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit.
 
+### `xlflow inspect form`
+
+Inspects a workbook `UserForm` through Excel COM and returns structured form/control state.
+
+```bash
+xlflow inspect form UserForm1 --runtime --json
+xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json
+xlflow inspect form UserForm1 --designer --json
+xlflow inspect form UserForm1 --both --initializer InitializeForm --json
+```
+
+`--runtime` is the default. It runs against a temporary workbook copy created from the current workbook state, loads the form there, inspects the loaded controls, and unloads it before returning so the source workbook is not mutated. `--designer` reads VBIDE Designer state from the source workbook without loading the form at runtime. `--both` returns both snapshots.
+
+`--initializer <method>` is optional and is valid only with `--runtime` or `--both`. It calls the named public form method with `ThisWorkbook` before runtime control enumeration. This is useful for forms whose visible state is populated by a custom initializer instead of `UserForm_Initialize`.
+
+Runtime inspection always warns that `UserForm_Initialize` ran. When `--initializer` is used, xlflow also warns that the explicit initializer ran.
+
 ### `xlflow run`
 
 Runs a macro from the CLI.

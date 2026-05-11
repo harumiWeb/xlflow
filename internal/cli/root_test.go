@@ -381,6 +381,7 @@ func TestRootCommandIncludesInspectSubcommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"inspect", "workbook"},
 		{"inspect", "sheets"},
+		{"inspect", "form"},
 		{"inspect", "range"},
 		{"inspect", "used-range"},
 		{"inspect", "cell"},
@@ -493,6 +494,24 @@ func TestRootCommandIncludesListFormsCommand(t *testing.T) {
 	for _, name := range []string{"session", "keepalive", "keepalive-interval"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected list forms command to define --%s", name)
+		}
+	}
+}
+
+func TestRootCommandIncludesInspectFormCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"inspect", "form"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "form" {
+		t.Fatalf("expected inspect form command, got %#v", cmd)
+	}
+	for _, name := range []string{"runtime", "designer", "both", "initializer", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected inspect form command to define --%s", name)
 		}
 	}
 }
@@ -1289,6 +1308,59 @@ func TestInspectWorkbookJSONIncludesTargetAndSessionState(t *testing.T) {
 	}
 	if _, ok := got.Inspect["target_info"].(map[string]any); !ok {
 		t.Fatalf("inspect target_info missing: %s", stdout.String())
+	}
+}
+
+func TestBuildInspectFormBasisDefaultsToRuntime(t *testing.T) {
+	got, err := buildInspectFormBasis(false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "runtime" {
+		t.Fatalf("basis = %q, want runtime", got)
+	}
+}
+
+func TestBuildInspectFormBasisRejectsConflictingModes(t *testing.T) {
+	_, err := buildInspectFormBasis(true, true, false)
+	if err == nil || !strings.Contains(err.Error(), "choose only one") {
+		t.Fatalf("expected conflicting mode error, got %v", err)
+	}
+}
+
+func TestBuildInspectFormOptionsRejectsInitializerForDesigner(t *testing.T) {
+	_, err := buildInspectFormOptions("UserForm1", "designer", "InitializeForm", false, keepaliveFlags{})
+	if err == nil || !strings.Contains(err.Error(), "--initializer can only be used") {
+		t.Fatalf("expected initializer validation error, got %v", err)
+	}
+}
+
+func TestInspectFormCommandUsesInspectFormArgsInvalidCode(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    t.TempDir(),
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "form", "UserForm1", "--designer", "--initializer", "InitializeForm"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse inspect form error output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "inspect_form_args_invalid" {
+		t.Fatalf("unexpected inspect form error payload: %+v", got)
 	}
 }
 

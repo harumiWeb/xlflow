@@ -73,6 +73,55 @@ default_component_folders = true
 - `push` treats filesystem location as authoritative and rewrites folder annotations in temporary import copies when `folder_annotation = "update"`.
 - `push` preserves annotations as-is when `folder_annotation = "preserve"` and does not read/write them when `folder_annotation = "ignore"`.
 - UserForm `.frm` and `.frx` companions must remain siblings after nested moves.
+
+## UserForm Phase 3 Inspect Form Spec
+
+### Goal
+
+Inspect existing workbook UserForms through Excel COM and return structured control state for AI-agent review.
+
+### Commands
+
+- `xlflow inspect form <name> [--runtime|--designer|--both] [--initializer <method>] [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
+
+### Behavior
+
+- Default basis is `runtime`.
+- `runtime` loads the form, inspects the loaded control tree, and unloads it before returning.
+- `designer` inspects `VBProject.VBComponents(name).Designer` from the source workbook without loading the form at runtime.
+- `runtime` and `both` execute against a temporary workbook copy created from the current source workbook state so form initialization does not mutate the source workbook or live session.
+- `both` returns both snapshots in one response.
+- `--initializer` is optional and is allowed only with `runtime` or `both`.
+- When provided, xlflow invokes the named public form method with `ThisWorkbook` after runtime load and before control enumeration.
+- Runtime inspection adds warnings that `UserForm_Initialize` ran and, when applicable, that the explicit initializer ran.
+- The result includes top-level `target`, `session`, and `warnings` metadata like other workbook-backed commands.
+
+### Output
+
+- `inspect.target = "form"`
+- `inspect.source = "excel_com"`
+- Single-basis output uses `inspect.form`.
+- `--both` uses `inspect.forms.runtime` and `inspect.forms.designer`.
+- Form snapshots include `name`, `basis`, `caption`, optional `width` / `height`, `coordinate_system`, and `controls`.
+- Control snapshots include `name`, `type`, optional `prog_id`, `caption`, `text`, `value`, `left`, `top`, `width`, `height`, `tab_index`, `enabled`, `visible`, optional `selected_index`, optional `list`, and recursive `controls` for supported container controls.
+
+### Errors
+
+- `inspect_form_args_invalid`
+- `form_not_found`
+- `vbproject_access_denied`
+- `designer_access_failed`
+- `runtime_form_load_failed`
+- `form_initializer_failed`
+- `control_enumeration_failed`
+
+### Sample validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- Runtime validation path: `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
 - Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
 
 ## Verification

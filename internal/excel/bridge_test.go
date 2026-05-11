@@ -614,6 +614,35 @@ func TestListFormsScriptArgsIncludeFolderAndSessionConfig(t *testing.T) {
 	}
 }
 
+func TestInspectFormScriptArgsIncludeSessionAndInitializer(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildInspectFormScriptArgs(root, cfg, InspectFormOptions{
+		Name:        "UserForm1",
+		Basis:       "runtime",
+		Initializer: "InitializeForm",
+		Session:     true,
+	})
+	if args["WorkbookPath"] != filepath.Join(root, "build", "Book.xlsm") {
+		t.Fatalf("WorkbookPath = %q", args["WorkbookPath"])
+	}
+	if args["FormName"] != "UserForm1" {
+		t.Fatalf("FormName = %q", args["FormName"])
+	}
+	if args["Basis"] != "runtime" {
+		t.Fatalf("Basis = %q", args["Basis"])
+	}
+	if args["Initializer"] != "InitializeForm" {
+		t.Fatalf("Initializer = %q", args["Initializer"])
+	}
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
 func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

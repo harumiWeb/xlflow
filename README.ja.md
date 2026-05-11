@@ -472,6 +472,23 @@ xlflow list forms --session --json
 
 他の workbook-backed な read command と同様に、`.xlflow/session.json` が設定済み workbook を指していれば `list forms` も一致する recorded session workbook を自動再利用します。明示的にその前提を要求したい場合は `--session` を付けます。
 
+### `xlflow inspect form`
+
+Excel COM 経由で workbook の `UserForm` を inspect し、form / control の構造化 state を返します。
+
+```bash
+xlflow inspect form UserForm1 --runtime --json
+xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json
+xlflow inspect form UserForm1 --designer --json
+xlflow inspect form UserForm1 --both --initializer InitializeForm --json
+```
+
+既定は `--runtime` です。現在の workbook state から作成した一時コピー上で form を読み込み、loaded control state を取得して返却前に unload するため、元の workbook は変更しません。`--designer` は元 workbook の VBIDE Designer state を runtime load なしで読みます。`--both` は両方を返します。
+
+`--initializer <method>` は任意で、`--runtime` または `--both` でのみ使えます。runtime inspect の control 列挙前に、その public form method を `ThisWorkbook` 引数付きで呼びます。`UserForm_Initialize` ではなく独自 initializer で画面 state を埋める form に向いています。
+
+runtime inspect は常に `UserForm_Initialize` 実行 warning を返します。`--initializer` を使った場合は、その explicit initializer を呼んだ warning も返します。
+
 ### `xlflow run`
 
 CLI から macro を実行します。

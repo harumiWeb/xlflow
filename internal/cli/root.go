@@ -1900,6 +1900,7 @@ func (a *app) inspectCommand() *cobra.Command {
 	cmd.AddCommand(
 		a.inspectWorkbookCommand(flags),
 		a.inspectSheetsCommand(flags),
+		a.inspectFormCommand(flags),
 		a.inspectRangeCommand(flags),
 		a.inspectUsedRangeCommand(flags),
 		a.inspectCellCommand(flags),
@@ -1984,6 +1985,77 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 	}
 }
 
+func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var runtime bool
+	var designer bool
+	var both bool
+	var initializer string
+	cmd := &cobra.Command{
+		Use:   "form <name>",
+		Short: "Inspect a workbook UserForm through Excel COM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			basis, err := buildInspectFormBasis(runtime, designer, both)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			opts, err := buildInspectFormOptions(args[0], basis, initializer, session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			var scriptEnv output.Envelope
+			var code int
+			err = a.withExcelProgress("Inspecting workbook form", opts.Keepalive, func() error {
+				var runErr error
+				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			if code != output.ExitSuccess {
+				return a.write(scriptEnv, code)
+			}
+			env := output.New("inspect")
+			env.Target = scriptEnv.Target
+			env.Session = scriptEnv.Session
+			env.Workbook = scriptEnv.Workbook
+			env.Warnings = scriptEnv.Warnings
+			env.Hints = scriptEnv.Hints
+			payload := workbookinspect.Payload{
+				Target: "form",
+				Format: format,
+				Source: "excel_com",
+			}
+			if opts.Basis == "both" {
+				payload.Forms = scriptEnv.Forms
+			} else {
+				payload.Form = scriptEnv.Forms
+			}
+			env.Inspect = payload
+			env.Logs = []string{fmt.Sprintf("inspected %s UserForm %s", opts.Basis, opts.Name)}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&runtime, "runtime", false, "inspect the loaded runtime form state")
+	cmd.Flags().BoolVar(&designer, "designer", false, "inspect the design-time VBIDE designer state")
+	cmd.Flags().BoolVar(&both, "both", false, "inspect both runtime and designer state")
+	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method invoked with ThisWorkbook during runtime inspection")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
 func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	var sheet string
 	var address string
@@ -2043,6 +2115,58 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	return cmd
+}
+
+func buildInspectFormBasis(runtime, designer, both bool) (string, error) {
+	selected := 0
+	if runtime {
+		selected++
+	}
+	if designer {
+		selected++
+	}
+	if both {
+		selected++
+	}
+	if selected == 0 {
+		return "runtime", nil
+	}
+	if selected > 1 {
+		return "", fmt.Errorf("choose only one of --runtime, --designer, or --both")
+	}
+	switch {
+	case runtime:
+		return "runtime", nil
+	case designer:
+		return "designer", nil
+	default:
+		return "both", nil
+	}
+}
+
+func buildInspectFormOptions(name, basis, initializer string, session bool, keepalive keepaliveFlags) (excel.InspectFormOptions, error) {
+	if strings.TrimSpace(name) == "" {
+		return excel.InspectFormOptions{}, fmt.Errorf("form name is required")
+	}
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return excel.InspectFormOptions{}, err
+	}
+	trimmedBasis := strings.ToLower(strings.TrimSpace(basis))
+	if trimmedBasis != "runtime" && trimmedBasis != "designer" && trimmedBasis != "both" {
+		return excel.InspectFormOptions{}, fmt.Errorf("unsupported inspect form basis %q", basis)
+	}
+	trimmedInitializer := strings.TrimSpace(initializer)
+	if trimmedInitializer != "" && trimmedBasis == "designer" {
+		return excel.InspectFormOptions{}, fmt.Errorf("--initializer can only be used with runtime or both inspection")
+	}
+	return excel.InspectFormOptions{
+		Name:        strings.TrimSpace(name),
+		Basis:       trimmedBasis,
+		Initializer: trimmedInitializer,
+		Session:     session,
+		Keepalive:   keepaliveOpts,
+	}, nil
 }
 
 func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command {

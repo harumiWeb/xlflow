@@ -30,6 +30,25 @@
 - `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestListScriptValidatesActionBeforeWorkbookOpen|TestListScriptUsesFormComponentPathAndPortableRelativePaths"` passed.
 - `go test ./...` passed.
 
+# UserForm Phase 3 Inspect Form Todo
+
+- [x] Add `xlflow inspect form` CLI command with basis, initializer, session, and keepalive flags.
+- [x] Add Go bridge plumbing plus inspect payload/output support for form snapshots.
+- [x] Add `inspect-form.ps1` and temporary VBA helper module support for runtime inspection.
+- [x] Keep designer-only inspection macro-safe by inspecting VBIDE Designer state directly from PowerShell.
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Validate against `tmp_workspaces\user-form\build\Book.xlsm` with the existing `UserForm1`.
+- [x] Update feature spec, CLI contract, and README files.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestInspectFormScriptValidatesBasisBeforeWorkbookOpen|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings"` passed.
+- Runtime validation workspace: `C:\dev\go\xlflow\tmp_workspaces\user-form`.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --runtime --initializer InitializeForm` returned `Order Entry Form`, width `308`, height `372`, `Alpha Stores`, `H001`, `Pencil`, `100`, and quantity `1`.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --designer` passed.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --both --initializer InitializeForm` passed.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

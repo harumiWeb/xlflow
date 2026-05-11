@@ -461,6 +461,40 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersInspectFormSummary(t *testing.T) {
+	env := New("inspect")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "description": "Workbook currently open through xlflow session"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": false, "save_required": false}
+	env.Warnings = []map[string]any{{"code": "runtime_form_loads_initialize", "message": "Runtime inspection loads the form and executes UserForm_Initialize."}}
+	env.Inspect = map[string]any{
+		"target": "form",
+		"format": "text",
+		"source": "excel_com",
+		"form": map[string]any{
+			"name":              "UserForm1",
+			"basis":             "runtime",
+			"caption":           "Order Entry Form",
+			"width":             308,
+			"height":            372,
+			"coordinate_system": "parent-relative",
+			"controls": []map[string]any{
+				{"name": "txtOrderDate", "type": "TextBox", "value": "2026/05/11", "left": 108, "top": 15},
+				{"name": "cmdRegister", "type": "CommandButton", "caption": "Save Order", "left": 72, "top": 231},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow inspect", "Basis:", "runtime", "Form:", "UserForm1", "txtOrderDate", "value=2026/05/11", "cmdRegister", "caption=Save Order", "Warnings:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect form output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersInspectEmptyRangeWarnings(t *testing.T) {
 	env := New("inspect")
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}

@@ -2377,6 +2377,436 @@ function Remove-XlflowRunnerModule {
   }
 }
 
+function Remove-XlflowVBComponentByName {
+  param(
+    $VBProject,
+    [string]$Name
+  )
+
+  try {
+    $existing = $VBProject.VBComponents.Item($Name)
+    $VBProject.VBComponents.Remove($existing)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Get-XlflowVBComponentByName {
+  param(
+    $VBProject,
+    [string]$Name
+  )
+
+  try {
+    return $VBProject.VBComponents.Item($Name)
+  } catch {
+    return $null
+  }
+}
+
+function Install-XlflowVBComponentFromCode {
+  param(
+    $VBProject,
+    [string]$Name,
+    [string]$Code
+  )
+
+  $existing = Get-XlflowVBComponentByName -VBProject $VBProject -Name $Name
+  if ($null -ne $existing) {
+    throw ("VBA component '" + $Name + "' already exists.")
+  }
+  $component = $VBProject.VBComponents.Add(1)
+  $component.Name = $Name
+  $component.CodeModule.AddFromString($Code)
+  return $component
+}
+
+function New-XlflowInspectFormModuleCode {
+  return @'
+Option Explicit
+
+Private Const xlflowBasisDesigner As String = "designer"
+Private Const xlflowBasisRuntime As String = "runtime"
+Private Const xlflowCoordinateSystem As String = "parent-relative"
+
+Public Function XlflowInspectFormJson(ByVal formName As String, ByVal basis As String, Optional ByVal initializer As String = "") As String
+  Dim normalizedBasis As String
+  normalizedBasis = LCase$(Trim$(basis))
+
+  Select Case normalizedBasis
+    Case xlflowBasisDesigner
+      XlflowInspectFormJson = InspectDesignerFormJson(formName)
+    Case xlflowBasisRuntime
+      XlflowInspectFormJson = InspectRuntimeFormJson(formName, initializer)
+    Case Else
+      Err.Raise vbObjectError + 7300, "XlflowInspectFormJson.args", "Unsupported inspect basis: " & basis
+  End Select
+End Function
+
+Private Function InspectDesignerFormJson(ByVal formName As String) As String
+  On Error GoTo ErrHandler
+
+  Dim component As Object
+  Dim designer As Object
+
+  Set component = ThisWorkbook.VBProject.VBComponents.Item(formName)
+  Set designer = component.Designer
+  InspectDesignerFormJson = SerializeFormSnapshot(formName, xlflowBasisDesigner, designer)
+  Exit Function
+
+ErrHandler:
+  Err.Raise Err.Number, "XlflowInspectFormJson.designer", Err.Description
+End Function
+
+Private Function InspectRuntimeFormJson(ByVal formName As String, ByVal initializer As String) As String
+  Dim formInstance As Object
+  Dim loaded As Boolean
+  Dim initializerRan As Boolean
+  Dim errorNumber As Long
+  Dim errorDescription As String
+  Dim errorSource As String
+
+  On Error GoTo ErrHandler
+
+  Set formInstance = UserForms.Add(formName)
+  loaded = True
+
+  If Len(Trim$(initializer)) > 0 Then
+    CallByName formInstance, Trim$(initializer), VbMethod, ThisWorkbook
+    initializerRan = True
+  End If
+
+  InspectRuntimeFormJson = SerializeFormSnapshot(formName, xlflowBasisRuntime, formInstance)
+
+Cleanup:
+  On Error Resume Next
+  If loaded Then
+    Unload formInstance
+  End If
+  Set formInstance = Nothing
+  On Error GoTo 0
+
+  If errorNumber <> 0 Then
+    Err.Raise errorNumber, errorSource, errorDescription
+  End If
+  Exit Function
+
+ErrHandler:
+  errorNumber = Err.Number
+  errorDescription = Err.Description
+  If Not loaded Then
+    errorSource = "XlflowInspectFormJson.runtime_load"
+  ElseIf Len(Trim$(initializer)) > 0 And Not initializerRan Then
+    errorSource = "XlflowInspectFormJson.initializer"
+  Else
+    errorSource = "XlflowInspectFormJson.enumerate"
+  End If
+  Resume Cleanup
+End Function
+
+Private Function SerializeFormSnapshot(ByVal formName As String, ByVal basis As String, ByVal formObject As Object) As String
+  Dim json As String
+  Dim hasFields As Boolean
+  Dim controls As Object
+
+  json = "{"
+
+  JsonAddString json, "name", formName, hasFields
+  JsonAddString json, "basis", basis, hasFields
+  JsonAddStringFromMember json, formObject, "Caption", "caption", hasFields
+  JsonAddNumberFromMember json, formObject, "Width", "width", hasFields
+  JsonAddNumberFromMember json, formObject, "Height", "height", hasFields
+  JsonAddString json, "coordinate_system", xlflowCoordinateSystem, hasFields
+
+  Set controls = GetObjectControls(formObject)
+  JsonAddRaw json, "controls", SerializeControls(controls), hasFields
+
+  json = json & "}"
+  SerializeFormSnapshot = json
+End Function
+
+Private Function SerializeControls(ByVal controls As Object) As String
+  Dim json As String
+  Dim first As Boolean
+  Dim control As Object
+
+  json = "["
+  first = True
+
+  If Not controls Is Nothing Then
+    For Each control In controls
+      If Not first Then
+        json = json & ","
+      End If
+      json = json & SerializeControl(control)
+      first = False
+    Next control
+  End If
+
+  json = json & "]"
+  SerializeControls = json
+End Function
+
+Private Function SerializeControl(ByVal control As Object) As String
+  Dim json As String
+  Dim hasFields As Boolean
+  Dim children As Object
+  Dim listCount As Long
+  Dim selectedIndex As Long
+  Dim typeNameValue As String
+
+  json = "{"
+
+  JsonAddStringFromMember json, control, "Name", "name", hasFields
+  typeNameValue = TypeName(control)
+  JsonAddString json, "type", typeNameValue, hasFields
+  JsonAddStringFromMember json, control, "ProgId", "prog_id", hasFields
+  JsonAddStringFromMember json, control, "Caption", "caption", hasFields
+  JsonAddStringFromMember json, control, "Text", "text", hasFields
+  JsonAddStringFromMember json, control, "Value", "value", hasFields
+  JsonAddNumberFromMember json, control, "Left", "left", hasFields
+  JsonAddNumberFromMember json, control, "Top", "top", hasFields
+  JsonAddNumberFromMember json, control, "Width", "width", hasFields
+  JsonAddNumberFromMember json, control, "Height", "height", hasFields
+  JsonAddLongFromMember json, control, "TabIndex", "tab_index", hasFields
+  JsonAddBoolFromMember json, control, "Enabled", "enabled", hasFields
+  JsonAddBoolFromMember json, control, "Visible", "visible", hasFields
+
+  If TryGetLongMember(control, "ListIndex", selectedIndex) Then
+    JsonAddLong json, "selected_index", selectedIndex, hasFields
+  End If
+  If TryGetLongMember(control, "ListCount", listCount) Then
+    JsonAddRaw json, "list", SerializeControlList(control, listCount), hasFields
+  End If
+
+  If ControlCanContainChildren(typeNameValue) Then
+    Set children = GetObjectControls(control)
+  End If
+  If Not children Is Nothing Then
+    JsonAddRaw json, "controls", SerializeControls(children), hasFields
+  End If
+
+  json = json & "}"
+  SerializeControl = json
+End Function
+
+Private Function ControlCanContainChildren(ByVal controlType As String) As Boolean
+  Select Case LCase$(Trim$(controlType))
+    Case "frame", "multipage", "page", "tabstrip"
+      ControlCanContainChildren = True
+    Case Else
+      ControlCanContainChildren = False
+  End Select
+End Function
+
+Private Function SerializeControlList(ByVal control As Object, ByVal listCount As Long) As String
+  Dim json As String
+  Dim i As Long
+  Dim first As Boolean
+  Dim itemValue As String
+
+  json = "["
+  first = True
+
+  If listCount > 0 Then
+    For i = 0 To listCount - 1
+      If TryGetListItem(control, i, itemValue) Then
+        If Not first Then
+          json = json & ","
+        End If
+        json = json & JsonQuote(itemValue)
+        first = False
+      End If
+    Next i
+  End If
+
+  json = json & "]"
+  SerializeControlList = json
+End Function
+
+Private Function TryGetListItem(ByVal control As Object, ByVal index As Long, ByRef valueOut As String) As Boolean
+  On Error GoTo Missing
+
+  Dim itemValue As Variant
+  itemValue = control.List(index)
+  If IsNull(itemValue) Or IsEmpty(itemValue) Then
+    valueOut = vbNullString
+  Else
+    valueOut = CStr(itemValue)
+  End If
+  TryGetListItem = True
+  Exit Function
+
+Missing:
+  valueOut = vbNullString
+  TryGetListItem = False
+End Function
+
+Private Function GetObjectControls(ByVal target As Object) As Object
+  On Error Resume Next
+  Set GetObjectControls = target.Controls
+  On Error GoTo 0
+End Function
+
+Private Sub JsonAddStringFromMember(ByRef json As String, ByVal target As Object, ByVal memberName As String, ByVal jsonKey As String, ByRef hasFields As Boolean)
+  Dim value As String
+  If TryGetStringMember(target, memberName, value) Then
+    JsonAddString json, jsonKey, value, hasFields
+  End If
+End Sub
+
+Private Sub JsonAddNumberFromMember(ByRef json As String, ByVal target As Object, ByVal memberName As String, ByVal jsonKey As String, ByRef hasFields As Boolean)
+  Dim value As Double
+  If TryGetNumberMember(target, memberName, value) Then
+    JsonAddNumber json, jsonKey, value, hasFields
+  End If
+End Sub
+
+Private Sub JsonAddLongFromMember(ByRef json As String, ByVal target As Object, ByVal memberName As String, ByVal jsonKey As String, ByRef hasFields As Boolean)
+  Dim value As Long
+  If TryGetLongMember(target, memberName, value) Then
+    JsonAddLong json, jsonKey, value, hasFields
+  End If
+End Sub
+
+Private Sub JsonAddBoolFromMember(ByRef json As String, ByVal target As Object, ByVal memberName As String, ByVal jsonKey As String, ByRef hasFields As Boolean)
+  Dim value As Boolean
+  If TryGetBoolMember(target, memberName, value) Then
+    JsonAddBool json, jsonKey, value, hasFields
+  End If
+End Sub
+
+Private Function TryGetStringMember(ByVal target As Object, ByVal memberName As String, ByRef valueOut As String) As Boolean
+  On Error GoTo Missing
+
+  Dim rawValue As Variant
+  rawValue = CallByName(target, memberName, VbGet)
+  If IsObject(rawValue) Or IsNull(rawValue) Or IsEmpty(rawValue) Then
+    GoTo Missing
+  End If
+
+  valueOut = CStr(rawValue)
+  TryGetStringMember = True
+  Exit Function
+
+Missing:
+  valueOut = vbNullString
+  TryGetStringMember = False
+End Function
+
+Private Function TryGetNumberMember(ByVal target As Object, ByVal memberName As String, ByRef valueOut As Double) As Boolean
+  On Error GoTo Missing
+
+  Dim rawValue As Variant
+  rawValue = CallByName(target, memberName, VbGet)
+  If IsObject(rawValue) Or IsNull(rawValue) Or IsEmpty(rawValue) Then
+    GoTo Missing
+  End If
+
+  valueOut = CDbl(rawValue)
+  TryGetNumberMember = True
+  Exit Function
+
+Missing:
+  valueOut = 0
+  TryGetNumberMember = False
+End Function
+
+Private Function TryGetLongMember(ByVal target As Object, ByVal memberName As String, ByRef valueOut As Long) As Boolean
+  On Error GoTo Missing
+
+  Dim rawValue As Variant
+  rawValue = CallByName(target, memberName, VbGet)
+  If IsObject(rawValue) Or IsNull(rawValue) Or IsEmpty(rawValue) Then
+    GoTo Missing
+  End If
+
+  valueOut = CLng(rawValue)
+  TryGetLongMember = True
+  Exit Function
+
+Missing:
+  valueOut = 0
+  TryGetLongMember = False
+End Function
+
+Private Function TryGetBoolMember(ByVal target As Object, ByVal memberName As String, ByRef valueOut As Boolean) As Boolean
+  On Error GoTo Missing
+
+  Dim rawValue As Variant
+  rawValue = CallByName(target, memberName, VbGet)
+  If IsObject(rawValue) Or IsNull(rawValue) Or IsEmpty(rawValue) Then
+    GoTo Missing
+  End If
+
+  valueOut = CBool(rawValue)
+  TryGetBoolMember = True
+  Exit Function
+
+Missing:
+  valueOut = False
+  TryGetBoolMember = False
+End Function
+
+Private Sub JsonAddRaw(ByRef json As String, ByVal key As String, ByVal rawValue As String, ByRef hasFields As Boolean)
+  If hasFields Then
+    json = json & ","
+  End If
+  json = json & JsonQuote(key) & ":" & rawValue
+  hasFields = True
+End Sub
+
+Private Sub JsonAddString(ByRef json As String, ByVal key As String, ByVal value As String, ByRef hasFields As Boolean)
+  If hasFields Then
+    json = json & ","
+  End If
+  json = json & JsonQuote(key) & ":" & JsonQuote(value)
+  hasFields = True
+End Sub
+
+Private Sub JsonAddNumber(ByRef json As String, ByVal key As String, ByVal value As Double, ByRef hasFields As Boolean)
+  If hasFields Then
+    json = json & ","
+  End If
+  json = json & JsonQuote(key) & ":" & Trim$(Str$(value))
+  hasFields = True
+End Sub
+
+Private Sub JsonAddLong(ByRef json As String, ByVal key As String, ByVal value As Long, ByRef hasFields As Boolean)
+  If hasFields Then
+    json = json & ","
+  End If
+  json = json & JsonQuote(key) & ":" & CStr(value)
+  hasFields = True
+End Sub
+
+Private Sub JsonAddBool(ByRef json As String, ByVal key As String, ByVal value As Boolean, ByRef hasFields As Boolean)
+  If hasFields Then
+    json = json & ","
+  End If
+  json = json & JsonQuote(key) & ":" & IIf(value, "true", "false")
+  hasFields = True
+End Sub
+
+Private Function JsonQuote(ByVal value As String) As String
+  JsonQuote = """" & JsonEscape(value) & """"
+End Function
+
+Private Function JsonEscape(ByVal value As String) As String
+  Dim text As String
+  text = value
+  text = Replace(text, "\", "\\")
+  text = Replace(text, """", Chr$(92) & Chr$(34))
+  text = Replace(text, vbCrLf, "\n")
+  text = Replace(text, vbCr, "\n")
+  text = Replace(text, vbLf, "\n")
+  text = Replace(text, vbTab, "\t")
+  JsonEscape = text
+End Function
+'@
+}
+
 function ConvertTo-XlflowTraceEvent {
   param([string]$Line)
 

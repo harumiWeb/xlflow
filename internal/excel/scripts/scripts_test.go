@@ -13,7 +13,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -24,6 +24,76 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestInspectFormScriptValidatesBasisBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./inspect-form.ps1 -Basis nope -FormName 'UserForm1' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect-form basis validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse inspect-form output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "inspect_form_args_invalid" {
+		t.Fatalf("expected inspect_form_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "inspect-form.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read inspect-form.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Install-XlflowVBComponentFromCode",
+		"New-XlflowInspectFormModuleName",
+		"New-XlflowInspectRuntimeWorkbookCopy",
+		"SaveCopyAs($tempPath)",
+		"New-XlflowInspectFormModuleCode",
+		"runtime_form_loads_initialize",
+		"runtime_form_temp_copy",
+		"temporary_component_cleanup_failed",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect-form.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "runtime_inspect_session_dirty") {
+		t.Fatalf("inspect-form.ps1 should no longer report live-session dirty mutation for runtime temp-copy inspection:\n%s", text)
+	}
+}
+
+func TestCommonScriptInstallVBComponentRefusesToReplaceExistingComponent(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "common.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"function Get-XlflowVBComponentByName",
+		"VBA component '\" + $Name + \"' already exists.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "[void](Remove-XlflowVBComponentByName -VBProject $VBProject -Name $Name)") {
+		t.Fatalf("Install-XlflowVBComponentFromCode should not blindly remove existing components:\n%s", text)
 	}
 }
 
