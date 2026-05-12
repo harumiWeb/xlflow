@@ -134,6 +134,28 @@ func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesFormSnapshotFields(t *testing.T) {
+	env := New("form snapshot")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "designer", "coordinate_system": "parent-relative", "control_count": 3}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.form.yaml", "format": "yaml"}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "session", "forms", "output", "warnings"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	env := New("edit")
 	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
@@ -688,6 +710,28 @@ func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
 	}
 	if strings.Count(got, "Target:") != 1 {
 		t.Fatalf("export-image output should render one Target label:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersFormSnapshotSummary(t *testing.T) {
+	env := New("form snapshot")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "designer", "caption": "Order Entry", "coordinate_system": "parent-relative", "control_count": 3}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.form.yaml", "format": "yaml"}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Snapshot target:", "live session workbook", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "3", "Output:", "artifacts/UserForm1.form.yaml", "Format:", "YAML", "SAVE REQUIRED", "save_required"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form snapshot output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Target:") != 1 {
+		t.Fatalf("form snapshot output should render one Target label:\n%s", got)
 	}
 }
 

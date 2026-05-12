@@ -339,9 +339,11 @@ try {
     $tempModuleName = New-XlflowInspectFormModuleName
     $null = Install-XlflowVBComponentFromCode -VBProject $runtimeVBProject -Name $tempModuleName -Code (New-XlflowInspectFormModuleCode)
     $tempModuleInstalled = $true
+    $designerSnapshot = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "designer"
+    $runtimeSnapshot = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "runtime" -InitializerName $Initializer
     $result.forms = [ordered]@{
-      runtime = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "runtime" -InitializerName $Initializer
-      designer = Get-XlflowDesignerFormSnapshot -VBProject $vbProject -TargetFormName $FormName
+      runtime = $runtimeSnapshot
+      designer = $designerSnapshot
     }
   } elseif ($normalizedBasis -eq "runtime") {
     $runtimeOpenResult = New-XlflowInspectRuntimeWorkbookCopy -SourceWorkbook $workbook
@@ -354,7 +356,15 @@ try {
     $tempModuleInstalled = $true
     $result.forms = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "runtime" -InitializerName $Initializer
   } else {
-    $result.forms = Get-XlflowDesignerFormSnapshot -VBProject $vbProject -TargetFormName $FormName
+    $runtimeOpenResult = New-XlflowInspectRuntimeWorkbookCopy -SourceWorkbook $workbook
+    $runtimeExcel = $runtimeOpenResult.excel
+    $runtimeWorkbook = $runtimeOpenResult.workbook
+    $runtimeWorkbookPath = $runtimeOpenResult.path
+    $runtimeVBProject = $runtimeWorkbook.VBProject
+    $tempModuleName = New-XlflowInspectFormModuleName
+    $null = Install-XlflowVBComponentFromCode -VBProject $runtimeVBProject -Name $tempModuleName -Code (New-XlflowInspectFormModuleCode)
+    $tempModuleInstalled = $true
+    $result.forms = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "designer"
   }
 
   $saveState = Update-XlflowInspectFormResultSaveState -Result $result -Workbook $workbook -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode

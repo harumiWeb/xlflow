@@ -227,6 +227,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTraceCommand(env))
 	case "export-image":
 		b.WriteString(r.renderExportImage(env))
+	case "form snapshot":
+		b.WriteString(r.renderFormSnapshot(env))
 	case "edit":
 		b.WriteString(r.renderEdit(env))
 	case "pull", "push", "attach":
@@ -857,6 +859,56 @@ func (r renderer) renderExportImage(env Envelope) string {
 	}
 	if value, ok := boolValueOK(outputPayload, "created_parent_dirs"); ok {
 		b.WriteString(kv("Created dirs", fmt.Sprintf("%t", value)))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderFormSnapshot(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	form := objectMap(env.Forms)
+	outputPayload := objectMap(env.Output)
+	if len(workbook) == 0 && len(target) == 0 && len(form) == 0 && len(outputPayload) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Snapshot target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if name := stringValue(form, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if basis := stringValue(form, "basis"); basis != "" {
+		b.WriteString(kv("Basis", basis))
+	}
+	if caption := stringValue(form, "caption"); caption != "" {
+		b.WriteString(kv("Caption", caption))
+	}
+	if coord := stringValue(form, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	if count, ok := numberValue(form, "control_count"); ok {
+		b.WriteString(kv("Controls", fmt.Sprintf("%d", int(count))))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if path := stringValue(outputPayload, "path"); path != "" {
+		b.WriteString(kv("Output", path))
+	}
+	if format := stringValue(outputPayload, "format"); format != "" {
+		b.WriteString(kv("Format", strings.ToUpper(format)))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))

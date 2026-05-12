@@ -116,6 +116,59 @@ Inspect existing workbook UserForms through Excel COM and return structured cont
 - `form_initializer_failed`
 - `control_enumeration_failed`
 
+## UserForm Phase 4 Snapshot Spec
+
+### Goal
+
+Persist the existing `inspect form --designer` UserForm snapshot as a stable JSON/YAML spec file for human review and later declarative workflows.
+
+### Commands
+
+- `xlflow form snapshot <name> --designer --out <path> [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.yaml --session --json`
+
+### Behavior
+
+- Phase 4 is designer-only. `--designer` is required and `--runtime`, `--both`, and `--initializer` are not supported.
+- The command reuses the existing Excel COM `inspect form --designer` bridge and does not add a new PowerShell snapshot action.
+- xlflow converts the returned designer snapshot into a persisted form spec in Go.
+- `--out` is required.
+- Output format is selected only by the `--out` extension.
+- `.json` writes JSON.
+- `.yaml` and `.yml` write YAML using the same spec fields.
+- Any other extension fails with `form_snapshot_args_invalid` before Excel is opened.
+- `--session`, `--keepalive`, and `--keepalive-interval` behave the same as `inspect form`.
+- Successful runs write the spec file, return normal workbook/session metadata, and expose the written path via top-level `output` metadata.
+- Phase 4 does not add new `.frx` parsing or unsupported-property detection beyond what the existing designer inspect already exposes.
+
+### Output Spec
+
+- Top-level persisted keys are `schemaVersion`, `kind`, `basis`, `coordinateSystem`, `form`, `controls`, and `warnings`.
+- `schemaVersion = 1`
+- `kind = "xlflow.userform"`
+- `basis = "designer"`
+- `coordinateSystem` comes from inspect `coordinate_system`.
+- `form` contains `name`, optional `caption`, optional `width`, and optional `height`.
+- `controls` contains recursively converted control snapshots.
+- Control fields convert inspect snake_case keys to camelCase where needed: `prog_id -> progId`, `tab_index -> tabIndex`, `selected_index -> selectedIndex`.
+
+### Errors
+
+- `form_snapshot_args_invalid`
+- `form_snapshot_write_failed`
+- `form_not_found`
+- `vbproject_access_denied`
+- `designer_access_failed`
+- `control_enumeration_failed`
+
+### Sample validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- JSON validation path: `xlflow form snapshot UserForm1 --designer --out artifacts/UserForm1.form.json --json`
+- YAML validation path: `xlflow form snapshot UserForm1 --designer --out artifacts/UserForm1.form.yaml --json`
+
 ### Sample validation target
 
 - Workspace: `tmp_workspaces/user-form`

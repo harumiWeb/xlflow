@@ -32,3 +32,4 @@
 - Edit payloads should identify exactly one mutated operation. Do not emit both formula and calculated-value snapshots for a single cell edit when downstream output needs to report which mutation the user requested.
 - Human output for inspection/list commands must distinguish "unavailable due to failure" from a real empty result set, and save-required warnings for dirty auto-reused sessions must be preserved on failure paths as well as success paths.
 - Temporary VBIDE helper components must never reuse a fixed user-visible module name or silently replace existing code. Generate collision-resistant helper names, and only restore `Workbook.Saved` after proving the persistent workbook state still matches the pre-helper baseline.
+- Temp workbook copies that rely on an injected VBA helper must keep automation macros executable after open. `DisableAutomationMacros = $true` prevents `Excel.Run` from invoking the helper module even when events are already disabled.

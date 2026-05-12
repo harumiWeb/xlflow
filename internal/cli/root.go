@@ -81,6 +81,11 @@ type keepaliveFlags struct {
 	interval time.Duration
 }
 
+type formSnapshotCommandOptions struct {
+	Inspect excel.InspectFormOptions
+	OutPath string
+}
+
 func Execute() error {
 	return ExecuteWithBuildInfo(BuildInfo{})
 }
@@ -126,6 +131,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.doctorCommand(),
 		a.attachCommand(),
 		a.listCommand(),
+		a.formCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.sessionCommand(),
@@ -319,6 +325,95 @@ func (a *app) listCommand() *cobra.Command {
 		Short: "List workbook resources",
 	}
 	cmd.AddCommand(a.listFormsCommand())
+	return cmd
+}
+
+func (a *app) formCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "form",
+		Short: "Manage workbook UserForms",
+	}
+	cmd.AddCommand(a.formSnapshotCommand())
+	return cmd
+}
+
+func (a *app) formSnapshotCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var designer bool
+	var outPath string
+	cmd := &cobra.Command{
+		Use:   "snapshot <name>",
+		Short: "Write a designer UserForm snapshot spec to a file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormSnapshotOptions(args[0], outPath, designer, session, keepalive)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
+			}
+			resolvedOutput, err := excel.ResolveFormSnapshotOutput(a.cwd, opts.OutPath)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form snapshot")
+			if err != nil {
+				return err
+			}
+			var scriptEnv output.Envelope
+			var code int
+			err = a.withExcelProgress("Snapshotting workbook form", opts.Inspect.Keepalive, func() error {
+				var runErr error
+				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts.Inspect)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			if code != output.ExitSuccess {
+				scriptEnv.Command = "form snapshot"
+				return a.write(scriptEnv, code)
+			}
+			spec, err := excel.FormSpecFromInspectSnapshot(scriptEnv.Forms)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
+			}
+			if err := excel.WriteFormSnapshot(resolvedOutput, spec); err != nil {
+				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
+			}
+			env := output.New("form snapshot")
+			env.Target = scriptEnv.Target
+			env.Session = scriptEnv.Session
+			env.Workbook = scriptEnv.Workbook
+			env.Warnings = scriptEnv.Warnings
+			env.Hints = scriptEnv.Hints
+			env.Output = map[string]any{
+				"path":   resolvedOutput.DisplayPath,
+				"format": resolvedOutput.Format,
+			}
+			formSummary := map[string]any{
+				"name":              spec.Form.Name,
+				"basis":             spec.Basis,
+				"coordinate_system": spec.CoordinateSystem,
+				"control_count":     len(spec.Controls),
+			}
+			if spec.Form.Caption != nil {
+				formSummary["caption"] = *spec.Form.Caption
+			}
+			if spec.Form.Width != nil {
+				formSummary["width"] = *spec.Form.Width
+			}
+			if spec.Form.Height != nil {
+				formSummary["height"] = *spec.Form.Height
+			}
+			env.Forms = formSummary
+			env.Logs = []string{fmt.Sprintf("wrote %s UserForm snapshot for %s to %s", spec.Basis, spec.Form.Name, resolvedOutput.DisplayPath)}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&designer, "designer", false, "snapshot the design-time VBIDE designer state")
+	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2166,6 +2261,24 @@ func buildInspectFormOptions(name, basis, initializer string, session bool, keep
 		Initializer: trimmedInitializer,
 		Session:     session,
 		Keepalive:   keepaliveOpts,
+	}, nil
+}
+
+func buildFormSnapshotOptions(name, outPath string, designer bool, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
+	if !designer {
+		return formSnapshotCommandOptions{}, fmt.Errorf("--designer is required")
+	}
+	inspectOpts, err := buildInspectFormOptions(name, "designer", "", session, keepalive)
+	if err != nil {
+		return formSnapshotCommandOptions{}, err
+	}
+	trimmedOut := strings.TrimSpace(outPath)
+	if trimmedOut == "" {
+		return formSnapshotCommandOptions{}, fmt.Errorf("--out is required")
+	}
+	return formSnapshotCommandOptions{
+		Inspect: inspectOpts,
+		OutPath: trimmedOut,
 	}, nil
 }
 

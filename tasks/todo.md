@@ -49,6 +49,28 @@
 - `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --designer` passed.
 - `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --both --initializer InitializeForm` passed.
 
+# UserForm Phase 4 Snapshot Todo
+
+- [x] Add `xlflow form snapshot <name> --designer --out <path>` CLI command with session and keepalive support.
+- [x] Reuse `InspectForm` designer output and add Go-side spec conversion plus JSON/YAML serialization.
+- [x] Validate snapshot output extensions strictly against `.json`, `.yaml`, and `.yml`.
+- [x] Add focused Go regression coverage for command wiring, argument validation, spec conversion, output rendering, and file writing.
+- [x] Update CLI contract, README files, bundled skill guidance, and dependency/licence metadata for YAML support.
+- [x] Validate `form snapshot` against `tmp_workspaces\user-form\build\Book.xlsm` for both JSON and YAML output.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output -run "FormSnapshot|InspectForm|ExportImage"` passed.
+- `go test ./internal/cli ./internal/excel ./internal/output ./internal/agentskill` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestInspectFormScriptValidatesBasisBeforeWorkbookOpen|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings"` passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\check-third-party-licences.ps1` passed.
+- `go test ./...` passed.
+- Validation workspace: `C:\dev\go\xlflow\tmp_workspaces\user-form`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --designer --out artifacts\UserForm1.form.json` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.json`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --designer --out artifacts\UserForm1.form.yaml` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.yaml`.
+- Persisted JSON/YAML snapshots included `schemaVersion`, `kind`, `basis`, `coordinateSystem`, `form`, `controls`, and `warnings`, with camelCase spec fields such as `tabIndex` and `selectedIndex`.
+- `go test ./internal/excel/scripts -run TestInspectFormScriptDesignerReturnsConcreteControlTypes -v` passed and confirmed designer inspect returns concrete control types (`Label`, `TextBox`) through the temp-copy helper path.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

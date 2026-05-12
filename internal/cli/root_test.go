@@ -498,6 +498,24 @@ func TestRootCommandIncludesListFormsCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "snapshot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "snapshot" {
+		t.Fatalf("expected form snapshot command, got %#v", cmd)
+	}
+	for _, name := range []string{"designer", "out", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form snapshot command to define --%s", name)
+		}
+	}
+}
+
 func TestRootCommandIncludesInspectFormCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -610,6 +628,34 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "qr\x1fdemo", "png", false, false, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "invalid Windows characters") {
 		t.Fatalf("expected control-character validation error, got %v", err)
+	}
+}
+
+func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Inspect.Name != "UserForm1" || opts.Inspect.Basis != "designer" {
+		t.Fatalf("inspect opts = %#v", opts.Inspect)
+	}
+	if !opts.Inspect.Session || !opts.Inspect.Keepalive.Keepalive || opts.Inspect.Keepalive.KeepaliveInterval != 7*time.Second {
+		t.Fatalf("keepalive/session opts = %#v", opts.Inspect)
+	}
+	if opts.OutPath != "artifacts\\UserForm1.form.yaml" {
+		t.Fatalf("out path = %q", opts.OutPath)
+	}
+}
+
+func TestBuildFormSnapshotOptionsRejectsMissingRequirements(t *testing.T) {
+	if _, err := buildFormSnapshotOptions("UserForm1", "artifacts\\UserForm1.form.yaml", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--designer is required") {
+		t.Fatalf("expected designer requirement error, got %v", err)
+	}
+	if _, err := buildFormSnapshotOptions("UserForm1", "", true, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+		t.Fatalf("expected out requirement error, got %v", err)
+	}
+	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", true, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+		t.Fatalf("expected form name error, got %v", err)
 	}
 }
 
@@ -1361,6 +1407,35 @@ func TestInspectFormCommandUsesInspectFormArgsInvalidCode(t *testing.T) {
 	}
 	if got.Status != output.StatusFailed || got.Error.Code != "inspect_form_args_invalid" {
 		t.Fatalf("unexpected inspect form error payload: %+v", got)
+	}
+}
+
+func TestFormSnapshotCommandUsesFormSnapshotArgsInvalidCode(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    t.TempDir(),
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "snapshot", "UserForm1", "--designer", "--out", "artifacts\\UserForm1.form.txt"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form snapshot error output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "form_snapshot_args_invalid" {
+		t.Fatalf("unexpected form snapshot error payload: %+v", got)
 	}
 }
 
