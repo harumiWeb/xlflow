@@ -103,12 +103,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## 動作要件
 
-| 要件                                                       | 必要になる場面                                                                                                  |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Windows                                                    | Excel COM automation                                                                                            |
+| 要件                                                       | 必要になる場面                                                                                                                                                        |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows                                                    | Excel COM automation                                                                                                                                                  |
 | Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                                 | Excel automation bridge                                                                                         |
-| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                      |
+| PowerShell                                                 | Excel automation bridge                                                                                                                                               |
+| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                                                                            |
 
 > [!NOTE]
 > `lint`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。

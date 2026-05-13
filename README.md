@@ -102,12 +102,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Requirements
 
-| Requirement                                  | Needed for                                                                                                      |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Windows                                      | Excel COM automation                                                                                            |
+| Requirement                                  | Needed for                                                                                                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows                                      | Excel COM automation                                                                                                                                                  |
 | Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                                                         |
-| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                |
+| PowerShell                                   | Excel automation bridge                                                                                                                                               |
+| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                      |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.

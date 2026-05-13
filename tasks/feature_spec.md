@@ -179,6 +179,7 @@ Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file f
 - Workbook: `build/Book.xlsm`
 - Form: `UserForm1`
 - Runtime validation path: `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
+
 ## UserForm Phase 5 Form Export Image Spec
 
 ### Goal
