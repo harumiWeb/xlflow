@@ -134,6 +134,28 @@ func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesFormSnapshotFields(t *testing.T) {
+	env := New("form snapshot")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "designer", "coordinate_system": "parent-relative", "control_count": 3}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.form.yaml", "format": "yaml"}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "session", "forms", "output", "warnings"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	env := New("edit")
 	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
@@ -158,6 +180,38 @@ func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
 		}
+	}
+}
+
+func TestWriteWithOptionsInspectMarkdownUsesUnnamedPlaceholder(t *testing.T) {
+	env := New("inspect")
+	payload := map[string]any{
+		"target": "form",
+		"forms": map[string]any{
+			"designer": map[string]any{
+				"name":  "UserForm1",
+				"basis": "designer",
+				"controls": []map[string]any{
+					{"name": "", "type": "Label", "caption": "Hello"},
+				},
+			},
+		},
+	}
+	text := renderer{}.renderInspectMarkdown(env, payload)
+	if !strings.Contains(text, "<unnamed>") {
+		t.Fatalf("expected unnamed placeholder in markdown output: %s", text)
+	}
+}
+
+func TestRenderInspectFormShowsUnavailableWhenBothPayloadMissing(t *testing.T) {
+	env := New("inspect")
+	env.Warnings = []map[string]any{{"code": "runtime_unavailable", "message": "runtime snapshot unavailable"}}
+	text := renderer{}.renderInspectForm(env, map[string]any{"target": "form"})
+	if !strings.Contains(text, "unavailable") {
+		t.Fatalf("expected unavailable forms summary: %s", text)
+	}
+	if !strings.Contains(text, "runtime snapshot unavailable") {
+		t.Fatalf("expected warnings to be preserved: %s", text)
 	}
 }
 
@@ -300,6 +354,47 @@ func TestWriteWithOptionsRendersMacrosHintsAndWarnings(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersListFormsSummary(t *testing.T) {
+	env := New("list")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Forms = []map[string]any{
+		{"name": "CustomerForm", "component_type": "MSForm", "has_frx": true, "source_path": "src/forms/CustomerForm.frm"},
+		{"name": "OrderForm", "component_type": "MSForm", "has_frx": false, "source_path": "src/forms/Sales/OrderForm.frm"},
+	}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow list", "Forms:", "2", "CustomerForm", "has .frx", "src/forms/Sales/OrderForm.frm", "SAVE REQUIRED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsDoesNotRenderZeroFormsWhenListFailed(t *testing.T) {
+	env := Failure("list", Error{Code: "vbproject_access_denied", Message: "VBProject access is denied."})
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Forms:", "unavailable", "SAVE REQUIRED", "Warnings:", "save_required"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failed list output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Forms:          0") || strings.Contains(got, "Forms:\t0") {
+		t.Fatalf("failed list output should not render zero forms:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersRunTraceHelperLifecycle(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -389,6 +484,7 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
 	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
 	env.Warnings = []map[string]any{{"code": "live_session_dirty", "message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook."}}
+	env.Hints = []map[string]any{{"code": "userform_planned_commands", "message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`."}}
 	env.Inspect = map[string]any{
 		"target": "range",
 		"target_info": map[string]any{
@@ -409,13 +505,47 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Target:", "Session state:", "Warnings:", "live_session_dirty", "Snapshot", "saved workbook file", "Style:         included"} {
+	for _, want := range []string{"Target:", "Session state:", "Warnings:", "Hints:", "live_session_dirty", "userform_planned_commands", "Snapshot", "saved workbook file", "Style:         included"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inspect output missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Count(got, "Target:") != 1 || strings.Count(got, "Session state:") != 1 {
 		t.Fatalf("inspect output should render target/session once:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersInspectFormSummary(t *testing.T) {
+	env := New("inspect")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "description": "Workbook currently open through xlflow session"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": false, "save_required": false}
+	env.Warnings = []map[string]any{{"code": "runtime_form_loads_initialize", "message": "Runtime inspection loads the form and executes UserForm_Initialize."}}
+	env.Inspect = map[string]any{
+		"target": "form",
+		"format": "text",
+		"source": "excel_com",
+		"form": map[string]any{
+			"name":              "UserForm1",
+			"basis":             "runtime",
+			"caption":           "Order Entry Form",
+			"width":             308,
+			"height":            372,
+			"coordinate_system": "parent-relative",
+			"controls": []map[string]any{
+				{"name": "txtOrderDate", "type": "TextBox", "value": "2026/05/11", "left": 108, "top": 15},
+				{"name": "cmdRegister", "type": "CommandButton", "caption": "Save Order", "left": 72, "top": 231},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow inspect", "Basis:", "runtime", "Form:", "UserForm1", "txtOrderDate", "value=2026/05/11", "cmdRegister", "caption=Save Order", "Warnings:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect form output missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -612,6 +742,50 @@ func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
 	}
 	if strings.Count(got, "Target:") != 1 {
 		t.Fatalf("export-image output should render one Target label:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersFormSnapshotSummary(t *testing.T) {
+	env := New("form snapshot")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "designer", "caption": "Order Entry", "coordinate_system": "parent-relative", "control_count": 3}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.form.yaml", "format": "yaml"}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Snapshot target:", "live session workbook", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "3", "Output:", "artifacts/UserForm1.form.yaml", "Format:", "YAML", "SAVE REQUIRED", "save_required"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form snapshot output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Target:") != 1 {
+		t.Fatalf("form snapshot output should render one Target label:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersFormExportImageSummary(t *testing.T) {
+	env := New("form export-image")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "form": "UserForm1", "capture_state": "temporary_copy"}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "runtime", "initializer": "InitializeForm"}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.png", "format": "png", "width_px": 308, "height_px": 372}
+	env.Warnings = []map[string]any{{"code": "userform_image_export_experimental", "message": "experimental"}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Export target:", "live session", "Form:", "UserForm1", "Basis:", "runtime", "Initializer:", "InitializeForm", "Capture:", "temporary_copy", "Output:", "artifacts/UserForm1.png", "Format:", "PNG", "308 x 372 px", "SAVE REQUIRED", "userform_image_export_experimental"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form export-image output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Target:") != 1 {
+		t.Fatalf("form export-image output should render one Target label:\n%s", got)
 	}
 }
 

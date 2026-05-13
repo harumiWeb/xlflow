@@ -8,13 +8,14 @@ This file is provided for attribution and licence review. It is not a substitute
 
 ## Direct dependencies
 
-| Module                               |   Version | Licence      | Licence file                                                      |
-| ------------------------------------ | --------: | ------------ | ----------------------------------------------------------------- |
-| `github.com/BurntSushi/toml`         |  `v1.6.0` | MIT          | `https://github.com/BurntSushi/toml/blob/v1.6.0/COPYING`          |
-| `github.com/charmbracelet/bubbletea` | `v1.3.10` | MIT          | `https://github.com/charmbracelet/bubbletea/blob/v1.3.10/LICENSE` |
-| `github.com/charmbracelet/lipgloss`  |  `v1.1.0` | MIT          | `https://github.com/charmbracelet/lipgloss/blob/v1.1.0/LICENSE`   |
-| `github.com/spf13/cobra`             | `v1.10.2` | Apache-2.0   | `https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt`         |
-| `github.com/xuri/excelize/v2`        | `v2.10.1` | BSD-3-Clause | `https://github.com/xuri/excelize/blob/v2.10.1/LICENSE`           |
+| Module                               |   Version | Licence           | Licence file                                                      |
+| ------------------------------------ | --------: | ----------------- | ----------------------------------------------------------------- |
+| `github.com/BurntSushi/toml`         |  `v1.6.0` | MIT               | `https://github.com/BurntSushi/toml/blob/v1.6.0/COPYING`          |
+| `github.com/charmbracelet/bubbletea` | `v1.3.10` | MIT               | `https://github.com/charmbracelet/bubbletea/blob/v1.3.10/LICENSE` |
+| `github.com/charmbracelet/lipgloss`  |  `v1.1.0` | MIT               | `https://github.com/charmbracelet/lipgloss/blob/v1.1.0/LICENSE`   |
+| `github.com/spf13/cobra`             | `v1.10.2` | Apache-2.0        | `https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt`         |
+| `gopkg.in/yaml.v3`                   |  `v3.0.1` | MIT OR Apache-2.0 | `https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE`             |
+| `github.com/xuri/excelize/v2`        | `v2.10.1` | BSD-3-Clause      | `https://github.com/xuri/excelize/blob/v2.10.1/LICENSE`           |
 
 ## Indirect dependencies
 

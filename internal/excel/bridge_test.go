@@ -141,6 +141,33 @@ func TestBuildExportImageScriptArgs(t *testing.T) {
 	}
 }
 
+func TestBuildFormExportImageScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildFormExportImageScriptArgs(root, cfg, FormExportImageOptions{
+		Name:        "UserForm1",
+		OutPath:     filepath.Join("artifacts", "forms", "UserForm1.png"),
+		Initializer: "InitializeForm",
+		Overwrite:   true,
+		Session:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["WorkbookPath"] != filepath.Join(root, "build", "Book.xlsm") {
+		t.Fatalf("workbook path = %q", args["WorkbookPath"])
+	}
+	if args["FormName"] != "UserForm1" || args["Initializer"] != "InitializeForm" {
+		t.Fatalf("unexpected form args: %+v", args)
+	}
+	if args["OutputPath"] != filepath.Join(root, "artifacts", "forms", "UserForm1.png") {
+		t.Fatalf("output path = %q", args["OutputPath"])
+	}
+	if args["Overwrite"] != "true" || args["UseSession"] != "true" {
+		t.Fatalf("unexpected overwrite/session args: %+v", args)
+	}
+}
+
 func TestBuildEditCellScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -250,6 +277,20 @@ func TestResolveExportImageOutputDefaultPath(t *testing.T) {
 	}
 }
 
+func TestResolveFormExportImageOutputRejectsUnsupportedExtension(t *testing.T) {
+	_, err := resolveFormExportImageOutput(t.TempDir(), FormExportImageOptions{OutPath: "artifacts\\UserForm1.webp"})
+	if err == nil || !strings.Contains(err.Error(), "supported formats: png") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
+func TestResolveFormExportImageOutputRejectsMissingExtension(t *testing.T) {
+	_, err := resolveFormExportImageOutput(t.TempDir(), FormExportImageOptions{OutPath: "artifacts\\UserForm1"})
+	if err == nil || !strings.Contains(err.Error(), `unsupported image format ""; supported formats: png`) {
+		t.Fatalf("expected missing extension error, got %v", err)
+	}
+}
+
 func TestNormalizeExportImagePathRejectsUnsupportedExtension(t *testing.T) {
 	_, _, err := normalizeExportImagePath(t.TempDir(), "artifacts\\qr.webp", "png")
 	if err == nil || !strings.Contains(err.Error(), "supported formats: png") {
@@ -291,6 +332,59 @@ func TestRunnerExportImageReturnsValidationFailureForUnsupportedExtension(t *tes
 	}
 }
 
+func TestRunnerFormExportImageReturnsValidationFailureForUnsupportedExtension(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.FormExportImage(config.Default(), FormExportImageOptions{
+		Name:    "UserForm1",
+		OutPath: "artifacts\\UserForm1.webp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerFormExportImageReturnsValidationFailureForMissingExtension(t *testing.T) {
+	env, code, err := Runner{RootDir: t.TempDir()}.FormExportImage(config.Default(), FormExportImageOptions{
+		Name:    "UserForm1",
+		OutPath: "artifacts\\UserForm1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "unsupported_image_format" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerInspectFormNormalizesCommandName(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$WorkbookPath,[string]$FormName,[string]$Basis,[string]$Initializer,[string]$Visible,[string]$UseSession,[string]$MetadataPath)
+@{ status = "ok"; command = "inspect-form"; logs = @(); error = $null } | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "inspect-form.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.InspectForm(config.Default(), InspectFormOptions{Name: "UserForm1", Basis: "designer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Command != "inspect" {
+		t.Fatalf("command = %q, want inspect", env.Command)
+	}
+}
+
 func TestOutputFileExistsIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,
@@ -308,6 +402,20 @@ func TestUnsupportedImageFormatIsValidationFailure(t *testing.T) {
 	}
 	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
 		t.Fatalf("exitCodeForScriptResult(unsupported_image_format) = %d, want %d", got, output.ExitValidation)
+	}
+}
+
+func TestFormExportImageFailureCodesAreValidationFailures(t *testing.T) {
+	for _, code := range []string{"runtime_form_load_failed", "form_initializer_failed", "window_not_found", "image_capture_failed"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitValidation)
+			}
+		})
 	}
 }
 
@@ -587,6 +695,63 @@ func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	args := buildPullScriptArgs(root, cfg, SessionCommandOptions{})
 	if args["Folders"] != "true" || args["FolderAnnotation"] != "update" || args["DefaultComponentFolders"] != "true" {
 		t.Fatalf("unexpected folder config args: %+v", args)
+	}
+}
+
+func TestListFormsScriptArgsIncludeFolderAndSessionConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildListFormsScriptArgs(root, cfg, SessionCommandOptions{Session: true})
+	if args["Action"] != "forms" {
+		t.Fatalf("Action = %q, want forms", args["Action"])
+	}
+	if args["ProjectRoot"] != root {
+		t.Fatalf("ProjectRoot = %q, want %q", args["ProjectRoot"], root)
+	}
+	if args["FormsDir"] != filepath.Join(root, "src", "forms") {
+		t.Fatalf("FormsDir = %q", args["FormsDir"])
+	}
+	if args["FolderAnnotation"] != "update" || args["Folders"] != "true" || args["DefaultComponentFolders"] != "true" {
+		t.Fatalf("unexpected folder config args: %+v", args)
+	}
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
+func TestInspectFormScriptArgsIncludeSessionAndInitializer(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildInspectFormScriptArgs(root, cfg, InspectFormOptions{
+		Name:           "UserForm1",
+		Basis:          "runtime",
+		Initializer:    "InitializeForm",
+		StrictDesigner: true,
+		Session:        true,
+	})
+	if args["WorkbookPath"] != filepath.Join(root, "build", "Book.xlsm") {
+		t.Fatalf("WorkbookPath = %q", args["WorkbookPath"])
+	}
+	if args["FormName"] != "UserForm1" {
+		t.Fatalf("FormName = %q", args["FormName"])
+	}
+	if args["Basis"] != "runtime" {
+		t.Fatalf("Basis = %q", args["Basis"])
+	}
+	if args["Initializer"] != "InitializeForm" {
+		t.Fatalf("Initializer = %q", args["Initializer"])
+	}
+	if args["StrictDesigner"] != "true" {
+		t.Fatalf("StrictDesigner = %q", args["StrictDesigner"])
+	}
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
 	}
 }
 

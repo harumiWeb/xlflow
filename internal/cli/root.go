@@ -81,6 +81,11 @@ type keepaliveFlags struct {
 	interval time.Duration
 }
 
+type formSnapshotCommandOptions struct {
+	Inspect excel.InspectFormOptions
+	OutPath string
+}
+
 func Execute() error {
 	return ExecuteWithBuildInfo(BuildInfo{})
 }
@@ -125,6 +130,8 @@ func (a *app) rootCommand() *cobra.Command {
 		a.initCommand(),
 		a.doctorCommand(),
 		a.attachCommand(),
+		a.listCommand(),
+		a.formCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.sessionCommand(),
@@ -222,12 +229,13 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
 		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
 		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
+		{Name: "form-image-export", Description: "Export a runtime UserForm to a PNG image for visual verification."},
 		{Name: "workbook-edit-helpers", Description: "Mutate a live session workbook for agent-driven test setup, event triggering, and visual tuning."},
 	}
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image", "edit"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "export-image", "form-export-image", "edit"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -299,6 +307,176 @@ func (a *app) macrosCommand() *cobra.Command {
 			err = a.withExcelProgress("Reading VBA project", keepaliveOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) listCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List workbook resources",
+	}
+	cmd.AddCommand(a.listFormsCommand())
+	return cmd
+}
+
+func (a *app) formCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "form",
+		Short: "Manage workbook UserForms",
+	}
+	cmd.AddCommand(a.formSnapshotCommand(), a.formExportImageCommand())
+	return cmd
+}
+
+func (a *app) formSnapshotCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var outPath string
+	cmd := &cobra.Command{
+		Use:   "snapshot <name>",
+		Short: "Write a strict designer UserForm snapshot spec to a file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormSnapshotOptions(args[0], outPath, session, keepalive)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
+			}
+			resolvedOutput, err := excel.ResolveFormSnapshotOutput(a.cwd, opts.OutPath)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form snapshot")
+			if err != nil {
+				return err
+			}
+			var scriptEnv output.Envelope
+			var code int
+			err = a.withExcelProgress("Snapshotting workbook form", opts.Inspect.Keepalive, func() error {
+				var runErr error
+				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts.Inspect)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			if code != output.ExitSuccess {
+				scriptEnv.Command = "form snapshot"
+				return a.write(scriptEnv, code)
+			}
+			spec, err := excel.FormSpecFromInspectSnapshot(scriptEnv.Forms)
+			if err != nil {
+				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
+			}
+			if err := excel.WriteFormSnapshot(resolvedOutput, spec); err != nil {
+				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
+			}
+			env := output.New("form snapshot")
+			env.Target = scriptEnv.Target
+			env.Session = scriptEnv.Session
+			env.Workbook = scriptEnv.Workbook
+			env.Warnings = scriptEnv.Warnings
+			env.Hints = scriptEnv.Hints
+			env.Output = map[string]any{
+				"path":   resolvedOutput.DisplayPath,
+				"format": resolvedOutput.Format,
+			}
+			formSummary := map[string]any{
+				"name":              spec.Form.Name,
+				"basis":             spec.Basis,
+				"coordinate_system": spec.CoordinateSystem,
+				"control_count":     len(spec.Controls),
+			}
+			if spec.Form.Caption != nil {
+				formSummary["caption"] = *spec.Form.Caption
+			}
+			if spec.Form.Width != nil {
+				formSummary["width"] = *spec.Form.Width
+			}
+			if spec.Form.Height != nil {
+				formSummary["height"] = *spec.Form.Height
+			}
+			env.Forms = formSummary
+			env.Logs = []string{fmt.Sprintf("wrote %s UserForm snapshot for %s to %s", spec.Basis, spec.Form.Name, resolvedOutput.DisplayPath)}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) formExportImageCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var overwrite bool
+	var outPath string
+	var initializer string
+	cmd := &cobra.Command{
+		Use:   "export-image <name>",
+		Short: "Export a runtime UserForm as a PNG image",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormExportImageOptions(args[0], outPath, initializer, overwrite, session, keepalive)
+			if err != nil {
+				return a.writeFailure("form export-image", output.ExitConfig, "form_export_image_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form export-image")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Exporting workbook form image", opts.Keepalive, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormExportImage(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&outPath, "out", "", "write the PNG image to an explicit file path")
+	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method to invoke with ThisWorkbook before capture")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) listFormsCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	cmd := &cobra.Command{
+		Use:   "forms",
+		Short: "List workbook UserForms",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("list", output.ExitConfig, "list_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("list")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Listing workbook forms", keepaliveOpts, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
 				return runErr
 			})
 			if err != nil {
@@ -1856,6 +2034,7 @@ func (a *app) inspectCommand() *cobra.Command {
 	cmd.AddCommand(
 		a.inspectWorkbookCommand(flags),
 		a.inspectSheetsCommand(flags),
+		a.inspectFormCommand(flags),
 		a.inspectRangeCommand(flags),
 		a.inspectUsedRangeCommand(flags),
 		a.inspectCellCommand(flags),
@@ -1882,10 +2061,12 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbook.Path)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "workbook",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbook.Path),
@@ -1919,10 +2100,12 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "sheets",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -1934,6 +2117,77 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+}
+
+func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var runtime bool
+	var designer bool
+	var both bool
+	var initializer string
+	cmd := &cobra.Command{
+		Use:   "form <name>",
+		Short: "Inspect a workbook UserForm through Excel COM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			basis, err := buildInspectFormBasis(runtime, designer, both)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			opts, err := buildInspectFormOptions(args[0], basis, initializer, session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			var scriptEnv output.Envelope
+			var code int
+			err = a.withExcelProgress("Inspecting workbook form", opts.Keepalive, func() error {
+				var runErr error
+				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			if code != output.ExitSuccess {
+				return a.write(scriptEnv, code)
+			}
+			env := output.New("inspect")
+			env.Target = scriptEnv.Target
+			env.Session = scriptEnv.Session
+			env.Workbook = scriptEnv.Workbook
+			env.Warnings = scriptEnv.Warnings
+			env.Hints = scriptEnv.Hints
+			payload := workbookinspect.Payload{
+				Target: "form",
+				Format: format,
+				Source: "excel_com",
+			}
+			if opts.Basis == "both" {
+				payload.Forms = scriptEnv.Forms
+			} else {
+				payload.Form = scriptEnv.Forms
+			}
+			env.Inspect = payload
+			env.Logs = []string{fmt.Sprintf("inspected %s UserForm %s", opts.Basis, opts.Name)}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&runtime, "runtime", false, "inspect the loaded runtime form state")
+	cmd.Flags().BoolVar(&designer, "designer", false, "inspect the design-time VBIDE designer state")
+	cmd.Flags().BoolVar(&both, "both", false, "inspect both runtime and designer state")
+	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method invoked with ThisWorkbook during runtime inspection")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
@@ -1973,9 +2227,11 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			env := output.New("inspect")
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -1993,6 +2249,96 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	return cmd
+}
+
+func buildInspectFormBasis(runtime, designer, both bool) (string, error) {
+	selected := 0
+	if runtime {
+		selected++
+	}
+	if designer {
+		selected++
+	}
+	if both {
+		selected++
+	}
+	if selected == 0 {
+		return "runtime", nil
+	}
+	if selected > 1 {
+		return "", fmt.Errorf("choose only one of --runtime, --designer, or --both")
+	}
+	switch {
+	case runtime:
+		return "runtime", nil
+	case designer:
+		return "designer", nil
+	default:
+		return "both", nil
+	}
+}
+
+func buildInspectFormOptions(name, basis, initializer string, session bool, keepalive keepaliveFlags) (excel.InspectFormOptions, error) {
+	if strings.TrimSpace(name) == "" {
+		return excel.InspectFormOptions{}, fmt.Errorf("form name is required")
+	}
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return excel.InspectFormOptions{}, err
+	}
+	trimmedBasis := strings.ToLower(strings.TrimSpace(basis))
+	if trimmedBasis != "runtime" && trimmedBasis != "designer" && trimmedBasis != "both" {
+		return excel.InspectFormOptions{}, fmt.Errorf("unsupported inspect form basis %q", basis)
+	}
+	trimmedInitializer := strings.TrimSpace(initializer)
+	if trimmedInitializer != "" && trimmedBasis == "designer" {
+		return excel.InspectFormOptions{}, fmt.Errorf("--initializer can only be used with runtime or both inspection")
+	}
+	return excel.InspectFormOptions{
+		Name:        strings.TrimSpace(name),
+		Basis:       trimmedBasis,
+		Initializer: trimmedInitializer,
+		Session:     session,
+		Keepalive:   keepaliveOpts,
+	}, nil
+}
+
+func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
+	inspectOpts, err := buildInspectFormOptions(name, "designer", "", session, keepalive)
+	if err != nil {
+		return formSnapshotCommandOptions{}, err
+	}
+	inspectOpts.StrictDesigner = true
+	trimmedOut := strings.TrimSpace(outPath)
+	if trimmedOut == "" {
+		return formSnapshotCommandOptions{}, fmt.Errorf("--out is required")
+	}
+	return formSnapshotCommandOptions{
+		Inspect: inspectOpts,
+		OutPath: trimmedOut,
+	}, nil
+}
+
+func buildFormExportImageOptions(name, outPath, initializer string, overwrite bool, session bool, keepalive keepaliveFlags) (excel.FormExportImageOptions, error) {
+	if strings.TrimSpace(name) == "" {
+		return excel.FormExportImageOptions{}, fmt.Errorf("form name is required")
+	}
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return excel.FormExportImageOptions{}, err
+	}
+	trimmedOut := strings.TrimSpace(outPath)
+	if trimmedOut == "" {
+		return excel.FormExportImageOptions{}, fmt.Errorf("--out is required")
+	}
+	return excel.FormExportImageOptions{
+		Name:        strings.TrimSpace(name),
+		OutPath:     trimmedOut,
+		Initializer: strings.TrimSpace(initializer),
+		Overwrite:   overwrite,
+		Session:     session,
+		Keepalive:   keepaliveOpts,
+	}, nil
 }
 
 func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command {
@@ -2031,9 +2377,11 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 			}
 			env := output.New("inspect")
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "used-range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2078,10 +2426,12 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
 			env.Session = session
-			env.Warnings = warnings
+			env.Warnings = append(warnings, formWarnings...)
+			env.Hints = formHints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "cell",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2161,6 +2511,51 @@ func inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath string) bo
 		return false
 	}
 	return strings.EqualFold(filepath.Clean(metadata.WorkbookPath), filepath.Clean(workbookPath))
+}
+
+func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string]any, []map[string]any) {
+	names := collectSourceUserFormNames(workbookArgPath(root, cfg.Src.Forms))
+	if len(names) == 0 {
+		return nil, nil
+	}
+	warnings := []map[string]any{{
+		"code":    "userform_inspect_saved_file",
+		"message": fmt.Sprintf("UserForms detected in source (%s). File-based inspect reads the saved workbook and cannot verify live UserForm Designer/runtime state from `.frm` text alone.", strings.Join(names, ", ")),
+	}}
+	hints := []map[string]any{{
+		"code":    "userform_planned_commands",
+		"message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`.",
+	}}
+	return warnings, hints
+}
+
+func collectSourceUserFormNames(formsDir string) []string {
+	if strings.TrimSpace(formsDir) == "" {
+		return nil
+	}
+	names := map[string]struct{}{}
+	_ = filepath.WalkDir(formsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
+			return nil
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))
+		if name != "" {
+			names[name] = struct{}{}
+		}
+		return nil
+	})
+	if len(names) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	slices.Sort(result)
+	return result
 }
 
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {

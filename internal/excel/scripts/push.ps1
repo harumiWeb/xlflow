@@ -33,6 +33,7 @@ try {
     throw "invalid backup mode"
   }
   $sourceFiles = @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)
+  $sourceUserFormNames = @(Get-XlflowSourceUserFormNames -FormsDir $FormsDir)
   $duplicates = @(Find-XlflowDuplicateModuleNames -Files $sourceFiles)
   if ($duplicates.Count -gt 0) {
     $messages = New-Object System.Collections.Generic.List[string]
@@ -55,6 +56,7 @@ try {
     $result.session = New-XlflowSessionResult -Active $false -WorkbookPath $WorkbookPath -Dirty $false -SaveRequired $false -Mode "none"
     $result.backup = [ordered]@{ path = $null; mode = $BackupMode }
     $result.source = [ordered]@{ changed_only = $true; changed = $false; state = $StatePath }
+    Add-XlflowUserFormDiscoveryMessages -Result $result -Names $sourceUserFormNames
     $result.logs = @("source state unchanged; skipped workbook import")
     Write-XlflowJson -Result $result
     exit 0
@@ -136,8 +138,10 @@ try {
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $needsSave -SaveRequired $needsSave -Mode $sessionMode
   $result.backup = [ordered]@{ path = $(if ($BackupMode -eq "always") { $backupDir } else { $null }); mode = $BackupMode }
   $result.source = [ordered]@{ changed_only = (ConvertTo-XlflowBool $ChangedOnly); changed = $true; state = $StatePath }
+  Add-XlflowUserFormDiscoveryMessages -Result $result -Names $sourceUserFormNames
   if ($needsSave) {
     Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Source files were pushed to the live workbook. The workbook file on disk has not been updated yet."
+    Add-XlflowUserFormSessionStaleWarning -Result $result -Names $sourceUserFormNames
   }
   $result.logs = @(
     @(

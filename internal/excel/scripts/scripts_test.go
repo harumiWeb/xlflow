@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -23,6 +25,430 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestFormExportImageScriptValidatesArgsBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-export-image.ps1 -FormName 'UserForm1' -OutputPath 'C:\\temp\\UserForm1.webp' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-export-image output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "unsupported_image_format" {
+		t.Fatalf("expected unsupported_image_format failure, got %+v", got)
+	}
+}
+
+func TestFormExportImageScriptWaitsForCaptureStatusBeforeFallback(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-export-image.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	want := "if (-not [bool]$captureStatus.ready -and [int64]$captureStatus.hwnd -eq 0 -and [string]::IsNullOrWhiteSpace([string]$captureStatus.caption))"
+	if !strings.Contains(text, want) {
+		t.Fatalf("form-export-image.ps1 missing empty-status wait guard %q:\n%s", want, text)
+	}
+}
+
+func trailingJSONLine(out []byte) []byte {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+			return []byte(line)
+		}
+	}
+	return out
+}
+
+func TestInspectFormScriptValidatesBasisBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./inspect-form.ps1 -Basis nope -FormName 'UserForm1' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect-form basis validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse inspect-form output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "inspect_form_args_invalid" {
+		t.Fatalf("expected inspect_form_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "inspect-form.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read inspect-form.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Install-XlflowVBComponentFromCode",
+		"New-XlflowInspectFormModuleName",
+		"New-XlflowInspectRuntimeWorkbookCopy",
+		"SaveCopyAs($tempPath)",
+		"New-XlflowInspectFormModuleCode",
+		"runtime_form_loads_initialize",
+		"runtime_form_temp_copy",
+		"temporary_component_cleanup_failed",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect-form.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "runtime_inspect_session_dirty") {
+		t.Fatalf("inspect-form.ps1 should no longer report live-session dirty mutation for runtime temp-copy inspection:\n%s", text)
+	}
+}
+
+func TestInspectFormScriptDesignerDoesNotRequireRunnableVBA(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`
+$result = [ordered]@{
+	skip = $false
+	skipReason = ''
+	status = ''
+	errorCode = ''
+	types = @()
+}
+
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ('xlflow-inspect-form-designer-' + [guid]::NewGuid().ToString())
+$wbPath = Join-Path $root 'DesignerTypes.xlsm'
+$excel = $null
+$workbook = $null
+
+try {
+	New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+	try {
+		$excel = New-Object -ComObject Excel.Application
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$excel.Visible = $false
+	$excel.DisplayAlerts = $false
+	$workbook = $excel.Workbooks.Add()
+
+	try {
+		$null = $workbook.VBProject
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$component = $workbook.VBProject.VBComponents.Add(3)
+	$component.Name = 'DesignerTypesForm'
+	$designer = $component.Designer
+
+	$brokenModule = $workbook.VBProject.VBComponents.Add(1)
+	$brokenModule.Name = 'BrokenCompileModule'
+	$brokenModule.CodeModule.AddFromString("Option Explicit" + [Environment]::NewLine + "Public Sub Broken()" + [Environment]::NewLine + "  Dim missing As" + [Environment]::NewLine + "End Sub")
+
+	$label = $designer.Controls.Add('Forms.Label.1')
+	$label.Name = 'lblCaption'
+	$label.Caption = 'Designer label'
+
+	$textBox = $designer.Controls.Add('Forms.TextBox.1')
+	$textBox.Name = 'txtValue'
+	$textBox.Text = 'Designer text'
+
+	$workbook.SaveAs($wbPath, 52)
+
+	$inspect = & ./inspect-form.ps1 -Basis designer -FormName 'DesignerTypesForm' -WorkbookPath $wbPath | ConvertFrom-Json
+	$result.status = $inspect.status
+	if ($null -ne $inspect.error) {
+		$result.errorCode = $inspect.error.code
+	}
+	if ($null -ne $inspect.forms -and $null -ne $inspect.forms.controls) {
+		$result.types = @($inspect.forms.controls | ForEach-Object { [string]$_.name })
+	}
+
+	$result | ConvertTo-Json -Compress
+} catch {
+	$result.skip = $false
+	$result.skipReason = ''
+	$result.status = 'command_failed'
+	$result.errorCode = $_.Exception.Message
+	$result | ConvertTo-Json -Compress
+	exit 1
+} finally {
+	if ($null -ne $workbook) {
+		try { $workbook.Close($false) | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+	}
+	if ($null -ne $excel) {
+		try { $excel.Quit() | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+	}
+	[GC]::Collect()
+	[GC]::WaitForPendingFinalizers()
+	if (Test-Path -LiteralPath $root) {
+		Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+	}
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect-form designer compile-tolerance check failed: %v\n%s", err, out)
+	}
+
+	var got struct {
+		Skip       bool     `json:"skip"`
+		SkipReason string   `json:"skipReason"`
+		Status     string   `json:"status"`
+		ErrorCode  string   `json:"errorCode"`
+		Types      []string `json:"types"`
+	}
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
+		t.Fatalf("failed to parse inspect-form designer output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("expected inspect-form designer status ok, got %+v", got)
+	}
+	want := []string{"lblCaption", "txtValue"}
+	if !reflect.DeepEqual(got.Types, want) {
+		t.Fatalf("designer control names = %#v, want %#v", got.Types, want)
+	}
+}
+
+func TestInspectFormScriptStrictDesignerReturnsConcreteControlTypes(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`
+$result = [ordered]@{
+	skip = $false
+	skipReason = ''
+	status = ''
+	errorCode = ''
+	types = @()
+}
+
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ('xlflow-inspect-form-strict-designer-' + [guid]::NewGuid().ToString())
+$wbPath = Join-Path $root 'DesignerTypes.xlsm'
+$excel = $null
+$workbook = $null
+
+try {
+	New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+	try {
+		$excel = New-Object -ComObject Excel.Application
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$excel.Visible = $false
+	$excel.DisplayAlerts = $false
+	$workbook = $excel.Workbooks.Add()
+
+	try {
+		$null = $workbook.VBProject
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$component = $workbook.VBProject.VBComponents.Add(3)
+	$component.Name = 'DesignerTypesForm'
+	$designer = $component.Designer
+
+	$label = $designer.Controls.Add('Forms.Label.1')
+	$label.Name = 'lblCaption'
+	$label.Caption = 'Designer label'
+
+	$textBox = $designer.Controls.Add('Forms.TextBox.1')
+	$textBox.Name = 'txtValue'
+	$textBox.Text = 'Designer text'
+
+	$workbook.SaveAs($wbPath, 52)
+
+	$inspect = & ./inspect-form.ps1 -Basis designer -StrictDesigner true -FormName 'DesignerTypesForm' -WorkbookPath $wbPath | ConvertFrom-Json
+	$result.status = $inspect.status
+	if ($null -ne $inspect.error) {
+		$result.errorCode = $inspect.error.code
+	}
+	if ($null -ne $inspect.forms -and $null -ne $inspect.forms.controls) {
+		$result.types = @($inspect.forms.controls | ForEach-Object { [string]$_.type })
+	}
+
+	$result | ConvertTo-Json -Compress
+} catch {
+	$result.skip = $false
+	$result.skipReason = ''
+	$result.status = 'command_failed'
+	$result.errorCode = $_.Exception.Message
+	$result | ConvertTo-Json -Compress
+	exit 1
+} finally {
+	if ($null -ne $workbook) {
+		try { $workbook.Close($false) | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+	}
+	if ($null -ne $excel) {
+		try { $excel.Quit() | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+	}
+	[GC]::Collect()
+	[GC]::WaitForPendingFinalizers()
+	if (Test-Path -LiteralPath $root) {
+		Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+	}
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect-form strict designer concrete type check failed: %v\n%s", err, out)
+	}
+
+	var got struct {
+		Skip       bool     `json:"skip"`
+		SkipReason string   `json:"skipReason"`
+		Status     string   `json:"status"`
+		ErrorCode  string   `json:"errorCode"`
+		Types      []string `json:"types"`
+	}
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
+		t.Fatalf("failed to parse strict designer output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("expected strict designer status ok, got %+v", got)
+	}
+	want := []string{"Label", "TextBox"}
+	if !reflect.DeepEqual(got.Types, want) {
+		t.Fatalf("strict designer control types = %#v, want %#v", got.Types, want)
+	}
+}
+
+func TestCommonScriptInstallVBComponentRefusesToReplaceExistingComponent(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "common.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"function Get-XlflowVBComponentByName",
+		"VBA component '\" + $Name + \"' already exists.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "[void](Remove-XlflowVBComponentByName -VBProject $VBProject -Name $Name)") {
+		t.Fatalf("Install-XlflowVBComponentFromCode should not blindly remove existing components:\n%s", text)
+	}
+}
+
+func TestListScriptValidatesActionBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./list.ps1 -Action nope -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list action validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse list output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "list_args_invalid" {
+		t.Fatalf("expected list_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestListScriptUsesFormComponentPathAndPortableRelativePaths(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "list.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read list.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Get-XlflowComponentPath -Component $component",
+		"ConvertTo-XlflowPortableRelativePath",
+		"component_type = \"MSForm\"",
+		"Get-XlflowUserFormComponents -Workbook $workbook",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("list.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestListScriptPreservesSaveRequiredWarningOnFailurePaths(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "list.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read list.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"function Add-XlflowListSaveRequiredWarning",
+		"Add-XlflowListSaveRequiredWarning -Result $result -SaveState $saveState",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("list.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if count := strings.Count(text, "Add-XlflowListSaveRequiredWarning -Result $result -SaveState $saveState"); count < 3 {
+		t.Fatalf("expected save-required warning helper on success and failure paths, found %d:\n%s", count, text)
 	}
 }
 
@@ -418,6 +844,88 @@ func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
 	}
 }
 
+func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Install-XlflowVBComponentFromCode",
+		"New-XlflowFormExportRuntimeWorkbookCopy",
+		"SaveCopyAs($tempPath)",
+		"XlflowPrepareFormImageCapture",
+		"Invoke-XlflowExcelCallWithDialogWatch",
+		`DialogKind "any_vba"`,
+		"XlflowFindFormWindowHandle",
+		"Resolve-XlflowFormImageCaptureWindow",
+		"Wait-XlflowFormImageCaptureWindow",
+		"[XlflowNativeMethods]::PrintWindow",
+		"CopyFromScreen",
+		"runtime_form_loads_initialize",
+		"runtime_form_temp_copy",
+		"userform_image_export_experimental",
+		"temporary_component_cleanup_failed",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptMapsPrepareFailuresToValidationCodes(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`XlflowFormImageCapture.capture_prepare`,
+		`return "runtime_form_load_failed"`,
+		`return "vba_compile_failed"`,
+		`Set-XlflowFormExportDialogFailure`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptNormalizesOverwriteTempParentForCurrentDirectory(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$tempParent = $outputParent`,
+		`if ([string]::IsNullOrWhiteSpace($tempParent))`,
+		`$tempParent = (Get-Location).ProviderPath`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnyVbaDialogWatcherDoesNotFallbackToFirstButtonForCompileDialogs(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`param(`,
+		`[string]$MatchedKind = ""`,
+		`if ($MatchedKind -eq "compile")`,
+		`Test-XlflowAllowDialogFirstButtonFallback -DialogKind $DialogKind -MatchedKind $matchedKind`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestInvokeXlflowExcelCallWithDialogWatchUsesShortPostInvokeWait(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -560,6 +1068,12 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
 		t.Fatalf("push.ps1 should preserve the non-session unchanged-disk log:\n%s", text)
 	}
+	if !strings.Contains(text, "Get-XlflowSourceUserFormNames") {
+		t.Fatalf("push.ps1 should inspect source UserForms during Phase 1 warnings:\n%s", text)
+	}
+	if !strings.Contains(text, "Add-XlflowUserFormSessionStaleWarning") {
+		t.Fatalf("push.ps1 should emit the UserForm stale-session warning for no-save pushes:\n%s", text)
+	}
 }
 
 func TestPullScriptClearsSourcesOnlyAfterWorkbookOpen(t *testing.T) {
@@ -575,6 +1089,20 @@ func TestPullScriptClearsSourcesOnlyAfterWorkbookOpen(t *testing.T) {
 	}
 	if clearIdx < openIdx {
 		t.Fatalf("pull.ps1 clears exported sources before opening the workbook, which can destroy the source tree on open failure:\n%s", text)
+	}
+}
+
+func TestPullScriptTreatsUserFormInspectionAsBestEffort(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(".", "pull.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "failed to inspect UserForms during pull") {
+		t.Fatalf("pull.ps1 should swallow auxiliary UserForm inspection failures:\n%s", text)
+	}
+	if !strings.Contains(text, "$userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)") {
+		t.Fatalf("pull.ps1 should still collect UserForm names when available:\n%s", text)
 	}
 }
 
@@ -878,6 +1406,9 @@ func TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired(t *testing.T) {
 	if !strings.Contains(text, "$needsSave = $running -and $open -and (($null -eq $dirty) -or [bool]$dirty)") {
 		t.Fatalf("session.ps1 should conservatively treat unknown dirty state as save-required:\n%s", text)
 	}
+	if !strings.Contains(text, "Get-XlflowUserFormNames -Workbook $workbook") {
+		t.Fatalf("session.ps1 should probe workbook UserForms on a best-effort basis:\n%s", text)
+	}
 }
 
 func TestMacrosScriptVBIDEAccessDenialStillIncludesTargetAndSession(t *testing.T) {
@@ -1070,6 +1601,88 @@ try {
 	}
 	if got.Source != got.Copied {
 		t.Fatalf("expected .frx bytes to be copied unchanged, got source=%q copied=%q", got.Source, got.Copied)
+	}
+}
+
+func TestGetXlflowSourceUserFormNamesFindsRecursiveFrmFiles(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  $formsDir = Join-Path $root 'src\forms'
+  $nestedDir = Join-Path $formsDir 'Nested'
+  New-Item -ItemType Directory -Force -Path $nestedDir | Out-Null
+  Set-Content -LiteralPath (Join-Path $formsDir 'UserForm1.frm') -Value 'VERSION 5.00' -Encoding UTF8
+  Set-Content -LiteralPath (Join-Path $nestedDir 'UserForm2.frm') -Value 'VERSION 5.00' -Encoding UTF8
+  [ordered]@{ names = @(Get-XlflowSourceUserFormNames -FormsDir $formsDir) } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceUserFormNames failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse source UserForm names: %v\n%s", err, out)
+	}
+	sort.Strings(got.Names)
+	if want := []string{"UserForm1", "UserForm2"}; !reflect.DeepEqual(got.Names, want) {
+		t.Fatalf("names = %#v, want %#v", got.Names, want)
+	}
+}
+
+func TestAddXlflowUserFormMessagesAddsDiscoveryAndStaleWarnings(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$result = New-XlflowResult -Command 'push'
+Add-XlflowUserFormDiscoveryMessages -Result $result -Names @('CustomerForm', 'OrderForm')
+Add-XlflowUserFormSessionStaleWarning -Result $result -Names @('CustomerForm', 'OrderForm')
+$result | ConvertTo-Json -Depth 6 -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("userform message helpers failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Warnings []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"warnings"`
+		Hints []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"hints"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse userform message helper output: %v\n%s", err, out)
+	}
+	if len(got.Warnings) != 2 {
+		t.Fatalf("warnings = %#v", got.Warnings)
+	}
+	if got.Warnings[0].Code != "userform_state_partial" || !strings.Contains(got.Warnings[0].Message, "CustomerForm, OrderForm") {
+		t.Fatalf("discovery warning = %#v", got.Warnings[0])
+	}
+	if got.Warnings[1].Code != "userform_unsaved_session_state" {
+		t.Fatalf("stale warning = %#v", got.Warnings[1])
+	}
+	if len(got.Hints) != 1 || got.Hints[0].Code != "userform_planned_commands" {
+		t.Fatalf("hints = %#v", got.Hints)
 	}
 }
 

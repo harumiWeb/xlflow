@@ -29,6 +29,12 @@ try {
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
   $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+  $userFormNames = @()
+  try {
+    $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+  } catch {
+    Write-Verbose ("failed to inspect UserForms during pull: " + $_.Exception.Message)
+  }
 
   Clear-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
 
@@ -61,6 +67,7 @@ try {
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
   $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+  Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
   if ($saveState.needs_save) {
     Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `pull` exported from the live workbook."
   }

@@ -43,6 +43,7 @@ type Envelope struct {
 	Bridge        any `json:"bridge,omitempty"`
 	Macro         any `json:"macro,omitempty"`
 	Macros        any `json:"macros,omitempty"`
+	Forms         any `json:"forms,omitempty"`
 	Issues        any `json:"issues,omitempty"`
 	Tests         any `json:"tests,omitempty"`
 	Diff          any `json:"diff,omitempty"`
@@ -210,6 +211,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderGUIBoundaries(env))
 	case "macros":
 		b.WriteString(r.renderMacros(env))
+	case "list":
+		b.WriteString(r.renderList(env))
 	case "session":
 		b.WriteString(r.renderSession(env))
 	case "save":
@@ -224,6 +227,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTraceCommand(env))
 	case "export-image":
 		b.WriteString(r.renderExportImage(env))
+	case "form export-image":
+		b.WriteString(r.renderFormExportImage(env))
+	case "form snapshot":
+		b.WriteString(r.renderFormSnapshot(env))
 	case "edit":
 		b.WriteString(r.renderEdit(env))
 	case "pull", "push", "attach":
@@ -691,6 +698,51 @@ func (r renderer) renderMacros(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderList(env Envelope) string {
+	forms := listOfObjects(env.Forms)
+	workbook := objectMap(env.Workbook)
+	if env.Forms == nil && len(workbook) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if env.Forms == nil {
+		b.WriteString(kv("Forms", "unavailable"))
+	} else {
+		b.WriteString(kv("Forms", fmt.Sprintf("%d", len(forms))))
+	}
+	for _, form := range forms {
+		name := stringValue(form, "name")
+		if name == "" {
+			continue
+		}
+		details := []string{}
+		if value, ok := boolValueOK(form, "has_frx"); ok && value {
+			details = append(details, "has .frx")
+		}
+		if path := stringValue(form, "source_path"); path != "" {
+			details = append(details, path)
+		}
+		if len(details) == 0 {
+			fmt.Fprintf(&b, "- %s\n", name)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s (%s)\n", name, strings.Join(details, ", "))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
 func (r renderer) renderWorkbookSource(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	backup := objectMap(env.Backup)
@@ -815,6 +867,110 @@ func (r renderer) renderExportImage(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderFormSnapshot(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	form := objectMap(env.Forms)
+	outputPayload := objectMap(env.Output)
+	if len(workbook) == 0 && len(target) == 0 && len(form) == 0 && len(outputPayload) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Snapshot target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if name := stringValue(form, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if basis := stringValue(form, "basis"); basis != "" {
+		b.WriteString(kv("Basis", basis))
+	}
+	if caption := stringValue(form, "caption"); caption != "" {
+		b.WriteString(kv("Caption", caption))
+	}
+	if coord := stringValue(form, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	if count, ok := numberValue(form, "control_count"); ok {
+		b.WriteString(kv("Controls", fmt.Sprintf("%d", int(count))))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if path := stringValue(outputPayload, "path"); path != "" {
+		b.WriteString(kv("Output", path))
+	}
+	if format := stringValue(outputPayload, "format"); format != "" {
+		b.WriteString(kv("Format", strings.ToUpper(format)))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderFormExportImage(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	form := objectMap(env.Forms)
+	outputPayload := objectMap(env.Output)
+	if len(workbook) == 0 && len(target) == 0 && len(form) == 0 && len(outputPayload) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Export target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if name := stringValue(form, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	} else if name := stringValue(target, "form"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if basis := stringValue(form, "basis"); basis != "" {
+		b.WriteString(kv("Basis", basis))
+	}
+	if initializer := stringValue(form, "initializer"); initializer != "" {
+		b.WriteString(kv("Initializer", initializer))
+	}
+	if captureState := stringValue(target, "capture_state"); captureState != "" {
+		b.WriteString(kv("Capture", captureState))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	if path := stringValue(outputPayload, "path"); path != "" {
+		b.WriteString(kv("Output", path))
+	}
+	if format := stringValue(outputPayload, "format"); format != "" {
+		b.WriteString(kv("Format", strings.ToUpper(format)))
+	}
+	if width, ok := numberValue(outputPayload, "width_px"); ok {
+		if height, ok := numberValue(outputPayload, "height_px"); ok {
+			b.WriteString(kv("Size", fmt.Sprintf("%d x %d px", int(width), int(height))))
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
 func (r renderer) renderEdit(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	target := objectMap(env.Target)
@@ -923,6 +1079,8 @@ func (r renderer) renderInspect(env Envelope) string {
 		return r.renderInspectWorkbook(env, payload)
 	case "sheets":
 		return r.renderInspectSheets(env, payload)
+	case "form":
+		return r.renderInspectForm(env, payload)
 	case "range", "used-range":
 		return r.renderInspectRange(env, payload)
 	case "cell":
@@ -1060,6 +1218,36 @@ func (r renderer) renderInspectCell(env Envelope, payload map[string]any) string
 	return b.String()
 }
 
+func (r renderer) renderInspectForm(env Envelope, payload map[string]any) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
+	b.WriteString(renderInspectTargetInfo(payload))
+	if form := objectMap(payload["form"]); len(form) > 0 {
+		b.WriteString(renderInspectFormSnapshot(form, ""))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
+	}
+	forms := objectMap(payload["forms"])
+	if len(forms) == 0 {
+		b.WriteString(kv("Forms", "unavailable"))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
+	}
+	for _, basis := range []string{"runtime", "designer"} {
+		snapshot := objectMap(forms[basis])
+		if len(snapshot) == 0 {
+			continue
+		}
+		if b.Len() > 1 {
+			b.WriteString("\n")
+		}
+		b.WriteString(renderInspectFormSnapshot(snapshot, basis))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
 func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) string {
 	switch stringValue(payload, "target") {
 	case "workbook":
@@ -1149,9 +1337,148 @@ func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) st
 			{"Value", emptyDash(stringValue(cell, "value"))},
 		}
 		return prefix + markdownTable([]string{"Field", "Value"}, rows) + renderWarningsAndHintsMarkdown(env)
+	case "form":
+		var b strings.Builder
+		b.WriteString(renderInspectTargetSessionMarkdown(env))
+		if info := renderInspectTargetInfoMarkdown(payload); info != "" {
+			b.WriteString(info)
+		}
+		if form := objectMap(payload["form"]); len(form) > 0 {
+			b.WriteString(markdownInspectFormSnapshot(form, ""))
+			b.WriteString(renderWarningsAndHintsMarkdown(env))
+			return b.String()
+		}
+		forms := objectMap(payload["forms"])
+		for _, basis := range []string{"runtime", "designer"} {
+			snapshot := objectMap(forms[basis])
+			if len(snapshot) == 0 {
+				continue
+			}
+			b.WriteString(markdownInspectFormSnapshot(snapshot, basis))
+		}
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
+		return b.String()
 	default:
 		return ""
 	}
+}
+
+func renderInspectFormSnapshot(snapshot map[string]any, heading string) string {
+	var b strings.Builder
+	label := stringValue(snapshot, "basis")
+	if heading != "" {
+		label = heading
+	}
+	if label != "" {
+		b.WriteString(kv("Basis", label))
+	}
+	if name := stringValue(snapshot, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if caption := stringValue(snapshot, "caption"); caption != "" {
+		b.WriteString(kv("Caption", caption))
+	}
+	if width, ok := numberValue(snapshot, "width"); ok {
+		if height, okHeight := numberValue(snapshot, "height"); okHeight {
+			b.WriteString(kv("Size", fmt.Sprintf("%.0f x %.0f", width, height)))
+		}
+	}
+	if coord := stringValue(snapshot, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	controls := listOfObjects(snapshot["controls"])
+	b.WriteString(kv("Controls", fmt.Sprintf("%d", len(controls))))
+	for _, control := range controls {
+		renderInspectControlLine(&b, control, 0)
+	}
+	return b.String()
+}
+
+func renderInspectControlLine(b *strings.Builder, control map[string]any, depth int) {
+	indent := strings.Repeat("  ", depth)
+	name := stringValue(control, "name")
+	kind := stringValue(control, "type")
+	summary := inspectControlSummary(control)
+	if name == "" {
+		name = "<unnamed>"
+	}
+	line := fmt.Sprintf("%s- %s [%s]", indent, name, kind)
+	if summary != "" {
+		line += " " + summary
+	}
+	b.WriteString(line)
+	b.WriteString("\n")
+	for _, child := range listOfObjects(control["controls"]) {
+		renderInspectControlLine(b, child, depth+1)
+	}
+}
+
+func inspectControlSummary(control map[string]any) string {
+	parts := make([]string, 0, 4)
+	if caption := stringValue(control, "caption"); caption != "" {
+		parts = append(parts, "caption="+caption)
+	}
+	if value := stringValue(control, "value"); value != "" {
+		parts = append(parts, "value="+value)
+	}
+	if text := stringValue(control, "text"); text != "" && text != stringValue(control, "value") {
+		parts = append(parts, "text="+text)
+	}
+	if left, ok := numberValue(control, "left"); ok {
+		if top, okTop := numberValue(control, "top"); okTop {
+			parts = append(parts, fmt.Sprintf("@ %.0f,%.0f", left, top))
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+func markdownInspectFormSnapshot(snapshot map[string]any, heading string) string {
+	var b strings.Builder
+	label := stringValue(snapshot, "basis")
+	if heading != "" {
+		label = heading
+	}
+	if label != "" {
+		b.WriteString("Basis: ")
+		b.WriteString(label)
+		b.WriteString("\n")
+	}
+	rows := [][]string{
+		{"Form", stringValue(snapshot, "name")},
+		{"Caption", stringValue(snapshot, "caption")},
+		{"Coordinates", stringValue(snapshot, "coordinate_system")},
+		{"Controls", fmt.Sprintf("%d", len(listOfObjects(snapshot["controls"])))},
+	}
+	if width, ok := numberValue(snapshot, "width"); ok {
+		if height, okHeight := numberValue(snapshot, "height"); okHeight {
+			rows = append(rows, []string{"Size", fmt.Sprintf("%.0f x %.0f", width, height)})
+		}
+	}
+	b.WriteString(markdownTable([]string{"Field", "Value"}, rows))
+	controls := flattenInspectControls(listOfObjects(snapshot["controls"]), 0)
+	if len(controls) > 0 {
+		b.WriteString("\n")
+		b.WriteString(markdownTable([]string{"Control", "Type", "Summary"}, controls))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func flattenInspectControls(controls []map[string]any, depth int) [][]string {
+	rows := make([][]string, 0, len(controls))
+	for _, control := range controls {
+		name := stringValue(control, "name")
+		if name == "" {
+			name = "<unnamed>"
+		}
+		rows = append(rows, []string{
+			strings.Repeat("  ", depth) + name,
+			stringValue(control, "type"),
+			inspectControlSummary(control),
+		})
+		rows = append(rows, flattenInspectControls(listOfObjects(control["controls"]), depth+1)...)
+	}
+	return rows
 }
 
 func renderInspectTargetInfo(payload map[string]any) string {

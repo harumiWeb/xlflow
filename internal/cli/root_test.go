@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -153,6 +154,26 @@ func TestVersionCommandVerboseIncludesExecutableAndFeatures(t *testing.T) {
 	}
 }
 
+func TestResolvedVersionScriptsIncludesNewUserFormScripts(t *testing.T) {
+	scripts := resolvedVersionScripts(t.TempDir())
+	names := make([]string, 0, len(scripts))
+	for _, script := range scripts {
+		names = append(names, script.Command)
+	}
+	for _, want := range []string{"list", "inspect-form", "form-export-image"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("resolvedVersionScripts missing %q in %#v", want, names)
+		}
+	}
+}
+
 func TestRootCommandIncludesRunFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -230,6 +251,7 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"new"},
 		{"doctor"},
 		{"attach"},
+		{"list", "forms"},
 		{"pull"},
 		{"push"},
 		{"export-image"},
@@ -379,6 +401,7 @@ func TestRootCommandIncludesInspectSubcommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"inspect", "workbook"},
 		{"inspect", "sheets"},
+		{"inspect", "form"},
 		{"inspect", "range"},
 		{"inspect", "used-range"},
 		{"inspect", "cell"},
@@ -458,6 +481,7 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 	for _, args := range [][]string{
+		{"list", "forms"},
 		{"pull"},
 		{"export-image"},
 		{"test"},
@@ -472,6 +496,81 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		}
 		if cmd.Flags().Lookup("session") == nil {
 			t.Fatalf("expected %v command to define --session", args)
+		}
+	}
+}
+
+func TestRootCommandIncludesListFormsCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"list", "forms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "forms" {
+		t.Fatalf("expected list forms command, got %#v", cmd)
+	}
+	for _, name := range []string{"session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected list forms command to define --%s", name)
+		}
+	}
+}
+
+func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "snapshot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "snapshot" {
+		t.Fatalf("expected form snapshot command, got %#v", cmd)
+	}
+	for _, name := range []string{"out", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form snapshot command to define --%s", name)
+		}
+	}
+	if cmd.Flags().Lookup("designer") != nil {
+		t.Fatal("form snapshot command should not expose --designer")
+	}
+}
+
+func TestRootCommandIncludesFormExportImageCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "export-image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "export-image" {
+		t.Fatalf("expected form export-image command, got %#v", cmd)
+	}
+	for _, name := range []string{"out", "initializer", "overwrite", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form export-image command to define --%s", name)
+		}
+	}
+}
+
+func TestRootCommandIncludesInspectFormCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"inspect", "form"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "form" {
+		t.Fatalf("expected inspect form command, got %#v", cmd)
+	}
+	for _, name := range []string{"runtime", "designer", "both", "initializer", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected inspect form command to define --%s", name)
 		}
 	}
 }
@@ -570,6 +669,56 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 	_, err = buildExportImageOptions("", "QR", "A1:B2", "", "", "qr\x1fdemo", "png", false, false, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "invalid Windows characters") {
 		t.Fatalf("expected control-character validation error, got %v", err)
+	}
+}
+
+func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Inspect.Name != "UserForm1" || opts.Inspect.Basis != "designer" {
+		t.Fatalf("inspect opts = %#v", opts.Inspect)
+	}
+	if !opts.Inspect.StrictDesigner {
+		t.Fatalf("expected strict designer snapshot opts = %#v", opts.Inspect)
+	}
+	if !opts.Inspect.Session || !opts.Inspect.Keepalive.Keepalive || opts.Inspect.Keepalive.KeepaliveInterval != 7*time.Second {
+		t.Fatalf("keepalive/session opts = %#v", opts.Inspect)
+	}
+	if opts.OutPath != "artifacts\\UserForm1.form.yaml" {
+		t.Fatalf("out path = %q", opts.OutPath)
+	}
+}
+
+func TestBuildFormSnapshotOptionsRejectsMissingRequirements(t *testing.T) {
+	if _, err := buildFormSnapshotOptions("UserForm1", "", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+		t.Fatalf("expected out requirement error, got %v", err)
+	}
+	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+		t.Fatalf("expected form name error, got %v", err)
+	}
+}
+
+func TestBuildFormExportImageOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildFormExportImageOptions(" UserForm1 ", " artifacts\\UserForm1.png ", " InitializeForm ", true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Name != "UserForm1" || opts.OutPath != "artifacts\\UserForm1.png" || opts.Initializer != "InitializeForm" {
+		t.Fatalf("unexpected form export-image opts: %#v", opts)
+	}
+	if !opts.Overwrite || !opts.Session || !opts.Keepalive.Keepalive || opts.Keepalive.KeepaliveInterval != 7*time.Second {
+		t.Fatalf("unexpected keepalive/session opts: %#v", opts)
+	}
+}
+
+func TestBuildFormExportImageOptionsRejectsMissingRequirements(t *testing.T) {
+	if _, err := buildFormExportImageOptions("", "artifacts\\UserForm1.png", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+		t.Fatalf("expected form name error, got %v", err)
+	}
+	if _, err := buildFormExportImageOptions("UserForm1", "", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+		t.Fatalf("expected out requirement error, got %v", err)
 	}
 }
 
@@ -1048,6 +1197,51 @@ func TestBuildInspectCellSelectorRejectsInvalidAddressSyntax(t *testing.T) {
 	}
 }
 
+func TestCollectSourceUserFormNamesFindsRecursiveFrmFiles(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms", "Nested")
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "CustomerForm.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "OrderForm.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "OrderForm.frx"), []byte{0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectSourceUserFormNames(filepath.Join(dir, "src", "forms"))
+	want := []string{"CustomerForm", "OrderForm"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("collectSourceUserFormNames() = %#v, want %#v", got, want)
+	}
+}
+
+func TestInspectSourceUserFormMessagesReturnsWarningAndHint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := os.MkdirAll(filepath.Join(dir, cfg.Src.Forms), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, cfg.Src.Forms, "UserForm1.frm"), []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	warnings, hints := inspectSourceUserFormMessages(dir, cfg)
+	if len(warnings) != 1 || warnings[0]["code"] != "userform_inspect_saved_file" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if got := fmt.Sprint(warnings[0]["message"]); !strings.Contains(got, "UserForm1") {
+		t.Fatalf("warning message = %q", got)
+	}
+	if len(hints) != 1 || hints[0]["code"] != "userform_planned_commands" {
+		t.Fatalf("hints = %#v", hints)
+	}
+}
+
 func TestDiffCommandReturnsSuccessWhenDifferencesExist(t *testing.T) {
 	dir := t.TempDir()
 	beforePath := filepath.Join(dir, "before.xlsx")
@@ -1223,6 +1417,88 @@ func TestInspectWorkbookJSONIncludesTargetAndSessionState(t *testing.T) {
 	}
 	if _, ok := got.Inspect["target_info"].(map[string]any); !ok {
 		t.Fatalf("inspect target_info missing: %s", stdout.String())
+	}
+}
+
+func TestBuildInspectFormBasisDefaultsToRuntime(t *testing.T) {
+	got, err := buildInspectFormBasis(false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "runtime" {
+		t.Fatalf("basis = %q, want runtime", got)
+	}
+}
+
+func TestBuildInspectFormBasisRejectsConflictingModes(t *testing.T) {
+	_, err := buildInspectFormBasis(true, true, false)
+	if err == nil || !strings.Contains(err.Error(), "choose only one") {
+		t.Fatalf("expected conflicting mode error, got %v", err)
+	}
+}
+
+func TestBuildInspectFormOptionsRejectsInitializerForDesigner(t *testing.T) {
+	_, err := buildInspectFormOptions("UserForm1", "designer", "InitializeForm", false, keepaliveFlags{})
+	if err == nil || !strings.Contains(err.Error(), "--initializer can only be used") {
+		t.Fatalf("expected initializer validation error, got %v", err)
+	}
+}
+
+func TestInspectFormCommandUsesInspectFormArgsInvalidCode(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    t.TempDir(),
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "form", "UserForm1", "--designer", "--initializer", "InitializeForm"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse inspect form error output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "inspect_form_args_invalid" {
+		t.Fatalf("unexpected inspect form error payload: %+v", got)
+	}
+}
+
+func TestFormSnapshotCommandUsesFormSnapshotArgsInvalidCode(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    t.TempDir(),
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "snapshot", "UserForm1", "--out", "artifacts\\UserForm1.form.txt"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form snapshot error output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "form_snapshot_args_invalid" {
+		t.Fatalf("unexpected form snapshot error payload: %+v", got)
 	}
 }
 

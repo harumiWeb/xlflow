@@ -79,6 +79,15 @@ type ExportImageOptions struct {
 	Keepalive    CommandOptions
 }
 
+type FormExportImageOptions struct {
+	Name        string
+	OutPath     string
+	Initializer string
+	Overwrite   bool
+	Session     bool
+	Keepalive   CommandOptions
+}
+
 type EditEventMode string
 
 const (
@@ -132,6 +141,15 @@ type SessionCommandOptions struct {
 	Keepalive CommandOptions
 }
 
+type InspectFormOptions struct {
+	Name           string
+	Basis          string
+	Initializer    string
+	StrictDesigner bool
+	Session        bool
+	Keepalive      CommandOptions
+}
+
 type SessionOptions struct {
 	Action string
 }
@@ -178,6 +196,7 @@ type ScriptResult struct {
 	Bridge        any           `json:"bridge,omitempty"`
 	Macro         any           `json:"macro,omitempty"`
 	Macros        any           `json:"macros,omitempty"`
+	Forms         any           `json:"forms,omitempty"`
 	Tests         any           `json:"tests,omitempty"`
 	Trace         any           `json:"trace,omitempty"`
 	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
@@ -479,6 +498,131 @@ func (r Runner) MacrosWithOptions(cfg config.Config, opts SessionCommandOptions)
 		"UseSession":   strconv.FormatBool(opts.Session),
 		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
+}
+
+func (r Runner) ListForms(cfg config.Config, opts SessionCommandOptions) (output.Envelope, int, error) {
+	return r.run("list", buildListFormsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
+func (r Runner) InspectForm(cfg config.Config, opts InspectFormOptions) (output.Envelope, int, error) {
+	env, code, err := r.run("inspect-form", buildInspectFormScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	env.Command = "inspect"
+	return env, code, err
+}
+
+func (r Runner) FormExportImage(cfg config.Config, opts FormExportImageOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildFormExportImageScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := formExportImageArgFailure(err)
+		return output.Failure("form export-image", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	env, code, runErr := r.run("form-export-image", scriptArgs, opts.Keepalive)
+	env.Command = "form export-image"
+	return env, code, runErr
+}
+
+func buildListFormsScriptArgs(root string, cfg config.Config, opts SessionCommandOptions) map[string]string {
+	return map[string]string{
+		"Action":                  "forms",
+		"WorkbookPath":            workbookPath(root, cfg.Excel.Path),
+		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
+		"ModulesDir":              filepath.Join(root, cfg.Src.Modules),
+		"ClassesDir":              filepath.Join(root, cfg.Src.Classes),
+		"WorkbookDir":             filepath.Join(root, cfg.Src.Workbook),
+		"ProjectRoot":             root,
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+	}
+}
+
+func buildInspectFormScriptArgs(root string, cfg config.Config, opts InspectFormOptions) map[string]string {
+	return map[string]string{
+		"WorkbookPath":   workbookPath(root, cfg.Excel.Path),
+		"Visible":        strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":     strconv.FormatBool(opts.Session),
+		"MetadataPath":   filepath.Join(root, ".xlflow", "session.json"),
+		"FormName":       opts.Name,
+		"Basis":          opts.Basis,
+		"StrictDesigner": strconv.FormatBool(opts.StrictDesigner),
+		"Initializer":    opts.Initializer,
+	}
+}
+
+type formExportImageResolvedOutput struct {
+	Path string
+}
+
+type formExportImageArgError struct {
+	code     string
+	message  string
+	exitCode int
+}
+
+func (e formExportImageArgError) Error() string {
+	return e.message
+}
+
+func formExportImageArgFailure(err error) (string, int) {
+	var argErr formExportImageArgError
+	if errors.As(err, &argErr) {
+		return argErr.code, argErr.exitCode
+	}
+	return "form_export_image_args_invalid", output.ExitConfig
+}
+
+func buildFormExportImageScriptArgs(root string, cfg config.Config, opts FormExportImageOptions) (map[string]string, error) {
+	resolvedOutput, err := resolveFormExportImageOutput(root, opts)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"FormName":     opts.Name,
+		"OutputPath":   resolvedOutput.Path,
+		"Overwrite":    strconv.FormatBool(opts.Overwrite),
+		"Initializer":  opts.Initializer,
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}, nil
+}
+
+func resolveFormExportImageOutput(root string, opts FormExportImageOptions) (formExportImageResolvedOutput, error) {
+	if strings.TrimSpace(opts.OutPath) == "" {
+		return formExportImageResolvedOutput{}, formExportImageArgError{
+			code:     "form_export_image_args_invalid",
+			message:  "output path is required",
+			exitCode: output.ExitConfig,
+		}
+	}
+	trimmed := strings.TrimSpace(opts.OutPath)
+	if filepath.Ext(trimmed) == "" {
+		return formExportImageResolvedOutput{}, formExportImageArgError{
+			code:     "unsupported_image_format",
+			message:  `unsupported image format ""; supported formats: png`,
+			exitCode: output.ExitValidation,
+		}
+	}
+	path, format, err := normalizeExportImagePath(root, opts.OutPath, "png")
+	if err != nil {
+		var exportErr exportImageArgError
+		if errors.As(err, &exportErr) {
+			return formExportImageResolvedOutput{}, formExportImageArgError(exportErr)
+		}
+		return formExportImageResolvedOutput{}, err
+	}
+	if format != "png" {
+		return formExportImageResolvedOutput{}, formExportImageArgError{
+			code:     "unsupported_image_format",
+			message:  fmt.Sprintf("unsupported image format %q; supported formats: png", format),
+			exitCode: output.ExitValidation,
+		}
+	}
+	return formExportImageResolvedOutput{Path: path}, nil
 }
 
 func (r Runner) UIButtonAdd(cfg config.Config, opts UIButtonAddOptions, cmdOpts ...CommandOptions) (output.Envelope, int, error) {
@@ -930,6 +1074,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Bridge = result.Bridge
 	env.Macro = result.Macro
 	env.Macros = result.Macros
+	env.Forms = result.Forms
 	env.Tests = result.Tests
 	env.Trace = result.Trace
 	env.GUIBoundaries = result.GUIBoundaries
@@ -1011,9 +1156,9 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid":
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

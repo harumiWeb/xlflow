@@ -1,5 +1,86 @@
 # xlflow Folder Structure Todo
 
+# UserForm Phase 1 Warning Todo
+
+- [x] Add shared UserForm detection/warning helpers in `internal/excel/scripts/common.ps1`.
+- [x] Surface UserForm warnings/hints in `pull`, `push`, and `session`/`save`.
+- [x] Add file-based inspect warnings from configured `src.forms` `.frm` detection without Excel COM.
+- [x] Add focused Go and PowerShell regression coverage for warning helpers and inspect/source detection.
+- [x] Run focused verification and `go test ./...`.
+- [x] Update CLI/README/skill docs for Phase 1 warning behavior.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestCollectSourceUserFormNamesFindsRecursiveFrmFiles|TestInspectSourceUserFormMessagesReturnsWarningAndHint|TestWriteWithOptionsRendersInspectSnapshotMetadata"` passed.
+- `go test ./internal/excel/scripts -run "TestGetXlflowSourceUserFormNamesFindsRecursiveFrmFiles|TestAddXlflowUserFormMessagesAddsDiscoveryAndStaleWarnings|TestPushScriptScopesSaveSessionWarningToSessionRuns|TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired|TestPowerShellScriptsParse"` passed.
+- `go test ./...` passed.
+
+# UserForm Phase 2 List Forms Todo
+
+- [x] Add `xlflow list forms` CLI command and session/keepalive flag plumbing.
+- [x] Add Go bridge support plus top-level `forms` envelope/output rendering.
+- [x] Add `internal/excel/scripts/list.ps1` for workbook UserForm discovery and folder-aware source path reporting.
+- [x] Add focused Go and PowerShell regression coverage for args, parsing, and human output.
+- [x] Update CLI contract, README files, and bundled xlflow skill guidance.
+- [x] Run focused verification plus `go test ./...`.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/output ./internal/excel -run "TestRootCommandIncludesListFormsCommand|TestRootCommandIncludesExcelCommandKeepaliveFlags|TestRootCommandIncludesSessionFlagsForWorkbookReaders|TestListFormsScriptArgsIncludeFolderAndSessionConfig|TestWriteWithOptionsRendersListFormsSummary"` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestListScriptValidatesActionBeforeWorkbookOpen|TestListScriptUsesFormComponentPathAndPortableRelativePaths"` passed.
+- `go test ./...` passed.
+
+# UserForm Phase 3 Inspect Form Todo
+
+- [x] Add `xlflow inspect form` CLI command with basis, initializer, session, and keepalive flags.
+- [x] Add Go bridge plumbing plus inspect payload/output support for form snapshots.
+- [x] Add `inspect-form.ps1` and temporary VBA helper module support for runtime inspection.
+- [x] Keep designer-only inspection macro-safe by inspecting VBIDE Designer state directly from PowerShell.
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Validate against `tmp_workspaces\user-form\build\Book.xlsm` with the existing `UserForm1`.
+- [x] Update feature spec, CLI contract, and README files.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestInspectFormScriptValidatesBasisBeforeWorkbookOpen|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings"` passed.
+- Runtime validation workspace: `C:\dev\go\xlflow\tmp_workspaces\user-form`.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --runtime --initializer InitializeForm` returned `Order Entry Form`, width `308`, height `372`, `Alpha Stores`, `H001`, `Pencil`, `100`, and quantity `1`.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --designer` passed.
+- `go run C:\dev\go\xlflow\cmd\xlflow --json inspect form UserForm1 --both --initializer InitializeForm` passed.
+
+# UserForm Phase 4 Snapshot Todo
+
+- [x] Add `xlflow form snapshot <name> --out <path>` CLI command with session and keepalive support.
+- [x] Reuse `InspectForm` designer output and add Go-side spec conversion plus JSON/YAML serialization.
+- [x] Validate snapshot output extensions strictly against `.json`, `.yaml`, and `.yml`.
+- [x] Add focused Go regression coverage for command wiring, argument validation, spec conversion, output rendering, and file writing.
+- [x] Update CLI contract, README files, bundled skill guidance, and dependency/licence metadata for YAML support.
+- [x] Validate `form snapshot` against `tmp_workspaces\user-form\build\Book.xlsm` for both JSON and YAML output.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output -run "FormSnapshot|InspectForm|ExportImage"` passed.
+- `go test ./internal/cli ./internal/excel ./internal/output ./internal/agentskill` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestInspectFormScriptValidatesBasisBeforeWorkbookOpen|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings"` passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\check-third-party-licences.ps1` passed.
+- `go test ./...` passed.
+- Validation workspace: `C:\dev\go\xlflow\tmp_workspaces\user-form`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --out artifacts\UserForm1.form.json` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.json`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --out artifacts\UserForm1.form.yaml` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.yaml`.
+- Persisted JSON/YAML snapshots included `schemaVersion`, `kind`, `basis`, `coordinateSystem`, `form`, `controls`, and `warnings`, with camelCase spec fields such as `tabIndex` and `selectedIndex`.
+- `go test ./internal/excel/scripts -run 'TestInspectFormScriptDesignerDoesNotRequireRunnableVBA|TestInspectFormScriptStrictDesignerReturnsConcreteControlTypes' -v` passed and confirmed direct `inspect form --designer` remains compile-tolerant while the strict snapshot/helper path returns concrete control types (`Label`, `TextBox`).
+
+# UserForm Phase 5 Form Export Image Todo
+
+- [x] Add `xlflow form export-image <name> --out <path.png>` CLI command with initializer, overwrite, session, and keepalive support.
+- [x] Add Go-side option/path validation and PowerShell bridge plumbing for runtime UserForm image export.
+- [x] Add `internal/excel/scripts/form-export-image.ps1` with temporary workbook copy execution, helper module injection, caption-token window lookup, and PNG capture/cleanup.
+- [x] Extend JSON envelope and human output rendering for `form export-image` target/forms/output metadata and experimental/runtime warnings.
+- [x] Update CLI contract, README files, bundled skill guidance, and UserForm hint text to point to `xlflow form export-image`.
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Run focused verification, full `go test ./...`, and Windows Excel COM validation against `tmp_workspaces\user-form`.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

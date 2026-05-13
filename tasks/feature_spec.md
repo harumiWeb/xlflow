@@ -1,5 +1,52 @@
 # xlflow Folder Structure Spec
 
+## UserForm Phase 1 Warning Spec
+
+## Phase 2 Goal
+
+Make UserForm risk visible in existing workflows before dedicated form commands exist.
+
+## Contract
+
+- `pull`, `push`, `save`, and `session start|status|stop` add top-level `warnings` and `hints` when UserForms are detected.
+- `inspect` remains file-based and detects UserForms from configured `src.forms` `.frm` files without opening Excel COM.
+- Phase 1 does not add new `form` subcommands.
+
+## Phase 2 Behavior
+
+- Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
+- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `form export-image`.
+- `push --session --no-save` with detected UserForms adds `userform_unsaved_session_state` warning in addition to existing save-required state.
+- `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
+- UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
+
+## UserForm Phase 2 List Forms Spec
+
+## Goal
+
+List workbook UserForms through Excel COM so agents can discover form names and expected source companion paths before deeper inspection commands exist.
+
+## CLI Contract
+
+- `xlflow list forms [--session] [--keepalive] [--keepalive-interval <duration>]`
+
+## Behavior
+
+- `list forms` opens the configured workbook through the normal session-aware Excel bridge.
+- It inspects `VBProject.VBComponents` and returns only components with type `3` (`vbext_ct_MSForm`).
+- It does not load forms at runtime and does not execute `UserForm_Initialize`.
+- Each form result includes `name`, `component_type = "MSForm"`, `has_frx`, `source_path`, and optional `frx_path`.
+- `source_path` and `frx_path` are expected project-relative source tree paths derived with the same folder-aware path resolution as `pull`.
+- `has_frx` reports whether the expected `.frx` sibling currently exists in the source tree.
+- VBProject access denial fails with `vbproject_access_denied` and a Trust Center hint.
+- When a matching live session workbook is reused and newer than disk, the result includes the normal save-required metadata and warning.
+
+## Verification
+
+- CLI exposes `list forms` with `--session` and keepalive flags.
+- Bridge args include workbook path, source roots, folder config, session metadata path, and project root for relative path resolution.
+- PowerShell bridge returns filtered UserForm components plus expected `.frm` / `.frx` source paths.
+
 ## Goal
 
 Support Rubberduck-compatible `@Folder(...)` annotations and nested source directories while preserving the existing type-specific `[src]` roots.
@@ -25,8 +72,175 @@ default_component_folders = true
 - `pull` clears stale exported `.bas`, `.cls`, `.frm`, and `.frx` files under the configured source roots before re-export.
 - `push` treats filesystem location as authoritative and rewrites folder annotations in temporary import copies when `folder_annotation = "update"`.
 - `push` preserves annotations as-is when `folder_annotation = "preserve"` and does not read/write them when `folder_annotation = "ignore"`.
-- UserForm `.frm` and `.frx` companions must remain siblings after nested moves.
 - Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
+- UserForm `.frm` and `.frx` companions must remain siblings after nested moves.
+
+## UserForm Phase 3 Inspect Form Spec
+
+### Goal
+
+Inspect existing workbook UserForms through Excel COM and return structured control state for AI-agent review.
+
+### Commands
+
+- `xlflow inspect form <name> [--runtime|--designer|--both] [--initializer <method>] [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
+
+### Behavior
+
+- Default basis is `runtime`.
+- `runtime` loads the form, inspects the loaded control tree, and unloads it before returning.
+- `designer` inspects `VBProject.VBComponents(name).Designer` from the source workbook without loading the form at runtime.
+- `runtime` and `both` execute against a temporary workbook copy created from the current source workbook state so form initialization does not mutate the source workbook or live session.
+- `both` returns both snapshots in one response.
+- `--initializer` is optional and is allowed only with `runtime` or `both`.
+- When provided, xlflow invokes the named public form method with `ThisWorkbook` after runtime load and before control enumeration.
+- Runtime inspection adds warnings that `UserForm_Initialize` ran and, when applicable, that the explicit initializer ran.
+- The result includes top-level `target`, `session`, and `warnings` metadata like other workbook-backed commands.
+
+### Output
+
+- `inspect.target = "form"`
+- `inspect.source = "excel_com"`
+- Single-basis output uses `inspect.form`.
+- `--both` uses `inspect.forms.runtime` and `inspect.forms.designer`.
+- Form snapshots include `name`, `basis`, `caption`, optional `width` / `height`, `coordinate_system`, and `controls`.
+- Control snapshots include `name`, `type`, optional `prog_id`, `caption`, `text`, `value`, `left`, `top`, `width`, `height`, `tab_index`, `enabled`, `visible`, optional `selected_index`, optional `list`, and recursive `controls` for supported container controls.
+
+### Errors
+
+- `inspect_form_args_invalid`
+- `form_not_found`
+- `vbproject_access_denied`
+- `designer_access_failed`
+- `runtime_form_load_failed`
+- `form_initializer_failed`
+- `control_enumeration_failed`
+
+## UserForm Phase 4 Snapshot Spec
+
+### Goal
+
+Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file for human review and later declarative workflows, without changing `inspect form --designer` away from its direct read-only VBIDE path.
+
+### Commands
+
+- `xlflow form snapshot <name> --out <path> [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --session --json`
+
+### Behavior
+
+- Phase 4 is fixed to strict designer snapshot mode. There is no `--designer` flag, and `--runtime`, `--both`, and `--initializer` are not supported.
+- `inspect form --designer` remains the direct read-only VBIDE inspection path.
+- `form snapshot` opens a temporary workbook copy and runs an injected VBA helper to recover concrete control types for the persisted artifact.
+- xlflow converts the returned designer snapshot into a persisted form spec in Go.
+- `--out` is required.
+- Output format is selected only by the `--out` extension.
+- `.json` writes JSON.
+- `.yaml` and `.yml` write YAML using the same spec fields.
+- Any other extension fails with `form_snapshot_args_invalid` before Excel is opened.
+- Snapshot can fail when the workbook's VBA project cannot execute the injected helper.
+- `--session`, `--keepalive`, and `--keepalive-interval` behave the same as `inspect form`.
+- Successful runs write the spec file, return normal workbook/session metadata, and expose the written path via top-level `output` metadata.
+- Persisted `warnings` are limited to form-local snapshot warnings. Top-level operational warnings such as `save_required` stay in the command result instead of the saved artifact.
+- Phase 4 does not add new `.frx` parsing or unsupported-property detection beyond what the strict helper snapshot exposes.
+
+### Output Spec
+
+- Top-level persisted keys are `schemaVersion`, `kind`, `basis`, `coordinateSystem`, `form`, `controls`, and `warnings`.
+- `schemaVersion = 1`
+- `kind = "xlflow.userform"`
+- `basis = "designer"`
+- `coordinateSystem` comes from inspect `coordinate_system`.
+- `form` contains `name`, optional `caption`, optional `width`, and optional `height`.
+- `controls` contains recursively converted control snapshots.
+- Control fields convert inspect snake_case keys to camelCase where needed: `prog_id -> progId`, `tab_index -> tabIndex`, `selected_index -> selectedIndex`.
+
+### Errors
+
+- `form_snapshot_args_invalid`
+- `form_snapshot_write_failed`
+- `form_not_found`
+- `vbproject_access_denied`
+- `designer_access_failed`
+- `control_enumeration_failed`
+
+### Snapshot validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- JSON validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.json --json`
+- YAML validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.yaml --json`
+
+### Runtime inspection validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- Runtime validation path: `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
+
+## UserForm Phase 5 Form Export Image Spec
+
+### Goal
+
+Export a runtime-rendered workbook UserForm as a PNG image for visual verification without mutating the source workbook or attached live session.
+
+### Commands
+
+- `xlflow form export-image <name> --out <path.png> [--initializer <method>] [--overwrite] [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --json`
+
+### Behavior
+
+- Phase 5 uses the `form` namespace: the CLI is `xlflow form export-image`.
+- Capture basis is fixed to runtime.
+- Runtime capture executes against a temporary workbook copy created from the current source workbook state, matching the safety model of `inspect form --runtime`.
+- The command loads the target form in the temporary workbook, optionally invokes the named public initializer with `ThisWorkbook`, shows the form modeless with a unique caption token, captures the matching top-level window, then unloads the form and closes the temporary workbook copy.
+- `--initializer` is optional and mirrors `inspect form --runtime --initializer`.
+- `--out` is required.
+- Output format is selected only by the `--out` extension and is PNG-only in Phase 5.
+- Any non-`.png` output path fails with `unsupported_image_format` before Excel is opened.
+- Existing output files fail with `output_file_exists` unless `--overwrite` is set.
+- Parent directories for `--out` are created automatically when missing.
+- Success returns normal workbook/session metadata plus top-level `target`, `forms`, `output`, and `warnings`.
+- The command always warns that runtime capture executes `UserForm_Initialize`.
+- The command always warns that runtime capture uses a temporary workbook copy.
+- The command always warns that the feature is experimental and currently depends on Windows desktop Excel GUI behavior.
+- Cleanup failures after a successful export are warnings, not fatal errors.
+
+### Output
+
+- `target.kind = file | live_session`
+- `target.path = <workbook path>`
+- `target.form = <form name>`
+- `target.capture_state = "temporary_copy"`
+- `forms.name = <form name>`
+- `forms.basis = "runtime"`
+- `forms.initializer = <method>` when provided
+- `output.path = <resolved png path>`
+- `output.format = "png"`
+- `output.width_px` / `output.height_px` when image dimensions are available
+
+### Errors
+
+- `form_export_image_args_invalid`
+- `unsupported_image_format`
+- `output_file_exists`
+- `form_not_found`
+- `vbproject_access_denied`
+- `runtime_form_load_failed`
+- `form_initializer_failed`
+- `window_not_found`
+- `image_capture_failed`
+- `temporary_component_cleanup_failed` as a warning when the main export succeeds
+
+### Sample validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- Validation path: `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --json`
 
 ## Verification
 
