@@ -579,7 +579,11 @@ try {
   }
   $exportPath = $resolvedOutputPath
   if ((Test-Path -LiteralPath $resolvedOutputPath -PathType Leaf) -and (ConvertTo-XlflowBool $Overwrite)) {
-    $temporaryExportPath = Join-Path $outputParent ("xlflow-form-export-" + [Guid]::NewGuid().ToString("N") + ".png")
+    $tempParent = $outputParent
+    if ([string]::IsNullOrWhiteSpace($tempParent)) {
+      $tempParent = (Get-Location).ProviderPath
+    }
+    $temporaryExportPath = Join-Path $tempParent ("xlflow-form-export-" + [Guid]::NewGuid().ToString("N") + ".png")
     $exportPath = $temporaryExportPath
   }
 

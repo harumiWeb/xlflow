@@ -72,6 +72,7 @@ default_component_folders = true
 - `pull` clears stale exported `.bas`, `.cls`, `.frm`, and `.frx` files under the configured source roots before re-export.
 - `push` treats filesystem location as authoritative and rewrites folder annotations in temporary import copies when `folder_annotation = "update"`.
 - `push` preserves annotations as-is when `folder_annotation = "preserve"` and does not read/write them when `folder_annotation = "ignore"`.
+- Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
 - UserForm `.frm` and `.frx` companions must remain siblings after nested moves.
 
 ## UserForm Phase 3 Inspect Form Spec
@@ -164,7 +165,7 @@ Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file f
 - `designer_access_failed`
 - `control_enumeration_failed`
 
-### Sample validation target
+### Snapshot validation target
 
 - Workspace: `tmp_workspaces/user-form`
 - Workbook: `build/Book.xlsm`
@@ -172,14 +173,12 @@ Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file f
 - JSON validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.json --json`
 - YAML validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.yaml --json`
 
-### Sample validation target
+### Runtime inspection validation target
 
 - Workspace: `tmp_workspaces/user-form`
 - Workbook: `build/Book.xlsm`
 - Form: `UserForm1`
 - Runtime validation path: `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
-- Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
-
 ## UserForm Phase 5 Form Export Image Spec
 
 ### Goal

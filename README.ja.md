@@ -106,7 +106,7 @@ pull → edit → push → lint → test/run → trace → diff
 | 要件                                                       | 必要になる場面                                                                                                  |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Windows                                                    | Excel COM automation                                                                                            |
-| Microsoft Excel                                            | `new`, `init`, `list forms`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
+| Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
 | PowerShell                                                 | Excel automation bridge                                                                                         |
 | VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                      |
 
@@ -579,7 +579,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `list forms` / `pull` / `push` / `macros` / `run` / `export-image` / `form export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
+`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `list forms` / `inspect form` / `form snapshot` / `pull` / `push` / `macros` / `run` / `export-image` / `form export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
 UserForm を含む workbook では、`.frm` / `.frx` 差分を確認する前にその save を行う前提で考えてください。

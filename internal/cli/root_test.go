@@ -154,6 +154,26 @@ func TestVersionCommandVerboseIncludesExecutableAndFeatures(t *testing.T) {
 	}
 }
 
+func TestResolvedVersionScriptsIncludesNewUserFormScripts(t *testing.T) {
+	scripts := resolvedVersionScripts(t.TempDir())
+	names := make([]string, 0, len(scripts))
+	for _, script := range scripts {
+		names = append(names, script.Command)
+	}
+	for _, want := range []string{"list", "inspect-form", "form-export-image"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("resolvedVersionScripts missing %q in %#v", want, names)
+		}
+	}
+}
+
 func TestRootCommandIncludesRunFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

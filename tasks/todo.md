@@ -73,13 +73,13 @@
 
 # UserForm Phase 5 Form Export Image Todo
 
-- [ ] Add `xlflow form export-image <name> --out <path.png>` CLI command with initializer, overwrite, session, and keepalive support.
-- [ ] Add Go-side option/path validation and PowerShell bridge plumbing for runtime UserForm image export.
-- [ ] Add `internal/excel/scripts/form-export-image.ps1` with temporary workbook copy execution, helper module injection, caption-token window lookup, and PNG capture/cleanup.
-- [ ] Extend JSON envelope and human output rendering for `form export-image` target/forms/output metadata and experimental/runtime warnings.
-- [ ] Update CLI contract, README files, bundled skill guidance, and UserForm hint text to point to `xlflow form export-image`.
-- [ ] Add focused Go and PowerShell regression coverage.
-- [ ] Run focused verification, full `go test ./...`, and Windows Excel COM validation against `tmp_workspaces\user-form`.
+- [x] Add `xlflow form export-image <name> --out <path.png>` CLI command with initializer, overwrite, session, and keepalive support.
+- [x] Add Go-side option/path validation and PowerShell bridge plumbing for runtime UserForm image export.
+- [x] Add `internal/excel/scripts/form-export-image.ps1` with temporary workbook copy execution, helper module injection, caption-token window lookup, and PNG capture/cleanup.
+- [x] Extend JSON envelope and human output rendering for `form export-image` target/forms/output metadata and experimental/runtime warnings.
+- [x] Update CLI contract, README files, bundled skill guidance, and UserForm hint text to point to `xlflow form export-image`.
+- [x] Add focused Go and PowerShell regression coverage.
+- [x] Run focused verification, full `go test ./...`, and Windows Excel COM validation against `tmp_workspaces\user-form`.
 
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.

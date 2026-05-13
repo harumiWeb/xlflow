@@ -204,7 +204,7 @@ function Get-XlflowSafeControlList {
       break
     }
   }
-  return @($items.ToArray()), [int](Get-XlflowSafeMemberValue -Target $Control -Name "ListIndex" -Default -1)
+  return (,@($items.ToArray())), [int](Get-XlflowSafeMemberValue -Target $Control -Name "ListIndex" -Default -1)
 }
 
 function Get-XlflowDesignerControlSnapshot {

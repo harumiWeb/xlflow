@@ -1465,8 +1465,12 @@ func markdownInspectFormSnapshot(snapshot map[string]any, heading string) string
 func flattenInspectControls(controls []map[string]any, depth int) [][]string {
 	rows := make([][]string, 0, len(controls))
 	for _, control := range controls {
+		name := stringValue(control, "name")
+		if name == "" {
+			name = "<unnamed>"
+		}
 		rows = append(rows, []string{
-			strings.Repeat("  ", depth) + stringValue(control, "name"),
+			strings.Repeat("  ", depth) + name,
 			stringValue(control, "type"),
 			inspectControlSummary(control),
 		})

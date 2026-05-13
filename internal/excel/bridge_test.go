@@ -364,6 +364,27 @@ func TestRunnerFormExportImageReturnsValidationFailureForMissingExtension(t *tes
 	}
 }
 
+func TestRunnerInspectFormNormalizesCommandName(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$WorkbookPath,[string]$FormName,[string]$Basis,[string]$Initializer,[string]$Visible,[string]$UseSession,[string]$MetadataPath)
+@{ status = "ok"; command = "inspect-form"; logs = @(); error = $null } | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "inspect-form.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.InspectForm(config.Default(), InspectFormOptions{Name: "UserForm1", Basis: "designer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Command != "inspect" {
+		t.Fatalf("command = %q, want inspect", env.Command)
+	}
+}
+
 func TestOutputFileExistsIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,

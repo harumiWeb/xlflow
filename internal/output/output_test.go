@@ -183,6 +183,26 @@ func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsInspectMarkdownUsesUnnamedPlaceholder(t *testing.T) {
+	env := New("inspect")
+	payload := map[string]any{
+		"target": "form",
+		"forms": map[string]any{
+			"designer": map[string]any{
+				"name":  "UserForm1",
+				"basis": "designer",
+				"controls": []map[string]any{
+					{"name": "", "type": "Label", "caption": "Hello"},
+				},
+			},
+		},
+	}
+	text := renderer{}.renderInspectMarkdown(env, payload)
+	if !strings.Contains(text, "<unnamed>") {
+		t.Fatalf("expected unnamed placeholder in markdown output: %s", text)
+	}
+}
+
 func TestWriteWithOptionsInspectJSONIncludesTargetStateAndWarnings(t *testing.T) {
 	env := New("inspect")
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}

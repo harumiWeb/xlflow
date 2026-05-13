@@ -235,7 +235,7 @@ func supportedVersionFeatures() []versionFeature {
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image", "form-export-image", "edit"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "export-image", "form-export-image", "edit"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -890,6 +891,23 @@ func TestFormExportImageScriptMapsPrepareFailuresToValidationCodes(t *testing.T)
 	}
 }
 
+func TestFormExportImageScriptNormalizesOverwriteTempParentForCurrentDirectory(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$tempParent = $outputParent`,
+		`if ([string]::IsNullOrWhiteSpace($tempParent))`,
+		`$tempParent = (Get-Location).ProviderPath`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestAnyVbaDialogWatcherDoesNotFallbackToFirstButtonForCompileDialogs(t *testing.T) {
 	data, err := os.ReadFile("common.ps1")
 	if err != nil {
@@ -1618,6 +1636,7 @@ try {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("failed to parse source UserForm names: %v\n%s", err, out)
 	}
+	sort.Strings(got.Names)
 	if want := []string{"UserForm1", "UserForm2"}; !reflect.DeepEqual(got.Names, want) {
 		t.Fatalf("names = %#v, want %#v", got.Names, want)
 	}

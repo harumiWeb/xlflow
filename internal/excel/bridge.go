@@ -505,7 +505,9 @@ func (r Runner) ListForms(cfg config.Config, opts SessionCommandOptions) (output
 }
 
 func (r Runner) InspectForm(cfg config.Config, opts InspectFormOptions) (output.Envelope, int, error) {
-	return r.run("inspect-form", buildInspectFormScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	env, code, err := r.run("inspect-form", buildInspectFormScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	env.Command = "inspect"
+	return env, code, err
 }
 
 func (r Runner) FormExportImage(cfg config.Config, opts FormExportImageOptions) (output.Envelope, int, error) {

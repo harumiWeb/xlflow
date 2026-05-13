@@ -134,7 +134,7 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 		return FormSpec{}, err
 	}
 	form := FormSpecForm{Name: name}
-	if caption, ok := optionalStringField(root, "caption"); ok {
+	if caption, ok := stringField(root, "caption"); ok {
 		form.Caption = &caption
 	}
 	if width, ok := optionalFloatField(root, "width"); ok {
@@ -209,10 +209,10 @@ func formSpecControl(root map[string]any) (FormSpecControl, error) {
 	if progID, ok := stringField(root, "prog_id"); ok {
 		control.ProgID = progID
 	}
-	if caption, ok := optionalStringField(root, "caption"); ok {
+	if caption, ok := stringField(root, "caption"); ok {
 		control.Caption = &caption
 	}
-	if text, ok := optionalStringField(root, "text"); ok {
+	if text, ok := stringField(root, "text"); ok {
 		control.Text = &text
 	}
 	if value, ok := root["value"]; ok {
@@ -303,18 +303,6 @@ func asSlice(value any) ([]any, bool) {
 }
 
 func stringField(root map[string]any, key string) (string, bool) {
-	value, ok := root[key]
-	if !ok || value == nil {
-		return "", false
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", false
-	}
-	return text, true
-}
-
-func optionalStringField(root map[string]any, key string) (string, bool) {
 	value, ok := root[key]
 	if !ok || value == nil {
 		return "", false

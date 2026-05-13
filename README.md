@@ -105,7 +105,7 @@ pull → edit → push → lint → test/run → trace → diff
 | Requirement                                  | Needed for                                                                                                      |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Windows                                      | Excel COM automation                                                                                            |
-| Microsoft Excel                              | `new`, `init`, `list forms`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
+| Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
 | PowerShell                                   | Excel automation bridge                                                                                         |
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                |
 
@@ -575,7 +575,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `pull`, `push`, `macros`, `run`, `export-image`, `form export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
+`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `inspect form`, `form snapshot`, `pull`, `push`, `macros`, `run`, `export-image`, `form export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
 If UserForms are involved, treat that save step as part of review hygiene before comparing `.frm` / `.frx` output.
