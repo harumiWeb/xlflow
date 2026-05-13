@@ -618,10 +618,11 @@ func TestInspectFormScriptArgsIncludeSessionAndInitializer(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	args := buildInspectFormScriptArgs(root, cfg, InspectFormOptions{
-		Name:        "UserForm1",
-		Basis:       "runtime",
-		Initializer: "InitializeForm",
-		Session:     true,
+		Name:           "UserForm1",
+		Basis:          "runtime",
+		Initializer:    "InitializeForm",
+		StrictDesigner: true,
+		Session:        true,
 	})
 	if args["WorkbookPath"] != filepath.Join(root, "build", "Book.xlsm") {
 		t.Fatalf("WorkbookPath = %q", args["WorkbookPath"])
@@ -634,6 +635,9 @@ func TestInspectFormScriptArgsIncludeSessionAndInitializer(t *testing.T) {
 	}
 	if args["Initializer"] != "InitializeForm" {
 		t.Fatalf("Initializer = %q", args["Initializer"])
+	}
+	if args["StrictDesigner"] != "true" {
+		t.Fatalf("StrictDesigner = %q", args["StrictDesigner"])
 	}
 	if args["UseSession"] != "true" {
 		t.Fatalf("UseSession = %q", args["UseSession"])

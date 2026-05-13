@@ -340,14 +340,13 @@ func (a *app) formCommand() *cobra.Command {
 func (a *app) formSnapshotCommand() *cobra.Command {
 	var keepalive keepaliveFlags
 	var session bool
-	var designer bool
 	var outPath string
 	cmd := &cobra.Command{
 		Use:   "snapshot <name>",
-		Short: "Write a designer UserForm snapshot spec to a file",
+		Short: "Write a strict designer UserForm snapshot spec to a file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts, err := buildFormSnapshotOptions(args[0], outPath, designer, session, keepalive)
+			opts, err := buildFormSnapshotOptions(args[0], outPath, session, keepalive)
 			if err != nil {
 				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
 			}
@@ -410,7 +409,6 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().BoolVar(&designer, "designer", false, "snapshot the design-time VBIDE designer state")
 	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
@@ -2264,14 +2262,12 @@ func buildInspectFormOptions(name, basis, initializer string, session bool, keep
 	}, nil
 }
 
-func buildFormSnapshotOptions(name, outPath string, designer bool, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
-	if !designer {
-		return formSnapshotCommandOptions{}, fmt.Errorf("--designer is required")
-	}
+func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
 	inspectOpts, err := buildInspectFormOptions(name, "designer", "", session, keepalive)
 	if err != nil {
 		return formSnapshotCommandOptions{}, err
 	}
+	inspectOpts.StrictDesigner = true
 	trimmedOut := strings.TrimSpace(outPath)
 	if trimmedOut == "" {
 		return formSnapshotCommandOptions{}, fmt.Errorf("--out is required")
@@ -2465,7 +2461,7 @@ func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string
 	}}
 	hints := []map[string]any{{
 		"code":    "userform_planned_commands",
-		"message": "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`.",
+		"message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`.",
 	}}
 	return warnings, hints
 }

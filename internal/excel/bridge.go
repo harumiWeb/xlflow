@@ -133,11 +133,12 @@ type SessionCommandOptions struct {
 }
 
 type InspectFormOptions struct {
-	Name        string
-	Basis       string
-	Initializer string
-	Session     bool
-	Keepalive   CommandOptions
+	Name           string
+	Basis          string
+	Initializer    string
+	StrictDesigner bool
+	Session        bool
+	Keepalive      CommandOptions
 }
 
 type SessionOptions struct {
@@ -518,13 +519,14 @@ func buildListFormsScriptArgs(root string, cfg config.Config, opts SessionComman
 
 func buildInspectFormScriptArgs(root string, cfg config.Config, opts InspectFormOptions) map[string]string {
 	return map[string]string{
-		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"UseSession":   strconv.FormatBool(opts.Session),
-		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
-		"FormName":     opts.Name,
-		"Basis":        opts.Basis,
-		"Initializer":  opts.Initializer,
+		"WorkbookPath":   workbookPath(root, cfg.Excel.Path),
+		"Visible":        strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":     strconv.FormatBool(opts.Session),
+		"MetadataPath":   filepath.Join(root, ".xlflow", "session.json"),
+		"FormName":       opts.Name,
+		"Basis":          opts.Basis,
+		"StrictDesigner": strconv.FormatBool(opts.StrictDesigner),
+		"Initializer":    opts.Initializer,
 	}
 }
 

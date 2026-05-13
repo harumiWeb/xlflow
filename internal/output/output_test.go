@@ -452,7 +452,7 @@ func TestWriteWithOptionsRendersInspectSnapshotMetadata(t *testing.T) {
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
 	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
 	env.Warnings = []map[string]any{{"code": "live_session_dirty", "message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook."}}
-	env.Hints = []map[string]any{{"code": "userform_planned_commands", "message": "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`."}}
+	env.Hints = []map[string]any{{"code": "userform_planned_commands", "message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`."}}
 	env.Inspect = map[string]any{
 		"target": "range",
 		"target_info": map[string]any{

@@ -45,6 +45,12 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 		"width":             308.0,
 		"height":            372.0,
 		"coordinate_system": "parent-relative",
+		"warnings": []any{
+			map[string]any{
+				"code":    "unsupported_property",
+				"message": "The snapshot omitted a designer-only property.",
+			},
+		},
 		"controls": []any{
 			map[string]any{
 				"name":           "txtCustomer",
@@ -99,8 +105,8 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	if len(control.Controls) != 1 || control.Controls[0].Name != "lblNested" {
 		t.Fatalf("nested controls = %#v", control.Controls)
 	}
-	if spec.Warnings == nil || len(spec.Warnings) != 0 {
-		t.Fatalf("warnings = %#v, want empty slice", spec.Warnings)
+	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_property" {
+		t.Fatalf("warnings = %#v", spec.Warnings)
 	}
 }
 

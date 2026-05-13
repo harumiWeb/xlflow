@@ -27,6 +27,17 @@ func TestPowerShellScriptsParse(t *testing.T) {
 	}
 }
 
+func trailingJSONLine(out []byte) []byte {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+			return []byte(line)
+		}
+	}
+	return out
+}
+
 func TestInspectFormScriptValidatesBasisBeforeWorkbookOpen(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -78,7 +89,7 @@ func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
 	}
 }
 
-func TestInspectFormScriptDesignerReturnsConcreteControlTypes(t *testing.T) {
+func TestInspectFormScriptDesignerDoesNotRequireRunnableVBA(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
 		"-NoProfile",
@@ -126,6 +137,10 @@ try {
 	$component.Name = 'DesignerTypesForm'
 	$designer = $component.Designer
 
+	$brokenModule = $workbook.VBProject.VBComponents.Add(1)
+	$brokenModule.Name = 'BrokenCompileModule'
+	$brokenModule.CodeModule.AddFromString("Option Explicit" + [Environment]::NewLine + "Public Sub Broken()" + [Environment]::NewLine + "  Dim missing As" + [Environment]::NewLine + "End Sub")
+
 	$label = $designer.Controls.Add('Forms.Label.1')
 	$label.Name = 'lblCaption'
 	$label.Caption = 'Designer label'
@@ -137,6 +152,125 @@ try {
 	$workbook.SaveAs($wbPath, 52)
 
 	$inspect = & ./inspect-form.ps1 -Basis designer -FormName 'DesignerTypesForm' -WorkbookPath $wbPath | ConvertFrom-Json
+	$result.status = $inspect.status
+	if ($null -ne $inspect.error) {
+		$result.errorCode = $inspect.error.code
+	}
+	if ($null -ne $inspect.forms -and $null -ne $inspect.forms.controls) {
+		$result.types = @($inspect.forms.controls | ForEach-Object { [string]$_.name })
+	}
+
+	$result | ConvertTo-Json -Compress
+} catch {
+	$result.skip = $false
+	$result.skipReason = ''
+	$result.status = 'command_failed'
+	$result.errorCode = $_.Exception.Message
+	$result | ConvertTo-Json -Compress
+	exit 1
+} finally {
+	if ($null -ne $workbook) {
+		try { $workbook.Close($false) | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+	}
+	if ($null -ne $excel) {
+		try { $excel.Quit() | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+	}
+	[GC]::Collect()
+	[GC]::WaitForPendingFinalizers()
+	if (Test-Path -LiteralPath $root) {
+		Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+	}
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect-form designer compile-tolerance check failed: %v\n%s", err, out)
+	}
+
+	var got struct {
+		Skip       bool     `json:"skip"`
+		SkipReason string   `json:"skipReason"`
+		Status     string   `json:"status"`
+		ErrorCode  string   `json:"errorCode"`
+		Types      []string `json:"types"`
+	}
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
+		t.Fatalf("failed to parse inspect-form designer output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("expected inspect-form designer status ok, got %+v", got)
+	}
+	want := []string{"lblCaption", "txtValue"}
+	if !reflect.DeepEqual(got.Types, want) {
+		t.Fatalf("designer control names = %#v, want %#v", got.Types, want)
+	}
+}
+
+func TestInspectFormScriptStrictDesignerReturnsConcreteControlTypes(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`
+$result = [ordered]@{
+	skip = $false
+	skipReason = ''
+	status = ''
+	errorCode = ''
+	types = @()
+}
+
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ('xlflow-inspect-form-strict-designer-' + [guid]::NewGuid().ToString())
+$wbPath = Join-Path $root 'DesignerTypes.xlsm'
+$excel = $null
+$workbook = $null
+
+try {
+	New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+	try {
+		$excel = New-Object -ComObject Excel.Application
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$excel.Visible = $false
+	$excel.DisplayAlerts = $false
+	$workbook = $excel.Workbooks.Add()
+
+	try {
+		$null = $workbook.VBProject
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$component = $workbook.VBProject.VBComponents.Add(3)
+	$component.Name = 'DesignerTypesForm'
+	$designer = $component.Designer
+
+	$label = $designer.Controls.Add('Forms.Label.1')
+	$label.Name = 'lblCaption'
+	$label.Caption = 'Designer label'
+
+	$textBox = $designer.Controls.Add('Forms.TextBox.1')
+	$textBox.Name = 'txtValue'
+	$textBox.Text = 'Designer text'
+
+	$workbook.SaveAs($wbPath, 52)
+
+	$inspect = & ./inspect-form.ps1 -Basis designer -StrictDesigner true -FormName 'DesignerTypesForm' -WorkbookPath $wbPath | ConvertFrom-Json
 	$result.status = $inspect.status
 	if ($null -ne $inspect.error) {
 		$result.errorCode = $inspect.error.code
@@ -172,7 +306,7 @@ try {
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("inspect-form designer concrete type check failed: %v\n%s", err, out)
+		t.Fatalf("inspect-form strict designer concrete type check failed: %v\n%s", err, out)
 	}
 
 	var got struct {
@@ -182,18 +316,18 @@ try {
 		ErrorCode  string   `json:"errorCode"`
 		Types      []string `json:"types"`
 	}
-	if err := json.Unmarshal(out, &got); err != nil {
-		t.Fatalf("failed to parse inspect-form designer output: %v\n%s", err, out)
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
+		t.Fatalf("failed to parse strict designer output: %v\n%s", err, out)
 	}
 	if got.Skip {
 		t.Skip(got.SkipReason)
 	}
 	if got.Status != "ok" {
-		t.Fatalf("expected inspect-form designer status ok, got %+v", got)
+		t.Fatalf("expected strict designer status ok, got %+v", got)
 	}
 	want := []string{"Label", "TextBox"}
 	if !reflect.DeepEqual(got.Types, want) {
-		t.Fatalf("designer control types = %#v, want %#v", got.Types, want)
+		t.Fatalf("strict designer control types = %#v, want %#v", got.Types, want)
 	}
 }
 

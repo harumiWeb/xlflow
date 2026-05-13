@@ -51,7 +51,7 @@
 
 # UserForm Phase 4 Snapshot Todo
 
-- [x] Add `xlflow form snapshot <name> --designer --out <path>` CLI command with session and keepalive support.
+- [x] Add `xlflow form snapshot <name> --out <path>` CLI command with session and keepalive support.
 - [x] Reuse `InspectForm` designer output and add Go-side spec conversion plus JSON/YAML serialization.
 - [x] Validate snapshot output extensions strictly against `.json`, `.yaml`, and `.yml`.
 - [x] Add focused Go regression coverage for command wiring, argument validation, spec conversion, output rendering, and file writing.
@@ -66,10 +66,10 @@
 - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\check-third-party-licences.ps1` passed.
 - `go test ./...` passed.
 - Validation workspace: `C:\dev\go\xlflow\tmp_workspaces\user-form`.
-- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --designer --out artifacts\UserForm1.form.json` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.json`.
-- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --designer --out artifacts\UserForm1.form.yaml` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.yaml`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --out artifacts\UserForm1.form.json` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.json`.
+- `go run ..\..\cmd\xlflow --json form snapshot UserForm1 --out artifacts\UserForm1.form.yaml` returned `command=form snapshot`, `forms.name=UserForm1`, `forms.basis=designer`, `forms.control_count=14`, and `output.path=artifacts/UserForm1.form.yaml`.
 - Persisted JSON/YAML snapshots included `schemaVersion`, `kind`, `basis`, `coordinateSystem`, `form`, `controls`, and `warnings`, with camelCase spec fields such as `tabIndex` and `selectedIndex`.
-- `go test ./internal/excel/scripts -run TestInspectFormScriptDesignerReturnsConcreteControlTypes -v` passed and confirmed designer inspect returns concrete control types (`Label`, `TextBox`) through the temp-copy helper path.
+- `go test ./internal/excel/scripts -run 'TestInspectFormScriptDesignerDoesNotRequireRunnableVBA|TestInspectFormScriptStrictDesignerReturnsConcreteControlTypes' -v` passed and confirmed direct `inspect form --designer` remains compile-tolerant while the strict snapshot/helper path returns concrete control types (`Label`, `TextBox`).
 
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.

@@ -15,7 +15,7 @@ Make UserForm risk visible in existing workflows before dedicated form commands 
 ## Behavior
 
 - Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
-- Generic guidance hint uses `userform_planned_commands` and explicitly labels future commands such as `form snapshot`, `inspect form`, and `export-form-image` as planned/future.
+- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `export-form-image`.
 - `push --session --no-save` with detected UserForms adds `userform_unsaved_session_state` warning in addition to existing save-required state.
 - `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
 - UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
@@ -120,26 +120,29 @@ Inspect existing workbook UserForms through Excel COM and return structured cont
 
 ### Goal
 
-Persist the existing `inspect form --designer` UserForm snapshot as a stable JSON/YAML spec file for human review and later declarative workflows.
+Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file for human review and later declarative workflows, without changing `inspect form --designer` away from its direct read-only VBIDE path.
 
 ### Commands
 
-- `xlflow form snapshot <name> --designer --out <path> [--session] [--keepalive] [--keepalive-interval <duration>]`
-- `xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.yaml --session --json`
+- `xlflow form snapshot <name> --out <path> [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --session --json`
 
 ### Behavior
 
-- Phase 4 is designer-only. `--designer` is required and `--runtime`, `--both`, and `--initializer` are not supported.
-- The command reuses the existing Excel COM `inspect form --designer` bridge and does not add a new PowerShell snapshot action.
+- Phase 4 is fixed to strict designer snapshot mode. There is no `--designer` flag, and `--runtime`, `--both`, and `--initializer` are not supported.
+- `inspect form --designer` remains the direct read-only VBIDE inspection path.
+- `form snapshot` opens a temporary workbook copy and runs an injected VBA helper to recover concrete control types for the persisted artifact.
 - xlflow converts the returned designer snapshot into a persisted form spec in Go.
 - `--out` is required.
 - Output format is selected only by the `--out` extension.
 - `.json` writes JSON.
 - `.yaml` and `.yml` write YAML using the same spec fields.
 - Any other extension fails with `form_snapshot_args_invalid` before Excel is opened.
+- Snapshot can fail when the workbook's VBA project cannot execute the injected helper.
 - `--session`, `--keepalive`, and `--keepalive-interval` behave the same as `inspect form`.
 - Successful runs write the spec file, return normal workbook/session metadata, and expose the written path via top-level `output` metadata.
-- Phase 4 does not add new `.frx` parsing or unsupported-property detection beyond what the existing designer inspect already exposes.
+- Persisted `warnings` are limited to form-local snapshot warnings. Top-level operational warnings such as `save_required` stay in the command result instead of the saved artifact.
+- Phase 4 does not add new `.frx` parsing or unsupported-property detection beyond what the strict helper snapshot exposes.
 
 ### Output Spec
 
@@ -166,8 +169,8 @@ Persist the existing `inspect form --designer` UserForm snapshot as a stable JSO
 - Workspace: `tmp_workspaces/user-form`
 - Workbook: `build/Book.xlsm`
 - Form: `UserForm1`
-- JSON validation path: `xlflow form snapshot UserForm1 --designer --out artifacts/UserForm1.form.json --json`
-- YAML validation path: `xlflow form snapshot UserForm1 --designer --out artifacts/UserForm1.form.yaml --json`
+- JSON validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.json --json`
+- YAML validation path: `xlflow form snapshot UserForm1 --out artifacts/UserForm1.form.yaml --json`
 
 ### Sample validation target
 

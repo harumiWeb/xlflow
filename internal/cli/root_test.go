@@ -509,10 +509,13 @@ func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "snapshot" {
 		t.Fatalf("expected form snapshot command, got %#v", cmd)
 	}
-	for _, name := range []string{"designer", "out", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"out", "session", "keepalive", "keepalive-interval"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected form snapshot command to define --%s", name)
 		}
+	}
+	if cmd.Flags().Lookup("designer") != nil {
+		t.Fatal("form snapshot command should not expose --designer")
 	}
 }
 
@@ -632,12 +635,15 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 }
 
 func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
-	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Inspect.Name != "UserForm1" || opts.Inspect.Basis != "designer" {
 		t.Fatalf("inspect opts = %#v", opts.Inspect)
+	}
+	if !opts.Inspect.StrictDesigner {
+		t.Fatalf("expected strict designer snapshot opts = %#v", opts.Inspect)
 	}
 	if !opts.Inspect.Session || !opts.Inspect.Keepalive.Keepalive || opts.Inspect.Keepalive.KeepaliveInterval != 7*time.Second {
 		t.Fatalf("keepalive/session opts = %#v", opts.Inspect)
@@ -648,13 +654,10 @@ func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
 }
 
 func TestBuildFormSnapshotOptionsRejectsMissingRequirements(t *testing.T) {
-	if _, err := buildFormSnapshotOptions("UserForm1", "artifacts\\UserForm1.form.yaml", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--designer is required") {
-		t.Fatalf("expected designer requirement error, got %v", err)
-	}
-	if _, err := buildFormSnapshotOptions("UserForm1", "", true, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+	if _, err := buildFormSnapshotOptions("UserForm1", "", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
 		t.Fatalf("expected out requirement error, got %v", err)
 	}
-	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", true, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
 		t.Fatalf("expected form name error, got %v", err)
 	}
 }
@@ -1418,7 +1421,7 @@ func TestFormSnapshotCommandUsesFormSnapshotArgsInvalidCode(t *testing.T) {
 		stderr: &bytes.Buffer{},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"--json", "form", "snapshot", "UserForm1", "--designer", "--out", "artifacts\\UserForm1.form.txt"})
+	root.SetArgs([]string{"--json", "form", "snapshot", "UserForm1", "--out", "artifacts\\UserForm1.form.txt"})
 
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitConfig {

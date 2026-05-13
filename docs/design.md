@@ -90,7 +90,7 @@ Note:
   Layout and binary properties may depend on .frx and VBIDE Designer state.
 
 Recommended commands:
-  xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.json
+  xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
   xlflow inspect form UserForm1 --runtime --json
   xlflow export-form-image UserForm1 --out artifacts/UserForm1.png
 ```
@@ -393,8 +393,8 @@ MVP may start with top-level controls only, but Frame support should be prioriti
 ### Command
 
 ```bash
-xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.json
-xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.yaml
+xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
+xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml
 ```
 
 ### Purpose
@@ -915,7 +915,7 @@ Unsupported environments:
 2. Implement `xlflow list forms --json`.
 3. Implement `xlflow inspect form <name> --designer --json`.
 4. Implement `xlflow inspect form <name> --runtime --json`.
-5. Implement `xlflow form snapshot <name> --designer --out ...`.
+5. Implement `xlflow form snapshot <name> --out ...`.
 6. Implement `xlflow export-form-image <name> --out ...` as experimental.
 7. Add `form diff` against snapshot/spec.
 8. Add `form build/apply` via Designer API.
@@ -941,7 +941,7 @@ The first deliverable should include:
 - xlflow list forms --json
 - xlflow inspect form <name> --designer --json
 - xlflow inspect form <name> --runtime --json
-- xlflow form snapshot <name> --designer --out <path>
+- xlflow form snapshot <name> --out <path>
 - UserForm warnings in push/pull/save/session flows
 ```
 
@@ -1022,7 +1022,7 @@ loads the form, returns runtime control metrics, unloads the form, and warns tha
 Given a manually created UserForm, running:
 
 ```bash
-xlflow form snapshot UserForm1 --designer --out src/forms/UserForm1.form.json
+xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
 ```
 
 writes a structured spec file that can be reviewed by humans and AI agents.

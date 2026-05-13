@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Planned/future commands for deeper UserForm inspection include `xlflow form snapshot <name> --designer`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
