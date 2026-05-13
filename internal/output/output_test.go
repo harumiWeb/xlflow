@@ -735,6 +735,28 @@ func TestWriteWithOptionsRendersFormSnapshotSummary(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersFormExportImageSummary(t *testing.T) {
+	env := New("form export-image")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "form": "UserForm1", "capture_state": "temporary_copy"}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "runtime", "initializer": "InitializeForm"}
+	env.Output = map[string]any{"path": "artifacts/UserForm1.png", "format": "png", "width_px": 308, "height_px": 372}
+	env.Warnings = []map[string]any{{"code": "userform_image_export_experimental", "message": "experimental"}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Export target:", "live session", "Form:", "UserForm1", "Basis:", "runtime", "Initializer:", "InitializeForm", "Capture:", "temporary_copy", "Output:", "artifacts/UserForm1.png", "Format:", "PNG", "308 x 372 px", "SAVE REQUIRED", "userform_image_export_experimental"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form export-image output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Target:") != 1 {
+		t.Fatalf("form export-image output should render one Target label:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersEditSummary(t *testing.T) {
 	env := New("edit")
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}

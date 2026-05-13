@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
@@ -501,6 +501,14 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 public static class XlflowNativeMethods {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
   [DllImport("user32.dll")]
@@ -520,6 +528,15 @@ public static class XlflowNativeMethods {
       if (processId == targetProcessId) {
         windows.Add(hWnd);
       }
+      return true;
+    }, IntPtr.Zero);
+    return windows.ToArray();
+  }
+
+  public static IntPtr[] GetTopLevelWindows() {
+    List<IntPtr> windows = new List<IntPtr>();
+    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+      windows.Add(hWnd);
       return true;
     }, IntPtr.Zero);
     return windows.ToArray();
@@ -549,6 +566,12 @@ public static class XlflowNativeMethods {
 
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr hWnd);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
   [DllImport("user32.dll", SetLastError=true)]
   public static extern IntPtr SendMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -667,8 +690,14 @@ function Test-XlflowCompileDialogSignals {
 }
 
 function Test-XlflowAllowDialogFirstButtonFallback {
-  param([string]$DialogKind)
+  param(
+    [string]$DialogKind,
+    [string]$MatchedKind = ""
+  )
 
+  if ($MatchedKind -eq "compile") {
+    return $false
+  }
   return $DialogKind -ne "compile"
 }
 
@@ -736,13 +765,35 @@ function Start-XlflowExcelDialogWatcher {
           Test-XlflowCompileDialogSignals -Title $title -StaticText $joinedStaticText -ButtonText $joinedButtonText
         )
 
-        $buttonToClick = $null
-        $action = ""
+        $matchedKind = ""
         switch ($DialogKind) {
           "runtime" {
             if (-not $looksLikeRuntimeDialog) {
               continue
             }
+            $matchedKind = "runtime"
+          }
+          "any_vba" {
+            if ($looksLikeRuntimeDialog) {
+              $matchedKind = "runtime"
+            } elseif ($looksLikeCompileDialog) {
+              $matchedKind = "compile"
+            } else {
+              continue
+            }
+          }
+          default {
+            if (-not $looksLikeCompileDialog) {
+              continue
+            }
+            $matchedKind = "compile"
+          }
+        }
+
+        $buttonToClick = $null
+        $action = ""
+        switch ($matchedKind) {
+          "runtime" {
             foreach ($button in $buttons) {
               if ($button.text -match "(?i)End" -or $button.text -match "終了") {
                 $buttonToClick = $button
@@ -761,9 +812,6 @@ function Start-XlflowExcelDialogWatcher {
             }
           }
           default {
-            if (-not $looksLikeCompileDialog) {
-              continue
-            }
             foreach ($button in $buttons) {
               if ($button.text -match "(?i)^(OK|Close)$" -or $button.text -match "はい|閉じる") {
                 $buttonToClick = $button
@@ -777,10 +825,10 @@ function Start-XlflowExcelDialogWatcher {
         if (-not $looksLikeCompileDialog -and -not $looksLikeRuntimeDialog) {
           continue
         }
-        if ((Test-XlflowAllowDialogFirstButtonFallback -DialogKind $DialogKind) -and $null -eq $buttonToClick -and $buttons.Count -gt 0) {
+        if ((Test-XlflowAllowDialogFirstButtonFallback -DialogKind $DialogKind -MatchedKind $matchedKind) -and $null -eq $buttonToClick -and $buttons.Count -gt 0) {
           $buttonToClick = $buttons[0]
           if ([string]::IsNullOrWhiteSpace($action)) {
-            $action = $DialogKind + "_first_button"
+            $action = $matchedKind + "_first_button"
           }
         }
 
@@ -789,13 +837,13 @@ function Start-XlflowExcelDialogWatcher {
         } else {
           [void][XlflowNativeMethods]::PostMessageW($hwnd, $wmClose, [IntPtr]::Zero, [IntPtr]::Zero)
           if ([string]::IsNullOrWhiteSpace($action)) {
-            $action = $DialogKind + "_close"
+            $action = $matchedKind + "_close"
           }
         }
 
         return [pscustomobject][ordered]@{
           found = $true
-          kind = $DialogKind
+          kind = $matchedKind
           hwnd = [int64]$hwnd
           title = $title
           class_name = $className

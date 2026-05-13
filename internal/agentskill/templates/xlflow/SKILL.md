@@ -19,6 +19,7 @@ Default safety rules for AI-agent work:
 - Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names or expected `.frm` / `.frx` source paths without loading the form at runtime.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` when you need structured UserForm state beyond saved worksheet snapshots. Runtime inspection executes against a temporary workbook copy of the current source state.
 - Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when you need a persisted JSON/YAML spec for design review or future declarative UserForm workflows. This path is stricter than `inspect form --designer` because it executes an injected helper to recover concrete control types.
+- Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when visual verification depends on the runtime-rendered UserForm rather than structured inspection alone.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
@@ -73,6 +74,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow inspect form <FormName> --runtime --session --keepalive --json` to read runtime state after form initialization or workbook-driven population logic; xlflow runs it against a temporary workbook copy so the source workbook state is preserved.
    - Use `xlflow inspect form <FormName> --designer --session --keepalive --json` to inspect design-time controls and geometry without running workbook VBA.
    - Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when you want that design-time state persisted as a reviewable JSON/YAML spec and you need concrete control types from the stricter helper path.
+   - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when you need a PNG of the runtime-rendered UserForm for visual review.
    - Use `xlflow inspect form <FormName> --both --session --keepalive --json` when you need to compare designer state against runtime state in one pass.
    - Add `--initializer <MethodName>` to runtime or both mode when the form must be explicitly populated before inspection, such as workbook-scoped setup methods that mirror the visible UI.
    - Use `xlflow edit cell --sheet <name> --cell <A1> --value <text> --events on --session --keepalive --json` to prepare input cells and trigger `Worksheet_Change` handlers during a session.
@@ -160,6 +162,7 @@ When the user reports a runtime failure:
 - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` for UserForm inspection; prefer `--designer` for source/design audits, `--runtime` for populated runtime state from a temporary workbook copy, and `--both` when you need to compare them.
 - Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when the goal is a stable artifact for review, diff, or later declarative form work rather than one-off stdout inspection.
+- Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when the question is visual fidelity of the runtime form, including layout after initialization.
 - Use `xlflow inspect form <FormName> --runtime --initializer <MethodName> --session --keepalive --json` when the form requires an explicit initializer call before its visible state is meaningful.
 - Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
 - Treat `xlflow inspect workbook|sheets|range|used-range|cell` as disk-backed workbook readers, and `xlflow inspect form` as an Excel COM inspection command whose runtime mode executes against a temporary workbook copy derived from the current source workbook state.
@@ -252,6 +255,8 @@ Run `xlflow analyze --json` or `xlflow check --keepalive --json` before changing
 If `xlflow inspect` does not show the workbook changes you expected, first decide whether disk is stale. A prior `xlflow push --session --no-save` or `xlflow run --session` can leave the live Excel workbook newer than the saved `.xlsm`; run `xlflow save --json` and inspect again before assuming the macro logic failed.
 
 If a UserForm inspection looks wrong, first decide whether you need design-time state or runtime state. Use `xlflow inspect form <FormName> --designer` for control layout and static properties, and `--runtime` when labels, combo contents, or text boxes are populated by code. If runtime values are blank but the visible UI should be initialized, rerun with `--initializer <MethodName>` before changing source.
+
+If the structure looks right but the visible layout is still uncertain, use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` to capture the runtime-rendered form from a temporary workbook copy.
 
 If `xlflow inspect used-range` is truncated, use the reported `returned_range` and warnings to choose a narrower follow-up `xlflow inspect range` query instead of blindly increasing prompt size.
 

@@ -229,12 +229,13 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
 		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
 		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
+		{Name: "form-image-export", Description: "Export a runtime UserForm to a PNG image for visual verification."},
 		{Name: "workbook-edit-helpers", Description: "Mutate a live session workbook for agent-driven test setup, event triggering, and visual tuning."},
 	}
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image", "edit"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "export-image", "form-export-image", "edit"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -333,7 +334,7 @@ func (a *app) formCommand() *cobra.Command {
 		Use:   "form",
 		Short: "Manage workbook UserForms",
 	}
-	cmd.AddCommand(a.formSnapshotCommand())
+	cmd.AddCommand(a.formSnapshotCommand(), a.formExportImageCommand())
 	return cmd
 }
 
@@ -410,6 +411,46 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) formExportImageCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var overwrite bool
+	var outPath string
+	var initializer string
+	cmd := &cobra.Command{
+		Use:   "export-image <name>",
+		Short: "Export a runtime UserForm as a PNG image",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormExportImageOptions(args[0], outPath, initializer, overwrite, session, keepalive)
+			if err != nil {
+				return a.writeFailure("form export-image", output.ExitConfig, "form_export_image_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form export-image")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Exporting workbook form image", opts.Keepalive, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormExportImage(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&outPath, "out", "", "write the PNG image to an explicit file path")
+	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method to invoke with ThisWorkbook before capture")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
@@ -2278,6 +2319,28 @@ func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keep
 	}, nil
 }
 
+func buildFormExportImageOptions(name, outPath, initializer string, overwrite bool, session bool, keepalive keepaliveFlags) (excel.FormExportImageOptions, error) {
+	if strings.TrimSpace(name) == "" {
+		return excel.FormExportImageOptions{}, fmt.Errorf("form name is required")
+	}
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return excel.FormExportImageOptions{}, err
+	}
+	trimmedOut := strings.TrimSpace(outPath)
+	if trimmedOut == "" {
+		return excel.FormExportImageOptions{}, fmt.Errorf("--out is required")
+	}
+	return excel.FormExportImageOptions{
+		Name:        strings.TrimSpace(name),
+		OutPath:     trimmedOut,
+		Initializer: strings.TrimSpace(initializer),
+		Overwrite:   overwrite,
+		Session:     session,
+		Keepalive:   keepaliveOpts,
+	}, nil
+}
+
 func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	var sheet string
 	var maxRows int
@@ -2461,7 +2524,7 @@ func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string
 	}}
 	hints := []map[string]any{{
 		"code":    "userform_planned_commands",
-		"message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow export-form-image <name>`.",
+		"message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`.",
 	}}
 	return warnings, hints
 }

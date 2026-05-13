@@ -15,7 +15,7 @@ Make UserForm risk visible in existing workflows before dedicated form commands 
 ## Behavior
 
 - Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
-- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `export-form-image`.
+- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `form export-image`.
 - `push --session --no-save` with detected UserForms adds `userform_unsaved_session_state` warning in addition to existing save-required state.
 - `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
 - UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
@@ -179,6 +179,68 @@ Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file f
 - Form: `UserForm1`
 - Runtime validation path: `xlflow inspect form UserForm1 --runtime --initializer InitializeForm --json`
 - Duplicate VBA component basenames anywhere in the recursive source tree fail `push` with `duplicate_module_name`.
+
+## UserForm Phase 5 Form Export Image Spec
+
+### Goal
+
+Export a runtime-rendered workbook UserForm as a PNG image for visual verification without mutating the source workbook or attached live session.
+
+### Commands
+
+- `xlflow form export-image <name> --out <path.png> [--initializer <method>] [--overwrite] [--session] [--keepalive] [--keepalive-interval <duration>]`
+- `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --json`
+
+### Behavior
+
+- Phase 5 uses the `form` namespace: the CLI is `xlflow form export-image`.
+- Capture basis is fixed to runtime.
+- Runtime capture executes against a temporary workbook copy created from the current source workbook state, matching the safety model of `inspect form --runtime`.
+- The command loads the target form in the temporary workbook, optionally invokes the named public initializer with `ThisWorkbook`, shows the form modeless with a unique caption token, captures the matching top-level window, then unloads the form and closes the temporary workbook copy.
+- `--initializer` is optional and mirrors `inspect form --runtime --initializer`.
+- `--out` is required.
+- Output format is selected only by the `--out` extension and is PNG-only in Phase 5.
+- Any non-`.png` output path fails with `unsupported_image_format` before Excel is opened.
+- Existing output files fail with `output_file_exists` unless `--overwrite` is set.
+- Parent directories for `--out` are created automatically when missing.
+- Success returns normal workbook/session metadata plus top-level `target`, `forms`, `output`, and `warnings`.
+- The command always warns that runtime capture executes `UserForm_Initialize`.
+- The command always warns that runtime capture uses a temporary workbook copy.
+- The command always warns that the feature is experimental and currently depends on Windows desktop Excel GUI behavior.
+- Cleanup failures after a successful export are warnings, not fatal errors.
+
+### Output
+
+- `target.kind = file | live_session`
+- `target.path = <workbook path>`
+- `target.form = <form name>`
+- `target.capture_state = "temporary_copy"`
+- `forms.name = <form name>`
+- `forms.basis = "runtime"`
+- `forms.initializer = <method>` when provided
+- `output.path = <resolved png path>`
+- `output.format = "png"`
+- `output.width_px` / `output.height_px` when image dimensions are available
+
+### Errors
+
+- `form_export_image_args_invalid`
+- `unsupported_image_format`
+- `output_file_exists`
+- `form_not_found`
+- `vbproject_access_denied`
+- `runtime_form_load_failed`
+- `form_initializer_failed`
+- `window_not_found`
+- `image_capture_failed`
+- `temporary_component_cleanup_failed` as a warning when the main export succeeds
+
+### Sample validation target
+
+- Workspace: `tmp_workspaces/user-form`
+- Workbook: `build/Book.xlsm`
+- Form: `UserForm1`
+- Validation path: `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --json`
 
 ## Verification
 

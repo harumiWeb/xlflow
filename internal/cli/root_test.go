@@ -519,6 +519,24 @@ func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesFormExportImageCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "export-image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "export-image" {
+		t.Fatalf("expected form export-image command, got %#v", cmd)
+	}
+	for _, name := range []string{"out", "initializer", "overwrite", "session", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form export-image command to define --%s", name)
+		}
+	}
+}
+
 func TestRootCommandIncludesInspectFormCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -659,6 +677,28 @@ func TestBuildFormSnapshotOptionsRejectsMissingRequirements(t *testing.T) {
 	}
 	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
 		t.Fatalf("expected form name error, got %v", err)
+	}
+}
+
+func TestBuildFormExportImageOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildFormExportImageOptions(" UserForm1 ", " artifacts\\UserForm1.png ", " InitializeForm ", true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Name != "UserForm1" || opts.OutPath != "artifacts\\UserForm1.png" || opts.Initializer != "InitializeForm" {
+		t.Fatalf("unexpected form export-image opts: %#v", opts)
+	}
+	if !opts.Overwrite || !opts.Session || !opts.Keepalive.Keepalive || opts.Keepalive.KeepaliveInterval != 7*time.Second {
+		t.Fatalf("unexpected keepalive/session opts: %#v", opts)
+	}
+}
+
+func TestBuildFormExportImageOptionsRejectsMissingRequirements(t *testing.T) {
+	if _, err := buildFormExportImageOptions("", "artifacts\\UserForm1.png", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+		t.Fatalf("expected form name error, got %v", err)
+	}
+	if _, err := buildFormExportImageOptions("UserForm1", "", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+		t.Fatalf("expected out requirement error, got %v", err)
 	}
 }
 

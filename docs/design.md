@@ -92,7 +92,7 @@ Note:
 Recommended commands:
   xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
   xlflow inspect form UserForm1 --runtime --json
-  xlflow export-form-image UserForm1 --out artifacts/UserForm1.png
+  xlflow form export-image UserForm1 --out artifacts/UserForm1.png
 ```
 
 #### Additional stale-state warning
@@ -511,15 +511,9 @@ warnings:
 
 ---
 
-## Phase 5: `xlflow export-form-image`
+## Phase 5: `xlflow form export-image`
 
 ### Command
-
-```bash
-xlflow export-form-image UserForm1 --out artifacts/UserForm1.png
-```
-
-Alternative namespace:
 
 ```bash
 xlflow form export-image UserForm1 --out artifacts/UserForm1.png
@@ -581,12 +575,12 @@ Do not rely only on window class names such as `ThunderDFrame` / `ThunderXFrame`
 
 ### Warnings
 
-`export-form-image` loads the form at runtime and executes `UserForm_Initialize`.
+`form export-image` loads the form at runtime and executes `UserForm_Initialize`.
 
 Example CLI warning:
 
 ```text
-Warning: export-form-image loads the UserForm at runtime.
+Warning: form export-image loads the UserForm at runtime.
 UserForm_Initialize will be executed.
 ```
 
@@ -603,7 +597,7 @@ This command should initially be marked experimental because it depends on:
 Example:
 
 ```text
-Note: export-form-image is experimental and currently supports Windows + desktop Excel only.
+Note: form export-image is experimental and currently supports Windows + desktop Excel only.
 ```
 
 ---
@@ -916,7 +910,7 @@ Unsupported environments:
 3. Implement `xlflow inspect form <name> --designer --json`.
 4. Implement `xlflow inspect form <name> --runtime --json`.
 5. Implement `xlflow form snapshot <name> --out ...`.
-6. Implement `xlflow export-form-image <name> --out ...` as experimental.
+6. Implement `xlflow form export-image <name> --out ...` as experimental.
 7. Add `form diff` against snapshot/spec.
 8. Add `form build/apply` via Designer API.
 9. Add `form init --dynamic`.
@@ -927,7 +921,7 @@ Read-only inspection is much safer than write operations.
 
 `Designer -> Snapshot` gives immediate value for existing manually created UserForms.
 
-`Runtime inspect` and `export-form-image` give AI agents a verification loop.
+`Runtime inspect` and `form export-image` give AI agents a verification loop.
 
 `Spec -> Designer` should come after the snapshot format is proven.
 
@@ -948,7 +942,7 @@ The first deliverable should include:
 Optional but high-value:
 
 ```text
-- xlflow export-form-image <name> --out <path>
+- xlflow form export-image <name> --out <path>
 ```
 
 Initial supported controls:
@@ -1027,12 +1021,12 @@ xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
 
 writes a structured spec file that can be reviewed by humans and AI agents.
 
-### `export-form-image`
+### `form export-image`
 
 Given a UserForm, running:
 
 ```bash
-xlflow export-form-image UserForm1 --out artifacts/UserForm1.png
+xlflow form export-image UserForm1 --out artifacts/UserForm1.png
 ```
 
 creates a PNG image of the runtime form, or returns a structured `image_capture_failed` / `window_not_found` error.
@@ -1064,7 +1058,7 @@ Mitigation:
 
 ### DPI and window capture instability
 
-`export-form-image` depends on desktop UI behavior.
+`form export-image` depends on desktop UI behavior.
 
 Mitigation:
 

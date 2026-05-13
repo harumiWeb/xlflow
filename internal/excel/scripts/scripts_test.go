@@ -13,7 +13,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -24,6 +24,44 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestFormExportImageScriptValidatesArgsBeforeWorkbookOpen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-export-image.ps1 -FormName 'UserForm1' -OutputPath 'C:\\temp\\UserForm1.webp' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-export-image output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "unsupported_image_format" {
+		t.Fatalf("expected unsupported_image_format failure, got %+v", got)
+	}
+}
+
+func TestFormExportImageScriptWaitsForCaptureStatusBeforeFallback(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-export-image.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	want := "if (-not [bool]$captureStatus.ready -and [int64]$captureStatus.hwnd -eq 0 -and [string]::IsNullOrWhiteSpace([string]$captureStatus.caption))"
+	if !strings.Contains(text, want) {
+		t.Fatalf("form-export-image.ps1 missing empty-status wait guard %q:\n%s", want, text)
 	}
 }
 
@@ -802,6 +840,71 @@ func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
 	}
 	if strings.Contains(text, "Remove-Item -LiteralPath $resolvedOutputPath -Force") {
 		t.Fatalf("expected export-image.ps1 to avoid deleting the destination before export succeeds")
+	}
+}
+
+func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Install-XlflowVBComponentFromCode",
+		"New-XlflowFormExportRuntimeWorkbookCopy",
+		"SaveCopyAs($tempPath)",
+		"XlflowPrepareFormImageCapture",
+		"Invoke-XlflowExcelCallWithDialogWatch",
+		`DialogKind "any_vba"`,
+		"XlflowFindFormWindowHandle",
+		"Resolve-XlflowFormImageCaptureWindow",
+		"Wait-XlflowFormImageCaptureWindow",
+		"[XlflowNativeMethods]::PrintWindow",
+		"CopyFromScreen",
+		"runtime_form_loads_initialize",
+		"runtime_form_temp_copy",
+		"userform_image_export_experimental",
+		"temporary_component_cleanup_failed",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptMapsPrepareFailuresToValidationCodes(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`XlflowFormImageCapture.capture_prepare`,
+		`return "runtime_form_load_failed"`,
+		`return "vba_compile_failed"`,
+		`Set-XlflowFormExportDialogFailure`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnyVbaDialogWatcherDoesNotFallbackToFirstButtonForCompileDialogs(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`param(`,
+		`[string]$MatchedKind = ""`,
+		`if ($MatchedKind -eq "compile")`,
+		`Test-XlflowAllowDialogFirstButtonFallback -DialogKind $DialogKind -MatchedKind $matchedKind`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
 	}
 }
 

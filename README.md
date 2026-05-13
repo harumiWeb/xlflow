@@ -320,33 +320,34 @@ xlflow inspect-gui --json
 
 ## Command map
 
-| Command         | Purpose                                                     | Typical usage                                                               |
-| --------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `new`           | Create a new xlflow project and `.xlsm` workbook            | `xlflow new Book.xlsm`                                                      |
-| `init`          | Initialize xlflow from an existing workbook                 | `xlflow init Book.xlsm`                                                     |
-| `doctor`        | Diagnose Excel, COM, PowerShell, and VBIDE access           | `xlflow doctor --json`                                                      |
-| `attach`        | Validate the workbook currently active in Excel             | `xlflow attach --active --json`                                             |
-| `pull`          | Export VBA components into `src/`                           | `xlflow pull --json`                                                        |
-| `push`          | Import VBA source back into the workbook                    | `xlflow push --json`                                                        |
-| `session`       | Keep the configured workbook open for fast loops            | `xlflow session start`                                                      |
-| `save`          | Save the workbook held by a session                         | `xlflow save --session --json`                                              |
-| `runner`        | Manage the persistent xlflow runner marker module           | `xlflow runner install --json`                                              |
-| `macros`        | Discover runnable macro entrypoints                         | `xlflow macros --json`                                                      |
-| `list forms`    | Discover workbook UserForms and expected source paths       | `xlflow list forms --json`                                                  |
-| `form snapshot` | Persist strict Designer UserForm state as JSON or YAML spec | `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --json` |
-| `run`           | Execute a macro from the CLI                                | `xlflow run Main.Run --json`                                                |
-| `export-image`  | Export a worksheet range to a PNG image                     | `xlflow export-image --sheet QR --range A1:AE31 --json`                     |
-| `edit`          | Mutate a live session workbook for setup and tuning         | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`  |
-| `trace`         | Enable, collect, and clean VBA trace logs                   | `xlflow trace enable --json`                                                |
-| `test`          | Run VBA tests                                               | `xlflow test --json`                                                        |
-| `diff`          | Compare workbook content and optional VBA source            | `xlflow diff before.xlsm after.xlsm --json`                                 |
-| `inspect`       | Inspect saved workbook snapshots without Excel COM          | `xlflow inspect range --sheet Result --address A1:F20 --json`               |
-| `lint`          | Lint VBA source                                             | `xlflow lint --json`                                                        |
-| `analyze`       | Analyze runtime-risk patterns without opening Excel         | `xlflow analyze --json`                                                     |
-| `check`         | Run `lint`, `analyze`, and `doctor` as a preflight          | `xlflow check --keepalive --json`                                           |
-| `inspect-gui`   | Detect GUI interaction boundaries                           | `xlflow inspect-gui --json`                                                 |
-| `skill install` | Install the bundled xlflow Skill for AI agents              | `xlflow skill install --agent codex`                                        |
-| `version`       | Show the installed xlflow build metadata                    | `xlflow version`                                                            |
+| Command             | Purpose                                                     | Typical usage                                                               |
+| ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `new`               | Create a new xlflow project and `.xlsm` workbook            | `xlflow new Book.xlsm`                                                      |
+| `init`              | Initialize xlflow from an existing workbook                 | `xlflow init Book.xlsm`                                                     |
+| `doctor`            | Diagnose Excel, COM, PowerShell, and VBIDE access           | `xlflow doctor --json`                                                      |
+| `attach`            | Validate the workbook currently active in Excel             | `xlflow attach --active --json`                                             |
+| `pull`              | Export VBA components into `src/`                           | `xlflow pull --json`                                                        |
+| `push`              | Import VBA source back into the workbook                    | `xlflow push --json`                                                        |
+| `session`           | Keep the configured workbook open for fast loops            | `xlflow session start`                                                      |
+| `save`              | Save the workbook held by a session                         | `xlflow save --session --json`                                              |
+| `runner`            | Manage the persistent xlflow runner marker module           | `xlflow runner install --json`                                              |
+| `macros`            | Discover runnable macro entrypoints                         | `xlflow macros --json`                                                      |
+| `list forms`        | Discover workbook UserForms and expected source paths       | `xlflow list forms --json`                                                  |
+| `form snapshot`     | Persist strict Designer UserForm state as JSON or YAML spec | `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --json` |
+| `form export-image` | Export a runtime UserForm to a PNG image                    | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`   |
+| `run`               | Execute a macro from the CLI                                | `xlflow run Main.Run --json`                                                |
+| `export-image`      | Export a worksheet range to a PNG image                     | `xlflow export-image --sheet QR --range A1:AE31 --json`                     |
+| `edit`              | Mutate a live session workbook for setup and tuning         | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`  |
+| `trace`             | Enable, collect, and clean VBA trace logs                   | `xlflow trace enable --json`                                                |
+| `test`              | Run VBA tests                                               | `xlflow test --json`                                                        |
+| `diff`              | Compare workbook content and optional VBA source            | `xlflow diff before.xlsm after.xlsm --json`                                 |
+| `inspect`           | Inspect saved workbook snapshots without Excel COM          | `xlflow inspect range --sheet Result --address A1:F20 --json`               |
+| `lint`              | Lint VBA source                                             | `xlflow lint --json`                                                        |
+| `analyze`           | Analyze runtime-risk patterns without opening Excel         | `xlflow analyze --json`                                                     |
+| `check`             | Run `lint`, `analyze`, and `doctor` as a preflight          | `xlflow check --keepalive --json`                                           |
+| `inspect-gui`       | Detect GUI interaction boundaries                           | `xlflow inspect-gui --json`                                                 |
+| `skill install`     | Install the bundled xlflow Skill for AI agents              | `xlflow skill install --agent codex`                                        |
+| `version`           | Show the installed xlflow build metadata                    | `xlflow version`                                                            |
 
 ---
 
@@ -505,6 +506,19 @@ Persisted `warnings` are reserved for form-local snapshot warnings that belong t
 
 Like other workbook-backed read commands, `form snapshot` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit.
 
+### `xlflow form export-image`
+
+Exports a runtime-rendered workbook `UserForm` to a PNG image.
+
+```bash
+xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json
+xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --session --overwrite --json
+```
+
+This command follows the same safe runtime model as `inspect form --runtime`: xlflow creates a temporary workbook copy from the current workbook state, loads the form there, optionally invokes the named initializer with `ThisWorkbook`, shows the form modeless, captures its window, and then unloads it. The source workbook and recorded live session are not mutated by the capture itself.
+
+`--out` is required and must resolve to `.png`. Existing files fail unless `--overwrite` is set. Successful JSON includes top-level `target`, `forms`, `output`, and `warnings`. The command always warns that it executes `UserForm_Initialize`, and it is marked experimental because it depends on Windows desktop Excel GUI capture behavior.
+
 ### `xlflow run`
 
 Runs a macro from the CLI.
@@ -561,7 +575,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
+`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `pull`, `push`, `macros`, `run`, `export-image`, `form export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
 If UserForms are involved, treat that save step as part of review hygiene before comparing `.frm` / `.frx` output.
