@@ -501,7 +501,7 @@ xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json --json
 xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --session --json
 ```
 
-`xlflow inspect form --designer` は source workbook の VBIDE Designer を直接読む read-only 経路のまま維持され、workbook VBA の実行を前提にしません。一方 `form snapshot` はより厳密です。一時 workbook copy を開き、injected VBA helper を実行して concrete control type まで含む spec を保存します。
+`xlflow inspect form --designer` は source workbook の VBIDE Designer を read-only で直接読み取る経路のまま維持され、workbook VBA の実行を前提としません。一方 `form snapshot` はより厳密です。一時的な workbook copy を開き、注入した VBA helper を実行して、具体的な control type まで含む spec を保存します。
 
 `--out` は必須です。出力拡張子と実際のシリアライズ形式は必ず一致し、`.json` は JSON、`.yaml` / `.yml` は YAML を書きます。それ以外の拡張子は Excel を開く前に失敗します。snapshot は helper 実行経路を使うため、workbook の VBA project が helper を実行できない場合は失敗しえます。
 

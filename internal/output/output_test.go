@@ -203,6 +203,18 @@ func TestWriteWithOptionsInspectMarkdownUsesUnnamedPlaceholder(t *testing.T) {
 	}
 }
 
+func TestRenderInspectFormShowsUnavailableWhenBothPayloadMissing(t *testing.T) {
+	env := New("inspect")
+	env.Warnings = []map[string]any{{"code": "runtime_unavailable", "message": "runtime snapshot unavailable"}}
+	text := renderer{}.renderInspectForm(env, map[string]any{"target": "form"})
+	if !strings.Contains(text, "unavailable") {
+		t.Fatalf("expected unavailable forms summary: %s", text)
+	}
+	if !strings.Contains(text, "runtime snapshot unavailable") {
+		t.Fatalf("expected warnings to be preserved: %s", text)
+	}
+}
+
 func TestWriteWithOptionsInspectJSONIncludesTargetStateAndWarnings(t *testing.T) {
 	env := New("inspect")
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}

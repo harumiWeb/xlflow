@@ -164,3 +164,36 @@ func TestWriteFormSnapshotWritesJSONAndYAML(t *testing.T) {
 		}
 	}
 }
+
+func TestFormSpecFromInspectSnapshotAssignsPlaceholderToUnnamedControl(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name":  "UserForm1",
+		"basis": "designer",
+		"controls": []any{
+			map[string]any{
+				"name": "",
+				"type": "Label",
+				"controls": []any{
+					map[string]any{
+						"type": "TextBox",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Controls) != 1 || spec.Controls[0].Name != "<unnamed_1>" {
+		t.Fatalf("unexpected top-level unnamed control placeholder: %#v", spec.Controls)
+	}
+	if len(spec.Controls[0].Controls) != 1 || spec.Controls[0].Controls[0].Name != "<unnamed_2>" {
+		t.Fatalf("unexpected nested unnamed control placeholder: %#v", spec.Controls[0].Controls)
+	}
+	if len(spec.Warnings) != 2 {
+		t.Fatalf("warnings = %#v", spec.Warnings)
+	}
+	if spec.Warnings[0].Code != "unnamed_control_placeholder" || spec.Warnings[1].Code != "unnamed_control_placeholder" {
+		t.Fatalf("unexpected warnings = %#v", spec.Warnings)
+	}
+}

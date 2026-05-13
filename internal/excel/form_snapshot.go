@@ -125,7 +125,8 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 		basis = "designer"
 	}
 	coordinateSystem, _ := stringField(root, "coordinate_system")
-	controls, err := formSpecControls(root["controls"])
+	counter := 0
+	controls, generatedWarnings, err := formSpecControls(root["controls"], &counter)
 	if err != nil {
 		return FormSpec{}, err
 	}
@@ -133,6 +134,7 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 	if err != nil {
 		return FormSpec{}, err
 	}
+	warnings = append(warnings, generatedWarnings...)
 	form := FormSpecForm{Name: name}
 	if caption, ok := stringField(root, "caption"); ok {
 		form.Caption = &caption
@@ -168,39 +170,52 @@ func formSnapshotFormatFromPath(path string) (string, error) {
 	}
 }
 
-func formSpecControls(value any) ([]FormSpecControl, error) {
+func formSpecControls(value any, unnamedCounter *int) ([]FormSpecControl, []FormSpecWarning, error) {
 	items, ok := asSlice(value)
 	if !ok || len(items) == 0 {
-		return []FormSpecControl{}, nil
+		return []FormSpecControl{}, []FormSpecWarning{}, nil
 	}
 	controls := make([]FormSpecControl, 0, len(items))
+	warnings := make([]FormSpecWarning, 0)
 	for _, item := range items {
 		controlMap, ok := asObjectMap(item)
 		if !ok {
-			return nil, fmt.Errorf("inspect designer snapshot control entry is invalid")
+			return nil, nil, fmt.Errorf("inspect designer snapshot control entry is invalid")
 		}
-		control, err := formSpecControl(controlMap)
+		control, controlWarnings, err := formSpecControl(controlMap, unnamedCounter)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		controls = append(controls, control)
+		warnings = append(warnings, controlWarnings...)
 	}
-	return controls, nil
+	return controls, warnings, nil
 }
 
-func formSpecControl(root map[string]any) (FormSpecControl, error) {
+func formSpecControl(root map[string]any, unnamedCounter *int) (FormSpecControl, []FormSpecWarning, error) {
 	name, ok := stringField(root, "name")
+	warnings := make([]FormSpecWarning, 0)
 	if !ok || strings.TrimSpace(name) == "" {
-		return FormSpecControl{}, fmt.Errorf("inspect designer snapshot control is missing a name")
+		if unnamedCounter == nil {
+			return FormSpecControl{}, nil, fmt.Errorf("inspect designer snapshot control is missing a name")
+		}
+		*unnamedCounter++
+		name = fmt.Sprintf("<unnamed_%d>", *unnamedCounter)
+		warnings = append(warnings, FormSpecWarning{
+			Code:    "unnamed_control_placeholder",
+			Message: "A control without a stable name was persisted with a generated placeholder name.",
+			Control: name,
+		})
 	}
 	controlType, ok := stringField(root, "type")
 	if !ok || strings.TrimSpace(controlType) == "" {
-		return FormSpecControl{}, fmt.Errorf("inspect designer snapshot control %q is missing a type", name)
+		return FormSpecControl{}, nil, fmt.Errorf("inspect designer snapshot control %q is missing a type", name)
 	}
-	children, err := formSpecControls(root["controls"])
+	children, childWarnings, err := formSpecControls(root["controls"], unnamedCounter)
 	if err != nil {
-		return FormSpecControl{}, err
+		return FormSpecControl{}, nil, err
 	}
+	warnings = append(warnings, childWarnings...)
 	control := FormSpecControl{
 		Name:     name,
 		Type:     controlType,
@@ -251,7 +266,7 @@ func formSpecControl(root map[string]any) (FormSpecControl, error) {
 	if properties, ok := asObjectMap(root["properties"]); ok && len(properties) > 0 {
 		control.Properties = properties
 	}
-	return control, nil
+	return control, warnings, nil
 }
 
 func formSpecWarnings(value any) ([]FormSpecWarning, error) {

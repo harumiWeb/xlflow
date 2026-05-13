@@ -1230,7 +1230,9 @@ func (r renderer) renderInspectForm(env Envelope, payload map[string]any) string
 	}
 	forms := objectMap(payload["forms"])
 	if len(forms) == 0 {
-		return ""
+		b.WriteString(kv("Forms", "unavailable"))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
 	}
 	for _, basis := range []string{"runtime", "designer"} {
 		snapshot := objectMap(forms[basis])

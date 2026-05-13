@@ -2,7 +2,7 @@
 
 ## UserForm Phase 1 Warning Spec
 
-## Goal
+## Phase 2 Goal
 
 Make UserForm risk visible in existing workflows before dedicated form commands exist.
 
@@ -12,7 +12,7 @@ Make UserForm risk visible in existing workflows before dedicated form commands 
 - `inspect` remains file-based and detects UserForms from configured `src.forms` `.frm` files without opening Excel COM.
 - Phase 1 does not add new `form` subcommands.
 
-## Behavior
+## Phase 2 Behavior
 
 - Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
 - Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `form export-image`.
