@@ -14,7 +14,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -25,6 +25,187 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestFormWriteScriptValidatesArgsBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -NoSave true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -Overwrite true -NoSave true -UseSession true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write overwrite/no-save validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error.Message, "--overwrite cannot be combined with --NoSave") {
+		t.Fatalf("unexpected validation message: %+v", got)
+	}
+}
+
+func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"VBComponents.Add(3)",
+		"Controls.Add($progId, $controlName, $true)",
+		"Clear-XlflowDesignerControls",
+		"Controls.Item($Container.Controls.Count - 1)",
+		"Where-Object { $null -ne $_ }",
+		"Get-XlflowRootControlSpecs",
+		"Get-XlflowControlSpecChildren",
+		"Set-XlflowVBComponentProperty",
+		"Export-XlflowVBComponentBackup",
+		"Import-XlflowVBComponentBackup",
+		"component '\" + $Name + \"' exists but is not a UserForm",
+		"save_required",
+		"userform_review_commands",
+		"--NoSave requires --UseSession",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-write.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormWriteScriptOverwritePathBacksUpAndRestoresOnFailure(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"New-XlflowFormRestoreDirectory",
+		"Export-XlflowVBComponentBackup -Component $existing -Directory $restoreDirectory",
+		"Import-XlflowVBComponentBackup -VBProject $VBProject -ExportPath $restorePath -ExpectedName $formName",
+		"restored original UserForm '\" + $formName + \"' after overwrite failure",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-write.ps1 missing overwrite restore handling %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormWriteScriptMatchesParentIDsCaseSensitively(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	start := strings.Index(text, "function Get-XlflowControlSpecChildren")
+	if start < 0 {
+		t.Fatalf("Get-XlflowControlSpecChildren not found:\n%s", text)
+	}
+	end := strings.Index(text[start:], "function Get-XlflowRootControlSpecs")
+	if end < 0 {
+		t.Fatalf("Get-XlflowRootControlSpecs boundary not found:\n%s", text)
+	}
+	section := text[start : start+end]
+	if !strings.Contains(section, "[System.StringComparison]::Ordinal") {
+		t.Fatalf("expected case-sensitive parentId matching in Get-XlflowControlSpecChildren:\n%s", section)
+	}
+	if strings.Contains(section, "[System.StringComparison]::OrdinalIgnoreCase") {
+		t.Fatalf("unexpected case-insensitive parentId matching in Get-XlflowControlSpecChildren:\n%s", section)
+	}
+}
+
+func TestFormWriteScriptAppliesSelectedIndexAfterListPopulation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	listIndex := strings.Index(text, "Set-XlflowControlListItems -Control $Control -ControlSpec $ControlSpec")
+	selectedIndex := strings.Index(text, `Set-XlflowFormProperty -Target $Control -PropertyName "ListIndex"`)
+	if listIndex < 0 || selectedIndex < 0 {
+		t.Fatalf("expected list population and selected index assignment in form-write.ps1:\n%s", text)
+	}
+	if selectedIndex < listIndex {
+		t.Fatalf("expected selected index assignment after list population")
+	}
+}
+
+func TestFormWriteScriptDecodesSpecInWindowsPowerShell(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available")
+	}
+
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[{"name":"Label1","type":"Label"}],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write decode check failed in Windows PowerShell: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write decode output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil {
+		t.Fatalf("unexpected decoded form spec result: %+v", got)
+	}
+	if strings.Contains(got.Error.Message, "invalid form spec payload") {
+		t.Fatalf("unexpected decoded form spec result: %+v", got)
 	}
 }
 
@@ -123,8 +304,33 @@ func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
 			t.Fatalf("inspect-form.ps1 missing %q:\n%s", want, text)
 		}
 	}
+	for _, want := range []string{
+		`Get-XlflowSafeMemberValue -Target $_ -Name "Parent"`,
+		"Get-XlflowDesignerControlSnapshot -Control $_ -ExpectedParentName",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect-form.ps1 missing nested-control parent filter %q:\n%s", want, text)
+		}
+	}
 	if strings.Contains(text, "runtime_inspect_session_dirty") {
 		t.Fatalf("inspect-form.ps1 should no longer report live-session dirty mutation for runtime temp-copy inspection:\n%s", text)
+	}
+}
+
+func TestCommonScriptStrictDesignerFiltersControlsByParentName(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "common.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"SerializeControls(controls, formName)",
+		"ControlHasExpectedParent",
+		"SafeControlName(control)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing strict designer parent filtering %q:\n%s", want, text)
+		}
 	}
 }
 

@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related UserForm commands include `xlflow form snapshot <name> --out <path>`, `xlflow form build <spec>`, `xlflow form build <spec> --overwrite`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
@@ -2568,13 +2568,13 @@ Private Function SerializeFormSnapshot(ByVal formName As String, ByVal basis As 
   JsonAddString json, "coordinate_system", xlflowCoordinateSystem, hasFields
 
   Set controls = GetObjectControls(formObject)
-  JsonAddRaw json, "controls", SerializeControls(controls), hasFields
+  JsonAddRaw json, "controls", SerializeControls(controls, formName), hasFields
 
   json = json & "}"
   SerializeFormSnapshot = json
 End Function
 
-Private Function SerializeControls(ByVal controls As Object) As String
+Private Function SerializeControls(ByVal controls As Object, ByVal expectedParentName As String) As String
   Dim json As String
   Dim first As Boolean
   Dim control As Object
@@ -2584,11 +2584,15 @@ Private Function SerializeControls(ByVal controls As Object) As String
 
   If Not controls Is Nothing Then
     For Each control In controls
+      If Not ControlHasExpectedParent(control, expectedParentName) Then
+        GoTo ContinueLoop
+      End If
       If Not first Then
         json = json & ","
       End If
       json = json & SerializeControl(control)
       first = False
+ContinueLoop:
     Next control
   End If
 
@@ -2632,11 +2636,39 @@ Private Function SerializeControl(ByVal control As Object) As String
     Set children = GetObjectControls(control)
   End If
   If Not children Is Nothing Then
-    JsonAddRaw json, "controls", SerializeControls(children), hasFields
+    JsonAddRaw json, "controls", SerializeControls(children, SafeControlName(control)), hasFields
   End If
 
   json = json & "}"
   SerializeControl = json
+End Function
+
+Private Function ControlHasExpectedParent(ByVal control As Object, ByVal expectedParentName As String) As Boolean
+  On Error GoTo Missing
+
+  Dim parentObject As Object
+  Dim parentName As String
+  Set parentObject = CallByName(control, "Parent", VbGet)
+  If parentObject Is Nothing Then
+    GoTo Missing
+  End If
+
+  parentName = CallByName(parentObject, "Name", VbGet)
+  ControlHasExpectedParent = (StrComp(Trim$(parentName), Trim$(expectedParentName), vbTextCompare) = 0)
+  Exit Function
+
+Missing:
+  ControlHasExpectedParent = False
+End Function
+
+Private Function SafeControlName(ByVal control As Object) As String
+  On Error GoTo Missing
+
+  SafeControlName = CStr(CallByName(control, "Name", VbGet))
+  Exit Function
+
+Missing:
+  SafeControlName = vbNullString
 End Function
 
 Private Function ControlCanContainChildren(ByVal controlType As String) As Boolean

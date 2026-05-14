@@ -103,12 +103,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## 動作要件
 
-| 要件                                                       | 必要になる場面                                                                                                                                                        |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows                                                    | Excel COM automation                                                                                                                                                  |
-| Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                                 | Excel automation bridge                                                                                                                                               |
-| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                                                                            |
+| 要件                                                       | 必要になる場面                                                                                                                                                                      |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows                                                    | Excel COM automation                                                                                                                                                                |
+| Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell                                                 | Excel automation bridge                                                                                                                                                             |
+| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                                                                                          |
 
 > [!NOTE]
 > `lint`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。
@@ -337,6 +337,7 @@ xlflow inspect-gui --json
 | `macros`            | 実行可能な macro entrypoint を検出                      | `xlflow macros --json`                                                      |
 | `list forms`        | workbook の UserForm と想定 source path を列挙          | `xlflow list forms --json`                                                  |
 | `form snapshot`     | 厳密な Designer UserForm state を JSON/YAML spec に保存 | `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --json` |
+| `form build`        | 保存済み spec から Designer-backed UserForm を作成      | `xlflow form build src/forms/UserForm1.form.yaml --json`                    |
 | `form export-image` | runtime UserForm を PNG 画像として出力                  | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`   |
 | `run`               | CLI から macro を実行                                   | `xlflow run Main.Run --json`                                                |
 | `export-image`      | worksheet range を PNG 画像として出力                   | `xlflow export-image --sheet QR --range A1:AE31 --json`                     |
@@ -509,6 +510,19 @@ persisted artifact の `warnings` は、保存される spec 自体に属する 
 
 他の workbook-backed read command と同様に、`.xlflow/session.json` が設定済み workbook を指していれば `form snapshot` も一致する recorded session workbook を自動再利用します。明示的にその前提を要求したい場合は `--session` を付けます。
 
+### `xlflow form build`
+
+保存済み `xlflow.userform` spec から Designer-backed な workbook `UserForm` を作成します。
+
+```bash
+xlflow form build src/forms/UserForm1.form.yaml --json
+xlflow form build src/forms/UserForm1.form.yaml --session --overwrite --json
+```
+
+spec path は `.json` / `.yaml` / `.yml` でなければなりません。xlflow は Excel を開く前に Go 側で schema を検証し、その後 `.frx` を直接編集せず VBIDE Designer API で form と controls を作成します。
+
+既定では同名の `form.name` がすでに存在すると `form_already_exists` で失敗します。`--overwrite` を付けた場合だけ既存 component を削除して spec から作り直します。spec を source of truth として毎回作り直す置換 workflow はこちらを前提にします。既定では保存し、`--session --no-save` のときだけ live workbook を未保存のまま残します。
+
 ### `xlflow form export-image`
 
 runtime で描画された workbook `UserForm` を PNG 画像として出力します。
@@ -579,7 +593,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `list forms` / `inspect form` / `form snapshot` / `pull` / `push` / `macros` / `run` / `export-image` / `form export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
+`--session` は明示的な強制 attach 用に残ります。`.xlflow/session.json` が設定済み workbook を指している場合は、通常の `list forms` / `inspect form` / `form snapshot` / `form build` / `pull` / `push` / `macros` / `run` / `export-image` / `form export-image` / `test` / `trace` / `save` でも一致する live workbook を自動再利用し、その利用形態を JSON / human output に表示します。
 
 `push --session --no-save` が成功した場合や、`run --session` を `--save` / `--save-as` なしで実行した場合は、`xlflow save --session` を行うまで live workbook とディスク上の `.xlsm` がずれる可能性があります。
 UserForm を含む workbook では、`.frm` / `.frx` 差分を確認する前にその save を行う前提で考えてください。

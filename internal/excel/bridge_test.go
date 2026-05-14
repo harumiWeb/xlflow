@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
@@ -752,6 +753,43 @@ func TestInspectFormScriptArgsIncludeSessionAndInitializer(t *testing.T) {
 	}
 	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
 		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
+func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildFormWriteScriptArgs(root, cfg, FormWriteOptions{
+		Action:   "apply",
+		SpecPath: "src/forms/UserForm1.form.yaml",
+		Spec: forms.FormSpec{
+			SchemaVersion: 1,
+			Kind:          "xlflow.userform",
+			Basis:         "designer",
+			Form:          forms.FormSpecForm{Name: "UserForm1"},
+			Controls: []forms.FormSpecControl{{
+				Name: "txtCustomer",
+				Type: "TextBox",
+			}},
+			Warnings: []forms.FormSpecWarning{},
+		},
+		Session: true,
+		NoSave:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["Action"] != "apply" {
+		t.Fatalf("Action = %q", args["Action"])
+	}
+	if args["SpecPath"] != "src/forms/UserForm1.form.yaml" {
+		t.Fatalf("SpecPath = %q", args["SpecPath"])
+	}
+	if args["UseSession"] != "true" || args["NoSave"] != "true" {
+		t.Fatalf("unexpected session flags: %+v", args)
+	}
+	if args["SpecJson64"] == "" {
+		t.Fatalf("SpecJson64 should be set: %+v", args)
 	}
 }
 

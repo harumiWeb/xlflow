@@ -102,12 +102,12 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Requirements
 
-| Requirement                                  | Needed for                                                                                                                                                            |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows                                      | Excel COM automation                                                                                                                                                  |
-| Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                                                                                                               |
-| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                      |
+| Requirement                                  | Needed for                                                                                                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows                                      | Excel COM automation                                                                                                                                                                |
+| Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
+| PowerShell                                   | Excel automation bridge                                                                                                                                                             |
+| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
@@ -334,6 +334,7 @@ xlflow inspect-gui --json
 | `macros`            | Discover runnable macro entrypoints                         | `xlflow macros --json`                                                      |
 | `list forms`        | Discover workbook UserForms and expected source paths       | `xlflow list forms --json`                                                  |
 | `form snapshot`     | Persist strict Designer UserForm state as JSON or YAML spec | `xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml --json` |
+| `form build`        | Create a Designer-backed UserForm from a saved spec         | `xlflow form build src/forms/UserForm1.form.yaml --json`                    |
 | `form export-image` | Export a runtime UserForm to a PNG image                    | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`   |
 | `run`               | Execute a macro from the CLI                                | `xlflow run Main.Run --json`                                                |
 | `export-image`      | Export a worksheet range to a PNG image                     | `xlflow export-image --sheet QR --range A1:AE31 --json`                     |
@@ -506,6 +507,19 @@ Persisted `warnings` are reserved for form-local snapshot warnings that belong t
 
 Like other workbook-backed read commands, `form snapshot` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit.
 
+### `xlflow form build`
+
+Creates a Designer-backed workbook `UserForm` from a saved `xlflow.userform` spec.
+
+```bash
+xlflow form build src/forms/UserForm1.form.yaml --json
+xlflow form build src/forms/UserForm1.form.yaml --session --overwrite --json
+```
+
+The spec path must end with `.json`, `.yaml`, or `.yml`. xlflow validates the schema in Go before Excel opens, then uses the VBIDE Designer API to create the form and its controls rather than editing `.frx` directly.
+
+By default, a form with the same `form.name` fails with `form_already_exists`. `--overwrite` removes that existing component and recreates it from the spec. This is the recommended replacement workflow when the form design should be rebuilt from source-of-truth spec data. The command saves by default; `--session --no-save` leaves the live workbook dirty and returns save-required state.
+
 ### `xlflow form export-image`
 
 Exports a runtime-rendered workbook `UserForm` to a PNG image.
@@ -575,7 +589,7 @@ xlflow save --session --json
 xlflow session stop
 ```
 
-`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `inspect form`, `form snapshot`, `pull`, `push`, `macros`, `run`, `export-image`, `form export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
+`--session` remains the explicit assertion mode. When `.xlflow/session.json` already points at the configured workbook, plain `list forms`, `inspect form`, `form snapshot`, `form build`, `pull`, `push`, `macros`, `run`, `export-image`, `form export-image`, `test`, `trace`, and `save` auto-reuse that matching live workbook and report that reuse in JSON and human output.
 
 When `push --session --no-save` succeeds, or `run --session` completes without `--save` / `--save-as`, the live workbook may differ from the `.xlsm` on disk until `xlflow save --session`.
 If UserForms are involved, treat that save step as part of review hygiene before comparing `.frm` / `.frx` output.

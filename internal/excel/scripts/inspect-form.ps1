@@ -255,7 +255,9 @@ function Get-XlflowDesignerControlSnapshot {
 
   $children = @()
   if (Test-XlflowControlCanContainChildren -ControlType $controlType) {
-    $children = @(Get-XlflowSafeControls -Target $Control)
+    $children = @(Get-XlflowSafeControls -Target $Control | Where-Object {
+      [string]::Equals([string](Get-XlflowSafeMemberValue -Target $_ -Name "Parent" -Default ([pscustomobject]@{ Name = "" })).Name, $snapshot.name, [System.StringComparison]::OrdinalIgnoreCase)
+    })
   }
   if ($children.Count -gt 0) {
     $snapshot.controls = @($children | ForEach-Object { Get-XlflowDesignerControlSnapshot -Control $_ })
@@ -277,7 +279,9 @@ function Get-XlflowDesignerFormSnapshot {
     throw
   }
 
-  $controls = @(Get-XlflowSafeControls -Target $designer)
+  $controls = @(Get-XlflowSafeControls -Target $designer | Where-Object {
+    [string]::Equals([string](Get-XlflowSafeMemberValue -Target $_ -Name "Parent" -Default ([pscustomobject]@{ Name = "" })).Name, $TargetFormName, [System.StringComparison]::OrdinalIgnoreCase)
+  })
   return [pscustomobject][ordered]@{
     name = $TargetFormName
     basis = "designer"

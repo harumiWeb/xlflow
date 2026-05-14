@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	bundledscripts "github.com/harumiWeb/xlflow/internal/excel/scripts"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
@@ -86,6 +87,16 @@ type FormExportImageOptions struct {
 	Overwrite   bool
 	Session     bool
 	Keepalive   CommandOptions
+}
+
+type FormWriteOptions struct {
+	Action    string
+	SpecPath  string
+	Spec      forms.FormSpec
+	Overwrite bool
+	Session   bool
+	NoSave    bool
+	Keepalive CommandOptions
 }
 
 type EditEventMode string
@@ -521,6 +532,17 @@ func (r Runner) FormExportImage(cfg config.Config, opts FormExportImageOptions) 
 	return env, code, runErr
 }
 
+func (r Runner) FormWrite(cfg config.Config, opts FormWriteOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildFormWriteScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := formWriteArgFailure(err, opts.Action)
+		return output.Failure("form "+opts.Action, output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	env, code, runErr := r.run("form-write", scriptArgs, opts.Keepalive)
+	env.Command = "form " + opts.Action
+	return env, code, runErr
+}
+
 func buildListFormsScriptArgs(root string, cfg config.Config, opts SessionCommandOptions) map[string]string {
 	return map[string]string{
 		"Action":                  "forms",
@@ -556,6 +578,16 @@ type formExportImageResolvedOutput struct {
 	Path string
 }
 
+type formWriteArgError struct {
+	code     string
+	message  string
+	exitCode int
+}
+
+func (e formWriteArgError) Error() string {
+	return e.message
+}
+
 type formExportImageArgError struct {
 	code     string
 	message  string
@@ -574,6 +606,19 @@ func formExportImageArgFailure(err error) (string, int) {
 	return "form_export_image_args_invalid", output.ExitConfig
 }
 
+func formWriteArgFailure(err error, action string) (string, int) {
+	var argErr formWriteArgError
+	if errors.As(err, &argErr) {
+		return argErr.code, argErr.exitCode
+	}
+	switch action {
+	case "apply":
+		return "form_apply_args_invalid", output.ExitConfig
+	default:
+		return "form_build_args_invalid", output.ExitConfig
+	}
+}
+
 func buildFormExportImageScriptArgs(root string, cfg config.Config, opts FormExportImageOptions) (map[string]string, error) {
 	resolvedOutput, err := resolveFormExportImageOutput(root, opts)
 	if err != nil {
@@ -589,6 +634,43 @@ func buildFormExportImageScriptArgs(root string, cfg config.Config, opts FormExp
 		"UseSession":   strconv.FormatBool(opts.Session),
 		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 	}, nil
+}
+
+func buildFormWriteScriptArgs(root string, cfg config.Config, opts FormWriteOptions) (map[string]string, error) {
+	action := strings.ToLower(strings.TrimSpace(opts.Action))
+	if action != "build" && action != "apply" {
+		return nil, formWriteArgError{
+			code:     "form_build_args_invalid",
+			message:  fmt.Sprintf("unsupported form action %q", opts.Action),
+			exitCode: output.ExitConfig,
+		}
+	}
+	specJSON, err := json.Marshal(opts.Spec)
+	if err != nil {
+		return nil, formWriteArgError{
+			code:     formWriteArgsCode(action),
+			message:  fmt.Sprintf("failed to serialize form spec: %v", err),
+			exitCode: output.ExitConfig,
+		}
+	}
+	return map[string]string{
+		"Action":       action,
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"SpecPath":     opts.SpecPath,
+		"SpecJson64":   base64.StdEncoding.EncodeToString(specJSON),
+		"Overwrite":    strconv.FormatBool(opts.Overwrite),
+		"NoSave":       strconv.FormatBool(opts.NoSave),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}, nil
+}
+
+func formWriteArgsCode(action string) string {
+	if action == "apply" {
+		return "form_apply_args_invalid"
+	}
+	return "form_build_args_invalid"
 }
 
 func resolveFormExportImageOutput(root string, opts FormExportImageOptions) (formExportImageResolvedOutput, error) {
@@ -1158,7 +1240,9 @@ func exitCodeForScriptResult(result ScriptResult) int {
 	switch result.Error.Code {
 	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "trace_not_injected", "trace_source_modified", "trace_args_invalid", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid":
+	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
+		return output.ExitValidation
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

@@ -24,6 +24,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -84,6 +85,16 @@ type keepaliveFlags struct {
 type formSnapshotCommandOptions struct {
 	Inspect excel.InspectFormOptions
 	OutPath string
+}
+
+type formWriteCommandOptions struct {
+	Action    string
+	SpecInput forms.SpecInput
+	Spec      forms.FormSpec
+	Overwrite bool
+	Session   bool
+	NoSave    bool
+	Keepalive excel.CommandOptions
 }
 
 func Execute() error {
@@ -230,12 +241,13 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
 		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
 		{Name: "form-image-export", Description: "Export a runtime UserForm to a PNG image for visual verification."},
+		{Name: "form-build-overwrite", Description: "Create or replace Designer-backed UserForms from persisted xlflow.userform specs."},
 		{Name: "workbook-edit-helpers", Description: "Mutate a live session workbook for agent-driven test setup, event triggering, and visual tuning."},
 	}
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "export-image", "form-export-image", "edit"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -334,7 +346,7 @@ func (a *app) formCommand() *cobra.Command {
 		Use:   "form",
 		Short: "Manage workbook UserForms",
 	}
-	cmd.AddCommand(a.formSnapshotCommand(), a.formExportImageCommand())
+	cmd.AddCommand(a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
 	return cmd
 }
 
@@ -351,7 +363,7 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
 			}
-			resolvedOutput, err := excel.ResolveFormSnapshotOutput(a.cwd, opts.OutPath)
+			resolvedOutput, err := forms.ResolveSnapshotOutput(a.cwd, opts.OutPath)
 			if err != nil {
 				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
 			}
@@ -373,11 +385,11 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 				scriptEnv.Command = "form snapshot"
 				return a.write(scriptEnv, code)
 			}
-			spec, err := excel.FormSpecFromInspectSnapshot(scriptEnv.Forms)
+			spec, err := forms.FormSpecFromInspectSnapshot(scriptEnv.Forms)
 			if err != nil {
 				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
 			}
-			if err := excel.WriteFormSnapshot(resolvedOutput, spec); err != nil {
+			if err := forms.WriteSnapshot(resolvedOutput, spec); err != nil {
 				return a.writeFailure("form snapshot", output.ExitEnvironment, "form_snapshot_write_failed", err)
 			}
 			env := output.New("form snapshot")
@@ -412,6 +424,97 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) formBuildCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var overwrite bool
+	var noSave bool
+	cmd := &cobra.Command{
+		Use:   "build <spec.json|spec.yaml|spec.yml>",
+		Short: "Create a UserForm from a persisted spec",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormWriteOptions("build", args[0], overwrite, session, noSave, keepalive, a.cwd)
+			if err != nil {
+				return a.writeFailure("form build", output.ExitConfig, "form_build_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form build")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Building workbook form", opts.Keepalive, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormWrite(cfg, excel.FormWriteOptions{
+					Action:    opts.Action,
+					SpecPath:  opts.SpecInput.DisplayPath,
+					Spec:      opts.Spec,
+					Overwrite: opts.Overwrite,
+					Session:   opts.Session,
+					NoSave:    opts.NoSave,
+					Keepalive: opts.Keepalive,
+				})
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing UserForm with the same spec form name")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave session-backed workbook changes unsaved until xlflow save")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
+}
+
+func (a *app) formApplyCommand() *cobra.Command {
+	var keepalive keepaliveFlags
+	var session bool
+	var noSave bool
+	cmd := &cobra.Command{
+		Use:    "apply <spec.json|spec.yaml|spec.yml>",
+		Short:  "Apply a persisted spec to an existing UserForm",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := buildFormWriteOptions("apply", args[0], false, session, noSave, keepalive, a.cwd)
+			if err != nil {
+				return a.writeFailure("form apply", output.ExitConfig, "form_apply_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("form apply")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Applying workbook form spec", opts.Keepalive, func() error {
+				var runErr error
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormWrite(cfg, excel.FormWriteOptions{
+					Action:    opts.Action,
+					SpecPath:  opts.SpecInput.DisplayPath,
+					Spec:      opts.Spec,
+					Overwrite: opts.Overwrite,
+					Session:   opts.Session,
+					NoSave:    opts.NoSave,
+					Keepalive: opts.Keepalive,
+				})
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave session-backed workbook changes unsaved until xlflow save")
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
@@ -2319,6 +2422,37 @@ func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keep
 	}, nil
 }
 
+func buildFormWriteOptions(action, specPath string, overwrite, session, noSave bool, keepalive keepaliveFlags, root string) (formWriteCommandOptions, error) {
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return formWriteCommandOptions{}, err
+	}
+	normalizedAction := strings.ToLower(strings.TrimSpace(action))
+	if normalizedAction != "build" && normalizedAction != "apply" {
+		return formWriteCommandOptions{}, fmt.Errorf("unsupported form action %q", action)
+	}
+	if noSave && !session {
+		return formWriteCommandOptions{}, fmt.Errorf("--no-save requires --session")
+	}
+	specInput, err := forms.ResolveSpecInput(root, specPath)
+	if err != nil {
+		return formWriteCommandOptions{}, err
+	}
+	spec, err := forms.LoadFormSpec(specInput)
+	if err != nil {
+		return formWriteCommandOptions{}, err
+	}
+	return formWriteCommandOptions{
+		Action:    normalizedAction,
+		SpecInput: specInput,
+		Spec:      spec,
+		Overwrite: overwrite,
+		Session:   session,
+		NoSave:    noSave,
+		Keepalive: keepaliveOpts,
+	}, nil
+}
+
 func buildFormExportImageOptions(name, outPath, initializer string, overwrite bool, session bool, keepalive keepaliveFlags) (excel.FormExportImageOptions, error) {
 	if strings.TrimSpace(name) == "" {
 		return excel.FormExportImageOptions{}, fmt.Errorf("form name is required")
@@ -2524,7 +2658,7 @@ func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string
 	}}
 	hints := []map[string]any{{
 		"code":    "userform_planned_commands",
-		"message": "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`.",
+		"message": "Related UserForm commands include `xlflow form snapshot <name> --out <path>`, `xlflow form build <spec>`, `xlflow form build <spec> --overwrite`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`.",
 	}}
 	return warnings, hints
 }

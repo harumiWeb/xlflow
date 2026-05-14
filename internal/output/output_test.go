@@ -789,6 +789,32 @@ func TestWriteWithOptionsRendersFormExportImageSummary(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersFormWriteSummary(t *testing.T) {
+	env := New("form apply")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Forms = map[string]any{
+		"name":              "UserForm1",
+		"basis":             "designer",
+		"action":            "apply",
+		"coordinate_system": "parent-relative",
+		"control_count":     4,
+		"spec_path":         "src/forms/UserForm1.form.yaml",
+		"overwrite":         false,
+	}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Write target:", "live session workbook", "Action:", "apply", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "4", "Spec:", "src/forms/UserForm1.form.yaml", "Overwrite:", "false", "SAVE REQUIRED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form write output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersEditSummary(t *testing.T) {
 	env := New("edit")
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}

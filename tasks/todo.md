@@ -81,6 +81,38 @@
 - [x] Add focused Go and PowerShell regression coverage.
 - [x] Run focused verification, full `go test ./...`, and Windows Excel COM validation against `tmp_workspaces\user-form`.
 
+# UserForm Phase 6-7 Forms Package / Build Apply Todo
+
+- [x] Extract UserForm spec parsing, validation, and snapshot serialization into `internal/excel/forms`.
+- [x] Keep existing `form snapshot` / `inspect form` wiring working through the new forms package.
+- [x] Add `xlflow form build` CLI command with `--overwrite`, `--session`, `--no-save`, and keepalive support.
+- [x] Keep `xlflow form apply` implemented but hidden while the public replacement workflow moves to `form build --overwrite`.
+- [x] Add Go-side spec loading/validation before Excel open and bridge payload serialization for build/apply.
+- [x] Add `internal/excel/scripts/form-write.ps1` using the VBIDE Designer API for build/apply.
+- [x] Extend human output rendering for `form build` / `form apply`.
+- [x] Update CLI contract, README files, feature spec, and UserForm hint text for build/apply.
+- [x] Run focused tests, full `go test ./...`, and Windows Excel COM validation for build/apply.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/forms` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestFormWriteScriptValidatesArgsBeforeWorkbookOpen|TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen|TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings|TestFormWriteScriptDecodesSpecInWindowsPowerShell|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings|TestCommonScriptStrictDesignerFiltersControlsByParentName"` passed.
+- `go test ./...` passed.
+- Excel COM validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-build-apply-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow pull --json`, `xlflow lint --json`, `xlflow form build specs/form-build.json --json`, `xlflow list forms --json`, `xlflow inspect form DemoForm --json`, `xlflow form snapshot DemoForm --out specs/demo-snapshot.json --json`, `xlflow session start --json`, `xlflow form apply specs/form-apply.json --session --no-save --json`, `xlflow inspect form DemoForm --session --json`, `xlflow save --session --json`, `xlflow session stop --json`, `xlflow inspect form DemoForm --designer --json`, and `xlflow form export-image DemoForm --out specs/DemoForm.png --json` all completed. Public guidance now prefers `form build --overwrite` instead of `form apply`.
+- Verified `form build` creates `DemoForm`, `list forms` reports `src/forms/DemoForm.frm`, `form snapshot` writes `specs/demo-snapshot.json`, and hidden `form apply --session --no-save` still returns `workbook.dirty=true` / `workbook.needs_save=true` / `session.save_required=true`. Public replacement workflow is rebuild via `form build --overwrite`.
+- Follow-up COM validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-build-contract-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow pull --json`, `xlflow lint --json`, `xlflow form build src/forms/CustomerForm.form.json --json`, `xlflow inspect form CustomerForm --designer --json`, `xlflow form snapshot CustomerForm --out artifacts/CustomerForm.snapshot.json --json`, `xlflow form build src/forms/CustomerForm.overwrite.form.json --overwrite --json`, `xlflow inspect form CustomerForm --designer --json`, `xlflow form snapshot CustomerForm --out artifacts/CustomerForm.overwrite.snapshot.json --json`, and a final `xlflow pull --json` all completed after reinstalling `xlflow`.
+- Verified `form build --overwrite` now succeeds after an intermediate workbook save, strict designer inspect no longer duplicates nested controls at the top level, and persisted snapshot specs now use flat `controls` entries with `id` / `parentId` / `zIndex`.
+- Regression validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-overwrite-restore-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow form build src/forms/StableForm.form.json --json`, `xlflow inspect form StableForm --designer --json`, `xlflow form build src/forms/StableForm.bad.form.json --overwrite --json`, and `xlflow inspect form StableForm --designer --json` completed.
+- Verified a failed `form build --overwrite` with an invalid runtime ProgID now restores the original UserForm and leaves the workbook with the pre-overwrite form still present.
+- Session regression validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-overwrite-restore-session-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow session start --json`, `xlflow form build src/forms/SessionForm.form.json --session --json`, `xlflow inspect form SessionForm --designer --session --json`, `xlflow form build src/forms/SessionForm.bad.form.json --overwrite --session --json`, `xlflow inspect form SessionForm --designer --session --json`, and `xlflow session stop --json` completed.
+- Verified the same failed overwrite path restores the original UserForm in the live session workbook as well; the session remained `dirty=false` / `save_required=false` after restoration.
+- Remaining known limitations from COM validation: form-level width/height still do not round-trip through the Designer API surface we can currently reach, and design-time `ComboBox` / `ListBox` item lists plus `selectedIndex` remain unreliable enough that build currently returns warnings and snapshots may come back with empty `list` and `selectedIndex=-1`.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.

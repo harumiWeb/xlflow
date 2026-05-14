@@ -15,7 +15,7 @@ Make UserForm risk visible in existing workflows before dedicated form commands 
 ## Phase 2 Behavior
 
 - Generic workbook/source detection warning uses `userform_state_partial` and explains that `.frm` text alone may not reflect layout, `.frx`, or Designer-backed state.
-- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `inspect form`, and `form export-image`.
+- Generic guidance hint uses `userform_planned_commands` and lists current related commands such as `form snapshot`, `form build`, `form build --overwrite`, `inspect form`, and `form export-image`.
 - `push --session --no-save` with detected UserForms adds `userform_unsaved_session_state` warning in addition to existing save-required state.
 - `inspect` with detected source UserForms adds `userform_inspect_saved_file` warning so callers do not confuse saved workbook snapshots with live Designer/runtime form state.
 - UserForm detection is best-effort for session lifecycle commands; inability to inspect forms must not fail `session`.
@@ -105,6 +105,7 @@ Inspect existing workbook UserForms through Excel COM and return structured cont
 - Single-basis output uses `inspect.form`.
 - `--both` uses `inspect.forms.runtime` and `inspect.forms.designer`.
 - Form snapshots include `name`, `basis`, `caption`, optional `width` / `height`, `coordinate_system`, and `controls`.
+- Designer inspect returns only true top-level controls at the root `controls` array; nested controls remain only under their parent container.
 - Control snapshots include `name`, `type`, optional `prog_id`, `caption`, `text`, `value`, `left`, `top`, `width`, `height`, `tab_index`, `enabled`, `visible`, optional `selected_index`, optional `list`, and recursive `controls` for supported container controls.
 
 ### Errors
@@ -152,8 +153,9 @@ Persist a strict design-time UserForm snapshot as a stable JSON/YAML spec file f
 - `kind = "xlflow.userform"`
 - `basis = "designer"`
 - `coordinateSystem` comes from inspect `coordinate_system`.
-- `form` contains `name`, optional `caption`, optional `width`, and optional `height`.
-- `controls` contains recursively converted control snapshots.
+- `form` contains `name`, optional legacy `caption` / `width` / `height`, optional raw `observed`, and optional rebuild-target `build`.
+- `controls` is the canonical flat capture array. Each control has `id`, optional `parentId`, optional `zIndex`, the normalized camelCase control fields, and optional `observed`. Legacy nested `controls` input may still be accepted and normalized into the flat array.
+- Explicit duplicate control `id` values are validation errors. They are not auto-corrected because `id` and `parentId` define the canonical tree.
 - Control fields convert inspect snake_case keys to camelCase where needed: `prog_id -> progId`, `tab_index -> tabIndex`, `selected_index -> selectedIndex`.
 
 ### Errors
@@ -241,6 +243,63 @@ Export a runtime-rendered workbook UserForm as a PNG image for visual verificati
 - Workbook: `build/Book.xlsm`
 - Form: `UserForm1`
 - Validation path: `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --initializer InitializeForm --json`
+
+## UserForm Phase 6 Forms Package Extraction Spec
+
+### Goal
+
+Move UserForm-specific spec parsing, snapshot serialization, and internal types behind `internal/excel/forms` so the rest of xlflow stops depending on ad hoc raw payload handling.
+
+### Behavior
+
+- `internal/excel/forms` owns `FormSpec`, persisted snapshot read/write, inspect-snapshot conversion, and spec validation.
+- Existing external behavior for `inspect form`, `form snapshot`, and `form export-image` remains unchanged.
+- `internal/excel/form_snapshot.go` may remain as a compatibility wrapper, but new code should import `internal/excel/forms` directly.
+- Form specs remain `schemaVersion = 1`, `kind = "xlflow.userform"`, `basis = "designer"`.
+
+## UserForm Phase 7 Build / Apply Spec
+
+### Goal
+
+Create or rewrite Designer-backed workbook UserForms from persisted `xlflow.userform` specs without directly editing `.frx`.
+
+### Commands
+
+- `xlflow form build <spec.json|spec.yaml|spec.yml> [--overwrite] [--session] [--no-save] [--keepalive] [--keepalive-interval <duration>]`
+
+### Behavior
+
+- `form build` is the public command surface.
+- `form apply` remains implemented but hidden because in-place Designer mutation is less stable than rebuild and is a likely deletion candidate.
+- Both code paths load and validate the spec in Go before Excel opens.
+- Both code paths use the VBIDE Designer API from the PowerShell bridge; they do not parse or write `.frx` directly.
+- `form build` creates a new UserForm from `form.name`.
+- `form build` fails with `form_already_exists` when that form already exists, unless `--overwrite` is set.
+- `form build --overwrite` exports the existing UserForm to a temporary backup, removes the existing UserForm component, saves the workbook, and recreates it from the spec.
+- `form build --overwrite` must fail instead of deleting a same-name non-UserForm component.
+- If overwrite rebuild fails after the deletion checkpoint, xlflow restores the original UserForm from the temporary backup and saves that restoration before returning failure.
+- Public replacement workflow is `form build --overwrite`, which removes the existing component and recreates it from spec.
+- v1 supported controls are `Label`, `TextBox`, `ComboBox`, `ListBox`, `CommandButton`, `CheckBox`, `OptionButton`, and `Frame`.
+- Unsupported control types fail with `unsupported_form_control`.
+- Unsupported property assignments are warnings, not fatal errors.
+- Both commands save by default.
+- `--no-save` is allowed only with `--session`.
+- `--overwrite --no-save` is invalid because Excel requires an intermediate save after removing the old UserForm and before recreating it.
+- Successful `--session --no-save` runs must return normal save-required workbook/session metadata and warnings.
+
+### Output
+
+- Success uses top-level `target`, `session`, optional `warnings` / `hints`, and `forms`.
+- `forms` includes `name`, `basis`, `action`, `control_count`, `spec_path`, optional `caption`, optional `coordinate_system`, and `overwrite` for build.
+
+### Errors
+
+- `form_build_args_invalid`
+- `form_apply_args_invalid`
+- `form_already_exists`
+- `form_not_found`
+- `unsupported_form_control`
+- `designer_write_failed`
 
 ## Verification
 

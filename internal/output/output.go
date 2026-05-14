@@ -231,6 +231,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderFormExportImage(env))
 	case "form snapshot":
 		b.WriteString(r.renderFormSnapshot(env))
+	case "form build", "form apply":
+		b.WriteString(r.renderFormWrite(env))
 	case "edit":
 		b.WriteString(r.renderEdit(env))
 	case "pull", "push", "attach":
@@ -965,6 +967,55 @@ func (r renderer) renderFormExportImage(env Envelope) string {
 		if height, ok := numberValue(outputPayload, "height_px"); ok {
 			b.WriteString(kv("Size", fmt.Sprintf("%d x %d px", int(width), int(height))))
 		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderFormWrite(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	form := objectMap(env.Forms)
+	if len(workbook) == 0 && len(target) == 0 && len(form) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Write target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if action := stringValue(form, "action"); action != "" {
+		b.WriteString(kv("Action", action))
+	}
+	if name := stringValue(form, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if basis := stringValue(form, "basis"); basis != "" {
+		b.WriteString(kv("Basis", basis))
+	}
+	if coord := stringValue(form, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	if count, ok := numberValue(form, "control_count"); ok {
+		b.WriteString(kv("Controls", fmt.Sprintf("%d", int(count))))
+	}
+	if specPath := stringValue(form, "spec_path"); specPath != "" {
+		b.WriteString(kv("Spec", specPath))
+	}
+	if overwrite, ok := boolValueOK(form, "overwrite"); ok {
+		b.WriteString(kv("Overwrite", fmt.Sprintf("%t", overwrite)))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))

@@ -539,6 +539,45 @@ func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesFormBuildCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "build" {
+		t.Fatalf("expected form build command, got %#v", cmd)
+	}
+	for _, name := range []string{"overwrite", "session", "no-save", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form build command to define --%s", name)
+		}
+	}
+}
+
+func TestRootCommandIncludesFormApplyCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "apply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "apply" {
+		t.Fatalf("expected form apply command, got %#v", cmd)
+	}
+	if !cmd.Hidden {
+		t.Fatal("expected form apply command to be hidden")
+	}
+	for _, name := range []string{"session", "no-save", "keepalive", "keepalive-interval"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form apply command to define --%s", name)
+		}
+	}
+}
+
 func TestRootCommandIncludesFormExportImageCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -719,6 +758,45 @@ func TestBuildFormExportImageOptionsRejectsMissingRequirements(t *testing.T) {
 	}
 	if _, err := buildFormExportImageOptions("UserForm1", "", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
 		t.Fatalf("expected out requirement error, got %v", err)
+	}
+}
+
+func TestBuildFormWriteOptionsValidatesAndNormalizes(t *testing.T) {
+	root := t.TempDir()
+	specPath := filepath.Join(root, "specs", "UserForm1.form.yaml")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols:\n  - name: txtCustomer\n    type: TextBox\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := buildFormWriteOptions(" build ", specPath, true, true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Action != "build" || opts.Spec.Form.Name != "UserForm1" {
+		t.Fatalf("unexpected form write opts: %#v", opts)
+	}
+	if !opts.Overwrite || !opts.Session || !opts.NoSave {
+		t.Fatalf("expected overwrite/session/no-save to be preserved: %#v", opts)
+	}
+	if !opts.Keepalive.Keepalive || opts.Keepalive.KeepaliveInterval != 7*time.Second {
+		t.Fatalf("unexpected keepalive opts: %#v", opts.Keepalive)
+	}
+	if !strings.HasSuffix(opts.SpecInput.DisplayPath, "specs/UserForm1.form.yaml") {
+		t.Fatalf("unexpected display path: %q", opts.SpecInput.DisplayPath)
+	}
+}
+
+func TestBuildFormWriteOptionsRejectsInvalidRequirements(t *testing.T) {
+	root := t.TempDir()
+	if _, err := buildFormWriteOptions("apply", "missing.form.yaml", false, false, true, keepaliveFlags{}, root); err == nil || !strings.Contains(err.Error(), "--no-save requires --session") {
+		t.Fatalf("expected no-save/session error, got %v", err)
+	}
+	if _, err := buildFormWriteOptions("noop", "missing.form.yaml", false, false, false, keepaliveFlags{}, root); err == nil || !strings.Contains(err.Error(), "unsupported form action") {
+		t.Fatalf("expected action error, got %v", err)
 	}
 }
 
