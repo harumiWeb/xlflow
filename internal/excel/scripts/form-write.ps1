@@ -226,6 +226,59 @@ function Add-XlflowFormWriteWarning {
   $result["warnings"] += $warning
 }
 
+function Add-XlflowFormContractWarnings {
+  param($Spec)
+
+  $formSpec = $Spec.form
+  $hasFormSizeExpectation = $false
+  foreach ($property in @("width", "height")) {
+    if ($null -ne $formSpec.PSObject.Properties["build"] -and
+        $null -ne $formSpec.build -and
+        $null -ne $formSpec.build.PSObject.Properties[$property]) {
+      $hasFormSizeExpectation = $true
+      break
+    }
+    if ($null -ne $formSpec.PSObject.Properties[$property]) {
+      $hasFormSizeExpectation = $true
+      break
+    }
+    if ($null -ne $formSpec.PSObject.Properties["observed"] -and
+        $null -ne $formSpec.observed -and
+        $null -ne $formSpec.observed.PSObject.Properties[$property]) {
+      $hasFormSizeExpectation = $true
+      break
+    }
+  }
+  if ($hasFormSizeExpectation) {
+    Add-XlflowFormWriteWarning -Code "best_effort_form_size" -Message "Form-level width/height are best-effort in Designer build and may not round-trip through Excel VBIDE Designer APIs."
+  }
+
+  $listStateControls = New-Object System.Collections.Generic.List[string]
+  foreach ($controlSpec in @($Spec.controls | Where-Object { $null -ne $_ })) {
+    $controlType = ([string]$controlSpec.type).Trim().ToLowerInvariant()
+    if ($controlType -notin @("combobox", "listbox")) {
+      continue
+    }
+    $hasListState = $false
+    if ($null -ne $controlSpec.PSObject.Properties["list"] -or $null -ne $controlSpec.PSObject.Properties["selectedIndex"]) {
+      $hasListState = $true
+    }
+    if (-not $hasListState -and
+        $null -ne $controlSpec.PSObject.Properties["observed"] -and
+        $null -ne $controlSpec.observed -and
+        ($null -ne $controlSpec.observed.PSObject.Properties["list"] -or $null -ne $controlSpec.observed.PSObject.Properties["selectedIndex"])) {
+      $hasListState = $true
+    }
+    if ($hasListState) {
+      $listStateControls.Add([string]$controlSpec.name)
+    }
+  }
+  if ($listStateControls.Count -gt 0) {
+    $controlNames = ($listStateControls | Select-Object -Unique) -join ", "
+    Add-XlflowFormWriteWarning -Code "best_effort_list_state" -Message ("Design-time ComboBox/ListBox list and selectedIndex are best-effort during build and should be treated as observed-only for round-trip expectations. Controls: " + $controlNames + ".")
+  }
+}
+
 function Set-XlflowFormProperty {
   param(
     $Target,
@@ -608,6 +661,7 @@ try {
   }
 
   $spec = ConvertFrom-XlflowFormSpecJson64 -Encoded $SpecJson64
+  Add-XlflowFormContractWarnings -Spec $spec
   $phase = "open_workbook"
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
   $excel = $openResult.excel

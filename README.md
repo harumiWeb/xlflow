@@ -520,6 +520,8 @@ The spec path must end with `.json`, `.yaml`, or `.yml`. xlflow validates the sc
 
 By default, a form with the same `form.name` fails with `form_already_exists`. `--overwrite` removes that existing component and recreates it from the spec. This is the recommended replacement workflow when the form design should be rebuilt from source-of-truth spec data. The command saves by default; `--session --no-save` leaves the live workbook dirty and returns save-required state.
 
+Successful `form build` results may still return contract warnings for weak Designer-backed fields. Form-level `width` / `height` are best-effort only, and design-time `ComboBox` / `ListBox` `list` / `selectedIndex` should be treated as observed-only for round-trip expectations even though xlflow still attempts to apply them.
+
 ### `xlflow form export-image`
 
 Exports a runtime-rendered workbook `UserForm` to a PNG image.

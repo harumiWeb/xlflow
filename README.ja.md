@@ -523,6 +523,8 @@ spec path は `.json` / `.yaml` / `.yml` でなければなりません。xlflow
 
 既定では同名の `form.name` がすでに存在すると `form_already_exists` で失敗します。`--overwrite` を付けた場合だけ既存 component を削除して spec から作り直します。spec を source of truth として毎回作り直す置換 workflow はこちらを前提にします。既定では保存し、`--session --no-save` のときだけ live workbook を未保存のまま残します。
 
+成功した `form build` でも、Designer-backed な弱い項目については contract warning を返すことがあります。form-level の `width` / `height` は best-effort でしかなく、design-time の `ComboBox` / `ListBox` の `list` / `selectedIndex` は xlflow が適用を試みても round-trip 期待としては observed-only とみなしてください。
+
 ### `xlflow form export-image`
 
 runtime で描画された workbook `UserForm` を PNG 画像として出力します。

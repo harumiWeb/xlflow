@@ -282,6 +282,7 @@ Create or rewrite Designer-backed workbook UserForms from persisted `xlflow.user
 - v1 supported controls are `Label`, `TextBox`, `ComboBox`, `ListBox`, `CommandButton`, `CheckBox`, `OptionButton`, and `Frame`.
 - Unsupported control types fail with `unsupported_form_control`.
 - Unsupported property assignments are warnings, not fatal errors.
+- Successful `form build` results should warn when the spec depends on weak Designer-backed fields: form-level `width` / `height` are best-effort, and design-time `ComboBox` / `ListBox` `list` / `selectedIndex` are observed-only for round-trip expectations even though xlflow still attempts to apply them.
 - Both commands save by default.
 - `--no-save` is allowed only with `--session`.
 - `--overwrite --no-save` is invalid because Excel requires an intermediate save after removing the old UserForm and before recreating it.

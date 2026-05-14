@@ -111,6 +111,7 @@
 - Session regression validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-overwrite-restore-session-e2e`.
 - `xlflow new --json`, `xlflow doctor --json`, `xlflow session start --json`, `xlflow form build src/forms/SessionForm.form.json --session --json`, `xlflow inspect form SessionForm --designer --session --json`, `xlflow form build src/forms/SessionForm.bad.form.json --overwrite --session --json`, `xlflow inspect form SessionForm --designer --session --json`, and `xlflow session stop --json` completed.
 - Verified the same failed overwrite path restores the original UserForm in the live session workbook as well; the session remained `dirty=false` / `save_required=false` after restoration.
+- `form write` now emits explicit contract warnings for weak Designer-backed fields: `best_effort_form_size` for form-level `width` / `height`, and `best_effort_list_state` for design-time `ComboBox` / `ListBox` `list` / `selectedIndex`.
 - Remaining known limitations from COM validation: form-level width/height still do not round-trip through the Designer API surface we can currently reach, and design-time `ComboBox` / `ListBox` item lists plus `selectedIndex` remain unreliable enough that build currently returns warnings and snapshots may come back with empty `list` and `selectedIndex=-1`.
 
 - [x] Add `[vba]` config defaults and validation.

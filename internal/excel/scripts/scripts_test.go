@@ -105,6 +105,9 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"Set-XlflowVBComponentProperty",
 		"Export-XlflowVBComponentBackup",
 		"Import-XlflowVBComponentBackup",
+		"Add-XlflowFormContractWarnings",
+		"best_effort_form_size",
+		"best_effort_list_state",
 		"component '\" + $Name + \"' exists but is not a UserForm",
 		"save_required",
 		"userform_review_commands",
@@ -112,6 +115,24 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-write.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormWriteScriptCommunicatesWeakDesignerContractFields(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`Add-XlflowFormWriteWarning -Code "best_effort_form_size"`,
+		`Form-level width/height are best-effort`,
+		`Add-XlflowFormWriteWarning -Code "best_effort_list_state"`,
+		`observed-only for round-trip expectations`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected weak-field contract warning %q in form-write.ps1:\n%s", want, text)
 		}
 	}
 }
