@@ -263,6 +263,7 @@ func TestPullAndPushScriptsHandleUserFormCodeSidecars(t *testing.T) {
 		"pull.ps1": {
 			"Export-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir",
 			"Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource",
+			"Normalize-XlflowUserFormArtifactFile -Path $path -Caption (Get-XlflowUserFormDesignerCaption -Component $component)",
 			"exported $($exportedFormCode.Count) UserForm code-behind sidecar(s)",
 		},
 		"push.ps1": {
@@ -283,6 +284,67 @@ func TestPullAndPushScriptsHandleUserFormCodeSidecars(t *testing.T) {
 				t.Fatalf("%s missing %q:\n%s", script, want, text)
 			}
 		}
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileUpdatesCaptionLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 5.00','Begin {GUID} RegistrationForm','   Caption         =   "UserForm1"','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine)
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption 'RegistrationForm'
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Caption         =   "RegistrationForm"`) {
+		t.Fatalf("expected normalized caption line, got %q", got)
+	}
+	if strings.Contains(got, `Caption         =   "UserForm1"`) {
+		t.Fatalf("expected stale caption line to be removed, got %q", got)
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileInsertsMissingCaptionLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 5.00','Begin {GUID} RegistrationForm','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine)
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption 'RegistrationForm'
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile insert failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Begin {GUID} RegistrationForm`+"\n"+`   Caption         =   "RegistrationForm"`) {
+		t.Fatalf("expected inserted caption line after Begin, got %q", got)
 	}
 }
 

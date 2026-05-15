@@ -604,6 +604,7 @@ function Export-XlflowBuiltUserFormArtifacts {
     throw ("designer_write_failed: failed to export built UserForm '" + [string]$Component.Name + "' back to source. " + $_.Exception.Message)
   }
   Convert-XlflowExportedSourceToUtf8 -Path $exportPath
+  Normalize-XlflowUserFormArtifactFile -Path $exportPath -Caption (Get-XlflowUserFormDesignerCaption -Component $Component)
   if ($FolderAnnotation -eq "update") {
     $rootDir = Get-XlflowComponentRootDir -ComponentType $Component.Type -ModulesDir "" -ClassesDir "" -FormsDir $FormsDir -WorkbookDir ""
     $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $rootDir -Path $exportPath

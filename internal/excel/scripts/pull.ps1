@@ -53,6 +53,9 @@ try {
       }
       $component.Export($path)
       Convert-XlflowExportedSourceToUtf8 -Path $path
+      if ($component.Type -eq 3) {
+        Normalize-XlflowUserFormArtifactFile -Path $path -Caption (Get-XlflowUserFormDesignerCaption -Component $component)
+      }
       if ($component.Type -eq 100) {
         Normalize-XlflowDocumentModuleFile -Path $path -RootDir $WorkbookDir -FolderAnnotationMode $FolderAnnotation
       } elseif ($FolderAnnotation -eq "update") {

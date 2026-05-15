@@ -2015,6 +2015,93 @@ function Convert-XlflowExportedSourceToUtf8 {
   Set-XlflowUtf8Text -Path $Path -Text $content
 }
 
+function ConvertTo-XlflowFRMStringLiteral {
+  param([string]$Value)
+
+  if ($null -eq $Value) {
+    $Value = ""
+  }
+  return '"' + ([string]$Value).Replace('"', '""') + '"'
+}
+
+function Get-XlflowUserFormDesignerCaption {
+  param($Component)
+
+  if ($null -eq $Component) {
+    return $null
+  }
+  try {
+    if ([int]$Component.Type -ne 3) {
+      return $null
+    }
+  } catch {
+    return $null
+  }
+  try {
+    return [string]$Component.Designer.Caption
+  } catch {
+    Write-Verbose ("failed to inspect UserForm designer caption: " + $_.Exception.Message)
+    return $null
+  }
+}
+
+function Normalize-XlflowUserFormArtifactFile {
+  param(
+    [string]$Path,
+    [string]$Caption
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+  if ([System.IO.Path]::GetExtension($Path) -ine ".frm") {
+    return
+  }
+
+  $text = Get-XlflowUtf8Text -Path $Path
+  if ([string]::IsNullOrEmpty($text)) {
+    return
+  }
+
+  $newline = Get-XlflowContentNewline -Text $text
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($line in ($text -split "`r?`n")) {
+    $lines.Add([string]$line)
+  }
+
+  $beginIndex = -1
+  $endIndex = -1
+  $captionIndex = -1
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = [string]$lines[$i]
+    if ($beginIndex -lt 0) {
+      if ($line -match '^\s*Begin\b') {
+        $beginIndex = $i
+      }
+      continue
+    }
+    if ($line -match '^\s*End\s*$') {
+      $endIndex = $i
+      break
+    }
+    if ($line -match '^\s*Caption\s*=') {
+      $captionIndex = $i
+    }
+  }
+  if ($beginIndex -lt 0 -or $endIndex -lt 0) {
+    return
+  }
+
+  $captionLine = '   Caption         =   ' + (ConvertTo-XlflowFRMStringLiteral -Value $Caption)
+  if ($captionIndex -ge 0) {
+    $lines[$captionIndex] = $captionLine
+  } else {
+    $lines.Insert(($beginIndex + 1), $captionLine)
+  }
+
+  Set-XlflowUtf8Text -Path $Path -Text ((@($lines.ToArray()) -join $newline) + $newline)
+}
+
 function Copy-XlflowSourceForImport {
   param(
     [string]$SourcePath,
