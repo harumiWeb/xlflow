@@ -22,6 +22,7 @@ Default safety rules for AI-agent work:
 - Use `xlflow form build <spec> --session --keepalive --json` when you need to create a Designer-backed UserForm from a persisted spec.
 - Use `xlflow form build <spec> --session --overwrite --keepalive --json` when the intended workflow is to replace an existing UserForm from spec rather than mutate it in place.
 - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when visual verification depends on the runtime-rendered UserForm rather than structured inspection alone.
+- When a task depends on UserForm spec authoring or review, load [references/forms.md](references/forms.md) before choosing `inspect form`, `form snapshot`, or `form build`. It defines the persisted `xlflow.userform` schema, flat `controls` contract, overwrite safety rules, supported control types, and the best-effort versus observed-only fields that should not be treated as round-trip guarantees.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.

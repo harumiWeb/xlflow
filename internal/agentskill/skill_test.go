@@ -40,6 +40,7 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json`",
 		"Use `xlflow form build <spec> --session --keepalive --json`",
 		"Use `xlflow form build <spec> --session --overwrite --keepalive --json`",
+		"[references/forms.md](references/forms.md)",
 		"Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json`",
 		"Use `xlflow export-image` when verification depends on rendered appearance",
 		"--gui-compile-errors",
@@ -76,6 +77,9 @@ func TestInstallUsesExplicitTarget(t *testing.T) {
 		t.Fatalf("path = %q", result.Path)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "forms.md")); err != nil {
 		t.Fatal(err)
 	}
 }
