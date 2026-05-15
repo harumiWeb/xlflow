@@ -1734,6 +1734,145 @@ code_source = "sidecar"
 	}
 }
 
+func TestFormBuildSidecarModeRejectsAttributeContaminatedSidecarBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	specBody := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Attribute VB_Name = \"UserForm1\"\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "build", "src/forms/specs/UserForm1.yaml"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+		Issues []struct {
+			Code       string `json:"code"`
+			File       string `json:"file"`
+			Line       int    `json:"line"`
+			Suggestion string `json:"suggestion"`
+		} `json:"issues"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form build contaminated-sidecar output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
+		t.Fatalf("unexpected contaminated-sidecar preflight payload: %+v", got)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+		t.Fatalf("unexpected contaminated-sidecar issues: %+v", got.Issues)
+	}
+	if !strings.Contains(got.Issues[0].Suggestion, "Attribute VB_*") {
+		t.Fatalf("unexpected suggestion: %+v", got.Issues[0])
+	}
+}
+
+func TestPushRejectsAttributeContaminatedUserFormSidecarBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "classes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "workbook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Attribute VB_Name = \"UserForm1\"\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+		Issues []struct {
+			Code string `json:"code"`
+			File string `json:"file"`
+			Line int    `json:"line"`
+		} `json:"issues"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse push contaminated-sidecar output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
+		t.Fatalf("unexpected push contaminated-sidecar payload: %+v", got)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+		t.Fatalf("unexpected push contaminated-sidecar issues: %+v", got.Issues)
+	}
+}
+
 func TestFormBuildSidecarModePreflightIgnoresOtherForms(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {

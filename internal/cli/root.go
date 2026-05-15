@@ -3223,6 +3223,25 @@ func (a *app) runUserFormCodeSourcePreflight(command string, cfg config.Config, 
 	if cfg.UserForm.CodeSource != "sidecar" {
 		return nil
 	}
+	issues, err := forms.ValidateUserFormCodeSidecars(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "source_preflight_failed", err)
+	}
+	if len(issues) > 0 {
+		rendered := make([]lint.Issue, 0, len(issues))
+		for _, issue := range issues {
+			rendered = append(rendered, issue.LintIssue(filepath.Join(a.cwd, cfg.Src.Forms)))
+		}
+		env := output.Failure(command, output.Error{
+			Code:    "source_preflight_failed",
+			Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid corrupting UserForm artifacts", len(rendered), command),
+			Source:  "xlflow",
+			Phase:   "preflight",
+		})
+		env.Issues = rendered
+		env.Logs = []string{"blocked before Excel automation because a UserForm sidecar contains Attribute VB_* header lines"}
+		return a.write(env, output.ExitValidation)
+	}
 	updated, err := forms.SyncUserFormCodeSidecars(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "userform_code_sync_failed", err)

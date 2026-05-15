@@ -78,3 +78,28 @@ func TestSyncUserFormCodeSidecarsHonorsTargetFilter(t *testing.T) {
 		t.Fatalf("unfiltered form should remain unchanged, got %q", got)
 	}
 }
+
+func TestValidateUserFormCodeSidecarsRejectsAttributeHeaders(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "CustomerForm.frm"), []byte("Attribute VB_Name = \"CustomerForm\"\n\nOption Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Attribute VB_Name = \"CustomerForm\"\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "CustomerForm.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := ValidateUserFormCodeSidecars(formsDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one", issues)
+	}
+	if issues[0].FormName != "CustomerForm" || issues[0].Line != 1 {
+		t.Fatalf("unexpected issue = %#v", issues[0])
+	}
+}
