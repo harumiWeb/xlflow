@@ -271,7 +271,7 @@ Create or rewrite Designer-backed workbook UserForms from persisted `xlflow.user
 ### Behavior
 
 - `form build` is the public command surface.
-- `form apply` remains implemented but hidden because in-place Designer mutation is less stable than rebuild and is a likely deletion candidate.
+- `form apply` remains implemented but hidden because in-place Designer mutation is less stable than rebuild, is not maintained for sidecar-aware code-behind flows, and is a likely deletion candidate.
 - Both code paths load and validate the spec in Go before Excel opens.
 - Both code paths use the VBIDE Designer API from the PowerShell bridge; they do not parse or write `.frx` directly.
 - `form build` creates a new UserForm from `form.name`.
@@ -279,7 +279,8 @@ Create or rewrite Designer-backed workbook UserForms from persisted `xlflow.user
 - `form build --overwrite` exports the existing UserForm to a temporary backup, removes the existing UserForm component, saves the workbook, and recreates it from the spec.
 - `form build --overwrite` must fail instead of deleting a same-name non-UserForm component.
 - If overwrite rebuild fails after the deletion checkpoint, xlflow restores the original UserForm from the temporary backup and saves that restoration before returning failure.
-- Public replacement workflow is `form build --overwrite`, which removes the existing component and recreates it from spec. The intended canonical spec location is `src/forms/specs/*.yaml`.
+- Public replacement workflow is `form build --overwrite`, which removes the existing component and recreates it from spec. The intended canonical Designer artifact is `src/forms/specs/*.yaml`; code-behind authority depends on `[userform].code_source`, with `src/forms/code/*.bas` canonical only in `sidecar` mode and embedded `.frm` code canonical in `frm` mode.
+- In `sidecar` mode, tracked `.frm` embedded code is treated as a generated artifact and synchronized from `src/forms/code/*.bas` before `push` or `form build` opens Excel.
 - v1 supported controls are `Label`, `TextBox`, `ComboBox`, `ListBox`, `CommandButton`, `CheckBox`, `OptionButton`, and `Frame`.
 - Unsupported control types fail with `unsupported_form_control`.
 - Unsupported property assignments are warnings, not fatal errors.

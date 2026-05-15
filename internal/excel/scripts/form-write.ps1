@@ -2,6 +2,8 @@ param(
   [string]$Action = "",
   [string]$WorkbookPath = "",
   [string]$SpecPath = "",
+  [string]$FormsDir = "",
+  [string]$CodeSource = "frm",
   [string]$SpecJson64 = "",
   [string]$Overwrite = "false",
   [string]$NoSave = "false",
@@ -530,12 +532,15 @@ function Invoke-XlflowFormBuild {
     $VBProject,
     $Workbook,
     $Spec,
+    [string]$FormsDir,
+    [string]$CodeSource,
     [bool]$AllowOverwrite,
     [bool]$CanCheckpointSave
   )
 
   $formName = [string]$Spec.form.name
   $existing = Get-XlflowVBComponentByName -VBProject $VBProject -Name $formName
+  $existingCodeText = $null
   $restorePath = $null
   $restoreDirectory = $null
   $removedExisting = $false
@@ -546,6 +551,7 @@ function Invoke-XlflowFormBuild {
     }
     $restoreDirectory = New-XlflowFormRestoreDirectory
     try {
+      $existingCodeText = Get-XlflowCodeModuleText -CodeModule $existing.CodeModule
       $restorePath = Export-XlflowVBComponentBackup -Component $existing -Directory $restoreDirectory
       Remove-XlflowVBComponentChecked -VBProject $VBProject -Name $formName
       $removedExisting = $true
@@ -568,6 +574,11 @@ function Invoke-XlflowFormBuild {
       $allControls = @($Spec.controls | Where-Object { $null -ne $_ })
       foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
         Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
+      }
+      if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+        [void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir -FallbackText $existingCodeText)
+      } elseif (-not [string]::IsNullOrWhiteSpace($existingCodeText)) {
+        Set-XlflowCodeModuleText -CodeModule $component.CodeModule -Text $existingCodeText
       }
     } catch {
       if ($removedExisting) {
@@ -604,6 +615,9 @@ function Invoke-XlflowFormBuild {
   $allControls = @($Spec.controls | Where-Object { $null -ne $_ })
   foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
     Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
+  }
+  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+    [void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)
   }
 }
 
@@ -675,7 +689,7 @@ try {
 
   $phase = "write_designer"
   if ($normalizedAction -eq "build") {
-    Invoke-XlflowFormBuild -VBProject $workbook.VBProject -Workbook $workbook -Spec $spec -AllowOverwrite (ConvertTo-XlflowBool $Overwrite) -CanCheckpointSave (-not (ConvertTo-XlflowBool $NoSave))
+    Invoke-XlflowFormBuild -VBProject $workbook.VBProject -Workbook $workbook -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource -AllowOverwrite (ConvertTo-XlflowBool $Overwrite) -CanCheckpointSave (-not (ConvertTo-XlflowBool $NoSave))
   } else {
     Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec
   }

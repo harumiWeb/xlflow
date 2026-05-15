@@ -429,7 +429,7 @@ xlflow attach --active --json
 xlflow pull --json
 ```
 
-標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet などの document module を `src/` 配下へ出力します。
+標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet などの document module を `src/` 配下へ出力します。`[userform].code_source = "sidecar"` のときだけ、form module に VBA 行がある場合 `src/forms/code/<FormName>.bas` へ code-behind sidecar も出力します。`frm` mode では code-behind は `.frm` に残します。
 recorded session workbook を明示的に要求したい場合は `xlflow pull --session --json` を使います。`.xlflow/session.json` が設定済み workbook を指している場合、通常の `xlflow pull --json` でもその live workbook を自動再利用します。
 workbook 内に UserForm が検出された場合、`pull` は `.frm` だけでは `.frx` や Designer state を完全には表せないことを warning として返します。
 
@@ -442,7 +442,7 @@ xlflow push --json
 ```
 
 `.bas` / `.cls` / `.frm` を読み込み、VBIDE 経由で workbook へ反映します。
-UserForm の `.frx` は binary companion file として扱います。
+UserForm の `.frx` は binary companion file として扱います。`[userform].code_source = "sidecar"` のとき、`src/forms/code/*.bas` の UserForm code-behind sidecar は standalone module としては import せず、先に sidecar から tracked `.frm` の埋め込みコードを同期し、その後 `.frm` import 後に対応する UserForm `CodeModule` へ再適用します。`code_source = "frm"` では `.frm` 埋め込みコードが authoritative です。
 source 内に UserForm がある場合、`push` はより深い form inspection 用の hint を返します。`push --session --no-save` では live workbook の UserForm state と disk の差分に関する追加 warning も返します。
 デフォルトでは `.xlflow/backups` にバックアップを作成し、workbook を保存します。
 
@@ -514,7 +514,7 @@ xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --session --
 
 persisted artifact の `warnings` は、保存される spec 自体に属する form-local warning だけを対象にします。`save_required` のような operational warning は command envelope と human output に残し、artifact には書き込みません。
 
-継続的に UserForm を管理する場合、canonical な source-controlled artifact は `src/forms/specs/*.yaml` と考えてください。`form snapshot` は既存 form から spec を取り出す capture path、`form build --overwrite` はその spec から workbook を再構築する rebuild path です。`pull` や `build` で得られる `.frm` / `.frx` は成果物として扱い、Designer behavior の primary source of truth とはみなしません。
+継続的に UserForm を管理する場合、Designer 構造の canonical な source-controlled artifact は `src/forms/specs/*.yaml` と考えてください。code-behind の authority は `[userform].code_source` に依存します。新規 project は `sidecar` が既定で `src/forms/code/*.bas` が canonical、`init` した既存 project は `frm` が既定で `.frm` 埋め込みコードが canonical です。`form snapshot` は Designer spec の capture path、`pull` は sidecar mode における code-behind capture path、`form build --overwrite` はその spec から workbook を再構築する rebuild path です。`pull` や `build` で得られる `.frm` / `.frx` は成果物として扱い、Designer behavior の primary source of truth とはみなしません。
 
 他の workbook-backed read command と同様に、`.xlflow/session.json` が設定済み workbook を指していれば `form snapshot` も一致する recorded session workbook を自動再利用します。明示的にその前提を要求したい場合は `--session` を付けます。
 
@@ -531,7 +531,7 @@ spec path は `.json` / `.yaml` / `.yml` でなければなりません。xlflow
 
 spec の parse や validation に失敗した場合、`form build` は `spec_parse_failed`、`spec_validation_failed`、`spec_schema_invalid` のいずれかを返し、top-level `spec` metadata として `path`、`format`、必要に応じて line / column、field path、remediation suggestion を含めます。YAML で `-` や `:` を値として使う場合は quote するか、JSON artifact を使ってください。
 
-既定では同名の `form.name` がすでに存在すると `form_already_exists` で失敗します。`--overwrite` を付けた場合だけ既存 component を削除して spec から作り直します。`src/forms/specs/*.yaml` を source of truth として毎回作り直す置換 workflow はこちらを前提にします。既定では保存し、`--session --no-save` のときだけ live workbook を未保存のまま残します。この状態では `xlflow save --session` を行うまで live workbook が disk より新しい状態です。
+既定では同名の `form.name` がすでに存在すると `form_already_exists` で失敗します。`--overwrite` を付けた場合だけ既存 component を削除して spec から作り直します。`src/forms/specs/*.yaml` を source of truth として毎回作り直す置換 workflow はこちらを前提にします。`sidecar` mode では `src/forms/code/<FormName>.bas` から tracked `.frm` artifact を同期し、その sidecar を新しい UserForm へ再適用します。まだ sidecar が無い場合でも削除前 workbook の code-behind を fallback として保持します。`frm` mode では `src/forms/code` を使わず、削除前 workbook の code-behind をそのまま保持します。既定では保存し、`--session --no-save` のときだけ live workbook を未保存のまま残します。この状態では `xlflow save --session` を行うまで live workbook が disk より新しい状態です。
 
 成功した `form build` でも、Designer-backed な弱い項目については contract warning を返すことがあります。form-level の `width` / `height` は best-effort でしかなく、design-time の `ComboBox` / `ListBox` の `list` / `selectedIndex` は xlflow が適用を試みても round-trip 期待としては observed-only とみなしてください。
 
@@ -540,11 +540,13 @@ spec の parse や validation に失敗した場合、`form build` は `spec_par
 ```text
 1. xlflow list forms --session --json
 2. xlflow inspect form <FormName> --designer --session --json
-3. xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json
-4. src/forms/specs/<FormName>.yaml を編集する
-5. xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json
-6. xlflow inspect form <FormName> --designer --session --json
-7. xlflow form export-image <FormName> --out artifacts/<FormName>.png --session --json
+3. xlflow pull --session --json
+4. xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json
+5. sidecar mode なら src/forms/code/<FormName>.bas を確認または編集する
+6. src/forms/specs/<FormName>.yaml を編集する
+7. xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json
+8. xlflow inspect form <FormName> --designer --session --json
+9. xlflow form export-image <FormName> --out artifacts/<FormName>.png --session --json
 ```
 
 ### `xlflow form export-image`
@@ -878,6 +880,9 @@ workbook = "src/workbook"
 folders = true
 folder_annotation = "update"
 default_component_folders = true
+
+[userform]
+code_source = "sidecar"
 
 [lint]
 require_option_explicit = true

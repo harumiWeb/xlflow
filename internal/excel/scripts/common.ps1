@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "UserForm workflow: `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit the spec, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "UserForm workflow: `xlflow pull --json`, `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit spec/code artifacts, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
@@ -205,6 +205,58 @@ function Get-XlflowSourceUserFormNames {
     }
   }
   return @($names.ToArray() | Sort-Object -Unique)
+}
+
+function Use-XlflowUserFormCodeSidecar {
+  param([string]$CodeSource)
+
+  return [string]::Equals(([string]$CodeSource).Trim(), "sidecar", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-XlflowUserFormCodeDir {
+  param([string]$FormsDir)
+
+  if ([string]::IsNullOrWhiteSpace($FormsDir)) {
+    return ""
+  }
+  return Join-Path $FormsDir "code"
+}
+
+function Get-XlflowUserFormCodePath {
+  param(
+    [string]$FormsDir,
+    [string]$FormName
+  )
+
+  $codeDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+  if ([string]::IsNullOrWhiteSpace($codeDir) -or [string]::IsNullOrWhiteSpace($FormName)) {
+    return ""
+  }
+  return Join-Path $codeDir ($FormName + ".bas")
+}
+
+function Get-XlflowUserFormCodeFiles {
+  param([string]$FormsDir)
+
+  $codeDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+  if ([string]::IsNullOrWhiteSpace($codeDir) -or -not (Test-Path -LiteralPath $codeDir)) {
+    return @()
+  }
+
+  $files = New-Object System.Collections.Generic.List[object]
+  foreach ($file in Get-ChildItem -LiteralPath $codeDir -Recurse -File -Filter *.bas | Sort-Object FullName) {
+    $formName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+    $files.Add([pscustomobject][ordered]@{
+      kind = "form_code"
+      root_dir = $codeDir
+      full_name = $file.FullName
+      relative_path = (Get-XlflowRelativePath -BasePath $codeDir -TargetPath $file.FullName).Replace("\", "/")
+      extension = ".bas"
+      module_name = $formName
+      form_name = $formName
+    })
+  }
+  return @($files.ToArray())
 }
 
 function ConvertTo-XlflowBool {
@@ -1764,7 +1816,8 @@ function Get-XlflowSourceComponentFiles {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
   $files = New-Object System.Collections.Generic.List[object]
@@ -1778,7 +1831,22 @@ function Get-XlflowSourceComponentFiles {
     if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) {
       continue
     }
+    $excludedDir = ""
+    if ($entry.kind -eq "form") {
+      $excludedDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+    }
     foreach ($file in Get-ChildItem -LiteralPath $dir -Recurse -File | Sort-Object FullName) {
+      if (-not [string]::IsNullOrWhiteSpace($excludedDir)) {
+        $excludedFullPath = [System.IO.Path]::GetFullPath($excludedDir)
+        $directorySeparator = [string][System.IO.Path]::DirectorySeparatorChar
+        if (-not $excludedFullPath.EndsWith($directorySeparator)) {
+          $excludedFullPath += $directorySeparator
+        }
+        $fileFullPath = [System.IO.Path]::GetFullPath($file.FullName)
+        if ($fileFullPath.StartsWith($excludedFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+          continue
+        }
+      }
       if ($file.Extension -notin @(".bas", ".cls", ".frm", ".frx")) {
         continue
       }
@@ -1792,6 +1860,11 @@ function Get-XlflowSourceComponentFiles {
       })
     }
   }
+  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+    foreach ($file in @(Get-XlflowUserFormCodeFiles -FormsDir $FormsDir)) {
+      $files.Add($file)
+    }
+  }
   return @($files.ToArray())
 }
 
@@ -1800,10 +1873,11 @@ function Clear-XlflowSourceComponentFiles {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
-  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource)) {
     Remove-Item -LiteralPath $file.full_name -Force -ErrorAction SilentlyContinue
   }
 }
@@ -1814,11 +1888,12 @@ function Get-XlflowSourceFingerprint {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
   $files = New-Object System.Collections.Generic.List[object]
-  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource)) {
     $files.Add([ordered]@{
       kind = [string]$file.kind
       path = [string]$file.relative_path
@@ -2022,6 +2097,90 @@ function Get-XlflowCodeModuleText {
     return ""
   }
   return $CodeModule.Lines(1, $CodeModule.CountOfLines)
+}
+
+function Set-XlflowCodeModuleText {
+  param(
+    $CodeModule,
+    [string]$Text
+  )
+
+  if ($null -eq $CodeModule) {
+    return
+  }
+  if ($CodeModule.CountOfLines -gt 0) {
+    $CodeModule.DeleteLines(1, $CodeModule.CountOfLines)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Text)) {
+    $CodeModule.AddFromString($Text)
+  }
+}
+
+function Get-XlflowUserFormCodeTextFromSource {
+  param(
+    [string]$FormsDir,
+    [string]$FormName
+  )
+
+  $path = Get-XlflowUserFormCodePath -FormsDir $FormsDir -FormName $FormName
+  if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) {
+    return $null
+  }
+  return (Get-XlflowUtf8Text -Path $path)
+}
+
+function Export-XlflowUserFormCodeBehind {
+  param(
+    $Component,
+    [string]$FormsDir
+  )
+
+  if ($null -eq $Component -or [int]$Component.Type -ne 3) {
+    return ""
+  }
+
+  $path = Get-XlflowUserFormCodePath -FormsDir $FormsDir -FormName ([string]$Component.Name)
+  if ([string]::IsNullOrWhiteSpace($path)) {
+    return ""
+  }
+
+  $text = Get-XlflowCodeModuleText -CodeModule $Component.CodeModule
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    if (Test-Path -LiteralPath $path) {
+      Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    return ""
+  }
+
+  $parent = Split-Path -Parent $path
+  if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+  Set-XlflowUtf8Text -Path $path -Text $text
+  return $path
+}
+
+function Sync-XlflowUserFormCodeBehind {
+  param(
+    $Component,
+    [string]$FormsDir,
+    [string]$FallbackText = $null
+  )
+
+  if ($null -eq $Component -or [int]$Component.Type -ne 3) {
+    return $false
+  }
+
+  $text = Get-XlflowUserFormCodeTextFromSource -FormsDir $FormsDir -FormName ([string]$Component.Name)
+  if ($null -eq $text) {
+    $text = $FallbackText
+  }
+  if ($null -eq $text) {
+    return $false
+  }
+
+  Set-XlflowCodeModuleText -CodeModule $Component.CodeModule -Text $text
+  return $true
 }
 
 function New-XlflowTestRunnerCode {

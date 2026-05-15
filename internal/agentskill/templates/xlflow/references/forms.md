@@ -18,12 +18,14 @@ Load this reference when the task depends on `xlflow list forms`, `xlflow inspec
 - Use `xlflow form build <spec> --session --keepalive --json` to create a new Designer-backed UserForm from a persisted spec.
 - Use `xlflow form build <spec> --session --overwrite --keepalive --json` when the intended workflow is to replace an existing UserForm from spec.
 - Use `xlflow form export-image <FormName> --out <path.png> --session --keepalive --json` when visual verification depends on the runtime-rendered form.
+- In `sidecar` mode, run `pull` before reviewing or editing `src/forms/code/<FormName>.bas`; `form snapshot` does not emit code-behind.
+- `form apply` is hidden and should not be used for sidecar-aware UserForm workflows; prefer `form build --overwrite`.
 
 ## Persisted Spec Contract
 
 `form snapshot` persists an `xlflow.userform` spec. `form build` consumes the same contract.
 
-For ongoing maintenance, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact. Exported `.frm` / `.frx` files can stay in the repository, but they are build or pull artifacts rather than the primary source of truth for Designer-backed behavior.
+For ongoing maintenance, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for Designer structure. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where `.frm` embedded code remains canonical until migration. Exported `.frm` / `.frx` files can stay in the repository, but they are build or pull artifacts rather than the primary source of truth for Designer-backed behavior.
 
 Required top-level fields:
 
@@ -103,6 +105,9 @@ When `form build` fails before Excel opens, expect structured `spec_parse_failed
 - Without `--overwrite`, `form build` fails with `form_already_exists` when a UserForm with the same `form.name` already exists.
 - `--overwrite` is only for replacing an existing UserForm. A same-name non-UserForm component must not be deleted.
 - Overwrite is implemented as export-backup -> delete -> save -> rebuild.
+- In `sidecar` mode, xlflow synchronizes tracked `.frm` embedded code from `src/forms/code/<FormName>.bas` and reapplies that sidecar to the new UserForm when present.
+- In `sidecar` mode, if no sidecar exists yet, overwrite falls back to the deleted workbook form's code-behind so the rebuild does not silently drop VBA lines.
+- In `frm` mode, overwrite preserves the deleted workbook form's code-behind without consulting `src/forms/code`.
 - If rebuild fails after the delete/save checkpoint, xlflow restores the original UserForm from the temporary export before returning failure.
 - `--no-save` is valid only with `--session`.
 - `--overwrite --no-save` is invalid because Excel requires an intermediate save after removing the old UserForm and before recreating it.
@@ -135,9 +140,11 @@ When an agent needs to review or regenerate a UserForm safely:
 
 1. `xlflow list forms --session --keepalive --json`
 2. `xlflow inspect form <FormName> --designer --session --keepalive --json`
-3. `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json`
-4. edit the persisted spec under `src/forms/specs/`
-5. `xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --keepalive --json`
-6. inspect the result with `inspect form` and, when visuals matter, `form export-image`
+3. `xlflow pull --session --keepalive --json`
+4. `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json`
+5. in `sidecar` mode, review or edit `src/forms/code/<FormName>.bas` if code-behind changed
+6. edit the persisted spec under `src/forms/specs/`
+7. `xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --keepalive --json`
+8. inspect the result with `inspect form` and, when visuals matter, `form export-image`
 
 Treat `form build` as a deterministic scaffold/rebuild command for supported structure and common properties, not as a promise of lossless Designer round-trip fidelity.

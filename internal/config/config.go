@@ -12,11 +12,12 @@ import (
 const FileName = "xlflow.toml"
 
 type Config struct {
-	Project ProjectConfig `toml:"project"`
-	Excel   ExcelConfig   `toml:"excel"`
-	Src     SourceConfig  `toml:"src"`
-	VBA     VBAConfig     `toml:"vba"`
-	Lint    LintConfig    `toml:"lint"`
+	Project  ProjectConfig  `toml:"project"`
+	Excel    ExcelConfig    `toml:"excel"`
+	Src      SourceConfig   `toml:"src"`
+	VBA      VBAConfig      `toml:"vba"`
+	UserForm UserFormConfig `toml:"userform"`
+	Lint     LintConfig     `toml:"lint"`
 }
 
 type ProjectConfig struct {
@@ -41,6 +42,10 @@ type VBAConfig struct {
 	Folders                 bool   `toml:"folders"`
 	FolderAnnotation        string `toml:"folder_annotation"`
 	DefaultComponentFolders bool   `toml:"default_component_folders"`
+}
+
+type UserFormConfig struct {
+	CodeSource string `toml:"code_source"`
 }
 
 type LintConfig struct {
@@ -74,6 +79,9 @@ func Default() Config {
 			Folders:                 true,
 			FolderAnnotation:        "update",
 			DefaultComponentFolders: true,
+		},
+		UserForm: UserFormConfig{
+			CodeSource: "sidecar",
 		},
 		Lint: LintConfig{
 			RequireOptionExplicit:    true,
@@ -126,6 +134,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.VBA.FolderAnnotation == "" {
 		cfg.VBA.FolderAnnotation = defaults.VBA.FolderAnnotation
 	}
+	if cfg.UserForm.CodeSource == "" {
+		cfg.UserForm.CodeSource = defaults.UserForm.CodeSource
+	}
 }
 
 func validate(cfg Config) error {
@@ -139,6 +150,11 @@ func validate(cfg Config) error {
 	case "update", "preserve", "ignore":
 	default:
 		return fmt.Errorf("vba.folder_annotation must be one of update, preserve, ignore")
+	}
+	switch cfg.UserForm.CodeSource {
+	case "frm", "sidecar":
+	default:
+		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
 	}
 	return nil
 }

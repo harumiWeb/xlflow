@@ -4,6 +4,7 @@ param(
   [string]$ClassesDir,
   [string]$FormsDir,
   [string]$WorkbookDir,
+  [string]$CodeSource = "frm",
   [string]$BackupRoot,
   [string]$Folders = "true",
   [string]$FolderAnnotation = "update",
@@ -32,9 +33,9 @@ try {
     Set-XlflowError -Result $result -Code "push_args_invalid" -Message "-BackupMode must be always or never." -Source "xlflow"
     throw "invalid backup mode"
   }
-  $sourceFiles = @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)
+  $sourceFiles = @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource)
   $sourceUserFormNames = @(Get-XlflowSourceUserFormNames -FormsDir $FormsDir)
-  $duplicates = @(Find-XlflowDuplicateModuleNames -Files $sourceFiles)
+  $duplicates = @(Find-XlflowDuplicateModuleNames -Files ($sourceFiles | Where-Object { $_.kind -ne "form_code" }))
   if ($duplicates.Count -gt 0) {
     $messages = New-Object System.Collections.Generic.List[string]
     foreach ($duplicate in $duplicates) {
@@ -49,7 +50,7 @@ try {
     Write-XlflowJson -Result $result
     exit 0
   }
-  $fingerprint = Get-XlflowSourceFingerprint -WorkbookPath $WorkbookPath -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+  $fingerprint = Get-XlflowSourceFingerprint -WorkbookPath $WorkbookPath -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource
   if ((ConvertTo-XlflowBool $ChangedOnly) -and (Test-XlflowFingerprintMatchesState -Fingerprint $fingerprint -StatePath $StatePath)) {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $false -SessionMode "none" -Saved $false -NeedsSave $false -Dirty $false
     $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
@@ -103,6 +104,7 @@ try {
   }
 
   $imported = @()
+  $syncedFormCode = @()
   $updatedDocumentModules = @()
   foreach ($file in $sourceFiles | Where-Object { $_.kind -in @("module", "class", "form") -and $_.extension -in @(".bas", ".cls", ".frm") }) {
     $importPath = Join-Path $tmpImportDir $file.relative_path
@@ -114,7 +116,12 @@ try {
         Copy-XlflowSourceForImport -SourcePath $frxSource -DestinationPath $importFrxPath
       }
     }
-    $workbook.VBProject.VBComponents.Import($importPath) | Out-Null
+    $importedComponent = $workbook.VBProject.VBComponents.Import($importPath)
+    if ((Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) -and $null -ne $importedComponent -and $file.kind -eq "form") {
+      if (Sync-XlflowUserFormCodeBehind -Component $importedComponent -FormsDir $FormsDir) {
+        $syncedFormCode += [string]$file.full_name
+      }
+    }
     $imported += $file.full_name
   }
   if (Test-Path -LiteralPath $WorkbookDir) {
@@ -148,6 +155,7 @@ try {
       $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
       $(if ($BackupMode -eq "always") { "backed up existing VBA components" } else { "skipped VBA backup" }),
       "imported $($imported.Count) source file(s)",
+      "synced $($syncedFormCode.Count) UserForm code-behind sidecar(s)",
       "updated $($updatedDocumentModules.Count) workbook module(s)",
       $(if ($saved) {
         "saved workbook in place"

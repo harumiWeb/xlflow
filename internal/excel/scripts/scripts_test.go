@@ -105,6 +105,8 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"Set-XlflowVBComponentProperty",
 		"Export-XlflowVBComponentBackup",
 		"Import-XlflowVBComponentBackup",
+		"Sync-XlflowUserFormCodeBehind",
+		"Get-XlflowCodeModuleText -CodeModule $existing.CodeModule",
 		"Add-XlflowFormContractWarnings",
 		"best_effort_form_size",
 		"best_effort_list_state",
@@ -117,6 +119,100 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-write.ps1 missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestCommonScriptTreatsUserFormCodeSidecarsSeparately(t *testing.T) {
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "src", "modules")
+	formsDir := filepath.Join(root, "src", "forms")
+	workbookDir := filepath.Join(root, "src", "workbook")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(modulesDir, "Main.bas"),
+		filepath.Join(formsDir, "CalendarPicker.frm"),
+		filepath.Join(formsDir, "CalendarPicker.frx"),
+		filepath.Join(formsDir, "code", "CalendarPicker.bas"),
+		filepath.Join(workbookDir, "ThisWorkbook.bas"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	command := fmt.Sprintf(`. ./common.ps1; $files = @(Get-XlflowSourceComponentFiles -ModulesDir '%s' -ClassesDir '' -FormsDir '%s' -WorkbookDir '%s' -CodeSource 'sidecar'); $files | ConvertTo-Json -Depth 5 -Compress`,
+		modulesDir, formsDir, workbookDir)
+	cmd := exec.Command("pwsh", "-NoProfile", "-Command", command)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceComponentFiles command failed: %v\n%s", err, out)
+	}
+
+	var got []struct {
+		Kind         string `json:"kind"`
+		RelativePath string `json:"relative_path"`
+		ModuleName   string `json:"module_name"`
+		FormName     string `json:"form_name"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse source component files: %v\n%s", err, out)
+	}
+
+	var kinds []string
+	for _, file := range got {
+		kinds = append(kinds, file.Kind+":"+file.RelativePath)
+	}
+	sort.Strings(kinds)
+	want := []string{
+		"document:ThisWorkbook.bas",
+		"form:CalendarPicker.frm",
+		"form:CalendarPicker.frx",
+		"form_code:CalendarPicker.bas",
+		"module:Main.bas",
+	}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("source component files = %#v, want %#v", kinds, want)
+	}
+}
+
+func TestCommonScriptOmitsUserFormCodeSidecarsInFRMMode(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "CustomerForm.frm"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "CustomerForm.bas"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf(`. ./common.ps1; $files = @(Get-XlflowSourceComponentFiles -ModulesDir '' -ClassesDir '' -FormsDir '%s' -WorkbookDir '' -CodeSource 'frm'); $files | ConvertTo-Json -Depth 5 -Compress`, formsDir)
+	cmd := exec.Command("pwsh", "-NoProfile", "-Command", command)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceComponentFiles frm-mode command failed: %v\n%s", err, out)
+	}
+	type sourceFile struct {
+		Kind string `json:"kind"`
+	}
+	var got []sourceFile
+	if err := json.Unmarshal(out, &got); err != nil {
+		var single sourceFile
+		if errSingle := json.Unmarshal(out, &single); errSingle != nil {
+			t.Fatalf("failed to parse frm-mode source component files: %v\n%s", err, out)
+		}
+		got = []sourceFile{single}
+	}
+	if len(got) != 1 || got[0].Kind != "form" {
+		t.Fatalf("got %#v, want only form entries", got)
 	}
 }
 
@@ -154,6 +250,34 @@ func TestFormWriteScriptOverwritePathBacksUpAndRestoresOnFailure(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-write.ps1 missing overwrite restore handling %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestPullAndPushScriptsHandleUserFormCodeSidecars(t *testing.T) {
+	checks := map[string][]string{
+		"pull.ps1": {
+			"Export-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir",
+			"Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource",
+			"exported $($exportedFormCode.Count) UserForm code-behind sidecar(s)",
+		},
+		"push.ps1": {
+			`Where-Object { $_.kind -ne "form_code" }`,
+			"Sync-XlflowUserFormCodeBehind -Component $importedComponent -FormsDir $FormsDir",
+			"Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource",
+			"synced $($syncedFormCode.Count) UserForm code-behind sidecar(s)",
+		},
+	}
+	for script, wants := range checks {
+		data, err := os.ReadFile(filepath.Join(".", script))
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", script, err)
+		}
+		text := string(data)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q:\n%s", script, want, text)
+			}
 		}
 	}
 }
@@ -3205,5 +3329,179 @@ try {
 	}
 	if !got.FrxIsSibling {
 		t.Fatal("expected .frx companion to be created in the same directory as .frm")
+	}
+}
+
+func TestUserFormCodeSidecarRoundTripInSidecarMode(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  initialPullStatus = ''
+  pushStatus = ''
+  roundtripPullStatus = ''
+  initialSidecarHasA = $false
+  finalSidecarHasB = $false
+  finalFrmHasB = $false
+}
+$excel = $null
+$workbook = $null
+$component = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'userform-sidecar-roundtrip.xlsm'
+  $modulesDir1 = Join-Path $root 'src1/modules'
+  $classesDir1 = Join-Path $root 'src1/classes'
+  $formsDir1 = Join-Path $root 'src1/forms'
+  $workbookDir1 = Join-Path $root 'src1/workbook'
+  $modulesDir2 = Join-Path $root 'src2/modules'
+  $classesDir2 = Join-Path $root 'src2/classes'
+  $formsDir2 = Join-Path $root 'src2/forms'
+  $workbookDir2 = Join-Path $root 'src2/workbook'
+  $backupRoot = Join-Path $root 'backups'
+  $formName = 'UserFormSidecar'
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+
+  try {
+    $null = $workbook.VBProject
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable (trust access to VBA project object model may be disabled): ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $component = $workbook.VBProject.VBComponents.Add(3)
+  $component.Name = $formName
+  $component.CodeModule.AddFromString(@'
+Option Explicit
+
+Private versionTag As String
+
+Private Sub UserForm_Initialize()
+    versionTag = "A"
+End Sub
+'@)
+  $workbook.SaveAs($wbPath, 52)
+  $global:XlflowSessionExcel = $excel
+  $global:XlflowSessionWorkbook = $workbook
+
+  $pull1 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -CodeSource sidecar -Visible false -UseSession true | ConvertFrom-Json
+  $result.initialPullStatus = $pull1.status
+  if ($pull1.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $sidecar1 = Join-Path $formsDir1 'code\UserFormSidecar.bas'
+  if (Test-Path -LiteralPath $sidecar1) {
+    $result.initialSidecarHasA = ((Get-Content -Raw -LiteralPath $sidecar1) -like '*versionTag = "A"*')
+  }
+
+  @'
+Option Explicit
+
+Private versionTag As String
+
+Private Sub UserForm_Initialize()
+    versionTag = "B"
+End Sub
+'@ | Set-Content -LiteralPath $sidecar1 -Encoding UTF8
+
+  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -CodeSource sidecar -BackupRoot $backupRoot -Visible false -UseSession true | ConvertFrom-Json
+  $result.pushStatus = $push.status
+  if ($push.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $pull2 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir2 -ClassesDir $classesDir2 -FormsDir $formsDir2 -WorkbookDir $workbookDir2 -CodeSource sidecar -Visible false -UseSession true | ConvertFrom-Json
+  $result.roundtripPullStatus = $pull2.status
+  if ($pull2.status -eq 'ok') {
+    $sidecar2 = Join-Path $formsDir2 'code\UserFormSidecar.bas'
+    $frm2 = Join-Path $formsDir2 'UserFormSidecar.frm'
+    if (Test-Path -LiteralPath $sidecar2) {
+      $result.finalSidecarHasB = ((Get-Content -Raw -LiteralPath $sidecar2) -like '*versionTag = "B"*')
+    }
+    if (Test-Path -LiteralPath $frm2) {
+      $result.finalFrmHasB = ((Get-Content -Raw -LiteralPath $frm2) -like '*versionTag = "B"*')
+    }
+  }
+
+  $result | ConvertTo-Json -Compress
+} catch {
+  $result.skip = $false
+  $result.skipReason = ''
+  $result.error = $_.Exception.Message
+  $result | ConvertTo-Json -Compress
+  exit 1
+} finally {
+  $global:XlflowSessionWorkbook = $null
+  $global:XlflowSessionExcel = $null
+  if ($null -ne $component) {
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($component) | Out-Null } catch {}
+  }
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("userform code sidecar roundtrip failed: %v\n%s", err, out)
+	}
+
+	var got struct {
+		Skip                bool   `json:"skip"`
+		SkipReason          string `json:"skipReason"`
+		InitialPullStatus   string `json:"initialPullStatus"`
+		PushStatus          string `json:"pushStatus"`
+		RoundtripPullStatus string `json:"roundtripPullStatus"`
+		InitialSidecarHasA  bool   `json:"initialSidecarHasA"`
+		FinalSidecarHasB    bool   `json:"finalSidecarHasB"`
+		FinalFrmHasB        bool   `json:"finalFrmHasB"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse sidecar roundtrip output as json: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skipf("skipped: %s", got.SkipReason)
+	}
+	if got.InitialPullStatus != "ok" || got.PushStatus != "ok" || got.RoundtripPullStatus != "ok" {
+		t.Fatalf("unexpected sidecar roundtrip statuses: %+v output=%s", got, out)
+	}
+	if !got.InitialSidecarHasA {
+		t.Fatalf("expected initial sidecar export to capture code-behind A: %+v", got)
+	}
+	if !got.FinalSidecarHasB || !got.FinalFrmHasB {
+		t.Fatalf("expected sidecar push/pull roundtrip to preserve B code-behind: %+v", got)
 	}
 }

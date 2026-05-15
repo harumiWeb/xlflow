@@ -278,3 +278,42 @@
 - `task lint` passed.
 - Workspace `C:\dev\go\xlflow\tmp_workspaces\edit-review-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, `session start`, `push --fast --session --no-save`, `edit cell|range|rows|columns --session`, `run Main.Run --session`, `save --session`, `session stop`, `pull`, and final `lint` all passed.
 - Excel COM workbook-state check after save/stop confirmed `A1="xlflow ok"`, `B2Formula="=1+2"`, `B2Value=3`, `C1Color=65280`, `Row1Height=24`, and `ColumnBWidth=22`.
+
+# UserForm Code-Behind Sidecar Todo
+
+- [x] Add shared PowerShell helpers for `src/forms/code/*.bas` sidecar discovery, export, and CodeModule reapplication.
+- [x] Update `pull` to export UserForm code-behind sidecars and `push` to reapply them after `.frm` import.
+- [x] Update `form build --overwrite` to preserve code-behind by preferring the sidecar and falling back to the pre-delete workbook form code.
+- [x] Update CLI contract, README files, and bundled skill references for the `spec + code sidecar` source-of-truth model.
+- [x] Add focused Go/PowerShell regression coverage and rerun lint/full tests.
+- [x] Run Windows Excel COM E2E for UserForm build/pull/push/overwrite with code-behind preservation.
+
+## Verification Notes
+
+- `go test ./internal/excel/forms ./internal/excel/scripts ./internal/excel ./internal/agentskill` passed.
+- `task lint` passed.
+- `go test ./...` passed.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-codebehind-sidecar-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, `form build src/forms/specs/CalendarPicker.yaml`, `pull`, `push`, `form build src/forms/specs/CalendarPicker.yaml --overwrite`, and final `pull` all passed.
+- Excel COM workbook-state check after overwrite confirmed the rebuilt `CalendarPicker` form still contained code-behind version `B` even after deleting `src/forms/code/CalendarPicker.bas`, proving overwrite fallback preserved workbook code.
+- Final `pull` recreated `src/forms/code/CalendarPicker.bas` with the preserved `B` code-behind.
+
+# UserForm Code Source Mode Hardening Todo
+
+- [x] Add `[userform].code_source = "frm" | "sidecar"` config, validation, and scaffold defaults (`new=sidecar`, `init=frm`).
+- [x] Make `pull`, `push`, and `form build` mode-aware so `frm` mode ignores `src/forms/code` while `sidecar` mode exports and reapplies code-behind sidecars.
+- [x] Synchronize tracked `.frm` embedded code from `src/forms/code/*.bas` before `push` and `form build` in `sidecar` mode so sidecar-only edits remain runnable.
+- [x] Run `form build` through the same source preflight used by `push`/`run` when `sidecar` mode may inject VBA.
+- [x] Update CLI contract, README files, and bundled skill references for mode-aware UserForm source-of-truth behavior.
+- [x] Add focused Go and PowerShell regression coverage for config defaults, sidecar preflight, and `.frm` artifact synchronization.
+- [x] Run Windows Excel COM E2E for both `new` (`sidecar`) and `init` (`frm`) workflows.
+
+## Verification Notes
+
+- `go test ./internal/config ./internal/project ./internal/excel/forms ./internal/cli ./internal/excel ./internal/excel/scripts ./internal/agentskill` passed.
+- `task lint` passed.
+- `go test ./...` passed.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-code-source-mode-e2e` (`new`, `code_source=sidecar`): `xlflow new`, `doctor`, `pull`, `lint`, `form build src/forms/specs/CalendarPicker.yaml`, `pull`, `push`, `pull`, `form build src/forms/specs/CalendarPicker.yaml --overwrite`, and final `pull` all passed.
+- Sidecar-mode E2E confirmed `pull -> edit src/forms/code/CalendarPicker.bas -> push -> pull` preserved code-behind version `B`, and a manually diverged `src/forms/CalendarPicker.frm` was synchronized back to the authoritative sidecar before `form build --overwrite`.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-code-source-mode-init` (`init`, `code_source=frm`): `xlflow init <existing workbook>`, `pull`, `.frm` code edit, `push`, `pull`, `form snapshot`, `form build --overwrite`, and final `pull` all passed.
+- FRM-mode E2E confirmed `pull` did not create `src/forms/code/*.bas`, `push` preserved `.frm`-embedded code version `FRM2`, and `form build --overwrite` kept that embedded code intact.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-preflight-scope-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, then `form build src/forms/specs/UserForm1.yaml` in a sidecar repo where unrelated `src/forms/UserForm2.frm` intentionally contained stale analyzer-breaking code. Build for `UserForm1` still succeeded, confirming form-build preflight now scopes UserForm source checks to the target form instead of unrelated generated `.frm` artifacts.

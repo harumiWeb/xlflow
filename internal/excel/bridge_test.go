@@ -697,6 +697,9 @@ func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	if args["Folders"] != "true" || args["FolderAnnotation"] != "update" || args["DefaultComponentFolders"] != "true" {
 		t.Fatalf("unexpected folder config args: %+v", args)
 	}
+	if args["CodeSource"] != "sidecar" {
+		t.Fatalf("CodeSource = %q", args["CodeSource"])
+	}
 }
 
 func TestListFormsScriptArgsIncludeFolderAndSessionConfig(t *testing.T) {
@@ -784,6 +787,12 @@ func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
 	}
 	if args["SpecPath"] != "src/forms/UserForm1.form.yaml" {
 		t.Fatalf("SpecPath = %q", args["SpecPath"])
+	}
+	if args["FormsDir"] != filepath.Join(root, "src", "forms") {
+		t.Fatalf("FormsDir = %q", args["FormsDir"])
+	}
+	if args["CodeSource"] != "sidecar" {
+		t.Fatalf("CodeSource = %q", args["CodeSource"])
 	}
 	if args["UseSession"] != "true" || args["NoSave"] != "true" {
 		t.Fatalf("unexpected session flags: %+v", args)

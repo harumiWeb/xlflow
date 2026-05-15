@@ -452,6 +452,14 @@ func (a *app) formBuildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := a.runUserFormCodeSourcePreflight("form build", cfg, map[string]bool{opts.Spec.Form.Name: true}); err != nil {
+				return err
+			}
+			if cfg.UserForm.CodeSource == "sidecar" {
+				if err := a.runSourcePreflight("form build", cfg, "building workbook forms", nil, buildUserFormSourcePathFilter(a.cwd, cfg, map[string]bool{opts.Spec.Form.Name: true})); err != nil {
+					return err
+				}
+			}
 			var env output.Envelope
 			var code int
 			err = a.withExcelProgress("Building workbook form", opts.Keepalive, func() error {
@@ -1067,7 +1075,10 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
-			if err := a.runSourcePreflight("push", cfg, "pushing to Excel", nil); err != nil {
+			if err := a.runUserFormCodeSourcePreflight("push", cfg, nil); err != nil {
+				return err
+			}
+			if err := a.runSourcePreflight("push", cfg, "pushing to Excel", nil, nil); err != nil {
 				return err
 			}
 			var env output.Envelope
@@ -1648,7 +1659,7 @@ func (a *app) runCommand() *cobra.Command {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
 			if a.shouldRunSourcePreflight(cfg, opts) {
-				if err := a.runSourcePreflight("run", cfg, "running macros", ignoredRunPreflightAnalysisCodes(opts)); err != nil {
+				if err := a.runSourcePreflight("run", cfg, "running macros", ignoredRunPreflightAnalysisCodes(opts), nil); err != nil {
 					return err
 				}
 			}
@@ -3142,12 +3153,12 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 	return diag
 }
 
-func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool) error {
-	issues, err := lint.Linter{RootDir: a.cwd, Config: cfg}.Run()
+func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
+	issues, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
-	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
 	}
@@ -3177,6 +3188,49 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	}
 	env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 	return a.write(env, output.ExitValidation)
+}
+
+func buildUserFormSourcePathFilter(root string, cfg config.Config, targetForms map[string]bool) func(string) bool {
+	if len(targetForms) == 0 {
+		return nil
+	}
+	formsRoot := filepath.Clean(filepath.Join(root, cfg.Src.Forms))
+	codeRoot := filepath.Clean(filepath.Join(formsRoot, "code"))
+	return func(path string) bool {
+		cleanPath := filepath.Clean(path)
+		ext := strings.ToLower(filepath.Ext(cleanPath))
+		base := strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))
+		if ext == ".frm" && isPathInsideRoot(cleanPath, formsRoot) {
+			return targetForms[base]
+		}
+		if ext == ".bas" && isPathInsideRoot(cleanPath, codeRoot) {
+			return targetForms[base]
+		}
+		return true
+	}
+}
+
+func isPathInsideRoot(path string, root string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanRoot := filepath.Clean(root)
+	if strings.EqualFold(cleanPath, cleanRoot) {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(cleanPath), strings.ToLower(cleanRoot)+strings.ToLower(string(os.PathSeparator)))
+}
+
+func (a *app) runUserFormCodeSourcePreflight(command string, cfg config.Config, targetForms map[string]bool) error {
+	if cfg.UserForm.CodeSource != "sidecar" {
+		return nil
+	}
+	updated, err := forms.SyncUserFormCodeSidecars(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "userform_code_sync_failed", err)
+	}
+	if len(updated) == 0 {
+		return nil
+	}
+	return nil
 }
 
 func ignoredRunPreflightAnalysisCodes(opts excel.RunOptions) map[string]bool {

@@ -1625,6 +1625,174 @@ func TestFormBuildCommandReturnsSpecParseMetadata(t *testing.T) {
 	}
 }
 
+func TestFormBuildSidecarModeRunsSourcePreflightBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	specBody := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Option Explicit\n\nPublic Sub BreakAnalyzer()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = True\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "build", "src/forms/specs/UserForm1.yaml"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form build preflight output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Phase != "preflight" {
+		t.Fatalf("unexpected form build preflight payload: %+v", got)
+	}
+	if got.Error.Code != "analyze_failed" && got.Error.Code != "source_preflight_failed" {
+		t.Fatalf("unexpected preflight error code: %+v", got)
+	}
+}
+
+func TestFormBuildSidecarModeSyncsEmbeddedCodeBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	specBody := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.runUserFormCodeSourcePreflight("form build", cfg, map[string]bool{"UserForm1": true}); err != nil {
+		t.Fatalf("runUserFormCodeSourcePreflight() error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	rewritten, err := os.ReadFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rewritten), `version = "sidecar"`) || strings.Contains(string(rewritten), `version = "frm"`) {
+		t.Fatalf("frm artifact was not synchronized from sidecar:\n%s", string(rewritten))
+	}
+}
+
+func TestFormBuildSidecarModePreflightIgnoresOtherForms(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/missing.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml"), []byte("schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols: []\nwarnings: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleFrm := "VERSION 5.00\nBegin {GUID} UserForm2\nEnd\nAttribute VB_Name = \"UserForm2\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPublic Sub BreakAnalyzer()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = True\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm2.frm"), []byte(staleFrm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm2.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "build", "src/forms/specs/UserForm1.yaml"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected form build to fail after preflight because workbook path is missing")
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form build output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Error.Phase == "preflight" && (got.Error.Code == "analyze_failed" || got.Error.Code == "source_preflight_failed") {
+		t.Fatalf("unrelated UserForm2 should not block UserForm1 build preflight: %+v", got)
+	}
+}
+
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
 	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)

@@ -427,6 +427,7 @@ xlflow pull --json
 ```
 
 It exports standard modules, class modules, UserForms, and document modules such as Workbook and Worksheet modules into `src/`.
+When `[userform].code_source = "sidecar"`, `pull` also writes code-behind sidecars to `src/forms/code/<FormName>.bas` when the form module contains VBA lines. In `frm` mode, `pull` leaves code-behind inside `.frm`.
 Use `xlflow pull --session --json` when you want to require the recorded session workbook explicitly. If `.xlflow/session.json` already points at the configured workbook, plain `xlflow pull --json` auto-reuses that matching live workbook.
 When workbook UserForms are detected, `pull` adds warnings that `.frm` text alone may not capture `.frx` or Designer-backed state.
 
@@ -439,7 +440,7 @@ xlflow push --json
 ```
 
 It reads `.bas`, `.cls`, and `.frm` files and imports them through VBIDE.
-UserForm `.frx` files are treated as binary companion files.
+UserForm `.frx` files are treated as binary companion files. When `[userform].code_source = "sidecar"`, `src/forms/code/*.bas` sidecars are not imported as standalone modules; xlflow first synchronizes tracked `.frm` embedded code from the sidecar, then `push` reapplies that sidecar onto the matching UserForm `CodeModule` after the `.frm` import succeeds. When `code_source = "frm"`, `.frm` embedded code remains authoritative.
 By default, `push` creates a backup under `.xlflow/backups` and saves the workbook.
 When source UserForms are detected, `push` adds warnings and deeper-form inspection hints. `push --session --no-save` adds an extra warning that live workbook UserForm state may now differ from disk.
 
@@ -511,7 +512,7 @@ xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --session --
 
 Persisted `warnings` are reserved for form-local snapshot warnings that belong to the saved spec itself. Operational warnings such as `save_required` remain in the command envelope and human output instead of being written into the artifact.
 
-For ongoing UserForm work, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact. `form snapshot` is the capture path from an existing workbook form into that spec, `form build --overwrite` is the rebuild path back into the workbook, and exported `.frm` / `.frx` files should be treated as build or pull artifacts rather than the primary source of truth for Designer behavior.
+For ongoing UserForm work, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for Designer structure. For code-behind, the authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while init/imported projects default to `frm`, where embedded `.frm` code remains canonical until you migrate intentionally. `form snapshot` is the capture path for Designer spec, `pull` is the capture path for code-behind sidecars in sidecar mode, `form build --overwrite` is the rebuild path back into the workbook, and exported `.frm` / `.frx` files should be treated as build or pull artifacts rather than the primary source of truth for Designer behavior.
 
 Like other workbook-backed read commands, `form snapshot` auto-reuses a matching recorded session workbook when `.xlflow/session.json` points at the configured workbook. Add `--session` when you want that requirement to be explicit.
 
@@ -528,7 +529,7 @@ The spec path must end with `.json`, `.yaml`, or `.yml`. xlflow validates the sc
 
 When the spec cannot be parsed or validated, `form build` returns structured `spec_parse_failed`, `spec_validation_failed`, or `spec_schema_invalid` errors plus top-level `spec` metadata such as `path`, `format`, optional `line`, optional `column`, optional `field`, and a remediation suggestion. YAML mistakes such as unquoted `-` or `:` values should be corrected by quoting the scalar or switching the artifact to JSON.
 
-By default, a form with the same `form.name` fails with `form_already_exists`. `--overwrite` removes that existing component and recreates it from the spec. This is the recommended replacement workflow when the form design should be rebuilt from source-of-truth spec data under `src/forms/specs/*.yaml`. The command saves by default; `--session --no-save` leaves the live workbook dirty and returns save-required state. In that mode, the live workbook is newer than disk until `xlflow save --session` persists it.
+By default, a form with the same `form.name` fails with `form_already_exists`. `--overwrite` removes that existing component and recreates it from the spec. This is the recommended replacement workflow when the form design should be rebuilt from source-of-truth spec data under `src/forms/specs/*.yaml`. In `sidecar` mode, xlflow synchronizes the tracked `.frm` artifact from `src/forms/code/<FormName>.bas`, reapplies that sidecar to the rebuilt form when present, and falls back to the deleted workbook form's code-behind if no sidecar exists yet. In `frm` mode, rebuild preserves the deleted workbook form's code-behind without consulting `src/forms/code`. The command saves by default; `--session --no-save` leaves the live workbook dirty and returns save-required state. In that mode, the live workbook is newer than disk until `xlflow save --session` persists it.
 
 Successful `form build` results may still return contract warnings for weak Designer-backed fields. Form-level `width` / `height` are best-effort only, and design-time `ComboBox` / `ListBox` `list` / `selectedIndex` should be treated as observed-only for round-trip expectations even though xlflow still attempts to apply them.
 
@@ -537,11 +538,13 @@ Recommended UserForm loop:
 ```text
 1. xlflow list forms --session --json
 2. xlflow inspect form <FormName> --designer --session --json
-3. xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json
-4. edit src/forms/specs/<FormName>.yaml
-5. xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json
-6. xlflow inspect form <FormName> --designer --session --json
-7. xlflow form export-image <FormName> --out artifacts/<FormName>.png --session --json
+3. xlflow pull --session --json
+4. xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json
+5. in sidecar mode, review or edit src/forms/code/<FormName>.bas if code-behind changed
+6. edit src/forms/specs/<FormName>.yaml
+7. xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json
+8. xlflow inspect form <FormName> --designer --session --json
+9. xlflow form export-image <FormName> --out artifacts/<FormName>.png --session --json
 ```
 
 ### `xlflow form export-image`
@@ -874,6 +877,9 @@ workbook = "src/workbook"
 folders = true
 folder_annotation = "update"
 default_component_folders = true
+
+[userform]
+code_source = "sidecar"
 
 [lint]
 require_option_explicit = true
