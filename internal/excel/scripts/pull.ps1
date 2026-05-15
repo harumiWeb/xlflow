@@ -69,7 +69,7 @@ try {
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `pull` exported from the live workbook."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. `pull` exported from the live workbook rather than the saved workbook file."
   }
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported $($exported.Count) VBA component(s)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {

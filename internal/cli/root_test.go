@@ -1580,6 +1580,51 @@ func TestFormSnapshotCommandUsesFormSnapshotArgsInvalidCode(t *testing.T) {
 	}
 }
 
+func TestFormBuildCommandReturnsSpecParseMetadata(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\n  caption: -\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "build", specPath})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Spec map[string]any `json:"spec"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form build error output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "spec_parse_failed" {
+		t.Fatalf("unexpected form build error payload: %+v", got)
+	}
+	if got.Spec["format"] != "yaml" || got.Spec["path"] != "src/forms/specs/UserForm1.yaml" {
+		t.Fatalf("unexpected spec metadata: %+v", got.Spec)
+	}
+	if suggestion, _ := got.Spec["suggestion"].(string); !strings.Contains(suggestion, `caption: ""`) {
+		t.Fatalf("unexpected suggestion: %+v", got.Spec)
+	}
+}
+
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
 	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, true, "build\\result.xlsm", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)

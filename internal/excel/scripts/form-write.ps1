@@ -210,7 +210,8 @@ function Add-XlflowFormWriteWarning {
   param(
     [string]$Code,
     [string]$Message,
-    [string]$ControlName = ""
+    [string]$ControlName = "",
+    [string]$FieldPath = ""
   )
 
   if (-not $result.Contains("warnings") -or $null -eq $result["warnings"]) {
@@ -222,6 +223,9 @@ function Add-XlflowFormWriteWarning {
   }
   if (-not [string]::IsNullOrWhiteSpace($ControlName)) {
     $warning.control = $ControlName
+  }
+  if (-not [string]::IsNullOrWhiteSpace($FieldPath)) {
+    $warning.field_path = $FieldPath
   }
   $result["warnings"] += $warning
 }
@@ -250,7 +254,7 @@ function Add-XlflowFormContractWarnings {
     }
   }
   if ($hasFormSizeExpectation) {
-    Add-XlflowFormWriteWarning -Code "best_effort_form_size" -Message "Form-level width/height are best-effort in Designer build and may not round-trip through Excel VBIDE Designer APIs."
+    Add-XlflowFormWriteWarning -Code "best_effort_form_size" -Message "Form-level width/height are best-effort in Designer build and may not round-trip through Excel VBIDE Designer APIs. Field scope: form.observed.width, form.observed.height, form.build.width, form.build.height." -FieldPath "form.observed.width"
   }
 
   $listStateControls = New-Object System.Collections.Generic.List[string]
@@ -275,7 +279,7 @@ function Add-XlflowFormContractWarnings {
   }
   if ($listStateControls.Count -gt 0) {
     $controlNames = ($listStateControls | Select-Object -Unique) -join ", "
-    Add-XlflowFormWriteWarning -Code "best_effort_list_state" -Message ("Design-time ComboBox/ListBox list and selectedIndex are best-effort during build and should be treated as observed-only for round-trip expectations. Controls: " + $controlNames + ".")
+    Add-XlflowFormWriteWarning -Code "best_effort_list_state" -Message ("Design-time ComboBox/ListBox list and selectedIndex are best-effort during build and should be treated as observed-only for round-trip expectations. Field scope includes controls[*].list and controls[*].selectedIndex. Controls: " + $controlNames + ".") -FieldPath "controls[*].selectedIndex"
   }
 }
 
@@ -705,7 +709,7 @@ try {
   }
   Add-XlflowHint -Result $result -Code "userform_review_commands" -Message ("Review the result with `xlflow inspect form " + [string]$spec.form.name + " --designer --json` or `xlflow form export-image " + [string]$spec.form.name + " --out <path>`.")
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message ("The live session workbook differs from disk after `form " + $normalizedAction + "`.")
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message ("The live workbook is newer than disk after `form " + $normalizedAction + "`. Run `xlflow save --session` before relying on disk-backed inspect, pull, or source review.")
   }
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ($normalizedAction + " form " + [string]$spec.form.name + " from " + $SpecPath)) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {

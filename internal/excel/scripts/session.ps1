@@ -85,6 +85,17 @@ try {
       }
       $dirty = Get-XlflowWorkbookDirtyState -Workbook $workbook
       $needsSave = $running -and $open -and (($null -eq $dirty) -or [bool]$dirty)
+      $userFormNames = @()
+      $userFormNamesKnown = $false
+      if ($running -and $open) {
+        try {
+          $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
+          $userFormNamesKnown = $true
+        } catch {
+          Write-Verbose ("failed to inspect UserForms during session status: " + $_.Exception.Message)
+          Add-XlflowStateWarning -Result $result -Code "userform_detection_unavailable" -Message "xlflow could not determine whether the live workbook contains UserForms during session status. Treat disk-backed inspect and source review as potentially incomplete until the workbook is saved and reviewed explicitly."
+        }
+      }
       $result.session = [ordered]@{
         running = $running
         workbook_open = $open
@@ -94,15 +105,18 @@ try {
         dirty = $dirty
         needs_save = $needsSave
         save_required = $needsSave
+        live_newer_than_disk = $needsSave
+        source_of_truth = $(if ($needsSave) { "live_workbook" } else { "saved_workbook" })
         mode = $(if ($running -and $open) { $sessionMode } else { "none" })
       }
       if ($running -and $open) {
-        $userFormNames = @()
-        try {
-          $userFormNames = @(Get-XlflowUserFormNames -Workbook $workbook)
-        } catch {
-          Write-Verbose ("failed to inspect UserForms during session status: " + $_.Exception.Message)
+        $result.session.userforms_known = $userFormNamesKnown
+        if ($userFormNamesKnown) {
+          $result.session.userforms_present = ($userFormNames.Count -gt 0)
+          $result.session.userform_count = $userFormNames.Count
         }
+      }
+      if ($running -and $open) {
         $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $true -SessionMode $sessionMode -Dirty $dirty -NeedsSave $needsSave
         $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath
         Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
@@ -111,7 +125,8 @@ try {
         $result.target = New-XlflowTargetResult -Kind "file" -Path $WorkbookPath
       }
       if ($needsSave) {
-        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
+        Add-XlflowUserFormSessionStaleWarning -Result $result -Names $userFormNames
       }
       $result.logs = @($(if ($running -and $open) { "xlflow session is running" } else { "xlflow session is not running" }))
     }

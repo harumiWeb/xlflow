@@ -30,7 +30,7 @@ function Add-XlflowListSaveRequiredWarning {
   )
 
   if ($null -ne $SaveState -and [bool]$SaveState.needs_save) {
-    Add-XlflowStateWarning -Result $Result -Code "save_required" -Message "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."
+    Add-XlflowStateWarning -Result $Result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
   }
 }
 

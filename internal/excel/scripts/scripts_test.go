@@ -108,6 +108,7 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"Add-XlflowFormContractWarnings",
 		"best_effort_form_size",
 		"best_effort_list_state",
+		"field_path",
 		"component '\" + $Name + \"' exists but is not a UserForm",
 		"save_required",
 		"userform_review_commands",
@@ -128,8 +129,10 @@ func TestFormWriteScriptCommunicatesWeakDesignerContractFields(t *testing.T) {
 	for _, want := range []string{
 		`Add-XlflowFormWriteWarning -Code "best_effort_form_size"`,
 		`Form-level width/height are best-effort`,
+		`form.observed.width`,
 		`Add-XlflowFormWriteWarning -Code "best_effort_list_state"`,
 		`observed-only for round-trip expectations`,
+		`controls[*].selectedIndex`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected weak-field contract warning %q in form-write.ps1:\n%s", want, text)
@@ -327,7 +330,7 @@ func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
 	}
 	for _, want := range []string{
 		`Get-XlflowSafeMemberValue -Target $_ -Name "Parent"`,
-		"Get-XlflowDesignerControlSnapshot -Control $_ -ExpectedParentName",
+		"Get-XlflowDesignerControlSnapshot -Control $_",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("inspect-form.ps1 missing nested-control parent filter %q:\n%s", want, text)
@@ -1289,7 +1292,7 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 	if !strings.Contains(text, "Open-XlflowWorkbookForCommand") {
 		t.Fatalf("push.ps1 should use the shared workbook-open helper for session reuse:\n%s", text)
 	}
-	if !strings.Contains(text, "\"SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop\"") {
+	if !strings.Contains(text, "\"SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop\"") {
 		t.Fatalf("push.ps1 should emit the strengthened save-required guidance:\n%s", text)
 	}
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
@@ -1635,6 +1638,12 @@ func TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired(t *testing.T) {
 	}
 	if !strings.Contains(text, "Get-XlflowUserFormNames -Workbook $workbook") {
 		t.Fatalf("session.ps1 should probe workbook UserForms on a best-effort basis:\n%s", text)
+	}
+	if !strings.Contains(text, "userforms_known = $userFormNamesKnown") {
+		t.Fatalf("session.ps1 should distinguish unknown UserForm detection from false:\n%s", text)
+	}
+	if !strings.Contains(text, "userform_detection_unavailable") {
+		t.Fatalf("session.ps1 should warn when UserForm detection is unavailable:\n%s", text)
 	}
 }
 

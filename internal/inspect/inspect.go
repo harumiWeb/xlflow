@@ -169,7 +169,7 @@ func SavedFileTargetInfo(path string) *TargetInfo {
 	return &TargetInfo{
 		Kind: "file",
 		Path: path,
-		Note: "This command inspected the saved workbook file, not an unsaved live Excel session.",
+		Note: "This command inspected the saved workbook file on disk, not an unsaved live Excel session.",
 	}
 }
 

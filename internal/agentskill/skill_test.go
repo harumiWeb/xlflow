@@ -37,7 +37,7 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.",
 		"Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`",
 		"Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names",
-		"Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json`",
+		"Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json`",
 		"Use `xlflow form build <spec> --session --keepalive --json`",
 		"Use `xlflow form build <spec> --session --overwrite --keepalive --json`",
 		"[references/forms.md](references/forms.md)",

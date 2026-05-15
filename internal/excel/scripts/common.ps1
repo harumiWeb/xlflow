@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related UserForm commands include `xlflow form snapshot <name> --out <path>`, `xlflow form build <spec>`, `xlflow form build <spec> --overwrite`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "UserForm workflow: `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit the spec, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
@@ -187,7 +187,7 @@ function Add-XlflowUserFormSessionStaleWarning {
   if ($normalized.Count -eq 0) {
     return
   }
-  Add-XlflowStateWarning -Result $Result -Code "userform_unsaved_session_state" -Message ("Workbook contains UserForms (" + ($normalized -join ", ") + ") and the current session changes are not saved. Disk `.frm`/`.frx` state may differ from the live workbook. Run `xlflow save --session` and `xlflow pull` before reviewing UserForm source differences.")
+  Add-XlflowStateWarning -Result $Result -Code "userform_unsaved_session_state" -Message ("Workbook contains UserForms (" + ($normalized -join ", ") + ") and the live workbook is newer than disk. Run `xlflow save --session` and `xlflow pull` before reviewing `.frm`/`.frx` or disk-backed inspect output.")
 }
 
 function Get-XlflowSourceUserFormNames {
@@ -298,7 +298,10 @@ function New-XlflowSessionResult {
     [string]$WorkbookPath = "",
     [AllowNull()]$Dirty = $null,
     [AllowNull()]$SaveRequired = $null,
-    [string]$Mode = ""
+    [string]$Mode = "",
+    [string]$SourceOfTruth = "",
+    [AllowNull()]$UserFormsPresent = $null,
+    [AllowNull()]$UserFormCount = $null
   )
 
   $session = [ordered]@{
@@ -312,9 +315,26 @@ function New-XlflowSessionResult {
   }
   if ($PSBoundParameters.ContainsKey("SaveRequired") -and $null -ne $SaveRequired) {
     $session.save_required = [bool]$SaveRequired
+    $session.live_newer_than_disk = [bool]$SaveRequired
   }
   if (-not [string]::IsNullOrWhiteSpace($Mode)) {
     $session.mode = $Mode
+  }
+  if ([string]::IsNullOrWhiteSpace($SourceOfTruth)) {
+    if ($session.Contains("live_newer_than_disk") -and [bool]$session.live_newer_than_disk) {
+      $SourceOfTruth = "live_workbook"
+    } else {
+      $SourceOfTruth = "saved_workbook"
+    }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($SourceOfTruth)) {
+    $session.source_of_truth = $SourceOfTruth
+  }
+  if ($PSBoundParameters.ContainsKey("UserFormsPresent") -and $null -ne $UserFormsPresent) {
+    $session.userforms_present = [bool]$UserFormsPresent
+  }
+  if ($PSBoundParameters.ContainsKey("UserFormCount") -and $null -ne $UserFormCount) {
+    $session.userform_count = [int]$UserFormCount
   }
   return $session
 }

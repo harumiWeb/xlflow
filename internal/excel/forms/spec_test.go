@@ -2,6 +2,7 @@ package forms
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +319,76 @@ func TestLoadFormSpecRejectsDuplicateExplicitControlIDs(t *testing.T) {
 	_, err = LoadFormSpec(input)
 	if err == nil || !strings.Contains(err.Error(), `id "shared" is duplicated`) {
 		t.Fatalf("expected duplicate id validation error, got %v", err)
+	}
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if specErr.Code != "spec_validation_failed" || specErr.Field != "controls[1].id" {
+		t.Fatalf("unexpected spec error: %+v", specErr)
+	}
+}
+
+func TestLoadFormSpecReturnsParseMetadataAndSuggestion(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "UserForm1.form.yaml")
+	body := `
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+  caption: -
+controls: []
+warnings: []
+`
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(body)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input, err := ResolveSpecInput(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadFormSpec(input)
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if specErr.Code != "spec_parse_failed" {
+		t.Fatalf("code = %q", specErr.Code)
+	}
+	if specErr.Path != "UserForm1.form.yaml" || specErr.Format != "yaml" {
+		t.Fatalf("unexpected spec metadata: %+v", specErr)
+	}
+	if !strings.Contains(specErr.Suggestion, `caption: ""`) {
+		t.Fatalf("suggestion = %q", specErr.Suggestion)
+	}
+}
+
+func TestLoadFormSpecReturnsJSONSpecificParseSuggestion(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "UserForm1.form.json")
+	body := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1",},"controls":[]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input, err := ResolveSpecInput(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadFormSpec(input)
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if specErr.Code != "spec_parse_failed" || specErr.Format != "json" {
+		t.Fatalf("unexpected parse error: %+v", specErr)
+	}
+	if !strings.Contains(specErr.Suggestion, "Fix JSON syntax") {
+		t.Fatalf("suggestion = %q", specErr.Suggestion)
+	}
+	if strings.Contains(specErr.Suggestion, "Try using JSON") {
+		t.Fatalf("json suggestion should not tell the user to switch to JSON: %q", specErr.Suggestion)
 	}
 }
 

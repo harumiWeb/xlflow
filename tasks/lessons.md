@@ -36,3 +36,4 @@
 - Persisted review artifacts must keep a stable contract. Do not merge transient operational warnings such as `save_required` or helper cleanup issues into saved spec files; keep those warnings in the command result only.
 - Do not treat UserForm Designer contract changes as stable until Excel COM E2E covers overwrite, nested container controls, and snapshot round-trip shape. Unit tests alone will miss VBIDE collection quirks and overwrite/save constraints.
 - For destructive UserForm overwrite flows, test an intentional post-delete failure on real Excel COM and prove the original form is restored. A successful overwrite path alone is not enough to claim safety.
+- File-based inspect session awareness must not rely on a metadata-file precheck alone. Query session status and match the returned workbook path so live-session dirty/save-required state still surfaces when the metadata file exists but the cheap gate would miss it.

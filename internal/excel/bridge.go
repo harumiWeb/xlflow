@@ -219,6 +219,7 @@ type ScriptResult struct {
 	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
 	Target        any           `json:"target,omitempty"`
 	Output        any           `json:"output,omitempty"`
+	Spec          any           `json:"spec,omitempty"`
 	Edit          any           `json:"edit,omitempty"`
 	Warnings      any           `json:"warnings,omitempty"`
 	Hints         any           `json:"hints,omitempty"`
@@ -1168,6 +1169,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.RunDiagnostic = result.RunDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
+	env.Spec = result.Spec
 	env.Edit = result.Edit
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints

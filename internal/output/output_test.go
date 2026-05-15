@@ -693,17 +693,79 @@ func TestWriteWithOptionsRendersVersionVerboseDetails(t *testing.T) {
 
 func TestWriteWithOptionsRendersSessionStatusSaveRequirement(t *testing.T) {
 	env := New("session")
-	env.Session = map[string]any{"running": true, "workbook_open": true, "needs_save": true}
+	env.Session = map[string]any{"running": true, "workbook_open": true, "needs_save": true, "live_newer_than_disk": true, "source_of_truth": "live_workbook", "userforms_present": true, "userform_count": 2}
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "needs_save": true}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Running:", "Workbook open:", "SAVE REQUIRED", "xlflow save before session stop"} {
+	for _, want := range []string{"Running:", "Workbook open:", "SAVE REQUIRED", "live workbook is newer than disk", "Source of truth:", "live_workbook", "UserForms:", "true (2)", "xlflow save before session stop"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("session status output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestWriteWithOptionsRendersUnknownUserFormsState(t *testing.T) {
+	env := New("session")
+	env.Session = map[string]any{"running": true, "workbook_open": true, "userforms_known": false}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "UserForms:") || !strings.Contains(got, "unknown") {
+		t.Fatalf("expected unknown UserForms state:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersFormBuildSpecFailureMetadata(t *testing.T) {
+	env := Failure("form build", Error{Code: "spec_parse_failed", Message: "yaml: line 6: did not find expected node content"})
+	env.Spec = map[string]any{
+		"path":       "src/forms/specs/UserForm1.yaml",
+		"format":     "yaml",
+		"line":       6,
+		"suggestion": `Try quoting scalar strings or use JSON if YAML syntax is uncertain. For an empty caption, use caption: "" rather than caption: -.`,
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Spec:", "src/forms/specs/UserForm1.yaml", "Spec format:", "YAML", "Spec location:", "line 6", "Remediation:", `caption: ""`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("form build failure output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersUserFormStateNote(t *testing.T) {
+	env := New("form snapshot")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "dirty": true, "save_required": true, "live_newer_than_disk": true, "userforms_present": true}
+	env.Forms = map[string]any{"name": "UserForm1", "basis": "designer", "control_count": 1}
+	env.Output = map[string]any{"path": "src/forms/specs/UserForm1.yaml", "format": "yaml"}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "State note:") || !strings.Contains(got, "UserForm project: save before disk inspect/pull review.") {
+		t.Fatalf("missing userform state note:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersTargetNoteStateNote(t *testing.T) {
+	env := New("inspect form")
+	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "note": "Strict designer inspection used a temporary workbook copy plus helper module to recover concrete control types."}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "State note:") || !strings.Contains(got, "Strict designer inspection used a temporary workbook copy plus helper module to recover concrete control types.") {
+		t.Fatalf("missing target note state note:\n%s", got)
 	}
 }
 
@@ -757,7 +819,7 @@ func TestWriteWithOptionsRendersFormSnapshotSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Snapshot target:", "live session workbook", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "3", "Output:", "artifacts/UserForm1.form.yaml", "Format:", "YAML", "SAVE REQUIRED", "save_required"} {
+	for _, want := range []string{"Snapshot target:", "live session", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "3", "Output:", "artifacts/UserForm1.form.yaml", "Format:", "YAML", "SAVE REQUIRED", "save_required"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("form snapshot output missing %q:\n%s", want, got)
 		}
@@ -799,7 +861,7 @@ func TestWriteWithOptionsRendersFormWriteSummary(t *testing.T) {
 		"action":            "apply",
 		"coordinate_system": "parent-relative",
 		"control_count":     4,
-		"spec_path":         "src/forms/UserForm1.form.yaml",
+		"spec_path":         "src/forms/specs/UserForm1.yaml",
 		"overwrite":         false,
 	}
 	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session` to persist workbook changes."}}
@@ -808,7 +870,7 @@ func TestWriteWithOptionsRendersFormWriteSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Write target:", "live session workbook", "Action:", "apply", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "4", "Spec:", "src/forms/UserForm1.form.yaml", "Overwrite:", "false", "SAVE REQUIRED"} {
+	for _, want := range []string{"Write target:", "live session", "Action:", "apply", "Form:", "UserForm1", "Basis:", "designer", "Coordinates:", "parent-relative", "Controls:", "4", "Spec:", "src/forms/specs/UserForm1.yaml", "Overwrite:", "false", "SAVE REQUIRED"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("form write output missing %q:\n%s", want, got)
 		}

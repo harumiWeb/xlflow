@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -440,6 +442,10 @@ func (a *app) formBuildCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := buildFormWriteOptions("build", args[0], overwrite, session, noSave, keepalive, a.cwd)
 			if err != nil {
+				var specErr *forms.SpecError
+				if errors.As(err, &specErr) {
+					return a.writeFormSpecFailure("form build", specErr)
+				}
 				return a.writeFailure("form build", output.ExitConfig, "form_build_args_invalid", err)
 			}
 			cfg, err := a.loadConfig("form build")
@@ -486,6 +492,10 @@ func (a *app) formApplyCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := buildFormWriteOptions("apply", args[0], false, session, noSave, keepalive, a.cwd)
 			if err != nil {
+				var specErr *forms.SpecError
+				if errors.As(err, &specErr) {
+					return a.writeFormSpecFailure("form apply", specErr)
+				}
 				return a.writeFailure("form apply", output.ExitConfig, "form_apply_args_invalid", err)
 			}
 			cfg, err := a.loadConfig("form apply")
@@ -2589,62 +2599,97 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 		"description": "Saved workbook file on disk",
 	}
 	session := map[string]any{
-		"active":        false,
-		"workbook_path": workbookPath,
-		"dirty":         false,
-		"save_required": false,
+		"active":               false,
+		"workbook_path":        workbookPath,
+		"dirty":                false,
+		"save_required":        false,
+		"live_newer_than_disk": false,
+		"source_of_truth":      "saved_workbook",
 	}
 	if runtime.GOOS != "windows" {
 		return target, session, nil
 	}
-	metadataPath := filepath.Join(a.cwd, ".xlflow", "session.json")
-	if !inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath) {
+	status, ok := a.inspectSessionStatus(cfg)
+	if !ok {
 		return target, session, nil
 	}
-	env, _, err := excel.Runner{RootDir: a.cwd}.Session(cfg, "status")
-	if err != nil {
+	statusWorkbookPath := stringValueForCLI(status, "workbook_path")
+	if strings.TrimSpace(statusWorkbookPath) == "" || !strings.EqualFold(filepath.Clean(statusWorkbookPath), filepath.Clean(workbookPath)) {
 		return target, session, nil
 	}
-	status := cliObjectMap(env.Session)
 	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
 	dirty := boolValueForCLI(status, "dirty")
 	saveRequired := boolValueForCLI(status, "save_required") || boolValueForCLI(status, "needs_save")
 	session["active"] = active
 	session["dirty"] = dirty
 	session["save_required"] = saveRequired
+	session["live_newer_than_disk"] = saveRequired
+	if saveRequired {
+		session["source_of_truth"] = "live_workbook"
+	}
 	if mode := stringValueForCLI(status, "mode"); mode != "" {
 		session["mode"] = mode
+	}
+	if present, ok := status["userforms_present"]; ok {
+		session["userforms_present"] = present
+	}
+	if count, ok := status["userform_count"]; ok {
+		session["userform_count"] = count
+	}
+	if known, ok := status["userforms_known"]; ok {
+		session["userforms_known"] = known
 	}
 	if !active || !dirty {
 		return target, session, nil
 	}
-	return target, session, []map[string]any{
+	warnings := []map[string]any{
 		{
 			"code":    "live_session_dirty",
-			"message": "A live session exists and has unsaved changes. This command inspected the saved file, not the live workbook.",
+			"message": "A live session exists and has unsaved changes. This command inspected the saved workbook file, so the result may be stale until `xlflow save --session` persists the live workbook.",
 		},
 		{
 			"code":    "command_reads_saved_file",
-			"message": "This inspect command read the saved workbook file on disk.",
+			"message": "This inspect command read the saved workbook file on disk, not the live workbook in Excel.",
 		},
 	}
+	if knownValue, ok := session["userforms_known"]; ok && knownValue != nil && !boolValueForCLI(session, "userforms_known") {
+		warnings = append(warnings, map[string]any{
+			"code":    "userform_detection_unavailable",
+			"message": "xlflow could not determine whether the live workbook contains UserForms. Save before relying on disk-backed inspect, pull, or source review for form state.",
+		})
+	}
+	return target, session, warnings
 }
 
-func inspectSessionMetadataMatchesWorkbook(metadataPath, workbookPath string) bool {
-	data, err := os.ReadFile(metadataPath)
-	if err != nil {
-		return false
+func (a *app) inspectSessionStatus(cfg config.Config) (map[string]any, bool) {
+	env, _, err := excel.Runner{RootDir: a.cwd}.Session(cfg, "status")
+	if err == nil {
+		if status := cliObjectMap(env.Session); len(status) > 0 {
+			return status, true
+		}
 	}
-	var metadata struct {
-		WorkbookPath string `json:"workbook_path"`
+
+	exe := resolvedExecutablePath()
+	if strings.TrimSpace(exe) == "" || !strings.EqualFold(filepath.Ext(exe), ".exe") {
+		return nil, false
 	}
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return false
+	cmd := exec.Command(exe, "--json", "session", "status")
+	cmd.Dir = a.cwd
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return nil, false
 	}
-	if strings.TrimSpace(metadata.WorkbookPath) == "" {
-		return false
+	var envOut output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envOut); err != nil {
+		return nil, false
 	}
-	return strings.EqualFold(filepath.Clean(metadata.WorkbookPath), filepath.Clean(workbookPath))
+	status := cliObjectMap(envOut.Session)
+	if len(status) == 0 {
+		return nil, false
+	}
+	return status, true
 }
 
 func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string]any, []map[string]any) {
@@ -2658,7 +2703,7 @@ func inspectSourceUserFormMessages(root string, cfg config.Config) ([]map[string
 	}}
 	hints := []map[string]any{{
 		"code":    "userform_planned_commands",
-		"message": "Related UserForm commands include `xlflow form snapshot <name> --out <path>`, `xlflow form build <spec>`, `xlflow form build <spec> --overwrite`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`.",
+		"message": "UserForm workflow: `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit the spec, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`.",
 	}}
 	return warnings, hints
 }
@@ -3399,6 +3444,36 @@ func (a *app) writeFailure(command string, code int, errCode string, err error) 
 		return output.WithExitCode(code, writeErr)
 	}
 	return output.WithExitCode(code, err)
+}
+
+func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) error {
+	env := output.Failure(command, output.Error{Code: specErr.Code, Message: specErr.Message})
+	spec := map[string]any{}
+	if specErr.Path != "" {
+		spec["path"] = specErr.Path
+	}
+	if specErr.Format != "" {
+		spec["format"] = specErr.Format
+	}
+	if specErr.Line > 0 {
+		spec["line"] = specErr.Line
+	}
+	if specErr.Column > 0 {
+		spec["column"] = specErr.Column
+	}
+	if specErr.Field != "" {
+		spec["field"] = specErr.Field
+	}
+	if specErr.Suggestion != "" {
+		spec["suggestion"] = specErr.Suggestion
+	}
+	if len(spec) > 0 {
+		env.Spec = spec
+	}
+	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
+		return output.WithExitCode(output.ExitValidation, writeErr)
+	}
+	return output.WithExitCode(output.ExitValidation, specErr)
 }
 
 func (a *app) write(env output.Envelope, code int) error {

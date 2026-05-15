@@ -211,7 +211,7 @@ try {
       $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
       $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
       if ($sessionAttached) {
-        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. The saved workbook copy does not update the session workbook on disk."
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. The saved workbook copy does not update the live session workbook on disk."
       }
       $result.logs = @(
         @(
@@ -225,14 +225,14 @@ try {
       $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
       $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
       if ($sessionAttached) {
-        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook, but the workbook file on disk has not been updated yet."
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook. The live workbook is newer than disk until `xlflow save --session` persists it."
       }
       $result.logs = @(
         @(
           $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
           $successLog,
           $(if ($sessionAttached) {
-            "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+            "SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop"
           } else {
             "left workbook unchanged on disk"
           })
@@ -399,7 +399,7 @@ try {
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
     if ($sessionAttached) {
-      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. The saved workbook copy does not update the session workbook on disk."
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. The saved workbook copy does not update the live session workbook on disk."
     }
     $result.logs = @(
       @(
@@ -413,14 +413,14 @@ try {
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $sessionAttached -SaveRequired $sessionAttached -Mode $sessionMode
     if ($sessionAttached) {
-      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook, but the workbook file on disk has not been updated yet."
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Run succeeded on the live workbook. The live workbook is newer than disk until `xlflow save --session` persists it."
     }
     $result.logs = @(
       @(
         $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
         $successLog,
         $(if ($sessionAttached) {
-          "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+          "SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop"
         } else {
           "left workbook unchanged on disk"
         })

@@ -651,6 +651,7 @@ try {
     description = $(Get-XlflowTargetDescription -Kind $(if ($sessionAttached) { "live_session" } else { "file" }))
     form = $FormName
     capture_state = "temporary_copy"
+    note = "Runtime export used a temporary workbook copy."
   }
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   $result.forms = [ordered]@{
@@ -685,7 +686,7 @@ try {
   }
   Add-XlflowWarning -Result $result -Code "userform_image_export_experimental" -Message "UserForm image export is experimental and currently supports Windows desktop Excel only."
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `form export-image` used the live workbook state."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. `form export-image` used the live workbook state, not the saved workbook file."
   }
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported runtime UserForm " + $FormName + " to " + $resolvedOutputPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {
@@ -702,6 +703,7 @@ try {
       path = $WorkbookPath
       form = $FormName
       capture_state = "temporary_copy"
+      note = "Runtime export used a temporary workbook copy."
     }
   }
   if ($null -eq $result.session -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {

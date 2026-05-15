@@ -2,9 +2,12 @@ package forms
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -101,6 +104,32 @@ type FormSpecWarning struct {
 	Code    string `json:"code,omitempty" yaml:"code,omitempty"`
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 	Control string `json:"control,omitempty" yaml:"control,omitempty"`
+}
+
+type SpecError struct {
+	Code       string
+	Message    string
+	Path       string
+	Format     string
+	Line       int
+	Column     int
+	Field      string
+	Suggestion string
+	Cause      error
+}
+
+func (e *SpecError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func (e *SpecError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 var typeProgIDMap = map[string]string{
@@ -211,10 +240,19 @@ func LoadFormSpec(input SpecInput) (FormSpec, error) {
 		err = fmt.Errorf("unsupported form spec format %q", input.Format)
 	}
 	if err != nil {
-		return FormSpec{}, err
+		return FormSpec{}, newSpecParseError(input, body, err)
 	}
 	spec = NormalizeFormSpec(spec)
 	if err := ValidateFormSpec(spec); err != nil {
+		var specErr *SpecError
+		if errors.As(err, &specErr) {
+			if specErr.Path == "" {
+				specErr.Path = input.DisplayPath
+			}
+			if specErr.Format == "" {
+				specErr.Format = input.Format
+			}
+		}
 		return FormSpec{}, err
 	}
 	return spec, nil
@@ -232,16 +270,16 @@ func NormalizeFormSpec(spec FormSpec) FormSpec {
 
 func ValidateFormSpec(spec FormSpec) error {
 	if spec.SchemaVersion != 1 {
-		return fmt.Errorf("schemaVersion must be 1")
+		return newSpecValidationError("spec_schema_invalid", "schemaVersion must be 1", "schemaVersion")
 	}
 	if spec.Kind != "xlflow.userform" {
-		return fmt.Errorf(`kind must be "xlflow.userform"`)
+		return newSpecValidationError("spec_schema_invalid", `kind must be "xlflow.userform"`, "kind")
 	}
 	if strings.TrimSpace(spec.Basis) != "designer" {
-		return fmt.Errorf(`basis must be "designer"`)
+		return newSpecValidationError("spec_schema_invalid", `basis must be "designer"`, "basis")
 	}
 	if strings.TrimSpace(spec.Form.Name) == "" {
-		return fmt.Errorf("form.name is required")
+		return newSpecValidationError("spec_schema_invalid", "form.name is required", "form.name")
 	}
 	ids := make(map[string]struct{}, len(spec.Controls))
 	for i, control := range spec.Controls {
@@ -250,7 +288,7 @@ func ValidateFormSpec(spec FormSpec) error {
 			return err
 		}
 		if _, exists := ids[control.ID]; exists {
-			return fmt.Errorf("%s.id %q is duplicated", path, control.ID)
+			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s.id %q is duplicated", path, control.ID), path+".id")
 		}
 		ids[control.ID] = struct{}{}
 	}
@@ -259,7 +297,8 @@ func ValidateFormSpec(spec FormSpec) error {
 			continue
 		}
 		if _, ok := ids[control.ParentID]; !ok {
-			return fmt.Errorf("controls[%d].parentId %q was not found", i, control.ParentID)
+			field := fmt.Sprintf("controls[%d].parentId", i)
+			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q was not found", field, control.ParentID), field)
 		}
 	}
 	return nil
@@ -267,16 +306,16 @@ func ValidateFormSpec(spec FormSpec) error {
 
 func ValidateFormSpecControl(control FormSpecControl, path string) error {
 	if strings.TrimSpace(control.ID) == "" {
-		return fmt.Errorf("%s.id is required", path)
+		return newSpecValidationError("spec_validation_failed", path+".id is required", path+".id")
 	}
 	if strings.TrimSpace(control.Name) == "" {
-		return fmt.Errorf("%s.name is required", path)
+		return newSpecValidationError("spec_validation_failed", path+".name is required", path+".name")
 	}
 	if strings.TrimSpace(control.Type) == "" {
-		return fmt.Errorf("%s.type is required", path)
+		return newSpecValidationError("spec_validation_failed", path+".type is required", path+".type")
 	}
 	if _, err := ControlProgID(control); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s: %v", path, err), path+".type")
 	}
 	return nil
 }
@@ -861,4 +900,103 @@ func relPath(base, path string) string {
 		return path
 	}
 	return rel
+}
+
+func newSpecValidationError(code, message, field string) error {
+	return &SpecError{
+		Code:    code,
+		Message: message,
+		Field:   field,
+	}
+}
+
+func newSpecParseError(input SpecInput, body []byte, err error) error {
+	specErr := &SpecError{
+		Code:    "spec_parse_failed",
+		Message: err.Error(),
+		Path:    input.DisplayPath,
+		Format:  input.Format,
+		Cause:   err,
+	}
+	if line, column := parseYAMLLineColumn(err.Error()); line > 0 {
+		specErr.Line = line
+		specErr.Column = column
+	} else if line, column := jsonLineColumn(body, err); line > 0 {
+		specErr.Line = line
+		specErr.Column = column
+	}
+	specErr.Suggestion = specParseSuggestion(input.Format, body)
+	return specErr
+}
+
+func parseYAMLLineColumn(message string) (int, int) {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`line (\d+): column (\d+)`),
+		regexp.MustCompile(`line (\d+)`),
+	}
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(message)
+		if len(matches) == 0 {
+			continue
+		}
+		line, _ := strconv.Atoi(matches[1])
+		column := 0
+		if len(matches) > 2 {
+			column, _ = strconv.Atoi(matches[2])
+		}
+		return line, column
+	}
+	return 0, 0
+}
+
+func jsonLineColumn(body []byte, err error) (int, int) {
+	var syntaxErr *json.SyntaxError
+	if !strings.Contains(err.Error(), "invalid") || !asJSONSyntaxError(err, &syntaxErr) {
+		return 0, 0
+	}
+	offset := int(syntaxErr.Offset)
+	if offset <= 0 {
+		return 0, 0
+	}
+	line := 1
+	column := 1
+	for i, b := range body {
+		if i >= offset-1 {
+			break
+		}
+		if b == '\n' {
+			line++
+			column = 1
+			continue
+		}
+		column++
+	}
+	return line, column
+}
+
+func asJSONSyntaxError(err error, target **json.SyntaxError) bool {
+	syntaxErr, ok := err.(*json.SyntaxError)
+	if !ok {
+		return false
+	}
+	*target = syntaxErr
+	return true
+}
+
+func specParseSuggestion(format string, body []byte) string {
+	if format == "json" {
+		return "Fix JSON syntax near the reported location. Check quotes, commas, and trailing delimiters."
+	}
+	if format != "yaml" {
+		return "Fix syntax near the reported location and retry the build."
+	}
+	text := string(body)
+	switch {
+	case strings.Contains(text, "caption: -"):
+		return `Try quoting scalar strings or use JSON if YAML syntax is uncertain. For an empty caption, use caption: "" rather than caption: -.`
+	case strings.Contains(text, ": -"), strings.Contains(text, "\n- "):
+		return `Try quoting scalar strings or use JSON if YAML syntax is uncertain. Strings containing ":" or "-" may need quotes.`
+	default:
+		return `Try quoting scalar strings or use JSON if YAML syntax is uncertain.`
+	}
 }

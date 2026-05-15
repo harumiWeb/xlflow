@@ -140,7 +140,7 @@ try {
   $result.source = [ordered]@{ changed_only = (ConvertTo-XlflowBool $ChangedOnly); changed = $true; state = $StatePath }
   Add-XlflowUserFormDiscoveryMessages -Result $result -Names $sourceUserFormNames
   if ($needsSave) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Source files were pushed to the live workbook. The workbook file on disk has not been updated yet."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "Source files were pushed to the live workbook. The live workbook is newer than disk until `xlflow save --session` persists it."
     Add-XlflowUserFormSessionStaleWarning -Result $result -Names $sourceUserFormNames
   }
   $result.logs = @(
@@ -152,7 +152,7 @@ try {
       $(if ($saved) {
         "saved workbook in place"
       } elseif ($sessionAttached) {
-        "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+        "SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop"
       } else {
         "left workbook unchanged on disk"
       })
