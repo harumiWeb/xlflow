@@ -1435,9 +1435,11 @@ function Open-XlflowWorkbookForCommand {
     [string]$Visible = "false",
     [string]$DisplayAlerts = "false",
     [string]$DisableAutomationMacros = "true",
+    [string]$CaptureOpenVBADialogs = "false",
     [string]$UseSession = "false",
     [string]$MetadataPath = "",
-    [bool]$AllowIsolatedOpen = $true
+    [bool]$AllowIsolatedOpen = $true,
+    [int]$OpenDialogWaitMilliseconds = 1500
   )
 
   if (ConvertTo-XlflowBool $UseSession) {
@@ -1474,12 +1476,39 @@ function Open-XlflowWorkbookForCommand {
 
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
-  $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+  $workbook = $null
+  $openDialog = New-XlflowExcelDialogWatcherResult
+  $openSelection = [ordered]@{
+    location = [ordered]@{
+      module = ""
+      line = 0
+      column = 0
+      end_line = 0
+      end_column = 0
+      token = ""
+    }
+    nearby_code = @()
+  }
+  if (ConvertTo-XlflowBool $CaptureOpenVBADialogs) {
+    $openResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $null -Invocation {
+      Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+    } -DialogKind "any_vba" -CaptureDialogs $true -WaitMilliseconds $OpenDialogWaitMilliseconds
+    $workbook = $openResult.value
+    $openDialog = $openResult.dialog
+    $openSelection = $openResult.selection
+    if ($null -ne $openResult.exception) {
+      throw $openResult.exception.Exception
+    }
+  } else {
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+  }
   return [pscustomobject][ordered]@{
     excel = $excel
     workbook = $workbook
     session_attached = $false
     session_mode = "none"
+    open_dialog = $openDialog
+    open_selection = $openSelection
   }
 }
 

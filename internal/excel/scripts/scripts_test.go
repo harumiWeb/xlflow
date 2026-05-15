@@ -1234,6 +1234,46 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	}
 }
 
+func TestRunScriptWatchesAnyVBADialogDuringInvoke(t *testing.T) {
+	data, err := os.ReadFile("run.ps1")
+	if err != nil {
+		t.Fatalf("failed to read run.ps1: %v", err)
+	}
+	text := string(data)
+	if count := strings.Count(text, `DialogKind "any_vba"`); count < 2 {
+		t.Fatalf("expected run.ps1 to watch any_vba dialogs during both direct and harness invoke paths, found %d:\n%s", count, text)
+	}
+	for _, want := range []string{
+		"function Set-XlflowVBADialogFailure",
+		`Set-XlflowError -Result $result -Code "vba_compile_failed"`,
+		"function Find-XlflowPendingVBADialog",
+		`CaptureOpenVBADialogs $SuppressModalErrors`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("run.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestOpenWorkbookHelperCanCaptureVBADialogsDuringIsolatedOpen(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`[string]$CaptureOpenVBADialogs = "false"`,
+		`[int]$OpenDialogWaitMilliseconds = 1500`,
+		`Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $null`,
+		`open_dialog = $openDialog`,
+		`open_selection = $openSelection`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
 	data, err := os.ReadFile("export-image.ps1")
 	if err != nil {

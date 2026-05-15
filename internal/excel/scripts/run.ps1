@@ -45,11 +45,15 @@ function Get-XlflowRunFailureCode {
   return "macro_failed"
 }
 
-function New-XlflowRuntimeDialogDiagnostic {
+function New-XlflowVBADialogDiagnostic {
   param($Dialog, $Selection)
 
+  $kind = [string]$Dialog.kind
+  if ([string]::IsNullOrWhiteSpace($kind)) {
+    $kind = "runtime"
+  }
   $diag = [ordered]@{
-    kind = "runtime"
+    kind = $kind
     dialog = $Dialog
   }
   $messageLines = @(Get-XlflowExcelDialogMessageLines -Dialog $Dialog)
@@ -63,7 +67,7 @@ function New-XlflowRuntimeDialogDiagnostic {
   return $diag
 }
 
-function Set-XlflowRuntimeDialogFailure {
+function Set-XlflowVBADialogFailure {
   param(
     [string]$ErrorCode,
     [string]$FallbackSource,
@@ -76,7 +80,11 @@ function Set-XlflowRuntimeDialogFailure {
   $messageLines = @(Get-XlflowExcelDialogMessageLines -Dialog $Dialog)
   $message = ($messageLines -join [Environment]::NewLine)
   if ([string]::IsNullOrWhiteSpace($message)) {
-    $message = "VBA runtime error dialog was shown."
+    if ([string]$Dialog.kind -eq "compile") {
+      $message = "VBA compile dialog was shown."
+    } else {
+      $message = "VBA runtime error dialog was shown."
+    }
   }
 
   $source = $FallbackSource
@@ -90,13 +98,28 @@ function Set-XlflowRuntimeDialogFailure {
     }
   }
 
-  $number = Get-XlflowVBARuntimeDialogErrorNumber -Dialog $Dialog
-  if ($number -eq 0) {
-    $number = $FallbackNumber
+  if ([string]$Dialog.kind -eq "compile") {
+    Set-XlflowError -Result $result -Code "vba_compile_failed" -Message $message -Source $source -Line $line -Phase "compile_vba"
+  } else {
+    $number = Get-XlflowVBARuntimeDialogErrorNumber -Dialog $Dialog
+    if ($number -eq 0) {
+      $number = $FallbackNumber
+    }
+    Set-XlflowError -Result $result -Code $ErrorCode -Message $message -Source $source -Number $number -Line $line -Phase $currentPhase
   }
 
-  Set-XlflowError -Result $result -Code $ErrorCode -Message $message -Source $source -Number $number -Line $line -Phase $currentPhase
-  $result.run_diagnostic = New-XlflowRuntimeDialogDiagnostic -Dialog $Dialog -Selection $Selection
+  $result.run_diagnostic = New-XlflowVBADialogDiagnostic -Dialog $Dialog -Selection $Selection
+}
+
+function Find-XlflowPendingVBADialog {
+  param(
+    $Excel,
+    $Workbook,
+    [bool]$CaptureDialogs,
+    [int]$WaitMilliseconds = 1500
+  )
+
+  return Invoke-XlflowExcelCallWithDialogWatch -Excel $Excel -Workbook $Workbook -Invocation { $null } -DialogKind "any_vba" -CaptureDialogs $CaptureDialogs -WaitMilliseconds $WaitMilliseconds
 }
 
 try {
@@ -126,11 +149,19 @@ try {
   }
 
   $currentPhase = "open_workbook"
-  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts $DisplayAlerts -DisableAutomationMacros "false" -UseSession $UseSession -MetadataPath $MetadataPath
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts $DisplayAlerts -DisableAutomationMacros "false" -CaptureOpenVBADialogs $SuppressModalErrors -UseSession $UseSession -MetadataPath $MetadataPath
   $excel = $openResult.excel
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  if ($null -ne $openResult.open_dialog -and [bool]$openResult.open_dialog.found) {
+    Set-XlflowVBADialogFailure -ErrorCode "macro_failed" -FallbackSource "Excel" -FallbackNumber 0 -FallbackLine 0 -Dialog $openResult.open_dialog -Selection $openResult.open_selection
+    $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath "" -NeedsSave $saveState.needs_save -Dirty $saveState.dirty
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+    throw "open workbook dialog shown"
+  }
 
   $typedValues = @(ConvertFrom-XlflowRunArgumentsJson -Json $MacroArgsJson)
   $argumentSpecs = @()
@@ -152,8 +183,19 @@ try {
     }
     $currentPhase = "invoke_macro"
     $startedAt = Get-Date
-    $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($MacroName) } -DialogKind "runtime" -CaptureDialogs ([bool]$suppressModalErrors)
+    $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($MacroName) } -DialogKind "any_vba" -CaptureDialogs ([bool]$suppressModalErrors)
     $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
+    if (-not [bool]$invokeResult.dialog.found -and [bool]$suppressModalErrors -and $null -ne $invokeResult.exception) {
+      $pendingDialog = Find-XlflowPendingVBADialog -Excel $excel -Workbook $workbook -CaptureDialogs $true
+      if ([bool]$pendingDialog.dialog.found) {
+        $invokeResult = [pscustomobject][ordered]@{
+          value = $invokeResult.value
+          exception = $invokeResult.exception
+          dialog = $pendingDialog.dialog
+          selection = $pendingDialog.selection
+        }
+      }
+    }
     if ([bool]$invokeResult.dialog.found) {
       $errorCode = "macro_failed"
       $failureNumber = 0
@@ -163,7 +205,7 @@ try {
         $failureDescription = [string]$invokeResult.exception.Exception.Message
         $errorCode = Get-XlflowRunFailureCode -Number $failureNumber -Description $failureDescription
       }
-      Set-XlflowRuntimeDialogFailure -ErrorCode $errorCode -FallbackSource (Get-XlflowMacroModuleName -MacroName $MacroName) -FallbackNumber $failureNumber -FallbackLine 0 -Dialog $invokeResult.dialog -Selection $invokeResult.selection
+      Set-XlflowVBADialogFailure -ErrorCode $errorCode -FallbackSource (Get-XlflowMacroModuleName -MacroName $MacroName) -FallbackNumber $failureNumber -FallbackLine 0 -Dialog $invokeResult.dialog -Selection $invokeResult.selection
       $result.macro = [ordered]@{
         name = $MacroName
         args = @($typedValues)
@@ -304,11 +346,22 @@ try {
 
   $currentPhase = "invoke_macro"
   $startedAt = Get-Date
-  $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($runnerName + ".RunMacro") } -DialogKind "runtime" -CaptureDialogs ([bool]$suppressModalErrors)
+  $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($runnerName + ".RunMacro") } -DialogKind "any_vba" -CaptureDialogs ([bool]$suppressModalErrors)
   $runResult = $invokeResult.value
   $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
   if ($null -ne $runResult -and $runResult.Count -gt 5) {
     $durationMs = [int]$runResult[5]
+  }
+  if (-not [bool]$invokeResult.dialog.found -and [bool]$suppressModalErrors -and $null -ne $invokeResult.exception) {
+    $pendingDialog = Find-XlflowPendingVBADialog -Excel $excel -Workbook $workbook -CaptureDialogs $true
+    if ([bool]$pendingDialog.dialog.found) {
+      $invokeResult = [pscustomobject][ordered]@{
+        value = $invokeResult.value
+        exception = $invokeResult.exception
+        dialog = $pendingDialog.dialog
+        selection = $pendingDialog.selection
+      }
+    }
   }
   if ([bool]$invokeResult.dialog.found) {
     $errorCode = "macro_failed"
@@ -328,7 +381,7 @@ try {
       $failureDescription = [string]$invokeResult.exception.Exception.Message
       $errorCode = Get-XlflowRunFailureCode -Number $failureNumber -Description $failureDescription
     }
-    Set-XlflowRuntimeDialogFailure -ErrorCode $errorCode -FallbackSource $failureSource -FallbackNumber $failureNumber -FallbackLine $failureLine -Dialog $invokeResult.dialog -Selection $invokeResult.selection
+    Set-XlflowVBADialogFailure -ErrorCode $errorCode -FallbackSource $failureSource -FallbackNumber $failureNumber -FallbackLine $failureLine -Dialog $invokeResult.dialog -Selection $invokeResult.selection
     $result.macro = [ordered]@{
       name = $MacroName
       args = @($typedValues)
