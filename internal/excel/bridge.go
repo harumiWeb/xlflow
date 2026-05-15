@@ -657,17 +657,20 @@ func buildFormWriteScriptArgs(root string, cfg config.Config, opts FormWriteOpti
 		}
 	}
 	return map[string]string{
-		"Action":       action,
-		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
-		"FormsDir":     filepath.Join(root, cfg.Src.Forms),
-		"CodeSource":   cfg.UserForm.CodeSource,
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"SpecPath":     opts.SpecPath,
-		"SpecJson64":   base64.StdEncoding.EncodeToString(specJSON),
-		"Overwrite":    strconv.FormatBool(opts.Overwrite),
-		"NoSave":       strconv.FormatBool(opts.NoSave),
-		"UseSession":   strconv.FormatBool(opts.Session),
-		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+		"Action":                  action,
+		"WorkbookPath":            workbookPath(root, cfg.Excel.Path),
+		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
+		"CodeSource":              cfg.UserForm.CodeSource,
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"SpecPath":                opts.SpecPath,
+		"SpecJson64":              base64.StdEncoding.EncodeToString(specJSON),
+		"Overwrite":               strconv.FormatBool(opts.Overwrite),
+		"NoSave":                  strconv.FormatBool(opts.NoSave),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
 	}, nil
 }
 

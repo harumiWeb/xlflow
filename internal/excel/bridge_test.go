@@ -794,6 +794,9 @@ func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
 	if args["CodeSource"] != "sidecar" {
 		t.Fatalf("CodeSource = %q", args["CodeSource"])
 	}
+	if args["FolderAnnotation"] != "update" || args["Folders"] != "true" || args["DefaultComponentFolders"] != "true" {
+		t.Fatalf("unexpected folder args: %+v", args)
+	}
 	if args["UseSession"] != "true" || args["NoSave"] != "true" {
 		t.Fatalf("unexpected session flags: %+v", args)
 	}

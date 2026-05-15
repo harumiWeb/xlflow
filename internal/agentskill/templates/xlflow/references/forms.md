@@ -25,7 +25,7 @@ Load this reference when the task depends on `xlflow list forms`, `xlflow inspec
 
 `form snapshot` persists an `xlflow.userform` spec. `form build` consumes the same contract.
 
-For ongoing maintenance, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for Designer structure. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where `.frm` embedded code remains canonical until migration. Exported `.frm` / `.frx` files can stay in the repository, but they are build or pull artifacts rather than the primary source of truth for Designer-backed behavior.
+For ongoing maintenance, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for Designer structure. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where `.frm` embedded code remains canonical until migration. Exported `.frm` / `.frx` files can stay in the repository, but they are generated Designer artifacts rather than the primary source of truth for Designer-backed behavior. Successful `form build` re-materializes them back into `src/forms/`, and `push` now fails preflight instead of importing stale/mismatched artifacts when spec filename, `form.name`, `.frm` basename, or `.frm` `Attribute VB_Name` disagree.
 
 Required top-level fields:
 

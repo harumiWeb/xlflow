@@ -1078,6 +1078,9 @@ func (a *app) pushCommand() *cobra.Command {
 			if err := a.runUserFormCodeSourcePreflight("push", cfg, nil); err != nil {
 				return err
 			}
+			if err := a.runUserFormArtifactPreflight("push", cfg, nil); err != nil {
+				return err
+			}
 			if err := a.runSourcePreflight("push", cfg, "pushing to Excel", nil, nil); err != nil {
 				return err
 			}
@@ -3250,6 +3253,32 @@ func (a *app) runUserFormCodeSourcePreflight(command string, cfg config.Config, 
 		return nil
 	}
 	return nil
+}
+
+func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, targetForms map[string]bool) error {
+	if cfg.UserForm.CodeSource != "sidecar" {
+		return nil
+	}
+	issues, err := forms.ValidateUserFormArtifactsAgainstSpecs(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "source_preflight_failed", err)
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+	rendered := make([]lint.Issue, 0, len(issues))
+	for _, issue := range issues {
+		rendered = append(rendered, issue.LintIssue(filepath.Join(a.cwd, cfg.Src.Forms)))
+	}
+	env := output.Failure(command, output.Error{
+		Code:    "source_preflight_failed",
+		Message: fmt.Sprintf("%d UserForm spec/artifact issue(s) must be fixed before %s so push cannot import the wrong Designer-backed form", len(rendered), command),
+		Source:  "xlflow",
+		Phase:   "preflight",
+	})
+	env.Issues = rendered
+	env.Logs = []string{"blocked before Excel automation because spec-driven UserForm artifacts are missing or inconsistent with src/forms/specs"}
+	return a.write(env, output.ExitValidation)
 }
 
 func ignoredRunPreflightAnalysisCodes(opts excel.RunOptions) map[string]bool {

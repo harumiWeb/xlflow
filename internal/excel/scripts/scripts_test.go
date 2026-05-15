@@ -106,6 +106,8 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"Export-XlflowVBComponentBackup",
 		"Import-XlflowVBComponentBackup",
 		"Sync-XlflowUserFormCodeBehind",
+		"Export-XlflowBuiltUserFormArtifacts",
+		"failed to remove partially created UserForm after name assignment failure",
 		"Get-XlflowCodeModuleText -CodeModule $existing.CodeModule",
 		"Add-XlflowFormContractWarnings",
 		"best_effort_form_size",
@@ -114,6 +116,7 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"component '\" + $Name + \"' exists but is not a UserForm",
 		"save_required",
 		"userform_review_commands",
+		"synchronized UserForm source artifacts for",
 		"--NoSave requires --UseSession",
 	} {
 		if !strings.Contains(text, want) {
@@ -246,6 +249,7 @@ func TestFormWriteScriptOverwritePathBacksUpAndRestoresOnFailure(t *testing.T) {
 		"New-XlflowFormRestoreDirectory",
 		"Export-XlflowVBComponentBackup -Component $existing -Directory $restoreDirectory",
 		"Import-XlflowVBComponentBackup -VBProject $VBProject -ExportPath $restorePath -ExpectedName $formName",
+		"Remove-XlflowVBComponentInstance -VBProject $VBProject -Component $component",
 		"restored original UserForm '\" + $formName + \"' after overwrite failure",
 	} {
 		if !strings.Contains(text, want) {

@@ -4,6 +4,9 @@ param(
   [string]$SpecPath = "",
   [string]$FormsDir = "",
   [string]$CodeSource = "frm",
+  [string]$Folders = "true",
+  [string]$FolderAnnotation = "update",
+  [string]$DefaultComponentFolders = "true",
   [string]$SpecJson64 = "",
   [string]$Overwrite = "false",
   [string]$NoSave = "false",
@@ -452,12 +455,41 @@ function New-XlflowUserFormComponent {
     [string]$Name
   )
 
+  $component = $null
   try {
     $component = $VBProject.VBComponents.Add(3)
-    $component.Name = $Name
-    return $component
   } catch {
     throw ("designer_write_failed: failed to create UserForm '" + $Name + "'. " + $_.Exception.Message)
+  }
+  try {
+    $component.Name = $Name
+  } catch {
+    try {
+      if ($null -ne $component) {
+        $VBProject.VBComponents.Remove($component)
+      }
+    } catch {
+      Write-Verbose ("failed to remove partially created UserForm after name assignment failure: " + $_.Exception.Message)
+    }
+    throw ("designer_write_failed: failed to create UserForm '" + $Name + "'. " + $_.Exception.Message)
+  }
+  return $component
+}
+
+function Remove-XlflowVBComponentInstance {
+  param(
+    $VBProject,
+    $Component,
+    [string]$FailureMessage
+  )
+
+  if ($null -eq $Component) {
+    return
+  }
+  try {
+    $VBProject.VBComponents.Remove($Component)
+  } catch {
+    throw ("designer_write_failed: " + $FailureMessage + ". " + $_.Exception.Message)
   }
 }
 
@@ -527,6 +559,71 @@ function Remove-XlflowVBComponentChecked {
   }
 }
 
+function Remove-XlflowUserFormExportArtifacts {
+  param([string]$ExportPath)
+
+  if ([string]::IsNullOrWhiteSpace($ExportPath)) {
+    return
+  }
+  foreach ($path in @($ExportPath, [System.IO.Path]::ChangeExtension($ExportPath, ".frx"))) {
+    if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path)) {
+      Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Export-XlflowBuiltUserFormArtifacts {
+  param(
+    $Component,
+    [string]$FormsDir,
+    [string]$CodeSource,
+    [string]$Folders,
+    [string]$FolderAnnotation,
+    [string]$DefaultComponentFolders
+  )
+
+  if ($null -eq $Component) {
+    throw "designer_write_failed: built UserForm component was not available for source synchronization."
+  }
+  if ([string]::IsNullOrWhiteSpace($FormsDir)) {
+    throw ("designer_write_failed: cannot export built UserForm '" + [string]$Component.Name + "' because FormsDir is empty.")
+  }
+
+  $exportPath = Get-XlflowComponentPath -Component $Component -ModulesDir "" -ClassesDir "" -FormsDir $FormsDir -WorkbookDir "" -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
+  if ([string]::IsNullOrWhiteSpace($exportPath)) {
+    throw ("designer_write_failed: failed to resolve the source artifact path for built UserForm '" + [string]$Component.Name + "'.")
+  }
+  $parent = Split-Path -Parent $exportPath
+  if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+  Remove-XlflowUserFormExportArtifacts -ExportPath $exportPath
+  try {
+    $Component.Export($exportPath)
+  } catch {
+    throw ("designer_write_failed: failed to export built UserForm '" + [string]$Component.Name + "' back to source. " + $_.Exception.Message)
+  }
+  Convert-XlflowExportedSourceToUtf8 -Path $exportPath
+  if ($FolderAnnotation -eq "update") {
+    $rootDir = Get-XlflowComponentRootDir -ComponentType $Component.Type -ModulesDir "" -ClassesDir "" -FormsDir $FormsDir -WorkbookDir ""
+    $desiredAnnotation = Get-XlflowFolderAnnotationForPath -RootDir $rootDir -Path $exportPath
+    $content = Get-XlflowUtf8Text -Path $exportPath
+    $content = Update-XlflowFolderAnnotationText -Text $content -FolderAnnotationMode $FolderAnnotation -DesiredAnnotation $desiredAnnotation
+    Set-XlflowUtf8Text -Path $exportPath -Text $content
+  }
+
+  $codePath = ""
+  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+    $codePath = Export-XlflowUserFormCodeBehind -Component $Component -FormsDir $FormsDir
+  }
+
+  return [pscustomobject][ordered]@{
+    form_path = $exportPath
+    frx_path = [System.IO.Path]::ChangeExtension($exportPath, ".frx")
+    code_path = $codePath
+  }
+}
+
 function Invoke-XlflowFormBuild {
   param(
     $VBProject,
@@ -583,12 +680,9 @@ function Invoke-XlflowFormBuild {
     } catch {
       if ($removedExisting) {
         try {
-          $partial = Get-XlflowVBComponentByName -VBProject $VBProject -Name $formName
-          if ($null -ne $partial) {
-            [void](Remove-XlflowVBComponentChecked -VBProject $VBProject -Name $formName)
-          }
+          Remove-XlflowVBComponentInstance -VBProject $VBProject -Component $component -FailureMessage ("overwrite failed for UserForm '" + $formName + "' and cleanup of the partial replacement also failed")
         } catch {
-          throw ("designer_write_failed: overwrite failed for UserForm '" + $formName + "' and cleanup of the partial replacement also failed. " + $_.Exception.Message)
+          throw
         }
         Import-XlflowVBComponentBackup -VBProject $VBProject -ExportPath $restorePath -ExpectedName $formName | Out-Null
         try {
@@ -603,22 +697,28 @@ function Invoke-XlflowFormBuild {
         Remove-Item -LiteralPath $restoreDirectory -Recurse -Force -ErrorAction SilentlyContinue
       }
     }
-    return
+    return $component
   }
-  $component = New-XlflowUserFormComponent -VBProject $VBProject -Name $formName
   try {
+    $component = New-XlflowUserFormComponent -VBProject $VBProject -Name $formName
     $designer = $component.Designer
   } catch {
     throw ("designer_write_failed: failed to access Designer for '" + $formName + "'. " + $_.Exception.Message)
   }
-  Set-XlflowDesignerFormProperties -Designer $designer -Component $component -Spec $Spec
-  $allControls = @($Spec.controls | Where-Object { $null -ne $_ })
-  foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
-    Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
+  try {
+    Set-XlflowDesignerFormProperties -Designer $designer -Component $component -Spec $Spec
+    $allControls = @($Spec.controls | Where-Object { $null -ne $_ })
+    foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
+      Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
+    }
+    if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+      [void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)
+    }
+  } catch {
+    Remove-XlflowVBComponentInstance -VBProject $VBProject -Component $component -FailureMessage ("build failed for UserForm '" + $formName + "' and cleanup of the partial component also failed")
+    throw
   }
-  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
-    [void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)
-  }
+  return $component
 }
 
 function Invoke-XlflowFormApply {
@@ -643,6 +743,7 @@ function Invoke-XlflowFormApply {
   foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
     Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
   }
+  return $component
 }
 
 try {
@@ -686,12 +787,14 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  $builtComponent = $null
+  $sourceSync = $null
 
   $phase = "write_designer"
   if ($normalizedAction -eq "build") {
-    Invoke-XlflowFormBuild -VBProject $workbook.VBProject -Workbook $workbook -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource -AllowOverwrite (ConvertTo-XlflowBool $Overwrite) -CanCheckpointSave (-not (ConvertTo-XlflowBool $NoSave))
+    $builtComponent = Invoke-XlflowFormBuild -VBProject $workbook.VBProject -Workbook $workbook -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource -AllowOverwrite (ConvertTo-XlflowBool $Overwrite) -CanCheckpointSave (-not (ConvertTo-XlflowBool $NoSave))
   } else {
-    Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec
+    $builtComponent = Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec
   }
 
   $phase = "save_workbook"
@@ -705,6 +808,9 @@ try {
     $saved = $true
   }
 
+  $phase = "sync_source"
+  $sourceSync = Export-XlflowBuiltUserFormArtifacts -Component $builtComponent -FormsDir $FormsDir -CodeSource $CodeSource -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
+
   $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $saved -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
   $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
@@ -717,15 +823,23 @@ try {
     control_count = @($spec.controls).Count
     spec_path = $SpecPath
     overwrite = (ConvertTo-XlflowBool $Overwrite)
+    source_synced = $true
   }
   if ($null -ne $spec.form.PSObject.Properties["caption"]) {
     $result.forms.caption = [string]$spec.form.caption
+  }
+  if ($null -ne $sourceSync) {
+    $result.forms.source_artifacts = [ordered]@{
+      form_path = [string]$sourceSync.form_path
+      frx_path = [string]$sourceSync.frx_path
+      code_path = [string]$sourceSync.code_path
+    }
   }
   Add-XlflowHint -Result $result -Code "userform_review_commands" -Message ("Review the result with `xlflow inspect form " + [string]$spec.form.name + " --designer --json` or `xlflow form export-image " + [string]$spec.form.name + " --out <path>`.")
   if ($saveState.needs_save) {
     Add-XlflowStateWarning -Result $result -Code "save_required" -Message ("The live workbook is newer than disk after `form " + $normalizedAction + "`. Run `xlflow save --session` before relying on disk-backed inspect, pull, or source review.")
   }
-  $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ($normalizedAction + " form " + [string]$spec.form.name + " from " + $SpecPath)) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), ($normalizedAction + " form " + [string]$spec.form.name + " from " + $SpecPath), ("synchronized UserForm source artifacts for " + [string]$spec.form.name)) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {
   if ($null -eq $result.error) {
     $code = Get-XlflowFormWriteErrorCode -CurrentAction $normalizedAction -Exception $_.Exception
