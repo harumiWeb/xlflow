@@ -52,6 +52,12 @@ These [samples](example) were created by an AI agent using xlflow with only mini
       <sub>Macro that allows playing Tetris within Excel</sub>
     </td>
   </tr>
+    <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/calendar-picker.png" alt="calendar picker" width="100%">
+      <sub>Rich calendar picker</sub>
+    </td>
+  </tr>
 </table>
 
 ---
