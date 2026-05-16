@@ -465,13 +465,23 @@ func TestFormExportImageScriptTrimsBlackEdgesAfterCapture(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
-			"Add-Type -AssemblyName System.Drawing; "+
+		"$result = [ordered]@{ skip = $false; skipReason = ''; width = 0; height = 0 }; "+
+			"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"try { "+
+			"Add-Type -AssemblyName System.Drawing -ErrorAction Stop; "+
 			"$bitmap = New-Object System.Drawing.Bitmap(64, 64); "+
+			"} catch { "+
+			"$result.skip = $true; "+
+			"$result.skipReason = 'System.Drawing bitmap support is unavailable in this environment: ' + $_.Exception.Message; "+
+			"$result | ConvertTo-Json -Compress; "+
+			"exit 0 "+
+			"}; "+
 			"for ($x = 0; $x -lt 64; $x++) { for ($y = 0; $y -lt 64; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::Black) } }; "+
 			"for ($x = 10; $x -lt 54; $x++) { for ($y = 10; $y -lt 54; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::White) } }; "+
 			"$trimmed = Trim-XlflowBitmapBlackEdges -Bitmap $bitmap; "+
-			"[pscustomobject]@{ width = $trimmed.Width; height = $trimmed.Height } | ConvertTo-Json -Compress",
+			"$result.width = $trimmed.Width; "+
+			"$result.height = $trimmed.Height; "+
+			"$result | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -479,11 +489,16 @@ func TestFormExportImageScriptTrimsBlackEdgesAfterCapture(t *testing.T) {
 		t.Fatalf("form-export-image trim command failed: %v\n%s", err, out)
 	}
 	var got struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
+		Skip       bool   `json:"skip"`
+		SkipReason string `json:"skipReason"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
 	}
-	if err := json.Unmarshal(out, &got); err != nil {
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
 		t.Fatalf("failed to parse trim output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
 	}
 	if got.Width != 44 || got.Height != 44 {
 		t.Fatalf("trimmed size = %+v, want 44x44", got)
