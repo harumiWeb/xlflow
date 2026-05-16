@@ -1,0 +1,74 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmInvader
+  caption: Space Invader
+  observed:
+    width: 372
+    height: 314
+controls:
+  - id: frame_game
+    name: fraGameArea
+    type: Frame
+    progId: Forms.Frame.1
+    left: 12
+    top: 12
+    width: 324
+    height: 228
+    caption: ""
+  - id: label_score_title
+    name: lblScoreTitle
+    type: Label
+    progId: Forms.Label.1
+    left: 12
+    top: 250
+    width: 42
+    height: 18
+    caption: Score
+  - id: label_score_value
+    name: lblScoreValue
+    type: Label
+    progId: Forms.Label.1
+    left: 58
+    top: 250
+    width: 54
+    height: 18
+    caption: "0"
+  - id: label_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 12
+    top: 272
+    width: 184
+    height: 18
+    caption: Ready
+  - id: button_start
+    name: cmdStart
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 210
+    top: 248
+    width: 44
+    height: 22
+    caption: Start
+  - id: button_stop
+    name: cmdStop
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 260
+    top: 248
+    width: 44
+    height: 22
+    caption: Stop
+  - id: button_reset
+    name: cmdReset
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 310
+    top: 248
+    width: 44
+    height: 22
+    caption: Reset
