@@ -33,7 +33,7 @@ function Add-XlflowInspectFormSaveRequiredWarning {
   )
 
   if ($null -ne $SaveState -and [bool]$SaveState.needs_save) {
-    Add-XlflowStateWarning -Result $Result -Code "save_required" -Message "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."
+    Add-XlflowStateWarning -Result $Result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
   }
 }
 
@@ -255,7 +255,9 @@ function Get-XlflowDesignerControlSnapshot {
 
   $children = @()
   if (Test-XlflowControlCanContainChildren -ControlType $controlType) {
-    $children = @(Get-XlflowSafeControls -Target $Control)
+    $children = @(Get-XlflowSafeControls -Target $Control | Where-Object {
+      [string]::Equals([string](Get-XlflowSafeMemberValue -Target $_ -Name "Parent" -Default ([pscustomobject]@{ Name = "" })).Name, $snapshot.name, [System.StringComparison]::OrdinalIgnoreCase)
+    })
   }
   if ($children.Count -gt 0) {
     $snapshot.controls = @($children | ForEach-Object { Get-XlflowDesignerControlSnapshot -Control $_ })
@@ -277,7 +279,9 @@ function Get-XlflowDesignerFormSnapshot {
     throw
   }
 
-  $controls = @(Get-XlflowSafeControls -Target $designer)
+  $controls = @(Get-XlflowSafeControls -Target $designer | Where-Object {
+    [string]::Equals([string](Get-XlflowSafeMemberValue -Target $_ -Name "Parent" -Default ([pscustomobject]@{ Name = "" })).Name, $TargetFormName, [System.StringComparison]::OrdinalIgnoreCase)
+  })
   return [pscustomobject][ordered]@{
     name = $TargetFormName
     basis = "designer"
@@ -381,6 +385,9 @@ try {
   if ($normalizedBasis -in @("runtime", "both")) {
     Add-XlflowWarning -Result $result -Code "runtime_form_loads_initialize" -Message "Runtime inspection loads the form and executes UserForm_Initialize."
     Add-XlflowWarning -Result $result -Code "runtime_form_temp_copy" -Message "Runtime inspection executed against a temporary workbook copy so the source workbook and live session are not mutated."
+    $result.target.note = "Runtime inspection used a temporary workbook copy."
+  } elseif ($strictDesigner) {
+    $result.target.note = "Strict designer inspection used a temporary workbook copy plus helper module to recover concrete control types."
   }
   if (-not [string]::IsNullOrWhiteSpace($Initializer) -and $normalizedBasis -in @("runtime", "both")) {
     Add-XlflowWarning -Result $result -Code "runtime_form_initializer_invoked" -Message ("Runtime inspection also invoked " + $Initializer + "(ThisWorkbook).")

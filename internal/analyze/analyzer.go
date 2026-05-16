@@ -25,8 +25,9 @@ type Finding struct {
 }
 
 type Analyzer struct {
-	RootDir string
-	Config  config.Config
+	RootDir    string
+	Config     config.Config
+	PathFilter func(string) bool
 }
 
 var (
@@ -127,6 +128,9 @@ func (a Analyzer) files() ([]string, error) {
 			}
 			switch strings.ToLower(filepath.Ext(path)) {
 			case ".bas", ".cls", ".frm":
+				if !a.shouldIncludeFile(path) {
+					return nil
+				}
 				files = append(files, path)
 			}
 			return nil
@@ -136,6 +140,29 @@ func (a Analyzer) files() ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func (a Analyzer) shouldIncludeFile(path string) bool {
+	if a.PathFilter != nil && !a.PathFilter(path) {
+		return false
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".frm") {
+		return true
+	}
+	if !strings.EqualFold(a.Config.UserForm.CodeSource, "sidecar") {
+		return true
+	}
+	formsRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Forms))
+	cleanPath := filepath.Clean(path)
+	if !strings.HasPrefix(strings.ToLower(cleanPath), strings.ToLower(formsRoot)+strings.ToLower(string(os.PathSeparator))) &&
+		!strings.EqualFold(cleanPath, formsRoot) {
+		return true
+	}
+	sidecarPath := filepath.Join(formsRoot, "code", strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))+".bas")
+	if _, err := os.Stat(sidecarPath); err == nil {
+		return false
+	}
+	return true
 }
 
 type procInfo struct {

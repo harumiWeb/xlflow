@@ -1,0 +1,28 @@
+[project]
+name = "Book"
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+visible = false
+display_alerts = false
+
+[src]
+modules = "src/modules"
+classes = "src/classes"
+forms = "src/forms"
+workbook = "src/workbook"
+
+[vba]
+folders = true
+folder_annotation = "update"
+default_component_folders = true
+
+[lint]
+require_option_explicit = true
+forbid_select = true
+forbid_activate = true
+forbid_on_error_resume_next = true
+detect_implicit_variant = true
+forbid_public_module_fields = true
+forbid_interactive_input = true

@@ -14,7 +14,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -25,6 +25,652 @@ func TestPowerShellScriptsParse(t *testing.T) {
 				t.Fatalf("script parse failed: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestFormWriteScriptValidatesArgsBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -NoSave true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+}
+
+func TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -FormsDir 'C:\\forms' -Overwrite true -NoSave true -UseSession true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write overwrite/no-save validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error.Message, "--overwrite cannot be combined with --NoSave") {
+		t.Fatalf("unexpected validation message: %+v", got)
+	}
+}
+
+func TestFormWriteScriptRequiresFormsDirBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write FormsDir validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error.Message, "FormsDir is required.") {
+		t.Fatalf("unexpected validation message: %+v", got)
+	}
+}
+
+func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"VBComponents.Add(3)",
+		"Controls.Add($progId, $controlName, $true)",
+		"Clear-XlflowDesignerControls",
+		"Controls.Item($Container.Controls.Count - 1)",
+		"Where-Object { $null -ne $_ }",
+		"Get-XlflowRootControlSpecs",
+		"Get-XlflowControlSpecChildren",
+		"Set-XlflowVBComponentProperty",
+		"Export-XlflowVBComponentBackup",
+		"Import-XlflowVBComponentBackup",
+		"Sync-XlflowUserFormCodeBehind",
+		"Export-XlflowBuiltUserFormArtifacts",
+		"failed to remove partially created UserForm after name assignment failure",
+		"Get-XlflowCodeModuleText -CodeModule $existing.CodeModule",
+		"Add-XlflowFormContractWarnings",
+		"best_effort_form_size",
+		"best_effort_list_state",
+		"field_path",
+		"component '\" + $Name + \"' exists but is not a UserForm",
+		"save_required",
+		"userform_review_commands",
+		"synchronized UserForm source artifacts for",
+		"FormsDir is required.",
+		"Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource",
+		"[void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)",
+		"--NoSave requires --UseSession",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-write.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileSkipsUnreadableCaption(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  $before = @('VERSION 5.00','Begin {GUID} RegistrationForm','   Caption         =   "KeepMe"','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine
+  Set-XlflowUtf8Text -Path $tmp -Text $before
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption $null
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile null caption failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Caption         =   "KeepMe"`) {
+		t.Fatalf("expected caption to remain unchanged, got %q", got)
+	}
+}
+
+func TestCommonScriptTreatsUserFormCodeSidecarsSeparately(t *testing.T) {
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "src", "modules")
+	formsDir := filepath.Join(root, "src", "forms")
+	workbookDir := filepath.Join(root, "src", "workbook")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(modulesDir, "Main.bas"),
+		filepath.Join(formsDir, "CalendarPicker.frm"),
+		filepath.Join(formsDir, "CalendarPicker.frx"),
+		filepath.Join(formsDir, "code", "CalendarPicker.bas"),
+		filepath.Join(workbookDir, "ThisWorkbook.bas"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	command := fmt.Sprintf(`. ./common.ps1; $files = @(Get-XlflowSourceComponentFiles -ModulesDir '%s' -ClassesDir '' -FormsDir '%s' -WorkbookDir '%s' -CodeSource 'sidecar'); $files | ConvertTo-Json -Depth 5 -Compress`,
+		modulesDir, formsDir, workbookDir)
+	cmd := exec.Command("pwsh", "-NoProfile", "-Command", command)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceComponentFiles command failed: %v\n%s", err, out)
+	}
+
+	var got []struct {
+		Kind         string `json:"kind"`
+		RelativePath string `json:"relative_path"`
+		ModuleName   string `json:"module_name"`
+		FormName     string `json:"form_name"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse source component files: %v\n%s", err, out)
+	}
+
+	var kinds []string
+	for _, file := range got {
+		kinds = append(kinds, file.Kind+":"+file.RelativePath)
+	}
+	sort.Strings(kinds)
+	want := []string{
+		"document:ThisWorkbook.bas",
+		"form:CalendarPicker.frm",
+		"form:CalendarPicker.frx",
+		"form_code:CalendarPicker.bas",
+		"module:Main.bas",
+	}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("source component files = %#v, want %#v", kinds, want)
+	}
+}
+
+func TestCommonScriptOmitsUserFormCodeSidecarsInFRMMode(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "CustomerForm.frm"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "CustomerForm.bas"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf(`. ./common.ps1; $files = @(Get-XlflowSourceComponentFiles -ModulesDir '' -ClassesDir '' -FormsDir '%s' -WorkbookDir '' -CodeSource 'frm'); $files | ConvertTo-Json -Depth 5 -Compress`, formsDir)
+	cmd := exec.Command("pwsh", "-NoProfile", "-Command", command)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowSourceComponentFiles frm-mode command failed: %v\n%s", err, out)
+	}
+	type sourceFile struct {
+		Kind string `json:"kind"`
+	}
+	var got []sourceFile
+	if err := json.Unmarshal(out, &got); err != nil {
+		var single sourceFile
+		if errSingle := json.Unmarshal(out, &single); errSingle != nil {
+			t.Fatalf("failed to parse frm-mode source component files: %v\n%s", err, out)
+		}
+		got = []sourceFile{single}
+	}
+	if len(got) != 1 || got[0].Kind != "form" {
+		t.Fatalf("got %#v, want only form entries", got)
+	}
+}
+
+func TestFormWriteScriptCommunicatesWeakDesignerContractFields(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`Add-XlflowFormWriteWarning -Code "best_effort_form_size"`,
+		`Form-level width/height are best-effort`,
+		`form.observed.width`,
+		`Add-XlflowFormWriteWarning -Code "best_effort_list_state"`,
+		`observed-only for round-trip expectations`,
+		`controls[*].selectedIndex`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected weak-field contract warning %q in form-write.ps1:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormWriteScriptUsesSnapshotDimensionsWithoutOffset(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-write.ps1; "+
+			"$cases = [ordered]@{ "+
+			"observedOnly = (Get-XlflowUserFormBuildDimensions -FormSpec ([pscustomobject]@{ observed = [pscustomobject]@{ width = 300; height = 262 } })); "+
+			"buildPreferred = (Get-XlflowUserFormBuildDimensions -FormSpec ([pscustomobject]@{ build = [pscustomobject]@{ width = 301; height = 263 }; observed = [pscustomobject]@{ width = 300; height = 262 } })) "+
+			"}; $cases | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write dimension command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		ObservedOnly struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"observedOnly"`
+		BuildPreferred struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"buildPreferred"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write dimensions: %v\n%s", err, out)
+	}
+	if got.ObservedOnly.Width != 300 || got.ObservedOnly.Height != 262 {
+		t.Fatalf("observed fallback = %+v, want width=300 height=262", got.ObservedOnly)
+	}
+	if got.BuildPreferred.Width != 301 || got.BuildPreferred.Height != 263 {
+		t.Fatalf("build preference = %+v, want width=301 height=263", got.BuildPreferred)
+	}
+}
+
+func TestFormExportImageScriptRepairsGenericRuntimeCaptionFromSourceDesigner(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-export-image.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`Private xlflowExpectedCaption As String`,
+		`Optional ByVal expectedCaption As String = ""`,
+		`xlflowExpectedCaption = Trim$(expectedCaption)`,
+		`If Len(xlflowExpectedCaption) > 0 Then`,
+		`Or LCase$(Left$(caption, 8)) = "userform" Then`,
+		`function Get-XlflowFormExportSourceDesignerCaption`,
+		`return [string]$component.Designer.Caption`,
+		`-ExpectedCaption $sourceDesignerCaption`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected runtime caption repair %q in form-export-image.ps1:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptKeepsVisibleWindowOnContainingScreen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"$window = [pscustomobject]@{ left = -1500; top = 120; width = 400; height = 300 }; "+
+			"$areas = @([pscustomobject]@{ left = -1920; top = 0; right = 0; bottom = 1080; width = 1920; height = 1080 }, [pscustomobject]@{ left = 0; top = 0; right = 1920; bottom = 1080; width = 1920; height = 1080 }); "+
+			"$area = Get-XlflowBestWorkingAreaForWindowInfo -WindowInfo $window -WorkingAreas $areas; "+
+			"$plan = Get-XlflowWindowCaptureRepositionPlan -WindowInfo $window -WorkArea $area -Margin 16; "+
+			"[pscustomobject]@{ area = $area; plan = $plan } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image containing-screen command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Area struct {
+			Left int `json:"left"`
+		} `json:"area"`
+		Plan struct {
+			Left  int  `json:"left"`
+			Top   int  `json:"top"`
+			Moved bool `json:"moved"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse containing-screen output: %v\n%s", err, out)
+	}
+	if got.Area.Left != -1920 {
+		t.Fatalf("best work area = %+v, want left=-1920", got.Area)
+	}
+	if got.Plan.Moved || got.Plan.Left != -1500 || got.Plan.Top != 120 {
+		t.Fatalf("reposition plan = %+v, want unchanged visible window", got.Plan)
+	}
+}
+
+func TestFormExportImageScriptRepositionsOnlyWithinContainingScreen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"$window = [pscustomobject]@{ left = -1918; top = -12; width = 400; height = 300 }; "+
+			"$areas = @([pscustomobject]@{ left = -1920; top = 0; right = 0; bottom = 1080; width = 1920; height = 1080 }, [pscustomobject]@{ left = 0; top = 0; right = 1920; bottom = 1080; width = 1920; height = 1080 }); "+
+			"$area = Get-XlflowBestWorkingAreaForWindowInfo -WindowInfo $window -WorkingAreas $areas; "+
+			"Get-XlflowWindowCaptureRepositionPlan -WindowInfo $window -WorkArea $area -Margin 16 | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image reposition command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Left  int  `json:"left"`
+		Top   int  `json:"top"`
+		Moved bool `json:"moved"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse reposition output: %v\n%s", err, out)
+	}
+	if !got.Moved || got.Left != -1904 || got.Top != 16 {
+		t.Fatalf("reposition plan = %+v, want left=-1904 top=16 moved=true", got)
+	}
+	if got.Left >= 0 {
+		t.Fatalf("window should stay on the negative-coordinate monitor, got %+v", got)
+	}
+}
+
+func TestFormExportImageScriptClampsCaptureScaleFromDPI(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"[ordered]@{ low = (Get-XlflowClampedCaptureScale -Dpi 72); normal = (Get-XlflowClampedCaptureScale -Dpi 96); scaled = (Get-XlflowClampedCaptureScale -Dpi 144); capped = (Get-XlflowClampedCaptureScale -Dpi 600) } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image dpi scale command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Low    float64 `json:"low"`
+		Normal float64 `json:"normal"`
+		Scaled float64 `json:"scaled"`
+		Capped float64 `json:"capped"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse dpi scale output: %v\n%s", err, out)
+	}
+	if got.Low != 1.0 || got.Normal != 1.0 || got.Scaled != 1.5 || got.Capped != 4.0 {
+		t.Fatalf("unexpected capture scales: %+v", got)
+	}
+}
+
+func TestFormExportImageScriptTrimsBlackEdgesAfterCapture(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"Add-Type -AssemblyName System.Drawing; "+
+			"$bitmap = New-Object System.Drawing.Bitmap(64, 64); "+
+			"for ($x = 0; $x -lt 64; $x++) { for ($y = 0; $y -lt 64; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::Black) } }; "+
+			"for ($x = 10; $x -lt 54; $x++) { for ($y = 10; $y -lt 54; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::White) } }; "+
+			"$trimmed = Trim-XlflowBitmapBlackEdges -Bitmap $bitmap; "+
+			"[pscustomobject]@{ width = $trimmed.Width; height = $trimmed.Height } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image trim command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trim output: %v\n%s", err, out)
+	}
+	if got.Width != 44 || got.Height != 44 {
+		t.Fatalf("trimmed size = %+v, want 44x44", got)
+	}
+}
+
+func TestFormWriteScriptOverwritePathBacksUpAndRestoresOnFailure(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"New-XlflowFormRestoreDirectory",
+		"Export-XlflowVBComponentBackup -Component $existing -Directory $restoreDirectory",
+		"Import-XlflowVBComponentBackup -VBProject $VBProject -ExportPath $restorePath -ExpectedName $formName",
+		"Remove-XlflowVBComponentInstance -VBProject $VBProject -Component $component",
+		"restored original UserForm '\" + $formName + \"' after overwrite failure",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-write.ps1 missing overwrite restore handling %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestPullAndPushScriptsHandleUserFormCodeSidecars(t *testing.T) {
+	checks := map[string][]string{
+		"pull.ps1": {
+			"Export-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir",
+			"Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource",
+			"Normalize-XlflowUserFormArtifactFile -Path $path -Caption (Get-XlflowUserFormDesignerCaption -Component $component)",
+			"exported $($exportedFormCode.Count) UserForm code-behind sidecar(s)",
+		},
+		"push.ps1": {
+			`Where-Object { $_.kind -ne "form_code" }`,
+			"Sync-XlflowUserFormCodeBehind -Component $importedComponent -FormsDir $FormsDir",
+			"Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource",
+			"synced $($syncedFormCode.Count) UserForm code-behind sidecar(s)",
+		},
+	}
+	for script, wants := range checks {
+		data, err := os.ReadFile(filepath.Join(".", script))
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", script, err)
+		}
+		text := string(data)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q:\n%s", script, want, text)
+			}
+		}
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileUpdatesCaptionLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 5.00','Begin {GUID} RegistrationForm','   Caption         =   "UserForm1"','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine)
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption 'RegistrationForm'
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Caption         =   "RegistrationForm"`) {
+		t.Fatalf("expected normalized caption line, got %q", got)
+	}
+	if strings.Contains(got, `Caption         =   "UserForm1"`) {
+		t.Fatalf("expected stale caption line to be removed, got %q", got)
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileInsertsMissingCaptionLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  Set-XlflowUtf8Text -Path $tmp -Text (@('VERSION 5.00','Begin {GUID} RegistrationForm','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine)
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption 'RegistrationForm'
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile insert failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Begin {GUID} RegistrationForm`+"\n"+`   Caption         =   "RegistrationForm"`) {
+		t.Fatalf("expected inserted caption line after Begin, got %q", got)
+	}
+}
+
+func TestFormWriteScriptMatchesParentIDsCaseSensitively(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	start := strings.Index(text, "function Get-XlflowControlSpecChildren")
+	if start < 0 {
+		t.Fatalf("Get-XlflowControlSpecChildren not found:\n%s", text)
+	}
+	end := strings.Index(text[start:], "function Get-XlflowRootControlSpecs")
+	if end < 0 {
+		t.Fatalf("Get-XlflowRootControlSpecs boundary not found:\n%s", text)
+	}
+	section := text[start : start+end]
+	if !strings.Contains(section, "[System.StringComparison]::Ordinal") {
+		t.Fatalf("expected case-sensitive parentId matching in Get-XlflowControlSpecChildren:\n%s", section)
+	}
+	if strings.Contains(section, "[System.StringComparison]::OrdinalIgnoreCase") {
+		t.Fatalf("unexpected case-insensitive parentId matching in Get-XlflowControlSpecChildren:\n%s", section)
+	}
+}
+
+func TestFormWriteScriptAppliesSelectedIndexAfterListPopulation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-write.ps1: %v", err)
+	}
+	text := string(data)
+	listIndex := strings.Index(text, "Set-XlflowControlListItems -Control $Control -ControlSpec $ControlSpec")
+	selectedIndex := strings.Index(text, `Set-XlflowFormProperty -Target $Control -PropertyName "ListIndex"`)
+	if listIndex < 0 || selectedIndex < 0 {
+		t.Fatalf("expected list population and selected index assignment in form-write.ps1:\n%s", text)
+	}
+	if selectedIndex < listIndex {
+		t.Fatalf("expected selected index assignment after list population")
+	}
+}
+
+func TestFormWriteScriptDecodesSpecInWindowsPowerShell(t *testing.T) {
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell is not available")
+	}
+
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[{"name":"Label1","type":"Label"}],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write decode check failed in Windows PowerShell: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write decode output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil {
+		t.Fatalf("unexpected decoded form spec result: %+v", got)
+	}
+	if strings.Contains(got.Error.Message, "invalid form spec payload") {
+		t.Fatalf("unexpected decoded form spec result: %+v", got)
 	}
 }
 
@@ -63,6 +709,15 @@ func TestFormExportImageScriptWaitsForCaptureStatusBeforeFallback(t *testing.T) 
 	want := "if (-not [bool]$captureStatus.ready -and [int64]$captureStatus.hwnd -eq 0 -and [string]::IsNullOrWhiteSpace([string]$captureStatus.caption))"
 	if !strings.Contains(text, want) {
 		t.Fatalf("form-export-image.ps1 missing empty-status wait guard %q:\n%s", want, text)
+	}
+	for _, want := range []string{
+		"function Wait-XlflowStableWindowCaptureInfo",
+		"$stableCount -ge $StableSamples",
+		"Wait-XlflowStableWindowCaptureInfo -Hwnd",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing stable-window guard %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -123,8 +778,33 @@ func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
 			t.Fatalf("inspect-form.ps1 missing %q:\n%s", want, text)
 		}
 	}
+	for _, want := range []string{
+		`Get-XlflowSafeMemberValue -Target $_ -Name "Parent"`,
+		"Get-XlflowDesignerControlSnapshot -Control $_",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect-form.ps1 missing nested-control parent filter %q:\n%s", want, text)
+		}
+	}
 	if strings.Contains(text, "runtime_inspect_session_dirty") {
 		t.Fatalf("inspect-form.ps1 should no longer report live-session dirty mutation for runtime temp-copy inspection:\n%s", text)
+	}
+}
+
+func TestCommonScriptStrictDesignerFiltersControlsByParentName(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "common.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"SerializeControls(controls, formName)",
+		"ControlHasExpectedParent",
+		"SafeControlName(control)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing strict designer parent filtering %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -814,6 +1494,46 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	}
 }
 
+func TestRunScriptWatchesAnyVBADialogDuringInvoke(t *testing.T) {
+	data, err := os.ReadFile("run.ps1")
+	if err != nil {
+		t.Fatalf("failed to read run.ps1: %v", err)
+	}
+	text := string(data)
+	if count := strings.Count(text, `DialogKind "any_vba"`); count < 2 {
+		t.Fatalf("expected run.ps1 to watch any_vba dialogs during both direct and harness invoke paths, found %d:\n%s", count, text)
+	}
+	for _, want := range []string{
+		"function Set-XlflowVBADialogFailure",
+		`Set-XlflowError -Result $result -Code "vba_compile_failed"`,
+		"function Find-XlflowPendingVBADialog",
+		`CaptureOpenVBADialogs $SuppressModalErrors`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("run.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestOpenWorkbookHelperCanCaptureVBADialogsDuringIsolatedOpen(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`[string]$CaptureOpenVBADialogs = "false"`,
+		`[int]$OpenDialogWaitMilliseconds = 1500`,
+		`Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $null`,
+		`open_dialog = $openDialog`,
+		`open_selection = $openSelection`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestExportImageScriptUsesPrinterPictureCopyMode(t *testing.T) {
 	data, err := os.ReadFile("export-image.ps1")
 	if err != nil {
@@ -860,8 +1580,11 @@ func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) 
 		"XlflowFindFormWindowHandle",
 		"Resolve-XlflowFormImageCaptureWindow",
 		"Wait-XlflowFormImageCaptureWindow",
+		"Wait-XlflowStableWindowCaptureInfo",
 		"[XlflowNativeMethods]::PrintWindow",
 		"CopyFromScreen",
+		"$paddingRight = 0",
+		"$paddingBottom = 0",
 		"runtime_form_loads_initialize",
 		"runtime_form_temp_copy",
 		"userform_image_export_experimental",
@@ -869,6 +1592,71 @@ func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) 
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptPrefersPrintWindowBeforeScreenFallback(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	copyIndex := strings.Index(text, "$graphics.CopyFromScreen")
+	printIndex := strings.Index(text, "[XlflowNativeMethods]::PrintWindow")
+	if copyIndex == -1 || printIndex == -1 {
+		t.Fatalf("expected both CopyFromScreen and PrintWindow in form-export-image.ps1:\n%s", text)
+	}
+	if printIndex > copyIndex {
+		t.Fatalf("expected PrintWindow to be attempted before CopyFromScreen fallback:\n%s", text)
+	}
+	for _, want := range []string{
+		`$printOk = $false`,
+		`[XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 2)`,
+		`if (-not $printOk) {`,
+		`$printOk = [XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 0)`,
+		`PrintWindow failed; falling back to CopyFromScreen`,
+		`CopyFromScreen fallback failed after PrintWindow`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptRejectsXLMAINWindowFallback(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Test-XlflowLikelyUserFormWindow`,
+		`[string]::Equals($className, "XLMAIN", [System.StringComparison]::OrdinalIgnoreCase)`,
+		`$className -match "(?i)^Thunder"`,
+		`Test-XlflowLikelyUserFormWindow -WindowInfo $window`,
+		`Test-XlflowLikelyUserFormWindow -WindowInfo $stableWindow`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing XLMAIN guard %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptReportsChosenCaptureWindowMetadata(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$result.target.capture_window = [ordered]@{`,
+		`class_name = $window.class_name`,
+		`width = $window.width`,
+		`height = $window.height`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing capture-window metadata %q:\n%s", want, text)
 		}
 	}
 }
@@ -1062,7 +1850,7 @@ func TestPushScriptScopesSaveSessionWarningToSessionRuns(t *testing.T) {
 	if !strings.Contains(text, "Open-XlflowWorkbookForCommand") {
 		t.Fatalf("push.ps1 should use the shared workbook-open helper for session reuse:\n%s", text)
 	}
-	if !strings.Contains(text, "\"SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop\"") {
+	if !strings.Contains(text, "\"SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop\"") {
 		t.Fatalf("push.ps1 should emit the strengthened save-required guidance:\n%s", text)
 	}
 	if !strings.Contains(text, "\"left workbook unchanged on disk\"") {
@@ -1408,6 +2196,12 @@ func TestSessionStatusTreatsUnknownDirtyStateAsSaveRequired(t *testing.T) {
 	}
 	if !strings.Contains(text, "Get-XlflowUserFormNames -Workbook $workbook") {
 		t.Fatalf("session.ps1 should probe workbook UserForms on a best-effort basis:\n%s", text)
+	}
+	if !strings.Contains(text, "userforms_known = $userFormNamesKnown") {
+		t.Fatalf("session.ps1 should distinguish unknown UserForm detection from false:\n%s", text)
+	}
+	if !strings.Contains(text, "userform_detection_unavailable") {
+		t.Fatalf("session.ps1 should warn when UserForm detection is unavailable:\n%s", text)
 	}
 }
 
@@ -2969,5 +3763,179 @@ try {
 	}
 	if !got.FrxIsSibling {
 		t.Fatal("expected .frx companion to be created in the same directory as .frm")
+	}
+}
+
+func TestUserFormCodeSidecarRoundTripInSidecarMode(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  initialPullStatus = ''
+  pushStatus = ''
+  roundtripPullStatus = ''
+  initialSidecarHasA = $false
+  finalSidecarHasB = $false
+  finalFrmHasB = $false
+}
+$excel = $null
+$workbook = $null
+$component = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'userform-sidecar-roundtrip.xlsm'
+  $modulesDir1 = Join-Path $root 'src1/modules'
+  $classesDir1 = Join-Path $root 'src1/classes'
+  $formsDir1 = Join-Path $root 'src1/forms'
+  $workbookDir1 = Join-Path $root 'src1/workbook'
+  $modulesDir2 = Join-Path $root 'src2/modules'
+  $classesDir2 = Join-Path $root 'src2/classes'
+  $formsDir2 = Join-Path $root 'src2/forms'
+  $workbookDir2 = Join-Path $root 'src2/workbook'
+  $backupRoot = Join-Path $root 'backups'
+  $formName = 'UserFormSidecar'
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+
+  try {
+    $null = $workbook.VBProject
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable (trust access to VBA project object model may be disabled): ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $component = $workbook.VBProject.VBComponents.Add(3)
+  $component.Name = $formName
+  $component.CodeModule.AddFromString(@'
+Option Explicit
+
+Private versionTag As String
+
+Private Sub UserForm_Initialize()
+    versionTag = "A"
+End Sub
+'@)
+  $workbook.SaveAs($wbPath, 52)
+  $global:XlflowSessionExcel = $excel
+  $global:XlflowSessionWorkbook = $workbook
+
+  $pull1 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -CodeSource sidecar -Visible false -UseSession true | ConvertFrom-Json
+  $result.initialPullStatus = $pull1.status
+  if ($pull1.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $sidecar1 = Join-Path $formsDir1 'code\UserFormSidecar.bas'
+  if (Test-Path -LiteralPath $sidecar1) {
+    $result.initialSidecarHasA = ((Get-Content -Raw -LiteralPath $sidecar1) -like '*versionTag = "A"*')
+  }
+
+  @'
+Option Explicit
+
+Private versionTag As String
+
+Private Sub UserForm_Initialize()
+    versionTag = "B"
+End Sub
+'@ | Set-Content -LiteralPath $sidecar1 -Encoding UTF8
+
+  $push = & ./push.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir1 -ClassesDir $classesDir1 -FormsDir $formsDir1 -WorkbookDir $workbookDir1 -CodeSource sidecar -BackupRoot $backupRoot -Visible false -UseSession true | ConvertFrom-Json
+  $result.pushStatus = $push.status
+  if ($push.status -ne 'ok') {
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  $pull2 = & ./pull.ps1 -WorkbookPath $wbPath -ModulesDir $modulesDir2 -ClassesDir $classesDir2 -FormsDir $formsDir2 -WorkbookDir $workbookDir2 -CodeSource sidecar -Visible false -UseSession true | ConvertFrom-Json
+  $result.roundtripPullStatus = $pull2.status
+  if ($pull2.status -eq 'ok') {
+    $sidecar2 = Join-Path $formsDir2 'code\UserFormSidecar.bas'
+    $frm2 = Join-Path $formsDir2 'UserFormSidecar.frm'
+    if (Test-Path -LiteralPath $sidecar2) {
+      $result.finalSidecarHasB = ((Get-Content -Raw -LiteralPath $sidecar2) -like '*versionTag = "B"*')
+    }
+    if (Test-Path -LiteralPath $frm2) {
+      $result.finalFrmHasB = ((Get-Content -Raw -LiteralPath $frm2) -like '*versionTag = "B"*')
+    }
+  }
+
+  $result | ConvertTo-Json -Compress
+} catch {
+  $result.skip = $false
+  $result.skipReason = ''
+  $result.error = $_.Exception.Message
+  $result | ConvertTo-Json -Compress
+  exit 1
+} finally {
+  $global:XlflowSessionWorkbook = $null
+  $global:XlflowSessionExcel = $null
+  if ($null -ne $component) {
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($component) | Out-Null } catch {}
+  }
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("userform code sidecar roundtrip failed: %v\n%s", err, out)
+	}
+
+	var got struct {
+		Skip                bool   `json:"skip"`
+		SkipReason          string `json:"skipReason"`
+		InitialPullStatus   string `json:"initialPullStatus"`
+		PushStatus          string `json:"pushStatus"`
+		RoundtripPullStatus string `json:"roundtripPullStatus"`
+		InitialSidecarHasA  bool   `json:"initialSidecarHasA"`
+		FinalSidecarHasB    bool   `json:"finalSidecarHasB"`
+		FinalFrmHasB        bool   `json:"finalFrmHasB"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse sidecar roundtrip output as json: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skipf("skipped: %s", got.SkipReason)
+	}
+	if got.InitialPullStatus != "ok" || got.PushStatus != "ok" || got.RoundtripPullStatus != "ok" {
+		t.Fatalf("unexpected sidecar roundtrip statuses: %+v output=%s", got, out)
+	}
+	if !got.InitialSidecarHasA {
+		t.Fatalf("expected initial sidecar export to capture code-behind A: %+v", got)
+	}
+	if !got.FinalSidecarHasB || !got.FinalFrmHasB {
+		t.Fatalf("expected sidecar push/pull roundtrip to preserve B code-behind: %+v", got)
 	}
 }

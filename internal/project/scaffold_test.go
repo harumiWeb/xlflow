@@ -40,6 +40,13 @@ func TestInitScaffold(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "prompts", "agent.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected prompts/agent.md not to be scaffolded, got %v", err)
 	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UserForm.CodeSource != "frm" {
+		t.Fatalf("init userform code source = %q, want frm", cfg.UserForm.CodeSource)
+	}
 }
 
 func TestNewScaffoldCreatesGitignore(t *testing.T) {
@@ -198,6 +205,9 @@ func TestNewScaffoldDefaultWorkbook(t *testing.T) {
 	}
 	if !cfg.Lint.ForbidInteractiveInput {
 		t.Fatal("expected scaffolded config to enable interactive input lint")
+	}
+	if cfg.UserForm.CodeSource != "sidecar" {
+		t.Fatalf("new userform code source = %q, want sidecar", cfg.UserForm.CodeSource)
 	}
 }
 

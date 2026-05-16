@@ -23,8 +23,9 @@ type Issue struct {
 }
 
 type Linter struct {
-	RootDir string
-	Config  config.Config
+	RootDir    string
+	Config     config.Config
+	PathFilter func(string) bool
 }
 
 var (
@@ -35,6 +36,8 @@ var (
 	publicVarRe       = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
 	publicProcRe      = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
 )
+
+const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project."
 
 func (l Linter) Run() ([]Issue, error) {
 	files, err := l.files()
@@ -78,6 +81,9 @@ func (l Linter) files() ([]string, error) {
 			}
 			switch strings.ToLower(filepath.Ext(path)) {
 			case ".bas", ".cls", ".frm":
+				if !l.shouldIncludeFile(path) {
+					return nil
+				}
 				files = append(files, path)
 			}
 			return nil
@@ -87,6 +93,29 @@ func (l Linter) files() ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func (l Linter) shouldIncludeFile(path string) bool {
+	if l.PathFilter != nil && !l.PathFilter(path) {
+		return false
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".frm") {
+		return true
+	}
+	if !strings.EqualFold(l.Config.UserForm.CodeSource, "sidecar") {
+		return true
+	}
+	formsRoot := filepath.Clean(filepath.Join(l.RootDir, l.Config.Src.Forms))
+	cleanPath := filepath.Clean(path)
+	if !strings.HasPrefix(strings.ToLower(cleanPath), strings.ToLower(formsRoot)+strings.ToLower(string(os.PathSeparator))) &&
+		!strings.EqualFold(cleanPath, formsRoot) {
+		return true
+	}
+	sidecarPath := filepath.Join(formsRoot, "code", strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))+".bas")
+	if _, err := os.Stat(sidecarPath); err == nil {
+		return false
+	}
+	return true
 }
 
 func (l Linter) lintFile(path string) ([]Issue, error) {
@@ -152,7 +181,7 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 				Severity:   "warning",
 				File:       boundary.File,
 				Line:       boundary.Line,
-				Message:    boundary.Message + " " + boundary.Suggestion,
+				Message:    boundary.Message + " " + boundary.Suggestion + " " + vb007DisableHint,
 				Kind:       boundary.Kind,
 				Symbol:     boundary.Symbol,
 				Suggestion: boundary.Suggestion,

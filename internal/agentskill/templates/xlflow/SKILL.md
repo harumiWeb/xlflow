@@ -18,8 +18,12 @@ Default safety rules for AI-agent work:
 - `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
 - Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names or expected `.frm` / `.frx` source paths without loading the form at runtime.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` when you need structured UserForm state beyond saved worksheet snapshots. Runtime inspection executes against a temporary workbook copy of the current source state.
-- Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when you need a persisted JSON/YAML spec for design review or future declarative UserForm workflows. This path is stricter than `inspect form --designer` because it executes an injected helper to recover concrete control types.
-- Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when visual verification depends on the runtime-rendered UserForm rather than structured inspection alone.
+- Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json` when you need a persisted JSON/YAML spec for design review or future declarative UserForm workflows. This path is stricter than `inspect form --designer` because it executes an injected helper to recover concrete control types.
+- Use `xlflow form build <spec> --session --keepalive --json` when you need to create a Designer-backed UserForm from a persisted spec under `src/forms/specs/`.
+- Use `xlflow form build <spec> --session --overwrite --keepalive --json` when the intended workflow is to replace an existing UserForm from spec rather than mutate it in place.
+- Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when visual verification depends on the runtime-rendered UserForm rather than structured inspection alone. Treat it as secondary visual confirmation because the capture path is experimental; prefer `inspect form` or `form snapshot` as the authoritative shape/state source.
+- When a task depends on UserForm spec authoring or review, load [references/forms.md](references/forms.md) before choosing `inspect form`, `form snapshot`, or `form build`. It defines the persisted `xlflow.userform` schema, flat `controls` contract, overwrite safety rules, supported control types, and the best-effort versus observed-only fields that should not be treated as round-trip guarantees.
+- Treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for UserForm design. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where embedded `.frm` code remains canonical until migration. `.frm` / `.frx` are generated Designer artifacts. After `xlflow form build`, xlflow now re-materializes those artifacts back into `src/forms/`, and `push` blocks before Excel opens when spec filename, `form.name`, `.frm` basename, or `.frm` `Attribute VB_Name` disagree.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
@@ -30,7 +34,7 @@ Default safety rules for AI-agent work:
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
-2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
+2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --keepalive --json` while iterating, and use `xlflow run --session --keepalive --json` or `xlflow run --headless --session --keepalive --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
 5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
@@ -73,7 +77,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow list forms --session --keepalive --json` when the workbook contains UserForms and you need the authoritative form names before planning `inspect form`, snapshot, or source review work.
    - Use `xlflow inspect form <FormName> --runtime --session --keepalive --json` to read runtime state after form initialization or workbook-driven population logic; xlflow runs it against a temporary workbook copy so the source workbook state is preserved.
    - Use `xlflow inspect form <FormName> --designer --session --keepalive --json` to inspect design-time controls and geometry without running workbook VBA.
-   - Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when you want that design-time state persisted as a reviewable JSON/YAML spec and you need concrete control types from the stricter helper path.
+   - Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json` when you want that design-time state persisted as a reviewable JSON/YAML spec and you need concrete control types from the stricter helper path.
    - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when you need a PNG of the runtime-rendered UserForm for visual review.
    - Use `xlflow inspect form <FormName> --both --session --keepalive --json` when you need to compare designer state against runtime state in one pass.
    - Add `--initializer <MethodName>` to runtime or both mode when the form must be explicitly populated before inspection, such as workbook-scoped setup methods that mirror the visible UI.
@@ -161,7 +165,8 @@ When the user reports a runtime failure:
 - Use `xlflow inspect used-range --sheet <name> --json` when the output rectangle is unknown or may expand.
 - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` for UserForm inspection; prefer `--designer` for source/design audits, `--runtime` for populated runtime state from a temporary workbook copy, and `--both` when you need to compare them.
-- Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json` when the goal is a stable artifact for review, diff, or later declarative form work rather than one-off stdout inspection.
+  - Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json` when the goal is a stable artifact for review, diff, or later declarative form work rather than one-off stdout inspection.
+  - Use `xlflow form build src/forms/specs/<FormName>.yaml --session --keepalive --json` to materialize a new UserForm from a saved spec; add `--overwrite` when replacing an existing component intentionally.
 - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when the question is visual fidelity of the runtime form, including layout after initialization.
 - Use `xlflow inspect form <FormName> --runtime --initializer <MethodName> --session --keepalive --json` when the form requires an explicit initializer call before its visible state is meaningful.
 - Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
@@ -169,11 +174,12 @@ When the user reports a runtime failure:
 - When UserForms are involved, treat `pull` / `push` / `save` warnings about partial `.frm` fidelity and unsaved session state as actionable; do not review UserForm diffs until the live workbook has been saved and re-pulled.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
-- Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain the boundary and either refactor the macro or rerun with `--interactive` when a human is available.
+- Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain that the preflight scans the configured source tree rather than the target macro call graph, then either refactor the macro or rerun with `--interactive` when a human is available.
+- If `lint` reports `VB007` for a project that is intentionally interactive, suppress the lint only with `[lint].forbid_interactive_input = false` in `xlflow.toml`. Do not imply that this changes `run --headless`; headless preflight still blocks GUI boundaries.
 - Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
-- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
+- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow attach --active --keepalive --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
@@ -206,7 +212,7 @@ End Sub
 
 ## Keepalive Rules
 
-Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow list forms`, `xlflow inspect form`, `xlflow form snapshot`, `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
+Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow list forms`, `xlflow inspect form`, `xlflow form snapshot`, `xlflow form build`, `xlflow form export-image`, `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
 
 After starting a keepalive command, wait until the process exits and stderr contains a line beginning with `XLFLOW_DONE`. Do not begin the next workbook-dependent step just because stdout has not changed for a while.
 

@@ -35,12 +35,17 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"xlflow save --json",
 		"xlflow push --fast --session --no-save --keepalive --json",
 		"When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.",
-		"Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`",
+		"Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`",
 		"Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names",
-		"Use `xlflow form snapshot <FormName> --out <path> --session --keepalive --json`",
+		"Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json`",
+		"Use `xlflow form build <spec> --session --keepalive --json`",
+		"Use `xlflow form build <spec> --session --overwrite --keepalive --json`",
+		"[references/forms.md](references/forms.md)",
 		"Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json`",
+		"Treat it as secondary visual confirmation because the capture path is experimental",
 		"Use `xlflow export-image` when verification depends on rendered appearance",
 		"--gui-compile-errors",
+		"[lint].forbid_interactive_input = false",
 		"xlflow session stop",
 		"XLFLOW_DONE status=success command=pull",
 	} {
@@ -74,6 +79,9 @@ func TestInstallUsesExplicitTarget(t *testing.T) {
 		t.Fatalf("path = %q", result.Path)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "forms.md")); err != nil {
 		t.Fatal(err)
 	}
 }

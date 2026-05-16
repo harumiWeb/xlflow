@@ -243,7 +243,7 @@ try {
   }
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `export-image` used the live workbook state."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. `export-image` used the live workbook state, not the saved workbook file."
   }
   $result.output = $output
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported " + $worksheet.Name + "!" + [string]$range.Address($false, $false) + " to " + $resolvedOutputPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })

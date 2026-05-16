@@ -209,6 +209,40 @@ End Sub
 	}
 }
 
+func TestAnalyzerSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPublic Sub BreakAnalyzer()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = True\nEnd Sub\n"
+	sidecarBody := "Option Explicit\n\nPublic Sub BreakAnalyzer()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = True\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "sidecar"
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vba104 []Finding
+	for _, finding := range findings {
+		if finding.Code == "VBA104" {
+			vba104 = append(vba104, finding)
+		}
+	}
+	if len(vba104) != 1 {
+		t.Fatalf("expected one VBA104 finding from sidecar mode, got %+v", vba104)
+	}
+	if vba104[0].File != "src/forms/code/UserForm1.bas" {
+		t.Fatalf("expected sidecar file to be authoritative, got %+v", vba104[0])
+	}
+}
+
 func writeModule(t *testing.T, dir, name, body string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "modules")

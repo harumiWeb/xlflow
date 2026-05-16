@@ -31,6 +31,9 @@ path = "build/Sales.xlsm"
 	if !cfg.VBA.Folders || cfg.VBA.FolderAnnotation != "update" || !cfg.VBA.DefaultComponentFolders {
 		t.Fatalf("unexpected vba defaults: %+v", cfg.VBA)
 	}
+	if cfg.UserForm.CodeSource != "sidecar" {
+		t.Fatalf("unexpected userform defaults: %+v", cfg.UserForm)
+	}
 	if !cfg.Lint.RequireOptionExplicit {
 		t.Fatalf("lint defaults were not applied")
 	}
@@ -89,5 +92,25 @@ folder_annotation = "broken"
 	_, err := Load(dir)
 	if err == nil {
 		t.Fatal("expected invalid folder annotation error")
+	}
+}
+
+func TestLoadRejectsInvalidUserFormCodeSource(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "broken"
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected invalid userform code source error")
 	}
 }

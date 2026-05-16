@@ -1,0 +1,82 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: CalendarPicker
+  caption: "日付を選択"
+  observed:
+    width: 300
+    height: 262
+controls:
+  - id: combo_year
+    name: CmbYear
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    left: 72
+    top: 9
+    width: 78
+    height: 24
+  - id: label_month
+    name: LblMonthYear
+    type: Label
+    progId: Forms.Label.1
+    left: 156
+    top: 12
+    width: 42
+    height: 18
+    caption: "5月"
+  - id: button_prev
+    name: BtnPrevMonth
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 18
+    top: 9
+    width: 42
+    height: 24
+    caption: "<"
+  - id: button_next
+    name: BtnNextMonth
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 228
+    top: 9
+    width: 42
+    height: 24
+    caption: ">"
+  - id: frame_calendar
+    name: FrameCalendar
+    type: Frame
+    progId: Forms.Frame.1
+    left: 18
+    top: 39
+    width: 252
+    height: 162
+    caption: "カレンダー"
+  - id: label_selected
+    name: LblSelectedDate
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 210
+    width: 186
+    height: 18
+    caption: "選択日: -"
+  - id: button_today
+    name: BtnToday
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 18
+    top: 231
+    width: 72
+    height: 24
+    caption: "今日"
+  - id: button_cancel
+    name: BtnCancel
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 198
+    top: 231
+    width: 72
+    height: 24
+    caption: "キャンセル"

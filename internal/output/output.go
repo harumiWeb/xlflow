@@ -59,6 +59,7 @@ type Envelope struct {
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`
 	Target        any `json:"target,omitempty"`
 	Output        any `json:"output,omitempty"`
+	Spec          any `json:"spec,omitempty"`
 	Edit          any `json:"edit,omitempty"`
 	Warnings      any `json:"warnings,omitempty"`
 	Hints         any `json:"hints,omitempty"`
@@ -231,6 +232,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderFormExportImage(env))
 	case "form snapshot":
 		b.WriteString(r.renderFormSnapshot(env))
+	case "form build", "form apply":
+		b.WriteString(r.renderFormWrite(env))
 	case "edit":
 		b.WriteString(r.renderEdit(env))
 	case "pull", "push", "attach":
@@ -971,6 +974,62 @@ func (r renderer) renderFormExportImage(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderFormWrite(env Envelope) string {
+	workbook := objectMap(env.Workbook)
+	target := objectMap(env.Target)
+	form := objectMap(env.Forms)
+	spec := objectMap(env.Spec)
+	if len(workbook) == 0 && len(target) == 0 && len(form) == 0 && len(spec) == 0 && env.Warnings == nil && env.Hints == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	} else if path := stringValue(target, "path"); path != "" {
+		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Write target", summary))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(kv("Session", sessionSummary))
+	}
+	if action := stringValue(form, "action"); action != "" {
+		b.WriteString(kv("Action", action))
+	}
+	if name := stringValue(form, "name"); name != "" {
+		b.WriteString(kv("Form", name))
+	}
+	if basis := stringValue(form, "basis"); basis != "" {
+		b.WriteString(kv("Basis", basis))
+	}
+	if coord := stringValue(form, "coordinate_system"); coord != "" {
+		b.WriteString(kv("Coordinates", coord))
+	}
+	if count, ok := numberValue(form, "control_count"); ok {
+		b.WriteString(kv("Controls", fmt.Sprintf("%d", int(count))))
+	}
+	if specPath := stringValue(form, "spec_path"); specPath != "" {
+		b.WriteString(kv("Spec", specPath))
+	}
+	if overwrite, ok := boolValueOK(form, "overwrite"); ok {
+		b.WriteString(kv("Overwrite", fmt.Sprintf("%t", overwrite)))
+	}
+	if len(spec) > 0 && stringValue(form, "spec_path") == "" {
+		b.WriteString(renderSpecMetadata(spec))
+	}
+	if save := summarizeSaveRequirement(workbook); save != "" {
+		b.WriteString(kv("Save", save))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	if suggestion := stringValue(spec, "suggestion"); suggestion != "" {
+		b.WriteString(kv("Remediation", suggestion))
+	}
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
 func (r renderer) renderEdit(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	target := objectMap(env.Target)
@@ -1562,6 +1621,21 @@ func (r renderer) renderSession(env Envelope) string {
 	if open, ok := boolValueOK(session, "workbook_open"); ok {
 		b.WriteString(kv("Workbook open", fmt.Sprintf("%t", open)))
 	}
+	if source := stringValue(session, "source_of_truth"); source != "" {
+		b.WriteString(kv("Source of truth", source))
+	}
+	if known, ok := boolValueOK(session, "userforms_known"); ok && !known {
+		b.WriteString(kv("UserForms", "unknown"))
+	} else if present, ok := boolValueOK(session, "userforms_present"); ok {
+		value := "false"
+		if present {
+			value = "true"
+			if count, ok := numberValue(session, "userform_count"); ok {
+				value = fmt.Sprintf("true (%d)", int(count))
+			}
+		}
+		b.WriteString(kv("UserForms", value))
+	}
 	if save := summarizeSaveRequirement(workbook); save != "" {
 		b.WriteString(kv("Save", save))
 	}
@@ -1679,6 +1753,9 @@ func (r renderer) renderTargetSession(env Envelope) string {
 	if len(session) > 0 {
 		b.WriteString(kv("Session state", summarizeSessionState(session)))
 	}
+	if note := summarizeStateNote(target, session, listOfObjects(env.Warnings)); note != "" {
+		b.WriteString(kv("State note", note))
+	}
 	return b.String()
 }
 
@@ -1723,6 +1800,11 @@ func renderInspectTargetSessionMarkdown(env Envelope) string {
 	if len(session) > 0 {
 		b.WriteString("Session state: ")
 		b.WriteString(summarizeSessionState(session))
+		b.WriteString("\n")
+	}
+	if note := summarizeStateNote(target, session, listOfObjects(env.Warnings)); note != "" {
+		b.WriteString("State note: ")
+		b.WriteString(note)
 		b.WriteString("\n")
 	}
 	if b.Len() > 0 {
@@ -2066,8 +2148,12 @@ func summarizeSessionState(session map[string]any) string {
 	if dirty, ok := boolValueOK(session, "dirty"); ok && dirty {
 		parts = append(parts, "dirty")
 	}
-	if saveRequired, ok := boolValueOK(session, "save_required"); ok && saveRequired {
+	if saveRequired, ok := boolValueOK(session, "live_newer_than_disk"); ok && saveRequired {
 		parts = append(parts, "SAVE REQUIRED")
+		parts = append(parts, "live workbook is newer than disk")
+	} else if saveRequired, ok := boolValueOK(session, "save_required"); ok && saveRequired {
+		parts = append(parts, "SAVE REQUIRED")
+		parts = append(parts, "live workbook is newer than disk")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -2079,7 +2165,40 @@ func summarizeSaveRequirement(workbook map[string]any) string {
 	if len(workbook) == 0 || !boolValue(workbook, "needs_save") {
 		return ""
 	}
-	return "SAVE REQUIRED: live session workbook differs from disk; run xlflow save before session stop"
+	return "SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop"
+}
+
+func summarizeStateNote(target, session map[string]any, warnings []map[string]any) string {
+	if len(session) == 0 && len(target) == 0 {
+		return ""
+	}
+	liveNewer := boolValue(session, "live_newer_than_disk") || boolValue(session, "save_required")
+	userFormsPresent := boolValue(session, "userforms_present")
+	userFormsKnown, userFormsKnownSet := boolValueOK(session, "userforms_known")
+	if !userFormsPresent {
+		for _, warning := range warnings {
+			switch stringValue(warning, "code") {
+			case "userform_state_partial", "userform_unsaved_session_state", "userform_inspect_saved_file":
+				userFormsPresent = true
+			case "userform_detection_unavailable":
+				userFormsKnown = false
+				userFormsKnownSet = true
+			}
+		}
+	}
+	if liveNewer && userFormsPresent {
+		return "UserForm project: save before disk inspect/pull review."
+	}
+	if liveNewer && userFormsKnownSet && !userFormsKnown {
+		return "Workbook may contain UserForms; save before disk inspect/pull review."
+	}
+	if note := stringValue(target, "note"); note != "" {
+		return note
+	}
+	if stringValue(target, "capture_state") == "temporary_copy" {
+		return "Runtime inspection/export used a temporary workbook copy."
+	}
+	return ""
 }
 
 func visibleLabel(m map[string]any) string {
@@ -2274,6 +2393,30 @@ func kv(key, value string) string {
 		return ""
 	}
 	return fmt.Sprintf("%-14s %s\n", key+":", value)
+}
+
+func renderSpecMetadata(spec map[string]any) string {
+	if len(spec) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if path := stringValue(spec, "path"); path != "" {
+		b.WriteString(kv("Spec", path))
+	}
+	if format := stringValue(spec, "format"); format != "" {
+		b.WriteString(kv("Spec format", strings.ToUpper(format)))
+	}
+	if field := stringValue(spec, "field"); field != "" {
+		b.WriteString(kv("Spec field", field))
+	}
+	line, lineOK := numberValue(spec, "line")
+	column, columnOK := numberValue(spec, "column")
+	if lineOK && columnOK {
+		b.WriteString(kv("Spec location", fmt.Sprintf("line %d, column %d", int(line), int(column))))
+	} else if lineOK {
+		b.WriteString(kv("Spec location", fmt.Sprintf("line %d", int(line))))
+	}
+	return b.String()
 }
 
 func objectMap(value any) map[string]any {

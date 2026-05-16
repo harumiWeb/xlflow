@@ -3,6 +3,7 @@ package lint
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -52,14 +53,20 @@ End Sub
 		}
 	}
 	foundBoundaryMetadata := false
+	foundDisableHint := false
 	for _, issue := range issues {
 		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
 			foundBoundaryMetadata = true
-			break
+		}
+		if issue.Code == "VB007" && strings.Contains(issue.Message, "[lint].forbid_interactive_input = false") {
+			foundDisableHint = true
 		}
 	}
 	if !foundBoundaryMetadata {
 		t.Fatalf("expected VB007 to include GUI boundary metadata: %+v", issues)
+	}
+	if !foundDisableHint {
+		t.Fatalf("expected VB007 to explain how to disable interactive-input lint: %+v", issues)
 	}
 }
 
@@ -161,5 +168,39 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 	if blocking[0].Code != "VB009" || blocking[0].Severity != "error" || blocking[0].Line != 3 {
 		t.Fatalf("unexpected C-style escape issue: %+v", blocking[0])
+	}
+}
+
+func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  If Mid$(text, index, 1) <> \"\\\"\" Then\nEnd Sub\n"
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\n" + body
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "sidecar"
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vb009 []Issue
+	for _, issue := range issues {
+		if issue.Code == "VB009" {
+			vb009 = append(vb009, issue)
+		}
+	}
+	if len(vb009) != 1 {
+		t.Fatalf("expected one VB009 issue from sidecar mode, got %+v", vb009)
+	}
+	if vb009[0].File != "src/forms/code/UserForm1.bas" {
+		t.Fatalf("expected sidecar file to be authoritative, got %+v", vb009[0])
 	}
 }

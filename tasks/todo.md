@@ -81,6 +81,39 @@
 - [x] Add focused Go and PowerShell regression coverage.
 - [x] Run focused verification, full `go test ./...`, and Windows Excel COM validation against `tmp_workspaces\user-form`.
 
+# UserForm Phase 6-7 Forms Package / Build Apply Todo
+
+- [x] Extract UserForm spec parsing, validation, and snapshot serialization into `internal/excel/forms`.
+- [x] Keep existing `form snapshot` / `inspect form` wiring working through the new forms package.
+- [x] Add `xlflow form build` CLI command with `--overwrite`, `--session`, `--no-save`, and keepalive support.
+- [x] Keep `xlflow form apply` implemented but hidden while the public replacement workflow moves to `form build --overwrite`.
+- [x] Add Go-side spec loading/validation before Excel open and bridge payload serialization for build/apply.
+- [x] Add `internal/excel/scripts/form-write.ps1` using the VBIDE Designer API for build/apply.
+- [x] Extend human output rendering for `form build` / `form apply`.
+- [x] Update CLI contract, README files, feature spec, and UserForm hint text for build/apply.
+- [x] Run focused tests, full `go test ./...`, and Windows Excel COM validation for build/apply.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/forms` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestFormWriteScriptValidatesArgsBeforeWorkbookOpen|TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen|TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings|TestFormWriteScriptDecodesSpecInWindowsPowerShell|TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings|TestCommonScriptStrictDesignerFiltersControlsByParentName"` passed.
+- `go test ./...` passed.
+- Excel COM validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-build-apply-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow pull --json`, `xlflow lint --json`, `xlflow form build specs/form-build.json --json`, `xlflow list forms --json`, `xlflow inspect form DemoForm --json`, `xlflow form snapshot DemoForm --out specs/demo-snapshot.json --json`, `xlflow session start --json`, `xlflow form apply specs/form-apply.json --session --no-save --json`, `xlflow inspect form DemoForm --session --json`, `xlflow save --session --json`, `xlflow session stop --json`, `xlflow inspect form DemoForm --designer --json`, and `xlflow form export-image DemoForm --out specs/DemoForm.png --json` all completed. Public guidance now prefers `form build --overwrite` instead of `form apply`.
+- Verified `form build` creates `DemoForm`, `list forms` reports `src/forms/DemoForm.frm`, `form snapshot` writes `specs/demo-snapshot.json`, and hidden `form apply --session --no-save` still returns `workbook.dirty=true` / `workbook.needs_save=true` / `session.save_required=true`. Public replacement workflow is rebuild via `form build --overwrite`.
+- Follow-up COM validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-build-contract-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow pull --json`, `xlflow lint --json`, `xlflow form build src/forms/CustomerForm.form.json --json`, `xlflow inspect form CustomerForm --designer --json`, `xlflow form snapshot CustomerForm --out artifacts/CustomerForm.snapshot.json --json`, `xlflow form build src/forms/CustomerForm.overwrite.form.json --overwrite --json`, `xlflow inspect form CustomerForm --designer --json`, `xlflow form snapshot CustomerForm --out artifacts/CustomerForm.overwrite.snapshot.json --json`, and a final `xlflow pull --json` all completed after reinstalling `xlflow`.
+- Verified `form build --overwrite` now succeeds after an intermediate workbook save, strict designer inspect no longer duplicates nested controls at the top level, and persisted snapshot specs now use flat `controls` entries with `id` / `parentId` / `zIndex`.
+- Regression validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-overwrite-restore-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow form build src/forms/StableForm.form.json --json`, `xlflow inspect form StableForm --designer --json`, `xlflow form build src/forms/StableForm.bad.form.json --overwrite --json`, and `xlflow inspect form StableForm --designer --json` completed.
+- Verified a failed `form build --overwrite` with an invalid runtime ProgID now restores the original UserForm and leaves the workbook with the pre-overwrite form still present.
+- Session regression validation workspace: `C:\dev\go\xlflow\tmp_workspaces\form-overwrite-restore-session-e2e`.
+- `xlflow new --json`, `xlflow doctor --json`, `xlflow session start --json`, `xlflow form build src/forms/SessionForm.form.json --session --json`, `xlflow inspect form SessionForm --designer --session --json`, `xlflow form build src/forms/SessionForm.bad.form.json --overwrite --session --json`, `xlflow inspect form SessionForm --designer --session --json`, and `xlflow session stop --json` completed.
+- Verified the same failed overwrite path restores the original UserForm in the live session workbook as well; the session remained `dirty=false` / `save_required=false` after restoration.
+- `form write` now emits explicit contract warnings for weak Designer-backed fields: `best_effort_form_size` for form-level `width` / `height`, and `best_effort_list_state` for design-time `ComboBox` / `ListBox` `list` / `selectedIndex`.
+- Remaining known limitations from COM validation: form-level width/height still do not round-trip through the Designer API surface we can currently reach, and design-time `ComboBox` / `ListBox` item lists plus `selectedIndex` remain unreliable enough that build currently returns warnings and snapshots may come back with empty `list` and `selectedIndex=-1`.
+
 - [x] Add `[vba]` config defaults and validation.
 - [x] Make `pull` folder-aware and clear stale recursive exports.
 - [x] Make `push` import recursive source trees and preserve nested `.frm`/`.frx` companions.
@@ -245,3 +278,42 @@
 - `task lint` passed.
 - Workspace `C:\dev\go\xlflow\tmp_workspaces\edit-review-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, `session start`, `push --fast --session --no-save`, `edit cell|range|rows|columns --session`, `run Main.Run --session`, `save --session`, `session stop`, `pull`, and final `lint` all passed.
 - Excel COM workbook-state check after save/stop confirmed `A1="xlflow ok"`, `B2Formula="=1+2"`, `B2Value=3`, `C1Color=65280`, `Row1Height=24`, and `ColumnBWidth=22`.
+
+# UserForm Code-Behind Sidecar Todo
+
+- [x] Add shared PowerShell helpers for `src/forms/code/*.bas` sidecar discovery, export, and CodeModule reapplication.
+- [x] Update `pull` to export UserForm code-behind sidecars and `push` to reapply them after `.frm` import.
+- [x] Update `form build --overwrite` to preserve code-behind by preferring the sidecar and falling back to the pre-delete workbook form code.
+- [x] Update CLI contract, README files, and bundled skill references for the `spec + code sidecar` source-of-truth model.
+- [x] Add focused Go/PowerShell regression coverage and rerun lint/full tests.
+- [x] Run Windows Excel COM E2E for UserForm build/pull/push/overwrite with code-behind preservation.
+
+## Verification Notes
+
+- `go test ./internal/excel/forms ./internal/excel/scripts ./internal/excel ./internal/agentskill` passed.
+- `task lint` passed.
+- `go test ./...` passed.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-codebehind-sidecar-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, `form build src/forms/specs/CalendarPicker.yaml`, `pull`, `push`, `form build src/forms/specs/CalendarPicker.yaml --overwrite`, and final `pull` all passed.
+- Excel COM workbook-state check after overwrite confirmed the rebuilt `CalendarPicker` form still contained code-behind version `B` even after deleting `src/forms/code/CalendarPicker.bas`, proving overwrite fallback preserved workbook code.
+- Final `pull` recreated `src/forms/code/CalendarPicker.bas` with the preserved `B` code-behind.
+
+# UserForm Code Source Mode Hardening Todo
+
+- [x] Add `[userform].code_source = "frm" | "sidecar"` config, validation, and scaffold defaults (`new=sidecar`, `init=frm`).
+- [x] Make `pull`, `push`, and `form build` mode-aware so `frm` mode ignores `src/forms/code` while `sidecar` mode exports and reapplies code-behind sidecars.
+- [x] Synchronize tracked `.frm` embedded code from `src/forms/code/*.bas` before `push` and `form build` in `sidecar` mode so sidecar-only edits remain runnable.
+- [x] Run `form build` through the same source preflight used by `push`/`run` when `sidecar` mode may inject VBA.
+- [x] Update CLI contract, README files, and bundled skill references for mode-aware UserForm source-of-truth behavior.
+- [x] Add focused Go and PowerShell regression coverage for config defaults, sidecar preflight, and `.frm` artifact synchronization.
+- [x] Run Windows Excel COM E2E for both `new` (`sidecar`) and `init` (`frm`) workflows.
+
+## Verification Notes
+
+- `go test ./internal/config ./internal/project ./internal/excel/forms ./internal/cli ./internal/excel ./internal/excel/scripts ./internal/agentskill` passed.
+- `task lint` passed.
+- `go test ./...` passed.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-code-source-mode-e2e` (`new`, `code_source=sidecar`): `xlflow new`, `doctor`, `pull`, `lint`, `form build src/forms/specs/CalendarPicker.yaml`, `pull`, `push`, `pull`, `form build src/forms/specs/CalendarPicker.yaml --overwrite`, and final `pull` all passed.
+- Sidecar-mode E2E confirmed `pull -> edit src/forms/code/CalendarPicker.bas -> push -> pull` preserved code-behind version `B`, and a manually diverged `src/forms/CalendarPicker.frm` was synchronized back to the authoritative sidecar before `form build --overwrite`.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-code-source-mode-init` (`init`, `code_source=frm`): `xlflow init <existing workbook>`, `pull`, `.frm` code edit, `push`, `pull`, `form snapshot`, `form build --overwrite`, and final `pull` all passed.
+- FRM-mode E2E confirmed `pull` did not create `src/forms/code/*.bas`, `push` preserved `.frm`-embedded code version `FRM2`, and `form build --overwrite` kept that embedded code intact.
+- Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-preflight-scope-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, then `form build src/forms/specs/UserForm1.yaml` in a sidecar repo where unrelated `src/forms/UserForm2.frm` intentionally contained stale analyzer-breaking code. Build for `UserForm1` still succeeded, confirming form-build preflight now scopes UserForm source checks to the target form instead of unrelated generated `.frm` artifacts.

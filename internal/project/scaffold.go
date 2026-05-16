@@ -34,7 +34,7 @@ func Init(cwd, workbookPath string) (InitResult, error) {
 	destPath := filepath.Join(cwd, "build", filepath.Base(workbookPath))
 	result, err = createScaffold(cwd, destPath, projectName(workbookPath), func(path string) error {
 		return copyFile(workbookPath, path)
-	})
+	}, "frm")
 	if err != nil {
 		return InitResult{}, err
 	}
@@ -50,10 +50,10 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 		return InitResult{}, err
 	}
 	destPath := filepath.Join(cwd, "build", name)
-	return createScaffold(cwd, destPath, projectName(name), createWorkbook)
+	return createScaffold(cwd, destPath, projectName(name), createWorkbook, "")
 }
 
-func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) (InitResult, error) {
+func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
@@ -93,6 +93,9 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator) 
 	cfg := config.Default()
 	cfg.Project.Name = name
 	cfg.Excel.Path = result.Workbook
+	if strings.TrimSpace(userFormCodeSource) != "" {
+		cfg.UserForm.CodeSource = userFormCodeSource
+	}
 	if err := config.Write(configPath, cfg); err != nil {
 		return result, err
 	}

@@ -174,7 +174,7 @@ function Add-XlflowUserFormDiscoveryMessages {
     return
   }
   Add-XlflowWarning -Result $Result -Code "userform_state_partial" -Message ("UserForms detected: " + ($normalized -join ", ") + ". `.frm` text may not fully represent layout, binary `.frx` state, or VBIDE Designer-backed properties.")
-  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "Related commands for deeper UserForm inspection include `xlflow form snapshot <name> --out <path>`, `xlflow inspect form <name> --runtime --json`, and `xlflow form export-image <name> --out <path>`."
+  Add-XlflowHint -Result $Result -Code "userform_planned_commands" -Message "UserForm workflow: `xlflow pull --json`, `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit spec/code artifacts, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`."
 }
 
 function Add-XlflowUserFormSessionStaleWarning {
@@ -187,7 +187,7 @@ function Add-XlflowUserFormSessionStaleWarning {
   if ($normalized.Count -eq 0) {
     return
   }
-  Add-XlflowStateWarning -Result $Result -Code "userform_unsaved_session_state" -Message ("Workbook contains UserForms (" + ($normalized -join ", ") + ") and the current session changes are not saved. Disk `.frm`/`.frx` state may differ from the live workbook. Run `xlflow save --session` and `xlflow pull` before reviewing UserForm source differences.")
+  Add-XlflowStateWarning -Result $Result -Code "userform_unsaved_session_state" -Message ("Workbook contains UserForms (" + ($normalized -join ", ") + ") and the live workbook is newer than disk. Run `xlflow save --session` and `xlflow pull` before reviewing `.frm`/`.frx` or disk-backed inspect output.")
 }
 
 function Get-XlflowSourceUserFormNames {
@@ -205,6 +205,58 @@ function Get-XlflowSourceUserFormNames {
     }
   }
   return @($names.ToArray() | Sort-Object -Unique)
+}
+
+function Use-XlflowUserFormCodeSidecar {
+  param([string]$CodeSource)
+
+  return [string]::Equals(([string]$CodeSource).Trim(), "sidecar", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-XlflowUserFormCodeDir {
+  param([string]$FormsDir)
+
+  if ([string]::IsNullOrWhiteSpace($FormsDir)) {
+    return ""
+  }
+  return Join-Path $FormsDir "code"
+}
+
+function Get-XlflowUserFormCodePath {
+  param(
+    [string]$FormsDir,
+    [string]$FormName
+  )
+
+  $codeDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+  if ([string]::IsNullOrWhiteSpace($codeDir) -or [string]::IsNullOrWhiteSpace($FormName)) {
+    return ""
+  }
+  return Join-Path $codeDir ($FormName + ".bas")
+}
+
+function Get-XlflowUserFormCodeFiles {
+  param([string]$FormsDir)
+
+  $codeDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+  if ([string]::IsNullOrWhiteSpace($codeDir) -or -not (Test-Path -LiteralPath $codeDir)) {
+    return @()
+  }
+
+  $files = New-Object System.Collections.Generic.List[object]
+  foreach ($file in Get-ChildItem -LiteralPath $codeDir -Recurse -File -Filter *.bas | Sort-Object FullName) {
+    $formName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+    $files.Add([pscustomobject][ordered]@{
+      kind = "form_code"
+      root_dir = $codeDir
+      full_name = $file.FullName
+      relative_path = (Get-XlflowRelativePath -BasePath $codeDir -TargetPath $file.FullName).Replace("\", "/")
+      extension = ".bas"
+      module_name = $formName
+      form_name = $formName
+    })
+  }
+  return @($files.ToArray())
 }
 
 function ConvertTo-XlflowBool {
@@ -298,7 +350,10 @@ function New-XlflowSessionResult {
     [string]$WorkbookPath = "",
     [AllowNull()]$Dirty = $null,
     [AllowNull()]$SaveRequired = $null,
-    [string]$Mode = ""
+    [string]$Mode = "",
+    [string]$SourceOfTruth = "",
+    [AllowNull()]$UserFormsPresent = $null,
+    [AllowNull()]$UserFormCount = $null
   )
 
   $session = [ordered]@{
@@ -312,9 +367,26 @@ function New-XlflowSessionResult {
   }
   if ($PSBoundParameters.ContainsKey("SaveRequired") -and $null -ne $SaveRequired) {
     $session.save_required = [bool]$SaveRequired
+    $session.live_newer_than_disk = [bool]$SaveRequired
   }
   if (-not [string]::IsNullOrWhiteSpace($Mode)) {
     $session.mode = $Mode
+  }
+  if ([string]::IsNullOrWhiteSpace($SourceOfTruth)) {
+    if ($session.Contains("live_newer_than_disk") -and [bool]$session.live_newer_than_disk) {
+      $SourceOfTruth = "live_workbook"
+    } else {
+      $SourceOfTruth = "saved_workbook"
+    }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($SourceOfTruth)) {
+    $session.source_of_truth = $SourceOfTruth
+  }
+  if ($PSBoundParameters.ContainsKey("UserFormsPresent") -and $null -ne $UserFormsPresent) {
+    $session.userforms_present = [bool]$UserFormsPresent
+  }
+  if ($PSBoundParameters.ContainsKey("UserFormCount") -and $null -ne $UserFormCount) {
+    $session.userform_count = [int]$UserFormCount
   }
   return $session
 }
@@ -572,6 +644,12 @@ public static class XlflowNativeMethods {
 
   [DllImport("user32.dll", SetLastError=true)]
   public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetDpiForWindow(IntPtr hWnd);
 
   [DllImport("user32.dll", SetLastError=true)]
   public static extern IntPtr SendMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -1363,9 +1441,11 @@ function Open-XlflowWorkbookForCommand {
     [string]$Visible = "false",
     [string]$DisplayAlerts = "false",
     [string]$DisableAutomationMacros = "true",
+    [string]$CaptureOpenVBADialogs = "false",
     [string]$UseSession = "false",
     [string]$MetadataPath = "",
-    [bool]$AllowIsolatedOpen = $true
+    [bool]$AllowIsolatedOpen = $true,
+    [int]$OpenDialogWaitMilliseconds = 1500
   )
 
   if (ConvertTo-XlflowBool $UseSession) {
@@ -1402,12 +1482,39 @@ function Open-XlflowWorkbookForCommand {
 
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = ConvertTo-XlflowBool $Visible
-  $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+  $workbook = $null
+  $openDialog = New-XlflowExcelDialogWatcherResult
+  $openSelection = [ordered]@{
+    location = [ordered]@{
+      module = ""
+      line = 0
+      column = 0
+      end_line = 0
+      end_column = 0
+      token = ""
+    }
+    nearby_code = @()
+  }
+  if (ConvertTo-XlflowBool $CaptureOpenVBADialogs) {
+    $openResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $null -Invocation {
+      Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+    } -DialogKind "any_vba" -CaptureDialogs $true -WaitMilliseconds $OpenDialogWaitMilliseconds
+    $workbook = $openResult.value
+    $openDialog = $openResult.dialog
+    $openSelection = $openResult.selection
+    if ($null -ne $openResult.exception) {
+      throw $openResult.exception.Exception
+    }
+  } else {
+    $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts (ConvertTo-XlflowBool $DisplayAlerts) -DisableAutomationMacros (ConvertTo-XlflowBool $DisableAutomationMacros)
+  }
   return [pscustomobject][ordered]@{
     excel = $excel
     workbook = $workbook
     session_attached = $false
     session_mode = "none"
+    open_dialog = $openDialog
+    open_selection = $openSelection
   }
 }
 
@@ -1744,7 +1851,8 @@ function Get-XlflowSourceComponentFiles {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
   $files = New-Object System.Collections.Generic.List[object]
@@ -1758,7 +1866,22 @@ function Get-XlflowSourceComponentFiles {
     if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) {
       continue
     }
+    $excludedDir = ""
+    if ($entry.kind -eq "form") {
+      $excludedDir = Get-XlflowUserFormCodeDir -FormsDir $FormsDir
+    }
     foreach ($file in Get-ChildItem -LiteralPath $dir -Recurse -File | Sort-Object FullName) {
+      if (-not [string]::IsNullOrWhiteSpace($excludedDir)) {
+        $excludedFullPath = [System.IO.Path]::GetFullPath($excludedDir)
+        $directorySeparator = [string][System.IO.Path]::DirectorySeparatorChar
+        if (-not $excludedFullPath.EndsWith($directorySeparator)) {
+          $excludedFullPath += $directorySeparator
+        }
+        $fileFullPath = [System.IO.Path]::GetFullPath($file.FullName)
+        if ($fileFullPath.StartsWith($excludedFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+          continue
+        }
+      }
       if ($file.Extension -notin @(".bas", ".cls", ".frm", ".frx")) {
         continue
       }
@@ -1772,6 +1895,11 @@ function Get-XlflowSourceComponentFiles {
       })
     }
   }
+  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+    foreach ($file in @(Get-XlflowUserFormCodeFiles -FormsDir $FormsDir)) {
+      $files.Add($file)
+    }
+  }
   return @($files.ToArray())
 }
 
@@ -1780,10 +1908,11 @@ function Clear-XlflowSourceComponentFiles {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
-  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource)) {
     Remove-Item -LiteralPath $file.full_name -Force -ErrorAction SilentlyContinue
   }
 }
@@ -1794,11 +1923,12 @@ function Get-XlflowSourceFingerprint {
     [string]$ModulesDir,
     [string]$ClassesDir,
     [string]$FormsDir,
-    [string]$WorkbookDir
+    [string]$WorkbookDir,
+    [string]$CodeSource = "frm"
   )
 
   $files = New-Object System.Collections.Generic.List[object]
-  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir)) {
+  foreach ($file in @(Get-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource)) {
     $files.Add([ordered]@{
       kind = [string]$file.kind
       path = [string]$file.relative_path
@@ -1920,6 +2050,97 @@ function Convert-XlflowExportedSourceToUtf8 {
   Set-XlflowUtf8Text -Path $Path -Text $content
 }
 
+function ConvertTo-XlflowFRMStringLiteral {
+  param([string]$Value)
+
+  if ($null -eq $Value) {
+    $Value = ""
+  }
+  return '"' + ([string]$Value).Replace('"', '""') + '"'
+}
+
+function Get-XlflowUserFormDesignerCaption {
+  param($Component)
+
+  if ($null -eq $Component) {
+    return $null
+  }
+  try {
+    if ([int]$Component.Type -ne 3) {
+      return $null
+    }
+  } catch {
+    return $null
+  }
+  try {
+    return [string]$Component.Designer.Caption
+  } catch {
+    Write-Verbose ("failed to inspect UserForm designer caption: " + $_.Exception.Message)
+    return $null
+  }
+}
+
+function Normalize-XlflowUserFormArtifactFile {
+  param(
+    [string]$Path,
+    [AllowNull()]
+    $Caption
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+  if ($null -eq $Caption) {
+    return
+  }
+  if ([System.IO.Path]::GetExtension($Path) -ine ".frm") {
+    return
+  }
+
+  $text = Get-XlflowUtf8Text -Path $Path
+  if ([string]::IsNullOrEmpty($text)) {
+    return
+  }
+
+  $newline = Get-XlflowContentNewline -Text $text
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($line in ($text -split "`r?`n")) {
+    $lines.Add([string]$line)
+  }
+
+  $beginIndex = -1
+  $endIndex = -1
+  $captionIndex = -1
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = [string]$lines[$i]
+    if ($beginIndex -lt 0) {
+      if ($line -match '^\s*Begin\b') {
+        $beginIndex = $i
+      }
+      continue
+    }
+    if ($line -match '^\s*End\s*$') {
+      $endIndex = $i
+      break
+    }
+    if ($line -match '^\s*Caption\s*=') {
+      $captionIndex = $i
+    }
+  }
+  if ($beginIndex -lt 0 -or $endIndex -lt 0) {
+    return
+  }
+
+  $captionLine = '   Caption         =   ' + (ConvertTo-XlflowFRMStringLiteral -Value $Caption)
+  if ($captionIndex -ge 0) {
+    $lines[$captionIndex] = $captionLine
+  } else {
+    $lines.Insert(($beginIndex + 1), $captionLine)
+  }
+
+  Set-XlflowUtf8Text -Path $Path -Text ((@($lines.ToArray()) -join $newline) + $newline)
+}
+
 function Copy-XlflowSourceForImport {
   param(
     [string]$SourcePath,
@@ -2002,6 +2223,90 @@ function Get-XlflowCodeModuleText {
     return ""
   }
   return $CodeModule.Lines(1, $CodeModule.CountOfLines)
+}
+
+function Set-XlflowCodeModuleText {
+  param(
+    $CodeModule,
+    [string]$Text
+  )
+
+  if ($null -eq $CodeModule) {
+    return
+  }
+  if ($CodeModule.CountOfLines -gt 0) {
+    $CodeModule.DeleteLines(1, $CodeModule.CountOfLines)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Text)) {
+    $CodeModule.AddFromString($Text)
+  }
+}
+
+function Get-XlflowUserFormCodeTextFromSource {
+  param(
+    [string]$FormsDir,
+    [string]$FormName
+  )
+
+  $path = Get-XlflowUserFormCodePath -FormsDir $FormsDir -FormName $FormName
+  if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) {
+    return $null
+  }
+  return (Get-XlflowUtf8Text -Path $path)
+}
+
+function Export-XlflowUserFormCodeBehind {
+  param(
+    $Component,
+    [string]$FormsDir
+  )
+
+  if ($null -eq $Component -or [int]$Component.Type -ne 3) {
+    return ""
+  }
+
+  $path = Get-XlflowUserFormCodePath -FormsDir $FormsDir -FormName ([string]$Component.Name)
+  if ([string]::IsNullOrWhiteSpace($path)) {
+    return ""
+  }
+
+  $text = Get-XlflowCodeModuleText -CodeModule $Component.CodeModule
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    if (Test-Path -LiteralPath $path) {
+      Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    return ""
+  }
+
+  $parent = Split-Path -Parent $path
+  if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+  Set-XlflowUtf8Text -Path $path -Text $text
+  return $path
+}
+
+function Sync-XlflowUserFormCodeBehind {
+  param(
+    $Component,
+    [string]$FormsDir,
+    [string]$FallbackText = $null
+  )
+
+  if ($null -eq $Component -or [int]$Component.Type -ne 3) {
+    return $false
+  }
+
+  $text = Get-XlflowUserFormCodeTextFromSource -FormsDir $FormsDir -FormName ([string]$Component.Name)
+  if ($null -eq $text) {
+    $text = $FallbackText
+  }
+  if ($null -eq $text) {
+    return $false
+  }
+
+  Set-XlflowCodeModuleText -CodeModule $Component.CodeModule -Text $text
+  return $true
 }
 
 function New-XlflowTestRunnerCode {
@@ -2568,13 +2873,13 @@ Private Function SerializeFormSnapshot(ByVal formName As String, ByVal basis As 
   JsonAddString json, "coordinate_system", xlflowCoordinateSystem, hasFields
 
   Set controls = GetObjectControls(formObject)
-  JsonAddRaw json, "controls", SerializeControls(controls), hasFields
+  JsonAddRaw json, "controls", SerializeControls(controls, formName), hasFields
 
   json = json & "}"
   SerializeFormSnapshot = json
 End Function
 
-Private Function SerializeControls(ByVal controls As Object) As String
+Private Function SerializeControls(ByVal controls As Object, ByVal expectedParentName As String) As String
   Dim json As String
   Dim first As Boolean
   Dim control As Object
@@ -2584,11 +2889,15 @@ Private Function SerializeControls(ByVal controls As Object) As String
 
   If Not controls Is Nothing Then
     For Each control In controls
+      If Not ControlHasExpectedParent(control, expectedParentName) Then
+        GoTo ContinueLoop
+      End If
       If Not first Then
         json = json & ","
       End If
       json = json & SerializeControl(control)
       first = False
+ContinueLoop:
     Next control
   End If
 
@@ -2632,11 +2941,39 @@ Private Function SerializeControl(ByVal control As Object) As String
     Set children = GetObjectControls(control)
   End If
   If Not children Is Nothing Then
-    JsonAddRaw json, "controls", SerializeControls(children), hasFields
+    JsonAddRaw json, "controls", SerializeControls(children, SafeControlName(control)), hasFields
   End If
 
   json = json & "}"
   SerializeControl = json
+End Function
+
+Private Function ControlHasExpectedParent(ByVal control As Object, ByVal expectedParentName As String) As Boolean
+  On Error GoTo Missing
+
+  Dim parentObject As Object
+  Dim parentName As String
+  Set parentObject = CallByName(control, "Parent", VbGet)
+  If parentObject Is Nothing Then
+    GoTo Missing
+  End If
+
+  parentName = CallByName(parentObject, "Name", VbGet)
+  ControlHasExpectedParent = (StrComp(Trim$(parentName), Trim$(expectedParentName), vbTextCompare) = 0)
+  Exit Function
+
+Missing:
+  ControlHasExpectedParent = False
+End Function
+
+Private Function SafeControlName(ByVal control As Object) As String
+  On Error GoTo Missing
+
+  SafeControlName = CStr(CallByName(control, "Name", VbGet))
+  Exit Function
+
+Missing:
+  SafeControlName = vbNullString
 End Function
 
 Private Function ControlCanContainChildren(ByVal controlType As String) As Boolean

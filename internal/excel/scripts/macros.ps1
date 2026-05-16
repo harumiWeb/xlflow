@@ -52,7 +52,7 @@ try {
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   $result.macros = $macros.ToArray()
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. Run `xlflow save --session` to persist workbook changes."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
   }
   if ($macros.Count -eq 0) {
     Add-XlflowHint -Result $result -Code "macros_empty_before_push" -Message "If you edited source files, run `xlflow push --session` before `xlflow macros --session`."

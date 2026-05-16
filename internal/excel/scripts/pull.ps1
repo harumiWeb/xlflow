@@ -4,6 +4,7 @@ param(
   [string]$ClassesDir,
   [string]$FormsDir,
   [string]$WorkbookDir,
+  [string]$CodeSource = "frm",
   [string]$Folders = "true",
   [string]$FolderAnnotation = "update",
   [string]$DefaultComponentFolders = "true",
@@ -36,9 +37,10 @@ try {
     Write-Verbose ("failed to inspect UserForms during pull: " + $_.Exception.Message)
   }
 
-  Clear-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir
+  Clear-XlflowSourceComponentFiles -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -CodeSource $CodeSource
 
   $exported = @()
+  $exportedFormCode = @()
   foreach ($component in $workbook.VBProject.VBComponents) {
     $path = Get-XlflowComponentPath -Component $component -ModulesDir $ModulesDir -ClassesDir $ClassesDir -FormsDir $FormsDir -WorkbookDir $WorkbookDir -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
     if ($null -ne $path) {
@@ -51,6 +53,9 @@ try {
       }
       $component.Export($path)
       Convert-XlflowExportedSourceToUtf8 -Path $path
+      if ($component.Type -eq 3) {
+        Normalize-XlflowUserFormArtifactFile -Path $path -Caption (Get-XlflowUserFormDesignerCaption -Component $component)
+      }
       if ($component.Type -eq 100) {
         Normalize-XlflowDocumentModuleFile -Path $path -RootDir $WorkbookDir -FolderAnnotationMode $FolderAnnotation
       } elseif ($FolderAnnotation -eq "update") {
@@ -62,6 +67,12 @@ try {
       }
       $exported += $path
     }
+    if ((Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) -and $component.Type -eq 3) {
+      $codePath = Export-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir
+      if (-not [string]::IsNullOrWhiteSpace($codePath)) {
+        $exportedFormCode += $codePath
+      }
+    }
   }
 
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
@@ -69,9 +80,13 @@ try {
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   Add-XlflowUserFormDiscoveryMessages -Result $result -Names $userFormNames
   if ($saveState.needs_save) {
-    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live session workbook differs from disk. `pull` exported from the live workbook."
+    Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. `pull` exported from the live workbook rather than the saved workbook file."
   }
-  $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "exported $($exported.Count) VBA component(s)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $result.logs = @(@(
+      $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
+      "exported $($exported.Count) VBA component(s)",
+      "exported $($exportedFormCode.Count) UserForm code-behind sidecar(s)"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 } catch {
   Set-XlflowError -Result $result -Code "excel_export_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
   $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
