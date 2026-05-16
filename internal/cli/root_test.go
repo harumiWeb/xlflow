@@ -206,6 +206,35 @@ func TestRunCommandDiagnosticDefaultsTrue(t *testing.T) {
 	}
 }
 
+func TestHeadlessGUIBoundaryLogsExplainProjectWideScanAndLintOverride(t *testing.T) {
+	logs := headlessGUIBoundaryLogs(config.Default())
+	for _, want := range []string{
+		"Headless preflight scans the configured source tree, not the target macro call graph.",
+		"Use xlflow run --interactive if a human can operate Excel dialogs.",
+		"[lint].forbid_interactive_input = false",
+	} {
+		found := false
+		for _, line := range logs {
+			if strings.Contains(line, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected headless GUI boundary log containing %q in %#v", want, logs)
+		}
+	}
+
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	logs = headlessGUIBoundaryLogs(cfg)
+	for _, line := range logs {
+		if strings.Contains(line, "[lint].forbid_interactive_input = false") {
+			t.Fatalf("did not expect lint override hint when interactive-input lint is already disabled: %#v", logs)
+		}
+	}
+}
+
 func TestRootCommandIncludesPushFastFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

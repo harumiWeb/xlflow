@@ -87,6 +87,7 @@ Private xlflowLastErrorMessage As String
 Private xlflowCaptureReady As Boolean
 Private xlflowCaptureWindowCaption As String
 Private xlflowCaptureWindowHandle As String
+Private xlflowExpectedCaption As String
 
 Private Function XlflowFindFormWindowHandle(ByVal caption As String) As String
 #If VBA7 Then
@@ -102,10 +103,11 @@ Private Function XlflowFindFormWindowHandle(ByVal caption As String) As String
   XlflowFindFormWindowHandle = CStr(hwnd)
 End Function
 
-Public Sub XlflowPrepareFormImageCapture(ByVal formName As String, ByVal token As String, Optional ByVal initializer As String = "")
+Public Sub XlflowPrepareFormImageCapture(ByVal formName As String, ByVal token As String, Optional ByVal initializer As String = "", Optional ByVal expectedCaption As String = "")
   xlflowCaptureFormName = formName
   xlflowCaptureToken = token
   xlflowCaptureInitializer = Trim$(initializer)
+  xlflowExpectedCaption = Trim$(expectedCaption)
   xlflowLastErrorSource = ""
   xlflowLastErrorMessage = ""
   xlflowCaptureReady = False
@@ -133,6 +135,13 @@ Public Sub XlflowExecuteFormImageCapture()
   On Error Resume Next
   caption = CStr(xlflowCapturedForm.Caption)
   On Error GoTo ErrHandler
+  If Len(xlflowExpectedCaption) > 0 Then
+    If Len(caption) = 0 _
+      Or StrComp(caption, xlflowCaptureFormName, vbTextCompare) = 0 _
+      Or LCase$(Left$(caption, 8)) = "userform" Then
+      caption = xlflowExpectedCaption
+    End If
+  End If
   If Len(caption) = 0 Then
     caption = xlflowCaptureFormName
   End If
@@ -169,6 +178,7 @@ Public Sub XlflowCleanupFormImageCapture()
   xlflowCaptureReady = False
   xlflowCaptureWindowCaption = ""
   xlflowCaptureWindowHandle = "0"
+  xlflowExpectedCaption = ""
   xlflowLastErrorSource = ""
   xlflowLastErrorMessage = ""
   On Error GoTo 0
@@ -227,12 +237,35 @@ function Invoke-XlflowPrepareFormImageCapture {
     $Workbook,
     [string]$TargetFormName,
     [string]$Token,
-    [string]$InitializerName = ""
+    [string]$InitializerName = "",
+    [string]$ExpectedCaption = ""
   )
 
   $workbookName = ([string]$Workbook.Name).Replace("'", "''")
   $macroName = "'" + $workbookName + "'!XlflowPrepareFormImageCapture"
-  $Excel.Run($macroName, $TargetFormName, $Token, $InitializerName) | Out-Null
+  $Excel.Run($macroName, $TargetFormName, $Token, $InitializerName, $ExpectedCaption) | Out-Null
+}
+
+function Get-XlflowFormExportSourceDesignerCaption {
+  param(
+    $Workbook,
+    [string]$TargetFormName
+  )
+
+  if ($null -eq $Workbook -or [string]::IsNullOrWhiteSpace($TargetFormName)) {
+    return ""
+  }
+
+  try {
+    $component = $Workbook.VBProject.VBComponents.Item($TargetFormName)
+    if ($null -eq $component) {
+      return ""
+    }
+    return [string]$component.Designer.Caption
+  } catch {
+    Write-Verbose ("failed to read source designer caption for form-export-image: " + $_.Exception.Message)
+    return ""
+  }
 }
 
 function Get-XlflowFormImageCaptureStatus {
@@ -338,6 +371,327 @@ function Get-XlflowWindowCaptureInfo {
   }
 }
 
+function Wait-XlflowStableWindowCaptureInfo {
+  param(
+    [System.IntPtr]$Hwnd,
+    [int]$TimeoutMilliseconds = 1200,
+    [int]$PollMilliseconds = 100,
+    [int]$StableSamples = 3
+  )
+
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+  $lastSignature = ""
+  $stableCount = 0
+  $lastWindow = $null
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $window = Get-XlflowWindowCaptureInfo -Hwnd $Hwnd
+    if ($null -eq $window) {
+      Start-Sleep -Milliseconds $PollMilliseconds
+      continue
+    }
+    $signature = [string]::Join(":", @($window.left, $window.top, $window.width, $window.height))
+    if ($signature -ceq $lastSignature) {
+      $stableCount++
+    } else {
+      $lastSignature = $signature
+      $stableCount = 1
+    }
+    $lastWindow = $window
+    if ($stableCount -ge $StableSamples) {
+      return $window
+    }
+    Start-Sleep -Milliseconds $PollMilliseconds
+  }
+  return $lastWindow
+}
+
+function Get-XlflowDesktopWorkingAreas {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    return @([System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
+      $bounds = $_.WorkingArea
+      [pscustomobject][ordered]@{
+        left = [int]$bounds.Left
+        top = [int]$bounds.Top
+        right = [int]$bounds.Right
+        bottom = [int]$bounds.Bottom
+        width = [int]$bounds.Width
+        height = [int]$bounds.Height
+      }
+    })
+  } catch {
+    Write-Verbose ("failed to resolve desktop working areas for form-export-image: " + $_.Exception.Message)
+    return @()
+  }
+}
+
+function Get-XlflowWindowRectIntersectionArea {
+  param(
+    $WindowInfo,
+    $WorkArea
+  )
+
+  if ($null -eq $WindowInfo -or $null -eq $WorkArea) {
+    return [double]0
+  }
+
+  $windowRight = [int]$WindowInfo.left + [int]$WindowInfo.width
+  $windowBottom = [int]$WindowInfo.top + [int]$WindowInfo.height
+  $left = [Math]::Max([int]$WindowInfo.left, [int]$WorkArea.left)
+  $top = [Math]::Max([int]$WindowInfo.top, [int]$WorkArea.top)
+  $right = [Math]::Min($windowRight, [int]$WorkArea.right)
+  $bottom = [Math]::Min($windowBottom, [int]$WorkArea.bottom)
+  if ($right -le $left -or $bottom -le $top) {
+    return [double]0
+  }
+
+  return [double](($right - $left) * ($bottom - $top))
+}
+
+function Get-XlflowBestWorkingAreaForWindowInfo {
+  param(
+    $WindowInfo,
+    $WorkingAreas
+  )
+
+  if ($null -eq $WindowInfo) {
+    return $null
+  }
+
+  $bestArea = $null
+  $bestIntersection = [double]-1
+  $bestDistance = [double]::PositiveInfinity
+  $windowCenterX = [double]([int]$WindowInfo.left + ([int]$WindowInfo.width / 2.0))
+  $windowCenterY = [double]([int]$WindowInfo.top + ([int]$WindowInfo.height / 2.0))
+  foreach ($area in @($WorkingAreas)) {
+    if ($null -eq $area) {
+      continue
+    }
+
+    $intersection = Get-XlflowWindowRectIntersectionArea -WindowInfo $WindowInfo -WorkArea $area
+    $areaCenterX = [double]([int]$area.left + ([int]$area.width / 2.0))
+    $areaCenterY = [double]([int]$area.top + ([int]$area.height / 2.0))
+    $dx = $windowCenterX - $areaCenterX
+    $dy = $windowCenterY - $areaCenterY
+    $distance = ($dx * $dx) + ($dy * $dy)
+    if ($intersection -gt $bestIntersection -or ($intersection -eq $bestIntersection -and $distance -lt $bestDistance)) {
+      $bestArea = $area
+      $bestIntersection = $intersection
+      $bestDistance = $distance
+    }
+  }
+  return $bestArea
+}
+
+function Get-XlflowWindowCaptureRepositionPlan {
+  param(
+    $WindowInfo,
+    $WorkArea,
+    [int]$Margin = 16
+  )
+
+  if ($null -eq $WindowInfo -or $null -eq $WorkArea) {
+    return $null
+  }
+
+  $minLeft = [int]$WorkArea.left + $Margin
+  $maxLeft = [int]$WorkArea.right - [int]$WindowInfo.width - $Margin
+  if ($maxLeft -lt $minLeft) {
+    $minLeft = [int]$WorkArea.left
+    $maxLeft = [Math]::Max($minLeft, [int]$WorkArea.right - [int]$WindowInfo.width)
+  }
+
+  $minTop = [int]$WorkArea.top + $Margin
+  $maxTop = [int]$WorkArea.bottom - [int]$WindowInfo.height - $Margin
+  if ($maxTop -lt $minTop) {
+    $minTop = [int]$WorkArea.top
+    $maxTop = [Math]::Max($minTop, [int]$WorkArea.bottom - [int]$WindowInfo.height)
+  }
+
+  $targetLeft = [Math]::Min([Math]::Max([int]$WindowInfo.left, $minLeft), $maxLeft)
+  $targetTop = [Math]::Min([Math]::Max([int]$WindowInfo.top, $minTop), $maxTop)
+  return [pscustomobject][ordered]@{
+    left = $targetLeft
+    top = $targetTop
+    moved = ($targetLeft -ne [int]$WindowInfo.left -or $targetTop -ne [int]$WindowInfo.top)
+  }
+}
+
+function Move-XlflowWindowIntoCaptureBounds {
+  param(
+    $WindowInfo,
+    [int]$Margin = 16
+  )
+
+  if ($null -eq $WindowInfo) {
+    return $null
+  }
+
+  $workArea = Get-XlflowBestWorkingAreaForWindowInfo -WindowInfo $WindowInfo -WorkingAreas (Get-XlflowDesktopWorkingAreas)
+  if ($null -eq $workArea) {
+    return $WindowInfo
+  }
+
+  $plan = Get-XlflowWindowCaptureRepositionPlan -WindowInfo $WindowInfo -WorkArea $workArea -Margin $Margin
+  if ($null -eq $plan -or -not [bool]$plan.moved) {
+    return $WindowInfo
+  }
+
+  Add-XlflowNativeMethods
+  $flags = 0x0001 -bor 0x0004 -bor 0x0010
+  $hwnd = [System.IntPtr]([int64]$WindowInfo.hwnd)
+  if (-not [XlflowNativeMethods]::SetWindowPos($hwnd, [System.IntPtr]::Zero, [int]$plan.left, [int]$plan.top, 0, 0, [uint32]$flags)) {
+    return $WindowInfo
+  }
+
+  $stableWindow = Wait-XlflowStableWindowCaptureInfo -Hwnd $hwnd -TimeoutMilliseconds 1200 -PollMilliseconds 100 -StableSamples 2
+  if ($null -ne $stableWindow) {
+    return $stableWindow
+  }
+  return Get-XlflowWindowCaptureInfo -Hwnd $hwnd
+}
+
+function Get-XlflowClampedCaptureScale {
+  param([uint32]$Dpi)
+
+  if ($Dpi -lt 96) {
+    return 1.0
+  }
+
+  $scale = ([double]$Dpi) / 96.0
+  if ($scale -lt 1.0) {
+    return 1.0
+  }
+  if ($scale -gt 4.0) {
+    return 4.0
+  }
+  return $scale
+}
+
+function Get-XlflowWindowCaptureScale {
+  param(
+    [int64]$Hwnd
+  )
+
+  Add-XlflowNativeMethods
+  try {
+    $dpi = [uint32][XlflowNativeMethods]::GetDpiForWindow([System.IntPtr]$Hwnd)
+    return Get-XlflowClampedCaptureScale -Dpi $dpi
+  } catch {
+    Write-Verbose ("failed to resolve window DPI for form-export-image: " + $_.Exception.Message)
+  }
+  return 1.0
+}
+
+function Test-XlflowBitmapEdgeIsBlack {
+  param(
+    [System.Drawing.Bitmap]$Bitmap,
+    [ValidateSet("left", "right", "top", "bottom")]
+    [string]$Edge,
+    [int]$Index,
+    [int]$Threshold = 64,
+    [int]$Step = 2,
+    [double]$MinimumDarkRatio = 0.75,
+    [int]$IgnoreTopPixels = 32
+  )
+
+  if ($null -eq $Bitmap) {
+    return $false
+  }
+
+  $samples = 0
+  $darkSamples = 0
+
+  switch ($Edge) {
+    "left" {
+      for ($y = [Math]::Min($IgnoreTopPixels, [Math]::Max(0, $Bitmap.Height - 1)); $y -lt $Bitmap.Height; $y += $Step) {
+        $pixel = $Bitmap.GetPixel($Index, $y)
+        $samples++
+        if ($pixel.R -le $Threshold -and $pixel.G -le $Threshold -and $pixel.B -le $Threshold) {
+          $darkSamples++
+        }
+      }
+    }
+    "right" {
+      for ($y = [Math]::Min($IgnoreTopPixels, [Math]::Max(0, $Bitmap.Height - 1)); $y -lt $Bitmap.Height; $y += $Step) {
+        $pixel = $Bitmap.GetPixel($Index, $y)
+        $samples++
+        if ($pixel.R -le $Threshold -and $pixel.G -le $Threshold -and $pixel.B -le $Threshold) {
+          $darkSamples++
+        }
+      }
+    }
+    "top" {
+      for ($x = 0; $x -lt $Bitmap.Width; $x += $Step) {
+        $pixel = $Bitmap.GetPixel($x, $Index)
+        $samples++
+        if ($pixel.R -le $Threshold -and $pixel.G -le $Threshold -and $pixel.B -le $Threshold) {
+          $darkSamples++
+        }
+      }
+    }
+    "bottom" {
+      for ($x = 0; $x -lt $Bitmap.Width; $x += $Step) {
+        $pixel = $Bitmap.GetPixel($x, $Index)
+        $samples++
+        if ($pixel.R -le $Threshold -and $pixel.G -le $Threshold -and $pixel.B -le $Threshold) {
+          $darkSamples++
+        }
+      }
+    }
+  }
+
+  if ($samples -le 0) {
+    return $false
+  }
+
+  return (([double]$darkSamples) / [double]$samples) -ge $MinimumDarkRatio
+}
+
+function Trim-XlflowBitmapBlackEdges {
+  param(
+    [System.Drawing.Bitmap]$Bitmap,
+    [int]$Threshold = 64
+  )
+
+  if ($null -eq $Bitmap) {
+    return $null
+  }
+
+  $left = 0
+  $right = $Bitmap.Width - 1
+  $top = 0
+  $bottom = $Bitmap.Height - 1
+
+  while ($left -lt $right -and (Test-XlflowBitmapEdgeIsBlack -Bitmap $Bitmap -Edge "left" -Index $left -Threshold $Threshold)) {
+    $left++
+  }
+  while ($right -gt $left -and (Test-XlflowBitmapEdgeIsBlack -Bitmap $Bitmap -Edge "right" -Index $right -Threshold $Threshold)) {
+    $right--
+  }
+  while ($top -lt $bottom -and (Test-XlflowBitmapEdgeIsBlack -Bitmap $Bitmap -Edge "top" -Index $top -Threshold $Threshold)) {
+    $top++
+  }
+  while ($bottom -gt $top -and (Test-XlflowBitmapEdgeIsBlack -Bitmap $Bitmap -Edge "bottom" -Index $bottom -Threshold $Threshold)) {
+    $bottom--
+  }
+
+  if ($left -eq 0 -and $top -eq 0 -and $right -eq ($Bitmap.Width - 1) -and $bottom -eq ($Bitmap.Height - 1)) {
+    return $Bitmap
+  }
+
+  $cropWidth = $right - $left + 1
+  $cropHeight = $bottom - $top + 1
+  if ($cropWidth -le 0 -or $cropHeight -le 0) {
+    return $Bitmap
+  }
+
+  $rect = New-Object System.Drawing.Rectangle($left, $top, $cropWidth, $cropHeight)
+  $trimmed = $Bitmap.Clone($rect, $Bitmap.PixelFormat)
+  $Bitmap.Dispose()
+  return $trimmed
+}
+
 function Find-XlflowWindowByTitle {
   param(
     [int]$ProcessId,
@@ -375,6 +729,22 @@ function Find-XlflowWindowByTitle {
   return $null
 }
 
+function Test-XlflowLikelyUserFormWindow {
+  param($WindowInfo)
+
+  if ($null -eq $WindowInfo) {
+    return $false
+  }
+  $className = ([string]$WindowInfo.class_name).Trim()
+  if ([string]::Equals($className, "XLMAIN", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $false
+  }
+  if ($className -match "(?i)^Thunder") {
+    return $true
+  }
+  return $false
+}
+
 function Find-XlflowWindowByCaptionToken {
   param(
     [int]$ProcessId,
@@ -386,7 +756,7 @@ function Find-XlflowWindowByCaptionToken {
   $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
   while ([DateTime]::UtcNow -lt $deadline) {
     $window = Find-XlflowWindowByTitle -ProcessId $ProcessId -Title $Token
-    if ($null -ne $window) {
+    if ($null -ne $window -and (Test-XlflowLikelyUserFormWindow -WindowInfo $window)) {
       return $window
     }
     Start-Sleep -Milliseconds $PollMilliseconds
@@ -403,17 +773,36 @@ function Resolve-XlflowFormImageCaptureWindow {
 
   if ($null -ne $CaptureStatus -and [int64]$CaptureStatus.hwnd -ne 0) {
     $window = Get-XlflowWindowCaptureInfo -Hwnd ([System.IntPtr]([int64]$CaptureStatus.hwnd))
-    if ($null -ne $window) {
+    if ($null -ne $window -and (Test-XlflowLikelyUserFormWindow -WindowInfo $window)) {
+      $stableWindow = Wait-XlflowStableWindowCaptureInfo -Hwnd ([System.IntPtr]([int64]$CaptureStatus.hwnd))
+      if ($null -ne $stableWindow -and (Test-XlflowLikelyUserFormWindow -WindowInfo $stableWindow)) {
+        return $stableWindow
+      }
       return $window
     }
   }
   if ($null -ne $CaptureStatus -and -not [string]::IsNullOrWhiteSpace([string]$CaptureStatus.caption)) {
     $window = Find-XlflowWindowByTitle -ProcessId $ProcessId -Title ([string]$CaptureStatus.caption) -ExactMatch
-    if ($null -ne $window) {
+    if ($null -ne $window -and (Test-XlflowLikelyUserFormWindow -WindowInfo $window)) {
+      $stableWindow = Wait-XlflowStableWindowCaptureInfo -Hwnd ([System.IntPtr]([int64]$window.hwnd))
+      if ($null -ne $stableWindow -and (Test-XlflowLikelyUserFormWindow -WindowInfo $stableWindow)) {
+        return $stableWindow
+      }
       return $window
     }
   }
-  return Find-XlflowWindowByCaptionToken -ProcessId $ProcessId -Token $Token -TimeoutMilliseconds 1 -PollMilliseconds 1
+  $window = Find-XlflowWindowByCaptionToken -ProcessId $ProcessId -Token $Token -TimeoutMilliseconds 1 -PollMilliseconds 1
+  if ($null -eq $window) {
+    return $null
+  }
+  $stableWindow = Wait-XlflowStableWindowCaptureInfo -Hwnd ([System.IntPtr]([int64]$window.hwnd))
+  if ($null -ne $stableWindow -and (Test-XlflowLikelyUserFormWindow -WindowInfo $stableWindow)) {
+    return $stableWindow
+  }
+  if (Test-XlflowLikelyUserFormWindow -WindowInfo $window) {
+    return $window
+  }
+  return $null
 }
 
 function Wait-XlflowFormImageCaptureWindow {
@@ -504,26 +893,52 @@ function Save-XlflowWindowImage {
   if ($width -le 0 -or $height -le 0) {
     throw "image_capture_failed: target window has non-positive bounds"
   }
+  $captureScale = Get-XlflowWindowCaptureScale -Hwnd $Hwnd
+  $paddingRight = 0
+  $paddingBottom = 0
+  $captureWidth = [int][Math]::Ceiling(($width * $captureScale) + $paddingRight)
+  $captureHeight = [int][Math]::Ceiling(($height * $captureScale) + $paddingBottom)
 
   $bitmap = $null
   $graphics = $null
   $hdc = [IntPtr]::Zero
   try {
-    $bitmap = New-Object System.Drawing.Bitmap($width, $height)
+    $bitmap = New-Object System.Drawing.Bitmap($captureWidth, $captureHeight)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $hdc = $graphics.GetHdc()
-    $printOk = [XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 0)
-    $graphics.ReleaseHdc($hdc)
-    $hdc = [IntPtr]::Zero
-
-    if (-not $printOk) {
-      $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($width, $height)))
+    $graphics.Clear([System.Drawing.Color]::White)
+    $printOk = $false
+    try {
+      $hdc = $graphics.GetHdc()
+      $printOk = [XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 2)
+      if (-not $printOk) {
+        $printOk = [XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 0)
+      }
+      $graphics.ReleaseHdc($hdc)
+      $hdc = [IntPtr]::Zero
+    } catch {
+      Write-Verbose ("PrintWindow failed; falling back to CopyFromScreen: " + $_.Exception.Message)
     }
 
+    if (-not $printOk) {
+      $screenCopyOk = $false
+    try {
+      $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($captureWidth, $captureHeight)))
+        $screenCopyOk = $true
+      } catch {
+        Write-Verbose ("CopyFromScreen fallback failed after PrintWindow: " + $_.Exception.Message)
+      }
+
+      if (-not $screenCopyOk) {
+        throw "image_capture_failed: failed to capture the target window"
+      }
+    }
+
+    $bitmap = Trim-XlflowBitmapBlackEdges -Bitmap $bitmap
     $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     return [ordered]@{
-      width_px = $width
-      height_px = $height
+      width_px = [int]$bitmap.Width
+      height_px = [int]$bitmap.Height
+      scale = $captureScale
     }
   } catch {
     throw "image_capture_failed: " + $_.Exception.Message
@@ -538,6 +953,10 @@ function Save-XlflowWindowImage {
       try { $bitmap.Dispose() } catch { Write-Verbose ("failed to dispose capture bitmap: " + $_.Exception.Message) }
     }
   }
+}
+
+if ($script:XlflowLoadFunctionsOnly) {
+  return
 }
 
 try {
@@ -614,6 +1033,7 @@ try {
   $runtimeWorkbook = $runtimeOpenResult.workbook
   $runtimeWorkbookPath = $runtimeOpenResult.path
   $runtimeVBProject = $runtimeWorkbook.VBProject
+  $sourceDesignerCaption = Get-XlflowFormExportSourceDesignerCaption -Workbook $workbook -TargetFormName $FormName
   $tempModuleName = New-XlflowFormExportImageModuleName
   $phase = "install_helper_module"
   $null = Install-XlflowVBComponentFromCode -VBProject $runtimeVBProject -Name $tempModuleName -Code (New-XlflowFormExportImageModuleCode)
@@ -623,7 +1043,7 @@ try {
   $captureToken = "xlflow-capture-" + [Guid]::NewGuid().ToString("N")
   $phase = "schedule_form_capture"
   $captureResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $runtimeExcel -Workbook $runtimeWorkbook -DialogKind "any_vba" -CaptureDialogs $true -WaitMilliseconds 250 -Invocation {
-    Invoke-XlflowPrepareFormImageCapture -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -Token $captureToken -InitializerName $Initializer
+    Invoke-XlflowPrepareFormImageCapture -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -Token $captureToken -InitializerName $Initializer -ExpectedCaption $sourceDesignerCaption
     Wait-XlflowFormImageCaptureWindow -Excel $runtimeExcel -Workbook $runtimeWorkbook -ProcessId $processId -Token $captureToken -TimeoutMilliseconds 7000 -PollMilliseconds 100
   }
   if ([bool]$captureResult.dialog.found) {
@@ -635,6 +1055,7 @@ try {
   }
   $phase = "find_form_window"
   $window = $captureResult.value.window
+  $window = Move-XlflowWindowIntoCaptureBounds -WindowInfo $window
 
   $phase = "capture_window_image"
   $dimensions = Save-XlflowWindowImage -Hwnd $window.hwnd -Path $exportPath
@@ -652,6 +1073,17 @@ try {
     form = $FormName
     capture_state = "temporary_copy"
     note = "Runtime export used a temporary workbook copy."
+  }
+  if ($null -ne $window) {
+    $result.target.capture_window = [ordered]@{
+      hwnd = $window.hwnd
+      title = $window.title
+      class_name = $window.class_name
+      left = $window.left
+      top = $window.top
+      width = $window.width
+      height = $window.height
+    }
   }
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   $result.forms = [ordered]@{

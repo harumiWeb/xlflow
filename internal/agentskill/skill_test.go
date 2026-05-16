@@ -42,8 +42,10 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"Use `xlflow form build <spec> --session --overwrite --keepalive --json`",
 		"[references/forms.md](references/forms.md)",
 		"Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json`",
+		"Treat it as secondary visual confirmation because the capture path is experimental",
 		"Use `xlflow export-image` when verification depends on rendered appearance",
 		"--gui-compile-errors",
+		"[lint].forbid_interactive_input = false",
 		"xlflow session stop",
 		"XLFLOW_DONE status=success command=pull",
 	} {

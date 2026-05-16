@@ -277,6 +277,8 @@ End Sub
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. JSON findings may include `kind`, `symbol`, and `suggestion`.
 
+Projects that intentionally use interactive GUI entrypoints may set `[lint].forbid_interactive_input = false` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
+
 ## Analysis Rules
 
 - `VBA101`: object variable assignment likely missing `Set`

@@ -646,6 +646,12 @@ public static class XlflowNativeMethods {
   public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
   [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+  [DllImport("user32.dll", SetLastError=true)]
   public static extern IntPtr SendMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
   [DllImport("user32.dll", SetLastError=true)]

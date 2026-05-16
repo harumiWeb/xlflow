@@ -37,6 +37,8 @@ var (
 	publicProcRe      = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
 )
 
+const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project."
+
 func (l Linter) Run() ([]Issue, error) {
 	files, err := l.files()
 	if err != nil {
@@ -179,7 +181,7 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 				Severity:   "warning",
 				File:       boundary.File,
 				Line:       boundary.Line,
-				Message:    boundary.Message + " " + boundary.Suggestion,
+				Message:    boundary.Message + " " + boundary.Suggestion + " " + vb007DisableHint,
 				Kind:       boundary.Kind,
 				Symbol:     boundary.Symbol,
 				Suggestion: boundary.Suggestion,

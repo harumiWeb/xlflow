@@ -896,6 +896,8 @@ forbid_interactive_input = true
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。
 
+対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`forbid_interactive_input = false` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。
+
 ---
 
 ## JSON 出力

@@ -3,6 +3,7 @@ package lint
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -52,14 +53,20 @@ End Sub
 		}
 	}
 	foundBoundaryMetadata := false
+	foundDisableHint := false
 	for _, issue := range issues {
 		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
 			foundBoundaryMetadata = true
-			break
+		}
+		if issue.Code == "VB007" && strings.Contains(issue.Message, "[lint].forbid_interactive_input = false") {
+			foundDisableHint = true
 		}
 	}
 	if !foundBoundaryMetadata {
 		t.Fatalf("expected VB007 to include GUI boundary metadata: %+v", issues)
+	}
+	if !foundDisableHint {
+		t.Fatalf("expected VB007 to explain how to disable interactive-input lint: %+v", issues)
 	}
 }
 

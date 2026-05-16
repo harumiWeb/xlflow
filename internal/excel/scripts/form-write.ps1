@@ -155,6 +155,17 @@ function Get-XlflowBuildFormValue {
   return $null
 }
 
+function Get-XlflowUserFormBuildDimensions {
+  param($FormSpec)
+
+  $width = Get-XlflowBuildFormValue -FormSpec $FormSpec -BuildName "width" -ObservedName "width"
+  $height = Get-XlflowBuildFormValue -FormSpec $FormSpec -BuildName "height" -ObservedName "height"
+  return [pscustomobject][ordered]@{
+    width = $(if ($null -ne $width) { [double]$width } else { $null })
+    height = $(if ($null -ne $height) { [double]$height } else { $null })
+  }
+}
+
 function Get-XlflowControlSpecChildren {
   param(
     $AllControls,
@@ -422,15 +433,14 @@ function Set-XlflowDesignerFormProperties {
   if ($null -ne $caption) {
     $null = Set-XlflowFormProperty -Target $Designer -PropertyName "Caption" -Value ([string]$caption)
   }
-  $width = Get-XlflowBuildFormValue -FormSpec $Spec.form -BuildName "width" -ObservedName "width"
-  if ($null -ne $width) {
-    if (-not (Set-XlflowVBComponentProperty -Component $Component -PropertyName "Width" -Value ([double]$width))) {
+  $dimensions = Get-XlflowUserFormBuildDimensions -FormSpec $Spec.form
+  if ($null -ne $dimensions.width) {
+    if (-not (Set-XlflowVBComponentProperty -Component $Component -PropertyName "Width" -Value ([double]$dimensions.width))) {
       Add-XlflowFormWriteWarning -Code "unsupported_property" -Message "Skipping unsupported property 'Width'."
     }
   }
-  $height = Get-XlflowBuildFormValue -FormSpec $Spec.form -BuildName "height" -ObservedName "height"
-  if ($null -ne $height) {
-    if (-not (Set-XlflowVBComponentProperty -Component $Component -PropertyName "Height" -Value ([double]$height))) {
+  if ($null -ne $dimensions.height) {
+    if (-not (Set-XlflowVBComponentProperty -Component $Component -PropertyName "Height" -Value ([double]$dimensions.height))) {
       Add-XlflowFormWriteWarning -Code "unsupported_property" -Message "Skipping unsupported property 'Height'."
     }
   }
@@ -745,6 +755,10 @@ function Invoke-XlflowFormApply {
     Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
   }
   return $component
+}
+
+if ($script:XlflowLoadFunctionsOnly) {
+  return
 }
 
 try {

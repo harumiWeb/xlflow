@@ -1627,6 +1627,18 @@ func (a *app) runnerCommand() *cobra.Command {
 	return runner
 }
 
+func headlessGUIBoundaryLogs(cfg config.Config) []string {
+	logs := []string{
+		"Headless preflight scans the configured source tree, not the target macro call graph.",
+		"Use xlflow run --interactive if a human can operate Excel dialogs.",
+		"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
+	}
+	if cfg.Lint.ForbidInteractiveInput {
+		logs = append(logs, "If this project is intentionally interactive, set [lint].forbid_interactive_input = false to suppress VB007 warnings; headless preflight still blocks GUI boundaries.")
+	}
+	return logs
+}
+
 func (a *app) runCommand() *cobra.Command {
 	var argLiterals []string
 	var input string
@@ -1679,10 +1691,7 @@ func (a *app) runCommand() *cobra.Command {
 						Phase:   "preflight",
 					})
 					env.GUIBoundaries = boundaries
-					env.Logs = []string{
-						"Use xlflow run --interactive if a human can operate Excel dialogs.",
-						"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
-					}
+					env.Logs = headlessGUIBoundaryLogs(cfg)
 					return a.write(env, output.ExitValidation)
 				}
 			}

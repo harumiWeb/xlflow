@@ -239,6 +239,192 @@ func TestFormWriteScriptCommunicatesWeakDesignerContractFields(t *testing.T) {
 	}
 }
 
+func TestFormWriteScriptUsesSnapshotDimensionsWithoutOffset(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-write.ps1; "+
+			"$cases = [ordered]@{ "+
+			"observedOnly = (Get-XlflowUserFormBuildDimensions -FormSpec ([pscustomobject]@{ observed = [pscustomobject]@{ width = 300; height = 262 } })); "+
+			"buildPreferred = (Get-XlflowUserFormBuildDimensions -FormSpec ([pscustomobject]@{ build = [pscustomobject]@{ width = 301; height = 263 }; observed = [pscustomobject]@{ width = 300; height = 262 } })) "+
+			"}; $cases | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write dimension command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		ObservedOnly struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"observedOnly"`
+		BuildPreferred struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"buildPreferred"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write dimensions: %v\n%s", err, out)
+	}
+	if got.ObservedOnly.Width != 300 || got.ObservedOnly.Height != 262 {
+		t.Fatalf("observed fallback = %+v, want width=300 height=262", got.ObservedOnly)
+	}
+	if got.BuildPreferred.Width != 301 || got.BuildPreferred.Height != 263 {
+		t.Fatalf("build preference = %+v, want width=301 height=263", got.BuildPreferred)
+	}
+}
+
+func TestFormExportImageScriptRepairsGenericRuntimeCaptionFromSourceDesigner(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "form-export-image.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`Private xlflowExpectedCaption As String`,
+		`Optional ByVal expectedCaption As String = ""`,
+		`xlflowExpectedCaption = Trim$(expectedCaption)`,
+		`If Len(xlflowExpectedCaption) > 0 Then`,
+		`Or LCase$(Left$(caption, 8)) = "userform" Then`,
+		`function Get-XlflowFormExportSourceDesignerCaption`,
+		`return [string]$component.Designer.Caption`,
+		`-ExpectedCaption $sourceDesignerCaption`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected runtime caption repair %q in form-export-image.ps1:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptKeepsVisibleWindowOnContainingScreen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"$window = [pscustomobject]@{ left = -1500; top = 120; width = 400; height = 300 }; "+
+			"$areas = @([pscustomobject]@{ left = -1920; top = 0; right = 0; bottom = 1080; width = 1920; height = 1080 }, [pscustomobject]@{ left = 0; top = 0; right = 1920; bottom = 1080; width = 1920; height = 1080 }); "+
+			"$area = Get-XlflowBestWorkingAreaForWindowInfo -WindowInfo $window -WorkingAreas $areas; "+
+			"$plan = Get-XlflowWindowCaptureRepositionPlan -WindowInfo $window -WorkArea $area -Margin 16; "+
+			"[pscustomobject]@{ area = $area; plan = $plan } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image containing-screen command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Area struct {
+			Left int `json:"left"`
+		} `json:"area"`
+		Plan struct {
+			Left  int  `json:"left"`
+			Top   int  `json:"top"`
+			Moved bool `json:"moved"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse containing-screen output: %v\n%s", err, out)
+	}
+	if got.Area.Left != -1920 {
+		t.Fatalf("best work area = %+v, want left=-1920", got.Area)
+	}
+	if got.Plan.Moved || got.Plan.Left != -1500 || got.Plan.Top != 120 {
+		t.Fatalf("reposition plan = %+v, want unchanged visible window", got.Plan)
+	}
+}
+
+func TestFormExportImageScriptRepositionsOnlyWithinContainingScreen(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"$window = [pscustomobject]@{ left = -1918; top = -12; width = 400; height = 300 }; "+
+			"$areas = @([pscustomobject]@{ left = -1920; top = 0; right = 0; bottom = 1080; width = 1920; height = 1080 }, [pscustomobject]@{ left = 0; top = 0; right = 1920; bottom = 1080; width = 1920; height = 1080 }); "+
+			"$area = Get-XlflowBestWorkingAreaForWindowInfo -WindowInfo $window -WorkingAreas $areas; "+
+			"Get-XlflowWindowCaptureRepositionPlan -WindowInfo $window -WorkArea $area -Margin 16 | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image reposition command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Left  int  `json:"left"`
+		Top   int  `json:"top"`
+		Moved bool `json:"moved"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse reposition output: %v\n%s", err, out)
+	}
+	if !got.Moved || got.Left != -1904 || got.Top != 16 {
+		t.Fatalf("reposition plan = %+v, want left=-1904 top=16 moved=true", got)
+	}
+	if got.Left >= 0 {
+		t.Fatalf("window should stay on the negative-coordinate monitor, got %+v", got)
+	}
+}
+
+func TestFormExportImageScriptClampsCaptureScaleFromDPI(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"[ordered]@{ low = (Get-XlflowClampedCaptureScale -Dpi 72); normal = (Get-XlflowClampedCaptureScale -Dpi 96); scaled = (Get-XlflowClampedCaptureScale -Dpi 144); capped = (Get-XlflowClampedCaptureScale -Dpi 600) } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image dpi scale command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Low    float64 `json:"low"`
+		Normal float64 `json:"normal"`
+		Scaled float64 `json:"scaled"`
+		Capped float64 `json:"capped"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse dpi scale output: %v\n%s", err, out)
+	}
+	if got.Low != 1.0 || got.Normal != 1.0 || got.Scaled != 1.5 || got.Capped != 4.0 {
+		t.Fatalf("unexpected capture scales: %+v", got)
+	}
+}
+
+func TestFormExportImageScriptTrimsBlackEdgesAfterCapture(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$script:XlflowLoadFunctionsOnly = $true; . ./form-export-image.ps1; "+
+			"Add-Type -AssemblyName System.Drawing; "+
+			"$bitmap = New-Object System.Drawing.Bitmap(64, 64); "+
+			"for ($x = 0; $x -lt 64; $x++) { for ($y = 0; $y -lt 64; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::Black) } }; "+
+			"for ($x = 10; $x -lt 54; $x++) { for ($y = 10; $y -lt 54; $y++) { $bitmap.SetPixel($x, $y, [System.Drawing.Color]::White) } }; "+
+			"$trimmed = Trim-XlflowBitmapBlackEdges -Bitmap $bitmap; "+
+			"[pscustomobject]@{ width = $trimmed.Width; height = $trimmed.Height } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-export-image trim command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse trim output: %v\n%s", err, out)
+	}
+	if got.Width != 44 || got.Height != 44 {
+		t.Fatalf("trimmed size = %+v, want 44x44", got)
+	}
+}
+
 func TestFormWriteScriptOverwritePathBacksUpAndRestoresOnFailure(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(".", "form-write.ps1"))
 	if err != nil {
@@ -458,6 +644,15 @@ func TestFormExportImageScriptWaitsForCaptureStatusBeforeFallback(t *testing.T) 
 	want := "if (-not [bool]$captureStatus.ready -and [int64]$captureStatus.hwnd -eq 0 -and [string]::IsNullOrWhiteSpace([string]$captureStatus.caption))"
 	if !strings.Contains(text, want) {
 		t.Fatalf("form-export-image.ps1 missing empty-status wait guard %q:\n%s", want, text)
+	}
+	for _, want := range []string{
+		"function Wait-XlflowStableWindowCaptureInfo",
+		"$stableCount -ge $StableSamples",
+		"Wait-XlflowStableWindowCaptureInfo -Hwnd",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing stable-window guard %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -1320,8 +1515,11 @@ func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) 
 		"XlflowFindFormWindowHandle",
 		"Resolve-XlflowFormImageCaptureWindow",
 		"Wait-XlflowFormImageCaptureWindow",
+		"Wait-XlflowStableWindowCaptureInfo",
 		"[XlflowNativeMethods]::PrintWindow",
 		"CopyFromScreen",
+		"$paddingRight = 0",
+		"$paddingBottom = 0",
 		"runtime_form_loads_initialize",
 		"runtime_form_temp_copy",
 		"userform_image_export_experimental",
@@ -1329,6 +1527,71 @@ func TestFormExportImageScriptUsesTemporaryHelperAndWindowCapture(t *testing.T) 
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptPrefersPrintWindowBeforeScreenFallback(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	copyIndex := strings.Index(text, "$graphics.CopyFromScreen")
+	printIndex := strings.Index(text, "[XlflowNativeMethods]::PrintWindow")
+	if copyIndex == -1 || printIndex == -1 {
+		t.Fatalf("expected both CopyFromScreen and PrintWindow in form-export-image.ps1:\n%s", text)
+	}
+	if printIndex > copyIndex {
+		t.Fatalf("expected PrintWindow to be attempted before CopyFromScreen fallback:\n%s", text)
+	}
+	for _, want := range []string{
+		`$printOk = $false`,
+		`[XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 2)`,
+		`if (-not $printOk) {`,
+		`$printOk = [XlflowNativeMethods]::PrintWindow([IntPtr]$Hwnd, $hdc, 0)`,
+		`PrintWindow failed; falling back to CopyFromScreen`,
+		`CopyFromScreen fallback failed after PrintWindow`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptRejectsXLMAINWindowFallback(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Test-XlflowLikelyUserFormWindow`,
+		`[string]::Equals($className, "XLMAIN", [System.StringComparison]::OrdinalIgnoreCase)`,
+		`$className -match "(?i)^Thunder"`,
+		`Test-XlflowLikelyUserFormWindow -WindowInfo $window`,
+		`Test-XlflowLikelyUserFormWindow -WindowInfo $stableWindow`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing XLMAIN guard %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFormExportImageScriptReportsChosenCaptureWindowMetadata(t *testing.T) {
+	data, err := os.ReadFile("form-export-image.ps1")
+	if err != nil {
+		t.Fatalf("failed to read form-export-image.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$result.target.capture_window = [ordered]@{`,
+		`class_name = $window.class_name`,
+		`width = $window.width`,
+		`height = $window.height`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("form-export-image.ps1 missing capture-window metadata %q:\n%s", want, text)
 		}
 	}
 }
