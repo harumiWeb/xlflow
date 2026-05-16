@@ -70,7 +70,7 @@ Public Sub InstallLaunchButton(ByVal wb As Workbook)
   End If
 
   With launchShape
-    .OnAction = "'" & wb.Name & "'!Ui.RunFromButton"
+    .OnAction = "'" & Replace$(wb.Name, "'", "''") & "'!Ui.RunFromButton"
     .TextFrame.Characters.Text = "カレンダーピッカーを開く"
     .TextFrame.HorizontalAlignment = xlHAlignCenter
     .TextFrame.VerticalAlignment = xlVAlignCenter

@@ -292,6 +292,33 @@ Create or rewrite Designer-backed workbook UserForms from persisted `xlflow.user
 - `--overwrite --no-save` is invalid because Excel requires an intermediate save after removing the old UserForm and before recreating it.
 - Successful `--session --no-save` runs must return normal save-required workbook/session metadata and warnings.
 
+### Function / Type Contracts
+
+- `buildForm(specPath string, opts FormWriteOptions) (FormWriteResult, error)`
+- `applyForm(specPath string, opts FormWriteOptions) (FormWriteResult, error)`
+- `loadFormSpec(specPath string) (FormSpec, SpecInput, error)`
+- `validateFormWritePreflight(command string, cfg Config, formName string) error`
+- `writeWorkbookForm(action string, spec FormSpec, opts FormWriteOptions) (FormWriteResult, error)`
+- `exportUserFormBackup(name string) (UserFormBackup, error)`
+- `restoreUserFormBackup(backup UserFormBackup) error`
+- `createUserFormFromSpec(spec FormSpec) (CreatedUserForm, error)`
+- `applyUserFormSpec(spec FormSpec) (UpdatedUserForm, error)`
+
+### Type Notes
+
+- `FormWriteOptions` contains `overwrite`, `session`, `noSave`, `keepalive`, and `keepaliveInterval`.
+- `FormWriteResult` contains top-level `target`, `session`, optional `warnings` / `hints`, and `forms`.
+- `forms` contains `name`, `basis`, `action`, `control_count`, `spec_path`, optional `caption`, optional `coordinate_system`, and `overwrite`.
+- `UserFormBackup` identifies the temporary exported artifact path and original form name used for overwrite restore.
+- `CreatedUserForm` / `UpdatedUserForm` identify the target form name plus any exported artifact sync metadata needed for result rendering.
+
+### Error Contract
+
+- `buildForm` returns `form_build_args_invalid` for option contract violations such as `--no-save` without `--session` and `--overwrite --no-save`.
+- `applyForm` returns `form_apply_args_invalid` for apply-specific argument validation failures.
+- Spec decode failures return `spec_parse_failed`, top-level schema failures return `spec_schema_invalid`, and structural validation failures return `spec_validation_failed`.
+- Workbook write flows can return `form_already_exists`, `form_not_found`, `unsupported_form_control`, and `designer_write_failed`.
+
 ### Output
 
 - Success uses top-level `target`, `session`, optional `warnings` / `hints`, and `forms`.

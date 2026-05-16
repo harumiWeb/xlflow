@@ -80,3 +80,26 @@ func TestValidateUserFormArtifactsAgainstSpecsRejectsSpecFilenameMismatch(t *tes
 		t.Fatalf("unexpected issue: %+v", issues[0])
 	}
 }
+
+func TestValidateUserFormArtifactsAgainstSpecsMatchesCaseInsensitively(t *testing.T) {
+	formsDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(formsDir, "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: RegistrationForm\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "specs", "RegistrationForm.yaml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frm := "VERSION 5.00\nBegin {GUID} registrationform\nEnd\nAttribute VB_Name = \"registrationform\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "registrationform.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := ValidateUserFormArtifactsAgainstSpecs(formsDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want no case-only mismatch", issues)
+	}
+}

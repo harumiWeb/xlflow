@@ -2083,10 +2083,14 @@ function Get-XlflowUserFormDesignerCaption {
 function Normalize-XlflowUserFormArtifactFile {
   param(
     [string]$Path,
-    [string]$Caption
+    [AllowNull()]
+    $Caption
   )
 
   if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+  if ($null -eq $Caption) {
     return
   }
   if ([System.IO.Path]::GetExtension($Path) -ine ".frm") {

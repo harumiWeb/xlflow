@@ -63,7 +63,7 @@ func TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen(t *testing.
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -Overwrite true -NoSave true -UseSession true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -FormsDir 'C:\\forms' -Overwrite true -NoSave true -UseSession true -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -84,6 +84,38 @@ func TestFormWriteScriptRejectsOverwriteWithNoSaveBeforeWorkbookOpen(t *testing.
 		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
 	}
 	if !strings.Contains(got.Error.Message, "--overwrite cannot be combined with --NoSave") {
+		t.Fatalf("unexpected validation message: %+v", got)
+	}
+}
+
+func TestFormWriteScriptRequiresFormsDirBeforeWorkbookOpen(t *testing.T) {
+	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
+	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		"$r = ./form-write.ps1 -Action build -SpecJson64 '"+specJSON64+"' -WorkbookPath 'C:\\missing.xlsm' | ConvertFrom-Json; $r | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("form-write FormsDir validation command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse form-write output: %v\n%s", err, out)
+	}
+	if got.Status != "failed" || got.Error == nil || got.Error.Code != "form_build_args_invalid" {
+		t.Fatalf("expected form_build_args_invalid failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error.Message, "FormsDir is required.") {
 		t.Fatalf("unexpected validation message: %+v", got)
 	}
 }
@@ -117,11 +149,44 @@ func TestFormWriteScriptUsesDesignerApiAndSessionSaveWarnings(t *testing.T) {
 		"save_required",
 		"userform_review_commands",
 		"synchronized UserForm source artifacts for",
+		"FormsDir is required.",
+		"Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource",
+		"[void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)",
 		"--NoSave requires --UseSession",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("form-write.ps1 missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestNormalizeXlflowUserFormArtifactFileSkipsUnreadableCaption(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.frm')
+try {
+  $before = @('VERSION 5.00','Begin {GUID} RegistrationForm','   Caption         =   "KeepMe"','   ClientHeight    =   3036','End','Attribute VB_Name = "RegistrationForm"') -join [Environment]::NewLine
+  Set-XlflowUtf8Text -Path $tmp -Text $before
+  Normalize-XlflowUserFormArtifactFile -Path $tmp -Caption $null
+  Get-XlflowUtf8Text -Path $tmp
+} finally {
+  if (Test-Path -LiteralPath $tmp) {
+    Remove-Item -LiteralPath $tmp -Force
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Normalize-XlflowUserFormArtifactFile null caption failed: %v\n%s", err, out)
+	}
+	got := strings.ReplaceAll(string(out), "\r\n", "\n")
+	if !strings.Contains(got, `Caption         =   "KeepMe"`) {
+		t.Fatalf("expected caption to remain unchanged, got %q", got)
 	}
 }
 

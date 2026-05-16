@@ -99,7 +99,7 @@ func ValidateUserFormArtifactsAgainstSpecs(formsDir string, targetForms map[stri
 			})
 		}
 
-		matches := frmIndex[formName]
+		matches := frmIndex[strings.ToLower(formName)]
 		if len(matches) == 0 {
 			issues = append(issues, UserFormArtifactIssue{
 				FormName:   formName,
@@ -167,7 +167,7 @@ func collectUserFormArtifacts(formsDir string) (map[string][]string, error) {
 		if !strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
 			return nil
 		}
-		name := strings.TrimSpace(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))
+		name := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))))
 		if name == "" {
 			return nil
 		}

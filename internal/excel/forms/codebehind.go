@@ -33,7 +33,7 @@ func (i UserFormCodeSourceIssue) LintIssue(formsDir string) lint.Issue {
 	relPath := i.Path
 	if strings.TrimSpace(formsDir) != "" {
 		if rel, err := filepath.Rel(formsDir, i.Path); err == nil {
-			relPath = filepath.ToSlash(filepath.Join("src/forms/code", rel))
+			relPath = filepath.ToSlash(filepath.Join("src/forms", rel))
 		} else {
 			relPath = filepath.ToSlash(i.Path)
 		}

@@ -148,7 +148,7 @@ func ResolveSnapshotOutput(root, outPath string) (SnapshotOutput, error) {
 	if trimmed == "" {
 		return SnapshotOutput{}, fmt.Errorf("--out is required")
 	}
-	resolved := trimmed
+	resolved := normalizeCLIPath(trimmed)
 	if !filepath.IsAbs(resolved) {
 		resolved = filepath.Join(root, resolved)
 	}
@@ -199,7 +199,7 @@ func ResolveSpecInput(root, specPath string) (SpecInput, error) {
 	if trimmed == "" {
 		return SpecInput{}, fmt.Errorf("spec path is required")
 	}
-	resolved := trimmed
+	resolved := normalizeCLIPath(trimmed)
 	if !filepath.IsAbs(resolved) {
 		resolved = filepath.Join(root, resolved)
 	}
@@ -223,6 +223,10 @@ func ResolveSpecInput(root, specPath string) (SpecInput, error) {
 		DisplayPath: filepath.ToSlash(relPath(root, resolved)),
 		Format:      format,
 	}, nil
+}
+
+func normalizeCLIPath(path string) string {
+	return strings.ReplaceAll(path, `\`, string(filepath.Separator))
 }
 
 func LoadFormSpec(input SpecInput) (FormSpec, error) {

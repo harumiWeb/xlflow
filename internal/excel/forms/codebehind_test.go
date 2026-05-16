@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/lint"
 )
 
 func TestExtractUserFormCodeFromFRM(t *testing.T) {
@@ -101,5 +103,17 @@ func TestValidateUserFormCodeSidecarsRejectsAttributeHeaders(t *testing.T) {
 	}
 	if issues[0].FormName != "CustomerForm" || issues[0].Line != 1 {
 		t.Fatalf("unexpected issue = %#v", issues[0])
+	}
+}
+
+func TestUserFormCodeSourceIssueLintPathDoesNotDuplicateCodeSegment(t *testing.T) {
+	root := t.TempDir()
+	issue := UserFormCodeSourceIssue{
+		Path: filepath.Join(root, "src", "forms", "code", "CustomerForm.bas"),
+	}
+	got := issue.LintIssue(filepath.Join(root, "src", "forms"))
+	want := lint.Issue{File: "src/forms/code/CustomerForm.bas"}
+	if got.File != want.File {
+		t.Fatalf("lint file = %q, want %q", got.File, want.File)
 	}
 }

@@ -735,7 +735,9 @@ function Invoke-XlflowFormBuild {
 function Invoke-XlflowFormApply {
   param(
     $VBProject,
-    $Spec
+    $Spec,
+    [string]$FormsDir,
+    [string]$CodeSource = "frm"
   )
 
   $formName = [string]$Spec.form.name
@@ -753,6 +755,9 @@ function Invoke-XlflowFormApply {
   $allControls = @($Spec.controls | Where-Object { $null -ne $_ })
   foreach ($controlSpec in @(Get-XlflowRootControlSpecs -Spec $Spec)) {
     Add-XlflowDesignerControl -Parent $designer -ControlSpec $controlSpec -AllControls $allControls
+  }
+  if (Use-XlflowUserFormCodeSidecar -CodeSource $CodeSource) {
+    [void](Sync-XlflowUserFormCodeBehind -Component $component -FormsDir $FormsDir)
   }
   return $component
 }
@@ -777,6 +782,12 @@ try {
   }
   if ([string]::IsNullOrWhiteSpace($SpecJson64)) {
     Set-FormWriteValidationError -Code (Get-XlflowFormWriteArgsCode -CurrentAction $normalizedAction) -Message "SpecJson64 is required."
+    $jsonWritten = $true
+    Write-XlflowJson -Result $result
+    exit
+  }
+  if ([string]::IsNullOrWhiteSpace($FormsDir)) {
+    Set-FormWriteValidationError -Code (Get-XlflowFormWriteArgsCode -CurrentAction $normalizedAction) -Message "FormsDir is required."
     $jsonWritten = $true
     Write-XlflowJson -Result $result
     exit
@@ -809,7 +820,7 @@ try {
   if ($normalizedAction -eq "build") {
     $builtComponent = Invoke-XlflowFormBuild -VBProject $workbook.VBProject -Workbook $workbook -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource -AllowOverwrite (ConvertTo-XlflowBool $Overwrite) -CanCheckpointSave (-not (ConvertTo-XlflowBool $NoSave))
   } else {
-    $builtComponent = Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec
+    $builtComponent = Invoke-XlflowFormApply -VBProject $workbook.VBProject -Spec $spec -FormsDir $FormsDir -CodeSource $CodeSource
   }
 
   $phase = "save_workbook"

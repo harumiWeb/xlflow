@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -452,13 +453,8 @@ func (a *app) formBuildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runUserFormCodeSourcePreflight("form build", cfg, map[string]bool{opts.Spec.Form.Name: true}); err != nil {
+			if err := a.runFormWritePreflight("form build", cfg, opts); err != nil {
 				return err
-			}
-			if cfg.UserForm.CodeSource == "sidecar" {
-				if err := a.runSourcePreflight("form build", cfg, "building workbook forms", nil, buildUserFormSourcePathFilter(a.cwd, cfg, map[string]bool{opts.Spec.Form.Name: true})); err != nil {
-					return err
-				}
 			}
 			var env output.Envelope
 			var code int
@@ -508,6 +504,9 @@ func (a *app) formApplyCommand() *cobra.Command {
 			}
 			cfg, err := a.loadConfig("form apply")
 			if err != nil {
+				return err
+			}
+			if err := a.runFormWritePreflight("form apply", cfg, opts); err != nil {
 				return err
 			}
 			var env output.Envelope
@@ -2696,7 +2695,9 @@ func (a *app) inspectSessionStatus(cfg config.Config) (map[string]any, bool) {
 	if strings.TrimSpace(exe) == "" || !strings.EqualFold(filepath.Ext(exe), ".exe") {
 		return nil, false
 	}
-	cmd := exec.Command(exe, "--json", "session", "status")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "--json", "session", "status")
 	cmd.Dir = a.cwd
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -3288,6 +3289,19 @@ func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, ta
 	env.Issues = rendered
 	env.Logs = []string{"blocked before Excel automation because spec-driven UserForm artifacts are missing or inconsistent with src/forms/specs"}
 	return a.write(env, output.ExitValidation)
+}
+
+func (a *app) runFormWritePreflight(command string, cfg config.Config, opts formWriteCommandOptions) error {
+	targetForms := map[string]bool{opts.Spec.Form.Name: true}
+	if err := a.runUserFormCodeSourcePreflight(command, cfg, targetForms); err != nil {
+		return err
+	}
+	if cfg.UserForm.CodeSource == "sidecar" {
+		if err := a.runSourcePreflight(command, cfg, "writing workbook forms", nil, buildUserFormSourcePathFilter(a.cwd, cfg, targetForms)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ignoredRunPreflightAnalysisCodes(opts excel.RunOptions) map[string]bool {

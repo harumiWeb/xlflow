@@ -16,6 +16,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
@@ -1831,6 +1832,63 @@ code_source = "sidecar"
 	}
 	if !strings.Contains(got.Issues[0].Suggestion, "Attribute VB_*") {
 		t.Fatalf("unexpected suggestion: %+v", got.Issues[0])
+	}
+}
+
+func TestFormApplySidecarModeRunsPreflightBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[userform]
+code_source = "sidecar"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	specBody := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols: []\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := formWriteCommandOptions{
+		Action: "apply",
+		Spec: forms.FormSpec{
+			Form: forms.FormSpecForm{Name: "UserForm1"},
+		},
+	}
+	if err := a.runFormWritePreflight("form apply", cfg, opts); err != nil {
+		t.Fatalf("runFormWritePreflight() error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	rewritten, err := os.ReadFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rewritten), `version = "sidecar"`) || strings.Contains(string(rewritten), `version = "frm"`) {
+		t.Fatalf("frm artifact was not synchronized from sidecar:\n%s", string(rewritten))
 	}
 }
 
