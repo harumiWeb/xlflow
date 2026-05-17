@@ -116,137 +116,135 @@ xlflow のような Go CLI プロジェクトでは、ルート直下に VitePre
 まずはこれくらいで十分です。
 
 ```ts
-import { defineConfig } from 'vitepress'
+import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  lang: 'en-US',
-  title: 'xlflow',
-  description: 'AI-Agent-ready CLI framework for Excel VBA development',
+  lang: "en-US",
+  title: "xlflow",
+  description: "AI-Agent-ready CLI framework for Excel VBA development",
 
   // GitHub Pages で https://harumiweb.github.io/xlflow/ に置くなら必要
-  base: '/xlflow/',
+  base: "/xlflow/",
 
   cleanUrls: true,
   lastUpdated: true,
 
   head: [
-    ['link', { rel: 'icon', href: '/xlflow/favicon.ico' }],
-    ['meta', { name: 'theme-color', content: '#2E7D32' }]
+    ["link", { rel: "icon", href: "/xlflow/favicon.ico" }],
+    ["meta", { name: "theme-color", content: "#2E7D32" }],
   ],
 
   themeConfig: {
-    logo: '/logo.svg',
+    logo: "/logo.svg",
 
     nav: [
-      { text: 'Guide', link: '/getting-started' },
-      { text: 'Commands', link: '/commands/' },
-      { text: 'AI Agents', link: '/ai-agents/' },
-      { text: 'Demos', link: '/demos/' },
-      { text: 'Reference', link: '/reference/json-output' }
+      { text: "Guide", link: "/getting-started" },
+      { text: "Commands", link: "/commands/" },
+      { text: "AI Agents", link: "/ai-agents/" },
+      { text: "Demos", link: "/demos/" },
+      { text: "Reference", link: "/reference/json-output" },
     ],
 
     sidebar: {
-      '/commands/': [
+      "/commands/": [
         {
-          text: 'Commands',
+          text: "Commands",
           items: [
-            { text: 'Overview', link: '/commands/' },
-            { text: 'new', link: '/commands/new' },
-            { text: 'init', link: '/commands/init' },
-            { text: 'doctor', link: '/commands/doctor' },
-            { text: 'attach', link: '/commands/attach' },
-            { text: 'pull', link: '/commands/pull' },
-            { text: 'push', link: '/commands/push' },
-            { text: 'session', link: '/commands/session' },
-            { text: 'save', link: '/commands/save' },
-            { text: 'run', link: '/commands/run' },
-            { text: 'lint', link: '/commands/lint' },
-            { text: 'inspect', link: '/commands/inspect' },
-            { text: 'export-image', link: '/commands/export-image' },
-            { text: 'ui', link: '/commands/ui' },
-            { text: 'forms', link: '/commands/forms' }
-          ]
-        }
+            { text: "Overview", link: "/commands/" },
+            { text: "new", link: "/commands/new" },
+            { text: "init", link: "/commands/init" },
+            { text: "doctor", link: "/commands/doctor" },
+            { text: "attach", link: "/commands/attach" },
+            { text: "pull", link: "/commands/pull" },
+            { text: "push", link: "/commands/push" },
+            { text: "session", link: "/commands/session" },
+            { text: "save", link: "/commands/save" },
+            { text: "run", link: "/commands/run" },
+            { text: "lint", link: "/commands/lint" },
+            { text: "inspect", link: "/commands/inspect" },
+            { text: "export-image", link: "/commands/export-image" },
+            { text: "ui", link: "/commands/ui" },
+            { text: "forms", link: "/commands/forms" },
+          ],
+        },
       ],
 
-      '/guides/': [
+      "/guides/": [
         {
-          text: 'Guides',
+          text: "Guides",
           items: [
-            { text: 'AI Agent First Project', link: '/guides/ai-agent-first-project' },
-            { text: 'Weather App', link: '/guides/build-weather-app' },
-            { text: 'News App', link: '/guides/build-news-app' },
-            { text: 'QR Generator', link: '/guides/build-qr-generator' },
-            { text: 'UserForm Game', link: '/guides/build-userform-game' },
-            { text: 'Troubleshooting VBA Errors', link: '/guides/error-handling' }
-          ]
-        }
+            { text: "AI Agent First Project", link: "/guides/ai-agent-first-project" },
+            { text: "Weather App", link: "/guides/build-weather-app" },
+            { text: "News App", link: "/guides/build-news-app" },
+            { text: "QR Generator", link: "/guides/build-qr-generator" },
+            { text: "UserForm Game", link: "/guides/build-userform-game" },
+            { text: "Troubleshooting VBA Errors", link: "/guides/error-handling" },
+          ],
+        },
       ],
 
-      '/reference/': [
+      "/reference/": [
         {
-          text: 'Reference',
+          text: "Reference",
           items: [
-            { text: 'JSON Output', link: '/reference/json-output' },
-            { text: 'Project Structure', link: '/reference/project-structure' },
-            { text: 'Config File', link: '/reference/config-file' },
-            { text: 'Exit Codes', link: '/reference/exit-codes' },
-            { text: 'Error Codes', link: '/reference/error-codes' },
-            { text: 'Environment Variables', link: '/reference/environment-variables' },
-            { text: 'Troubleshooting', link: '/reference/troubleshooting' }
-          ]
-        }
+            { text: "JSON Output", link: "/reference/json-output" },
+            { text: "Project Structure", link: "/reference/project-structure" },
+            { text: "Config File", link: "/reference/config-file" },
+            { text: "Exit Codes", link: "/reference/exit-codes" },
+            { text: "Error Codes", link: "/reference/error-codes" },
+            { text: "Environment Variables", link: "/reference/environment-variables" },
+            { text: "Troubleshooting", link: "/reference/troubleshooting" },
+          ],
+        },
       ],
 
-      '/ai-agents/': [
+      "/ai-agents/": [
         {
-          text: 'AI Agents',
+          text: "AI Agents",
           items: [
-            { text: 'Overview', link: '/ai-agents/' },
-            { text: 'Recommended Prompts', link: '/ai-agents/recommended-prompts' },
-            { text: 'Codex', link: '/ai-agents/codex' },
-            { text: 'Claude Code', link: '/ai-agents/claude-code' },
-            { text: 'GitHub Copilot', link: '/ai-agents/github-copilot' },
-            { text: 'Skills', link: '/ai-agents/skills' }
-          ]
-        }
+            { text: "Overview", link: "/ai-agents/" },
+            { text: "Recommended Prompts", link: "/ai-agents/recommended-prompts" },
+            { text: "Codex", link: "/ai-agents/codex" },
+            { text: "Claude Code", link: "/ai-agents/claude-code" },
+            { text: "GitHub Copilot", link: "/ai-agents/github-copilot" },
+            { text: "Skills", link: "/ai-agents/skills" },
+          ],
+        },
       ],
 
-      '/demos/': [
+      "/demos/": [
         {
-          text: 'Demos',
+          text: "Demos",
           items: [
-            { text: 'Overview', link: '/demos/' },
-            { text: 'Weather App', link: '/demos/weather' },
-            { text: 'News API App', link: '/demos/newsapi' },
-            { text: 'Stock Dashboard', link: '/demos/stock-dashboard' },
-            { text: 'QR Code Generator', link: '/demos/qr-code' },
-            { text: 'Tetris', link: '/demos/tetris' },
-            { text: 'Invader Game', link: '/demos/invader-game' }
-          ]
-        }
-      ]
+            { text: "Overview", link: "/demos/" },
+            { text: "Weather App", link: "/demos/weather" },
+            { text: "News API App", link: "/demos/newsapi" },
+            { text: "Stock Dashboard", link: "/demos/stock-dashboard" },
+            { text: "QR Code Generator", link: "/demos/qr-code" },
+            { text: "Tetris", link: "/demos/tetris" },
+            { text: "Invader Game", link: "/demos/invader-game" },
+          ],
+        },
+      ],
     },
 
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/harumiWeb/xlflow' }
-    ],
+    socialLinks: [{ icon: "github", link: "https://github.com/harumiWeb/xlflow" }],
 
     search: {
-      provider: 'local'
+      provider: "local",
     },
 
     editLink: {
-      pattern: 'https://github.com/harumiWeb/xlflow/edit/main/vitepress/:path',
-      text: 'Edit this page on GitHub'
+      pattern: "https://github.com/harumiWeb/xlflow/edit/main/vitepress/:path",
+      text: "Edit this page on GitHub",
     },
 
     footer: {
-      message: 'Released under the BSD-3-Clause License.',
-      copyright: 'Copyright © 2026 harumiWeb'
-    }
-  }
-})
+      message: "Released under the BSD-3-Clause License.",
+      copyright: "Copyright © 2026 harumiWeb",
+    },
+  },
+});
 ```
 
 GitHub Pages で `https://harumiweb.github.io/xlflow/` 配下に公開するなら `base: '/xlflow/'` が重要です。独自ドメインでルート公開するなら `base` は不要、または `'/'` でよいです。
@@ -306,6 +304,7 @@ Import VBA source files from `src/` into the target Excel workbook.
 
 ```bash
 xlflow push [options]
+```
 ````
 
 ## When to use
@@ -349,9 +348,9 @@ xlflow push --session --json
 
 ## Related commands
 
-* [`xlflow pull`](./pull.md)
-* [`xlflow run`](./run.md)
-* [`xlflow session`](./session.md)
+- [`xlflow pull`](./pull.md)
+- [`xlflow run`](./run.md)
+- [`xlflow session`](./session.md)
 
 ````
 
@@ -433,6 +432,7 @@ related:
 
 ```bash
 xlflow new Book.xlsm
+```
 ````
 
 ## Start an Excel session
@@ -501,15 +501,16 @@ xlflow lint --json
 xlflow run Main.Main --json
 xlflow inspect --json
 xlflow save --session --json
+```
 ````
 
 ## Rules for agents
 
-* Prefer `--json`.
-* Run `doctor` before debugging environment issues.
-* Use `session` for iterative development.
-* Use `inspect` to verify workbook state.
-* Avoid file picker dialogs and interactive MsgBox flows.
+- Prefer `--json`.
+- Run `doctor` before debugging environment issues.
+- Use `session` for iterative development.
+- Use `inspect` to verify workbook state.
+- Avoid file picker dialogs and interactive MsgBox flows.
 
 ````
 
@@ -602,10 +603,10 @@ on:
     branches:
       - main
     paths:
-      - 'vitepress/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/vitepress.yml'
+      - "vitepress/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/vitepress.yml"
   workflow_dispatch:
 
 permissions:
@@ -681,6 +682,7 @@ xlflow new Book.xlsm
 xlflow session start
 xlflow push --json
 xlflow run Main.Main --json
+```
 ````
 
 ## Documentation
@@ -690,15 +692,15 @@ Full documentation is available at:
 
 ## Examples
 
-* Weather API App
-* News API App
-* QR Code Generator
-* UserForm Invader Game
+- Weather API App
+- News API App
+- QR Code Generator
+- UserForm Invader Game
 
 ````
 
-README は **広告・入口・最短導線** に寄せる。  
-VitePress は **体系的な仕様・チュートリアル・リファレンス** に寄せる。  
+README は **広告・入口・最短導線** に寄せる。
+VitePress は **体系的な仕様・チュートリアル・リファレンス** に寄せる。
 この分担がよいです。
 
 ---
