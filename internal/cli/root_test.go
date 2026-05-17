@@ -2372,6 +2372,54 @@ func TestPushRejectsLikelyCStyleQuoteEscapesBeforeExcel(t *testing.T) {
 	}
 }
 
+func TestPushRejectsVBAProcedureSyntaxBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\nEnd Function\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestPushRejectsMissingLineContinuationWhitespaceBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  Debug.Print \"hello\"_\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
 func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

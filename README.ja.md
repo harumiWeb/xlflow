@@ -902,6 +902,8 @@ forbid_interactive_input = true
 
 対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`forbid_interactive_input = false` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。
 
+typographic quote、C-style quote escape、閉じられていないまたは対応がずれた procedure、行継続 `_` の空白不足を検出する構文安全 lint は常に有効です。`push` や `run` が Excel を開く前に VBE compile dialog を防ぐためのルールです。
+
 ---
 
 ## JSON 出力

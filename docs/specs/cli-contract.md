@@ -276,8 +276,16 @@ End Sub
 - `VB005`: possible implicit `Variant`
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. JSON findings may include `kind`, `symbol`, and `suggestion`.
+- `VB008`: typographic quote characters that can trigger VBE compile dialogs
+- `VB009`: likely C-style quote escapes in VBA string literals
+- `VB010`: unterminated `Sub`, `Function`, or `Property` procedure
+- `VB011`: unexpected `End Sub`, `End Function`, or `End Property`
+- `VB012`: mismatched procedure end statement
+- `VB013`: missing whitespace before a line-continuation underscore
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].forbid_interactive_input = false` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
+
+Compile-dialog prevention findings `VB008` through `VB013` are always enabled and block source preflight before `push` or `run` opens Excel.
 
 ## Analysis Rules
 

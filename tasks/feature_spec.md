@@ -1,3 +1,19 @@
+# VBA Syntax Lint Spec
+
+## Goal
+
+Catch cheap VBA syntax mistakes before Excel/VBE can surface them as modal compile dialogs.
+
+## Contract
+
+- `xlflow lint` reports always-on `error` findings for malformed `Sub`, `Function`, and `Property Get/Let/Set` procedure boundaries.
+- `VB010` reports an unterminated procedure at the procedure start line.
+- `VB011` reports an unexpected `End Sub`, `End Function`, or `End Property` when no matching procedure is open.
+- `VB012` reports a mismatched procedure end when the open procedure kind differs from the `End ...` kind.
+- `VB013` reports a line-continuation underscore that is not preceded by whitespace.
+- The scanner ignores comments and string literal contents for token detection and underscore checks, and joins valid continued physical lines before procedure boundary detection.
+- These findings are push/run source-preflight blocking issues, matching existing compile-dialog prevention rules.
+
 # xlflow Folder Structure Spec
 
 ## UserForm Phase 1 Warning Spec
