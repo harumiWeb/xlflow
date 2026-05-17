@@ -261,7 +261,7 @@ function Get-XlflowUserFormCodeFiles {
 
 function ConvertTo-XlflowBool {
   param([string]$Value)
-  return $Value -eq "true" -or $Value -eq "True" -or $Value -eq "1"
+  return (($Value -eq "true") -or ($Value -eq "True") -or ($Value -eq "1"))
 }
 
 function Get-XlflowRelativePath {

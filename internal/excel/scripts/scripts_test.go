@@ -28,6 +28,32 @@ func TestPowerShellScriptsParse(t *testing.T) {
 	}
 }
 
+func TestCommonScriptConvertToXlflowBoolHandlesFalseStrings(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; [pscustomobject]@{ falseString = ConvertTo-XlflowBool 'false'; empty = ConvertTo-XlflowBool ''; trueString = ConvertTo-XlflowBool 'true'; one = ConvertTo-XlflowBool '1' } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ConvertTo-XlflowBool command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		FalseString bool `json:"falseString"`
+		Empty       bool `json:"empty"`
+		TrueString  bool `json:"trueString"`
+		One         bool `json:"one"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse ConvertTo-XlflowBool output: %v\n%s", err, out)
+	}
+	if got.FalseString || got.Empty || !got.TrueString || !got.One {
+		t.Fatalf("unexpected ConvertTo-XlflowBool results: %+v", got)
+	}
+}
+
 func TestFormWriteScriptValidatesArgsBeforeWorkbookOpen(t *testing.T) {
 	specJSON := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1"},"controls":[],"warnings":[]}`
 	specJSON64 := base64.StdEncoding.EncodeToString([]byte(specJSON))
@@ -803,6 +829,68 @@ func TestInspectFormScriptUsesTemporaryHelperModuleAndWarnings(t *testing.T) {
 	}
 	if strings.Contains(text, "runtime_inspect_session_dirty") {
 		t.Fatalf("inspect-form.ps1 should no longer report live-session dirty mutation for runtime temp-copy inspection:\n%s", text)
+	}
+}
+
+func TestUserFormRuntimeCleanupNullChecksAreParenthesized(t *testing.T) {
+	cases := []struct {
+		path string
+		want []string
+		bad  []string
+	}{
+		{
+			path: "inspect-form.ps1",
+			want: []string{
+				"if (($null -ne $runtimeWorkbook) -or ($null -ne $runtimeExcel))",
+				"if ((-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath)) -and (Test-Path -LiteralPath $runtimeWorkbookPath))",
+			},
+			bad: []string{
+				"if ($null -ne $runtimeWorkbook -or $null -ne $runtimeExcel)",
+				"if (-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath) -and (Test-Path -LiteralPath $runtimeWorkbookPath))",
+			},
+		},
+		{
+			path: "form-export-image.ps1",
+			want: []string{
+				"if (($null -ne $runtimeWorkbook) -or ($null -ne $runtimeExcel))",
+				"if ((-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath)) -and (Test-Path -LiteralPath $runtimeWorkbookPath))",
+			},
+			bad: []string{
+				"if ($null -ne $runtimeWorkbook -or $null -ne $runtimeExcel)",
+				"if (-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath) -and (Test-Path -LiteralPath $runtimeWorkbookPath))",
+			},
+		},
+	}
+	for _, tc := range cases {
+		data, err := os.ReadFile(filepath.Join(".", tc.path))
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", tc.path, err)
+		}
+		text := string(data)
+		for _, want := range tc.want {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing parenthesized cleanup guard %q", tc.path, want)
+			}
+		}
+		for _, bad := range tc.bad {
+			if strings.Contains(text, bad) {
+				t.Fatalf("%s still contains ambiguous cleanup guard %q", tc.path, bad)
+			}
+		}
+	}
+}
+
+func TestInspectFormStrictDesignerBoolDoesNotReuseStringParameterName(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "inspect-form.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read inspect-form.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "$strictDesignerEnabled = ConvertTo-XlflowBool $StrictDesigner") {
+		t.Fatalf("inspect-form.ps1 should store parsed StrictDesigner flag in a non-parameter variable")
+	}
+	if strings.Contains(text, "$strictDesigner = ConvertTo-XlflowBool $StrictDesigner") {
+		t.Fatalf("inspect-form.ps1 must not assign parsed bool back to the [string] StrictDesigner parameter")
 	}
 }
 

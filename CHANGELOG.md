@@ -2,6 +2,12 @@
 
 All notable changes to xlflow will be documented in this file.
 
+## v0.8.1
+
+- Fixed `xlflow inspect form <name> --designer --session` so normal designer inspection no longer takes the strict temporary-workbook path, reducing the sample `space-invader` session inspection from about one minute to a few seconds.
+- Corrected PowerShell boolean parsing and case-insensitive variable handling around the `StrictDesigner` flag, preventing `"False"` string values from being treated as truthy.
+- Hardened UserForm runtime cleanup guards in `inspect form` and `form export-image` so null runtime workbook state does not trigger unnecessary Excel COM cleanup and finalizer waits.
+
 ## v0.8.0
 
 - Completed the UserForm feature set for issue #25 across phase 1 through phase 7, including explicit UserForm warnings in core workbook flows, `xlflow list forms`, `inspect form` for designer/runtime/both, `form snapshot`, and experimental runtime image export.
