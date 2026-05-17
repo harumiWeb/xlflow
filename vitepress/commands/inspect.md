@@ -5,31 +5,65 @@ Inspect saved workbook state or UserForm state.
 ## Usage
 
 ```bash
-xlflow inspect workbook|sheets|range|used-range|cell|form ...
+xlflow inspect workbook
+xlflow inspect sheets
+xlflow inspect range --sheet <sheet> --address <range>
+xlflow inspect form <name> [--runtime|--designer|--both]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument                 | Description                                               | Default  |
+| --------------------------------- | --------------------------------------------------------- | -------- |
+| `workbook`                        | Return workbook-level metadata.                           | -        |
+| `sheets`                          | List worksheets.                                          | -        |
+| `range`                           | Read a worksheet range.                                   | -        |
+| `used-range`                      | Read a worksheet used range.                              | -        |
+| `cell`                            | Read one cell.                                            | -        |
+| `form <name>`                     | Inspect UserForm state.                                   | -        |
+| `--sheet <name>`                  | Worksheet for sheet-scoped inspection.                    | -        |
+| `--address <range>`               | A1 address for range or cell inspection.                  | -        |
+| `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100      |
+| `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30       |
+| `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | designer |
 
-## Example
+## Examples
 
 ```bash
-xlflow inspect range --sheet Result --address A1:F20 --include-style --json
+xlflow inspect workbook --json
+xlflow inspect range --sheet Result --address A1:F20 --json
+xlflow inspect form CalendarForm --both --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: warning
+Most file-based inspection reads the saved workbook. Use session-aware commands when you need live dirty workbook state.
+:::
 
-## Common failures
+::: important
+Runtime UserForm inspection may execute initializer code on a temporary workbook copy.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "inspect range",
+  "sheet": "Result",
+  "address": "A1:F20",
+  "values": [
+    ["Name", "Amount"],
+    ["A", 42]
+  ]
+}
+```
 
 ## Related
 
+- [export-image](./export-image)
+- [list](./list)
 - [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)

@@ -8,28 +8,47 @@ Initialize an xlflow project from an existing workbook.
 xlflow init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                                   | Default  |
+| -------------------- | --------------------------------------------- | -------- |
+| `workbook`           | Existing workbook to bind to the new project. | required |
+| `--with-skill`       | Install the bundled AI-agent skill.           | false    |
+| `--agent <provider>` | Choose the agent skill provider.              | -        |
+| `--no-update-check`  | Skip the startup update check.                | false    |
 
-## Example
+## Examples
 
 ```bash
-xlflow init Sales.xlsm --with-skill --agent codex
+xlflow init LegacyBook.xlsm
+xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
+:::
 
-## Common failures
+::: tip
+Run `xlflow pull --json` after `init` to create the first source-controlled snapshot.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "init",
+  "workbook": "LegacyBook.xlsm",
+  "config": "xlflow.toml"
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [pull](./pull)
+- [doctor](./doctor)
+- [project structure](../reference/project-structure)

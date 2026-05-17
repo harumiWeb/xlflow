@@ -5,31 +5,55 @@ Manage VBA trace logging support and trace log cleanup.
 ## Usage
 
 ```bash
-xlflow trace enable|disable|status|clean|inject [workbook]
+xlflow trace enable
+xlflow trace status
+xlflow trace disable
+xlflow trace clean
+xlflow trace inject
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                        | Default |
+| ----------------- | -------------------------------------------------- | ------- |
+| `enable`          | Enable trace helper support.                       | -       |
+| `status`          | Report helper and log state.                       | -       |
+| `disable`         | Remove trace helper support when safe.             | -       |
+| `clean`           | Remove trace logs.                                 | -       |
+| `inject`          | Inject helper into the active/session workbook.    | -       |
+| `--session`       | Operate against the managed live session workbook. | false   |
 
-## Example
+## Examples
 
 ```bash
-xlflow trace enable --session --json
+xlflow trace enable --json
+xlflow run Main.Run --trace --json
+xlflow trace clean --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+VBA code can call `XlflowLog` after trace support is available.
+:::
 
-## Common failures
+::: warning
+`trace disable` refuses unsafe removal when the helper appears modified or in use.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "trace status",
+  "trace": { "enabled": true, "log": ".xlflow/trace.log" }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [run](./run)
+- [session](./session)

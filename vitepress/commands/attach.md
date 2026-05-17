@@ -5,31 +5,48 @@ Validate that the active Excel workbook matches the configured workbook.
 ## Usage
 
 ```bash
-xlflow attach --active
+xlflow attach --active [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                     | Default  |
+| ----------------- | ----------------------------------------------- | -------- |
+| `--active`        | Inspect the currently active workbook in Excel. | required |
+| `--keepalive`     | Keep the bridge process alive.                  | false    |
+| `--json`          | Emit a machine-readable match result.           | false    |
 
-## Example
+## Examples
 
 ```bash
+xlflow attach --active
 xlflow attach --active --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+`attach` is a safety check. It does not import source, change workbook state, or create a managed session.
+:::
 
-## Common failures
+::: tip
+Use this before manual Excel work when multiple workbooks are open.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "attach",
+  "active_workbook": "Book.xlsm",
+  "matches_config": true
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [session](./session)
+- [doctor](./doctor)

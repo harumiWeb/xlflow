@@ -8,28 +8,40 @@ Show xlflow build metadata.
 xlflow version [--verbose]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                                   | Default |
+| ----------------- | ------------------------------------------------------------- | ------- |
+| `--verbose`       | Include additional build and runtime metadata when available. | false   |
+| `--json`          | Return machine-readable version metadata.                     | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow version
 xlflow version --verbose --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Include `xlflow version --verbose --json` output in bug reports and CI diagnostics.
+:::
 
-## Common failures
+## JSON Output Example
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "version",
+  "version": "0.1.0",
+  "commit": "abcdef0"
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [installation](../installation)
+- [troubleshooting](../reference/troubleshooting)

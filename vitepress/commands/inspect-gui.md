@@ -8,28 +8,43 @@ Scan source for automation-hostile GUI boundaries without opening Excel.
 xlflow inspect-gui
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                      | Default |
+| ----------------- | ------------------------------------------------ | ------- |
+| `--json`          | Return detected boundaries and source locations. | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow inspect-gui
 xlflow inspect-gui --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Run `inspect-gui` before headless automation to find likely `MsgBox`, `InputBox`, dialog, or UserForm boundaries.
+:::
 
-## Common failures
+::: warning
+This is static analysis. It is intentionally conservative and does not prove a macro is fully headless-safe.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "inspect-gui",
+  "boundaries": [{ "file": "src/modules/Main.bas", "line": 12, "kind": "MsgBox" }]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [lint](./lint)
+- [analyze](./analyze)
+- [run](./run)

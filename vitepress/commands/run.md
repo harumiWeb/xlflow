@@ -8,28 +8,64 @@ Run a workbook macro from the CLI.
 xlflow run [macro] [--arg <type:value>]... [--save|--save-as <path>] [--trace] [--headless|--interactive] [--session]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument      | Description                                                                    | Default             |
+| ---------------------- | ------------------------------------------------------------------------------ | ------------------- |
+| `macro`                | Macro entrypoint such as `Main.Run`. If omitted, config may provide the entry. | config entry        |
+| `--arg <type:value>`   | Pass a typed macro argument. Repeat for multiple arguments.                    | -                   |
+| `--headless`           | Run without showing Excel when possible.                                       | false               |
+| `--interactive`        | Allow visible Excel interaction for dialogs or UserForms.                      | false               |
+| `--session`            | Run in the managed live session workbook.                                      | false               |
+| `--save`               | Save the workbook after running.                                               | false               |
+| `--save-as <path>`     | Save a copy to a different workbook path.                                      | -                   |
+| `--trace`              | Inject or use trace logging around the run.                                    | false               |
+| `--diagnostic`         | Use diagnostic execution with stronger compile-dialog visibility.              | false               |
+| `--direct`             | Run an argument-free macro without temporary harness injection.                | false               |
+| `--fast`               | Use development-oriented fast run defaults.                                    | false               |
+| `--gui-compile-errors` | Let Excel/VBE compile dialogs surface instead of structured diagnostics.       | false               |
+| `--input <path>`       | Override workbook path for this run.                                           | configured workbook |
+| `--timeout <duration>` | Maximum macro runtime before timeout.                                          | 5m0s                |
+| `--keepalive`          | Write periodic progress heartbeat lines to stderr.                             | false               |
 
-## Example
+## Examples
 
 ```bash
-xlflow run Main.Run --headless --session --json
+xlflow macros --json
+xlflow run Main.Run --headless --json
+xlflow run Main.Run --arg string:ABC123 --session --trace --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Discover entrypoints with `xlflow macros --json` before running macros from an agent.
+:::
 
-## Common failures
+::: warning
+Use `--interactive` only when the macro intentionally shows dialogs or UserForms. Headless automation should avoid GUI prompts.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+::: important
+For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
+:::
+
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "run",
+  "macro": "Main.Run",
+  "result": { "message": "completed" },
+  "duration_ms": 1234
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [macros](./macros)
+- [trace](./trace)
+- [test](./test)

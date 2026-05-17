@@ -5,31 +5,50 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <name>] [--session]
+xlflow test [--filter <pattern>] [--session] [--keepalive]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                             | Default |
+| -------------------- | --------------------------------------- | ------- |
+| `--filter <pattern>` | Run only matching test names.           | -       |
+| `--session`          | Run tests in the managed live workbook. | false   |
+| `--keepalive`        | Reuse the bridge process.               | false   |
+| `--json`             | Return structured test results.         | false   |
 
-## Example
+## Examples
 
 ```bash
-xlflow test --filter TestCreateReport --session --json
+xlflow test --json
+xlflow test --filter Smoke --session --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+`test` executes VBA. Use a controlled workbook state before running tests that mutate sheets or files.
+:::
 
-## Common failures
+::: tip
+Keep VBA assertions simple and scalar so failures are easy for agents to parse.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "test",
+  "tests": [{ "name": "TestSmoke", "status": "pass" }],
+  "summary": { "passed": 1, "failed": 0 }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [run](./run)
+- [check](./check)
+- [error handling guide](../guides/error-handling)

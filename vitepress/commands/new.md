@@ -8,28 +8,48 @@ Create a new xlflow project and macro-enabled workbook.
 xlflow new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                                                          | Default   |
+| -------------------- | -------------------------------------------------------------------- | --------- |
+| `workbook`           | Workbook filename or project name. `.xlsm` is appended when omitted. | Book.xlsm |
+| `--with-skill`       | Install the bundled AI-agent skill after scaffolding.                | false     |
+| `--agent <provider>` | Select the target agent skill provider, such as `codex`.             | -         |
+| `--no-update-check`  | Skip the startup update check.                                       | false     |
 
-## Example
+## Examples
 
 ```bash
-xlflow new Book.xlsm --with-skill --agent codex
+xlflow new Sales.xlsm
+xlflow new Sales.xlsm --with-skill --agent codex --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use `--with-skill --agent codex` when the project will be maintained primarily by an AI coding agent.
+:::
 
-## Common failures
+::: warning
+The generated workbook is macro-enabled. Keep the `.xlsm` extension so Excel can preserve VBA components.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "new",
+  "workbook": "Sales.xlsm",
+  "source_root": "src",
+  "created": ["xlflow.toml", "src/modules/Main.bas"]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [init](./init)
+- [doctor](./doctor)
+- [skill](./skill)

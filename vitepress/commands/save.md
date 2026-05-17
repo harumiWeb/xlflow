@@ -5,31 +5,42 @@ Save the workbook held by the managed xlflow session.
 ## Usage
 
 ```bash
-xlflow save [--session]
+xlflow save --session
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                        | Default  |
+| ----------------- | ---------------------------------- | -------- |
+| `--session`       | Save the managed session workbook. | required |
+| `--json`          | Return save status.                | false    |
 
-## Example
+## Examples
 
 ```bash
+xlflow save --session
 xlflow save --session --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+Use this after `push --session --no-save` or `edit --session` when the live workbook should become the persisted workbook.
+:::
 
-## Common failures
+## JSON Output Example
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "save",
+  "session": { "name": "default", "dirty": false }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [session](./session)
+- [push](./push)

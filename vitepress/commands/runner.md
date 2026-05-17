@@ -1,35 +1,50 @@
 # xlflow runner
 
-Manage the persistent xlflow runner marker module.
+Manage the persistent xlflow runner marker module used by some workbook execution flows.
 
 ## Usage
 
 ```bash
-xlflow runner install|remove|status
+xlflow runner install
+xlflow runner status
+xlflow runner remove
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                 | Default |
+| ----------------- | ------------------------------------------- | ------- |
+| `install`         | Install or update the runner marker module. | -       |
+| `status`          | Report whether the marker is present.       | -       |
+| `remove`          | Remove the marker module.                   | -       |
+| `--json`          | Return structured runner state.             | false   |
 
-## Example
+## Examples
 
 ```bash
 xlflow runner status --json
+xlflow runner install --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Most users can rely on `xlflow run`; use `runner` directly when debugging persistent runner state.
+:::
 
-## Common failures
+## JSON Output Example
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "runner status",
+  "runner": { "installed": true, "module": "XlflowRunner" }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [run](./run)
+- [trace](./trace)

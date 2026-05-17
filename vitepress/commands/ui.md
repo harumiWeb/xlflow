@@ -5,31 +5,50 @@ Manage xlflow-owned worksheet buttons.
 ## Usage
 
 ```bash
-xlflow ui button add|list|remove ...
+xlflow ui button add --sheet <sheet> --cell <cell> --text <label> --macro <entry>
+xlflow ui button list
+xlflow ui button remove --id <id>
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                   | Default          |
+| ----------------- | --------------------------------------------- | ---------------- |
+| `button add`      | Create or update a worksheet button.          | -                |
+| `button list`     | List xlflow-owned buttons.                    | -                |
+| `button remove`   | Remove a managed button.                      | -                |
+| `--sheet <name>`  | Target worksheet.                             | required for add |
+| `--cell <addr>`   | Anchor cell.                                  | required for add |
+| `--text <label>`  | Button text.                                  | required for add |
+| `--macro <entry>` | Assigned macro entrypoint.                    | required for add |
+| `--verify-macro`  | Fail if the target macro is not discoverable. | false            |
 
-## Example
+## Examples
 
 ```bash
-xlflow ui button add --sheet Menu --cell A1 --text Run --macro Main.Run --json
+xlflow ui button add --sheet Home --cell B2 --text "Run" --macro Main.Run --verify-macro --json
+xlflow ui button list --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Give buttons stable ids or anchors so rerunning the command can update the intended control.
+:::
 
-## Common failures
+## JSON Output Example
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "ui button add",
+  "button": { "sheet": "Home", "text": "Run", "macro": "Main.Run" }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [macros](./macros)
+- [run](./run)

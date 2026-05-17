@@ -5,31 +5,47 @@ Discover runnable public workbook macro entrypoints without executing user code.
 ## Usage
 
 ```bash
-xlflow macros [--session]
+xlflow macros [--session] [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                         | Default |
+| ----------------- | --------------------------------------------------- | ------- |
+| `--session`       | Read macro metadata from the managed live workbook. | false   |
+| `--keepalive`     | Reuse the bridge process.                           | false   |
+| `--json`          | Return macro names and module metadata.             | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow macros
 xlflow macros --session --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Run `macros --json` before `run` so agents can choose an exact entrypoint.
+:::
 
-## Common failures
+::: important
+This command inspects workbook state; it does not execute discovered macros.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "macros",
+  "macros": [{ "module": "Main", "name": "Run", "entry": "Main.Run" }]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [run](./run)
+- [inspect](./inspect)

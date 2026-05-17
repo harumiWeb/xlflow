@@ -5,31 +5,55 @@ Export a worksheet range as a PNG image through Excel COM.
 ## Usage
 
 ```bash
-xlflow export-image [workbook] --sheet <name> --range <A1:B2> [--out <path.png>] [--overwrite] [--session]
+xlflow export-image --sheet <name> --range <address> [--out <png>|--output-dir <dir>] [--session]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                                    | Default                 |
+| -------------------- | ---------------------------------------------- | ----------------------- |
+| `--sheet <name>`     | Worksheet to render.                           | active/configured sheet |
+| `--range <address>`  | A1 range to export.                            | used range              |
+| `--out <png>`        | Exact output image path.                       | -                       |
+| `--output-dir <dir>` | Directory for generated image output.          | artifacts               |
+| `--name <name>`      | Base filename when using `--output-dir`.       | derived                 |
+| `--format png`       | Output image format.                           | png                     |
+| `--overwrite`        | Replace an existing image file.                | false                   |
+| `--session`          | Render from the managed live session workbook. | false                   |
 
-## Example
+## Examples
 
 ```bash
-xlflow export-image --sheet QR --range A1:AE31 --out artifacts/qr.png --overwrite --json
+xlflow export-image --sheet Dashboard --range A1:K30 --out artifacts/dashboard.png --json
+xlflow export-image --sheet QR --range A1:AE31 --output-dir artifacts --overwrite --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use image exports in PRs and agent loops to review visual workbook output without opening Excel manually.
+:::
 
-## Common failures
+::: warning
+Without `--overwrite`, existing output files may cause the command to fail instead of replacing the image.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "export-image",
+  "sheet": "Dashboard",
+  "range": "A1:K30",
+  "output": "artifacts/dashboard.png"
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [inspect](./inspect)
+- [run](./run)
+- [Demos](../demos/)

@@ -1,6 +1,6 @@
 # xlflow doctor
 
-Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.
+Diagnose Excel, COM, PowerShell, VBIDE access, workbook access, and GUI-boundary prerequisites.
 
 ## Usage
 
@@ -8,28 +8,48 @@ Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.
 xlflow doctor [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument                 | Description                                           | Default         |
+| --------------------------------- | ----------------------------------------------------- | --------------- |
+| `--keepalive`                     | Keep the Excel bridge process alive across checks.    | false           |
+| `--keepalive-interval <duration>` | Bridge keepalive interval such as `30s`.              | command default |
+| `--json`                          | Return structured diagnostics for agents and CI logs. | false           |
 
-## Example
+## Examples
 
 ```bash
+xlflow doctor
 xlflow doctor --keepalive --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Run `doctor` before debugging workbook behavior on a new Windows or Excel installation.
+:::
 
-## Common failures
+::: warning
+VBIDE access must be enabled in Excel Trust Center before xlflow can import, export, or inspect VBA components.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "doctor",
+  "checks": [
+    { "name": "excel_com", "status": "ok" },
+    { "name": "vbide_access", "status": "ok" }
+  ]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [check](./check)
+- [troubleshooting](../reference/troubleshooting)
+- [environment variables](../reference/environment-variables)

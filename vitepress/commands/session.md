@@ -5,31 +5,52 @@ Keep Excel and the configured workbook open across repeated commands.
 ## Usage
 
 ```bash
-xlflow session start|status|stop
+xlflow session start
+xlflow session status
+xlflow session stop
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                     | Default |
+| ----------------- | ----------------------------------------------- | ------- |
+| `start`           | Open and register the managed workbook session. | -       |
+| `status`          | Show whether the session is running and dirty.  | -       |
+| `stop`            | Close or detach the managed session.            | -       |
+| `--json`          | Return machine-readable session state.          | false   |
 
-## Example
+## Examples
 
 ```bash
 xlflow session start --json
+xlflow session status --json
+xlflow session stop --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use sessions for fast AI-agent loops: `push --session --no-save`, `run --session`, inspect results, then `save --session`.
+:::
 
-## Common failures
+::: warning
+A dirty session may report `save_required`. That warning means disk does not yet contain the live workbook changes.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "session status",
+  "session": { "name": "default", "running": true, "dirty": false }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [push](./push)
+- [run](./run)
+- [save](./save)

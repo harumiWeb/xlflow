@@ -5,31 +5,50 @@ Install the bundled xlflow skill for AI agent tools.
 ## Usage
 
 ```bash
-xlflow skill install [--agent <provider>|--target <dir>] [--force]
+xlflow skill install [--agent <provider>|--target <path>] [--force]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                                       | Default  |
+| -------------------- | ------------------------------------------------- | -------- |
+| `install`            | Install the skill files.                          | required |
+| `--agent <provider>` | Install to a known agent profile such as `codex`. | -        |
+| `--target <path>`    | Install to an explicit directory.                 | -        |
+| `--force`            | Overwrite an existing skill installation.         | false    |
+| `--json`             | Return installation paths.                        | false    |
 
-## Example
+## Examples
 
 ```bash
 xlflow skill install --agent codex
+xlflow skill install --target .agents/skills/xlflow --force --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+Use either `--agent` or `--target`, not both.
+:::
 
-## Common failures
+::: tip
+For repository-local agent setup, commit the generated skill only if your team intentionally shares that workflow.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "skill install",
+  "target": ".agents/skills/xlflow",
+  "written": ["SKILL.md"]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [AI agents](../ai-agents/)
+- [recommended prompts](../ai-agents/recommended-prompts)

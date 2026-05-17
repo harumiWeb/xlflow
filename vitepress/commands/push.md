@@ -5,31 +5,53 @@ Import edited source files back into the configured workbook.
 ## Usage
 
 ```bash
-xlflow push [--backup always|never] [--fast] [--changed-only] [--session] [--no-save]
+xlflow push [--backup <always|never>] [--fast] [--changed-only] [--session] [--no-save]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                    | Default                                                          |
+| ----------------- | ---------------------------------------------- | ---------------------------------------------------------------- | ------ |
+| `--backup <always | never>`                                        | Choose whether to create a backup before modifying the workbook. | always |
+| `--fast`          | Use the faster import path when supported.     | false                                                            |
+| `--changed-only`  | Import only changed source files.              | false                                                            |
+| `--session`       | Push into the managed live workbook session.   | false                                                            |
+| `--no-save`       | Leave the session workbook dirty after import. | false                                                            |
+| `--json`          | Return import results and warnings.            | false                                                            |
 
-## Example
+## Examples
 
 ```bash
-xlflow push --fast --session --no-save --json
+xlflow push --backup always --json
+xlflow push --session --fast --no-save --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+`push` runs source preflight before opening Excel so modal compile dialogs are caught as structured CLI errors whenever possible.
+:::
 
-## Common failures
+::: warning
+`--session --no-save` leaves the live workbook newer than disk. Run `xlflow save --session` when the changes should persist.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "push",
+  "imported": ["src/modules/Main.bas"],
+  "backup": "backups/Book-20260517-120000.xlsm",
+  "session": { "name": "default", "dirty": true }
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [pull](./pull)
+- [save](./save)
+- [lint](./lint)

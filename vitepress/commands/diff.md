@@ -5,31 +5,49 @@ Compare workbook files and optionally exported VBA source trees.
 ## Usage
 
 ```bash
-xlflow diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
+xlflow diff <before.xlsm> <after.xlsm> [--vba-before <dir>] [--vba-after <dir>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument    | Description                               | Default  |
+| -------------------- | ----------------------------------------- | -------- |
+| `before.xlsm`        | Baseline workbook.                        | required |
+| `after.xlsm`         | Workbook to compare.                      | required |
+| `--vba-before <dir>` | Baseline exported VBA source directory.   | -        |
+| `--vba-after <dir>`  | Comparison exported VBA source directory. | -        |
+| `--json`             | Return structured diff counts and paths.  | false    |
 
-## Example
+## Examples
 
 ```bash
-xlflow diff before.xlsm after.xlsm --vba-before before-src --vba-after after-src --json
+xlflow diff before.xlsm after.xlsm --json
+xlflow diff before.xlsm after.xlsm --vba-before before/src --vba-after after/src --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+A successful comparison can still report differences. Inspect the JSON summary instead of treating exit code `0` as no changes.
+:::
 
-## Common failures
+::: tip
+Use `pull` before `diff` when you need workbook and source changes in one review.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "diff",
+  "summary": { "workbook_diffs": 2, "vba_diffs": 1, "total_diffs": 3 }
+}
+```
 
 ## Related
 
+- [pull](./pull)
 - [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)

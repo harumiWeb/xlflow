@@ -8,28 +8,43 @@ Analyze VBA source for runtime-risk patterns without Excel COM.
 xlflow analyze
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                          | Default |
+| ----------------- | ------------------------------------ | ------- |
+| `--json`          | Return structured analysis findings. | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow analyze
 xlflow analyze --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use `analyze` for fast source-level feedback before opening Excel.
+:::
 
-## Common failures
+::: important
+Findings that block automation return a failure status and exit code `1`.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "error",
+  "command": "analyze",
+  "findings": [{ "file": "src/modules/Main.bas", "line": 20, "code": "interactive_input" }]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [lint](./lint)
+- [check](./check)
+- [inspect-gui](./inspect-gui)

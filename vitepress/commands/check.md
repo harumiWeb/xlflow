@@ -8,28 +8,49 @@ Run lint, analyze, and doctor as a combined preflight.
 xlflow check [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument                 | Description                                    | Default         |
+| --------------------------------- | ---------------------------------------------- | --------------- |
+| `--keepalive`                     | Reuse the bridge process during doctor checks. | false           |
+| `--keepalive-interval <duration>` | Bridge keepalive interval.                     | command default |
+| `--json`                          | Return a combined report.                      | false           |
 
-## Example
+## Examples
 
 ```bash
+xlflow check
 xlflow check --keepalive --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use `check --json` as the default preflight before agent-driven `push` and `run` workflows.
+:::
 
-## Common failures
+::: important
+`check` reports each phase independently, so read the phase list even when the combined status is failure.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "error",
+  "command": "check",
+  "phases": [
+    { "name": "lint", "status": "ok" },
+    { "name": "analyze", "status": "error" },
+    { "name": "doctor", "status": "ok" }
+  ]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [lint](./lint)
+- [analyze](./analyze)
+- [doctor](./doctor)

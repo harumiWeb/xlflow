@@ -1,35 +1,53 @@
 # xlflow pull
 
-Export workbook VBA components into configured source directories.
+Export workbook VBA components and form artifacts into configured source directories.
 
 ## Usage
 
 ```bash
-xlflow pull [--session]
+xlflow pull [--session] [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                  | Default |
+| ----------------- | -------------------------------------------- | ------- |
+| `--session`       | Pull from the managed live session workbook. | false   |
+| `--keepalive`     | Reuse the bridge process.                    | false   |
+| `--json`          | Report exported files and warnings.          | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow pull
 xlflow pull --session --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Pull before editing if the workbook may contain newer VBA than the source tree.
+:::
 
-## Common failures
+::: important
+UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "pull",
+  "workbook": "Book.xlsm",
+  "written": ["src/modules/Main.bas", "src/forms/specs/UserForm1.yaml"]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [push](./push)
+- [diff](./diff)
+- [project structure](../reference/project-structure)

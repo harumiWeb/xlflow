@@ -8,28 +8,45 @@ Lint VBA source files for agent-hostile and compile-dialog-prone patterns.
 xlflow lint
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                    | Default |
+| ----------------- | ------------------------------ | ------- |
+| `--json`          | Return structured lint issues. | false   |
 
-## Example
+## Examples
 
 ```bash
+xlflow lint
 xlflow lint --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: important
+Syntax-safety checks are always enabled for patterns that could surface as modal VBE compile dialogs.
+:::
 
-## Common failures
+::: tip
+Use `lint --json` in agent loops before `push` to catch source problems while Excel is still closed.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "error",
+  "command": "lint",
+  "issues": [
+    { "file": "src/modules/Main.bas", "line": 7, "code": "vba_syntax_risk", "severity": "error" }
+  ]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [analyze](./analyze)
+- [check](./check)
+- [error codes](../reference/error-codes)

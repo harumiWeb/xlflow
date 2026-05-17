@@ -1,35 +1,51 @@
 # xlflow list
 
-List workbook resources. The public subcommand is `list forms`.
+List workbook resources. The public resource command is `list forms`.
 
 ## Usage
 
 ```bash
-xlflow list forms [--session]
+xlflow list forms [--session] [--keepalive] [--keepalive-interval <duration>]
 ```
 
-## When to use
+## Options and Arguments
 
-Use this command when its target state is the next step in the source-to-workbook workflow. Prefer `--json` for automation and AI agents.
+| Option / argument | Description                                  | Default  |
+| ----------------- | -------------------------------------------- | -------- |
+| `forms`           | List UserForms and expected source paths.    | required |
+| `--session`       | Read from the managed live workbook session. | false    |
+| `--json`          | Return form metadata for scripts.            | false    |
 
-## Example
+## Examples
 
 ```bash
+xlflow list forms
 xlflow list forms --session --json
 ```
 
-## Output notes
+## Notes
 
-JSON output uses the xlflow envelope with `status`, `command`, `error`, and command-specific top-level fields. Workbook-backed commands may also include `target`, `session`, `warnings`, and `hints`.
+::: tip
+Use `list forms` before `form snapshot`, `form build`, or `form export-image` to confirm names.
+:::
 
-## Common failures
+::: important
+Listing forms is metadata-oriented; it does not execute UserForm runtime code.
+:::
 
-- CLI or config mistakes return exit code `2`.
-- Validation, lint, macro, GUI-boundary, or test failures return exit code `1`.
-- Excel, COM, VBIDE, PowerShell, or bridge failures return exit code `3`.
+## JSON Output Example
+
+Successful `--json` output uses the xlflow envelope plus command-specific fields.
+
+```json
+{
+  "status": "ok",
+  "command": "list forms",
+  "forms": [{ "name": "UserForm1", "designer": "src/forms/specs/UserForm1.yaml" }]
+}
+```
 
 ## Related
 
-- [JSON output](../reference/json-output)
-- [Exit codes](../reference/exit-codes)
-- [Troubleshooting](../reference/troubleshooting)
+- [form](./form)
+- [inspect](./inspect)
