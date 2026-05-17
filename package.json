@@ -8,10 +8,14 @@
   "main": "index.js",
   "scripts": {
     "format": "oxfmt",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "docs:dev": "vitepress dev vitepress",
+    "docs:build": "vitepress build vitepress",
+    "docs:preview": "vitepress preview vitepress"
   },
   "devDependencies": {
-    "oxfmt": "^0.47.0"
+    "oxfmt": "^0.47.0",
+    "vitepress": "^1.6.4"
   },
   "packageManager": "pnpm@10.28.1"
 }
