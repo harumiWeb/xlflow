@@ -221,7 +221,7 @@ function New-XlflowFormExportRuntimeWorkbookCopy {
       path = $tempPath
     }
   } catch {
-    if ($null -ne $tempWorkbook -or $null -ne $tempExcel) {
+    if (($null -ne $tempWorkbook) -or ($null -ne $tempExcel)) {
       Close-XlflowCom -Workbook $tempWorkbook -Excel $tempExcel -Save $false
     }
     if (Test-Path -LiteralPath $tempPath) {
@@ -1142,22 +1142,22 @@ try {
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   }
 } finally {
-  if ($null -ne $runtimeExcel -and $null -ne $runtimeWorkbook) {
+  if (($null -ne $runtimeExcel) -and ($null -ne $runtimeWorkbook)) {
     Invoke-XlflowCleanupFormImageCapture -Excel $runtimeExcel -Workbook $runtimeWorkbook
   }
-  if ($tempModuleInstalled -and $null -ne $runtimeVBProject) {
+  if ($tempModuleInstalled -and ($null -ne $runtimeVBProject)) {
     $tempModuleRemoved = Remove-XlflowVBComponentByName -VBProject $runtimeVBProject -Name $tempModuleName
     if (-not $tempModuleRemoved) {
       Add-XlflowWarning -Result $result -Code "temporary_component_cleanup_failed" -Message ("Temporary helper module '" + $tempModuleName + "' could not be removed automatically.")
     }
   }
-  if ($null -ne $runtimeWorkbook -or $null -ne $runtimeExcel) {
+  if (($null -ne $runtimeWorkbook) -or ($null -ne $runtimeExcel)) {
     Close-XlflowCom -Workbook $runtimeWorkbook -Excel $runtimeExcel -Save $false
   }
-  if (-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath) -and (Test-Path -LiteralPath $runtimeWorkbookPath)) {
+  if ((-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath)) -and (Test-Path -LiteralPath $runtimeWorkbookPath)) {
     Remove-Item -LiteralPath $runtimeWorkbookPath -Force -ErrorAction SilentlyContinue
   }
-  if (-not [string]::IsNullOrWhiteSpace($temporaryExportPath) -and (Test-Path -LiteralPath $temporaryExportPath -PathType Leaf)) {
+  if ((-not [string]::IsNullOrWhiteSpace($temporaryExportPath)) -and (Test-Path -LiteralPath $temporaryExportPath -PathType Leaf)) {
     try {
       Remove-Item -LiteralPath $temporaryExportPath -Force
     } catch {

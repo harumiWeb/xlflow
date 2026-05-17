@@ -32,7 +32,7 @@ function Add-XlflowInspectFormSaveRequiredWarning {
     $SaveState
   )
 
-  if ($null -ne $SaveState -and [bool]$SaveState.needs_save) {
+  if (($null -ne $SaveState) -and [bool]$SaveState.needs_save) {
     Add-XlflowStateWarning -Result $Result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
   }
 }
@@ -57,16 +57,16 @@ function Get-XlflowInspectFormErrorCode {
   }
   $source = [string]$Exception.Source
   $message = [string]$Exception.Message
-  if ($source -like "*XlflowInspectFormJson.initializer*" -or $message -like "*XlflowInspectFormJson.initializer*") {
+  if (($source -like "*XlflowInspectFormJson.initializer*") -or ($message -like "*XlflowInspectFormJson.initializer*")) {
     return "form_initializer_failed"
   }
-  if ($source -like "*XlflowInspectFormJson.runtime_load*" -or $message -like "*XlflowInspectFormJson.runtime_load*") {
+  if (($source -like "*XlflowInspectFormJson.runtime_load*") -or ($message -like "*XlflowInspectFormJson.runtime_load*")) {
     return "runtime_form_load_failed"
   }
-  if ($source -like "*XlflowInspectFormJson.enumerate*" -or $message -like "*XlflowInspectFormJson.enumerate*") {
+  if (($source -like "*XlflowInspectFormJson.enumerate*") -or ($message -like "*XlflowInspectFormJson.enumerate*")) {
     return "control_enumeration_failed"
   }
-  if ($source -like "*XlflowInspectFormJson.designer*" -or $message -like "*XlflowInspectFormJson.designer*") {
+  if (($source -like "*XlflowInspectFormJson.designer*") -or ($message -like "*XlflowInspectFormJson.designer*")) {
     return "designer_access_failed"
   }
   return "inspect_form_failed"
@@ -104,7 +104,7 @@ function Update-XlflowInspectFormResultSaveState {
     [string]$SessionMode
   )
 
-  if ($null -eq $Workbook -or [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+  if (($null -eq $Workbook) -or [string]::IsNullOrWhiteSpace($WorkbookPath)) {
     return [ordered]@{ dirty = $false; needs_save = $false }
   }
 
@@ -144,7 +144,7 @@ function New-XlflowInspectRuntimeWorkbookCopy {
       path = $tempPath
     }
   } catch {
-    if ($null -ne $tempWorkbook -or $null -ne $tempExcel) {
+    if (($null -ne $tempWorkbook) -or ($null -ne $tempExcel)) {
       Close-XlflowCom -Workbook $tempWorkbook -Excel $tempExcel -Save $false
     }
     if (Test-Path -LiteralPath $tempPath) {
@@ -214,7 +214,7 @@ function Get-XlflowDesignerControlSnapshot {
   $controlType = "Control"
   if (-not [string]::IsNullOrWhiteSpace($progId)) {
     $segments = $progId.Split(".")
-    if ($segments.Length -ge 2 -and -not [string]::IsNullOrWhiteSpace($segments[1])) {
+    if (($segments.Length -ge 2) -and (-not [string]::IsNullOrWhiteSpace($segments[1]))) {
       $controlType = $segments[1]
     }
   }
@@ -246,10 +246,10 @@ function Get-XlflowDesignerControlSnapshot {
   }
 
   $listData = Get-XlflowSafeControlList -Control $Control
-  if ($listData.Count -ge 1 -and $null -ne $listData[0]) {
+  if (($listData.Count -ge 1) -and ($null -ne $listData[0])) {
     $snapshot.list = @($listData[0])
   }
-  if ($listData.Count -ge 2 -and $null -ne $listData[1] -and [int]$listData[1] -ge -1) {
+  if (($listData.Count -ge 2) -and ($null -ne $listData[1]) -and ([int]$listData[1] -ge -1)) {
     $snapshot.selected_index = [int]$listData[1]
   }
 
@@ -309,12 +309,12 @@ try {
     Write-XlflowJson -Result $result
     exit
   }
-  if (-not [string]::IsNullOrWhiteSpace($Initializer) -and $normalizedBasis -eq "designer") {
+  if ((-not [string]::IsNullOrWhiteSpace($Initializer)) -and ($normalizedBasis -eq "designer")) {
     Set-InspectFormValidationError -Result $result -Code "inspect_form_args_invalid" -Message "--initializer can only be used with runtime or both inspection"
     Write-XlflowJson -Result $result
     exit
   }
-  $strictDesigner = ConvertTo-XlflowBool $StrictDesigner
+  $strictDesignerEnabled = ConvertTo-XlflowBool $StrictDesigner
 
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
   $excel = $openResult.excel
@@ -345,7 +345,7 @@ try {
     $tempModuleName = New-XlflowInspectFormModuleName
     $null = Install-XlflowVBComponentFromCode -VBProject $runtimeVBProject -Name $tempModuleName -Code (New-XlflowInspectFormModuleCode)
     $tempModuleInstalled = $true
-    if ($strictDesigner) {
+    if ($strictDesignerEnabled) {
       $designerSnapshot = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "designer"
     } else {
       $designerSnapshot = Get-XlflowDesignerFormSnapshot -VBProject $vbProject -TargetFormName $FormName
@@ -366,7 +366,7 @@ try {
     $tempModuleInstalled = $true
     $result.forms = Invoke-XlflowInspectFormSnapshot -Excel $runtimeExcel -Workbook $runtimeWorkbook -TargetFormName $FormName -TargetBasis "runtime" -InitializerName $Initializer
   } else {
-    if ($strictDesigner) {
+    if ($strictDesignerEnabled) {
       $runtimeOpenResult = New-XlflowInspectRuntimeWorkbookCopy -SourceWorkbook $workbook
       $runtimeExcel = $runtimeOpenResult.excel
       $runtimeWorkbook = $runtimeOpenResult.workbook
@@ -386,10 +386,10 @@ try {
     Add-XlflowWarning -Result $result -Code "runtime_form_loads_initialize" -Message "Runtime inspection loads the form and executes UserForm_Initialize."
     Add-XlflowWarning -Result $result -Code "runtime_form_temp_copy" -Message "Runtime inspection executed against a temporary workbook copy so the source workbook and live session are not mutated."
     $result.target.note = "Runtime inspection used a temporary workbook copy."
-  } elseif ($strictDesigner) {
+  } elseif ($strictDesignerEnabled) {
     $result.target.note = "Strict designer inspection used a temporary workbook copy plus helper module to recover concrete control types."
   }
-  if (-not [string]::IsNullOrWhiteSpace($Initializer) -and $normalizedBasis -in @("runtime", "both")) {
+  if ((-not [string]::IsNullOrWhiteSpace($Initializer)) -and ($normalizedBasis -in @("runtime", "both"))) {
     Add-XlflowWarning -Result $result -Code "runtime_form_initializer_invoked" -Message ("Runtime inspection also invoked " + $Initializer + "(ThisWorkbook).")
   }
   $result.logs = @(@($(Get-XlflowSessionUsageLog -SessionMode $sessionMode), "inspected " + $normalizedBasis + " UserForm " + $FormName) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -398,30 +398,30 @@ try {
     $code = Get-XlflowInspectFormErrorCode -Exception $_.Exception
     Set-XlflowError -Result $result -Code $code -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
   }
-  if ($null -eq $result.workbook -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+  if (($null -eq $result.workbook) -and (-not [string]::IsNullOrWhiteSpace($WorkbookPath))) {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
   }
-  if ($null -eq $result.target -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+  if (($null -eq $result.target) -and (-not [string]::IsNullOrWhiteSpace($WorkbookPath))) {
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
   }
-  if ($null -eq $result.session -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+  if (($null -eq $result.session) -and (-not [string]::IsNullOrWhiteSpace($WorkbookPath))) {
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   }
 } finally {
-  if ($tempModuleInstalled -and $null -ne $runtimeVBProject) {
+  if ($tempModuleInstalled -and ($null -ne $runtimeVBProject)) {
     $tempModuleRemoved = Remove-XlflowVBComponentByName -VBProject $runtimeVBProject -Name $tempModuleName
     if (-not $tempModuleRemoved) {
       Add-XlflowWarning -Result $result -Code "temporary_component_cleanup_failed" -Message ("Temporary helper module '" + $tempModuleName + "' could not be removed automatically.")
     }
   }
-  if ($null -ne $workbook -and -not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+  if (($null -ne $workbook) -and (-not [string]::IsNullOrWhiteSpace($WorkbookPath))) {
     $saveState = Update-XlflowInspectFormResultSaveState -Result $result -Workbook $workbook -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode
     Add-XlflowInspectFormSaveRequiredWarning -Result $result -SaveState $saveState
   }
-  if ($null -ne $runtimeWorkbook -or $null -ne $runtimeExcel) {
+  if (($null -ne $runtimeWorkbook) -or ($null -ne $runtimeExcel)) {
     Close-XlflowCom -Workbook $runtimeWorkbook -Excel $runtimeExcel -Save $false
   }
-  if (-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath) -and (Test-Path -LiteralPath $runtimeWorkbookPath)) {
+  if ((-not [string]::IsNullOrWhiteSpace($runtimeWorkbookPath)) -and (Test-Path -LiteralPath $runtimeWorkbookPath)) {
     Remove-Item -LiteralPath $runtimeWorkbookPath -Force -ErrorAction SilentlyContinue
   }
   if ($sessionAttached) {
