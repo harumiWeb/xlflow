@@ -18,6 +18,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added always-on `xlflow lint` syntax checks for unclosed or mismatched VBA `Sub`/`Function`/`Property` procedures and malformed line-continuation underscores, blocking `push`/`run` before Excel can open a VBE compile dialog.
+
 ## v0.7.0
 
 - Added `xlflow edit cell`, `edit range`, `edit rows`, and `edit columns` as minimal workbook-mutation helpers for AI-agent testing and visual tuning in a live Excel session.

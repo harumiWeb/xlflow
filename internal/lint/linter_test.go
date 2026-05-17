@@ -171,6 +171,238 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 }
 
+func TestLinterAllowsValidProcedureBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Foo()
+End Sub
+
+Private Function Bar() As String
+End Function
+
+Friend Property Get Name() As String
+End Property
+
+Public Property Let Name(ByVal value As String)
+End Property
+
+Public Property Set Item(ByVal value As Object)
+End Property
+
+Public Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if strings.HasPrefix(issue.Code, "VB01") {
+			t.Fatalf("valid procedure source should not trigger syntax lint: %+v", issues)
+		}
+	}
+}
+
+func TestLinterFindsProcedureBoundarySyntaxErrors(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Unterminated()
+
+End Function
+
+End Property
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB012", 4)
+	assertIssue(t, issues, "VB011", 6)
+
+	blocking := PushBlockingIssues(issues)
+	assertIssue(t, blocking, "VB012", 4)
+	assertIssue(t, blocking, "VB011", 6)
+}
+
+func TestLinterFindsUnterminatedProcedureAtStartLine(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Function MissingClose() As String
+    MissingClose = "x"
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := findIssue(t, issues, "VB010", 2)
+	if issue.Symbol == "" {
+		t.Fatalf("expected VB010 to include procedure symbol: %+v", issue)
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB010", 2)
+}
+
+func TestLinterProcedureScannerIgnoresCommentsStringsAndDesignerEnd(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1
+End
+Attribute VB_Name = "UserForm1"
+Option Explicit
+' Sub Fake()
+Public Sub Run()
+    Debug.Print "End Sub"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" {
+			t.Fatalf("comments, strings, and designer End should not trigger procedure lint: %+v", issues)
+		}
+	}
+}
+
+func TestLinterHandlesContinuedProcedureDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Run( _
+    ByVal value As String)
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" {
+			t.Fatalf("valid continued declaration should not trigger syntax lint: %+v", issues)
+		}
+	}
+}
+
+func TestLinterFindsMissingWhitespaceBeforeLineContinuation(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Run()
+    Debug.Print "hello"_
+    Debug.Print "hello" _
+    Debug.Print "abc_"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB013", 3)
+	assertIssue(t, PushBlockingIssues(issues), "VB013", 3)
+	var count int
+	for _, issue := range issues {
+		if issue.Code == "VB013" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one VB013 issue, got %+v", issues)
+	}
+}
+
+func TestLinterAllowsIdentifiersEndingWithUnderscore(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Run()
+    Dim total_ As Long
+    total_ = 1
+    Debug.Print total_
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB013" {
+			t.Fatalf("identifier ending with underscore should not trigger VB013: %+v", issues)
+		}
+	}
+}
+
+func TestLinterHandlesOneLineProcedureStatements(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Foo(): End Sub
+Function Bar() As String: Bar = "x": End Function
+Property Get Name() As String: Name = "x": End Property
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" {
+			t.Fatalf("one-line procedures should not trigger structure lint: %+v", issues)
+		}
+	}
+}
+
 func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 	dir := t.TempDir()
 	formsDir := filepath.Join(dir, "src", "forms")
@@ -203,4 +435,20 @@ func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 	if vb009[0].File != "src/forms/code/UserForm1.bas" {
 		t.Fatalf("expected sidecar file to be authoritative, got %+v", vb009[0])
 	}
+}
+
+func assertIssue(t *testing.T, issues []Issue, code string, line int) {
+	t.Helper()
+	findIssue(t, issues, code, line)
+}
+
+func findIssue(t *testing.T, issues []Issue, code string, line int) Issue {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.Code == code && issue.Line == line {
+			return issue
+		}
+	}
+	t.Fatalf("missing issue %s at line %d in %+v", code, line, issues)
+	return Issue{}
 }

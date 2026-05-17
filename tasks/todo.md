@@ -1,3 +1,18 @@
+# VBA Syntax Lint Todo
+
+- [x] Add always-on lint findings for procedure boundary structure and line-continuation underscore whitespace.
+- [x] Include the new syntax findings in push/run source-preflight blocking issues.
+- [x] Add focused lint and CLI preflight regression tests.
+- [x] Update CLI contract and README lint rule documentation.
+- [x] Run `go test ./internal/lint ./internal/cli`, `go test ./...`, and `task lint`.
+
+## Verification Notes
+
+- `go test ./internal/lint ./internal/cli` passed.
+- `go test ./...` passed.
+- `task lint` passed.
+- Excel COM E2E was not run because this change only affects static lint/source preflight logic and does not change workbook import/export, VBIDE automation, or macro execution behavior.
+
 # xlflow Folder Structure Todo
 
 # UserForm Phase 1 Warning Todo
