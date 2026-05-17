@@ -183,7 +183,9 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 			logicalLine.WriteString(lineForProcedure)
 			lineForProcedure = logicalLine.String()
 		}
-		issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, lineForProcedure, &procedures)...)
+		for _, statement := range splitStatements(lineForProcedure) {
+			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
+		}
 		logicalLine.Reset()
 		logicalStartLine = 0
 	}
@@ -197,7 +199,9 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 		return nil, err
 	}
 	if logicalLine.Len() > 0 {
-		issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, logicalLine.String(), &procedures)...)
+		for _, statement := range splitStatements(logicalLine.String()) {
+			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
+		}
 	}
 	for _, procedure := range procedures {
 		issue := l.issue(path, procedure.LineNo, "VB010", "error", "Unterminated "+procedure.Kind+" procedure.")
@@ -418,6 +422,9 @@ func missingLineContinuationWhitespace(line string) bool {
 	if !strings.HasSuffix(trimmed, "_") || len(trimmed) < 2 {
 		return false
 	}
+	if endsWithIdentifierUnderscore(trimmed) {
+		return false
+	}
 	return trimmed[len(trimmed)-2] != ' ' && trimmed[len(trimmed)-2] != '\t'
 }
 
@@ -435,6 +442,52 @@ func removeLineContinuationMarker(line string) string {
 		return line
 	}
 	return trimmed[:len(trimmed)-1]
+}
+
+func splitStatements(line string) []string {
+	statements := make([]string, 0, 1)
+	start := 0
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case ':':
+			if inString {
+				continue
+			}
+			statement := strings.TrimSpace(line[start:i])
+			if statement != "" {
+				statements = append(statements, statement)
+			}
+			start = i + 1
+		}
+	}
+	statement := strings.TrimSpace(line[start:])
+	if statement != "" {
+		statements = append(statements, statement)
+	}
+	return statements
+}
+
+func endsWithIdentifierUnderscore(line string) bool {
+	end := len(line) - 1
+	if end < 0 || line[end] != '_' {
+		return false
+	}
+	start := end
+	for start >= 0 && isIdentifierChar(line[start]) {
+		start--
+	}
+	return start < end-1
+}
+
+func isIdentifierChar(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func looksPublicVariable(line string) bool {

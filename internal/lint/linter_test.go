@@ -351,6 +351,58 @@ End Sub
 	}
 }
 
+func TestLinterAllowsIdentifiersEndingWithUnderscore(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Run()
+    Dim total_ As Long
+    total_ = 1
+    Debug.Print total_
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB013" {
+			t.Fatalf("identifier ending with underscore should not trigger VB013: %+v", issues)
+		}
+	}
+}
+
+func TestLinterHandlesOneLineProcedureStatements(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Foo(): End Sub
+Function Bar() As String: Bar = "x": End Function
+Property Get Name() As String: Name = "x": End Property
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" {
+			t.Fatalf("one-line procedures should not trigger structure lint: %+v", issues)
+		}
+	}
+}
+
 func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 	dir := t.TempDir()
 	formsDir := filepath.Join(dir, "src", "forms")
