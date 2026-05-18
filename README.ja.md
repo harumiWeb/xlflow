@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
 
@@ -137,13 +137,21 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## インストール
 
-### Go install
+### winget
 
-```bash
-go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
+```powershell
+winget install HarumiWeb.Xlflow
 ```
 
-`go install` は Go 環境に設定された module mirror や checksum database へアクセスすることがあります。source checkout からの開発や CI では、`go.mod` に書かれた Go version を正式サポート toolchain の source of truth としてください。リポジトリの CI / release workflow もその値から Go を解決します。
+既存のインストールを更新する場合:
+
+```powershell
+winget upgrade HarumiWeb.Xlflow
+```
+
+> [!NOTE]
+> winget は manifest を upstream へ提出して承認されるまで、GitHub Release より反映が遅れる場合があります。
+> 最新 release をすぐに使いたい場合は、Scoop または GitHub Releases の ZIP を使ってください。
 
 ### Scoop
 
@@ -181,6 +189,14 @@ gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
 ```
 
 > この検証で分かるのは、release artifact に対する GitHub artifact attestation が存在し、検証できることです。Windows の publisher certificate による Authenticode signing を意味するものではありません。
+
+### Go install
+
+```bash
+go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
+```
+
+`go install` は Go 環境に設定された module mirror や checksum database へアクセスすることがあります。source checkout からの開発や CI では、`go.mod` に書かれた Go version を正式サポート toolchain の source of truth としてください。リポジトリの CI / release workflow もその値から Go を解決します。
 
 インストール後、次のコマンドで確認できます。
 

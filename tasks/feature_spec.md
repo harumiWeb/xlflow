@@ -1,3 +1,27 @@
+# winget Release Publishing Spec
+
+## Goal
+
+Publish xlflow Windows release metadata to winget using the existing `harumiWeb/winget-pkgs` fork and the `WINGET_GITHUB_TOKEN` release secret.
+
+## Contract
+
+- GitHub Releases continue to publish the existing Windows ZIP archive for `xlflow_windows_x86_64.zip`.
+- GoReleaser generates a winget manifest for package identifier `HarumiWeb.Xlflow`.
+- The winget manifest references the GitHub Release archive generated from the existing Windows archive configuration.
+- GoReleaser pushes generated manifest changes to `harumiWeb/winget-pkgs` on branch `xlflow-<version>`.
+- GoReleaser does not automatically open a cross-repository pull request to `microsoft/winget-pkgs`; upstream submission remains a manual follow-up from the pushed fork branch.
+- Prerelease tags skip winget manifest publishing.
+- The release workflow passes `WINGET_GITHUB_TOKEN` to GoReleaser.
+- User-facing install docs include `winget install HarumiWeb.Xlflow` while keeping Scoop and GitHub Releases as supported alternatives.
+
+## Verification
+
+- `goreleaser check` validates the release configuration.
+- `goreleaser release --snapshot --clean --skip=publish` validates archive, checksum, SBOM, and generated manifest behavior without publishing.
+- `go test ./...` passes.
+- After a real release, confirm the pushed branch and manifest path in `harumiWeb/winget-pkgs` before manually opening the upstream PR.
+
 # Workbook Rollback Spec
 
 ## Goal

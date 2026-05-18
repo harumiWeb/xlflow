@@ -1,3 +1,23 @@
+# winget Release Publishing Todo
+
+- [x] Add winget release publishing contract to the working feature spec.
+- [x] Add GoReleaser `winget` configuration for `HarumiWeb.Xlflow`.
+- [x] Pass `WINGET_GITHUB_TOKEN` to GoReleaser in the release workflow.
+- [x] Update README, Japanese README, VitePress installation docs, and changelog with the winget install path.
+- [x] Run `goreleaser check`.
+- [x] Run `goreleaser release --snapshot --clean --skip=publish`.
+- [x] Run `go test ./...`.
+- [x] Run `pnpm docs:build`.
+
+## Verification Notes
+
+- `goreleaser check` passed.
+- `goreleaser release --snapshot --clean --skip=publish` passed and generated winget manifests under `dist/winget/manifests/h/HarumiWeb/Xlflow/0.8.2-next/`.
+- Generated snapshot manifest used `PackageIdentifier: HarumiWeb.Xlflow`, `InstallerType: zip`, `NestedInstallerType: portable`, `PortableCommandAlias: xlflow`, and the Windows x64 ZIP artifact.
+- `go test ./...` passed.
+- `pnpm docs:build` passed.
+- Real release follow-up: confirm the pushed `harumiWeb/winget-pkgs` branch `xlflow-<version>` and manually open the upstream PR to `microsoft/winget-pkgs`.
+
 # Workbook Rollback Todo
 
 - [x] Add Go-side workbook backup metadata listing and restore helpers.

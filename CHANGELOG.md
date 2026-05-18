@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added winget release publishing so GoReleaser can generate the `HarumiWeb.Xlflow` manifest and push it to the `harumiWeb/winget-pkgs` fork for upstream submission.
 - Updated `xlflow new` to bootstrap the workbook/source sync automatically by pushing scaffolded VBA into the new workbook before the command reports success, and added placeholder `src/workbook/ThisWorkbook.bas` / `Sheet1.bas` files with `Option Explicit` for new projects.
 - Updated `xlflow init` to bootstrap source sync automatically by pulling VBA from the copied workbook into `src/`, and added scaffold-level keepalive handling so `new` / `init --keepalive` emit a single final `XLFLOW_DONE` marker only after bootstrap sync completes.
 - Added first-class workbook rollback support with `xlflow backup list` and `xlflow rollback`, including metadata-backed workbook-file backups under `.xlflow/backups/<backup-id>/`, automatic safety backups before restore, and session-aware guards that refuse rollback while the target workbook is open in an active xlflow session.

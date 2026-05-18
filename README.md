@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
 
@@ -136,13 +136,21 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Installation
 
-### Go install
+### winget
 
-```bash
-go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
+```powershell
+winget install HarumiWeb.Xlflow
 ```
 
-`go install` may contact the Go module mirror and checksum database configured in your Go environment. For direct source checkout development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth; the repository CI and release workflows resolve Go from that file.
+Use `upgrade` to update an existing installation:
+
+```powershell
+winget upgrade HarumiWeb.Xlflow
+```
+
+> [!NOTE]
+> winget availability may lag behind a GitHub Release while the manifest is submitted and accepted upstream.
+> Use Scoop or the GitHub Releases ZIP when you need the newest release immediately.
 
 ### Scoop
 
@@ -180,6 +188,14 @@ gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
 ```
 
 > This confirms the artifact attestation published for the release artifact. It does not mean the ZIP is Authenticode-signed by a Windows publisher certificate.
+
+### Go install
+
+```bash
+go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
+```
+
+`go install` may contact the Go module mirror and checksum database configured in your Go environment. For direct source checkout development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth; the repository CI and release workflows resolve Go from that file.
 
 Verify the installation:
 

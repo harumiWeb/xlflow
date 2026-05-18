@@ -70,3 +70,37 @@ scoops:
     homepage: https://github.com/harumiWeb/xlflow
     description: Excel VBA development framework for CLI-first humans and AI agents.
     license: MIT
+
+winget:
+  - name: xlflow
+    publisher: HarumiWeb
+    package_identifier: HarumiWeb.Xlflow
+    package_name: xlflow
+    short_description: Excel VBA development framework for CLI-first humans and AI agents.
+    description: Excel VBA development framework for CLI-first humans and AI agents.
+    license: MIT
+    homepage: https://github.com/harumiWeb/xlflow
+    publisher_url: https://github.com/harumiWeb
+    publisher_support_url: https://github.com/harumiWeb/xlflow/issues
+    license_url: https://github.com/harumiWeb/xlflow/blob/{{ .Tag }}/LICENSE
+    tags:
+      - go
+      - cli
+      - excel
+      - vba
+      - automation
+    ids:
+      - xlflow
+    repository:
+      owner: harumiWeb
+      name: winget-pkgs
+      branch: xlflow-{{ .Version }}
+      token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    commit_msg_template: "{{ .PackageIdentifier }}: {{ .Tag }}"
+    skip_upload: "{{ if .Prerelease }}true{{ else }}false{{ end }}"
