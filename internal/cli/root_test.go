@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -279,6 +281,7 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"new"},
+		{"init"},
 		{"doctor"},
 		{"attach"},
 		{"list", "forms"},
@@ -316,7 +319,6 @@ func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
 	root := a.rootCommand()
 
 	for _, args := range [][]string{
-		{"init"},
 		{"lint"},
 		{"analyze"},
 		{"diff"},
@@ -363,6 +365,25 @@ func TestPullCommandRejectsInvalidKeepaliveIntervalBeforeConfigLoad(t *testing.T
 	a := &app{cwd: dir}
 	root := a.rootCommand()
 	root.SetArgs([]string{"pull", "--keepalive", "--keepalive-interval", "0s"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "--keepalive-interval") {
+		t.Fatalf("error = %v, want keepalive interval message", err)
+	}
+}
+
+func TestInitCommandRejectsInvalidKeepaliveIntervalBeforeScaffold(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook, "--keepalive", "--keepalive-interval", "0s"})
 
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitConfig {
@@ -1043,11 +1064,13 @@ func TestSkillInstallCommandInstallsProviderSkill(t *testing.T) {
 }
 
 func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	a := &app{cwd: dir}
 	root := a.rootCommand()
 	root.SetArgs([]string{"init", workbook, "--with-skill", "--agent", "codex"})
@@ -1063,11 +1086,13 @@ func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
 }
 
 func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1084,7 +1109,7 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	got := stdout.String()
-	for _, want := range []string{"Version: 1.2.3", "copied workbook to build/Input.xlsm"} {
+	for _, want := range []string{"Version: 1.2.3", "copied workbook to build/Input.xlsm", "pulled workbook VBA into source"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("interactive init output missing %q:\n%s", want, got)
 		}
@@ -1098,11 +1123,13 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 }
 
 func TestInitCommandSkipsWelcomeForJSONOutput(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1129,11 +1156,13 @@ func TestInitCommandSkipsWelcomeForJSONOutput(t *testing.T) {
 }
 
 func TestInitCommandShowsUpdateNoticeWhenNewReleaseIsAvailable(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1156,11 +1185,13 @@ func TestInitCommandShowsUpdateNoticeWhenNewReleaseIsAvailable(t *testing.T) {
 }
 
 func TestInitCommandSilentlySkipsFailedUpdateCheck(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1183,11 +1214,13 @@ func TestInitCommandSilentlySkipsFailedUpdateCheck(t *testing.T) {
 }
 
 func TestInitCommandSkipsUpdateCheckWithFlag(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1209,6 +1242,7 @@ func TestInitCommandSkipsUpdateCheckWithFlag(t *testing.T) {
 }
 
 func TestInitCommandSkipsUpdateCheckWithEnv(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
 	t.Setenv(noUpdateCheckEnvVar, "1")
 
 	dir := t.TempDir()
@@ -1216,6 +1250,7 @@ func TestInitCommandSkipsUpdateCheckWithEnv(t *testing.T) {
 	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeTestPullScript(t, dir, false)
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:            dir,
@@ -1233,6 +1268,58 @@ func TestInitCommandSkipsUpdateCheckWithEnv(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "Update available:") {
 		t.Fatalf("interactive init output should skip update notice when %s is set:\n%s", noUpdateCheckEnvVar, stdout.String())
+	}
+}
+
+func TestInitCommandAutoPullsWorkbookSource(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPullScript(t, dir, true)
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	modulePath := filepath.Join(dir, "src", "modules", "Imported.bas")
+	body, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatalf("expected auto-pulled module at %s: %v", modulePath, err)
+	}
+	if !strings.Contains(string(body), `Attribute VB_Name = "Imported"`) {
+		t.Fatalf("unexpected pulled module body:\n%s", string(body))
+	}
+}
+
+func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	writeTestNewScript(t, dir)
+	writeTestPushScript(t, dir)
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"new", "Book.xlsm"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	markerPath := filepath.Join(dir, ".xlflow", "push.called")
+	body, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("expected auto-push marker at %s: %v", markerPath, err)
+	}
+	text := string(body)
+	for _, want := range []string{"Main.bas", "App.bas", "Ui.bas", "XlflowAssert.bas"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected push marker to mention %s:\n%s", want, text)
+		}
 	}
 }
 
@@ -2625,5 +2712,101 @@ func TestFilterAnalysisFindingsIgnoresTraceHelperCodesForTraceRun(t *testing.T) 
 func TestIgnoredRunPreflightAnalysisCodesEmptyWithoutTrace(t *testing.T) {
 	if got := ignoredRunPreflightAnalysisCodes(excel.RunOptions{}); got != nil {
 		t.Fatalf("expected nil ignored codes without trace, got %+v", got)
+	}
+}
+
+func skipWindowsPowerShellOnlyTest(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("requires Windows PowerShell bridge")
+	}
+	if _, err := exec.LookPath("powershell"); err != nil {
+		t.Skip("powershell not available")
+	}
+}
+
+func writeTestPullScript(t *testing.T, root string, createModule bool) {
+	t.Helper()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createModuleLiteral := "$false"
+	if createModule {
+		createModuleLiteral = "$true"
+	}
+	script := fmt.Sprintf(`param(
+  [string]$WorkbookPath,
+  [string]$ModulesDir,
+  [string]$ClassesDir,
+  [string]$FormsDir,
+  [string]$WorkbookDir
+)
+New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
+if (%s) {
+  Set-Content -LiteralPath (Join-Path $ModulesDir 'Imported.bas') -Value "Attribute VB_Name = ""Imported""" -Encoding UTF8
+}
+@{
+  status = 'ok'
+  command = 'pull'
+  logs = @('stub pull ok')
+  workbook = @{ path = $WorkbookPath }
+} | ConvertTo-Json -Compress
+`, createModuleLiteral)
+	if err := os.WriteFile(filepath.Join(scriptsDir, "pull.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTestNewScript(t *testing.T, root string) {
+	t.Helper()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param(
+  [string]$WorkbookPath
+)
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $WorkbookPath) | Out-Null
+Set-Content -LiteralPath $WorkbookPath -Value 'fake workbook' -Encoding UTF8
+@{
+  status = 'ok'
+  command = 'new'
+  logs = @('stub new ok')
+  workbook = @{ path = $WorkbookPath }
+} | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "new.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTestPushScript(t *testing.T, root string) {
+	t.Helper()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param(
+  [string]$WorkbookPath,
+  [string]$ModulesDir,
+  [string]$StatePath
+)
+$markerPath = Join-Path (Split-Path -Parent $StatePath) '..\push.called'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $markerPath) | Out-Null
+$names = @()
+if (Test-Path -LiteralPath $ModulesDir) {
+  $names = @(Get-ChildItem -LiteralPath $ModulesDir -File | Select-Object -ExpandProperty Name)
+}
+Set-Content -LiteralPath $markerPath -Value ($names -join [Environment]::NewLine) -Encoding UTF8
+@{
+  status = 'ok'
+  command = 'push'
+  logs = @('stub push ok')
+  workbook = @{ path = $WorkbookPath }
+} | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "push.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

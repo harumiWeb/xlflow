@@ -867,6 +867,13 @@ func (a *app) newCommand() *cobra.Command {
 				}
 				return a.writeFailure("new", output.ExitConfig, "new_failed", err)
 			}
+			bootstrapEnv, bootstrapCode, bootstrapErr := a.bootstrapScaffoldPush(keepaliveOpts)
+			if bootstrapErr != nil {
+				return bootstrapErr
+			}
+			if bootstrapCode != output.ExitSuccess {
+				return a.write(bootstrapEnv, bootstrapCode)
+			}
 			var skillResult agentskill.InstallResult
 			if withSkill {
 				skillResult, err = agentskill.Install(skillOpts)
@@ -879,6 +886,7 @@ func (a *app) newCommand() *cobra.Command {
 			env.Logs = []string{
 				"created " + result.ConfigPath,
 				"created " + result.Workbook,
+				"pushed scaffolded VBA source to workbook",
 			}
 			if withSkill {
 				env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
@@ -897,6 +905,7 @@ func (a *app) initCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
 	var noUpdateCheck bool
+	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "init <workbook>",
@@ -905,6 +914,10 @@ func (a *app) initCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.writeScaffoldWelcome("init", noUpdateCheck); err != nil {
 				return output.WithExitCode(output.ExitEnvironment, err)
+			}
+			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+			if err != nil {
+				return a.writeFailure("init", output.ExitConfig, "init_args_invalid", err)
 			}
 			var skillOpts agentskill.InstallOptions
 			if withSkill {
@@ -918,6 +931,13 @@ func (a *app) initCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("init", output.ExitConfig, "init_failed", err)
 			}
+			bootstrapEnv, bootstrapCode, bootstrapErr := a.bootstrapScaffoldPull(keepaliveOpts)
+			if bootstrapErr != nil {
+				return bootstrapErr
+			}
+			if bootstrapCode != output.ExitSuccess {
+				return a.write(bootstrapEnv, bootstrapCode)
+			}
 			var skillResult agentskill.InstallResult
 			if withSkill {
 				skillResult, err = agentskill.Install(skillOpts)
@@ -930,6 +950,7 @@ func (a *app) initCommand() *cobra.Command {
 			env.Logs = []string{
 				"created " + result.ConfigPath,
 				"copied workbook to " + result.Workbook,
+				"pulled workbook VBA into source",
 			}
 			if withSkill {
 				env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
@@ -940,7 +961,33 @@ func (a *app) initCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
+}
+
+func (a *app) bootstrapScaffoldPush(keepaliveOpts excel.CommandOptions) (output.Envelope, int, error) {
+	cfg, err := config.Load(a.cwd)
+	if err != nil {
+		return output.Envelope{}, 0, a.writeFailure("new", output.ExitConfig, "config_error", err)
+	}
+	return a.runExcelWithProgress("Importing scaffolded VBA source", keepaliveOpts, func() (output.Envelope, int, error) {
+		return excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, excel.PushOptions{
+			BackupMode: "never",
+			Keepalive:  keepaliveOpts,
+		})
+	})
+}
+
+func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.Envelope, int, error) {
+	cfg, err := config.Load(a.cwd)
+	if err != nil {
+		return output.Envelope{}, 0, a.writeFailure("init", output.ExitConfig, "config_error", err)
+	}
+	return a.runExcelWithProgress("Exporting workbook VBA source", keepaliveOpts, func() (output.Envelope, int, error) {
+		return excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{
+			Keepalive: keepaliveOpts,
+		})
+	})
 }
 
 func (a *app) doctorCommand() *cobra.Command {

@@ -210,11 +210,15 @@ Create a new xlflow project and macro-enabled workbook:
 xlflow new Book.xlsm
 ```
 
+`new` automatically pushes the scaffolded VBA modules into the new workbook, so a later `pull` starts from the same initial source.
+
 Or start from an existing workbook:
 
 ```bash
 xlflow init Book.xlsm
 ```
+
+`init` automatically pulls VBA out of the copied workbook into `src/`, so you can edit source files immediately without a separate bootstrap `pull`.
 
 Install the AI agent Skill during project creation:
 

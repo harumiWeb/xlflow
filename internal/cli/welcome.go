@@ -56,9 +56,9 @@ func renderScaffoldWelcome(model scaffoldWelcomeModel, color bool) string {
 		logo = renderGradientBlock(scaffoldWelcomeLogo, welcomeTitleStart, welcomeTitleEnd)
 	}
 	if meta == "" {
-		return logo + "\n\n"
+		return "\n\n" + logo + "\n\n"
 	}
-	return logo + "\n\n" + meta + "\n\n"
+	return "\n\n" + logo + "\n\n" + meta + "\n\n"
 }
 
 func renderScaffoldWelcomeBadge(text string) string {
