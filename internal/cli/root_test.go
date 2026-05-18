@@ -1084,13 +1084,16 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	got := stdout.String()
-	for _, want := range []string{"Welcome to xlflow", "Version: 1.2.3", "copied workbook to build/Input.xlsm"} {
+	for _, want := range []string{"Version: 1.2.3", "copied workbook to build/Input.xlsm"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("interactive init output missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Index(got, "Welcome to xlflow") > strings.Index(got, "xlflow init") {
-		t.Fatalf("expected welcome before command summary:\n%s", got)
+	if strings.Contains(got, "Welcome to xlflow") {
+		t.Fatalf("interactive init output should not include welcome text:\n%s", got)
+	}
+	if strings.Index(got, "Version: 1.2.3") > strings.Index(got, "xlflow init") {
+		t.Fatalf("expected welcome UI before command summary:\n%s", got)
 	}
 }
 
