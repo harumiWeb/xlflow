@@ -34,7 +34,7 @@ func Init(cwd, workbookPath string) (InitResult, error) {
 	destPath := filepath.Join(cwd, "build", filepath.Base(workbookPath))
 	result, err = createScaffold(cwd, destPath, projectName(workbookPath), func(path string) error {
 		return copyFile(workbookPath, path)
-	}, "frm")
+	}, "frm", false)
 	if err != nil {
 		return InitResult{}, err
 	}
@@ -50,17 +50,23 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 		return InitResult{}, err
 	}
 	destPath := filepath.Join(cwd, "build", name)
-	return createScaffold(cwd, destPath, projectName(name), createWorkbook, "")
+	return createScaffold(cwd, destPath, projectName(name), createWorkbook, "", true)
 }
 
-func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string) (InitResult, error) {
+func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string, scaffoldWorkbookModules bool) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
 	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
 	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
 	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
-	for _, path := range []string{destPath, configPath, assertPath, mainPath, appPath, uiPath} {
+	thisWorkbookPath := filepath.Join(cwd, "src", "workbook", "ThisWorkbook.bas")
+	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
+	protectedPaths := []string{destPath, configPath, assertPath, mainPath, appPath, uiPath}
+	if scaffoldWorkbookModules {
+		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
+	}
+	for _, path := range protectedPaths {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -118,6 +124,20 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 			return result, err
 		}
 		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
+	}
+	if scaffoldWorkbookModules {
+		for _, item := range []struct {
+			path string
+			body string
+		}{
+			{thisWorkbookPath, defaultDocumentModule},
+			{sheet1Path, defaultDocumentModule},
+		} {
+			if err := writeExclusive(item.path, item.body); err != nil {
+				return result, err
+			}
+			result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
+		}
 	}
 
 	gitignorePath := filepath.Join(cwd, ".gitignore")
@@ -355,4 +375,7 @@ Option Explicit
 Public Sub RunFromButton()
   Main.Run
 End Sub
+`
+
+const defaultDocumentModule = `Option Explicit
 `
