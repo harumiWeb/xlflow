@@ -24,9 +24,8 @@ xlflow save --session --json
 
 ## Notes
 
-::: important
-Use this after `push --session --no-save` or `edit --session` when the live workbook should become the persisted workbook.
-:::
+> [!IMPORTANT]
+> Use this after `push --session --no-save` or `edit --session` when the live workbook should become the persisted workbook.
 
 ## JSON Output Example
 

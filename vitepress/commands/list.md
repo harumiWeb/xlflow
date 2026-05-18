@@ -29,9 +29,8 @@ xlflow list forms --session --json
 Use `list forms` before `form snapshot`, `form build`, or `form export-image` to confirm names.
 :::
 
-::: important
-Listing forms is metadata-oriented; it does not execute UserForm runtime code.
-:::
+> [!IMPORTANT]
+> Listing forms is metadata-oriented; it does not execute UserForm runtime code.
 
 ## JSON Output Example
 

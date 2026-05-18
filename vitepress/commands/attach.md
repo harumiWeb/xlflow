@@ -25,9 +25,8 @@ xlflow attach --active --json
 
 ## Notes
 
-::: important
-`attach` is a safety check. It does not import source, change workbook state, or create a managed session.
-:::
+> [!IMPORTANT]
+> `attach` is a safety check. It does not import source, change workbook state, or create a managed session.
 
 ::: tip
 Use this before manual Excel work when multiple workbooks are open.

@@ -43,9 +43,8 @@ xlflow edit range --sheet QR --range A1:AE31 --fill "#FFFFFF" --session --json
 
 ## Notes
 
-::: important
-`edit` is session-oriented. Save explicitly when the mutation should persist to disk.
-:::
+> [!IMPORTANT]
+> `edit` is session-oriented. Save explicitly when the mutation should persist to disk.
 
 ::: warning
 Treat edit payloads as workbook mutations. Use disposable sessions or backups for destructive experiments.

@@ -28,9 +28,8 @@ xlflow push --session --fast --no-save --json
 
 ## Notes
 
-::: important
-`push` runs source preflight before opening Excel so modal compile dialogs are caught as structured CLI errors whenever possible.
-:::
+> [!IMPORTANT]
+> `push` runs source preflight before opening Excel so modal compile dialogs are caught as structured CLI errors whenever possible.
 
 ::: warning
 `--session --no-save` leaves the live workbook newer than disk. Run `xlflow save --session` when the changes should persist.

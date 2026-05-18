@@ -27,9 +27,8 @@ xlflow analyze --json
 Use `analyze` for fast source-level feedback before opening Excel.
 :::
 
-::: important
-Findings that block automation return a failure status and exit code `1`.
-:::
+> [!IMPORTANT]
+> Findings that block automation return a failure status and exit code `1`.
 
 ## JSON Output Example
 

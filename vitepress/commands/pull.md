@@ -29,9 +29,8 @@ xlflow pull --session --json
 Pull before editing if the workbook may contain newer VBA than the source tree.
 :::
 
-::: important
-UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
-:::
+> [!IMPORTANT]
+> UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
 
 ## JSON Output Example
 

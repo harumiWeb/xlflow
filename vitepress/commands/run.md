@@ -46,9 +46,8 @@ Discover entrypoints with `xlflow macros --json` before running macros from an a
 Use `--interactive` only when the macro intentionally shows dialogs or UserForms. Headless automation should avoid GUI prompts.
 :::
 
-::: important
-For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
-:::
+> [!IMPORTANT]
+> For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
 
 ## JSON Output Example
 

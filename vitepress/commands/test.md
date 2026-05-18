@@ -26,9 +26,8 @@ xlflow test --filter Smoke --session --json
 
 ## Notes
 
-::: important
-`test` executes VBA. Use a controlled workbook state before running tests that mutate sheets or files.
-:::
+> [!IMPORTANT]
+> `test` executes VBA. Use a controlled workbook state before running tests that mutate sheets or files.
 
 ::: tip
 Keep VBA assertions simple and scalar so failures are easy for agents to parse.

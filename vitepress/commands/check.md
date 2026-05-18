@@ -29,9 +29,8 @@ xlflow check --keepalive --json
 Use `check --json` as the default preflight before agent-driven `push` and `run` workflows.
 :::
 
-::: important
-`check` reports each phase independently, so read the phase list even when the combined status is failure.
-:::
+> [!IMPORTANT]
+> `check` reports each phase independently, so read the phase list even when the combined status is failure.
 
 ## JSON Output Example
 

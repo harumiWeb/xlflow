@@ -27,9 +27,8 @@ xlflow diff before.xlsm after.xlsm --vba-before before/src --vba-after after/src
 
 ## Notes
 
-::: important
-A successful comparison can still report differences. Inspect the JSON summary instead of treating exit code `0` as no changes.
-:::
+> [!IMPORTANT]
+> A successful comparison can still report differences. Inspect the JSON summary instead of treating exit code `0` as no changes.
 
 ::: tip
 Use `pull` before `diff` when you need workbook and source changes in one review.

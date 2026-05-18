@@ -26,9 +26,8 @@ xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 
 ## Notes
 
-::: important
-Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
-:::
+> [!IMPORTANT]
+> Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
 
 ::: tip
 Run `xlflow pull --json` after `init` to create the first source-controlled snapshot.

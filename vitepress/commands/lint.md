@@ -23,9 +23,8 @@ xlflow lint --json
 
 ## Notes
 
-::: important
-Syntax-safety checks are always enabled for patterns that could surface as modal VBE compile dialogs.
-:::
+> [!IMPORTANT]
+> Syntax-safety checks are always enabled for patterns that could surface as modal VBE compile dialogs.
 
 ::: tip
 Use `lint --json` in agent loops before `push` to catch source problems while Excel is still closed.
@@ -40,7 +39,12 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
   "status": "error",
   "command": "lint",
   "issues": [
-    { "file": "src/modules/Main.bas", "line": 7, "code": "vba_syntax_risk", "severity": "error" }
+    {
+      "file": "src/modules/Main.bas",
+      "line": 7,
+      "code": "vba_syntax_risk",
+      "severity": "error"
+    }
   ]
 }
 ```

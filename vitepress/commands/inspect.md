@@ -41,9 +41,8 @@ xlflow inspect form CalendarForm --both --json
 Most file-based inspection reads the saved workbook. Use session-aware commands when you need live dirty workbook state.
 :::
 
-::: important
-Runtime UserForm inspection may execute initializer code on a temporary workbook copy.
-:::
+> [!IMPORTANT]
+> Runtime UserForm inspection may execute initializer code on a temporary workbook copy.
 
 ## JSON Output Example
 

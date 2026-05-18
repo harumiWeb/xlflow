@@ -29,9 +29,8 @@ xlflow macros --session --json
 Run `macros --json` before `run` so agents can choose an exact entrypoint.
 :::
 
-::: important
-This command inspects workbook state; it does not execute discovered macros.
-:::
+> [!IMPORTANT]
+> This command inspects workbook state; it does not execute discovered macros.
 
 ## JSON Output Example
 
