@@ -27,7 +27,7 @@ xlflow skill install --target .agents/skills/xlflow --force --json
 
 ## Notes
 
-::: important
+::: warning
 Use either `--agent` or `--target`, not both.
 :::
 

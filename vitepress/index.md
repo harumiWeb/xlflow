@@ -33,10 +33,10 @@ features:
 These samples show the kind of workbook applications xlflow can help build and verify.
 
 <div class="demo-grid">
-  <a href="/xlflow/demos/world-news"><img src="/images/world-news.png" alt="World news workbook"><span>World News</span></a>
-  <a href="/xlflow/demos/stock-dashboard"><img src="/images/stock-price.png" alt="Stock dashboard workbook"><span>Stock Dashboard</span></a>
-  <a href="/xlflow/demos/qr-code"><img src="/images/gen-qrcode.png" alt="QR generator workbook"><span>QR Generator</span></a>
-  <a href="/xlflow/demos/invader-game"><img src="/images/space-invader.gif" alt="UserForm invader game"><span>UserForm Game</span></a>
+  <a href="/demos/world-news"><img src="/images/world-news.png" alt="World news workbook"><span>World News</span></a>
+  <a href="/demos/stock-dashboard"><img src="/images/stock-price.png" alt="Stock dashboard workbook"><span>Stock Dashboard</span></a>
+  <a href="/demos/qr-code"><img src="/images/gen-qrcode.png" alt="QR generator workbook"><span>QR Generator</span></a>
+  <a href="/demos/invader-game"><img src="/images/space-invader.gif" alt="UserForm invader game"><span>UserForm Game</span></a>
 </div>
 
 <style>

@@ -10,14 +10,14 @@ xlflow push [--backup <always|never>] [--fast] [--changed-only] [--session] [--n
 
 ## Options and Arguments
 
-| Option / argument | Description                                    | Default                                                          |
-| ----------------- | ---------------------------------------------- | ---------------------------------------------------------------- | ------ |
-| `--backup <always | never>`                                        | Choose whether to create a backup before modifying the workbook. | always |
-| `--fast`          | Use the faster import path when supported.     | false                                                            |
-| `--changed-only`  | Import only changed source files.              | false                                                            |
-| `--session`       | Push into the managed live workbook session.   | false                                                            |
-| `--no-save`       | Leave the session workbook dirty after import. | false                                                            |
-| `--json`          | Return import results and warnings.            | false                                                            |
+| Option / argument          | Description                                                      | Default |
+| -------------------------- | ---------------------------------------------------------------- | ------- |
+| `--backup <always\|never>` | Choose whether to create a backup before modifying the workbook. | always  |
+| `--fast`                   | Use the faster import path when supported.                       | false   |
+| `--changed-only`           | Import only changed source files.                                | false   |
+| `--session`                | Push into the managed live workbook session.                     | false   |
+| `--no-save`                | Leave the session workbook dirty after import.                   | false   |
+| `--json`                   | Return import results and warnings.                              | false   |
 
 ## Examples
 
