@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
+	"github.com/harumiWeb/xlflow/internal/backup"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
@@ -59,6 +60,31 @@ func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	}
 	if cmd == nil || cmd.Name() != "version" {
 		t.Fatalf("expected version command, got %#v", cmd)
+	}
+}
+
+func TestRootCommandIncludesBackupAndRollbackCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	backupCmd, _, err := root.Find([]string{"backup", "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backupCmd == nil || backupCmd.Name() != "list" {
+		t.Fatalf("expected backup list command, got %#v", backupCmd)
+	}
+	rollbackCmd, _, err := root.Find([]string{"rollback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rollbackCmd == nil || rollbackCmd.Name() != "rollback" {
+		t.Fatalf("expected rollback command, got %#v", rollbackCmd)
+	}
+	for _, name := range []string{"latest", "backup"} {
+		if rollbackCmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected rollback command to define --%s", name)
+		}
 	}
 }
 
@@ -2348,6 +2374,79 @@ func TestBuildPushOptionsExpandsFastAndRequiresSessionForNoSave(t *testing.T) {
 	_, err = buildPushOptions("always", false, false, false, true, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "--no-save requires --session") {
 		t.Fatalf("expected no-save session error, got %v", err)
+	}
+}
+
+func TestBuildRollbackTargetRequiresExactlyOneSelector(t *testing.T) {
+	if _, err := buildRollbackTarget(false, ""); err == nil {
+		t.Fatal("expected selector error")
+	}
+	if _, err := buildRollbackTarget(true, "20260518-100000-push"); err == nil {
+		t.Fatal("expected exclusive selector error")
+	}
+	target, err := buildRollbackTarget(true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !target.Latest {
+		t.Fatalf("target = %#v, want latest", target)
+	}
+}
+
+func TestBackupListCommandReturnsWorkbookBackupsOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(dir, ".xlflow", "backups", "legacy")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "Module1.bas"), []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("backup list error = %v", err)
+	}
+	var got struct {
+		Backups []map[string]any `json:"backups"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Backups) != 1 {
+		t.Fatalf("backups = %#v, want 1", got.Backups)
+	}
+}
+
+func TestRollbackCommandRequiresBackupSelector(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "rollback"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("rollback err=%v exit=%d", err, output.ExitCode(err))
 	}
 }
 

@@ -57,6 +57,8 @@ type Envelope struct {
 	Check         any `json:"check,omitempty"`
 	Version       any `json:"version,omitempty"`
 	RunDiagnostic any `json:"run_diagnostic,omitempty"`
+	Backups       any `json:"backups,omitempty"`
+	Rollback      any `json:"rollback,omitempty"`
 	Target        any `json:"target,omitempty"`
 	Output        any `json:"output,omitempty"`
 	Spec          any `json:"spec,omitempty"`
@@ -214,6 +216,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderMacros(env))
 	case "list":
 		b.WriteString(r.renderList(env))
+	case "backup list":
+		b.WriteString(r.renderBackupList(env))
+	case "rollback":
+		b.WriteString(r.renderRollback(env))
 	case "session":
 		b.WriteString(r.renderSession(env))
 	case "save":
@@ -740,6 +746,73 @@ func (r renderer) renderList(env Envelope) string {
 			continue
 		}
 		fmt.Fprintf(&b, "- %s (%s)\n", name, strings.Join(details, ", "))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderBackupList(env Envelope) string {
+	backups := listOfObjects(env.Backups)
+	if env.Backups == nil {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(kv("Backups", fmt.Sprintf("%d", len(backups))))
+	for _, item := range backups {
+		line := []string{stringValue(item, "id")}
+		if created := stringValue(item, "created_at"); created != "" {
+			line = append(line, created)
+		}
+		if reason := stringValue(item, "reason"); reason != "" {
+			line = append(line, reason)
+		}
+		if workbook := stringValue(item, "workbook"); workbook != "" {
+			line = append(line, workbook)
+		}
+		if path := stringValue(item, "path"); path != "" {
+			line = append(line, path)
+		}
+		b.WriteString("- ")
+		b.WriteString(strings.Join(line, " | "))
+		b.WriteString("\n")
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderRollback(env Envelope) string {
+	rollback := objectMap(env.Rollback)
+	target := objectMap(env.Target)
+	if len(rollback) == 0 && len(target) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if summary := summarizeTarget(target); summary != "" {
+		b.WriteString(kv("Target", summary))
+	}
+	restored := objectMap(rollback["restored_from"])
+	if id := stringValue(restored, "id"); id != "" {
+		b.WriteString(kv("Backup ID", id))
+	}
+	if path := stringValue(restored, "path"); path != "" {
+		b.WriteString(kv("Restored from", path))
+	}
+	if reason := stringValue(restored, "reason"); reason != "" {
+		b.WriteString(kv("Reason", reason))
+	}
+	if created := stringValue(restored, "created_at"); created != "" {
+		b.WriteString(kv("Created", created))
+	}
+	safety := objectMap(rollback["safety_backup"])
+	if id := stringValue(safety, "id"); id != "" {
+		b.WriteString(kv("Safety backup", id))
+	}
+	if path := stringValue(safety, "path"); path != "" {
+		b.WriteString(kv("Safety path", path))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))

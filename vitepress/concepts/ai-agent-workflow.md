@@ -25,4 +25,5 @@ Rules for agents:
 - Use `macros` before guessing a `run` target.
 - Use `inspect` and `export-image` to verify workbook output.
 - Use `trace` when runtime failures are unclear.
+- Use `backup list` and `rollback` when a `push` or workbook mutation leaves the workbook in a bad state.
 - Avoid headless workflows for macros that intentionally require dialogs or UserForms.

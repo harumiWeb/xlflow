@@ -27,8 +27,49 @@ $tmpImportDir = $null
 $sessionAttached = $false
 $sessionMode = "none"
 $sessionInvalidated = $false
+$backupWorkbookPath = $null
+
+function New-XlflowPushBackupMetadata {
+  param(
+    [string]$Id,
+    [string]$Reason,
+    [string]$WorkbookPath,
+    [string]$BackupFileName,
+    [datetime]$CreatedAt
+  )
+
+  return [ordered]@{
+    id = $Id
+    created_at = $CreatedAt.ToString("o")
+    reason = $Reason
+    original_workbook_path = [System.IO.Path]::GetFullPath($WorkbookPath)
+    backup_file_path = $BackupFileName
+  }
+}
+
+function New-XlflowPushBackupIdentity {
+  param(
+    [string]$BackupRootFull,
+    [string]$Reason
+  )
+
+  do {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+    $suffix = [guid]::NewGuid().ToString("N").Substring(0, 6)
+    $backupId = "$timestamp-$Reason-$suffix"
+    $backupDir = Join-Path $BackupRootFull $backupId
+  } while (Test-Path -LiteralPath $backupDir)
+
+  return [ordered]@{
+    id = $backupId
+    dir = $backupDir
+    timestamp = $timestamp
+  }
+}
 
 try {
+  $null = $Folders
+  $null = $DefaultComponentFolders
   if ($BackupMode -ne "always" -and $BackupMode -ne "never") {
     Set-XlflowError -Result $result -Code "push_args_invalid" -Message "-BackupMode must be always or never." -Source "xlflow"
     throw "invalid backup mode"
@@ -63,19 +104,19 @@ try {
     exit 0
   }
 
-  $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $backupReason = "before-push"
   $backupRootFull = [System.IO.Path]::GetFullPath($BackupRoot)
   $xlflowRoot = Split-Path -Parent $backupRootFull
   if ([string]::IsNullOrWhiteSpace($xlflowRoot)) {
     throw "backup root parent could not be resolved: $BackupRoot"
   }
-  $backupDir = Join-Path $backupRootFull $timestamp
+  $backupIdentity = New-XlflowPushBackupIdentity -BackupRootFull $backupRootFull -Reason "push"
+  $backupId = [string]$backupIdentity.id
+  $backupDir = [string]$backupIdentity.dir
+  $timestamp = [string]$backupIdentity.timestamp
   $tmpRoot = Join-Path $xlflowRoot "tmp"
   $tmpImportRoot = Join-Path $tmpRoot "import"
   $tmpImportDir = Join-Path $tmpImportRoot $timestamp
-  if ($BackupMode -eq "always") {
-    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-  }
   New-Item -ItemType Directory -Force -Path $tmpImportDir | Out-Null
 
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -UseSession $UseSession -MetadataPath $MetadataPath
@@ -87,17 +128,15 @@ try {
     try { $excel = $workbook.Application } catch { Write-Verbose ("failed to resolve workbook application: " + $_.Exception.Message) }
   }
 
+  if ($BackupMode -eq "always") {
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    $backupWorkbookPath = Join-Path $backupDir ([System.IO.Path]::GetFileName($WorkbookPath))
+    $workbook.SaveCopyAs($backupWorkbookPath)
+    $metadata = New-XlflowPushBackupMetadata -Id $backupId -Reason $backupReason -WorkbookPath $WorkbookPath -BackupFileName ([System.IO.Path]::GetFileName($backupWorkbookPath)) -CreatedAt (Get-Date)
+    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $backupDir "metadata.json") -Encoding UTF8
+  }
+
   foreach ($component in @($workbook.VBProject.VBComponents)) {
-    if ($BackupMode -eq "always") {
-      $backupPath = Get-XlflowComponentPath -Component $component -ModulesDir $backupDir -ClassesDir $backupDir -FormsDir $backupDir -WorkbookDir $backupDir -Folders $Folders -FolderAnnotation $FolderAnnotation -DefaultComponentFolders $DefaultComponentFolders
-      if ($null -ne $backupPath) {
-        $backupParent = Split-Path -Parent $backupPath
-        if (-not [string]::IsNullOrWhiteSpace($backupParent)) {
-          New-Item -ItemType Directory -Force -Path $backupParent | Out-Null
-        }
-        $component.Export($backupPath)
-      }
-    }
     if ($component.Type -ne 100) {
       $workbook.VBProject.VBComponents.Remove($component)
     }
@@ -143,7 +182,12 @@ try {
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $saved -NeedsSave $needsSave -Dirty $needsSave
   $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $needsSave -SaveRequired $needsSave -Mode $sessionMode
-  $result.backup = [ordered]@{ path = $(if ($BackupMode -eq "always") { $backupDir } else { $null }); mode = $BackupMode }
+  $result.backup = [ordered]@{
+    id = $(if ($BackupMode -eq "always") { $backupId } else { $null })
+    path = $(if ($BackupMode -eq "always") { $backupWorkbookPath } else { $null })
+    reason = $(if ($BackupMode -eq "always") { $backupReason } else { $null })
+    mode = $BackupMode
+  }
   $result.source = [ordered]@{ changed_only = (ConvertTo-XlflowBool $ChangedOnly); changed = $true; state = $StatePath }
   Add-XlflowUserFormDiscoveryMessages -Result $result -Names $sourceUserFormNames
   if ($needsSave) {
@@ -153,7 +197,7 @@ try {
   $result.logs = @(
     @(
       $(Get-XlflowSessionUsageLog -SessionMode $sessionMode),
-      $(if ($BackupMode -eq "always") { "backed up existing VBA components" } else { "skipped VBA backup" }),
+      $(if ($BackupMode -eq "always") { "backed up workbook file before push" } else { "skipped workbook backup" }),
       "imported $($imported.Count) source file(s)",
       "synced $($syncedFormCode.Count) UserForm code-behind sidecar(s)",
       "updated $($updatedDocumentModules.Count) workbook module(s)",

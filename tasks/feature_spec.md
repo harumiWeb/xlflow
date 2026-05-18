@@ -1,3 +1,54 @@
+# Workbook Rollback Spec
+
+## Goal
+
+Add a first-class rollback flow for restoring the configured workbook from xlflow-managed backups after a broken `push`, failed import, or workbook-level mistake.
+
+## Contract
+
+- `xlflow backup list` lists rollback-capable workbook backups for the configured workbook.
+- `xlflow rollback --latest` restores the newest matching backup.
+- `xlflow rollback --backup <backup-id>` restores a specific matching backup.
+- `push` default backup mode now creates workbook-file backups under `.xlflow/backups/<backup-id>/` with a copied workbook and `metadata.json`.
+- Rollback creates a safety workbook backup with reason `pre-rollback` before replacing the target workbook file.
+- Rollback restores only the workbook file; it does not update `src/` automatically.
+- If the configured workbook is attached to an active xlflow session, rollback fails safely instead of replacing the file underneath the live workbook.
+- Successful rollback warns that workbook and source may be out of sync and hints to run `inspect` and `pull`.
+
+## Function / Type Contracts
+
+```go
+type Metadata struct {
+    ID                   string
+    CreatedAt            time.Time
+    Reason               string
+    OriginalWorkbookPath string
+    BackupFilePath       string
+}
+
+type Record struct {
+    Metadata
+    Directory         string
+    BackupFileAbsPath string
+}
+
+func List(projectRoot string, workbookPath string) ([]Record, error)
+func Latest(projectRoot string, workbookPath string) (Record, error)
+func Create(projectRoot string, workbookPath string, reason string, now time.Time) (Record, error)
+func Restore(targetWorkbookPath string, record Record) error
+```
+
+- `List` filters by workbook path and ignores legacy backup directories that do not contain valid rollback metadata.
+- `Latest` returns the newest matching backup record for the configured workbook.
+- `Create` returns the created backup record, including the generated backup ID and resolved backup workbook path.
+- `Restore` replaces the target workbook from a selected record and is paired with CLI-level `workbook_in_use` safety checks before file replacement.
+
+## Verification
+
+- CLI tests cover command registration and selector validation for `backup list` and `rollback`.
+- Unit tests cover backup metadata listing, latest selection, workbook-path filtering, legacy directory ignore behavior, and restore behavior.
+- `push.ps1` continues to parse and now creates workbook-file backup artifacts compatible with rollback.
+
 # new/init Bootstrap Sync Spec
 
 ## Goal

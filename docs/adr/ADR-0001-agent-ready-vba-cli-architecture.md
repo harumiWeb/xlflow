@@ -23,7 +23,7 @@ Adopt a Go CLI using Cobra for command routing, `xlflow.toml` for project config
 
 The MVP is Windows-first. Excel-dependent commands are expected to run on Windows with Excel installed and suitable VBIDE trust settings. Non-Excel commands such as `init` and `lint` remain testable without Excel.
 
-`push` creates a timestamped backup under `.xlflow/backups/` before replacing VBA components.
+`push` creates a timestamped workbook-file backup under `.xlflow/backups/<backup-id>/` before replacing VBA components. Each backup directory stores the copied workbook plus metadata used by `backup list` and `rollback`.
 
 VBA source-controlled files use UTF-8 without BOM. The Excel COM bridge treats VBIDE import and export text files as CP932 and converts at the `pull`/`push` boundary. Binary userform companions such as `.frx` are copied without text conversion.
 

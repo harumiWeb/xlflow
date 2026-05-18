@@ -2,6 +2,13 @@
 
 All notable changes to xlflow will be documented in this file.
 
+## Unreleased
+
+- Updated `xlflow new` to bootstrap the workbook/source sync automatically by pushing scaffolded VBA into the new workbook before the command reports success, and added placeholder `src/workbook/ThisWorkbook.bas` / `Sheet1.bas` files with `Option Explicit` for new projects.
+- Updated `xlflow init` to bootstrap source sync automatically by pulling VBA from the copied workbook into `src/`, and added scaffold-level keepalive handling so `new` / `init --keepalive` emit a single final `XLFLOW_DONE` marker only after bootstrap sync completes.
+- Added first-class workbook rollback support with `xlflow backup list` and `xlflow rollback`, including metadata-backed workbook-file backups under `.xlflow/backups/<backup-id>/`, automatic safety backups before restore, and session-aware guards that refuse rollback while the target workbook is open in an active xlflow session.
+- Changed default `push` backups from component-export snapshots to rollback-capable workbook snapshots, and updated the CLI/docs surface, JSON output, and VitePress command/concept pages to reflect the new backup and recovery workflow.
+
 ## v0.8.1
 
 - Fixed `xlflow inspect form <name> --designer --session` so normal designer inspection no longer takes the strict temporary-workbook path, reducing the sample `space-invader` session inspection from about one minute to a few seconds.
@@ -15,10 +22,6 @@ All notable changes to xlflow will be documented in this file.
 - Corrected UserForm build round-tripping so snapshot-derived width and height no longer grow on each `form build` cycle, preserving the persisted Designer dimensions from `snapshot` output.
 - Updated the bundled docs, CLI contract, and agent guidance to reflect the UserForm discovery, inspection, snapshot, export, and warning workflow, including the experimental status of runtime image export.
 - Strengthened PowerShell script coverage with behavior-oriented tests for the UserForm build and export helpers, replacing narrow string-presence checks where practical.
-
-## Unreleased
-
-- Added always-on `xlflow lint` syntax checks for unclosed or mismatched VBA `Sub`/`Function`/`Property` procedures and malformed line-continuation underscores, blocking `push`/`run` before Excel can open a VBE compile dialog.
 
 ## v0.7.0
 

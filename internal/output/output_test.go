@@ -183,6 +183,74 @@ func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesBackupAndRollbackFields(t *testing.T) {
+	env := New("rollback")
+	env.Backups = []map[string]any{{"id": "20260518-100000-push", "path": ".xlflow/backups/20260518-100000-push/Book.xlsm"}}
+	env.Rollback = map[string]any{
+		"restored_from": map[string]any{"id": "20260518-100000-push"},
+		"safety_backup": map[string]any{"id": "20260518-110000-pre-rollback"},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"backups", "rollback"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersBackupListSummary(t *testing.T) {
+	env := New("backup list")
+	env.Backups = []map[string]any{
+		{"id": "20260518-100000-push", "created_at": "2026-05-18T10:00:00+09:00", "reason": "before-push", "workbook": "build/Book.xlsm", "path": ".xlflow/backups/20260518-100000-push/Book.xlsm"},
+		{"id": "20260518-110000-pre-rollback", "created_at": "2026-05-18T11:00:00+09:00", "reason": "pre-rollback", "workbook": "build/Book.xlsm", "path": ".xlflow/backups/20260518-110000-pre-rollback/Book.xlsm"},
+	}
+	env.Warnings = []map[string]any{{"code": "stale_index", "message": "refresh backup metadata"}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Backups:", "2", "20260518-100000-push", "before-push", "20260518-110000-pre-rollback", "Warnings:", "refresh backup metadata"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("backup list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRollbackSummary(t *testing.T) {
+	env := New("rollback")
+	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm"}
+	env.Rollback = map[string]any{
+		"restored_from": map[string]any{
+			"id":         "20260518-100000-push",
+			"path":       ".xlflow/backups/20260518-100000-push/Book.xlsm",
+			"reason":     "before-push",
+			"created_at": "2026-05-18T10:00:00+09:00",
+		},
+		"safety_backup": map[string]any{
+			"id":   "20260518-110000-pre-rollback",
+			"path": ".xlflow/backups/20260518-110000-pre-rollback/Book.xlsm",
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Target:", "build/Book.xlsm", "Backup ID:", "20260518-100000-push", "Safety backup:", "20260518-110000-pre-rollback"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rollback output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsInspectMarkdownUsesUnnamedPlaceholder(t *testing.T) {
 	env := New("inspect")
 	payload := map[string]any{
