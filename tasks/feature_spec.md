@@ -6,7 +6,7 @@ Remove the extra bootstrap commands after project creation so `new` and `init` l
 
 ## Contract
 
-- `xlflow new` still scaffolds `src/modules/XlflowAssert.bas`, `Main.bas`, `App.bas`, and `Ui.bas`, then automatically `push`es that scaffolded source into the newly created workbook before reporting success.
+- `xlflow new` still scaffolds `src/modules/XlflowAssert.bas`, `Main.bas`, `App.bas`, and `Ui.bas`, plus workbook document-module placeholders `src/workbook/ThisWorkbook.bas` and `src/workbook/Sheet1.bas`, then automatically `push`es that scaffolded source into the newly created workbook before reporting success.
 - `xlflow init` still copies the input workbook into `build/<basename>`, then automatically `pull`s VBA from that copied workbook into `src/` before reporting success.
 - `new` success output includes a log that scaffolded VBA was pushed to the workbook.
 - `init` success output includes a log that workbook VBA was pulled into source.

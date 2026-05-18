@@ -1323,6 +1323,29 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 	}
 }
 
+func TestNewCommandKeepaliveReportsOnlyFinalCommandDoneMarker(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	writeTestNewScript(t, dir)
+	writeTestPushScript(t, dir)
+
+	var stderr bytes.Buffer
+	a := &app{cwd: dir, stderr: &stderr}
+	root := a.rootCommand()
+	root.SetArgs([]string{"new", "Book.xlsm", "--keepalive"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	got := stderr.String()
+	if count := strings.Count(got, "XLFLOW_DONE status=success command=new"); count != 1 {
+		t.Fatalf("expected exactly one final new done marker, got %d:\n%s", count, got)
+	}
+	if strings.Contains(got, "command=push") {
+		t.Fatalf("expected internal bootstrap push not to emit its own done marker:\n%s", got)
+	}
+}
+
 func TestSkillInstallCommandRefusesOverwriteUnlessForced(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cwd: dir}
