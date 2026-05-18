@@ -92,6 +92,23 @@ Publish an English-first xlflow documentation site from `vitepress/` with GitHub
 - VitePress build output must not report broken internal links.
 - Generated asset paths must be compatible with `base: "/xlflow/"`.
 
+## VitePress Docs Polish Spec
+
+## Goal
+
+Improve first-run VitePress guidance for Windows users and AI-agent workflows without changing the CLI contract.
+
+## Contract
+
+- `vitepress/installation.md` presents the Windows end-user path first, with Scoop and GitHub Releases ahead of `go install`.
+- `vitepress/quickstart.md` explains what `xlflow new` creates and where users should edit VBA source before `push`.
+- `vitepress/ai-agents/index.md` documents a short recovery loop for failed agent runs and links the stable machine contract pages for JSON output and error codes.
+
+## Verification
+
+- `pnpm docs:build` must pass.
+- Updated pages must keep existing internal links valid under the GitHub Pages base path.
+
 # VBA Syntax Lint Spec
 
 ## Goal

@@ -41,6 +41,9 @@
 - [x] Reuse existing demo images under `vitepress/public/images`.
 - [x] Add GitHub Pages deployment workflow and ignore VitePress build output.
 - [x] Run `pnpm docs:build` and fix broken links or build issues.
+- [x] Reorder installation guidance for Windows-first users.
+- [x] Add quickstart output/edit-target explanation for `xlflow new`.
+- [x] Add AI-agent recovery loop guidance plus JSON/error-code reference links.
 
 ## Verification Notes
 

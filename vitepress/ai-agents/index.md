@@ -2,6 +2,8 @@
 
 xlflow gives coding agents a stable interface for Excel VBA projects: source files, JSON output, explicit exit codes, diagnostics, sessions, and visual inspection commands.
 
+Every command can return a stable JSON envelope, so coding agents can parse results without scraping terminal text. See [JSON Output](../reference/json-output) and [Error Codes](../reference/error-codes).
+
 Recommended loop:
 
 ```bash
@@ -16,6 +18,18 @@ xlflow macros --session --json
 xlflow run Main.Run --headless --session --json
 xlflow save --session --json
 ```
+
+If a run fails, recover with a short loop before retrying:
+
+```bash
+xlflow lint --json
+xlflow analyze --json
+xlflow run Main.Run --diagnostic --session --json
+xlflow inspect workbook --json
+xlflow pull --session --json
+```
+
+Use `run --diagnostic` when you need structured compile or runtime failure details instead of a blind Excel/VBE dialog. Re-run `pull` after workbook-side investigation when you need the latest saved workbook state back in source.
 
 Install the bundled skill when supported by your agent:
 
