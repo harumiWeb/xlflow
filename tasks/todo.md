@@ -1,3 +1,19 @@
+# new/init Bootstrap Sync Todo
+
+- [x] Add automatic scaffold `push` after `xlflow new`.
+- [x] Add automatic bootstrap `pull` after `xlflow init`.
+- [x] Add `init` keepalive flag support and argument validation coverage.
+- [x] Add CLI regression tests using script overrides for bootstrap `push` / `pull`.
+- [x] Run focused Go tests, full `go test ./...`, and Windows Excel COM E2E verification.
+
+## Verification Notes
+
+- `go test ./internal/cli -run "TestRootCommandIncludesExcelCommandKeepaliveFlags|TestRootCommandDoesNotAddKeepaliveToNonExcelCommands|TestInitCommandRejectsInvalidKeepaliveIntervalBeforeScaffold|TestInitWithSkillInstallsProviderSkill|TestInitCommandRendersWelcomeForInteractiveTerminal|TestInitCommandSkipsWelcomeForJSONOutput|TestInitCommandShowsUpdateNoticeWhenNewReleaseIsAvailable|TestInitCommandSilentlySkipsFailedUpdateCheck|TestInitCommandSkipsUpdateCheckWithFlag|TestInitCommandSkipsUpdateCheckWithEnv|TestInitCommandAutoPullsWorkbookSource|TestNewCommandAutoPushesScaffoldSource"` passed.
+- `go test ./...` passed.
+- E2E workspace `C:\dev\go\xlflow\tmp_workspaces\bootstrap-sync-e2e`: `xlflow new --json`, `doctor --json`, immediate `pull --json`, and `lint --json` all passed. The pulled source tree retained `src/modules/Main.bas`, `App.bas`, `Ui.bas`, and `XlflowAssert.bas`, confirming `new` now bootstraps workbook VBA before the first pull.
+- E2E workspace `C:\dev\go\xlflow\tmp_workspaces\bootstrap-sync-init`: `xlflow init C:\dev\go\xlflow\tmp_workspaces\bootstrap-sync-e2e\build\Book.xlsm --json`, `pull --json`, and `lint --json` all passed. `init` success output included `pulled workbook VBA into source`, and `src/` already contained workbook exports before the manual follow-up `pull`.
+- Verification scope was intentionally narrowed to the `new` / `init` bootstrap sync paths rather than full release-gate coverage.
+
 # VitePress Documentation Site Todo
 
 - [x] Add VitePress site configuration for GitHub Pages, local search, nav, sidebars, edit links, and footer.

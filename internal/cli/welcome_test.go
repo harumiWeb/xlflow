@@ -56,10 +56,9 @@ func TestShouldRenderScaffoldWelcome(t *testing.T) {
 	}
 }
 
-func TestRenderScaffoldWelcomeIncludesBadgeAndLogo(t *testing.T) {
+func TestRenderScaffoldWelcomeIncludesLogoAndVersion(t *testing.T) {
 	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
 	for _, want := range []string{
-		"🏄‍♂️ Welcome to xlflow",
 		"Version: 1.2.3",
 		" ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗",
 		" ╚═╝  ╚═╝ ╚══════╝ ╚═╝      ╚══════╝  ╚═════╝   ╚══╝╚══╝",
@@ -67,6 +66,13 @@ func TestRenderScaffoldWelcomeIncludesBadgeAndLogo(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("welcome output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRenderScaffoldWelcomeOmitsWelcomeBadge(t *testing.T) {
+	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
+	if strings.Contains(got, "Welcome to xlflow") {
+		t.Fatalf("welcome output should not include welcome badge:\n%s", got)
 	}
 }
 

@@ -209,6 +209,31 @@ func TestNewScaffoldDefaultWorkbook(t *testing.T) {
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("new userform code source = %q, want sidecar", cfg.UserForm.CodeSource)
 	}
+	for _, path := range []string{"src/workbook/ThisWorkbook.bas", "src/workbook/Sheet1.bas"} {
+		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(path)))
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if string(body) != defaultDocumentModule {
+			t.Fatalf("%s = %q, want %q", path, string(body), defaultDocumentModule)
+		}
+	}
+}
+
+func TestInitScaffoldDoesNotCreatePlaceholderWorkbookModules(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(dir, workbook); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"src/workbook/ThisWorkbook.bas", "src/workbook/Sheet1.bas"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); !os.IsNotExist(err) {
+			t.Fatalf("expected %s not to be scaffolded for init, got %v", path, err)
+		}
+	}
 }
 
 func TestNewScaffoldAppendsXlsmExtension(t *testing.T) {

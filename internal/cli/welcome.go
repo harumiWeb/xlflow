@@ -26,7 +26,6 @@ type rgbColor struct {
 }
 
 var (
-	welcomeBadgeColor = rgbColor{r: 184, g: 245, b: 162}
 	welcomeTitleStart = rgbColor{r: 143, g: 211, b: 255}
 	welcomeTitleEnd   = rgbColor{r: 184, g: 245, b: 162}
 	welcomeInfoColor  = rgbColor{r: 208, g: 214, b: 220}
@@ -51,20 +50,15 @@ func shouldRenderScaffoldWelcome(command string, opts output.Options) bool {
 }
 
 func renderScaffoldWelcome(model scaffoldWelcomeModel, color bool) string {
-	badge := renderScaffoldWelcomeBadge("🏄‍♂️ Welcome to xlflow")
 	logo := strings.Join(scaffoldWelcomeLogo, "\n")
 	meta := renderScaffoldWelcomeMeta(model, color)
 	if color {
-		badge = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(welcomeBadgeColor.hex())).
-			Bold(true).
-			Render(badge)
 		logo = renderGradientBlock(scaffoldWelcomeLogo, welcomeTitleStart, welcomeTitleEnd)
 	}
 	if meta == "" {
-		return badge + "\n\n" + logo + "\n\n"
+		return "\n\n" + logo + "\n\n"
 	}
-	return badge + "\n\n" + logo + "\n\n" + meta + "\n\n"
+	return "\n\n" + logo + "\n\n" + meta + "\n\n"
 }
 
 func renderScaffoldWelcomeBadge(text string) string {

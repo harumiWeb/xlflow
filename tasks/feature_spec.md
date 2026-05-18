@@ -1,3 +1,24 @@
+# new/init Bootstrap Sync Spec
+
+## Goal
+
+Remove the extra bootstrap commands after project creation so `new` and `init` leave workbook state and source state synchronized immediately.
+
+## Contract
+
+- `xlflow new` still scaffolds `src/modules/XlflowAssert.bas`, `Main.bas`, `App.bas`, and `Ui.bas`, plus workbook document-module placeholders `src/workbook/ThisWorkbook.bas` and `src/workbook/Sheet1.bas`, then automatically `push`es that scaffolded source into the newly created workbook before reporting success.
+- `xlflow init` still copies the input workbook into `build/<basename>`, then automatically `pull`s VBA from that copied workbook into `src/` before reporting success.
+- `new` success output includes a log that scaffolded VBA was pushed to the workbook.
+- `init` success output includes a log that workbook VBA was pulled into source.
+- `init` is now an Excel COM-backed command for contract purposes: if the automatic bootstrap pull cannot complete because Excel, COM, PowerShell, or VBIDE access is unavailable, the command returns an environment failure instead of a partial success.
+- `init` supports the same `--keepalive` / `--keepalive-interval` heartbeat behavior used by other Excel COM-backed commands.
+
+## Verification
+
+- `new` followed immediately by `pull` must preserve the scaffolded modules instead of exporting an empty workbook VBA project.
+- `init` must materialize workbook VBA under `src/` without requiring a manual follow-up `pull`.
+- CLI regression tests must cover the new success logs, `init` keepalive flags, and the bootstrap `push` / `pull` command chaining.
+
 # VitePress Documentation Site Spec
 
 ## Goal

@@ -4,13 +4,13 @@
 
 This spec defines the MVP command, configuration, JSON output, and exit-code contracts for xlflow.
 
-xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-controlled code. Excel operations use PowerShell and Excel COM. Non-Excel commands such as `init` and `lint` should remain testable without Excel installed.
+xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-controlled code. Excel operations use PowerShell and Excel COM. Source-only commands such as `lint` should remain testable without Excel installed.
 
 ## Commands
 
 ```text
 xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check] [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
 xlflow [--json] list forms [--session] [--keepalive] [--keepalive-interval <duration>]
@@ -61,13 +61,13 @@ xlflow [--json] version [--verbose]
 
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
 
-Excel COM-backed commands support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. This includes `new`, `doctor`, `attach`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `trace enable/disable/status/inject/clean`, `run`, `export-image`, `edit cell/range/rows/columns`, `macros`, `ui button add/list/remove`, `test`, and `check`. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=pull` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
+Excel COM-backed commands support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. This includes `new`, `init`, `doctor`, `attach`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `trace enable/disable/status/inject/clean`, `run`, `export-image`, `edit cell/range/rows/columns`, `macros`, `ui button add/list/remove`, `test`, and `check`. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=pull` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
 
 Excel COM-backed commands also include top-level `bridge` metadata with `host`, `edition`, and `version`. This identifies the xlflow PowerShell bridge process only. If workbook VBA launches its own external PowerShell process, that workbook-side host may differ and must be inspected separately.
 
-`new` creates a fresh macro-enabled workbook under `build/` and scaffolds the same project layout as `init`. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
+`new` creates a fresh macro-enabled workbook under `build/`, scaffolds the same project layout as `init`, and then automatically `push`es the scaffolded VBA source into that workbook so the initial workbook and `src/` tree start in sync. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
 
-`init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, and records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`). Initialized projects write `[userform].code_source = "frm"` so existing `.frm`-embedded code remains authoritative by default.
+`init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`), and then automatically `pull`s VBA from the copied workbook into `src/` so the initial source tree reflects workbook reality without a second command. Initialized projects write `[userform].code_source = "frm"` so existing `.frm`-embedded code remains authoritative by default. Because this bootstrap pull opens Excel/VBIDE, `init` is now an Excel COM-backed command and returns an environment failure if the automatic import cannot complete.
 
 `new` and `init` create or update a project-local `.gitignore`. The managed entries ignore Excel temporary files (`~$*.xls*`, `*.tmp`) and xlflow-generated state (`.xlflow/`, `build/`). Existing `.gitignore` content is preserved; missing managed entries are appended without duplicating entries that are already present.
 

@@ -211,11 +211,15 @@ task run -- --help
 xlflow new Book.xlsm
 ```
 
+`new` は scaffold した VBA module を新しい workbook へ自動 `push` するため、その後の `pull` でも同じ初期状態から始められます。
+
 既存の Excel ブックから始める場合は `init` を使用します。
 
 ```bash
 xlflow init Book.xlsm
 ```
+
+`init` はコピーした workbook から `src/` へ自動 `pull` するため、追加の bootstrap `pull` なしでそのまま source 編集を始められます。
 
 AI エージェント向けの Skill も同時にインストールする場合:
 
