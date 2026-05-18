@@ -24,7 +24,6 @@ export default defineConfig({
     sidebar: {
       "/commands/": commandSidebar(),
       "/concepts/": conceptSidebar(),
-      "/guides/": guideSidebar(),
       "/reference/": referenceSidebar(),
       "/ai-agents/": agentSidebar(),
       "/demos/": demoSidebar(),
@@ -91,24 +90,6 @@ function conceptSidebar() {
         { text: "Source of Truth", link: "/concepts/source-of-truth" },
         { text: "Backup and Rollback", link: "/concepts/backup-and-rollback" },
         { text: "AI Agent Workflow", link: "/concepts/ai-agent-workflow" },
-      ],
-    },
-  ];
-}
-
-function guideSidebar() {
-  return [
-    {
-      text: "Guides",
-      items: [
-        { text: "AI Agent First Project", link: "/guides/ai-agent-first-project" },
-        { text: "Weather App", link: "/guides/build-weather-app" },
-        { text: "News App", link: "/guides/build-news-app" },
-        { text: "QR Generator", link: "/guides/build-qr-generator" },
-        { text: "UserForm Game", link: "/guides/build-userform-game" },
-        { text: "UserForm Development", link: "/guides/userform-development" },
-        { text: "Error Handling", link: "/guides/error-handling" },
-        { text: "CI and Local Workflow", link: "/guides/ci-local-workflow" },
       ],
     },
   ];

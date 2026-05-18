@@ -60,4 +60,3 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 
 - [list](./list)
 - [inspect form](./inspect)
-- [UserForm guide](../guides/userform-development)

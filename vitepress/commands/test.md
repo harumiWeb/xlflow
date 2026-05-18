@@ -51,4 +51,3 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 
 - [run](./run)
 - [check](./check)
-- [error handling guide](../guides/error-handling)
