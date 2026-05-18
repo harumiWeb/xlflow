@@ -778,6 +778,7 @@ func (r renderer) renderBackupList(env Envelope) string {
 		b.WriteString(strings.Join(line, " | "))
 		b.WriteString("\n")
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }

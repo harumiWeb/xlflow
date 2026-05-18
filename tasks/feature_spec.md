@@ -15,6 +15,34 @@ Add a first-class rollback flow for restoring the configured workbook from xlflo
 - If the configured workbook is attached to an active xlflow session, rollback fails safely instead of replacing the file underneath the live workbook.
 - Successful rollback warns that workbook and source may be out of sync and hints to run `inspect` and `pull`.
 
+## Function / Type Contracts
+
+```go
+type Metadata struct {
+    ID                   string
+    CreatedAt            time.Time
+    Reason               string
+    OriginalWorkbookPath string
+    BackupFilePath       string
+}
+
+type Record struct {
+    Metadata
+    Directory         string
+    BackupFileAbsPath string
+}
+
+func List(projectRoot string, workbookPath string) ([]Record, error)
+func Latest(projectRoot string, workbookPath string) (Record, error)
+func Create(projectRoot string, workbookPath string, reason string, now time.Time) (Record, error)
+func Restore(targetWorkbookPath string, record Record) error
+```
+
+- `List` filters by workbook path and ignores legacy backup directories that do not contain valid rollback metadata.
+- `Latest` returns the newest matching backup record for the configured workbook.
+- `Create` returns the created backup record, including the generated backup ID and resolved backup workbook path.
+- `Restore` replaces the target workbook from a selected record and is paired with CLI-level `workbook_in_use` safety checks before file replacement.
+
 ## Verification
 
 - CLI tests cover command registration and selector validation for `backup list` and `rollback`.

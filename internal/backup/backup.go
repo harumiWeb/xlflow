@@ -152,8 +152,10 @@ func Restore(targetWorkbookPath string, record Record) error {
 		return err
 	}
 	if err := os.Remove(targetAbs); err != nil {
-		_ = os.Remove(tempPath)
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			_ = os.Remove(tempPath)
+			return err
+		}
 	}
 	if err := os.Rename(tempPath, targetAbs); err != nil {
 		_ = os.Remove(tempPath)

@@ -1380,6 +1380,9 @@ func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
 	if metadata.PID <= 0 {
 		return true, nil
 	}
+	if runtime.GOOS != "windows" {
+		return false, nil
+	}
 	running, err := processRunning(metadata.PID)
 	if err != nil {
 		return false, err
@@ -1415,7 +1418,35 @@ func looksLikeWorkbookInUse(err error) bool {
 }
 
 func samePath(a, b string) bool {
+	left, leftErr := canonicalPath(a)
+	right, rightErr := canonicalPath(b)
+	if leftErr == nil && rightErr == nil {
+		return strings.EqualFold(left, right)
+	}
+	if leftInfo, err := os.Stat(a); err == nil {
+		if rightInfo, err := os.Stat(b); err == nil {
+			return os.SameFile(leftInfo, rightInfo)
+		}
+	}
 	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+func canonicalPath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return filepath.Clean(resolvedPath), nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Clean(absPath), nil
+	}
+	return "", err
 }
 
 func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format string, overwrite bool, session bool, keepalive excel.CommandOptions) (excel.ExportImageOptions, error) {

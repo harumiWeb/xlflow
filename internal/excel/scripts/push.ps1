@@ -47,6 +47,26 @@ function New-XlflowPushBackupMetadata {
   }
 }
 
+function New-XlflowPushBackupIdentity {
+  param(
+    [string]$BackupRootFull,
+    [string]$Reason
+  )
+
+  do {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+    $suffix = [guid]::NewGuid().ToString("N").Substring(0, 6)
+    $backupId = "$timestamp-$Reason-$suffix"
+    $backupDir = Join-Path $BackupRootFull $backupId
+  } while (Test-Path -LiteralPath $backupDir)
+
+  return [ordered]@{
+    id = $backupId
+    dir = $backupDir
+    timestamp = $timestamp
+  }
+}
+
 try {
   $null = $Folders
   $null = $DefaultComponentFolders
@@ -85,14 +105,15 @@ try {
   }
 
   $backupReason = "before-push"
-  $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
   $backupRootFull = [System.IO.Path]::GetFullPath($BackupRoot)
   $xlflowRoot = Split-Path -Parent $backupRootFull
   if ([string]::IsNullOrWhiteSpace($xlflowRoot)) {
     throw "backup root parent could not be resolved: $BackupRoot"
   }
-  $backupId = "$timestamp-push"
-  $backupDir = Join-Path $backupRootFull $backupId
+  $backupIdentity = New-XlflowPushBackupIdentity -BackupRootFull $backupRootFull -Reason "push"
+  $backupId = [string]$backupIdentity.id
+  $backupDir = [string]$backupIdentity.dir
+  $timestamp = [string]$backupIdentity.timestamp
   $tmpRoot = Join-Path $xlflowRoot "tmp"
   $tmpImportRoot = Join-Path $tmpRoot "import"
   $tmpImportDir = Join-Path $tmpImportRoot $timestamp
