@@ -12,6 +12,7 @@ Publish an English-first xlflow documentation site from `vitepress/` with GitHub
 - Command pages must match the current Cobra command surface reported by `go run ./cmd/xlflow --help`.
 - Public-facing prose is derived from the README files; stable CLI contracts and JSON/exit-code details are derived from `docs/specs/*`; design pages link back to ADRs.
 - GitHub Pages deployment builds with pnpm and uploads `vitepress/.vitepress/dist`.
+- If `vitepress/.vitepress/theme` exists, it must provide an `index` entrypoint. The default site theme is represented by re-exporting `vitepress/theme` from `vitepress/.vitepress/theme/index.ts`.
 
 ## Verification
 

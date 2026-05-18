@@ -12,6 +12,7 @@
 - `pnpm docs:build` passed.
 - `pnpm docs:preview -- --host 127.0.0.1 --port 4173` served `http://localhost:4173/xlflow/`.
 - HTTP checks returned `200` for `/xlflow/`, `/xlflow/commands/`, `/xlflow/demos/`, `/xlflow/reference/json-output`, and `/xlflow/commands/completion`.
+- Fixed `pnpm docs:dev` failing with unresolved `@theme/index` by adding the required VitePress theme entrypoint at `vitepress/.vitepress/theme/index.ts`.
 
 # VBA Syntax Lint Todo
 
