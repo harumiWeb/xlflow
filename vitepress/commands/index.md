@@ -14,10 +14,12 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [init](./init)                 | Initialize an xlflow project from an existing workbook.                          |
 | [doctor](./doctor)             | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.        |
 | [attach](./attach)             | Validate that the active Excel workbook matches the configured workbook.         |
+| [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.              |
 | [list](./list)                 | List workbook resources. The public subcommand is `list forms`.                  |
 | [form](./form)                 | Manage UserForms through snapshot, build, and image export workflows.            |
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
+| [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
 | [session](./session)           | Keep Excel and the configured workbook open across repeated commands.            |
 | [save](./save)                 | Save the workbook held by the managed xlflow session.                            |
 | [runner](./runner)             | Manage the persistent xlflow runner marker module.                               |

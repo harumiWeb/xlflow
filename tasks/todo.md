@@ -1,3 +1,22 @@
+# Workbook Rollback Todo
+
+- [x] Add Go-side workbook backup metadata listing and restore helpers.
+- [x] Add `backup list` and `rollback` CLI commands with selector validation and session safety checks.
+- [x] Change default `push` backup creation from component export snapshots to workbook-file backups with `metadata.json`.
+- [x] Extend JSON/human output for backup listing and rollback results.
+- [x] Update CLI contract, README files, ADR note, and bundled skill guidance.
+- [x] Run focused tests, `go test ./...`, `task lint`, and Windows Excel COM E2E rollback verification.
+
+## Verification Notes
+
+- `go test ./internal/backup ./internal/cli ./internal/output` passed.
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestPushScriptScopesSaveSessionWarningToSessionRuns"` passed.
+- `go test ./...` passed.
+- `task lint` passed.
+- E2E workspace `C:\dev\go\xlflow\tmp_workspaces\rollback-e2e`: `xlflow new --json`, `doctor --json`, `pull --json`, `lint --json`, `push --json`, `backup list --json`, second `push --json`, `rollback --latest --json`, post-rollback `pull --json`, and `run Main.Run --save --json` all passed.
+- In that E2E workspace, `backup list` showed metadata-backed workbook backups under `.xlflow/backups/<backup-id>/Book.xlsm`, post-rollback `src/modules/Main.bas` was restored to the pre-breakage `xlflow ok` version after `pull`, and an Excel COM workbook-state check confirmed `A1 = "xlflow ok"` after `run --save`.
+- Verification scope was intentionally narrowed to workbook backup/rollback behavior rather than the full release-gate matrix.
+
 # new/init Bootstrap Sync Todo
 
 - [x] Add automatic scaffold `push` after `xlflow new`.

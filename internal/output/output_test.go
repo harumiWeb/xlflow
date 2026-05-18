@@ -183,6 +183,28 @@ func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesBackupAndRollbackFields(t *testing.T) {
+	env := New("rollback")
+	env.Backups = []map[string]any{{"id": "20260518-100000-push", "path": ".xlflow/backups/20260518-100000-push/Book.xlsm"}}
+	env.Rollback = map[string]any{
+		"restored_from": map[string]any{"id": "20260518-100000-push"},
+		"safety_backup": map[string]any{"id": "20260518-110000-pre-rollback"},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"backups", "rollback"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
+		}
+	}
+}
+
 func TestWriteWithOptionsInspectMarkdownUsesUnnamedPlaceholder(t *testing.T) {
 	env := New("inspect")
 	payload := map[string]any{

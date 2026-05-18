@@ -156,6 +156,8 @@ When the user reports a runtime failure:
 - Use `xlflow pull --session --keepalive --json` to refresh editable source from the configured workbook during a session.
 - Use `xlflow push --fast --session --no-save --keepalive` after source edits during a session.
 - Use plain `xlflow push --keepalive` when you need the safe isolated path with backup and save.
+- Use `xlflow backup list --json` to find rollback targets after a broken `push` or workbook-level mistake.
+- Use `xlflow rollback --latest --json` or `xlflow rollback --backup <id> --json` only after the workbook is closed or the xlflow session has been stopped; then run `xlflow pull --json` if source files should match the restored workbook.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --session --keepalive --json` as the primary correctness signal when tests exist.
 - Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a non-default `run` target.

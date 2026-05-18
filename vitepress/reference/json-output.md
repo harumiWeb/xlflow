@@ -26,6 +26,6 @@ Failures set `status` to `failed` and populate `error`:
 }
 ```
 
-Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `trace`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`.
+Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `trace`, `backups`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`.
 
 Source: `docs/specs/cli-contract.md`.

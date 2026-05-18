@@ -1,3 +1,26 @@
+# Workbook Rollback Spec
+
+## Goal
+
+Add a first-class rollback flow for restoring the configured workbook from xlflow-managed backups after a broken `push`, failed import, or workbook-level mistake.
+
+## Contract
+
+- `xlflow backup list` lists rollback-capable workbook backups for the configured workbook.
+- `xlflow rollback --latest` restores the newest matching backup.
+- `xlflow rollback --backup <backup-id>` restores a specific matching backup.
+- `push` default backup mode now creates workbook-file backups under `.xlflow/backups/<backup-id>/` with a copied workbook and `metadata.json`.
+- Rollback creates a safety workbook backup with reason `pre-rollback` before replacing the target workbook file.
+- Rollback restores only the workbook file; it does not update `src/` automatically.
+- If the configured workbook is attached to an active xlflow session, rollback fails safely instead of replacing the file underneath the live workbook.
+- Successful rollback warns that workbook and source may be out of sync and hints to run `inspect` and `pull`.
+
+## Verification
+
+- CLI tests cover command registration and selector validation for `backup list` and `rollback`.
+- Unit tests cover backup metadata listing, latest selection, workbook-path filtering, legacy directory ignore behavior, and restore behavior.
+- `push.ps1` continues to parse and now creates workbook-file backup artifacts compatible with rollback.
+
 # new/init Bootstrap Sync Spec
 
 ## Goal

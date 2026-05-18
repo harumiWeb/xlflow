@@ -343,8 +343,10 @@ xlflow inspect-gui --json
 | `init`              | 既存 workbook から xlflow プロジェクトを初期化          | `xlflow init Book.xlsm`                                                      |
 | `doctor`            | Excel、COM、PowerShell、VBIDE access を診断             | `xlflow doctor --json`                                                       |
 | `attach`            | Excel で現在 active な workbook を検証                  | `xlflow attach --active --json`                                              |
+| `backup list`       | rollback 用 workbook backup を一覧表示                  | `xlflow backup list --json`                                                  |
 | `pull`              | VBA component を `src/` へエクスポート                  | `xlflow pull --json`                                                         |
 | `push`              | VBA source を workbook へインポート                     | `xlflow push --json`                                                         |
+| `rollback`          | 保存済み backup から workbook を復元                    | `xlflow rollback --latest --json`                                            |
 | `session`           | 高速ループ用に workbook を開いたままにする              | `xlflow session start`                                                       |
 | `save`              | session 中の workbook を保存                            | `xlflow save --session --json`                                               |
 | `runner`            | 永続 xlflow runner marker module を管理                 | `xlflow runner install --json`                                               |

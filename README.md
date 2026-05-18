@@ -340,8 +340,10 @@ xlflow inspect-gui --json
 | `init`              | Initialize xlflow from an existing workbook                 | `xlflow init Book.xlsm`                                                      |
 | `doctor`            | Diagnose Excel, COM, PowerShell, and VBIDE access           | `xlflow doctor --json`                                                       |
 | `attach`            | Validate the workbook currently active in Excel             | `xlflow attach --active --json`                                              |
+| `backup list`       | List rollback-capable workbook backups                      | `xlflow backup list --json`                                                  |
 | `pull`              | Export VBA components into `src/`                           | `xlflow pull --json`                                                         |
 | `push`              | Import VBA source back into the workbook                    | `xlflow push --json`                                                         |
+| `rollback`          | Restore the workbook from a saved backup                    | `xlflow rollback --latest --json`                                            |
 | `session`           | Keep the configured workbook open for fast loops            | `xlflow session start`                                                       |
 | `save`              | Save the workbook held by a session                         | `xlflow save --session --json`                                               |
 | `runner`            | Manage the persistent xlflow runner marker module           | `xlflow runner install --json`                                               |

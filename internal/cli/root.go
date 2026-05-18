@@ -24,6 +24,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/agentskill"
 	"github.com/harumiWeb/xlflow/internal/analyze"
+	"github.com/harumiWeb/xlflow/internal/backup"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
@@ -144,10 +145,12 @@ func (a *app) rootCommand() *cobra.Command {
 		a.initCommand(),
 		a.doctorCommand(),
 		a.attachCommand(),
+		a.backupCommand(),
 		a.listCommand(),
 		a.formCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
+		a.rollbackCommand(),
 		a.sessionCommand(),
 		a.saveCommand(),
 		a.runnerCommand(),
@@ -341,6 +344,115 @@ func (a *app) listCommand() *cobra.Command {
 		Short: "List workbook resources",
 	}
 	cmd.AddCommand(a.listFormsCommand())
+	return cmd
+}
+
+func (a *app) backupCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backup",
+		Short: "Manage workbook backups",
+	}
+	cmd.AddCommand(a.backupListCommand())
+	return cmd
+}
+
+func (a *app) backupListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List available workbook backups",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("backup list")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			records, err := backup.List(a.cwd, workbookPath)
+			if err != nil {
+				return a.writeFailure("backup list", output.ExitEnvironment, "backup_list_failed", err)
+			}
+			env := output.New("backup list")
+			env.Backups = renderBackupRecords(a.cwd, records)
+			env.Logs = []string{fmt.Sprintf("found %d backup(s)", len(records))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func (a *app) rollbackCommand() *cobra.Command {
+	var latest bool
+	var backupID string
+	cmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Restore the workbook from a saved backup",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := buildRollbackTarget(latest, backupID)
+			if err != nil {
+				return a.writeFailure("rollback", output.ExitConfig, "rollback_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("rollback")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			blocked, err := a.rollbackBlockedBySession(workbookPath)
+			if err != nil {
+				return a.writeFailure("rollback", output.ExitEnvironment, "rollback_session_check_failed", err)
+			}
+			if blocked {
+				return a.writeFailure("rollback", output.ExitValidation, "workbook_in_use", fmt.Errorf("the configured workbook is attached to an active xlflow session; stop the session before rollback"))
+			}
+			record, err := resolveRollbackRecord(a.cwd, workbookPath, target)
+			if err != nil {
+				return a.writeFailure("rollback", output.ExitValidation, "backup_not_found", err)
+			}
+			safety, err := backup.Create(a.cwd, workbookPath, "pre-rollback", time.Now())
+			if err != nil {
+				return a.writeFailure("rollback", output.ExitEnvironment, "rollback_backup_failed", err)
+			}
+			if err := backup.Restore(workbookPath, record); err != nil {
+				code := "rollback_failed"
+				exitCode := output.ExitEnvironment
+				if looksLikeWorkbookInUse(err) {
+					code = "workbook_in_use"
+					exitCode = output.ExitValidation
+				}
+				return a.writeFailure("rollback", exitCode, code, err)
+			}
+			env := output.New("rollback")
+			env.Target = map[string]any{"kind": "file", "path": displayPath(a.cwd, workbookPath)}
+			env.Rollback = map[string]any{
+				"restored_from": map[string]any{
+					"id":         record.ID,
+					"path":       displayPath(a.cwd, record.BackupFileAbsPath),
+					"reason":     record.Reason,
+					"created_at": record.CreatedAt.Format(time.RFC3339),
+				},
+				"safety_backup": map[string]any{
+					"id":   safety.ID,
+					"path": displayPath(a.cwd, safety.BackupFileAbsPath),
+				},
+				"target": map[string]any{
+					"path": displayPath(a.cwd, workbookPath),
+				},
+			}
+			env.Warnings = []map[string]any{
+				{
+					"code":    "source_out_of_sync",
+					"message": "Rollback restored only the workbook file. Source files under `src/` were not changed and may now be out of sync.",
+				},
+			}
+			env.Hints = []map[string]any{
+				{"code": "verify_workbook", "message": "Run `xlflow inspect --json` to verify the restored workbook state."},
+				{"code": "sync_source", "message": "Run `xlflow pull --json` if you want source files to match the restored workbook."},
+			}
+			env.Logs = []string{"restored workbook from backup"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().BoolVar(&latest, "latest", false, "restore the latest backup for the configured workbook")
+	cmd.Flags().StringVar(&backupID, "backup", "", "restore a specific backup ID")
 	return cmd
 }
 
@@ -1193,6 +1305,117 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 		NoSave:      noSave,
 		Keepalive:   keepalive,
 	}, nil
+}
+
+type rollbackTarget struct {
+	Latest   bool
+	BackupID string
+}
+
+func buildRollbackTarget(latest bool, backupID string) (rollbackTarget, error) {
+	backupID = strings.TrimSpace(backupID)
+	switch {
+	case latest && backupID != "":
+		return rollbackTarget{}, fmt.Errorf("--latest and --backup cannot be combined")
+	case !latest && backupID == "":
+		return rollbackTarget{}, fmt.Errorf("exactly one of --latest or --backup is required")
+	}
+	return rollbackTarget{Latest: latest, BackupID: backupID}, nil
+}
+
+func resolveRollbackRecord(rootDir, workbookPath string, target rollbackTarget) (backup.Record, error) {
+	if target.Latest {
+		return backup.Latest(rootDir, workbookPath)
+	}
+	return backup.Find(rootDir, workbookPath, target.BackupID)
+}
+
+func renderBackupRecords(rootDir string, records []backup.Record) []map[string]any {
+	rendered := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		rendered = append(rendered, map[string]any{
+			"id":         record.ID,
+			"created_at": record.CreatedAt.Format(time.RFC3339),
+			"reason":     record.Reason,
+			"workbook":   displayPath(rootDir, record.OriginalWorkbookPath),
+			"path":       displayPath(rootDir, record.BackupFileAbsPath),
+		})
+	}
+	return rendered
+}
+
+func displayPath(rootDir, path string) string {
+	rel, err := filepath.Rel(rootDir, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+type sessionMetadata struct {
+	PID          int    `json:"pid"`
+	WorkbookPath string `json:"workbook_path"`
+}
+
+func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
+	metadataPath := filepath.Join(a.cwd, ".xlflow", "session.json")
+	body, err := os.ReadFile(metadataPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+	var metadata sessionMetadata
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		return false, err
+	}
+	if !samePath(metadata.WorkbookPath, workbookPath) {
+		return false, nil
+	}
+	if metadata.PID <= 0 {
+		return true, nil
+	}
+	running, err := processRunning(metadata.PID)
+	if err != nil {
+		return false, err
+	}
+	return running, nil
+}
+
+func processRunning(pid int) (bool, error) {
+	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	text := strings.TrimSpace(string(out))
+	if text == "" {
+		return false, nil
+	}
+	if strings.Contains(strings.ToLower(text), "no tasks are running") {
+		return false, nil
+	}
+	return true, nil
+}
+
+func looksLikeWorkbookInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "being used by another process") ||
+		strings.Contains(message, "used by another process") ||
+		strings.Contains(message, "permission denied") ||
+		strings.Contains(message, "access is denied")
+}
+
+func samePath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format string, overwrite bool, session bool, keepalive excel.CommandOptions) (excel.ExportImageOptions, error) {
