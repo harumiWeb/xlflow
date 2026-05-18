@@ -75,10 +75,8 @@ That works for small manual edits, but it becomes painful when you want repeatab
 | ---------------------------------------------------- | -------------------------------------------------------------- |
 | VBA code is trapped inside `.xlsm` files             | Export/import VBA as `.bas`, `.cls`, and `.frm` source files   |
 | Macro entrypoints are unclear                        | Discover runnable `Public Sub` procedures with `xlflow macros` |
-| Existing UserForm names are unclear                  | Discover workbook UserForms with `xlflow list forms`           |
 | Existing UserForm layout is hard to review in diffs  | Persist Designer state with `xlflow form snapshot`             |
 | Runtime failures are hard to locate                  | Return structured errors, diagnostics, and trace logs          |
-| File dialogs and `MsgBox` block automation           | Detect GUI boundaries before headless runs                     |
 | Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source      |
 | AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                    |
 
@@ -281,26 +279,43 @@ xlflow test --json
 
 ## Common workflows
 
-### AI-agent-assisted VBA editing
+### Letting an AI agent edit VBA
 
-```text
-1. Read xlflow.toml
-2. Start xlflow session start for normal editing work
-3. If the latest source of truth is unclear, run xlflow pull --session --json
-4. Edit files under src/
-5. Run xlflow push --fast --session --no-save --json
-6. Run xlflow lint --json
-7. Run xlflow test --session --json
-8. Run xlflow macros --session --json
-9. Run xlflow run <qualified_name> --headless --session --json
-10. Use xlflow run --trace --session --json when runtime failures are unclear
-11. Run xlflow save --session --json before xlflow session stop
-12. Use xlflow diff --json when workbook changes must be reviewed
+#### Installing the Skill
+
+When having an AI agent edit VBA using xlflow, it is recommended to install the Skill provided by xlflow into the agent's environment.
+
+```bash
+xlflow skill install
 ```
 
-> [!IMPORTANT]
-> AI agents and CI-like scripts should prefer `--json`. The JSON envelope is designed to be stable and easier to parse than human-readable output.
-> `xlflow run` now compiles VBA and returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE dialogs.
+You can also install it at the same time you launch a project.
+
+```bash
+xlflow new Book.xlsm --with-skill
+```
+
+If you wish to manage skills using a manager such as vercel-labs/skills, please install the skill as follows.
+
+```bash
+npx skills add harumiWeb/xlflow/internal/agentskill/templates --skill xlflow
+```
+
+#### Creating a project
+
+While you can leave the creation of the project itself to an AI agent, it is recommended that the initial project setup be performed by a human.
+
+```bash
+xlflow new Book.xlsm --with-skill
+```
+
+#### Letting an AI agent edit
+
+Using the installed skill, please provide instructions for what you want to achieve in natural language.
+
+```bash
+/xlflow Create a macro that enters "Hello, world!" into cell A1 using VBA
+```
 
 ### Human-assisted Excel sessions
 
@@ -478,75 +493,6 @@ On failure, `status` is `failed`, and `error.code` and `error.message` are retur
 
 ---
 
-## Recommended VBA rules
-
-VBA executed by xlflow should be written for unattended automation.
-
-- [x] Always use `Option Explicit`
-- [x] Use explicit `Workbook`, `Worksheet`, and `Range` references
-- [x] Prefer `Long` over `Integer`
-- [x] Keep GUI entrypoints thin
-- [x] Extract parameterized headless procedures for the core logic
-- [x] Pass input values through `xlflow run --arg`, configuration files, deterministic paths, or environment variables
-- [x] Emit error messages that make failures diagnosable
-- [x] Verify destructive workbook changes with tests or diff
-- [ ] Do not rely on `Select`, `Activate`, or `ActiveSheet`
-- [ ] Do not depend on UI dialogs or modal `MsgBox` in headless procedures
-- [ ] Avoid broad `On Error Resume Next`
-
----
-
-## Local verification
-
-Run repository linters with:
-
-```bash
-task lint
-```
-
-`task lint` runs `golangci-lint run` and `PSScriptAnalyzer` against tracked `.ps1` sources.
-Make sure `Invoke-ScriptAnalyzer` is available in your local PowerShell environment.
-
-Run the fast repository verification with:
-
-```bash
-task verify
-```
-
-Currently, `task verify` runs `go test ./...` as non-COM test coverage.
-
-Excel COM E2E verification should be run on Windows with Excel and VBIDE access enabled.
-
-```bash
-xlflow doctor --json
-```
-
-After `doctor` reports a healthy environment, run `new`, `doctor`, `pull`, `lint`, `push`, `run`, `test`, and `diff` against a real workbook.
-
----
-
-## Current status
-
-xlflow is an MVP-stage tool.
-
-Its primary goal is to bring Excel VBA into AI-agent and CLI-based development workflows.
-Typical use cases include:
-
-| Use case                           | Why xlflow helps                                                |
-| ---------------------------------- | --------------------------------------------------------------- |
-| Source control for existing VBA    | VBA modules become normal files                                 |
-| AI-agent-assisted VBA modification | Agents can edit source, run checks, and inspect JSON output     |
-| CLI execution of Excel macros      | Macros can be invoked from scripts and terminals                |
-| Automated VBA testing              | Tests can be discovered and executed consistently               |
-| Debugging with runtime logs        | Trace events show how far execution progressed                  |
-| Workbook change review             | `diff` makes workbook changes easier to inspect                 |
-| Internal Excel automation          | Existing VBA assets can move toward safer development workflows |
-
-> [!CAUTION]
-> xlflow is useful, but it cannot make every legacy workbook safely headless. GUI-heavy macros, workbook-level side effects, external dependencies, and fragile Excel state still need deliberate refactoring.
-
----
-
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE).
