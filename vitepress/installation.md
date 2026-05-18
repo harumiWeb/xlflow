@@ -2,7 +2,21 @@
 
 ## Recommended for Windows users
 
-If you just want to use xlflow on Windows, install it with Scoop:
+If you just want to use xlflow on Windows, install it with winget:
+
+```powershell
+winget install HarumiWeb.Xlflow
+```
+
+Use `upgrade` to update an existing installation:
+
+```powershell
+winget upgrade HarumiWeb.Xlflow
+```
+
+winget availability may lag behind a GitHub Release while the manifest is submitted and accepted upstream.
+
+Scoop is also supported:
 
 ```powershell
 scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
