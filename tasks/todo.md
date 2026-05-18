@@ -1,3 +1,19 @@
+# VitePress Documentation Site Todo
+
+- [x] Add VitePress site configuration for GitHub Pages, local search, nav, sidebars, edit links, and footer.
+- [x] Replace starter homepage content with xlflow product and demo positioning.
+- [x] Add the planned docs page structure for guide, concepts, commands, AI agents, demos, reference, and design.
+- [x] Reuse existing demo images under `vitepress/public/images`.
+- [x] Add GitHub Pages deployment workflow and ignore VitePress build output.
+- [x] Run `pnpm docs:build` and fix broken links or build issues.
+
+## Verification Notes
+
+- `pnpm docs:build` passed.
+- `pnpm docs:preview -- --host 127.0.0.1 --port 4173` served `http://localhost:4173/xlflow/`.
+- HTTP checks returned `200` for `/xlflow/`, `/xlflow/commands/`, `/xlflow/demos/`, `/xlflow/reference/json-output`, and `/xlflow/commands/completion`.
+- Fixed `pnpm docs:dev` failing with unresolved `@theme/index` by adding the required VitePress theme entrypoint at `vitepress/.vitepress/theme/index.ts`.
+
 # VBA Syntax Lint Todo
 
 - [x] Add always-on lint findings for procedure boundary structure and line-continuation underscore whitespace.

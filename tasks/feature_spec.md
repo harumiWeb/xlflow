@@ -1,3 +1,25 @@
+# VitePress Documentation Site Spec
+
+## Goal
+
+Publish an English-first xlflow documentation site from `vitepress/` with GitHub Pages project routing at `/xlflow/`.
+
+## Contract
+
+- VitePress uses `vitepress/.vitepress/config.mts` with local search, clean URLs, last-updated metadata, GitHub edit links, and sectioned navigation.
+- The starter VitePress example pages are no longer linked from navigation.
+- The site has stable pages for guides, concepts, command reference, AI-agent workflows, demos, reference material, and design background.
+- Command pages must match the current Cobra command surface reported by `go run ./cmd/xlflow --help`.
+- Public-facing prose is derived from the README files; stable CLI contracts and JSON/exit-code details are derived from `docs/specs/*`; design pages link back to ADRs.
+- GitHub Pages deployment builds with pnpm and uploads `vitepress/.vitepress/dist`.
+- If `vitepress/.vitepress/theme` exists, it must provide an `index` entrypoint. The default site theme is represented by re-exporting `vitepress/theme` from `vitepress/.vitepress/theme/index.ts`.
+
+## Verification
+
+- `pnpm docs:build` must pass.
+- VitePress build output must not report broken internal links.
+- Generated asset paths must be compatible with `base: "/xlflow/"`.
+
 # VBA Syntax Lint Spec
 
 ## Goal

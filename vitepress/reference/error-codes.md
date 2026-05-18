@@ -1,0 +1,19 @@
+# Error Codes
+
+Stable error codes appear in `error.code` and command-specific findings.
+
+Common examples:
+
+- `vbide_access_denied`
+- `macro_failed`
+- `macro_not_found`
+- `macro_timeout`
+- `vba_compile_failed`
+- `gui_boundary_detected`
+- `source_preflight_failed`
+- `output_file_exists`
+- `unsupported_image_format`
+- `form_not_found`
+- `spec_validation_failed`
+
+Lint codes include `VB001` through `VB013`. Analyzer codes include `VBA101` and later runtime-risk findings.

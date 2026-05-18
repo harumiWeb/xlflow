@@ -1,1118 +1,741 @@
 <!-- 設計メモ -->
 
-# Add UserForm support: inspect, snapshot, image export, and future form spec workflow
+## 推奨ディレクトリ設計
 
-## Background
+xlflow なら、まずはこの構成がよいです。
 
-xlflow currently works well for normal VBA source workflows such as:
+```txt
+xlflow/
+├─ cmd/
+├─ internal/
+├─ scripts/
+├─ examples/
+├─ vitepress/
+│  ├─ .vitepress/
+│  │  ├─ config.ts
+│  │  └─ theme/
+│  │     ├─ index.ts
+│  │     └─ custom.css
+│  │
+│  ├─ public/
+│  │  ├─ logo.svg
+│  │  ├─ favicon.ico
+│  │  └─ images/
+│  │
+│  ├─ index.md
+│  ├─ getting-started.md
+│  ├─ installation.md
+│  ├─ quickstart.md
+│  ├─ concepts/
+│  │  ├─ project-model.md
+│  │  ├─ workbook-session-source.md
+│  │  ├─ source-of-truth.md
+│  │  ├─ backup-and-rollback.md
+│  │  └─ ai-agent-workflow.md
+│  │
+│  ├─ commands/
+│  │  ├─ index.md
+│  │  ├─ new.md
+│  │  ├─ init.md
+│  │  ├─ doctor.md
+│  │  ├─ attach.md
+│  │  ├─ pull.md
+│  │  ├─ push.md
+│  │  ├─ session.md
+│  │  ├─ save.md
+│  │  ├─ run.md
+│  │  ├─ lint.md
+│  │  ├─ inspect.md
+│  │  ├─ export-image.md
+│  │  ├─ ui.md
+│  │  └─ forms.md
+│  │
+│  ├─ guides/
+│  │  ├─ ai-agent-first-project.md
+│  │  ├─ build-weather-app.md
+│  │  ├─ build-news-app.md
+│  │  ├─ build-qr-generator.md
+│  │  ├─ build-userform-game.md
+│  │  ├─ userform-development.md
+│  │  ├─ error-handling.md
+│  │  └─ ci-local-workflow.md
+│  │
+│  ├─ reference/
+│  │  ├─ json-output.md
+│  │  ├─ project-structure.md
+│  │  ├─ config-file.md
+│  │  ├─ exit-codes.md
+│  │  ├─ error-codes.md
+│  │  ├─ environment-variables.md
+│  │  └─ troubleshooting.md
+│  │
+│  ├─ ai-agents/
+│  │  ├─ overview.md
+│  │  ├─ recommended-prompts.md
+│  │  ├─ codex.md
+│  │  ├─ claude-code.md
+│  │  ├─ github-copilot.md
+│  │  └─ skills.md
+│  │
+│  ├─ design/
+│  │  ├─ architecture.md
+│  │  ├─ command-design.md
+│  │  ├─ vba-import-export.md
+│  │  ├─ session-runner.md
+│  │  └─ linter.md
+│  │
+│  └─ changelog.md
+│
+├─ package.json
+├─ .github/
+│  └─ workflows/
+│     └─ vitepress.yml
+└─ README.md
+```
 
-- `pull`
-- `push`
-- `test`
-- `run`
-- `save`
-- `session`
+ポイントは、**commands / guides / reference / ai-agents / demos** を分けることです。
 
-However, UserForm development is still difficult for AI agents and CLI-based workflows.
+README ではなくドキュメントサイトで一番価値が出るのは、たぶんこの3つです。
 
-A UserForm is not represented by `.frm` text alone. In practice, its state may be spread across:
-
-- `.frm` text
-- `.frx` binary data
-- VBIDE Designer state
-- runtime UserForm state
-- code inside `UserForm_Initialize`
-- dynamically added controls via `Controls.Add`
-
-This makes UserForm development error-prone for AI agents. In recent testing, the agent was able to complete a UserForm-based macro, but it struggled with layout differences and hidden assumptions around `.frm` / `.frx` / VBE Designer behavior.
-
-## Problem
-
-AI agents can edit `.frm` files as text, but they cannot reliably understand or verify the actual UserForm layout from `.frm` alone.
-
-Common problems:
-
-- `.frm` changes do not always reflect the actual runtime appearance.
-- `.frx` may contain binary or designer-backed state that is hard to diff or review.
-- VBE Designer state and runtime display may differ.
-- `push --session --no-save` can leave disk state stale while live workbook state is newer.
-- Existing manually created UserForms are difficult for agents to understand.
-- UserForm layout is not currently available as structured JSON.
-- Visual verification requires manual VBE / Excel interaction.
-
-## Goals
-
-Add first-class UserForm support to xlflow so that AI agents can inspect, verify, snapshot, and eventually generate UserForms without manually operating VBE.
-
-Primary goals:
-
-- Make existing UserForm state visible from the CLI.
-- Export UserForm structure as JSON/YAML.
-- Enable visual verification through image export.
-- Support both Designer-based and runtime-based inspection.
-- Provide a migration path from manually created UserForms to declarative specs.
-- Avoid direct `.frx` parsing as the primary strategy.
-- Keep `.frx` as a generated or opaque artifact where possible.
-
-Non-goals for the first implementation:
-
-- Complete `.frx` parsing.
-- Perfect reconstruction of every MSForms property.
-- Full support for external ActiveX controls.
-- Full bidirectional Designer/spec synchronization in the initial release.
+1. コマンドの仕様を探せること
+2. AI エージェントが迷わず開発ループを回せること
+3. 初見ユーザーが「何ができるツールか」をデモで直感的に理解できること
 
 ---
 
-## Proposed feature set
+## vitepress 配下に置く理由
 
-### Phase 1: UserForm discovery and warning improvements
+VitePress は `vitepress/.vitepress/config.ts` のように、プロジェクトルートとは別に vitepress ルートを持たせる構成が自然です。公式でも、VitePress の config は `<root>/.vitepress/config.[ext]` から解決され、TypeScript config も標準対応しています。([VitePress][2])
 
-#### Commands affected
-
-- `pull`
-- `push`
-- `save`
-- `inspect`
-- `session`
-- future `form` commands
-
-#### Behavior
-
-When UserForms are detected, xlflow should emit explicit warnings or hints.
-
-Example:
-
-```text
-UserForm detected: UserForm1
-
-Note:
-  UserForm state may not be fully represented by .frm text alone.
-  Layout and binary properties may depend on .frx and VBIDE Designer state.
-
-Recommended commands:
-  xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
-  xlflow inspect form UserForm1 --runtime --json
-  xlflow form export-image UserForm1 --out artifacts/UserForm1.png
-```
-
-#### Additional stale-state warning
-
-When using `push --session --no-save`, and the workbook contains UserForms, xlflow should warn that disk state may not match live workbook state.
-
-Example:
-
-```text
-Warning: workbook contains UserForms and current session changes are not saved.
-Some inspect operations may use saved workbook state, while runtime/session operations may use live state.
-Run `xlflow save --session` and `xlflow pull` before reviewing .frm/.frx differences.
-```
+xlflow のような Go CLI プロジェクトでは、ルート直下に VitePress 関連ファイルを散らすより、`vitepress/` に閉じ込めた方が保守しやすいです。
 
 ---
 
-## Phase 2: `xlflow list forms`
+## 最小の `vitepress/.vitepress/config.ts`
 
-### Command
+まずはこれくらいで十分です。
 
-```bash
-xlflow list forms --json
-```
+```ts
+import { defineConfig } from "vitepress";
 
-### Purpose
+export default defineConfig({
+  lang: "en-US",
+  title: "xlflow",
+  description: "AI-Agent-ready CLI framework for Excel VBA development",
 
-List UserForms in the current workbook/project.
+  // GitHub Pages で https://harumiweb.github.io/xlflow/ に置くなら必要
+  base: "/xlflow/",
 
-### Output example
+  cleanUrls: true,
+  lastUpdated: true,
 
-```json
-{
-  "ok": true,
-  "forms": [
-    {
-      "name": "UserForm1",
-      "component_type": "MSForm",
-      "has_frx": true,
-      "source_path": "src/UserForm1.frm",
-      "frx_path": "src/UserForm1.frx"
-    }
-  ]
-}
-```
+  head: [
+    ["link", { rel: "icon", href: "/xlflow/favicon.ico" }],
+    ["meta", { name: "theme-color", content: "#2E7D32" }],
+  ],
 
-### Implementation notes
+  themeConfig: {
+    logo: "/logo.svg",
 
-This can be implemented by inspecting `VBProject.VBComponents` and filtering components with type `vbext_ct_MSForm`.
+    nav: [
+      { text: "Guide", link: "/getting-started" },
+      { text: "Commands", link: "/commands/" },
+      { text: "AI Agents", link: "/ai-agents/" },
+      { text: "Demos", link: "/demos/" },
+      { text: "Reference", link: "/reference/json-output" },
+    ],
 
-Use late binding where possible to avoid requiring explicit VBA references in injected helper code.
+    sidebar: {
+      "/commands/": [
+        {
+          text: "Commands",
+          items: [
+            { text: "Overview", link: "/commands/" },
+            { text: "new", link: "/commands/new" },
+            { text: "init", link: "/commands/init" },
+            { text: "doctor", link: "/commands/doctor" },
+            { text: "attach", link: "/commands/attach" },
+            { text: "pull", link: "/commands/pull" },
+            { text: "push", link: "/commands/push" },
+            { text: "session", link: "/commands/session" },
+            { text: "save", link: "/commands/save" },
+            { text: "run", link: "/commands/run" },
+            { text: "lint", link: "/commands/lint" },
+            { text: "inspect", link: "/commands/inspect" },
+            { text: "export-image", link: "/commands/export-image" },
+            { text: "ui", link: "/commands/ui" },
+            { text: "forms", link: "/commands/forms" },
+          ],
+        },
+      ],
 
-```vb
-Const vbext_ct_MSForm As Long = 3
-```
+      "/guides/": [
+        {
+          text: "Guides",
+          items: [
+            { text: "AI Agent First Project", link: "/guides/ai-agent-first-project" },
+            { text: "Weather App", link: "/guides/build-weather-app" },
+            { text: "News App", link: "/guides/build-news-app" },
+            { text: "QR Generator", link: "/guides/build-qr-generator" },
+            { text: "UserForm Game", link: "/guides/build-userform-game" },
+            { text: "Troubleshooting VBA Errors", link: "/guides/error-handling" },
+          ],
+        },
+      ],
 
----
+      "/reference/": [
+        {
+          text: "Reference",
+          items: [
+            { text: "JSON Output", link: "/reference/json-output" },
+            { text: "Project Structure", link: "/reference/project-structure" },
+            { text: "Config File", link: "/reference/config-file" },
+            { text: "Exit Codes", link: "/reference/exit-codes" },
+            { text: "Error Codes", link: "/reference/error-codes" },
+            { text: "Environment Variables", link: "/reference/environment-variables" },
+            { text: "Troubleshooting", link: "/reference/troubleshooting" },
+          ],
+        },
+      ],
 
-## Phase 3: `xlflow inspect form <name>`
+      "/ai-agents/": [
+        {
+          text: "AI Agents",
+          items: [
+            { text: "Overview", link: "/ai-agents/" },
+            { text: "Recommended Prompts", link: "/ai-agents/recommended-prompts" },
+            { text: "Codex", link: "/ai-agents/codex" },
+            { text: "Claude Code", link: "/ai-agents/claude-code" },
+            { text: "GitHub Copilot", link: "/ai-agents/github-copilot" },
+            { text: "Skills", link: "/ai-agents/skills" },
+          ],
+        },
+      ],
 
-### Commands
+      "/demos/": [
+        {
+          text: "Demos",
+          items: [
+            { text: "Overview", link: "/demos/" },
+            { text: "Weather App", link: "/demos/weather" },
+            { text: "News API App", link: "/demos/newsapi" },
+            { text: "Stock Dashboard", link: "/demos/stock-dashboard" },
+            { text: "QR Code Generator", link: "/demos/qr-code" },
+            { text: "Tetris", link: "/demos/tetris" },
+            { text: "Invader Game", link: "/demos/invader-game" },
+          ],
+        },
+      ],
+    },
 
-```bash
-xlflow inspect form UserForm1 --json
-xlflow inspect form UserForm1 --designer --json
-xlflow inspect form UserForm1 --runtime --json
-xlflow inspect form UserForm1 --both --json
-```
+    socialLinks: [{ icon: "github", link: "https://github.com/harumiWeb/xlflow" }],
 
-### Purpose
+    search: {
+      provider: "local",
+    },
 
-Return structured information about a UserForm and its controls.
+    editLink: {
+      pattern: "https://github.com/harumiWeb/xlflow/edit/main/vitepress/:path",
+      text: "Edit this page on GitHub",
+    },
 
-There should be two inspection modes:
-
-| Mode       | Source                 | Purpose                             |
-| ---------- | ---------------------- | ----------------------------------- |
-| `designer` | `VBComponent.Designer` | Inspect design-time layout          |
-| `runtime`  | `UserForms.Add(name)`  | Inspect actual loaded runtime state |
-
-Default mode should likely be `runtime`, because AI agents usually need to verify the actual displayed result.
-
-However, `designer` is important for spec import/export and future form build workflows.
-
----
-
-## Designer inspection
-
-### Technical approach
-
-Access the Designer object:
-
-```vb
-Set comp = ThisWorkbook.VBProject.VBComponents.Item("UserForm1")
-Set designer = comp.Designer
-```
-
-Then read:
-
-```vb
-designer.Caption
-designer.Width
-designer.Height
-designer.Controls
-```
-
-For each control:
-
-```vb
-ctrl.Name
-TypeName(ctrl)
-ctrl.Left
-ctrl.Top
-ctrl.Width
-ctrl.Height
-ctrl.Caption
-ctrl.Text
-ctrl.TabIndex
-ctrl.Enabled
-ctrl.Visible
-```
-
-Use safe property access because not all controls support all properties.
-
-### Example output
-
-```json
-{
-  "ok": true,
-  "basis": "designer",
-  "form": {
-    "name": "UserForm1",
-    "caption": "顧客登録",
-    "width": 420,
-    "height": 320,
-    "controls": [
-      {
-        "name": "lblName",
-        "type": "Label",
-        "prog_id": "Forms.Label.1",
-        "caption": "氏名",
-        "left": 24,
-        "top": 24,
-        "width": 72,
-        "height": 18,
-        "visible": true,
-        "enabled": true
-      },
-      {
-        "name": "txtName",
-        "type": "TextBox",
-        "prog_id": "Forms.TextBox.1",
-        "left": 120,
-        "top": 20,
-        "width": 180,
-        "height": 24,
-        "tab_index": 0,
-        "visible": true,
-        "enabled": true
-      },
-      {
-        "name": "btnSubmit",
-        "type": "CommandButton",
-        "prog_id": "Forms.CommandButton.1",
-        "caption": "登録",
-        "left": 240,
-        "top": 260,
-        "width": 80,
-        "height": 30,
-        "tab_index": 1,
-        "visible": true,
-        "enabled": true
-      }
-    ]
+    footer: {
+      message: "Released under the BSD-3-Clause License.",
+      copyright: "Copyright © 2026 harumiWeb",
+    },
   },
-  "warnings": []
-}
+});
 ```
+
+GitHub Pages で `https://harumiweb.github.io/xlflow/` 配下に公開するなら `base: '/xlflow/'` が重要です。独自ドメインでルート公開するなら `base` は不要、または `'/'` でよいです。
 
 ---
 
-## Runtime inspection
+## トップページ設計
 
-### Technical approach
+`vitepress/index.md` は、文章中心よりも「何ができるか」を一瞬で伝える構成がよいです。
 
-Load the form at runtime:
+```md
+---
+layout: home
 
-```vb
-Set f = UserForms.Add("UserForm1")
+hero:
+  name: xlflow
+  text: AI-Agent-ready Excel VBA development CLI
+  tagline: Edit, lint, push, run, inspect, and automate Excel VBA projects from the command line.
+  image:
+    src: /logo.svg
+    alt: xlflow
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /getting-started
+    - theme: alt
+      text: Command Reference
+      link: /commands/
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/harumiWeb/xlflow
+
+features:
+  - title: Source-first VBA development
+    details: Export and import VBA components as text files, making Excel VBA projects easier to version, review, and automate.
+  - title: Built for AI agents
+    details: JSON outputs, deterministic workflows, session-based execution, and diagnostics help coding agents develop Excel VBA autonomously.
+  - title: Safer Excel automation
+    details: Backup, lint, doctor, inspect, and run commands reduce the risk of breaking workbooks during iterative development.
+---
 ```
 
-Then enumerate:
+トップページでは **コマンド名を全部並べない** 方がいいです。README と同じ問題が再発します。
 
-```vb
-f.Controls
+---
+
+## コマンドページのテンプレート
+
+`vitepress/commands/push.md` などは、全コマンドで同じフォーマットにするとかなり見やすくなります。
+
+````md
+# xlflow push
+
+Import VBA source files from `src/` into the target Excel workbook.
+
+## Usage
+
+```bash
+xlflow push [options]
+```
+````
+
+## When to use
+
+Use this command after editing VBA source files on disk and before running or saving the workbook.
+
+## Examples
+
+```bash
+xlflow push
+xlflow push --json
+xlflow push --session --json
 ```
 
-Finally unload:
+## Options
 
-```vb
-Unload f
-Set f = Nothing
-```
+| Option      | Description                    |
+| ----------- | ------------------------------ |
+| `--json`    | Output machine-readable JSON.  |
+| `--session` | Use the active xlflow session. |
 
-### Important warning
-
-Runtime inspection executes `UserForm_Initialize`.
-
-Therefore, xlflow must warn about possible side effects.
-
-Example warning:
-
-```json
-{
-  "warnings": ["Runtime inspection loads the form and executes UserForm_Initialize."]
-}
-```
-
-### Runtime output example
+## Output
 
 ```json
 {
   "ok": true,
-  "basis": "runtime",
-  "form": {
-    "name": "UserForm1",
-    "caption": "顧客登録",
-    "width": 420,
-    "height": 320,
-    "controls": [
-      {
-        "name": "txtName",
-        "type": "TextBox",
-        "left": 120,
-        "top": 20,
-        "width": 180,
-        "height": 24,
-        "tab_index": 0
-      }
-    ]
-  },
-  "warnings": ["Runtime inspection executed UserForm_Initialize."]
+  "command": "push",
+  "backup": {
+    "created": true,
+    "path": ".xlflow/backups/Book_20260517_120000.xlsm"
+  }
 }
 ```
+
+## Common failures
+
+| Error                 | Cause                                                     | Fix                                              |
+| --------------------- | --------------------------------------------------------- | ------------------------------------------------ |
+| `workbook_not_found`  | The target workbook cannot be found.                      | Check the project config or run `xlflow attach`. |
+| `vbide_access_denied` | Trust access to the VBA project object model is disabled. | Enable VBIDE access and run `xlflow doctor`.     |
+
+## Related commands
+
+- [`xlflow pull`](./pull.md)
+- [`xlflow run`](./run.md)
+- [`xlflow session`](./session.md)
+
+````
+
+この形式を全コマンドに適用すると、AI エージェントにも人間にも読みやすいです。
 
 ---
 
-## Nested controls
+## コマンド一覧は将来的に自動生成する
 
-UserForms may contain container controls such as:
+最初は手書きでよいですが、いずれは以下のどちらかを入れると強いです。
 
-- `Frame`
-- `MultiPage`
-- `Page`
-- `TabStrip`
-
-Controls inside containers should eventually be represented recursively.
-
-Example:
-
-```json
-{
-  "name": "fraCustomer",
-  "type": "Frame",
-  "caption": "顧客情報",
-  "left": 16,
-  "top": 16,
-  "width": 360,
-  "height": 120,
-  "controls": [
-    {
-      "name": "txtCustomerName",
-      "type": "TextBox",
-      "left": 100,
-      "top": 20,
-      "width": 180,
-      "height": 24
-    }
-  ]
-}
-```
-
-Coordinates should be parent-relative.
-
-Add this to output metadata:
-
-```json
-{
-  "coordinate_system": "parent-relative"
-}
-```
-
-MVP may start with top-level controls only, but Frame support should be prioritized because it is common in business UserForms.
-
----
-
-## Phase 4: `xlflow form snapshot`
-
-### Command
+### 案A: `xlflow help --json` から生成
 
 ```bash
-xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
-xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.yaml
+xlflow help --json > vitepress/generated/commands.json
+go run ./tools/gen-vitepress
+````
+
+生成先：
+
+```txt
+vitepress/commands/generated/
+├─ new.md
+├─ init.md
+├─ push.md
+├─ run.md
+└─ ...
 ```
 
-### Purpose
+ただし、完全自動生成にすると文章が無機質になるので、個人的には次がよいです。
 
-Convert an existing manually created UserForm into a structured spec.
+### 案B: YAML metadata + 手書き解説
 
-This is useful for:
-
-- Existing VBA assets.
-- AI-agent understanding.
-- Git diff review.
-- Future migration to declarative form management.
-- Future `form build` / `form apply`.
-
-### Important distinction
-
-`snapshot` should not imply complete round-trip support at first.
-
-It means:
-
-```text
-Designer state -> structured snapshot/spec
+```txt
+vitepress/_data/commands/
+├─ new.yaml
+├─ init.yaml
+├─ push.yaml
+├─ run.yaml
+└─ lint.yaml
 ```
 
-Not necessarily:
-
-```text
-structured spec -> perfectly identical Designer state
-```
-
-### Output example
+例：
 
 ```yaml
-schemaVersion: 1
-kind: xlflow.userform
-basis: designer
-coordinateSystem: parent-relative
-
-form:
-  name: UserForm1
-  caption: 顧客登録
-  width: 420
-  height: 320
-
-controls:
-  - type: Label
-    progId: Forms.Label.1
-    name: lblName
-    caption: 氏名
-    left: 24
-    top: 24
-    width: 72
-    height: 18
-    visible: true
-    enabled: true
-
-  - type: TextBox
-    progId: Forms.TextBox.1
-    name: txtName
-    left: 120
-    top: 20
-    width: 180
-    height: 24
-    tabIndex: 0
-    visible: true
-    enabled: true
-
-  - type: CommandButton
-    progId: Forms.CommandButton.1
-    name: btnSubmit
-    caption: 登録
-    left: 240
-    top: 260
-    width: 80
-    height: 30
-    tabIndex: 1
-    visible: true
-    enabled: true
-
-warnings: []
+name: push
+summary: Import VBA source files into the workbook.
+usage: xlflow push [options]
+category: workbook
+options:
+  - name: --json
+    description: Output machine-readable JSON.
+  - name: --session
+    description: Use the active xlflow session.
+related:
+  - pull
+  - run
+  - session
 ```
 
-### Unsupported properties
-
-Some properties may be backed by `.frx` or external binary data.
-
-Examples:
-
-- `Picture`
-- `MouseIcon`
-- Image control binary content
-- External ActiveX internal state
-
-Initial behavior should be detection + warning, not full export.
-
-Example:
-
-```yaml
-controls:
-  - type: Image
-    progId: Forms.Image.1
-    name: imgLogo
-    left: 24
-    top: 24
-    width: 120
-    height: 60
-    unsupported:
-      - Picture
-
-warnings:
-  - control: imgLogo
-    message: Picture property may be backed by .frx and is not exported yet.
-```
+この YAML から `Options` や `Usage` だけ生成し、本文は Markdown で手書きにするのがベストです。
 
 ---
 
-## Phase 5: `xlflow form export-image`
+## xlflow のドキュメントで特に作るべきページ
 
-### Command
+優先順位はこの順番でよいです。
+
+### 1. `getting-started.md`
+
+初見向け。
+
+````md
+# Getting Started
+
+## Install xlflow
+
+## Create a new project
 
 ```bash
-xlflow form export-image UserForm1 --out artifacts/UserForm1.png
+xlflow new Book.xlsm
 ```
+````
 
-### Purpose
-
-Show the UserForm at runtime and export a PNG screenshot.
-
-This is especially useful for AI agents because it enables visual verification without manual VBE/Excel operation.
-
-### Technical approach
-
-1. Start or reuse an Excel session.
-2. Inject temporary helper macro.
-3. Load the form with `UserForms.Add(name)`.
-4. Set a unique temporary caption token.
-5. Show the form modeless.
-6. Use Win32 API from Go to find the form window.
-7. Capture with `PrintWindow` or `BitBlt`.
-8. Save PNG.
-9. Unload the form.
-10. Clean up temporary helper modules.
-
-### VBA-side sketch
-
-```vb
-Public Sub __xlflow_show_form_for_capture(ByVal formName As String, ByVal token As String)
-    Dim f As Object
-    Set f = UserForms.Add(formName)
-
-    f.Caption = f.Caption & " [xlflow-capture-" & token & "]"
-    f.Show vbModeless
-
-    DoEvents
-End Sub
-```
-
-### Go-side window search
-
-Find the target window using a combination of:
-
-- Excel process ID
-- unique caption token
-- UserForm window class
-- visible window state
-
-Possible Win32 APIs:
-
-- `EnumWindows`
-- `GetWindowText`
-- `GetClassName`
-- `GetWindowThreadProcessId`
-- `GetWindowRect`
-- `PrintWindow`
-- `BitBlt`
-
-Do not rely only on window class names such as `ThunderDFrame` / `ThunderXFrame`, because these may differ by Office version/environment.
-
-### Warnings
-
-`form export-image` loads the form at runtime and executes `UserForm_Initialize`.
-
-Example CLI warning:
-
-```text
-Warning: form export-image loads the UserForm at runtime.
-UserForm_Initialize will be executed.
-```
-
-### Experimental status
-
-This command should initially be marked experimental because it depends on:
-
-- Windows GUI behavior
-- DPI scaling
-- Excel window state
-- UserForm initialization behavior
-- Win32 capture reliability
-
-Example:
-
-```text
-Note: form export-image is experimental and currently supports Windows + desktop Excel only.
-```
-
----
-
-## Phase 6: Designer abstraction layer
-
-### Motivation
-
-Direct use of:
-
-```vb
-wb.VBProject.VBComponents.Item("UserForm1").Designer
-```
-
-should be hidden behind an internal abstraction.
-
-The rest of xlflow should not depend on raw COM/VBIDE objects.
-
-### Proposed internal structure
-
-```text
-internal/excel/forms/
-  backend.go
-  designer_backend.go
-  runtime_backend.go
-  snapshot.go
-  spec.go
-  properties.go
-  errors.go
-```
-
-### Suggested interfaces
-
-```go
-type FormBackend interface {
-    ListForms(ctx context.Context) ([]FormInfo, error)
-    InspectForm(ctx context.Context, name string) (*FormSnapshot, error)
-}
-
-type DesignerFormBackend interface {
-    FormBackend
-    SnapshotForm(ctx context.Context, name string) (*FormSpec, error)
-}
-
-type RuntimeFormBackend interface {
-    FormBackend
-    ExportImage(ctx context.Context, name string, outPath string) error
-}
-```
-
-### Suggested data models
-
-```go
-type FormSnapshot struct {
-    Name             string            `json:"name"`
-    Caption          string            `json:"caption,omitempty"`
-    Width            float64           `json:"width,omitempty"`
-    Height           float64           `json:"height,omitempty"`
-    Controls         []ControlSnapshot `json:"controls,omitempty"`
-    Basis            string            `json:"basis"` // designer | runtime | source
-    CoordinateSystem string            `json:"coordinate_system,omitempty"`
-    Warnings         []FormWarning      `json:"warnings,omitempty"`
-}
-```
-
-```go
-type ControlSnapshot struct {
-    Name        string             `json:"name"`
-    Type        string             `json:"type"`
-    ProgID      string             `json:"prog_id,omitempty"`
-    Caption     *string            `json:"caption,omitempty"`
-    Text        *string            `json:"text,omitempty"`
-    Left        float64            `json:"left,omitempty"`
-    Top         float64            `json:"top,omitempty"`
-    Width       float64            `json:"width,omitempty"`
-    Height      float64            `json:"height,omitempty"`
-    TabIndex    *int               `json:"tab_index,omitempty"`
-    Enabled     *bool              `json:"enabled,omitempty"`
-    Visible     *bool              `json:"visible,omitempty"`
-    Font        *FontSnapshot      `json:"font,omitempty"`
-    Properties  map[string]any     `json:"properties,omitempty"`
-    Unsupported []string           `json:"unsupported,omitempty"`
-    Controls    []ControlSnapshot  `json:"controls,omitempty"`
-}
-```
-
-```go
-type FormWarning struct {
-    Code    string `json:"code"`
-    Message string `json:"message"`
-    Control string `json:"control,omitempty"`
-}
-```
-
----
-
-## Phase 7: Future `form build` / `form apply`
-
-This should be considered future work after read-only inspection and snapshot are stable.
-
-### Possible commands
+## Start an Excel session
 
 ```bash
-xlflow form build src/forms/UserForm1.form.yaml
-xlflow form apply src/forms/UserForm1.form.yaml
-xlflow form diff UserForm1 --spec src/forms/UserForm1.form.yaml
+xlflow session start
 ```
 
-### Design principle
+## Edit VBA source
 
-Avoid directly editing `.frx`.
-
-Instead:
-
-```text
-form.yaml
-  ↓
-VBIDE Designer API
-  ↓
-Excel/VBE saves .frm/.frx
-```
-
-### Designer write approach
-
-Use `VBComponent.Designer` and `designer.Controls.Add`.
-
-Example:
-
-```vb
-Set comp = ThisWorkbook.VBProject.VBComponents.Item("UserForm1")
-Set designer = comp.Designer
-
-Set ctrl = designer.Controls.Add("Forms.TextBox.1", "txtName", True)
-ctrl.Left = 120
-ctrl.Top = 20
-ctrl.Width = 180
-ctrl.Height = 24
-```
-
-### Important distinction
-
-There are two different `Controls.Add` workflows:
-
-```text
-designer.Controls.Add
-  - design-time
-  - persisted into .frm/.frx
-  - useful for form build/apply
-
-runtimeForm.Controls.Add
-  - runtime only
-  - disappears when form is unloaded
-  - useful for dynamic UI
-```
-
-xlflow should model these separately.
-
----
-
-## Phase 8: Dynamic UserForm template
-
-For new AI-generated UserForms, dynamic layout may be more reliable than editing Designer-backed `.frm/.frx`.
-
-### Command idea
+## Push and run
 
 ```bash
-xlflow form init OrderEntryForm --dynamic
+xlflow push --json
+xlflow run Main.Main --json
 ```
 
-### Generated files
+## Save the workbook
 
-```text
-src/forms/OrderEntryForm.frm
-src/forms/OrderEntryFormBuilder.bas
-src/forms/OrderEntryFormHandlers.cls
+```bash
+xlflow save --session --json
 ```
 
-### Concept
-
-- `OrderEntryForm.frm` is a minimal empty container.
-- `OrderEntryFormBuilder.bas` creates controls with `Controls.Add`.
-- `OrderEntryFormHandlers.cls` handles events with `WithEvents`.
-- Layout is represented as normal VBA code or generated from future `form.yaml`.
-
-### Example runtime builder
-
-```vb
-Public Sub BuildOrderEntryForm(ByVal form As Object)
-    Dim lbl As Object
-    Set lbl = form.Controls.Add("Forms.Label.1", "lblOrderDate", True)
-    With lbl
-        .Caption = "受注日"
-        .Left = 24
-        .Top = 24
-        .Width = 80
-        .Height = 18
-    End With
-
-    Dim txt As Object
-    Set txt = form.Controls.Add("Forms.TextBox.1", "txtOrderDate", True)
-    With txt
-        .Left = 120
-        .Top = 20
-        .Width = 120
-        .Height = 24
-    End With
-End Sub
-```
-
-### Event handler caveat
-
-Dynamically added controls need `WithEvents` handler classes.
-
-Example:
-
-```vb
-' Class Module: XlflowButtonHandler
-Option Explicit
-
-Public WithEvents Button As MSForms.CommandButton
-
-Private Sub Button_Click()
-    MsgBox "Clicked: " & Button.Name
-End Sub
-```
-
-The UserForm must keep handlers alive:
-
-```vb
-Private handlers As Collection
-
-Private Sub UserForm_Initialize()
-    Set handlers = New Collection
-
-    Dim btn As MSForms.CommandButton
-    Set btn = Me.Controls.Add("Forms.CommandButton.1", "btnSubmit", True)
-    btn.Caption = "登録"
-
-    Dim h As XlflowButtonHandler
-    Set h = New XlflowButtonHandler
-    Set h.Button = btn
-    handlers.Add h
-End Sub
-```
-
-This should be template-generated because AI agents are likely to forget to keep handler instances alive.
+````
 
 ---
 
-## Error handling
+### 2. `concepts/workbook-session-source.md`
 
-Add specific error codes for UserForm workflows.
+これは xlflow 特有なので重要です。
 
-Suggested codes:
+説明すべきこと：
 
-```text
-form_not_found
-vbproject_access_denied
-designer_access_failed
-runtime_form_load_failed
-form_initialize_failed
-control_enumeration_failed
-unsupported_control
-image_capture_failed
-window_not_found
-temporary_component_cleanup_failed
+```txt
+source files
+   ↓ push
+Excel workbook
+   ↓ session/run/save
+Excel instance
+   ↓ pull
+source files
+````
+
+このページがあると、AI エージェントも人間も「今どこが正か」を理解しやすくなります。
+
+---
+
+### 3. `ai-agents/overview.md`
+
+xlflow の差別化ポイントなので、専用カテゴリにした方がいいです。
+
+書くべき内容：
+
+````md
+# AI Agent Workflow
+
+xlflow is designed to let coding agents develop Excel VBA projects without manual Excel operations.
+
+## Recommended loop
+
+```bash
+xlflow doctor --json
+xlflow session start --json
+xlflow push --json
+xlflow lint --json
+xlflow run Main.Main --json
+xlflow inspect --json
+xlflow save --session --json
 ```
+````
 
-Example JSON error:
+## Rules for agents
+
+- Prefer `--json`.
+- Run `doctor` before debugging environment issues.
+- Use `session` for iterative development.
+- Use `inspect` to verify workbook state.
+- Avoid file picker dialogs and interactive MsgBox flows.
+
+````
+
+ここはかなり強い訴求ポイントになります。
+
+---
+
+### 4. `reference/json-output.md`
+
+AI エージェント向けには必須です。
+
+```md
+# JSON Output
+
+Most xlflow commands support `--json`.
+
+## Success response
+
+```json
+{
+  "ok": true,
+  "command": "run",
+  "durationMs": 1234
+}
+````
+
+## Error response
 
 ```json
 {
   "ok": false,
   "error": {
-    "code": "vbproject_access_denied",
-    "message": "VBProject access is denied.",
-    "hint": "Enable 'Trust access to the VBA project object model' in Excel Trust Center."
+    "code": "vba_runtime_error",
+    "message": "Division by zero",
+    "source": "Main.Main",
+    "line": 20
   }
 }
 ```
 
----
+## Error handling policy
 
-## Security and environment requirements
+Agents should inspect `error.code` first, then follow the suggested action if available.
 
-UserForm features that use VBIDE require:
+````
 
-```text
-Excel Trust Center:
-  Trust access to the VBA project object model = enabled
-```
-
-These features are Windows + desktop Excel only.
-
-Unsupported environments:
-
-- Excel Online
-- LibreOffice
-- macOS Excel, at least initially
-- headless environments without desktop Excel
+これは xlflow の「AI-Agent-ready」感を強く出せます。
 
 ---
 
-## Implementation strategy
+### 5. `demos/index.md`
 
-### Recommended order
+ここは画像多めでよいです。
 
-1. Add UserForm detection and warnings.
-2. Implement `xlflow list forms --json`.
-3. Implement `xlflow inspect form <name> --designer --json`.
-4. Implement `xlflow inspect form <name> --runtime --json`.
-5. Implement `xlflow form snapshot <name> --out ...`.
-6. Implement `xlflow form export-image <name> --out ...` as experimental.
-7. Add `form diff` against snapshot/spec.
-8. Add `form build/apply` via Designer API.
-9. Add `form init --dynamic`.
+```md
+# Demos
 
-### Why this order
+xlflow can be used by AI coding agents to build practical Excel VBA applications.
 
-Read-only inspection is much safer than write operations.
+## Weather API App
 
-`Designer -> Snapshot` gives immediate value for existing manually created UserForms.
+![Weather app](/images/demo-weather.png)
 
-`Runtime inspect` and `form export-image` give AI agents a verification loop.
+## News API App
 
-`Spec -> Designer` should come after the snapshot format is proven.
+![News app](/images/demo-news.png)
 
----
+## QR Code Generator
 
-## MVP scope
+![QR code generator](/images/demo-qr.png)
 
-The first deliverable should include:
+## UserForm Invader Game
 
-```text
-- xlflow list forms --json
-- xlflow inspect form <name> --designer --json
-- xlflow inspect form <name> --runtime --json
-- xlflow form snapshot <name> --out <path>
-- UserForm warnings in push/pull/save/session flows
-```
+![Invader game](/images/demo-invader.png)
+````
 
-Optional but high-value:
-
-```text
-- xlflow form export-image <name> --out <path>
-```
-
-Initial supported controls:
-
-```text
-- Label
-- TextBox
-- ComboBox
-- ListBox
-- CommandButton
-- CheckBox
-- OptionButton
-- Frame
-```
-
-Initial properties:
-
-```text
-- name
-- type
-- prog_id
-- caption
-- text
-- left
-- top
-- width
-- height
-- tab_index
-- enabled
-- visible
-```
-
-Unsupported properties should be reported, not treated as fatal.
+OSS 初見ユーザーには、コマンド仕様よりデモの方が刺さることが多いです。
 
 ---
 
-## Acceptance criteria
+## GitHub Pages デプロイ
 
-### `list forms`
+GitHub Pages に出すなら `.github/workflows/vitepress.yml` を作ります。
 
-Given a workbook with `UserForm1`, running:
+```yaml
+name: Deploy vitepress
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "vitepress/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/vitepress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: vitepress
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run vitepress:build
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: vitepress/.vitepress/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+VitePress はデフォルトでビルド出力を `.vitepress/dist` に置くため、`vitepress/.vitepress/dist` を Pages artifact に渡します。公式にも、dev server cache と production build output は `.vitepress/cache` と `.vitepress/dist` に置かれるため、Git 管理から除外するのが推奨されています。([VitePress][1])
+
+`.gitignore` には追加します。
+
+```gitignore
+vitepress/.vitepress/cache
+vitepress/.vitepress/dist
+```
+
+---
+
+## README との役割分担
+
+README は短くして、こういう構成にした方がいいです。
+
+````md
+# xlflow
+
+AI-Agent-ready CLI framework for Excel VBA development.
+
+## Quick demo
+
+画像 or GIF
+
+## Install
+
+go install / GitHub Releases / winget / scoop
+
+## Quick start
 
 ```bash
-xlflow list forms --json
+xlflow new Book.xlsm
+xlflow session start
+xlflow push --json
+xlflow run Main.Main --json
 ```
+````
 
-returns `UserForm1`.
+## Documentation
 
-### `inspect form --designer`
+Full documentation is available at:
+[https://harumiweb.github.io/xlflow/](https://harumiweb.github.io/xlflow/)
 
-Given a manually created UserForm with a Label, TextBox, and Button, running:
+## Examples
 
-```bash
-xlflow inspect form UserForm1 --designer --json
-```
+- Weather API App
+- News API App
+- QR Code Generator
+- UserForm Invader Game
 
-returns form metrics and control metrics from the Designer.
+````
 
-### `inspect form --runtime`
-
-Given the same form, running:
-
-```bash
-xlflow inspect form UserForm1 --runtime --json
-```
-
-loads the form, returns runtime control metrics, unloads the form, and warns that `UserForm_Initialize` was executed.
-
-### `form snapshot`
-
-Given a manually created UserForm, running:
-
-```bash
-xlflow form snapshot UserForm1 --out src/forms/UserForm1.form.json
-```
-
-writes a structured spec file that can be reviewed by humans and AI agents.
-
-### `form export-image`
-
-Given a UserForm, running:
-
-```bash
-xlflow form export-image UserForm1 --out artifacts/UserForm1.png
-```
-
-creates a PNG image of the runtime form, or returns a structured `image_capture_failed` / `window_not_found` error.
+README は **広告・入口・最短導線** に寄せる。
+VitePress は **体系的な仕様・チュートリアル・リファレンス** に寄せる。
+この分担がよいです。
 
 ---
 
-## Risks
+## 最初の実装順
 
-### Runtime side effects
+いきなり全部作るより、この順番が安全です。
 
-Runtime inspection and image export execute `UserForm_Initialize`.
+```txt
+Phase 1: サイトの骨組み
+- docs/index.md
+- docs/getting-started.md
+- docs/installation.md
+- docs/commands/index.md
+- docs/.vitepress/config.ts
+- GitHub Pages workflow
 
-Mitigation:
+Phase 2: コマンドリファレンス
+- new / init / doctor / pull / push / run / lint / session / save
+- 各ページに usage / examples / json output / common errors を入れる
 
-- Warn clearly.
-- Add future `--no-initialize` only if technically possible.
-- Encourage separating layout from side-effectful initialization.
+Phase 3: AI エージェント向け導線
+- ai-agents/overview.md
+- ai-agents/recommended-prompts.md
+- ai-agents/skills.md
+- reference/json-output.md
+- reference/error-codes.md
 
-### Cleanup failures
-
-Temporary helper modules/forms may fail to delete.
-
-Mitigation:
-
-- Use `__xlflow_` prefix.
-- Add retry with `DoEvents`.
-- Add cleanup command.
-- Report cleanup failure as warning when main operation succeeds.
-
-### DPI and window capture instability
-
-`form export-image` depends on desktop UI behavior.
-
-Mitigation:
-
-- Mark experimental initially.
-- Use unique caption token.
-- Use process ID + caption token for window discovery.
-- Provide structured errors.
-
-### Unsupported controls
-
-External ActiveX controls may not serialize cleanly.
-
-Mitigation:
-
-- Include minimal metrics.
-- Mark as `unsupported_control`.
-- Avoid failing entire snapshot.
+Phase 4: 自動生成
+- xlflow help --json
+- tools/gen-docs
+- commands metadata
+````
 
 ---
 
-## Future ideas
-
-- `xlflow form diff UserForm1 --spec src/forms/UserForm1.form.yaml`
-- `xlflow form apply src/forms/UserForm1.form.yaml`
-- `xlflow form build src/forms/UserForm1.form.yaml`
-- `xlflow form normalize UserForm1`
-- `xlflow form validate UserForm1`
-- `xlflow form init UserForm1 --dynamic`
-- `xlflow form export-assets UserForm1`
-- `xlflow inspect form UserForm1 --compare designer,runtime`
-- `xlflow cleanup` for stale temporary xlflow components
-
----
-
-## Summary
-
-This feature would make UserForms observable and eventually controllable from the CLI.
-
-The key design choice is to avoid direct `.frx` parsing as the primary strategy.
-
-Instead:
-
-```text
-Existing manual UserForm:
-  VBComponent.Designer -> snapshot/spec
-
-Runtime verification:
-  UserForms.Add(name) -> inspect/export image
-
-Future generation:
-  form.yaml -> VBIDE Designer API -> .frm/.frx generated by Excel/VBE
-
-New AI-generated forms:
-  dynamic UserForm template using Controls.Add
-```
-
-This would make xlflow significantly more useful for AI-agent-driven Excel/VBA GUI development.
+[1]: https://vitepress.dev/guide/getting-started "Getting Started | VitePress"
+[2]: https://vitepress.dev/reference/site-config "Site Config | VitePress"
