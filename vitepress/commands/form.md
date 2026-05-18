@@ -34,13 +34,11 @@ xlflow form export-image CalendarForm --out artifacts/CalendarForm.png --json
 
 ## Notes
 
-::: important
-The canonical Designer source is `src/forms/specs/*.yaml` or `*.json`; sidecar code lives separately under `src/forms/code/`.
-:::
+> [!IMPORTANT]
+> The canonical Designer source is `src/forms/specs/*.yaml` or `*.json`; sidecar code lives separately under `src/forms/code/`.
 
-::: warning
-`form export-image` depends on desktop Excel GUI behavior and may execute `UserForm_Initialize` depending on initializer settings.
-:::
+> [!WARNING]
+> `form export-image` depends on desktop Excel GUI behavior and may execute `UserForm_Initialize` depending on initializer settings.
 
 ## JSON Output Example
 
