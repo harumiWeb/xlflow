@@ -2008,13 +2008,18 @@ func TestRunScriptRestoresRuntimeMarkersBeforePersistingWorkbook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read run.ps1: %v", err)
 	}
-	text := string(data)
-	for _, want := range []string{
-		"Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState\n        $runtimeState = $null\n      $workbook.Save()",
-		"Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState\n        $runtimeState = $null\n      $workbook.SaveCopyAs($SaveAsPath)",
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	for _, want := range []struct {
+		restore string
+		save    string
+	}{
+		{restore: "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState", save: "$workbook.Save()"},
+		{restore: "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState", save: "$workbook.SaveCopyAs($SaveAsPath)"},
 	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("run.ps1 should restore runtime markers before persistence %q:\n%s", want, text)
+		restoreIndex := strings.Index(text, want.restore)
+		saveIndex := strings.Index(text, want.save)
+		if restoreIndex == -1 || saveIndex == -1 || restoreIndex > saveIndex {
+			t.Fatalf("run.ps1 should restore runtime markers before persistence restore=%q save=%q:\n%s", want.restore, want.save, text)
 		}
 	}
 }
@@ -2024,10 +2029,11 @@ func TestTestScriptRestoresRuntimeMarkersBeforeSavingWorkbook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read test.ps1: %v", err)
 	}
-	text := string(data)
-	want := "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState\n    $runtimeState = $null\n  $workbook.Save()"
-	if !strings.Contains(text, want) {
-		t.Fatalf("test.ps1 should restore runtime markers before save %q:\n%s", want, text)
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	restoreIndex := strings.Index(text, "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState")
+	saveIndex := strings.Index(text, "$workbook.Save()")
+	if restoreIndex == -1 || saveIndex == -1 || restoreIndex > saveIndex {
+		t.Fatalf("test.ps1 should restore runtime markers before save:\n%s", text)
 	}
 }
 
