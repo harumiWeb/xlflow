@@ -1,5 +1,23 @@
 # winget Release Publishing Todo
 
+# Live Session Inspect Todo
+
+- [x] Add `--session` and `--keepalive` plumbing to `inspect workbook|sheets|range|used-range|cell`.
+- [x] Add Excel COM live-session inspect bridge support and `inspect.ps1`.
+- [x] Keep default file-backed inspect behavior and add live-session guidance hints on stale-disk warnings.
+- [x] Update CLI/docs/agent guidance for explicit live-session inspect mode.
+- [x] Run focused tests, `go test ./...`, and Windows Excel COM E2E verification for live-session inspect.
+
+## Verification Notes
+
+- `go test ./internal/cli ./internal/excel ./internal/output` passed.
+- `go test ./internal/excel/scripts -run TestPowerShellScriptsParse` passed.
+- `go test ./...` passed.
+- E2E workspace `C:\dev\go\xlflow\tmp_workspaces\inspect-session-e2e`:
+  `xlflow new --json`, `doctor --json`, `pull --json`, `lint --json`, `session start --json`, `push --fast --session --no-save --json`, `run Main.Run --session --json`, `inspect workbook --session --json`, `inspect range --sheet Sheet1 --address A1:B2 --session --include-style --json`, `inspect range --sheet Sheet1 --address A1:B2 --json`, `save --session --json`, `inspect range --sheet Sheet1 --address A1:B2 --json`, and `session stop --json` all completed.
+- Live-session inspect showed `A1="live session ok"` and `B2="before save"` before save while file-backed inspect still reported the stale saved workbook plus `live_session_dirty` / `command_reads_saved_file` warnings and live-session hints.
+- After `save --session`, file-backed inspect matched the live workbook and a raw Excel COM workbook-state check confirmed `A1="live session ok"`, `B2="before save"`, and `B2Color=65535`.
+
 - [x] Add winget release publishing contract to the working feature spec.
 - [x] Add GoReleaser `winget` configuration for `HarumiWeb.Xlflow`.
 - [x] Pass `WINGET_GITHUB_TOKEN` to GoReleaser in the release workflow.

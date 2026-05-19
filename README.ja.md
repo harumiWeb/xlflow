@@ -372,37 +372,37 @@ xlflow inspect-gui --json
 
 ## コマンドマップ
 
-| コマンド            | 目的                                                    | 代表的な使い方                                                               |
-| ------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `new`               | 新しい xlflow プロジェクトと `.xlsm` workbook を作成    | `xlflow new Book.xlsm`                                                       |
-| `init`              | 既存 workbook から xlflow プロジェクトを初期化          | `xlflow init Book.xlsm`                                                      |
-| `doctor`            | Excel、COM、PowerShell、VBIDE access を診断             | `xlflow doctor --json`                                                       |
-| `attach`            | Excel で現在 active な workbook を検証                  | `xlflow attach --active --json`                                              |
-| `backup list`       | rollback 用 workbook backup を一覧表示                  | `xlflow backup list --json`                                                  |
-| `pull`              | VBA component を `src/` へエクスポート                  | `xlflow pull --json`                                                         |
-| `push`              | VBA source を workbook へインポート                     | `xlflow push --json`                                                         |
-| `rollback`          | 保存済み backup から workbook を復元                    | `xlflow rollback --latest --json`                                            |
-| `session`           | 高速ループ用に workbook を開いたままにする              | `xlflow session start`                                                       |
-| `save`              | session 中の workbook を保存                            | `xlflow save --session --json`                                               |
-| `runner`            | 永続 xlflow runner marker module を管理                 | `xlflow runner install --json`                                               |
-| `macros`            | 実行可能な macro entrypoint を検出                      | `xlflow macros --json`                                                       |
-| `list forms`        | workbook の UserForm と想定 source path を列挙          | `xlflow list forms --json`                                                   |
-| `form snapshot`     | 厳密な Designer UserForm state を JSON/YAML spec に保存 | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
-| `form build`        | 保存済み spec から Designer-backed UserForm を作成      | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
-| `form export-image` | runtime UserForm を PNG 画像として出力                  | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
-| `run`               | CLI から macro を実行                                   | `xlflow run Main.Run --json`                                                 |
-| `export-image`      | worksheet range を PNG 画像として出力                   | `xlflow export-image --sheet QR --range A1:AE31 --json`                      |
-| `edit`              | live session workbook を準備・調整用に変更する          | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`   |
-| `trace`             | VBA trace log を有効化・収集・削除                      | `xlflow trace enable --json`                                                 |
-| `test`              | VBA test を実行                                         | `xlflow test --json`                                                         |
-| `diff`              | workbook 内容と任意の VBA source を比較                 | `xlflow diff before.xlsm after.xlsm --json`                                  |
-| `inspect`           | Excel COM を使わず保存済み workbook snapshot を確認     | `xlflow inspect range --sheet Result --address A1:F20 --json`                |
-| `lint`              | VBA source を lint                                      | `xlflow lint --json`                                                         |
-| `analyze`           | Excel を開かず runtime-risk pattern を解析              | `xlflow analyze --json`                                                      |
-| `check`             | `lint` / `analyze` / `doctor` をまとめて実行            | `xlflow check --keepalive --json`                                            |
-| `inspect-gui`       | GUI interaction boundary を検出                         | `xlflow inspect-gui --json`                                                  |
-| `skill install`     | AI エージェント向け Skill をインストール                | `xlflow skill install --agent codex`                                         |
-| `version`           | インストール済み xlflow の build metadata を表示        | `xlflow version`                                                             |
+| コマンド            | 目的                                                              | 代表的な使い方                                                               |
+| ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `new`               | 新しい xlflow プロジェクトと `.xlsm` workbook を作成              | `xlflow new Book.xlsm`                                                       |
+| `init`              | 既存 workbook から xlflow プロジェクトを初期化                    | `xlflow init Book.xlsm`                                                      |
+| `doctor`            | Excel、COM、PowerShell、VBIDE access を診断                       | `xlflow doctor --json`                                                       |
+| `attach`            | Excel で現在 active な workbook を検証                            | `xlflow attach --active --json`                                              |
+| `backup list`       | rollback 用 workbook backup を一覧表示                            | `xlflow backup list --json`                                                  |
+| `pull`              | VBA component を `src/` へエクスポート                            | `xlflow pull --json`                                                         |
+| `push`              | VBA source を workbook へインポート                               | `xlflow push --json`                                                         |
+| `rollback`          | 保存済み backup から workbook を復元                              | `xlflow rollback --latest --json`                                            |
+| `session`           | 高速ループ用に workbook を開いたままにする                        | `xlflow session start`                                                       |
+| `save`              | session 中の workbook を保存                                      | `xlflow save --session --json`                                               |
+| `runner`            | 永続 xlflow runner marker module を管理                           | `xlflow runner install --json`                                               |
+| `macros`            | 実行可能な macro entrypoint を検出                                | `xlflow macros --json`                                                       |
+| `list forms`        | workbook の UserForm と想定 source path を列挙                    | `xlflow list forms --json`                                                   |
+| `form snapshot`     | 厳密な Designer UserForm state を JSON/YAML spec に保存           | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
+| `form build`        | 保存済み spec から Designer-backed UserForm を作成                | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
+| `form export-image` | runtime UserForm を PNG 画像として出力                            | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
+| `run`               | CLI から macro を実行                                             | `xlflow run Main.Run --json`                                                 |
+| `export-image`      | worksheet range を PNG 画像として出力                             | `xlflow export-image --sheet QR --range A1:AE31 --json`                      |
+| `edit`              | live session workbook を準備・調整用に変更する                    | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`   |
+| `trace`             | VBA trace log を有効化・収集・削除                                | `xlflow trace enable --json`                                                 |
+| `test`              | VBA test を実行                                                   | `xlflow test --json`                                                         |
+| `diff`              | workbook 内容と任意の VBA source を比較                           | `xlflow diff before.xlsm after.xlsm --json`                                  |
+| `inspect`           | 保存済み workbook snapshot または明示的な live session 状態を確認 | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
+| `lint`              | VBA source を lint                                                | `xlflow lint --json`                                                         |
+| `analyze`           | Excel を開かず runtime-risk pattern を解析                        | `xlflow analyze --json`                                                      |
+| `check`             | `lint` / `analyze` / `doctor` をまとめて実行                      | `xlflow check --keepalive --json`                                            |
+| `inspect-gui`       | GUI interaction boundary を検出                                   | `xlflow inspect-gui --json`                                                  |
+| `skill install`     | AI エージェント向け Skill をインストール                          | `xlflow skill install --agent codex`                                         |
+| `version`           | インストール済み xlflow の build metadata を表示                  | `xlflow version`                                                             |
 
 ---
 

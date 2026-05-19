@@ -15,7 +15,7 @@ Default safety rules for AI-agent work:
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --keepalive --json`.
 - When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
-- `xlflow inspect` reads the saved workbook file directly. Do not trust `inspect` to reflect unsaved live session changes until `xlflow save --json` has completed.
+- `xlflow inspect workbook|sheets|range|used-range|cell` reads the saved workbook file by default, but these commands accept `--session` when you need the live workbook currently open in Excel.
 - Use `xlflow list forms --session --keepalive --json` when you need workbook UserForm names or expected `.frm` / `.frx` source paths without loading the form at runtime.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` when you need structured UserForm state beyond saved worksheet snapshots. Runtime inspection executes against a temporary workbook copy of the current source state.
 - Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json` when you need a persisted JSON/YAML spec for design review or future declarative UserForm workflows. This path is stricter than `inspect form --designer` because it executes an injected helper to recover concrete control types.
@@ -84,15 +84,17 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow edit cell --sheet <name> --cell <A1> --value <text> --events on --session --keepalive --json` to prepare input cells and trigger `Worksheet_Change` handlers during a session.
    - Use `xlflow edit range --sheet <name> --range <A1:B2> --fill <#RRGGBB> --session --keepalive --json` or `--clear contents|formats|all` to reset workbook state between iterations.
    - Use `xlflow edit rows --sheet <name> --rows <1:31> --height <points> --session --keepalive --json` and `xlflow edit columns --sheet <name> --columns <A:AE> --width <chars> --session --keepalive --json` for visual tuning before `export-image`.
-   - Use `xlflow inspect workbook --json` to confirm workbook path, active sheet metadata, and per-sheet used ranges.
-   - Use `xlflow inspect sheets --json` to verify sheet creation/removal, visibility, row counts, and column counts.
-   - Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output range is known.
-   - Add `--include-style` when visual correctness depends on fill colors, borders, merged cells, row heights, or column widths.
-   - Use `xlflow inspect used-range --sheet <name> --json` when the output bounds are unknown and you need the current data rectangle.
-   - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for targeted assertions on one cell.
-   - Use `xlflow export-image --sheet <name> --range <A1:F20> --session --keepalive --json` when verification depends on the rendered sheet appearance, chart placement, fills, or layout.
-   - Prefer global `--json` for agent parsing. Use `--format markdown` only when you intentionally want a compact human/LLM-facing table.
-   - If the live session workbook is newer than disk, run `xlflow save --json` before relying on any `inspect` result.
+
+- Use `xlflow inspect workbook --json` for saved-file metadata, or `xlflow inspect workbook --session --keepalive --json` for the live workbook state in Excel.
+- Use `xlflow inspect sheets --json` for saved-file sheet metadata, or `xlflow inspect sheets --session --keepalive --json` for the live workbook state in Excel.
+- Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected saved-file output range is known.
+- Use `xlflow inspect range --sheet <name> --address <A1:F20> --session --keepalive --json` when the workbook output is still only in the live session.
+- Add `--include-style` when visual correctness depends on fill colors, borders, merged cells, row heights, or column widths.
+- Use `xlflow inspect used-range --sheet <name> --json` when the output bounds are unknown and you need the current data rectangle.
+- Use `xlflow inspect cell --sheet <name> --address <A1> --json` for targeted assertions on one cell.
+- Use `xlflow export-image --sheet <name> --range <A1:F20> --session --keepalive --json` when verification depends on the rendered sheet appearance, chart placement, fills, or layout.
+- Prefer global `--json` for agent parsing. Use `--format markdown` only when you intentionally want a compact human/LLM-facing table.
+- If the live session workbook is newer than disk, either run the matching `inspect ... --session` command or run `xlflow save --json` before relying on file-backed inspect.
 
 6. Compare results.
    - Use `xlflow diff <before> <after> --json` for workbook state changes.
@@ -109,7 +111,7 @@ Before editing, decide what is authoritative:
 - If the user says the workbook has the latest VBA, or source files are missing or stale, run `xlflow pull --session --keepalive --json` after starting the session, then edit source files.
 - Do not mix direct workbook edits with source edits in the same task unless the requested change is workbook-state only and no VBA source change is needed.
 - After `xlflow trace inject --keepalive --json`, remember that `XlflowTrace.bas` is generated xlflow support code. Do not rewrite it by hand unless the user is changing xlflow itself.
-- Treat `xlflow inspect` as a disk snapshot reader, not a live Excel inspector. If the task depends on unsaved session changes, save first or use session-aware execution commands to reproduce the state again.
+- Treat `xlflow inspect` without `--session` as a disk snapshot reader. If the task depends on unsaved session changes, either inspect with `--session` or save first.
 
 Before running a macro, decide the runnable entrypoint:
 
@@ -161,9 +163,10 @@ When the user reports a runtime failure:
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --session --keepalive --json` as the primary correctness signal when tests exist.
 - Use `xlflow macros --session --keepalive --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
-- Use `xlflow inspect workbook --json` to confirm workbook-level metadata after save.
-- Use `xlflow inspect sheets --json` to verify expected worksheet names, visibility, and lightweight used ranges.
-- Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected output rectangle is known.
+- Use `xlflow inspect workbook --json` to confirm saved workbook metadata after save, or `xlflow inspect workbook --session --keepalive --json` to inspect the live workbook before saving.
+- Use `xlflow inspect sheets --json` to verify saved worksheet names, visibility, and lightweight used ranges, or `xlflow inspect sheets --session --keepalive --json` for the live workbook.
+- Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected saved-file output rectangle is known.
+- Use `xlflow inspect range --sheet <name> --address <A1:F20> --session --keepalive --json` when the expected output rectangle is still only in the live workbook.
 - Use `xlflow inspect used-range --sheet <name> --json` when the output rectangle is unknown or may expand.
 - Use `xlflow inspect cell --sheet <name> --address <A1> --json` for single-cell checks or precise assertions.
 - Use `xlflow inspect form <FormName> --runtime|--designer|--both --session --keepalive --json` for UserForm inspection; prefer `--designer` for source/design audits, `--runtime` for populated runtime state from a temporary workbook copy, and `--both` when you need to compare them.
@@ -171,8 +174,8 @@ When the user reports a runtime failure:
   - Use `xlflow form build src/forms/specs/<FormName>.yaml --session --keepalive --json` to materialize a new UserForm from a saved spec; add `--overwrite` when replacing an existing component intentionally.
 - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when the question is visual fidelity of the runtime form, including layout after initialization.
 - Use `xlflow inspect form <FormName> --runtime --initializer <MethodName> --session --keepalive --json` when the form requires an explicit initializer call before its visible state is meaningful.
-- Use `xlflow save --json` before `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
-- Treat `xlflow inspect workbook|sheets|range|used-range|cell` as disk-backed workbook readers, and `xlflow inspect form` as an Excel COM inspection command whose runtime mode executes against a temporary workbook copy derived from the current source workbook state.
+- Use `xlflow save --json` before file-backed `inspect` whenever a session run or `push --session --no-save` may have left newer workbook state only in the live Excel instance.
+- Treat `xlflow inspect workbook|sheets|range|used-range|cell` without `--session` as disk-backed workbook readers, `xlflow inspect ... --session` as live Excel inspectors, and `xlflow inspect form` as a specialized Excel COM inspection command whose runtime mode executes against a temporary workbook copy derived from the current source workbook state.
 - When UserForms are involved, treat `pull` / `push` / `save` warnings about partial `.frm` fidelity and unsaved session state as actionable; do not review UserForm diffs until the live workbook has been saved and re-pulled.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
@@ -214,7 +217,7 @@ End Sub
 
 ## Keepalive Rules
 
-Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow list forms`, `xlflow inspect form`, `xlflow form snapshot`, `xlflow form build`, `xlflow form export-image`, `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
+Use `--keepalive --json` for long Excel COM-backed commands, including `xlflow list forms`, `xlflow inspect form`, `xlflow inspect workbook|sheets|range|used-range|cell --session`, `xlflow form snapshot`, `xlflow form build`, `xlflow form export-image`, `xlflow pull`, `xlflow push`, `xlflow macros`, `xlflow test`, `xlflow trace inject`, `xlflow run`, `xlflow export-image`, and workbook UI operations. Keepalive heartbeat lines and the final `XLFLOW_DONE` marker are written to stderr so stdout remains valid JSON.
 
 After starting a keepalive command, wait until the process exits and stderr contains a line beginning with `XLFLOW_DONE`. Do not begin the next workbook-dependent step just because stdout has not changed for a while.
 

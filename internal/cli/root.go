@@ -101,6 +101,11 @@ type formWriteCommandOptions struct {
 	Keepalive excel.CommandOptions
 }
 
+type inspectBridgeOptions struct {
+	Session   bool
+	Keepalive excel.CommandOptions
+}
+
 func Execute() error {
 	return ExecuteWithBuildInfo(BuildInfo{})
 }
@@ -2497,7 +2502,9 @@ func (a *app) inspectCommand() *cobra.Command {
 }
 
 func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
-	return &cobra.Command{
+	var session bool
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "workbook",
 		Short: "Inspect workbook summary information",
 		Args:  cobra.NoArgs,
@@ -2506,21 +2513,40 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
+			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("inspect")
 			if err != nil {
 				return err
+			}
+			if bridgeOpts.Session {
+				env, code, err := a.runSessionInspect(cfg, excel.InspectOptions{
+					Target:    "workbook",
+					Session:   true,
+					Keepalive: bridgeOpts.Keepalive,
+				}, format)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
 			}
 			workbook, err := workbookinspect.Workbook(workbookArgPath(a.cwd, cfg.Excel.Path))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
-			target, session, warnings := a.inspectStateForWorkbook(cfg, workbook.Path)
+			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbook.Path)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
-			env.Session = session
+			env.Session = sessionState
 			env.Warnings = append(warnings, formWarnings...)
-			env.Hints = formHints
+			hints := append([]map[string]any{}, formHints...)
+			if len(warnings) > 0 {
+				hints = append(hints, staleFileInspectHints("workbook")...)
+			}
+			env.Hints = hints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "workbook",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbook.Path),
@@ -2532,10 +2558,15 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
-	return &cobra.Command{
+	var session bool
+	var keepalive keepaliveFlags
+	cmd := &cobra.Command{
 		Use:   "sheets",
 		Short: "Inspect workbook worksheets",
 		Args:  cobra.NoArgs,
@@ -2544,22 +2575,41 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
+			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("inspect")
 			if err != nil {
 				return err
+			}
+			if bridgeOpts.Session {
+				env, code, err := a.runSessionInspect(cfg, excel.InspectOptions{
+					Target:    "sheets",
+					Session:   true,
+					Keepalive: bridgeOpts.Keepalive,
+				}, format)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
 			}
 			sheets, err := workbookinspect.Sheets(workbookArgPath(a.cwd, cfg.Excel.Path))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
-			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
-			env.Session = session
+			env.Session = sessionState
 			env.Warnings = append(warnings, formWarnings...)
-			env.Hints = formHints
+			hints := append([]map[string]any{}, formHints...)
+			if len(warnings) > 0 {
+				hints = append(hints, staleFileInspectHints("sheets")...)
+			}
+			env.Hints = hints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "sheets",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2571,6 +2621,9 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
+	addKeepaliveFlags(cmd, &keepalive)
+	return cmd
 }
 
 func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
@@ -2650,6 +2703,8 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	var maxRows int
 	var maxCols int
 	var includeStyle bool
+	var session bool
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "range [<sheet!A1:B2>]",
 		Short: "Inspect a worksheet range",
@@ -2667,9 +2722,28 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
+			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("inspect")
 			if err != nil {
 				return err
+			}
+			if bridgeOpts.Session {
+				env, code, err := a.runSessionInspect(cfg, excel.InspectOptions{
+					Target:       "range",
+					Sheet:        selector.Sheet,
+					Address:      selector.Address,
+					Limits:       inspectLimitsMap(limits),
+					IncludeStyle: includeStyle,
+					Session:      true,
+					Keepalive:    bridgeOpts.Keepalive,
+				}, format)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			snapshot, err := workbookinspect.Range(workbookPath, selector.Sheet, selector.Address, workbookinspect.RangeOptions{
@@ -2680,12 +2754,16 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
-			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
-			env.Session = session
+			env.Session = sessionState
 			env.Warnings = append(warnings, formWarnings...)
-			env.Hints = formHints
+			hints := append([]map[string]any{}, formHints...)
+			if len(warnings) > 0 {
+				hints = append(hints, staleFileInspectHints("range", selector.Sheet, selector.Address)...)
+			}
+			env.Hints = hints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2702,6 +2780,8 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
+	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2755,6 +2835,51 @@ func buildInspectFormOptions(name, basis, initializer string, session bool, keep
 		Session:     session,
 		Keepalive:   keepaliveOpts,
 	}, nil
+}
+
+func buildInspectBridgeOptions(session bool, keepalive keepaliveFlags) (inspectBridgeOptions, error) {
+	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
+	if err != nil {
+		return inspectBridgeOptions{}, err
+	}
+	if keepalive.enabled && !session {
+		return inspectBridgeOptions{}, fmt.Errorf("--keepalive requires --session")
+	}
+	return inspectBridgeOptions{
+		Session:   session,
+		Keepalive: keepaliveOpts,
+	}, nil
+}
+
+func inspectLimitsMap(limits workbookinspect.Limits) map[string]int {
+	return map[string]int{
+		"max_rows": limits.MaxRows,
+		"max_cols": limits.MaxCols,
+	}
+}
+
+func staleFileInspectHints(target string, args ...string) []map[string]any {
+	command := "xlflow inspect " + target
+	switch target {
+	case "range", "cell":
+		if len(args) >= 2 {
+			command += " --sheet " + strconv.Quote(args[0]) + " --address " + strconv.Quote(args[1])
+		}
+	case "used-range":
+		if len(args) >= 1 && strings.TrimSpace(args[0]) != "" {
+			command += " --sheet " + strconv.Quote(args[0])
+		}
+	}
+	return []map[string]any{
+		{
+			"code":    "inspect_live_session",
+			"message": command + " --session --json reads the live workbook currently open in Excel.",
+		},
+		{
+			"code":    "save_session_before_file_inspect",
+			"message": "Run `xlflow save --session --json` before disk-backed inspect when the live workbook is newer than disk.",
+		},
+	}
 }
 
 func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
@@ -2831,6 +2956,8 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	var maxRows int
 	var maxCols int
 	var includeStyle bool
+	var session bool
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "used-range [<sheet>]",
 		Short: "Inspect the lightweight used range for a worksheet",
@@ -2848,9 +2975,27 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
+			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("inspect")
 			if err != nil {
 				return err
+			}
+			if bridgeOpts.Session {
+				env, code, err := a.runSessionInspect(cfg, excel.InspectOptions{
+					Target:       "used-range",
+					Sheet:        targetSheet,
+					Limits:       inspectLimitsMap(limits),
+					IncludeStyle: includeStyle,
+					Session:      true,
+					Keepalive:    bridgeOpts.Keepalive,
+				}, format)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			snapshot, err := workbookinspect.UsedRange(workbookPath, targetSheet, workbookinspect.RangeOptions{
@@ -2861,12 +3006,16 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			env := output.New("inspect")
-			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env.Target = target
-			env.Session = session
+			env.Session = sessionState
 			env.Warnings = append(warnings, formWarnings...)
-			env.Hints = formHints
+			hints := append([]map[string]any{}, formHints...)
+			if len(warnings) > 0 {
+				hints = append(hints, staleFileInspectHints("used-range", targetSheet)...)
+			}
+			env.Hints = hints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "used-range",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2882,12 +3031,16 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	cmd.Flags().IntVar(&maxRows, "max-rows", 100, "maximum rows returned")
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
+	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 	var sheet string
 	var address string
+	var session bool
+	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "cell [<sheet!A1>]",
 		Short: "Inspect a single worksheet cell",
@@ -2901,22 +3054,43 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
+			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
 			cfg, err := a.loadConfig("inspect")
 			if err != nil {
 				return err
+			}
+			if bridgeOpts.Session {
+				env, code, err := a.runSessionInspect(cfg, excel.InspectOptions{
+					Target:    "cell",
+					Sheet:     selector.Sheet,
+					Address:   selector.Address,
+					Session:   true,
+					Keepalive: bridgeOpts.Keepalive,
+				}, format)
+				if err != nil {
+					return err
+				}
+				return a.write(env, code)
 			}
 			cell, err := workbookinspect.Cell(workbookArgPath(a.cwd, cfg.Excel.Path), selector.Sheet, selector.Address)
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
-			target, session, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
+			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
 			env.Target = target
-			env.Session = session
+			env.Session = sessionState
 			env.Warnings = append(warnings, formWarnings...)
-			env.Hints = formHints
+			hints := append([]map[string]any{}, formHints...)
+			if len(warnings) > 0 {
+				hints = append(hints, staleFileInspectHints("cell", selector.Sheet, selector.Address)...)
+			}
+			env.Hints = hints
 			env.Inspect = workbookinspect.Payload{
 				Target:     "cell",
 				TargetInfo: workbookinspect.SavedFileTargetInfo(workbookPath),
@@ -2930,7 +3104,38 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
 	cmd.Flags().StringVar(&address, "address", "", "cell address such as A1")
+	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
+	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
+}
+
+func (a *app) runSessionInspect(cfg config.Config, opts excel.InspectOptions, format string) (output.Envelope, int, error) {
+	var scriptEnv output.Envelope
+	var code int
+	err := a.withExcelProgress("Inspecting live workbook", opts.Keepalive, func() error {
+		var runErr error
+		scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.Inspect(cfg, opts)
+		return runErr
+	})
+	if err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if code != output.ExitSuccess {
+		return scriptEnv, code, nil
+	}
+	env := output.New("inspect")
+	env.Target = scriptEnv.Target
+	env.Session = scriptEnv.Session
+	env.Workbook = scriptEnv.Workbook
+	env.Warnings = scriptEnv.Warnings
+	env.Hints = scriptEnv.Hints
+	env.Logs = scriptEnv.Logs
+	payload := cliObjectMap(scriptEnv.Inspect)
+	if len(payload) > 0 {
+		payload["format"] = format
+		env.Inspect = payload
+	}
+	return env, output.ExitSuccess, nil
 }
 
 func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (map[string]any, map[string]any, []map[string]any) {
@@ -2942,6 +3147,7 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 	session := map[string]any{
 		"active":               false,
 		"workbook_path":        workbookPath,
+		"workbook_name":        filepath.Base(workbookPath),
 		"dirty":                false,
 		"save_required":        false,
 		"live_newer_than_disk": false,
@@ -2970,6 +3176,9 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 	}
 	if mode := stringValueForCLI(status, "mode"); mode != "" {
 		session["mode"] = mode
+	}
+	if name := stringValueForCLI(status, "workbook_name"); strings.TrimSpace(name) != "" {
+		session["workbook_name"] = name
 	}
 	if present, ok := status["userforms_present"]; ok {
 		session["userforms_present"] = present

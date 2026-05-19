@@ -685,10 +685,12 @@ type StyledCellSnapshot struct {
 ## Behavior
 
 - `inspect` continues to read the configured saved workbook file directly without starting Excel COM.
+- `inspect workbook|sheets|range|used-range|cell --session` reads the live workbook currently attached to the xlflow session through Excel COM and returns the same target-specific payload shapes with `inspect.source = "excel_com"` and `inspect.target_info.kind = "live_session"`.
 - `--include-style` is opt-in and only affects range-based inspect commands.
 - Existing `values` matrix output remains unchanged for compatibility.
 - When `--include-style` is set, range output also includes per-cell style metadata, row metadata, column metadata, and merged-range metadata for the returned range after truncation.
 - Style-aware inspect reports the target as the saved workbook file and includes a note that unsaved live-session state is not being inspected.
+- File-backed inspect keeps warning when a matching live session is dirty and now adds hints to run the matching `inspect ... --session` command or `save --session`.
 - Empty cells are still included in the returned range and may carry style metadata even when `value` is `null`.
 - Conditional formatting evaluation is out of scope for v1; output reflects stored cell styles in the saved workbook file.
 
@@ -774,7 +776,7 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 ## Explicit Workbook State Output
 
 - Workbook-backed commands must make their read/write target explicit through top-level `target.kind = source|file|live_session`.
-- Relevant commands must also return top-level `session.active`, `session.workbook_path`, `session.dirty`, and `session.save_required` when that state is knowable.
+- Relevant commands must also return top-level `session.active`, `session.workbook_path`, `session.workbook_name`, `session.dirty`, and `session.save_required` when that state is knowable.
 - Existing `workbook.session_mode`, `workbook.dirty`, and `workbook.needs_save` remain for compatibility; the new `target` and `session` blocks are the preferred stable contract for callers.
 - `macros` with zero results should emit actionable `hints` explaining that discovery reads workbook state, not source files, and may require `push`.
 - `inspect` keeps reading the saved workbook file directly, but when `.xlflow/session.json` points at the same live workbook it should surface session dirty state and warn when the saved file may be stale.

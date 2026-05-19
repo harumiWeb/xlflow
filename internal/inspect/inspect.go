@@ -173,6 +173,14 @@ func SavedFileTargetInfo(path string) *TargetInfo {
 	}
 }
 
+func LiveSessionTargetInfo(path string) *TargetInfo {
+	return &TargetInfo{
+		Kind: "live_session",
+		Path: path,
+		Note: "This command inspected the live workbook currently open in Excel through xlflow session.",
+	}
+}
+
 func Workbook(path string) (WorkbookSummary, error) {
 	result := WorkbookSummary{
 		Path:   path,
