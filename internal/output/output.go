@@ -49,6 +49,7 @@ type Envelope struct {
 	Diff          any `json:"diff,omitempty"`
 	Inspect       any `json:"inspect,omitempty"`
 	Trace         any `json:"trace,omitempty"`
+	Runtime       any `json:"runtime,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
 	UI            any `json:"ui,omitempty"`
 	Session       any `json:"session,omitempty"`
@@ -430,17 +431,46 @@ func (r renderer) checkLine(ok bool, name, detail string) string {
 	return fmt.Sprintf("%s %s - %s\n", marker, r.style(name, "", true), detail)
 }
 
+func summarizeRuntime(runtime map[string]any) string {
+	if len(runtime) == 0 {
+		return ""
+	}
+	mode := stringValue(runtime, "mode_name")
+	if mode == "" {
+		mode = stringValue(runtime, "mode")
+	}
+	if mode == "" {
+		return ""
+	}
+	parts := []string{mode}
+	if source := stringValue(runtime, "source"); source != "" {
+		parts = append(parts, "source="+source)
+	}
+	if injected, ok := boolValueOK(runtime, "injected"); ok {
+		if injected {
+			parts = append(parts, "workbook marker injected")
+		} else {
+			parts = append(parts, "workbook marker not injected")
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (r renderer) renderRun(env Envelope) string {
 	macro := objectMap(env.Macro)
 	workbook := objectMap(env.Workbook)
 	trace := objectMap(env.Trace)
-	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && env.RunDiagnostic == nil {
+	runtime := objectMap(env.Runtime)
+	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && len(runtime) == 0 && env.RunDiagnostic == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
 	b.WriteString("\n")
 	if name := stringValue(macro, "name"); name != "" {
 		b.WriteString(kv("Macro", name))
+	}
+	if summary := summarizeRuntime(runtime); summary != "" {
+		b.WriteString(kv("Runtime", summary))
 	}
 	if duration, ok := numberValue(macro, "duration_ms"); ok {
 		b.WriteString(kv("Duration", fmt.Sprintf("%dms", int(duration))))
@@ -542,6 +572,7 @@ func (r renderer) renderTest(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	workbook := objectMap(env.Workbook)
+	runtime := objectMap(env.Runtime)
 	passed := 0
 	failed := 0
 	notRun := 0
@@ -559,6 +590,9 @@ func (r renderer) renderTest(env Envelope) string {
 	b.WriteString("\n")
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(kv("Workbook", path))
+	}
+	if summary := summarizeRuntime(runtime); summary != "" {
+		b.WriteString(kv("Runtime", summary))
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		b.WriteString(kv("Session", sessionSummary))

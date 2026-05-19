@@ -11,6 +11,8 @@ param(
   [string]$Direct = "false",
   [string]$Diagnostic = "false",
   [string]$SuppressModalErrors = "true",
+  [string]$RuntimeMode = "interactive",
+  [string]$RuntimeSource = "default",
   [string]$UseSession = "false",
   [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
@@ -29,6 +31,7 @@ $currentPhase = "initialize"
 $sessionAttached = $false
 $sessionMode = "none"
 $suppressModalErrors = ConvertTo-XlflowBool $SuppressModalErrors
+$runtimeState = $null
 
 function Get-XlflowRunFailureCode {
   param(
@@ -154,6 +157,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource
   if ($null -ne $openResult.open_dialog -and [bool]$openResult.open_dialog.found) {
     Set-XlflowVBADialogFailure -ErrorCode "macro_failed" -FallbackSource "Excel" -FallbackNumber 0 -FallbackLine 0 -Dialog $openResult.open_dialog -Selection $openResult.open_selection
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
@@ -513,6 +517,13 @@ try {
       Write-Verbose ("failed to remove temporary trace module: " + $_.Exception.Message)
     }
   }
+	if ($null -ne $runtimeState) {
+		try {
+			Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+		} catch {
+			Write-Verbose ("failed to restore runtime injection state: " + $_.Exception.Message)
+		}
+	}
   if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {

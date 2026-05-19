@@ -424,3 +424,23 @@
 - Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-code-source-mode-init` (`init`, `code_source=frm`): `xlflow init <existing workbook>`, `pull`, `.frm` code edit, `push`, `pull`, `form snapshot`, `form build --overwrite`, and final `pull` all passed.
 - FRM-mode E2E confirmed `pull` did not create `src/forms/code/*.bas`, `push` preserved `.frm`-embedded code version `FRM2`, and `form build --overwrite` kept that embedded code intact.
 - Workspace `C:\dev\go\xlflow\tmp_workspaces\userform-preflight-scope-e2e`: `xlflow new`, `doctor`, `pull`, `lint`, then `form build src/forms/specs/UserForm1.yaml` in a sidecar repo where unrelated `src/forms/UserForm2.frm` intentionally contained stale analyzer-breaking code. Build for `UserForm1` still succeeded, confirming form-build preflight now scopes UserForm source checks to the target form instead of unrelated generated `.frm` artifacts.
+
+# Runtime-Aware Execution Mode Todo
+
+- [x] Decide whether this public VBA/runtime contract needs a new ADR or an update to an existing ADR. Added [docs/adr/ADR-0005-runtime-execution-mode-injection.md](docs/adr/ADR-0005-runtime-execution-mode-injection.md).
+- [x] Add a shared Go execution-mode resolver and thread it through `run` and `test` option/script-arg builders.
+- [x] Add shared PowerShell runtime-marker helpers in `common.ps1` and inject/restore reserved workbook names in `run.ps1` and `test.ps1`.
+- [x] Scaffold `src/modules/XlflowRuntime.bas` for `xlflow new` and extend scaffold coverage for the new helper module.
+- [x] Extend JSON/human output and docs/skill guidance so callers can see the resolved runtime mode and the VBA helper usage.
+- [x] Add focused Go and PowerShell regression coverage for mode resolution, script args, reserved-name cleanup, and VBA helper behavior.
+- [x] Run focused tests, full `go test ./...`, and Windows Excel COM validation that proves `interactive`, `headless`, `agent`, and `test` reach VBA as expected.
+
+- Focused validation passed for `internal/output` runtime rendering and for `internal/project` scaffold/runtime-helper regression tests.
+- `go test -count=1 ./internal/project -run 'TestNewScaffoldCreatesRuntimeHelper|TestNewScaffoldRuntimeHelperLintsCleanly'` passed, and a broader package run reached passing results for `internal/cli` and `internal/excel` before terminal output became unreliable.
+- Excel COM E2E workspace: `C:\dev\go\xlflow\tmp_workspaces\runtime-mode-e2e`.
+- In that workspace, `xlflow new RuntimeMode.xlsm --json` succeeded, scaffolded `src/modules/XlflowRuntime.bas`, and `xlflow push --json` succeeded after tightening the helper to be lint-clean.
+- `xlflow run Main.Run --headless --json` returned `runtime.mode=headless`, `runtime.mode_name=headless`, and `runtime.injected=true` in the Excel COM result envelope.
+- Session-aware E2E also passed in that workspace: `xlflow session start --json`, `xlflow push --fast --session --no-save --json`, `xlflow test --session --json`, `xlflow save --session --json`, and `xlflow session stop --json` all succeeded.
+- `XLFLOW_MODE=agent xlflow run Main.RunAgentProbe --json` succeeded against the disposable workbook, and the VBA probe macro asserted `XlflowRuntime.ModeName() = "agent"`, `IsAgent() = True`, and `IsHeadless() = True`. The JSON envelope reported `runtime.mode=agent`, `runtime.mode_name=agent`, and `runtime.source=environment`.
+- `xlflow test --session --json` reported `PASS Test_RuntimeMode_IsTestDuringXlflowTest`, and the test envelope reported `runtime.mode=test`, `runtime.mode_name=test`, and `runtime.injected=true`, proving the VBA helper observed test mode during session-backed execution.
+- A repository-wide `go test -count=1 ./...` run was started afterward and had reached passing results through `internal/excel/forms` at the time of this note; the long-running remainder still needed final exit confirmation when this section was updated.

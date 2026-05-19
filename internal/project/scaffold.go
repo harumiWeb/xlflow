@@ -34,7 +34,7 @@ func Init(cwd, workbookPath string) (InitResult, error) {
 	destPath := filepath.Join(cwd, "build", filepath.Base(workbookPath))
 	result, err = createScaffold(cwd, destPath, projectName(workbookPath), func(path string) error {
 		return copyFile(workbookPath, path)
-	}, "frm", false)
+	}, "frm", false, false)
 	if err != nil {
 		return InitResult{}, err
 	}
@@ -50,19 +50,23 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 		return InitResult{}, err
 	}
 	destPath := filepath.Join(cwd, "build", name)
-	return createScaffold(cwd, destPath, projectName(name), createWorkbook, "", true)
+	return createScaffold(cwd, destPath, projectName(name), createWorkbook, "", true, true)
 }
 
-func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string, scaffoldWorkbookModules bool) (InitResult, error) {
+func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string, scaffoldWorkbookModules bool, scaffoldRuntimeHelper bool) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
+	runtimePath := filepath.Join(cwd, "src", "modules", "XlflowRuntime.bas")
 	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
 	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
 	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
 	thisWorkbookPath := filepath.Join(cwd, "src", "workbook", "ThisWorkbook.bas")
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
 	protectedPaths := []string{destPath, configPath, assertPath, mainPath, appPath, uiPath}
+	if scaffoldRuntimeHelper {
+		protectedPaths = append(protectedPaths, runtimePath)
+	}
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
 	}
@@ -112,6 +116,12 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 		return result, err
 	}
 	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, assertPath)))
+	if scaffoldRuntimeHelper {
+		if err := writeExclusive(runtimePath, defaultRuntimeModule); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, runtimePath)))
+	}
 	for _, item := range []struct {
 		path string
 		body string
@@ -350,6 +360,97 @@ Private Function DescribeAssertValue(ByVal value As Variant) As String
   Else
     DescribeAssertValue = CStr(value)
   End If
+End Function
+`
+
+const defaultRuntimeModule = `Attribute VB_Name = "XlflowRuntime"
+Option Explicit
+
+Private Const xlflowInteractive As Long = 0
+Private Const xlflowHeadless As Long = 1
+Private Const xlflowCI As Long = 2
+Private Const xlflowAgent As Long = 3
+Private Const xlflowTest As Long = 4
+
+Public Function Mode() As Long
+	Select Case ModeName()
+		Case "headless"
+			Mode = xlflowHeadless
+		Case "ci"
+			Mode = xlflowCI
+		Case "agent"
+			Mode = xlflowAgent
+		Case "test"
+			Mode = xlflowTest
+		Case Else
+			Mode = xlflowInteractive
+	End Select
+End Function
+
+Public Function ModeName() As String
+	Dim raw As String
+	raw = ReadWorkbookModeName()
+	If Len(raw) = 0 Then
+		raw = Environ$("XLFLOW_MODE")
+	End If
+	raw = LCase$(Trim$(raw))
+
+	Select Case raw
+		Case "headless", "ci", "agent", "test"
+			ModeName = raw
+		Case Else
+			ModeName = "interactive"
+	End Select
+End Function
+
+Public Function IsInteractive() As Boolean
+	IsInteractive = (Mode() = xlflowInteractive)
+End Function
+
+Public Function IsHeadless() As Boolean
+	Select Case Mode()
+		Case xlflowHeadless, xlflowCI, xlflowAgent, xlflowTest
+			IsHeadless = True
+		Case Else
+			IsHeadless = False
+	End Select
+End Function
+
+Public Function IsCI() As Boolean
+	IsCI = (Mode() = xlflowCI)
+End Function
+
+Public Function IsAgent() As Boolean
+	IsAgent = (Mode() = xlflowAgent)
+End Function
+
+Public Function IsTest() As Boolean
+	IsTest = (Mode() = xlflowTest)
+End Function
+
+Private Function ReadWorkbookModeName() As String
+	On Error GoTo Missing
+	ReadWorkbookModeName = DecodeWorkbookDefinedName(ThisWorkbook.Names("__XLFLOW_MODE__").RefersTo)
+	Exit Function
+
+Missing:
+	ReadWorkbookModeName = ""
+End Function
+
+Private Function DecodeWorkbookDefinedName(ByVal refersTo As String) As String
+	If Len(refersTo) = 0 Then
+		DecodeWorkbookDefinedName = ""
+		Exit Function
+	End If
+	If Left$(refersTo, 1) = "=" Then
+		refersTo = Mid$(refersTo, 2)
+	End If
+	If Len(refersTo) >= 2 Then
+		If Left$(refersTo, 1) = Chr$(34) And Right$(refersTo, 1) = Chr$(34) Then
+			refersTo = Mid$(refersTo, 2, Len(refersTo) - 2)
+		End If
+	End If
+	DecodeWorkbookDefinedName = Replace$(refersTo, Chr$(34) & Chr$(34), Chr$(34))
 End Function
 `
 

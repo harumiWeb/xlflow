@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/lint"
 )
 
 func TestInitScaffold(t *testing.T) {
@@ -25,6 +26,7 @@ func TestInitScaffold(t *testing.T) {
 	for _, path := range []string{
 		config.FileName,
 		"src/modules/XlflowAssert.bas",
+		"src/modules",
 		"src/modules",
 		"src/classes",
 		"src/forms",
@@ -167,6 +169,52 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldCreatesRuntimeHelper(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowRuntime.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{
+		`Attribute VB_Name = "XlflowRuntime"`,
+		"Private Const xlflowInteractive As Long = 0",
+		"Public Function Mode() As Long",
+		"Public Function ModeName() As String",
+		"Public Function IsHeadless() As Boolean",
+		`ThisWorkbook.Names("__XLFLOW_MODE__").RefersTo`,
+		`Environ$("XLFLOW_MODE")`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("runtime helper should contain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestNewScaffoldRuntimeHelperLintsCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(dir, "src", "modules", "XlflowRuntime.bas")
+	issues, err := lint.Linter{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(path) == filepath.Clean(runtimePath)
+		},
+	}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("runtime helper should lint cleanly: %+v", issues)
+	}
+}
+
 func TestInitRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")
@@ -233,6 +281,9 @@ func TestInitScaffoldDoesNotCreatePlaceholderWorkbookModules(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); !os.IsNotExist(err) {
 			t.Fatalf("expected %s not to be scaffolded for init, got %v", path, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "modules", "XlflowRuntime.bas")); !os.IsNotExist(err) {
+		t.Fatalf("expected runtime helper not to be scaffolded for init, got %v", err)
 	}
 }
 

@@ -365,6 +365,20 @@ xlflow inspect-gui --json
 > [!WARNING]
 > Headless automation and modal Excel UI do not mix. Use `inspect-gui` before unattended runs and keep GUI entrypoints thin.
 
+### Runtime-aware VBA branches
+
+New `xlflow new` projects include `src/modules/XlflowRuntime.bas`. During `xlflow run` and `xlflow test`, xlflow injects a workbook-scoped execution mode marker before user VBA starts, so code can branch without process inspection hacks.
+
+```vb
+If XlflowRuntime.IsHeadless() Then
+  Debug.Print "running unattended in " & XlflowRuntime.ModeName()
+Else
+  MsgBox "Running interactively"
+End If
+```
+
+`run --headless` resolves to `headless`, `run --interactive` resolves to `interactive`, and `test` resolves to `test`. Plain `run` falls back to `interactive` unless the xlflow process environment sets `XLFLOW_MODE=interactive|headless|ci|agent|test`.
+
 ---
 
 ## Command map

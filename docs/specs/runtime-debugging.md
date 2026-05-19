@@ -108,6 +108,10 @@ Findings explain that xlflow-oriented macros should prefer explicit `run --arg` 
 
 `xlflow inspect-gui` exposes the same boundary report without running Excel. `xlflow attach --active` verifies that the human-opened active workbook matches the configured workbook before an interactive workflow continues.
 
+When `run` or `test` invokes user VBA, xlflow also injects a workbook-scoped runtime mode marker before execution and restores the reserved names afterward. New scaffolded projects expose that state through `XlflowRuntime.bas`, so VBA can branch with helpers such as `XlflowRuntime.ModeName()`, `XlflowRuntime.IsHeadless()`, `XlflowRuntime.IsAgent()`, and `XlflowRuntime.IsTest()`. The workbook-scoped marker is the primary contract; `Environ$("XLFLOW_MODE")` is only a secondary fallback for manual helper adoption in older projects or wrapper-driven runs.
+
+For runtime debugging sessions that need more than one workbook-backed command, keep the workbook attached through `session start` and reuse that session for `push --fast --session --no-save`, `run --session`, `test --session`, inspect, and save steps. Reopening the workbook separately for each step is intentionally not the preferred path because it slows down debugging and makes the live workbook state harder to reason about. Use a fresh non-session open only when the reopen boundary itself is the thing you are investigating.
+
 ## Empty Trace Guidance
 
 `xlflow run --trace` returns all trace events written before failure. Trace logs are written under `.xlflow/traces`. If the workbook does not already contain `XlflowTrace`, xlflow may inject it temporarily and revert it before saving successful results. Source preflight for configured `run --trace` may ignore missing-helper findings that are satisfied by this temporary injection path, while `push` and non-trace configured runs keep treating those findings as blocking. If a traced run fails with zero events, output indicates that execution may have failed before reaching user trace calls.

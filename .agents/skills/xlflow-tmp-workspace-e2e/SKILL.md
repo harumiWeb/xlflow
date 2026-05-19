@@ -11,6 +11,8 @@ Follow the workflow exactly unless the user narrows scope.
 
 When the task is release preparation, treat this skill as a release gate rather than an optional spot check.
 
+Prefer a session-first Excel workflow for any real-workbook verification that needs more than one Excel COM-backed command. Reopening the workbook separately for `push`, `run`, `test`, `pull`, `save`, or repeated inspect steps frequently makes validation much slower and can stall or look hung. Unless the check is truly one-shot, start a session once, reuse it, and stop it only after the verification slice is complete.
+
 ## Preconditions
 
 - Read `tasks/lessons.md` before creating the workspace.
@@ -34,6 +36,23 @@ Before using a workspace:
 - record the exact absolute path for reporting
 
 ## Standard Flow
+
+### 0. Session-first rule for Excel COM verification
+
+For blank scaffold checks such as `new`, `doctor`, first `pull`, and first `lint`, normal one-shot commands are fine.
+
+For any workflow that chains workbook-backed execution or mutation commands, prefer this shape:
+
+```powershell
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run <MacroName> --session --json
+xlflow test --session --json
+xlflow save --session --json
+xlflow session stop --json
+```
+
+Adjust the middle commands to the scenario, but keep the same principle: reuse one live workbook session instead of reopening Excel for each step. Only skip the session when the user explicitly asks for saved-file-only validation or when the path is intentionally verifying non-session behavior.
 
 ### 1. Confirm tool resolution
 
@@ -79,6 +98,8 @@ Pay special attention to the document-module normalization rule from `tasks/less
 
 Use this path when `push`, `run`, workbook save behavior, or VBA round-trip behavior matters.
 
+Strong default: use a session for this flow. Do not run `push`, `run`, and follow-up workbook checks as separate fresh Excel opens unless the point of the test is specifically to verify non-session behavior.
+
 Create a minimal runnable module at `src/modules/Main.bas`:
 
 ```vb
@@ -94,8 +115,11 @@ Then run:
 
 ```powershell
 xlflow lint --json
-xlflow push --json
-xlflow run Main.Run --json
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --session --json
+xlflow save --session --json
+xlflow session stop --json
 xlflow pull --json
 xlflow lint --json
 ```
@@ -104,12 +128,15 @@ Verify:
 
 - `push` reports imported source files and workbook-module updates when expected
 - `run` reports the requested macro name
+- session-backed `save` / `stop` leave the workbook clean without stray save-required state
 - `pull` exports `Main.bas` plus workbook modules
 - the final `lint` still passes
 
 ### 4. Workbook-state verification
 
 When macro behavior should persist to the workbook, verify it through Excel COM instead of trusting CLI success output alone.
+
+If the behavior under test already uses a session, keep that session for the workbook mutation commands and do the direct COM state check only after `save --session` or `session stop`, unless the test explicitly needs to inspect the live unsaved workbook.
 
 Use a PowerShell check like:
 
@@ -175,6 +202,8 @@ When the release includes session-related changes, also cover:
 - `save --session`
 - `session stop`
 - explicit confirmation of any save-required warnings or session metadata that changed
+
+Even when the change is not primarily about session state, prefer the same session-backed execution pattern for multi-step Excel COM release checks unless a specific saved-file reopen path is itself under test.
 
 Do not report release readiness if one of these paths was skipped without calling it out explicitly.
 
