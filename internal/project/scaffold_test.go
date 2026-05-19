@@ -27,7 +27,6 @@ func TestInitScaffold(t *testing.T) {
 		config.FileName,
 		"src/modules/XlflowAssert.bas",
 		"src/modules",
-		"src/modules",
 		"src/classes",
 		"src/forms",
 		"src/workbook",

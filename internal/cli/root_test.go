@@ -2328,8 +2328,8 @@ func TestBuildRunOptionsUsesEnvironmentRuntimeOverrideByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Mode != "" {
-		t.Fatalf("mode = %q, want empty operational mode", opts.Mode)
+	if opts.Mode != excel.RuntimeModeHeadless {
+		t.Fatalf("mode = %q, want %q operational mode", opts.Mode, excel.RuntimeModeHeadless)
 	}
 	if opts.RuntimeMode != excel.RuntimeModeAgent || opts.RuntimeSource != excel.RuntimeSourceEnvironment {
 		t.Fatalf("runtime = (%q, %q), want (%q, %q)", opts.RuntimeMode, opts.RuntimeSource, excel.RuntimeModeAgent, excel.RuntimeSourceEnvironment)

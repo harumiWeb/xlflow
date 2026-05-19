@@ -240,7 +240,11 @@ function Get-XlflowWorkbookPersistedStateHash {
   if ($null -eq $Workbook) {
     return ""
   }
-  $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("xlflow-runtime-" + [guid]::NewGuid().ToString("N") + ".xlsm")
+  $extension = [System.IO.Path]::GetExtension([string]$Workbook.FullName)
+  if ([string]::IsNullOrWhiteSpace($extension)) {
+    $extension = ".xlsm"
+  }
+  $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("xlflow-runtime-" + [guid]::NewGuid().ToString("N") + $extension)
   try {
     $Workbook.SaveCopyAs($tempPath)
     return Get-XlflowFileHash -Path $tempPath

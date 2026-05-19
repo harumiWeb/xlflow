@@ -234,6 +234,10 @@ try {
     }
     if (ConvertTo-XlflowBool $SaveWorkbook) {
       $currentPhase = "save_result"
+      if ($null -ne $runtimeState) {
+        Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+        $runtimeState = $null
+      }
       $workbook.Save()
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
       $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
@@ -251,6 +255,10 @@ try {
       $targetDir = Split-Path -Parent $SaveAsPath
       if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      if ($null -ne $runtimeState) {
+        Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+        $runtimeState = $null
       }
       $workbook.SaveCopyAs($SaveAsPath)
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
@@ -433,6 +441,10 @@ try {
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
     $currentPhase = "save_result"
+    if ($null -ne $runtimeState) {
+      Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+      $runtimeState = $null
+    }
     $workbook.Save()
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
@@ -450,6 +462,10 @@ try {
     $targetDir = Split-Path -Parent $SaveAsPath
     if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
       New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+    }
+    if ($null -ne $runtimeState) {
+      Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+      $runtimeState = $null
     }
     $workbook.SaveCopyAs($SaveAsPath)
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached

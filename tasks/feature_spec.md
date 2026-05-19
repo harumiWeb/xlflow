@@ -747,15 +747,13 @@ Expose a stable VBA-visible execution mode so workbook code can branch between n
 - Phase 1 uses VBA-native module-qualified calls rather than a pseudo-namespace. The stable helper surface is:
 
 ```vb
-Public Enum XlflowExecutionMode
-        xlflowInteractive = 0
-        xlflowHeadless = 1
-        xlflowCI = 2
-        xlflowAgent = 3
-        xlflowTest = 4
-End Enum
+Private Const xlflowInteractive As Long = 0
+Private Const xlflowHeadless As Long = 1
+Private Const xlflowCI As Long = 2
+Private Const xlflowAgent As Long = 3
+Private Const xlflowTest As Long = 4
 
-Public Function Mode() As XlflowExecutionMode
+Public Function Mode() As Long
 Public Function ModeName() As String
 Public Function IsInteractive() As Boolean
 Public Function IsHeadless() As Boolean
@@ -769,7 +767,7 @@ Public Function IsTest() As Boolean
 
 ## Output Contract
 
-- `run` and `test` may include top-level `runtime.mode`, `runtime.mode_name`, `runtime.injected`, and `runtime.source = workbook_name|environment|default`.
+- `run` and `test` may include top-level `runtime.mode`, `runtime.mode_name`, `runtime.injected`, and `runtime.source = command|environment|default`.
 - Human output should mention the resolved runtime mode when xlflow invokes user VBA.
 
 ## Implementation Notes

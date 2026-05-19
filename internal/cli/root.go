@@ -1855,6 +1855,9 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		mode = "interactive"
 	}
 	runtime := excel.ResolveRunRuntimeInfo(mode)
+	if mode == "" && runtime.Mode != excel.RuntimeModeInteractive {
+		mode = excel.RuntimeModeHeadless
+	}
 	return excel.RunOptions{
 		Macro:               macro,
 		WorkbookPath:        input,

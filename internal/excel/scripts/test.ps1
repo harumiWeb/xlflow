@@ -135,6 +135,10 @@ try {
 
   $project.VBComponents.Remove($runnerComponent)
   $runnerComponent = $null
+  if ($null -ne $runtimeState) {
+    Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+    $runtimeState = $null
+  }
   $workbook.Save()
   $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -NeedsSave $false -Dirty $false
   $result["tests"] = $results.ToArray()
