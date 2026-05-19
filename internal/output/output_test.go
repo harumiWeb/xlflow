@@ -686,13 +686,14 @@ func TestWriteWithOptionsRendersSessionOnlyPushResult(t *testing.T) {
 func TestWriteWithOptionsRendersRunSessionUnsavedWarning(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Runtime = map[string]any{"mode": "headless", "source": "command", "injected": true}
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false, "session": true, "session_mode": "explicit", "needs_save": true}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"SAVE REQUIRED", "xlflow save before session stop", "explicit xlflow session workbook"} {
+	for _, want := range []string{"Runtime:", "headless", "workbook marker injected", "SAVE REQUIRED", "xlflow save before session stop", "explicit xlflow session workbook"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run output missing %q:\n%s", want, got)
 		}
@@ -1038,6 +1039,7 @@ func TestWriteWithOptionsDoesNotDuplicateTraceEventsFromLogs(t *testing.T) {
 
 func TestWriteWithOptionsRendersTestFailures(t *testing.T) {
 	env := Failure("test", Error{Code: "test_failed", Message: "1 of 2 test(s) failed"})
+	env.Runtime = map[string]any{"mode": "test", "source": "command", "injected": true}
 	env.Tests = []map[string]any{
 		{"name": "TestOk", "module": "Tests", "status": "passed", "duration_ms": 3},
 		{"name": "TestBad", "module": "Tests", "status": "failed", "duration_ms": 5, "error": map[string]any{"message": "expected 1"}},
@@ -1050,6 +1052,23 @@ func TestWriteWithOptionsRendersTestFailures(t *testing.T) {
 	for _, want := range []string{"1 passed, 1 failed, 2 total", "Tests.TestOk", "Tests.TestBad", "expected 1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("test output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersTestRuntimeSummary(t *testing.T) {
+	env := New("test")
+	env.Runtime = map[string]any{"mode": "test", "source": "command", "injected": true}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": true}
+	env.Tests = []map[string]any{{"name": "TestRun", "module": "MainTests", "status": "passed", "duration_ms": 5}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Runtime:", "test", "source=command", "workbook marker injected", "1 passed, 0 failed, 1 total"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("test runtime output missing %q:\n%s", want, got)
 		}
 	}
 }

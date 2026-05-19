@@ -2,6 +2,8 @@ param(
   [string]$WorkbookPath,
   [string]$Filter = "",
   [string]$Visible = "false",
+  [string]$RuntimeMode = "test",
+  [string]$RuntimeSource = "command",
   [string]$UseSession = "false",
   [string]$MetadataPath = ""
 )
@@ -14,6 +16,7 @@ $workbook = $null
 $runnerComponent = $null
 $sessionAttached = $false
 $sessionMode = "none"
+$runtimeState = $null
 
 try {
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "false" -UseSession $UseSession -MetadataPath $MetadataPath
@@ -21,6 +24,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource
 
   try {
     $project = $workbook.VBProject
@@ -131,6 +135,10 @@ try {
 
   $project.VBComponents.Remove($runnerComponent)
   $runnerComponent = $null
+  if ($null -ne $runtimeState) {
+    Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+    $runtimeState = $null
+  }
   $workbook.Save()
   $result["workbook"] = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -NeedsSave $false -Dirty $false
   $result["tests"] = $results.ToArray()
@@ -144,6 +152,13 @@ try {
 } finally {
   if ($null -ne $runnerComponent) {
     try { $workbook.VBProject.VBComponents.Remove($runnerComponent) | Out-Null } catch { Write-Verbose ("failed to remove test harness module: " + $_.Exception.Message) }
+  }
+  if ($null -ne $runtimeState) {
+    try {
+      Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+    } catch {
+      Write-Verbose ("failed to restore runtime injection state: " + $_.Exception.Message)
+    }
   }
   if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel

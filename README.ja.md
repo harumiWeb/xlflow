@@ -368,6 +368,20 @@ xlflow inspect-gui --json
 > [!WARNING]
 > headless automation と modal な Excel UI は相性が悪いです。無人実行前に `inspect-gui` を使い、GUI entrypoint は薄く保つことを推奨します。
 
+### 実行モードを VBA から参照する
+
+新しく `xlflow new` で作るプロジェクトには `src/modules/XlflowRuntime.bas` が含まれます。`xlflow run` や `xlflow test` の実行前に、xlflow は workbook-scoped の実行モード marker を一時注入するため、VBA 側は process inspection に頼らずに分岐できます。
+
+```vb
+If XlflowRuntime.IsHeadless() Then
+  Debug.Print "running unattended in " & XlflowRuntime.ModeName()
+Else
+  MsgBox "Running interactively"
+End If
+```
+
+`run --headless` は `headless`、`run --interactive` は `interactive`、`test` は `test` に解決されます。plain `run` は、xlflow 実行プロセスの環境変数 `XLFLOW_MODE=interactive|headless|ci|agent|test` が無い限り `interactive` にフォールバックします。
+
 ---
 
 ## コマンドマップ

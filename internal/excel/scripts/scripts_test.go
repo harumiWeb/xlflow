@@ -275,6 +275,53 @@ func TestCommonScriptTreatsUserFormCodeSidecarsSeparately(t *testing.T) {
 	}
 }
 
+func TestGetXlflowWorkbookPersistedStateHashUsesWorkbookNativeExtension(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+. ./common.ps1
+$source = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.xlsb')
+try {
+  Set-Content -LiteralPath $source -Value 'runtime hash test' -Encoding UTF8
+  $script:lastSaveCopyPath = ''
+  $workbook = [pscustomobject]@{ FullName = $source }
+  $workbook | Add-Member -MemberType ScriptMethod -Name SaveCopyAs -Value {
+    param($path)
+    $script:lastSaveCopyPath = $path
+    Copy-Item -LiteralPath $this.FullName -Destination $path -Force
+  }
+  [ordered]@{
+    hash = Get-XlflowWorkbookPersistedStateHash -Workbook $workbook
+    extension = [System.IO.Path]::GetExtension($script:lastSaveCopyPath)
+  } | ConvertTo-Json -Compress
+} finally {
+  if (Test-Path -LiteralPath $source) {
+    Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowWorkbookPersistedStateHash command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Hash      string `json:"hash"`
+		Extension string `json:"extension"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse persisted state hash output: %v\n%s", err, out)
+	}
+	if got.Extension != ".xlsb" {
+		t.Fatalf("temp copy extension = %q, want .xlsb", got.Extension)
+	}
+	if got.Hash == "" {
+		t.Fatalf("expected non-empty persisted state hash, got %+v", got)
+	}
+}
+
 func TestCommonScriptOmitsUserFormCodeSidecarsInFRMMode(t *testing.T) {
 	root := t.TempDir()
 	formsDir := filepath.Join(root, "src", "forms")
@@ -1953,6 +2000,40 @@ func TestRunScriptRejectsDirectDiagnosticBeforeOpeningWorkbook(t *testing.T) {
 	}
 	if got.Status != "failed" || got.Error == nil || got.Error.Code != "run_args_invalid" || got.Error.Phase != "initialize" {
 		t.Fatalf("expected direct diagnostic argument failure, got %+v", got)
+	}
+}
+
+func TestRunScriptRestoresRuntimeMarkersBeforePersistingWorkbook(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "run.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read run.ps1: %v", err)
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	for _, want := range []struct {
+		restore string
+		save    string
+	}{
+		{restore: "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState", save: "$workbook.Save()"},
+		{restore: "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState", save: "$workbook.SaveCopyAs($SaveAsPath)"},
+	} {
+		restoreIndex := strings.Index(text, want.restore)
+		saveIndex := strings.Index(text, want.save)
+		if restoreIndex == -1 || saveIndex == -1 || restoreIndex > saveIndex {
+			t.Fatalf("run.ps1 should restore runtime markers before persistence restore=%q save=%q:\n%s", want.restore, want.save, text)
+		}
+	}
+}
+
+func TestTestScriptRestoresRuntimeMarkersBeforeSavingWorkbook(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "test.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read test.ps1: %v", err)
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	restoreIndex := strings.Index(text, "Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState")
+	saveIndex := strings.Index(text, "$workbook.Save()")
+	if restoreIndex == -1 || saveIndex == -1 || restoreIndex > saveIndex {
+		t.Fatalf("test.ps1 should restore runtime markers before save:\n%s", text)
 	}
 }
 

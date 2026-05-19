@@ -11,6 +11,8 @@ param(
   [string]$Direct = "false",
   [string]$Diagnostic = "false",
   [string]$SuppressModalErrors = "true",
+  [string]$RuntimeMode = "interactive",
+  [string]$RuntimeSource = "default",
   [string]$UseSession = "false",
   [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
@@ -29,6 +31,7 @@ $currentPhase = "initialize"
 $sessionAttached = $false
 $sessionMode = "none"
 $suppressModalErrors = ConvertTo-XlflowBool $SuppressModalErrors
+$runtimeState = $null
 
 function Get-XlflowRunFailureCode {
   param(
@@ -154,6 +157,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource
   if ($null -ne $openResult.open_dialog -and [bool]$openResult.open_dialog.found) {
     Set-XlflowVBADialogFailure -ErrorCode "macro_failed" -FallbackSource "Excel" -FallbackNumber 0 -FallbackLine 0 -Dialog $openResult.open_dialog -Selection $openResult.open_selection
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
@@ -230,6 +234,10 @@ try {
     }
     if (ConvertTo-XlflowBool $SaveWorkbook) {
       $currentPhase = "save_result"
+      if ($null -ne $runtimeState) {
+        Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+        $runtimeState = $null
+      }
       $workbook.Save()
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
       $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
@@ -247,6 +255,10 @@ try {
       $targetDir = Split-Path -Parent $SaveAsPath
       if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      if ($null -ne $runtimeState) {
+        Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+        $runtimeState = $null
       }
       $workbook.SaveCopyAs($SaveAsPath)
       $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
@@ -429,6 +441,10 @@ try {
     $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   } elseif (ConvertTo-XlflowBool $SaveWorkbook) {
     $currentPhase = "save_result"
+    if ($null -ne $runtimeState) {
+      Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+      $runtimeState = $null
+    }
     $workbook.Save()
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $true -SaveAsPath ""
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
@@ -446,6 +462,10 @@ try {
     $targetDir = Split-Path -Parent $SaveAsPath
     if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
       New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+    }
+    if ($null -ne $runtimeState) {
+      Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+      $runtimeState = $null
     }
     $workbook.SaveCopyAs($SaveAsPath)
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Saved $false -SaveAsPath $SaveAsPath -NeedsSave $sessionAttached -Dirty $sessionAttached
@@ -513,6 +533,13 @@ try {
       Write-Verbose ("failed to remove temporary trace module: " + $_.Exception.Message)
     }
   }
+	if ($null -ne $runtimeState) {
+		try {
+			Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
+		} catch {
+			Write-Verbose ("failed to restore runtime injection state: " + $_.Exception.Message)
+		}
+	}
   if ($sessionAttached) {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {

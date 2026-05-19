@@ -2304,6 +2304,9 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	if opts.Mode != "headless" {
 		t.Fatalf("mode = %q, want headless", opts.Mode)
 	}
+	if opts.RuntimeMode != excel.RuntimeModeHeadless || opts.RuntimeSource != excel.RuntimeSourceCommand {
+		t.Fatalf("runtime = (%q, %q), want (%q, %q)", opts.RuntimeMode, opts.RuntimeSource, excel.RuntimeModeHeadless, excel.RuntimeSourceCommand)
+	}
 	if opts.Timeout != 5*time.Minute {
 		t.Fatalf("timeout = %s", opts.Timeout)
 	}
@@ -2315,6 +2318,21 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opts.Args, want) {
 		t.Fatalf("run args = %#v, want %#v", opts.Args, want)
+	}
+}
+
+func TestBuildRunOptionsUsesEnvironmentRuntimeOverrideByDefault(t *testing.T) {
+	t.Setenv("XLFLOW_MODE", excel.RuntimeModeAgent)
+	cfg := config.Default()
+	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Mode != excel.RuntimeModeHeadless {
+		t.Fatalf("mode = %q, want %q operational mode", opts.Mode, excel.RuntimeModeHeadless)
+	}
+	if opts.RuntimeMode != excel.RuntimeModeAgent || opts.RuntimeSource != excel.RuntimeSourceEnvironment {
+		t.Fatalf("runtime = (%q, %q), want (%q, %q)", opts.RuntimeMode, opts.RuntimeSource, excel.RuntimeModeAgent, excel.RuntimeSourceEnvironment)
 	}
 }
 

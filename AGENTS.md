@@ -82,6 +82,7 @@ root: .
 - 「これを staff engineer が見て承認するか？」を自問すること
 - テスト実行、ログ確認、正しく動くことの提示まで行うこと
 - リリース前の確認では、CI だけで十分だとみなさないこと。Windows + Excel の実機 E2E が必要な変更は、`xlflow-tmp-workspace-e2e` skill を使って `tmp_workspaces` で release 前検証を行うこと
+- Windows + Excel の実機確認で `push` / `run` / `test` / `pull` / `save` を複数回行う場合は、非 session の単発コマンド連打を避け、`session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop` を基本形として使うこと。workbook を毎回開き直すと検証が極端に遅くなったり、待機中に詰まって見えることがある
 
 ### 5. バランスを保ちながら、よりエレガントな解決を目指す
 
@@ -127,6 +128,7 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 - Windows + Excel COM / VBIDE access が関わる変更をリリースする前には、repo-local の `xlflow-tmp-workspace-e2e` skill を使って実機 E2E を実施すること
 - 少なくとも blank workbook、standard module round-trip、class module round-trip、UserForm + `.frx` round-trip、`init` の各経路を確認すること
 - session-aware workflow を変更した場合は、`session start -> push --fast --session --no-save -> run/test -> save -> session stop` も release gate に含めること
+- Windows + Excel の実機 E2E で workbook-backed command を複数回組み合わせる場合は、session-aware workflow を変更していなくても、まず `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop` を優先すること
 - 検証に使った `tmp_workspaces` の絶対パス、実行コマンド、結果、未検証項目を最終報告へ残すこと
 
 ---

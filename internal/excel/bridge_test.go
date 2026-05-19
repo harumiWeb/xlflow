@@ -650,6 +650,37 @@ func TestBuildRunScriptArgsEnablesTrace(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesRuntimeMode(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:         "Main.Run",
+		RuntimeMode:   RuntimeModeAgent,
+		RuntimeSource: RuntimeSourceEnvironment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["RuntimeMode"] != RuntimeModeAgent {
+		t.Fatalf("RuntimeMode = %q, want %q", args["RuntimeMode"], RuntimeModeAgent)
+	}
+	if args["RuntimeSource"] != RuntimeSourceEnvironment {
+		t.Fatalf("RuntimeSource = %q, want %q", args["RuntimeSource"], RuntimeSourceEnvironment)
+	}
+}
+
+func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{RuntimeMode: RuntimeModeTest, RuntimeSource: RuntimeSourceCommand})
+	if args["RuntimeMode"] != RuntimeModeTest {
+		t.Fatalf("RuntimeMode = %q, want %q", args["RuntimeMode"], RuntimeModeTest)
+	}
+	if args["RuntimeSource"] != RuntimeSourceCommand {
+		t.Fatalf("RuntimeSource = %q, want %q", args["RuntimeSource"], RuntimeSourceCommand)
+	}
+}
+
 func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,

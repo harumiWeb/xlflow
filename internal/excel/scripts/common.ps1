@@ -127,6 +127,227 @@ function Add-XlflowStateWarning {
   Add-XlflowWarning -Result $Result -Code $Code -Message $Message
 }
 
+function Get-XlflowRuntimeModeName {
+  param([string]$Mode)
+
+  $normalized = ([string]$Mode).Trim().ToLowerInvariant()
+  switch ($normalized) {
+    "headless" { return "headless" }
+    "ci" { return "ci" }
+    "agent" { return "agent" }
+    "test" { return "test" }
+    default { return "interactive" }
+  }
+}
+
+function Get-XlflowRuntimeModeRefersTo {
+  param([string]$Mode)
+
+  return '="' + (Get-XlflowRuntimeModeName -Mode $Mode).Replace('"', '""') + '"'
+}
+
+function Get-XlflowRuntimeVersionRefersTo {
+  return '="1"'
+}
+
+function Get-XlflowWorkbookDefinedNameState {
+  param(
+    $Workbook,
+    [string]$Name
+  )
+
+  $state = [ordered]@{
+    exists = $false
+    refers_to = ""
+    visible = $false
+  }
+  if ($null -eq $Workbook -or [string]::IsNullOrWhiteSpace($Name)) {
+    return $state
+  }
+  try {
+    $definedName = $Workbook.Names.Item($Name)
+    if ($null -eq $definedName) {
+      return $state
+    }
+    $state.exists = $true
+    try {
+      $state.refers_to = [string]$definedName.RefersTo
+    } catch {
+      Write-Verbose ("failed to read workbook defined name RefersTo: " + $_.Exception.Message)
+    }
+    try {
+      $state.visible = [bool]$definedName.Visible
+    } catch {
+      $state.visible = $false
+    }
+    return $state
+  } catch {
+    return $state
+  }
+}
+
+function Set-XlflowWorkbookDefinedName {
+  param(
+    $Workbook,
+    [string]$Name,
+    [string]$RefersTo,
+    [bool]$Visible = $false
+  )
+
+  if ($null -eq $Workbook -or [string]::IsNullOrWhiteSpace($Name) -or [string]::IsNullOrWhiteSpace($RefersTo)) {
+    return
+  }
+  $definedName = $null
+  try {
+    $definedName = $Workbook.Names.Item($Name)
+  } catch {
+    $definedName = $null
+  }
+  if ($null -eq $definedName) {
+    $definedName = $Workbook.Names.Add($Name, $RefersTo)
+  } else {
+    $definedName.RefersTo = $RefersTo
+  }
+  try {
+    $definedName.Visible = $Visible
+  } catch {
+    Write-Verbose ("failed to set workbook defined name visibility: " + $_.Exception.Message)
+  }
+}
+
+function Remove-XlflowWorkbookDefinedName {
+  param(
+    $Workbook,
+    [string]$Name
+  )
+
+  if ($null -eq $Workbook -or [string]::IsNullOrWhiteSpace($Name)) {
+    return
+  }
+  try {
+    $definedName = $Workbook.Names.Item($Name)
+    if ($null -ne $definedName) {
+      $definedName.Delete()
+    }
+  } catch {
+    Write-Verbose ("failed to delete workbook defined name: " + $_.Exception.Message)
+  }
+}
+
+function Get-XlflowWorkbookPersistedStateHash {
+  param($Workbook)
+
+  if ($null -eq $Workbook) {
+    return ""
+  }
+  $extension = [System.IO.Path]::GetExtension([string]$Workbook.FullName)
+  if ([string]::IsNullOrWhiteSpace($extension)) {
+    $extension = ".xlsm"
+  }
+  $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("xlflow-runtime-" + [guid]::NewGuid().ToString("N") + $extension)
+  try {
+    $Workbook.SaveCopyAs($tempPath)
+    return Get-XlflowFileHash -Path $tempPath
+  } catch {
+    Write-Verbose ("failed to capture workbook persisted-state hash: " + $_.Exception.Message)
+    return ""
+  } finally {
+    if (Test-Path -LiteralPath $tempPath) {
+      Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Start-XlflowRuntimeInjection {
+  param(
+    $Workbook,
+    $Result,
+    [string]$Mode = "",
+    [string]$Source = "default"
+  )
+
+  $modeName = Get-XlflowRuntimeModeName -Mode $Mode
+  $state = [ordered]@{
+    applied = $false
+    saved_before = $null
+    baseline_hash = ""
+    names = [ordered]@{
+      __XLFLOW_MODE__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_MODE__")
+      __XLFLOW_RUNTIME_VERSION__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_RUNTIME_VERSION__")
+    }
+  }
+  if ($null -eq $Workbook) {
+    if ($null -ne $Result) {
+      $Result.runtime = [ordered]@{
+        mode = $modeName
+        mode_name = $modeName
+        source = ([string]$Source).Trim().ToLowerInvariant()
+        injected = $false
+      }
+    }
+    return $state
+  }
+
+  try {
+    $state.saved_before = [bool]$Workbook.Saved
+  } catch {
+    $state.saved_before = $null
+  }
+  if ($state.saved_before -eq $true) {
+    $state.baseline_hash = Get-XlflowWorkbookPersistedStateHash -Workbook $Workbook
+  }
+
+  Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_MODE__" -RefersTo (Get-XlflowRuntimeModeRefersTo -Mode $modeName) -Visible $false
+  Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_RUNTIME_VERSION__" -RefersTo (Get-XlflowRuntimeVersionRefersTo) -Visible $false
+  $state.applied = $true
+
+  if ($null -ne $Result) {
+    $Result.runtime = [ordered]@{
+      mode = $modeName
+      mode_name = $modeName
+      source = ([string]$Source).Trim().ToLowerInvariant()
+      injected = $true
+    }
+  }
+
+  return $state
+}
+
+function Restore-XlflowRuntimeInjection {
+  param(
+    $Workbook,
+    $State
+  )
+
+  if ($null -eq $Workbook -or $null -eq $State -or -not [bool]$State.applied) {
+    return
+  }
+
+  foreach ($name in @("__XLFLOW_MODE__", "__XLFLOW_RUNTIME_VERSION__")) {
+    $nameState = $State.names[$name]
+    if ($null -eq $nameState) {
+      Remove-XlflowWorkbookDefinedName -Workbook $Workbook -Name $name
+      continue
+    }
+    if ([bool]$nameState.exists) {
+      Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name $name -RefersTo ([string]$nameState.refers_to) -Visible ([bool]$nameState.visible)
+    } else {
+      Remove-XlflowWorkbookDefinedName -Workbook $Workbook -Name $name
+    }
+  }
+
+  if ($State.saved_before -eq $true -and -not [string]::IsNullOrWhiteSpace([string]$State.baseline_hash)) {
+    $currentHash = Get-XlflowWorkbookPersistedStateHash -Workbook $Workbook
+    if (-not [string]::IsNullOrWhiteSpace($currentHash) -and $currentHash -eq [string]$State.baseline_hash) {
+      try {
+        $Workbook.Saved = $true
+      } catch {
+        Write-Verbose ("failed to restore workbook saved state after runtime cleanup: " + $_.Exception.Message)
+      }
+    }
+  }
+}
+
 function Get-XlflowUserFormComponents {
   param($Workbook)
 

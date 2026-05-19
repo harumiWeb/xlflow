@@ -702,6 +702,94 @@ type StyledCellSnapshot struct {
 - When `--include-style` is absent, `style_included`, `cells`, `rows`, `columns`, and `merged_ranges` are omitted from JSON.
 - Style cell objects include `address`, `row`, `column`, `value`, `formula`, `fill`, `font`, `border`, `number_format`, `horizontal_alignment`, `vertical_alignment`, `merged`, and `merge_range`.
 
+# Runtime-Aware Execution Mode Spec
+
+## Goal
+
+Expose a stable VBA-visible execution mode so workbook code can branch between normal Excel use and xlflow-managed automation without relying on process inspection hacks.
+
+## Scope
+
+- Phase 1 covers execution context resolution and injection for `xlflow run` and `xlflow test`.
+- Phase 1 does not add dialog abstractions such as `XlflowUI.MsgBox` or `XlflowUI.InputBox`; it only provides the runtime state those helpers can read later.
+- Manual Excel usage remains backward compatible: when no xlflow marker is present, VBA falls back to interactive mode.
+
+## Runtime Modes
+
+- `interactive`
+- `headless`
+- `ci`
+- `agent`
+- `test`
+
+- `IsHeadless` is true for `headless`, `ci`, `agent`, and `test`.
+
+## Resolution Contract
+
+- `xlflow run --headless` resolves to `headless`.
+- `xlflow run --interactive` resolves to `interactive`.
+- `xlflow test` resolves to `test`.
+- When no explicit mode flag is set, xlflow may honor `XLFLOW_MODE=interactive|headless|ci|agent|test` as a wrapper-level override for unattended agent or CI entrypoints.
+- Unknown `XLFLOW_MODE` values are ignored rather than guessed.
+- If no xlflow-specific signal exists, VBA fallback remains `interactive`.
+
+## Injection Contract
+
+- Before user VBA starts, `run.ps1` and `test.ps1` write a workbook-scoped hidden defined name `__XLFLOW_MODE__` with the resolved mode string.
+- xlflow may also write a reserved compatibility marker such as `__XLFLOW_RUNTIME_VERSION__ = 1` for future helper evolution.
+- Runtime markers are removed or restored in `finally`, even when macro/test execution fails.
+- Cleanup occurs before `Save`, `SaveCopyAs`, and final result serialization so runtime markers are not persisted as workbook content.
+- If a reserved name already exists, xlflow preserves its prior value and restores it after execution rather than silently overwriting it permanently.
+
+## VBA API Contract
+
+- New scaffolded projects add `src/modules/XlflowRuntime.bas`.
+- Phase 1 uses VBA-native module-qualified calls rather than a pseudo-namespace. The stable helper surface is:
+
+```vb
+Private Const xlflowInteractive As Long = 0
+Private Const xlflowHeadless As Long = 1
+Private Const xlflowCI As Long = 2
+Private Const xlflowAgent As Long = 3
+Private Const xlflowTest As Long = 4
+
+Public Function Mode() As Long
+Public Function ModeName() As String
+Public Function IsInteractive() As Boolean
+Public Function IsHeadless() As Boolean
+Public Function IsCI() As Boolean
+Public Function IsAgent() As Boolean
+Public Function IsTest() As Boolean
+```
+
+- `XlflowRuntime` reads workbook-scoped state first, then `Environ$("XLFLOW_MODE")`, then defaults to `interactive`.
+- Existing projects are not auto-migrated in Phase 1; documentation should show how to add the helper module manually when a project wants runtime-aware branching.
+
+## Output Contract
+
+- `run` and `test` may include top-level `runtime.mode`, `runtime.mode_name`, `runtime.injected`, and `runtime.source = command|environment|default`.
+- Human output should mention the resolved runtime mode when xlflow invokes user VBA.
+
+## Implementation Notes
+
+- Add a shared Go execution-mode resolver so `run`, `test`, docs, and regression tests use one mapping.
+- Add shared PowerShell helpers in `common.ps1` for reserved-name add/restore and mode serialization.
+- `New-XlflowRunHarnessCode` and the test runner keep their existing temporary-module flow; runtime marker injection is parallel to trace/helper injection rather than replacing it.
+- `xlflow new` scaffolds `XlflowRuntime.bas`; `init` keeps existing workbook import behavior and does not force runtime helper migration into imported projects.
+
+## Verification
+
+- `go test ./internal/cli ./internal/excel ./internal/project`
+- `go test ./internal/excel/scripts -run "TestPowerShellScriptsParse|TestBuildRunScriptArgsPassesRuntimeMode|TestRunScriptInjectsRuntimeMode|TestTestScriptInjectsRuntimeMode"`
+- `go test ./...`
+- Windows Excel COM validation in a disposable workspace:
+  - `xlflow new --json`
+  - `xlflow run Main.Run --interactive --json`
+  - `xlflow run Main.Run --headless --json`
+  - `XLFLOW_MODE=agent xlflow run Main.Run --json`
+  - `xlflow test --json`
+- Validation workbook code should write `XlflowRuntime.ModeName()` and the predicate booleans to worksheet cells so Excel state proves each injected mode reached VBA.
+
 # xlflow Range Image Export Spec
 
 ## Goal

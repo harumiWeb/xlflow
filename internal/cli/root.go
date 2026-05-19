@@ -1854,6 +1854,10 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 	if interactive {
 		mode = "interactive"
 	}
+	runtime := excel.ResolveRunRuntimeInfo(mode)
+	if mode == "" && runtime.Mode != excel.RuntimeModeInteractive {
+		mode = excel.RuntimeModeHeadless
+	}
 	return excel.RunOptions{
 		Macro:               macro,
 		WorkbookPath:        input,
@@ -1862,6 +1866,8 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		SaveAs:              saveAs,
 		Trace:               trace,
 		Mode:                mode,
+		RuntimeMode:         runtime.Mode,
+		RuntimeSource:       runtime.Source,
 		Direct:              direct,
 		Fast:                fast,
 		Diagnostic:          diagnostic,
@@ -2435,9 +2441,10 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			var env output.Envelope
 			var code int
+			runtime := excel.ResolveTestRuntimeInfo()
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source})
 				return runErr
 			})
 			if err != nil {

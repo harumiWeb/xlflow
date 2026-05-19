@@ -48,6 +48,8 @@ type RunOptions struct {
 	SaveAs              string
 	Trace               bool
 	Mode                string
+	RuntimeMode         string
+	RuntimeSource       string
 	Direct              bool
 	Fast                bool
 	Diagnostic          bool
@@ -152,6 +154,58 @@ type SessionCommandOptions struct {
 	Keepalive CommandOptions
 }
 
+type TestOptions struct {
+	Session       bool
+	Keepalive     CommandOptions
+	RuntimeMode   string
+	RuntimeSource string
+}
+
+const (
+	RuntimeModeInteractive = "interactive"
+	RuntimeModeHeadless    = "headless"
+	RuntimeModeCI          = "ci"
+	RuntimeModeAgent       = "agent"
+	RuntimeModeTest        = "test"
+
+	RuntimeSourceCommand     = "command"
+	RuntimeSourceEnvironment = "environment"
+	RuntimeSourceDefault     = "default"
+)
+
+type RuntimeInfo struct {
+	Mode   string
+	Source string
+}
+
+func ResolveRunRuntimeInfo(mode string) RuntimeInfo {
+	trimmed := strings.ToLower(strings.TrimSpace(mode))
+	if trimmed == RuntimeModeHeadless || trimmed == RuntimeModeInteractive {
+		return RuntimeInfo{Mode: trimmed, Source: RuntimeSourceCommand}
+	}
+	if envMode, ok := resolveRuntimeModeEnv(); ok {
+		return RuntimeInfo{Mode: envMode, Source: RuntimeSourceEnvironment}
+	}
+	return RuntimeInfo{Mode: RuntimeModeInteractive, Source: RuntimeSourceDefault}
+}
+
+func ResolveTestRuntimeInfo() RuntimeInfo {
+	return RuntimeInfo{Mode: RuntimeModeTest, Source: RuntimeSourceCommand}
+}
+
+func resolveRuntimeModeEnv() (string, bool) {
+	raw, ok := os.LookupEnv("XLFLOW_MODE")
+	if !ok {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case RuntimeModeInteractive, RuntimeModeHeadless, RuntimeModeCI, RuntimeModeAgent, RuntimeModeTest:
+		return strings.ToLower(strings.TrimSpace(raw)), true
+	default:
+		return "", false
+	}
+}
+
 type InspectFormOptions struct {
 	Name           string
 	Basis          string
@@ -220,6 +274,7 @@ type ScriptResult struct {
 	Forms         any           `json:"forms,omitempty"`
 	Tests         any           `json:"tests,omitempty"`
 	Trace         any           `json:"trace,omitempty"`
+	Runtime       any           `json:"runtime,omitempty"`
 	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
 	UI            any           `json:"ui,omitempty"`
 	Session       any           `json:"session,omitempty"`
@@ -410,6 +465,12 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		"UseSession":          strconv.FormatBool(opts.Session),
 		"MetadataPath":        filepath.Join(root, ".xlflow", "session.json"),
 	}
+	if strings.TrimSpace(opts.RuntimeMode) != "" {
+		scriptArgs["RuntimeMode"] = strings.TrimSpace(opts.RuntimeMode)
+	}
+	if strings.TrimSpace(opts.RuntimeSource) != "" {
+		scriptArgs["RuntimeSource"] = strings.TrimSpace(opts.RuntimeSource)
+	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
 		scriptArgs["DisplayAlerts"] = "true"
@@ -491,21 +552,32 @@ func (r Runner) Attach(cfg config.Config, active bool, opts ...CommandOptions) (
 }
 
 func (r Runner) Test(cfg config.Config, filter string, opts ...CommandOptions) (output.Envelope, int, error) {
-	cmdOpts := SessionCommandOptions{}
+	cmdOpts := TestOptions{}
 	if len(opts) > 0 {
 		cmdOpts.Keepalive = opts[0]
 	}
 	return r.TestWithOptions(cfg, filter, cmdOpts)
 }
 
-func (r Runner) TestWithOptions(cfg config.Config, filter string, opts SessionCommandOptions) (output.Envelope, int, error) {
-	return r.run("test", map[string]string{
-		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+func (r Runner) TestWithOptions(cfg config.Config, filter string, opts TestOptions) (output.Envelope, int, error) {
+	return r.run("test", buildTestScriptArgs(r.RootDir, cfg, filter, opts), opts.Keepalive)
+}
+
+func buildTestScriptArgs(root string, cfg config.Config, filter string, opts TestOptions) map[string]string {
+	args := map[string]string{
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
 		"Filter":       filter,
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":   strconv.FormatBool(opts.Session),
-		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
-	}, opts.Keepalive)
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+	if strings.TrimSpace(opts.RuntimeMode) != "" {
+		args["RuntimeMode"] = strings.TrimSpace(opts.RuntimeMode)
+	}
+	if strings.TrimSpace(opts.RuntimeSource) != "" {
+		args["RuntimeSource"] = strings.TrimSpace(opts.RuntimeSource)
+	}
+	return args
 }
 
 func (r Runner) Macros(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -1200,6 +1272,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Forms = result.Forms
 	env.Tests = result.Tests
 	env.Trace = result.Trace
+	env.Runtime = result.Runtime
 	env.GUIBoundaries = result.GUIBoundaries
 	env.UI = result.UI
 	env.Session = result.Session
