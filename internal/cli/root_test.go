@@ -1704,6 +1704,32 @@ func TestBuildInspectBridgeOptionsRejectsKeepaliveWithoutSession(t *testing.T) {
 	}
 }
 
+func TestStaleFileInspectHintsQuoteSelectors(t *testing.T) {
+	hints := staleFileInspectHints("range", "World News", "A1:B2")
+	if len(hints) == 0 {
+		t.Fatal("expected hints")
+	}
+	message, _ := hints[0]["message"].(string)
+	if !strings.Contains(message, "--sheet \"World News\" --address \"A1:B2\"") {
+		t.Fatalf("unexpected inspect hint message: %q", message)
+	}
+
+	usedRangeHints := staleFileInspectHints("used-range", "Quarterly Report")
+	usedRangeMessage, _ := usedRangeHints[0]["message"].(string)
+	if !strings.Contains(usedRangeMessage, "--sheet \"Quarterly Report\"") {
+		t.Fatalf("unexpected used-range hint message: %q", usedRangeMessage)
+	}
+}
+
+func TestInspectStateForWorkbookIncludesWorkbookNameFallback(t *testing.T) {
+	a := &app{}
+	workbookPath := filepath.Join("build", "World News.xlsm")
+	_, session, _ := a.inspectStateForWorkbook(config.Config{}, workbookPath)
+	if got := session["workbook_name"]; got != filepath.Base(workbookPath) {
+		t.Fatalf("workbook_name = %v, want %q", got, filepath.Base(workbookPath))
+	}
+}
+
 func TestInspectFormCommandUsesInspectFormArgsInvalidCode(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{

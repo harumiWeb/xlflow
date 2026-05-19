@@ -14,21 +14,21 @@ xlflow inspect form <name> [--runtime|--designer|--both]
 
 ## Options and Arguments
 
-| Option / argument                 | Description                                               | Default  |
-| --------------------------------- | --------------------------------------------------------- | -------- |
-| `workbook`                        | Return workbook-level metadata.                           | -        |
-| `sheets`                          | List worksheets.                                          | -        |
-| `range`                           | Read a worksheet range.                                   | -        |
-| `used-range`                      | Read a worksheet used range.                              | -        |
-| `cell`                            | Read one cell.                                            | -        |
-| `form <name>`                     | Inspect UserForm state.                                   | -        |
-| `--sheet <name>`                  | Worksheet for sheet-scoped inspection.                    | -        |
-| `--address <range>`               | A1 address for range or cell inspection.                  | -        |
-| `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100      |
-| `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30       |
-| `--session`                       | Inspect the live workbook in the managed xlflow session.  | false    |
-| `--keepalive`                     | Emit heartbeat lines while live session inspect runs.     | false    |
-| `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | designer |
+| Option / argument                 | Description                                               | Default |
+| --------------------------------- | --------------------------------------------------------- | ------- |
+| `workbook`                        | Return workbook-level metadata.                           | -       |
+| `sheets`                          | List worksheets.                                          | -       |
+| `range`                           | Read a worksheet range.                                   | -       |
+| `used-range`                      | Read a worksheet used range.                              | -       |
+| `cell`                            | Read one cell.                                            | -       |
+| `form <name>`                     | Inspect UserForm state.                                   | -       |
+| `--sheet <name>`                  | Worksheet for sheet-scoped inspection.                    | -       |
+| `--address <range>`               | A1 address for range or cell inspection.                  | -       |
+| `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100     |
+| `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30      |
+| `--session`                       | Inspect the live workbook in the managed xlflow session.  | false   |
+| `--keepalive`                     | Emit heartbeat lines while live session inspect runs.     | false   |
+| `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | runtime |
 
 ## Examples
 

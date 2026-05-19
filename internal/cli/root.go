@@ -2863,11 +2863,11 @@ func staleFileInspectHints(target string, args ...string) []map[string]any {
 	switch target {
 	case "range", "cell":
 		if len(args) >= 2 {
-			command += " --sheet " + args[0] + " --address " + args[1]
+			command += " --sheet " + strconv.Quote(args[0]) + " --address " + strconv.Quote(args[1])
 		}
 	case "used-range":
 		if len(args) >= 1 && strings.TrimSpace(args[0]) != "" {
-			command += " --sheet " + args[0]
+			command += " --sheet " + strconv.Quote(args[0])
 		}
 	}
 	return []map[string]any{
@@ -3147,6 +3147,7 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 	session := map[string]any{
 		"active":               false,
 		"workbook_path":        workbookPath,
+		"workbook_name":        filepath.Base(workbookPath),
 		"dirty":                false,
 		"save_required":        false,
 		"live_newer_than_disk": false,
@@ -3175,6 +3176,9 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 	}
 	if mode := stringValueForCLI(status, "mode"); mode != "" {
 		session["mode"] = mode
+	}
+	if name := stringValueForCLI(status, "workbook_name"); strings.TrimSpace(name) != "" {
+		session["workbook_name"] = name
 	}
 	if present, ok := status["userforms_present"]; ok {
 		session["userforms_present"] = present

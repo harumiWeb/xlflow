@@ -914,6 +914,24 @@ func TestInspectScriptUsesTargetWorkbookActiveSheetAndReleasesColumnHeaderCells(
 	}
 }
 
+func TestInspectScriptRejectsNegativeLimitsAndMultiCellAddresses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "inspect.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read inspect.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"max row/column limits must be non-negative integers",
+		"$cellCount = ([int]$cell.Rows.Count) * ([int]$cell.Columns.Count)",
+		"throw (\"cell inspect requires a single-cell address, got \" + $normalizedAddress)",
+		"elseif ($message -like \"cell inspect requires a single-cell address*\") {",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestCommonScriptStrictDesignerFiltersControlsByParentName(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(".", "common.ps1"))
 	if err != nil {

@@ -533,6 +533,11 @@ try {
     Write-XlflowJson -Result $result
     exit
   }
+  if ($maxRowsValue -lt 0 -or $maxColsValue -lt 0) {
+    Set-InspectValidationError -Message "max row/column limits must be non-negative integers"
+    Write-XlflowJson -Result $result
+    exit
+  }
 
   if (($normalizedTarget -eq "range" -or $normalizedTarget -eq "cell") -and ([string]::IsNullOrWhiteSpace($Sheet) -or [string]::IsNullOrWhiteSpace($Address))) {
     Set-InspectValidationError -Message "sheet and address are required for range/cell inspect"
@@ -657,6 +662,10 @@ try {
         $worksheet = Get-XlflowWorksheetByName -Workbook $workbook -SheetName $Sheet
         $cell = $worksheet.Range($Address)
         $normalizedAddress = Get-XlflowRangeAddress -Range $cell
+        $cellCount = ([int]$cell.Rows.Count) * ([int]$cell.Columns.Count)
+        if ($cellCount -ne 1) {
+          throw ("cell inspect requires a single-cell address, got " + $normalizedAddress)
+        }
         $result.target = New-XlflowTargetResult -Kind "live_session" -Path $WorkbookPath -Sheet $Sheet -Range $normalizedAddress
         $result.inspect = [ordered]@{
           target = "cell"
@@ -679,6 +688,8 @@ try {
   $message = $_.Exception.Message
   if ($message -like "*xlflow session*") {
     Set-XlflowError -Result $result -Code "session_required" -Message $message -Source "xlflow"
+  } elseif ($message -like "cell inspect requires a single-cell address*") {
+    Set-InspectValidationError -Message $message
   } elseif ($message -like "sheet '*' not found") {
     Set-XlflowError -Result $result -Code "sheet_not_found" -Message $message -Source "xlflow"
   } else {
