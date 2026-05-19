@@ -685,10 +685,12 @@ type StyledCellSnapshot struct {
 ## Behavior
 
 - `inspect` continues to read the configured saved workbook file directly without starting Excel COM.
+- `inspect workbook|sheets|range|used-range|cell --session` reads the live workbook currently attached to the xlflow session through Excel COM and returns the same target-specific payload shapes with `inspect.source = "excel_com"` and `inspect.target_info.kind = "live_session"`.
 - `--include-style` is opt-in and only affects range-based inspect commands.
 - Existing `values` matrix output remains unchanged for compatibility.
 - When `--include-style` is set, range output also includes per-cell style metadata, row metadata, column metadata, and merged-range metadata for the returned range after truncation.
 - Style-aware inspect reports the target as the saved workbook file and includes a note that unsaved live-session state is not being inspected.
+- File-backed inspect keeps warning when a matching live session is dirty and now adds hints to run the matching `inspect ... --session` command or `save --session`.
 - Empty cells are still included in the returned range and may carry style metadata even when `value` is `null`.
 - Conditional formatting evaluation is out of scope for v1; output reflects stored cell styles in the saved workbook file.
 

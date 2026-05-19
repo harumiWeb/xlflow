@@ -1621,8 +1621,11 @@ func renderInspectTargetInfo(payload map[string]any) string {
 	var b strings.Builder
 	if kind := stringValue(info, "kind"); kind != "" {
 		label := kind
-		if kind == "file" {
+		switch kind {
+		case "file":
 			label = "saved workbook file"
+		case "live_session":
+			label = "live session workbook"
 		}
 		b.WriteString(kv("Snapshot", label))
 	}
@@ -1643,8 +1646,11 @@ func renderInspectTargetInfoMarkdown(payload map[string]any) string {
 	var b strings.Builder
 	if kind := stringValue(info, "kind"); kind != "" {
 		label := kind
-		if kind == "file" {
+		switch kind {
+		case "file":
 			label = "saved workbook file"
+		case "live_session":
+			label = "live session workbook"
 		}
 		b.WriteString("Snapshot: ")
 		b.WriteString(label)

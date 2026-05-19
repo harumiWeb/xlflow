@@ -311,6 +311,11 @@ func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
 		{"doctor"},
 		{"attach"},
 		{"list", "forms"},
+		{"inspect", "workbook"},
+		{"inspect", "sheets"},
+		{"inspect", "range"},
+		{"inspect", "used-range"},
+		{"inspect", "cell"},
 		{"pull"},
 		{"push"},
 		{"export-image"},
@@ -348,10 +353,6 @@ func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
 		{"lint"},
 		{"analyze"},
 		{"diff"},
-		{"inspect", "workbook"},
-		{"inspect", "range"},
-		{"inspect", "used-range"},
-		{"inspect", "cell"},
 		{"inspect-gui"},
 		{"skill", "install"},
 	} {
@@ -561,6 +562,11 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		{"list", "forms"},
 		{"pull"},
 		{"export-image"},
+		{"inspect", "workbook"},
+		{"inspect", "sheets"},
+		{"inspect", "range"},
+		{"inspect", "used-range"},
+		{"inspect", "cell"},
 		{"test"},
 		{"trace", "enable"},
 		{"trace", "disable"},
@@ -1688,6 +1694,13 @@ func TestBuildInspectFormOptionsRejectsInitializerForDesigner(t *testing.T) {
 	_, err := buildInspectFormOptions("UserForm1", "designer", "InitializeForm", false, keepaliveFlags{})
 	if err == nil || !strings.Contains(err.Error(), "--initializer can only be used") {
 		t.Fatalf("expected initializer validation error, got %v", err)
+	}
+}
+
+func TestBuildInspectBridgeOptionsRejectsKeepaliveWithoutSession(t *testing.T) {
+	_, err := buildInspectBridgeOptions(false, keepaliveFlags{enabled: true, interval: 5 * time.Second})
+	if err == nil || !strings.Contains(err.Error(), "--keepalive requires --session") {
+		t.Fatalf("expected keepalive/session validation error, got %v", err)
 	}
 }
 

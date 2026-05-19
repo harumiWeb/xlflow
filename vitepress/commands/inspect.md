@@ -8,6 +8,7 @@ Inspect saved workbook state or UserForm state.
 xlflow inspect workbook
 xlflow inspect sheets
 xlflow inspect range --sheet <sheet> --address <range>
+xlflow inspect range --sheet <sheet> --address <range> --session
 xlflow inspect form <name> [--runtime|--designer|--both]
 ```
 
@@ -25,6 +26,8 @@ xlflow inspect form <name> [--runtime|--designer|--both]
 | `--address <range>`               | A1 address for range or cell inspection.                  | -        |
 | `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100      |
 | `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30       |
+| `--session`                       | Inspect the live workbook in the managed xlflow session.  | false    |
+| `--keepalive`                     | Emit heartbeat lines while live session inspect runs.     | false    |
 | `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | designer |
 
 ## Examples
@@ -32,13 +35,14 @@ xlflow inspect form <name> [--runtime|--designer|--both]
 ```bash
 xlflow inspect workbook --json
 xlflow inspect range --sheet Result --address A1:F20 --json
+xlflow inspect range --sheet Result --address A1:F20 --session --include-style --json
 xlflow inspect form CalendarForm --both --json
 ```
 
 ## Notes
 
 ::: warning
-Most file-based inspection reads the saved workbook. Use session-aware commands when you need live dirty workbook state.
+Most `inspect` commands read the saved workbook by default. Add `--session` when you need the live workbook state that is still open and unsaved in Excel.
 :::
 
 > [!IMPORTANT]

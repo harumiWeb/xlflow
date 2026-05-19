@@ -161,6 +161,16 @@ type InspectFormOptions struct {
 	Keepalive      CommandOptions
 }
 
+type InspectOptions struct {
+	Target       string
+	Sheet        string
+	Address      string
+	Limits       map[string]int
+	IncludeStyle bool
+	Session      bool
+	Keepalive    CommandOptions
+}
+
 type SessionOptions struct {
 	Action string
 }
@@ -223,6 +233,7 @@ type ScriptResult struct {
 	Edit          any           `json:"edit,omitempty"`
 	Warnings      any           `json:"warnings,omitempty"`
 	Hints         any           `json:"hints,omitempty"`
+	Inspect       any           `json:"inspect,omitempty"`
 }
 
 type UIButtonAddOptions struct {
@@ -524,6 +535,12 @@ func (r Runner) InspectForm(cfg config.Config, opts InspectFormOptions) (output.
 	return env, code, err
 }
 
+func (r Runner) Inspect(cfg config.Config, opts InspectOptions) (output.Envelope, int, error) {
+	env, code, err := r.run("inspect", buildInspectScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	env.Command = "inspect"
+	return env, code, err
+}
+
 func (r Runner) FormExportImage(cfg config.Config, opts FormExportImageOptions) (output.Envelope, int, error) {
 	scriptArgs, err := buildFormExportImageScriptArgs(r.RootDir, cfg, opts)
 	if err != nil {
@@ -575,6 +592,22 @@ func buildInspectFormScriptArgs(root string, cfg config.Config, opts InspectForm
 		"StrictDesigner": strconv.FormatBool(opts.StrictDesigner),
 		"Initializer":    opts.Initializer,
 	}
+}
+
+func buildInspectScriptArgs(root string, cfg config.Config, opts InspectOptions) map[string]string {
+	args := map[string]string{
+		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+		"Target":       opts.Target,
+		"Sheet":        opts.Sheet,
+		"Address":      opts.Address,
+		"IncludeStyle": strconv.FormatBool(opts.IncludeStyle),
+		"MaxRows":      strconv.Itoa(opts.Limits["max_rows"]),
+		"MaxCols":      strconv.Itoa(opts.Limits["max_cols"]),
+	}
+	return args
 }
 
 type formExportImageResolvedOutput struct {
@@ -1180,6 +1213,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Edit = result.Edit
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints
+	env.Inspect = result.Inspect
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
@@ -1251,7 +1285,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitValidation
 	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
 		return output.ExitValidation
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
+	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

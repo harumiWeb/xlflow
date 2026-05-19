@@ -14,7 +14,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "inspect.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -891,6 +891,26 @@ func TestInspectFormStrictDesignerBoolDoesNotReuseStringParameterName(t *testing
 	}
 	if strings.Contains(text, "$strictDesigner = ConvertTo-XlflowBool $StrictDesigner") {
 		t.Fatalf("inspect-form.ps1 must not assign parsed bool back to the [string] StrictDesigner parameter")
+	}
+}
+
+func TestInspectScriptUsesTargetWorkbookActiveSheetAndReleasesColumnHeaderCells(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "inspect.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read inspect.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"$workbookSummary.active_sheet = [string]$workbook.ActiveSheet.Name",
+		"$columnHeaderCell = $Worksheet.Cells.Item(1, $colIndex)",
+		"Release-XlflowComObject -Object $columnHeaderCell -Name \"worksheet column header cell COM object\"",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "$workbookSummary.active_sheet = [string]$excel.ActiveWorkbook.ActiveSheet.Name") {
+		t.Fatalf("inspect.ps1 must not read active sheet from Excel.ActiveWorkbook")
 	}
 }
 
