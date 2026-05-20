@@ -3,6 +3,7 @@
 package excel
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,11 +22,14 @@ type uiStreamSession struct {
 	listener net.Listener
 	stderr   io.Writer
 
-	done chan struct{}
+	done      chan struct{}
+	closed    chan struct{}
+	closeOnce sync.Once
 
-	mu       sync.Mutex
-	events   []map[string]any
-	closeErr error
+	mu         sync.Mutex
+	events     []map[string]any
+	closeErr   error
+	activeConn net.Conn
 }
 
 func newUIStreamSession(stderr io.Writer) (*uiStreamSession, error) {
@@ -37,7 +41,7 @@ func newUIStreamSession(stderr io.Writer) (*uiStreamSession, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	session := &uiStreamSession{pipePath: pipePath, listener: listener, stderr: stderr, done: make(chan struct{})}
+	session := &uiStreamSession{pipePath: pipePath, listener: listener, stderr: stderr, done: make(chan struct{}), closed: make(chan struct{})}
 	go session.acceptLoop()
 	return session, nil
 }
@@ -53,7 +57,15 @@ func (s *uiStreamSession) Close() error {
 	if s == nil {
 		return nil
 	}
-	_ = s.listener.Close()
+	s.closeOnce.Do(func() {
+		close(s.closed)
+		_ = s.listener.Close()
+		s.mu.Lock()
+		if s.activeConn != nil {
+			_ = s.activeConn.Close()
+		}
+		s.mu.Unlock()
+	})
 	<-s.done
 	return s.closeErr
 }
@@ -88,7 +100,15 @@ func (s *uiStreamSession) acceptLoop() {
 			}
 			return
 		}
-		payload, readErr := io.ReadAll(conn)
+		s.mu.Lock()
+		s.activeConn = conn
+		s.mu.Unlock()
+		payload, readErr := s.readPayload(conn)
+		s.mu.Lock()
+		if s.activeConn == conn {
+			s.activeConn = nil
+		}
+		s.mu.Unlock()
 		_ = conn.Close()
 		for _, line := range decodeUIStreamLines(payload) {
 			trimmed := strings.TrimSpace(line)
@@ -109,6 +129,40 @@ func (s *uiStreamSession) acceptLoop() {
 		if readErr != nil && !isClosedPipeAccept(readErr) {
 			s.closeErr = readErr
 			return
+		}
+	}
+}
+
+func (s *uiStreamSession) readPayload(conn net.Conn) ([]byte, error) {
+	var buffer bytes.Buffer
+	chunk := make([]byte, 4096)
+	for {
+		if err := conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+			return buffer.Bytes(), err
+		}
+		n, err := conn.Read(chunk)
+		if n > 0 {
+			_, _ = buffer.Write(chunk[:n])
+		}
+		if err == nil {
+			continue
+		}
+		if err == io.EOF {
+			return buffer.Bytes(), nil
+		}
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			select {
+			case <-s.closed:
+				return buffer.Bytes(), nil
+			default:
+				continue
+			}
+		}
+		select {
+		case <-s.closed:
+			return buffer.Bytes(), nil
+		default:
+			return buffer.Bytes(), err
 		}
 	}
 }

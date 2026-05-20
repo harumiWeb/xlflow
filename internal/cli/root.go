@@ -1886,6 +1886,9 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 	if direct && trace {
 		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --trace")
 	}
+	if fast && uiStream {
+		return excel.RunOptions{}, fmt.Errorf("--fast cannot be combined with --ui-stream")
+	}
 	if direct && uiStream {
 		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --ui-stream")
 	}

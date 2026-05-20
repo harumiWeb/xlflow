@@ -678,6 +678,9 @@ func summarizeUIEvent(event map[string]any) string {
 		parts = append(parts, "result="+result)
 	}
 	if value := stringValue(event, "resolved_value"); value != "" {
+		if boolValue(event, "redacted") {
+			value = "[redacted]"
+		}
 		parts = append(parts, "value="+value)
 	}
 	if errText := stringValue(event, "error"); errText != "" {

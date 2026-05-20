@@ -20,6 +20,10 @@ This lets one workbook support both autonomous agent workflows and normal Excel 
 
 `DefaultResponse` and `DefaultValue` are workbook-side fallbacks used when xlflow does not receive a scripted `--msgbox` or `--inputbox` value for that dialog id.
 
+`Default` is the native interactive prompt default shown only when a human is using Excel interactively. `DefaultValue` is the separate headless fallback used only when xlflow cannot find a scripted `--inputbox` value.
+
+`Default` is the native interactive prompt default shown only when a human is using Excel interactively. `DefaultValue` is the separate headless fallback used only when xlflow cannot find a scripted `--inputbox` value.
+
 ## VBA Contract
 
 Recent `xlflow new` scaffolds include `src/modules/XlflowUI.bas` with these wrappers:

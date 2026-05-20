@@ -34,6 +34,11 @@ type detector struct {
 	keepString bool
 }
 
+var (
+	msgBoxFunctionRe   = regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+msgbox\b`)
+	inputBoxFunctionRe = regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+inputbox\b`)
+)
+
 var detectors = []detector{
 	detect(`(?i)\bapplication\s*\.\s*getopenfilename\b`, "file_picker", "Application.GetOpenFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
 	detect(`(?i)\bapplication\s*\.\s*getsaveasfilename\b`, "file_picker", "Application.GetSaveAsFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
@@ -70,12 +75,12 @@ func shouldIgnoreDetectorLine(detector detector, code string) bool {
 		if strings.Contains(lower, "xlflowui.msgbox") {
 			return true
 		}
-		return regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+msgbox\b`).MatchString(code)
+		return msgBoxFunctionRe.MatchString(code)
 	case "InputBox":
 		if strings.Contains(lower, "xlflowui.inputbox") {
 			return true
 		}
-		return regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+inputbox\b`).MatchString(code)
+		return inputBoxFunctionRe.MatchString(code)
 	default:
 		return false
 	}
@@ -102,7 +107,6 @@ func (a Analyzer) files() ([]string, error) {
 		a.Config.Src.Modules,
 		a.Config.Src.Classes,
 		a.Config.Src.Forms,
-		a.Config.Src.Workbook,
 		"tests",
 	}
 	var files []string

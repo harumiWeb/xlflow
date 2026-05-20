@@ -2544,6 +2544,14 @@ func TestBuildRunOptionsWithUIStreamRejectsDirect(t *testing.T) {
 	}
 }
 
+func TestBuildRunOptionsWithUIStreamRejectsFast(t *testing.T) {
+	cfg := config.Default()
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Fast: true, UIStream: true})
+	if err == nil || !strings.Contains(err.Error(), "--fast cannot be combined with --ui-stream") {
+		t.Fatalf("expected fast ui-stream conflict, got %v", err)
+	}
+}
+
 func TestBuildPushOptionsExpandsFastAndRequiresSessionForNoSave(t *testing.T) {
 	opts, err := buildPushOptions("always", true, false, false, false, excel.CommandOptions{})
 	if err != nil {

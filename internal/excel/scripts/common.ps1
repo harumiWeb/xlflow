@@ -429,7 +429,14 @@ function Restore-XlflowRuntimeInjection {
   }
 
   if (-not [string]::IsNullOrWhiteSpace([string]$State.ui_stream_module)) {
-    Remove-XlflowUIStreamModule -VBProject $Workbook.VBProject -ModuleName ([string]$State.ui_stream_module) | Out-Null
+    try {
+      $project = $Workbook.VBProject
+      if ($null -ne $project) {
+        Remove-XlflowUIStreamModule -VBProject $project -ModuleName ([string]$State.ui_stream_module) | Out-Null
+      }
+    } catch {
+      Write-Verbose ("failed to remove UI stream module during runtime cleanup: " + $_.Exception.Message)
+    }
   }
 
   if ($State.saved_before -eq $true -and -not [string]::IsNullOrWhiteSpace([string]$State.baseline_hash)) {

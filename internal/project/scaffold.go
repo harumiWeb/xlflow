@@ -511,7 +511,12 @@ Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional By
 	Exit Function
 
 HandleHeadlessFailure:
-	EmitHeadlessUIEvent "inputbox", Id, Prompt, Title, "error", "", "[redacted]", ShouldRedactInputStream(), Err.Description
+	redacted = ShouldRedactInputStream()
+	displayValue = ""
+	If redacted Then
+		displayValue = "[redacted]"
+	End If
+	EmitHeadlessUIEvent "inputbox", Id, Prompt, Title, "error", "", displayValue, redacted, Err.Description
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
@@ -549,8 +554,11 @@ Resolve:
 		Case "yes"
 			ResolveMsgBoxResponse = vbYes
 		Case Else
+			If ResponseSource = "default" Then
+				Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Invalid default MsgBox response for dialog id '" & Id & "'."
+			End If
 			ResponseSource = "error"
-			Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing or invalid scripted MsgBox response for dialog id '" & Id & "'."
+			Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Invalid scripted MsgBox response for dialog id '" & Id & "'."
 	End Select
 End Function
 
