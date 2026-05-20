@@ -54,6 +54,7 @@ End Sub
 	}
 	foundBoundaryMetadata := false
 	foundDisableHint := false
+	foundDialogWrapperHint := false
 	for _, issue := range issues {
 		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
 			foundBoundaryMetadata = true
@@ -61,12 +62,18 @@ End Sub
 		if issue.Code == "VB007" && strings.Contains(issue.Message, "[lint].forbid_interactive_input = false") {
 			foundDisableHint = true
 		}
+		if issue.Code == "VB007" && (issue.Symbol == "MsgBox" || issue.Symbol == "InputBox") && strings.Contains(issue.Suggestion, "XlflowUI") && strings.Contains(issue.Message, "XlflowUI") {
+			foundDialogWrapperHint = true
+		}
 	}
 	if !foundBoundaryMetadata {
 		t.Fatalf("expected VB007 to include GUI boundary metadata: %+v", issues)
 	}
 	if !foundDisableHint {
 		t.Fatalf("expected VB007 to explain how to disable interactive-input lint: %+v", issues)
+	}
+	if !foundDialogWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw MsgBox/InputBox usage: %+v", issues)
 	}
 }
 
@@ -121,6 +128,41 @@ End Sub
 	for _, issue := range issues {
 		if issue.Code == "VB007" {
 			t.Fatalf("VB007 should be disabled: %+v", issues)
+		}
+	}
+}
+
+func TestLinterIgnoresXlflowUIWrappers(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+  MsgBox = VBA.Interaction.MsgBox(Prompt)
+End Function
+
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String) As String
+  InputBox = VBA.Interaction.InputBox(Prompt)
+End Function
+
+Sub Main()
+  Dim result As VbMsgBoxResult
+  result = XlflowUI.MsgBox("confirm-save", "Done")
+  Debug.Print XlflowUI.InputBox("customer-name", "Name")
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "XlflowUI.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB007" {
+			t.Fatalf("wrapper helper should not trigger VB007: %+v", issues)
 		}
 	}
 }

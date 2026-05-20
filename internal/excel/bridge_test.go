@@ -669,6 +669,27 @@ func TestBuildRunScriptArgsPassesRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesUIResponses(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro: "Main.Run",
+		UIResponses: UIResponses{
+			MsgBox: map[string]string{"confirm-save": "yes"},
+			Input:  map[string]string{"customer-name": "John"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"yes"}`)); got != want {
+		t.Fatalf("MsgBoxResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"John"}`)); got != want {
+		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+}
+
 func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -678,6 +699,23 @@ func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	}
 	if args["RuntimeSource"] != RuntimeSourceCommand {
 		t.Fatalf("RuntimeSource = %q, want %q", args["RuntimeSource"], RuntimeSourceCommand)
+	}
+}
+
+func TestBuildTestScriptArgsPassesUIResponses(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{
+		UIResponses: UIResponses{
+			MsgBox: map[string]string{"confirm-save": "no"},
+			Input:  map[string]string{"customer-name": "Jane"},
+		},
+	})
+	if got, want := args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"no"}`)); got != want {
+		t.Fatalf("MsgBoxResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"Jane"}`)); got != want {
+		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
 	}
 }
 

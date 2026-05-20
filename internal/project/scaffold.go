@@ -58,6 +58,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	configPath := filepath.Join(cwd, config.FileName)
 	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
 	runtimePath := filepath.Join(cwd, "src", "modules", "XlflowRuntime.bas")
+	uiHelperPath := filepath.Join(cwd, "src", "modules", "XlflowUI.bas")
 	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
 	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
 	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
@@ -65,7 +66,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
 	protectedPaths := []string{destPath, configPath, assertPath, mainPath, appPath, uiPath}
 	if scaffoldRuntimeHelper {
-		protectedPaths = append(protectedPaths, runtimePath)
+		protectedPaths = append(protectedPaths, runtimePath, uiHelperPath)
 	}
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
@@ -121,6 +122,10 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 			return result, err
 		}
 		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, runtimePath)))
+		if err := writeExclusive(uiHelperPath, defaultUIRuntimeModule); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, uiHelperPath)))
 	}
 	for _, item := range []struct {
 		path string
@@ -436,6 +441,126 @@ Private Function ReadWorkbookModeName() As String
 Missing:
 	ReadWorkbookModeName = ""
 End Function
+
+Private Function DecodeWorkbookDefinedName(ByVal refersTo As String) As String
+	If Len(refersTo) = 0 Then
+		DecodeWorkbookDefinedName = ""
+		Exit Function
+	End If
+	If Left$(refersTo, 1) = "=" Then
+		refersTo = Mid$(refersTo, 2)
+	End If
+	If Len(refersTo) >= 2 Then
+		If Left$(refersTo, 1) = Chr$(34) And Right$(refersTo, 1) = Chr$(34) Then
+			refersTo = Mid$(refersTo, 2, Len(refersTo) - 2)
+		End If
+	End If
+	DecodeWorkbookDefinedName = Replace$(refersTo, Chr$(34) & Chr$(34), Chr$(34))
+End Function
+`
+
+const defaultUIRuntimeModule = `Attribute VB_Name = "XlflowUI"
+Option Explicit
+
+Private Const xlflowResponseErrorBase As Long = vbObjectError + 520
+Private Const xlflowErrInvalidDialogId As Long = xlflowResponseErrorBase + 1
+Private Const xlflowErrInvalidMsgBoxResponse As Long = xlflowResponseErrorBase + 2
+Private Const xlflowErrMissingInputResponse As Long = xlflowResponseErrorBase + 3
+
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "") As VbMsgBoxResult
+	ValidateDialogId Id, "XlflowUI.MsgBox"
+	If XlflowRuntime.IsHeadless() Then
+		MsgBox = ResolveMsgBoxResponse(Id)
+		Exit Function
+	End If
+
+	MsgBox = VBA.Interaction.MsgBox(Prompt, Buttons, Title)
+End Function
+
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "") As String
+	ValidateDialogId Id, "XlflowUI.InputBox"
+	If XlflowRuntime.IsHeadless() Then
+		InputBox = ResolveInputResponse(Id)
+		Exit Function
+	End If
+
+	InputBox = VBA.Interaction.InputBox(Prompt, Title, Default)
+End Function
+
+Private Function ResolveMsgBoxResponse(ByVal Id As String) As VbMsgBoxResult
+	Dim response As String
+	response = LCase$(Trim$(ReadResponseValue("msgbox", Id)))
+
+	Select Case response
+		Case "abort"
+			ResolveMsgBoxResponse = vbAbort
+		Case "cancel"
+			ResolveMsgBoxResponse = vbCancel
+		Case "ignore"
+			ResolveMsgBoxResponse = vbIgnore
+		Case "no"
+			ResolveMsgBoxResponse = vbNo
+		Case "ok"
+			ResolveMsgBoxResponse = vbOK
+		Case "retry"
+			ResolveMsgBoxResponse = vbRetry
+		Case "yes"
+			ResolveMsgBoxResponse = vbYes
+		Case Else
+			Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing or invalid scripted MsgBox response for dialog id '" & Id & "'."
+	End Select
+End Function
+
+Private Function ResolveInputResponse(ByVal Id As String) As String
+	ResolveInputResponse = ReadResponseValue("input", Id)
+End Function
+
+Private Function ReadResponseValue(ByVal Kind As String, ByVal Id As String) As String
+	On Error GoTo Missing
+	ReadResponseValue = DecodeWorkbookDefinedName(ThisWorkbook.Names(BuildResponseName(Kind, Id)).RefersTo)
+	Exit Function
+
+Missing:
+	If LCase$(Trim$(Kind)) = "msgbox" Then
+		Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing scripted MsgBox response for dialog id '" & Id & "'."
+	End If
+	Err.Raise xlflowErrMissingInputResponse, "XlflowUI.InputBox", "Missing scripted InputBox response for dialog id '" & Id & "'."
+End Function
+
+Private Function BuildResponseName(ByVal Kind As String, ByVal Id As String) As String
+	BuildResponseName = "__XLFLOW_UI_" & UCase$(Trim$(Kind)) & "_" & NormalizeResponseId(Id) & "__"
+End Function
+
+Private Function NormalizeResponseId(ByVal value As String) As String
+	Dim i As Long
+	Dim ch As String
+	Dim normalized As String
+	Dim lastSeparator As Boolean
+
+	value = LCase$(Trim$(value))
+	For i = 1 To Len(value)
+		ch = Mid$(value, i, 1)
+		If ch Like "[a-z0-9]" Then
+			normalized = normalized & ch
+			lastSeparator = False
+		ElseIf Len(normalized) > 0 And Not lastSeparator Then
+			normalized = normalized & "_"
+			lastSeparator = True
+		End If
+	Next i
+
+	Do While Len(normalized) > 0 And Right$(normalized, 1) = "_"
+		normalized = Left$(normalized, Len(normalized) - 1)
+	Loop
+
+	NormalizeResponseId = normalized
+End Function
+
+Private Sub ValidateDialogId(ByVal Id As String, ByVal SourceName As String)
+	If Len(NormalizeResponseId(Id)) = 0 Then
+		Err.Raise xlflowErrInvalidDialogId, SourceName, "Dialog id must contain at least one ASCII letter or digit."
+	End If
+End Sub
 
 Private Function DecodeWorkbookDefinedName(ByVal refersTo As String) As String
 	If Len(refersTo) = 0 Then

@@ -40,10 +40,16 @@ type RunArgument struct {
 	Value string `json:"value"`
 }
 
+type UIResponses struct {
+	MsgBox map[string]string
+	Input  map[string]string
+}
+
 type RunOptions struct {
 	Macro               string
 	WorkbookPath        string
 	Args                []RunArgument
+	UIResponses         UIResponses
 	Save                bool
 	SaveAs              string
 	Trace               bool
@@ -159,6 +165,7 @@ type TestOptions struct {
 	Keepalive     CommandOptions
 	RuntimeMode   string
 	RuntimeSource string
+	UIResponses   UIResponses
 }
 
 const (
@@ -471,6 +478,20 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	if strings.TrimSpace(opts.RuntimeSource) != "" {
 		scriptArgs["RuntimeSource"] = strings.TrimSpace(opts.RuntimeSource)
 	}
+	if len(opts.UIResponses.MsgBox) > 0 {
+		msgBoxJSON, err := json.Marshal(opts.UIResponses.MsgBox)
+		if err != nil {
+			return nil, err
+		}
+		scriptArgs["MsgBoxResponsesJSON"] = base64.StdEncoding.EncodeToString(msgBoxJSON)
+	}
+	if len(opts.UIResponses.Input) > 0 {
+		inputJSON, err := json.Marshal(opts.UIResponses.Input)
+		if err != nil {
+			return nil, err
+		}
+		scriptArgs["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
+	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
 		scriptArgs["DisplayAlerts"] = "true"
@@ -576,6 +597,16 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 	}
 	if strings.TrimSpace(opts.RuntimeSource) != "" {
 		args["RuntimeSource"] = strings.TrimSpace(opts.RuntimeSource)
+	}
+	if len(opts.UIResponses.MsgBox) > 0 {
+		if msgBoxJSON, err := json.Marshal(opts.UIResponses.MsgBox); err == nil {
+			args["MsgBoxResponsesJSON"] = base64.StdEncoding.EncodeToString(msgBoxJSON)
+		}
+	}
+	if len(opts.UIResponses.Input) > 0 {
+		if inputJSON, err := json.Marshal(opts.UIResponses.Input); err == nil {
+			args["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
+		}
 	}
 	return args
 }

@@ -4,6 +4,8 @@ param(
   [string]$Visible = "false",
   [string]$RuntimeMode = "test",
   [string]$RuntimeSource = "command",
+  [string]$MsgBoxResponsesJSON = "",
+  [string]$InputResponsesJSON = "",
   [string]$UseSession = "false",
   [string]$MetadataPath = ""
 )
@@ -24,7 +26,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
-  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON
 
   try {
     $project = $workbook.VBProject

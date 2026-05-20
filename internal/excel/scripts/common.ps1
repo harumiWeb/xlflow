@@ -150,6 +150,69 @@ function Get-XlflowRuntimeVersionRefersTo {
   return '="1"'
 }
 
+function Get-XlflowStringRefersTo {
+  param([string]$Value)
+
+  return '="' + ([string]$Value).Replace('"', '""') + '"'
+}
+
+function ConvertTo-XlflowUIResponseId {
+  param([string]$Value)
+
+  $value = ([string]$Value).Trim().ToLowerInvariant()
+  $builder = New-Object System.Text.StringBuilder
+  $lastSeparator = $false
+  foreach ($char in $value.ToCharArray()) {
+    $isValid = (($char -ge [char]'a' -and $char -le [char]'z') -or ($char -ge [char]'0' -and $char -le [char]'9'))
+    if ($isValid) {
+      [void]$builder.Append($char)
+      $lastSeparator = $false
+      continue
+    }
+    if (-not $lastSeparator -and $builder.Length -gt 0) {
+      [void]$builder.Append("_")
+      $lastSeparator = $true
+    }
+  }
+  return $builder.ToString().Trim("_")
+}
+
+function Get-XlflowUIResponseDefinedName {
+  param(
+    [string]$Kind,
+    [string]$Id
+  )
+
+  $normalizedKind = ([string]$Kind).Trim().ToLowerInvariant()
+  if ($normalizedKind -ne "msgbox" -and $normalizedKind -ne "input") {
+    throw "unsupported xlflow UI response kind: $Kind"
+  }
+  $normalizedId = ConvertTo-XlflowUIResponseId -Value $Id
+  if ([string]::IsNullOrWhiteSpace($normalizedId)) {
+    throw "xlflow UI response id cannot be empty"
+  }
+  return "__XLFLOW_UI_" + $normalizedKind.ToUpperInvariant() + "_" + $normalizedId + "__"
+}
+
+function ConvertFrom-XlflowUIResponsesJson {
+  param([string]$Json)
+
+  $responses = [ordered]@{}
+  if ([string]::IsNullOrWhiteSpace([string]$Json)) {
+    return $responses
+  }
+  $decodedBytes = [System.Convert]::FromBase64String([string]$Json)
+  $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
+  $parsed = ConvertFrom-Json -InputObject $decodedJson
+  if ($null -eq $parsed) {
+    return $responses
+  }
+  foreach ($property in $parsed.PSObject.Properties) {
+    $responses[[string]$property.Name] = [string]$property.Value
+  }
+  return $responses
+}
+
 function Get-XlflowWorkbookDefinedNameState {
   param(
     $Workbook,
@@ -263,10 +326,14 @@ function Start-XlflowRuntimeInjection {
     $Workbook,
     $Result,
     [string]$Mode = "",
-    [string]$Source = "default"
+    [string]$Source = "default",
+    [string]$MsgBoxResponsesJSON = "",
+    [string]$InputResponsesJSON = ""
   )
 
   $modeName = Get-XlflowRuntimeModeName -Mode $Mode
+  $msgBoxResponses = ConvertFrom-XlflowUIResponsesJson -Json $MsgBoxResponsesJSON
+  $inputResponses = ConvertFrom-XlflowUIResponsesJson -Json $InputResponsesJSON
   $state = [ordered]@{
     applied = $false
     saved_before = $null
@@ -275,6 +342,15 @@ function Start-XlflowRuntimeInjection {
       __XLFLOW_MODE__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_MODE__")
       __XLFLOW_RUNTIME_VERSION__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_RUNTIME_VERSION__")
     }
+  }
+
+  foreach ($entry in $msgBoxResponses.GetEnumerator()) {
+    $name = Get-XlflowUIResponseDefinedName -Kind "msgbox" -Id ([string]$entry.Key)
+    $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
+  }
+  foreach ($entry in $inputResponses.GetEnumerator()) {
+    $name = Get-XlflowUIResponseDefinedName -Kind "input" -Id ([string]$entry.Key)
+    $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
   }
   if ($null -eq $Workbook) {
     if ($null -ne $Result) {
@@ -299,6 +375,12 @@ function Start-XlflowRuntimeInjection {
 
   Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_MODE__" -RefersTo (Get-XlflowRuntimeModeRefersTo -Mode $modeName) -Visible $false
   Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_RUNTIME_VERSION__" -RefersTo (Get-XlflowRuntimeVersionRefersTo) -Visible $false
+  foreach ($entry in $msgBoxResponses.GetEnumerator()) {
+    Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name (Get-XlflowUIResponseDefinedName -Kind "msgbox" -Id ([string]$entry.Key)) -RefersTo (Get-XlflowStringRefersTo -Value ([string]$entry.Value)) -Visible $false
+  }
+  foreach ($entry in $inputResponses.GetEnumerator()) {
+    Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name (Get-XlflowUIResponseDefinedName -Kind "input" -Id ([string]$entry.Key)) -RefersTo (Get-XlflowStringRefersTo -Value ([string]$entry.Value)) -Visible $false
+  }
   $state.applied = $true
 
   if ($null -ne $Result) {
@@ -323,7 +405,7 @@ function Restore-XlflowRuntimeInjection {
     return
   }
 
-  foreach ($name in @("__XLFLOW_MODE__", "__XLFLOW_RUNTIME_VERSION__")) {
+  foreach ($name in @($State.names.Keys)) {
     $nameState = $State.names[$name]
     if ($null -eq $nameState) {
       Remove-XlflowWorkbookDefinedName -Workbook $Workbook -Name $name

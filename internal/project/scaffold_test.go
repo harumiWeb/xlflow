@@ -193,6 +193,36 @@ func TestNewScaffoldCreatesRuntimeHelper(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldCreatesUIHelper(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowUI.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{
+		`Attribute VB_Name = "XlflowUI"`,
+		"Public Function MsgBox(ByVal Id As String, ByVal Prompt As String",
+		"Public Function InputBox(ByVal Id As String, ByVal Prompt As String",
+		"ValidateDialogId Id, \"XlflowUI.MsgBox\"",
+		"ValidateDialogId Id, \"XlflowUI.InputBox\"",
+		"Private Const xlflowErrInvalidDialogId As Long",
+		"Private Sub ValidateDialogId(ByVal Id As String, ByVal SourceName As String)",
+		"If XlflowRuntime.IsHeadless() Then",
+		`ThisWorkbook.Names(BuildResponseName(Kind, Id)).RefersTo`,
+		"__XLFLOW_UI_",
+		"VBA.Interaction.MsgBox",
+		"VBA.Interaction.InputBox",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("UI helper should contain %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestNewScaffoldRuntimeHelperLintsCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
@@ -211,6 +241,27 @@ func TestNewScaffoldRuntimeHelperLintsCleanly(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("runtime helper should lint cleanly: %+v", issues)
+	}
+}
+
+func TestNewScaffoldUIHelperLintsCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	uiPath := filepath.Join(dir, "src", "modules", "XlflowUI.bas")
+	issues, err := lint.Linter{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(path) == filepath.Clean(uiPath)
+		},
+	}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("UI helper should lint cleanly: %+v", issues)
 	}
 }
 

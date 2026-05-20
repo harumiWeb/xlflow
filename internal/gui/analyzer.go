@@ -38,13 +38,13 @@ var detectors = []detector{
 	detect(`(?i)\bapplication\s*\.\s*getopenfilename\b`, "file_picker", "Application.GetOpenFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
 	detect(`(?i)\bapplication\s*\.\s*getsaveasfilename\b`, "file_picker", "Application.GetSaveAsFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
 	detect(`(?i)\bapplication\s*\.\s*filedialog\b`, "file_picker", "Application.FileDialog", "File dialog requires human interaction.", "Pass the path with xlflow run --arg or keep this code behind an interactive-only adapter."),
-	detect(`(?i)\binputbox\s*(?:\(|")?`, "modal_dialog", "InputBox", "InputBox requires human input.", "Pass scalar values with xlflow run --arg or configuration instead of prompting."),
-	detect(`(?i)\bmsgbox\s*(?:\(|")?`, "modal_dialog", "MsgBox", "MsgBox blocks unattended execution.", "Use trace logging or return status through workbook state for headless runs."),
+	detect(`(?i)\binputbox\s*(?:\(|")?`, "modal_dialog", "InputBox", "Raw InputBox requires human input and bypasses XlflowUI.", "Replace it with XlflowUI.InputBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --inputbox responses."),
+	detect(`(?i)\bmsgbox\s*(?:\(|")?`, "modal_dialog", "MsgBox", "Raw MsgBox blocks unattended execution and bypasses XlflowUI.", "Replace it with XlflowUI.MsgBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --msgbox responses."),
 	detect(`(?i)\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*show\b`, "user_form", "UserForm.Show", "UserForm display requires human interaction.", "Keep UserForm entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\.\s*show\s+vbmodal\b`, "user_form", ".Show vbModal", "Modal form display requires human interaction.", "Keep modal UI entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\bdoevents\b`, "message_pump", "DoEvents", "DoEvents can hide GUI waits or message-pump dependent behavior.", "Avoid message-pump dependent control flow in headless macros."),
 	detect(`(?i)^\s*shell\s*(?:\(|")?`, "external_process", "Shell", "Shell starts an external process from VBA.", "Prefer explicit CLI orchestration or document this macro as interactive/external-process dependent."),
-	detectWithStrings(`(?i)\bcreateobject\s*\(\s*"wscript\.shell"\s*\)\s*\.\s*popup\b`, "modal_dialog", `CreateObject("WScript.Shell").Popup`, "WScript popup blocks unattended execution.", "Use trace logging or return status through workbook state for headless runs."),
+	detectWithStrings(`(?i)\bcreateobject\s*\(\s*"wscript\.shell"\s*\)\s*\.\s*popup\b`, "modal_dialog", `CreateObject("WScript.Shell").Popup`, "WScript popup blocks unattended execution.", "If this is just a confirmation dialog, prefer XlflowUI.MsgBox with a stable dialog id; otherwise keep it behind an interactive-only adapter."),
 }
 
 func detect(pattern, kind, symbol, message, suggestion string) detector {
@@ -61,6 +61,24 @@ func detectWithStrings(pattern, kind, symbol, message, suggestion string) detect
 	d := detect(pattern, kind, symbol, message, suggestion)
 	d.keepString = true
 	return d
+}
+
+func shouldIgnoreDetectorLine(detector detector, code string) bool {
+	lower := strings.ToLower(code)
+	switch detector.symbol {
+	case "MsgBox":
+		if strings.Contains(lower, "xlflowui.msgbox") {
+			return true
+		}
+		return regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+msgbox\b`).MatchString(code)
+	case "InputBox":
+		if strings.Contains(lower, "xlflowui.inputbox") {
+			return true
+		}
+		return regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+inputbox\b`).MatchString(code)
+	default:
+		return false
+	}
 }
 
 func (a Analyzer) Run() ([]Boundary, error) {
@@ -134,6 +152,12 @@ func (a Analyzer) AnalyzeFile(path string) (boundaries []Boundary, err error) {
 		code := StripComment(scanner.Text())
 		codeWithoutStrings := detectionText(code)
 		for _, detector := range detectors {
+			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox") {
+				continue
+			}
+			if shouldIgnoreDetectorLine(detector, code) {
+				continue
+			}
 			input := codeWithoutStrings
 			if detector.keepString {
 				input = code

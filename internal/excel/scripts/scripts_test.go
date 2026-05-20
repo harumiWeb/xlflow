@@ -1665,6 +1665,48 @@ func TestRunScriptAcceptsDiagnosticParameter(t *testing.T) {
 	}
 }
 
+func TestRunScriptAcceptsUIResponseParameters(t *testing.T) {
+	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON"} {
+		t.Run(parameter, func(t *testing.T) {
+			cmd := exec.Command(
+				"pwsh",
+				"-NoProfile",
+				"-Command",
+				fmt.Sprintf("$command = Get-Command ./run.ps1; $command.Parameters.ContainsKey('%s')", parameter),
+			)
+			cmd.Dir = "."
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("run script %s parameter check failed: %v\n%s", parameter, err, out)
+			}
+			if strings.TrimSpace(string(out)) != "True" {
+				t.Fatalf("expected run.ps1 to expose %s, got %q", parameter, out)
+			}
+		})
+	}
+}
+
+func TestTestScriptAcceptsUIResponseParameters(t *testing.T) {
+	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON"} {
+		t.Run(parameter, func(t *testing.T) {
+			cmd := exec.Command(
+				"pwsh",
+				"-NoProfile",
+				"-Command",
+				fmt.Sprintf("$command = Get-Command ./test.ps1; $command.Parameters.ContainsKey('%s')", parameter),
+			)
+			cmd.Dir = "."
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("test script %s parameter check failed: %v\n%s", parameter, err, out)
+			}
+			if strings.TrimSpace(string(out)) != "True" {
+				t.Fatalf("expected test.ps1 to expose %s, got %q", parameter, out)
+			}
+		})
+	}
+}
+
 func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -1679,6 +1721,37 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "True" {
 		t.Fatalf("expected run.ps1 to expose SuppressModalErrors, got %q", out)
+	}
+}
+
+func TestCommonScriptParsesUIResponsesAndBuildsDefinedNames(t *testing.T) {
+	json64 := base64.StdEncoding.EncodeToString([]byte(`{"confirm save":"yes","customer-name":"Jane"}`))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		fmt.Sprintf(". ./common.ps1; $responses = ConvertFrom-XlflowUIResponsesJson -Json '%s'; [ordered]@{ id = (ConvertTo-XlflowUIResponseId -Value 'Confirm Save'); msgbox = (Get-XlflowUIResponseDefinedName -Kind 'msgbox' -Id 'Confirm Save'); input = (Get-XlflowUIResponseDefinedName -Kind 'input' -Id 'Customer Name'); confirm = $responses['confirm save']; customer = $responses['customer-name'] } | ConvertTo-Json -Compress", json64),
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("common.ps1 UI response helper check failed: %v\n%s", err, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse UI response helper output: %v\n%s", err, out)
+	}
+	if got["id"] != "confirm_save" {
+		t.Fatalf("id = %#v, want confirm_save", got["id"])
+	}
+	if got["msgbox"] != "__XLFLOW_UI_MSGBOX_confirm_save__" {
+		t.Fatalf("msgbox defined name = %#v", got["msgbox"])
+	}
+	if got["input"] != "__XLFLOW_UI_INPUT_customer_name__" {
+		t.Fatalf("input defined name = %#v", got["input"])
+	}
+	if got["confirm"] != "yes" || got["customer"] != "Jane" {
+		t.Fatalf("decoded responses = %#v", got)
 	}
 }
 

@@ -1790,7 +1790,83 @@ func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.Comman
 	}, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
+var allowedMsgBoxResults = map[string]struct{}{
+	"abort":  {},
+	"cancel": {},
+	"ignore": {},
+	"no":     {},
+	"ok":     {},
+	"retry":  {},
+	"yes":    {},
+}
+
+func normalizeUIResponseID(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastSeparator := false
+	for _, r := range trimmed {
+		isValid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isValid {
+			builder.WriteRune(r)
+			lastSeparator = false
+			continue
+		}
+		if builder.Len() > 0 && !lastSeparator {
+			builder.WriteByte('_')
+			lastSeparator = true
+		}
+	}
+	return strings.Trim(builder.String(), "_")
+}
+
+func parseUIResponseLiterals(flagName string, literals []string, normalizer func(string) (string, error)) (map[string]string, error) {
+	responses := make(map[string]string, len(literals))
+	normalizedIDs := make(map[string]string, len(literals))
+	for _, literal := range literals {
+		parts := strings.SplitN(literal, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid --%s %q: expected id=value", flagName, literal)
+		}
+		id := strings.TrimSpace(parts[0])
+		if id == "" {
+			return nil, fmt.Errorf("invalid --%s %q: dialog id cannot be empty", flagName, literal)
+		}
+		normalizedID := normalizeUIResponseID(id)
+		if normalizedID == "" {
+			return nil, fmt.Errorf("invalid --%s %q: dialog id must contain at least one ASCII letter or digit", flagName, literal)
+		}
+		if _, exists := responses[id]; exists {
+			return nil, fmt.Errorf("invalid --%s %q: duplicate dialog id %q", flagName, literal, id)
+		}
+		if existing, exists := normalizedIDs[normalizedID]; exists {
+			return nil, fmt.Errorf("invalid --%s %q: dialog id %q collides with %q after normalization", flagName, literal, id, existing)
+		}
+		value := parts[1]
+		if normalizer != nil {
+			normalizedValue, err := normalizer(value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid --%s %q: %w", flagName, literal, err)
+			}
+			value = normalizedValue
+		}
+		responses[id] = value
+		normalizedIDs[normalizedID] = id
+	}
+	return responses, nil
+}
+
+func normalizeMsgBoxResponseToken(value string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return "", fmt.Errorf("msgbox result cannot be empty")
+	}
+	if _, ok := allowedMsgBoxResults[trimmed]; !ok {
+		return "", fmt.Errorf("unsupported msgbox result %q", value)
+	}
+	return trimmed, nil
+}
+
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -1847,6 +1923,14 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 	if direct && len(args) > 0 {
 		return excel.RunOptions{}, fmt.Errorf("--direct cannot be used with --arg")
 	}
+	msgBoxResponses, err := parseUIResponseLiterals("msgbox", msgBoxLiterals, normalizeMsgBoxResponseToken)
+	if err != nil {
+		return excel.RunOptions{}, err
+	}
+	inputResponses, err := parseUIResponseLiterals("inputbox", inputBoxLiterals, nil)
+	if err != nil {
+		return excel.RunOptions{}, err
+	}
 	mode := ""
 	if headless {
 		mode = "headless"
@@ -1862,6 +1946,7 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		Macro:               macro,
 		WorkbookPath:        input,
 		Args:                args,
+		UIResponses:         excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses},
 		Save:                save,
 		SaveAs:              saveAs,
 		Trace:               trace,
@@ -1960,6 +2045,7 @@ func headlessGUIBoundaryLogs(cfg config.Config) []string {
 	logs := []string{
 		"Headless preflight scans the configured source tree, not the target macro call graph.",
 		"Use xlflow run --interactive if a human can operate Excel dialogs.",
+		"For simple dialogs, replace raw MsgBox/InputBox with XlflowUI wrappers and drive them with --msgbox/--inputbox.",
 		"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
 	}
 	if cfg.Lint.ForbidInteractiveInput {
@@ -1971,6 +2057,8 @@ func headlessGUIBoundaryLogs(cfg config.Config) []string {
 func (a *app) runCommand() *cobra.Command {
 	var argLiterals []string
 	var input string
+	var msgBoxLiterals []string
+	var inputBoxLiterals []string
 	var save bool
 	var saveAs string
 	var trace bool
@@ -1998,7 +2086,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
+			opts, err := buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -2046,6 +2134,8 @@ func (a *app) runCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, or bool:true")
+	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
+	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
@@ -2424,6 +2514,8 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 
 func (a *app) testCommand() *cobra.Command {
 	var filter string
+	var msgBoxLiterals []string
+	var inputBoxLiterals []string
 	var keepalive keepaliveFlags
 	var session bool
 	cmd := &cobra.Command{
@@ -2442,9 +2534,17 @@ func (a *app) testCommand() *cobra.Command {
 			var env output.Envelope
 			var code int
 			runtime := excel.ResolveTestRuntimeInfo()
+			msgBoxResponses, err := parseUIResponseLiterals("msgbox", msgBoxLiterals, normalizeMsgBoxResponseToken)
+			if err != nil {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
+			}
+			inputResponses, err := parseUIResponseLiterals("inputbox", inputBoxLiterals, nil)
+			if err != nil {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
+			}
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses}})
 				return runErr
 			})
 			if err != nil {
@@ -2454,6 +2554,8 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
+	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
