@@ -6,6 +6,9 @@ param(
   [string]$RuntimeSource = "command",
   [string]$MsgBoxResponsesJSON = "",
   [string]$InputResponsesJSON = "",
+  [string]$UIStreamEnabled = "false",
+  [string]$UIStreamRedactInput = "true",
+  [string]$UIStreamPipeName = "",
   [string]$UseSession = "false",
   [string]$MetadataPath = ""
 )
@@ -26,10 +29,11 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
-  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
 
   try {
     $project = $workbook.VBProject
+    [void](Enable-XlflowUIStreamRuntimeInjection -Workbook $workbook -State $runtimeState -VBProject $project)
   } catch {
     Set-XlflowError -Result $result -Code "vbide_access_denied" -Message "VBIDE access is not available." -Source "Excel"
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode

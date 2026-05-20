@@ -466,40 +466,72 @@ Private Const xlflowResponseErrorBase As Long = vbObjectError + 520
 Private Const xlflowErrInvalidDialogId As Long = xlflowResponseErrorBase + 1
 Private Const xlflowErrInvalidMsgBoxResponse As Long = xlflowResponseErrorBase + 2
 Private Const xlflowErrMissingInputResponse As Long = xlflowResponseErrorBase + 3
+Private Const xlflowStreamHelperName As String = "__XLFLOW_UI_STREAM_HELPER__"
+Private Const xlflowStreamRedactInputName As String = "__XLFLOW_UI_STREAM_REDACT_INPUT__"
 
 Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "", Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
+	Dim responseSource As String
+	Dim responseToken As String
 	ValidateDialogId Id, "XlflowUI.MsgBox"
 	If XlflowRuntime.IsHeadless() Then
-		MsgBox = ResolveMsgBoxResponse(Id, DefaultResponse)
+		On Error GoTo HandleHeadlessFailure
+		MsgBox = ResolveMsgBoxResponse(Id, DefaultResponse, responseSource, responseToken)
+		EmitHeadlessUIEvent "msgbox", Id, Prompt, Title, responseSource, responseToken, "", False, ""
 		Exit Function
 	End If
 
 	MsgBox = VBA.Interaction.MsgBox(Prompt, Buttons, Title)
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "msgbox", Id, Prompt, Title, "error", "", "", False, Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
 Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "", Optional ByVal DefaultValue As String = "") As String
+	Dim responseSource As String
+	Dim responseValue As String
+	Dim displayValue As String
+	Dim redacted As Boolean
 	ValidateDialogId Id, "XlflowUI.InputBox"
 	If XlflowRuntime.IsHeadless() Then
-		InputBox = ResolveInputResponse(Id, DefaultValue)
+		On Error GoTo HandleHeadlessFailure
+		responseValue = ResolveInputResponse(Id, DefaultValue, responseSource)
+		redacted = ShouldRedactInputStream()
+		displayValue = responseValue
+		If redacted Then
+			displayValue = "[redacted]"
+		End If
+		EmitHeadlessUIEvent "inputbox", Id, Prompt, Title, responseSource, "", displayValue, redacted, ""
+		InputBox = responseValue
 		Exit Function
 	End If
 
 	InputBox = VBA.Interaction.InputBox(Prompt, Title, Default)
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "inputbox", Id, Prompt, Title, "error", "", "[redacted]", ShouldRedactInputStream(), Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-Private Function ResolveMsgBoxResponse(ByVal Id As String, Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
+Private Function ResolveMsgBoxResponse(ByVal Id As String, Optional ByVal DefaultResponse As String = "", Optional ByRef ResponseSource As String = "", Optional ByRef ResponseToken As String = "") As VbMsgBoxResult
 	Dim response As String
 	On Error GoTo UseDefault
 	response = LCase$(Trim$(ReadResponseValue("msgbox", Id)))
+	ResponseSource = "scripted"
 	GoTo Resolve
 
 UseDefault:
 	If Len(Trim$(DefaultResponse)) = 0 Then
+		ResponseSource = "error"
 		Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing scripted MsgBox response for dialog id '" & Id & "'."
 	End If
 	response = LCase$(Trim$(DefaultResponse))
+	ResponseSource = "default"
 
 Resolve:
+	ResponseToken = response
 
 	Select Case response
 		Case "abort"
@@ -517,17 +549,91 @@ Resolve:
 		Case "yes"
 			ResolveMsgBoxResponse = vbYes
 		Case Else
+			ResponseSource = "error"
 			Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing or invalid scripted MsgBox response for dialog id '" & Id & "'."
 	End Select
 End Function
 
-Private Function ResolveInputResponse(ByVal Id As String, Optional ByVal DefaultValue As String = "") As String
+Private Function ResolveInputResponse(ByVal Id As String, Optional ByVal DefaultValue As String = "", Optional ByRef ResponseSource As String = "") As String
 	On Error GoTo UseDefault
+	ResponseSource = "scripted"
 	ResolveInputResponse = ReadResponseValue("input", Id)
 	Exit Function
 
 UseDefault:
+	ResponseSource = "default"
 	ResolveInputResponse = DefaultValue
+End Function
+
+Private Sub EmitHeadlessUIEvent(ByVal Kind As String, ByVal Id As String, ByVal Prompt As String, ByVal Title As String, ByVal ResponseSource As String, Optional ByVal ResolvedResult As String = "", Optional ByVal ResolvedValue As String = "", Optional ByVal Redacted As Boolean = False, Optional ByVal FailureMessage As String = "")
+	Dim helperMacro As String
+	Dim payload As String
+
+	helperMacro = ResolveStreamHelperMacro()
+	If Len(helperMacro) = 0 Then
+		Exit Sub
+	End If
+
+	payload = "{" & _
+		JsonProperty("event", "ui_dialog") & "," & _
+		JsonProperty("kind", Kind) & "," & _
+		JsonProperty("dialog_id", Id) & "," & _
+		JsonProperty("prompt", Prompt) & "," & _
+		JsonProperty("title", Title) & "," & _
+		JsonProperty("response_source", ResponseSource) & "," & _
+		JsonProperty("resolved_result", ResolvedResult) & "," & _
+		JsonProperty("resolved_value", ResolvedValue) & "," & _
+		JsonBooleanProperty("redacted", Redacted) & "," & _
+		JsonProperty("runtime_mode", XlflowRuntime.ModeName()) & "," & _
+		JsonProperty("error", FailureMessage) & "}"
+
+	InvokeStreamHelper helperMacro, payload
+End Sub
+
+Private Sub InvokeStreamHelper(ByVal helperMacro As String, ByVal payload As String)
+	On Error GoTo Swallow
+	Application.Run "'" & ThisWorkbook.Name & "'!" & helperMacro, payload
+	Exit Sub
+
+Swallow:
+End Sub
+
+Private Function ResolveStreamHelperMacro() As String
+	ResolveStreamHelperMacro = ReadOptionalDefinedNameValue(xlflowStreamHelperName)
+End Function
+
+Private Function ShouldRedactInputStream() As Boolean
+	Dim configured As String
+
+	configured = LCase$(Trim$(ReadOptionalDefinedNameValue(xlflowStreamRedactInputName)))
+	ShouldRedactInputStream = (configured <> "false")
+End Function
+
+Private Function ReadOptionalDefinedNameValue(ByVal name As String) As String
+	On Error GoTo Missing
+	ReadOptionalDefinedNameValue = DecodeWorkbookDefinedName(ThisWorkbook.Names(name).RefersTo)
+	Exit Function
+
+Missing:
+	ReadOptionalDefinedNameValue = ""
+End Function
+
+Private Function JsonEscape(ByVal value As String) As String
+	value = Replace$(value, "\", "\\")
+	value = Replace$(value, Chr$(34), Chr$(92) & Chr$(34))
+	value = Replace$(value, vbCrLf, "\n")
+	value = Replace$(value, vbCr, "\n")
+	value = Replace$(value, vbLf, "\n")
+	value = Replace$(value, vbTab, "\t")
+	JsonEscape = value
+End Function
+
+Private Function JsonProperty(ByVal name As String, ByVal value As String) As String
+	JsonProperty = Chr$(34) & JsonEscape(name) & Chr$(34) & ":" & Chr$(34) & JsonEscape(value) & Chr$(34)
+End Function
+
+Private Function JsonBooleanProperty(ByVal name As String, ByVal value As Boolean) As String
+	JsonBooleanProperty = Chr$(34) & JsonEscape(name) & Chr$(34) & ":" & LCase$(CStr(value))
 End Function
 
 Private Function ReadResponseValue(ByVal Kind As String, ByVal Id As String) As String

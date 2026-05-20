@@ -328,16 +328,24 @@ function Start-XlflowRuntimeInjection {
     [string]$Mode = "",
     [string]$Source = "default",
     [string]$MsgBoxResponsesJSON = "",
-    [string]$InputResponsesJSON = ""
+    [string]$InputResponsesJSON = "",
+    [string]$UIStreamEnabled = "false",
+    [string]$UIStreamPipeName = "",
+    [string]$UIStreamRedactInput = "true"
   )
 
   $modeName = Get-XlflowRuntimeModeName -Mode $Mode
   $msgBoxResponses = ConvertFrom-XlflowUIResponsesJson -Json $MsgBoxResponsesJSON
   $inputResponses = ConvertFrom-XlflowUIResponsesJson -Json $InputResponsesJSON
+  $uiStreamEnabled = (ConvertTo-XlflowBool $UIStreamEnabled) -and -not [string]::IsNullOrWhiteSpace([string]$UIStreamPipeName)
   $state = [ordered]@{
     applied = $false
     saved_before = $null
     baseline_hash = ""
+    ui_stream_enabled = $uiStreamEnabled
+    ui_stream_pipe_name = [string]$UIStreamPipeName
+    ui_stream_redact_input = (ConvertTo-XlflowBool $UIStreamRedactInput)
+    ui_stream_module = ""
     names = [ordered]@{
       __XLFLOW_MODE__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_MODE__")
       __XLFLOW_RUNTIME_VERSION__ = (Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_RUNTIME_VERSION__")
@@ -352,6 +360,8 @@ function Start-XlflowRuntimeInjection {
     $name = Get-XlflowUIResponseDefinedName -Kind "input" -Id ([string]$entry.Key)
     $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
   }
+  $state.names["__XLFLOW_UI_STREAM_HELPER__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_HELPER__"
+  $state.names["__XLFLOW_UI_STREAM_REDACT_INPUT__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_REDACT_INPUT__"
   if ($null -eq $Workbook) {
     if ($null -ne $Result) {
       $Result.runtime = [ordered]@{
@@ -418,6 +428,10 @@ function Restore-XlflowRuntimeInjection {
     }
   }
 
+  if (-not [string]::IsNullOrWhiteSpace([string]$State.ui_stream_module)) {
+    Remove-XlflowUIStreamModule -VBProject $Workbook.VBProject -ModuleName ([string]$State.ui_stream_module) | Out-Null
+  }
+
   if ($State.saved_before -eq $true -and -not [string]::IsNullOrWhiteSpace([string]$State.baseline_hash)) {
     $currentHash = Get-XlflowWorkbookPersistedStateHash -Workbook $Workbook
     if (-not [string]::IsNullOrWhiteSpace($currentHash) -and $currentHash -eq [string]$State.baseline_hash) {
@@ -427,6 +441,105 @@ function Restore-XlflowRuntimeInjection {
         Write-Verbose ("failed to restore workbook saved state after runtime cleanup: " + $_.Exception.Message)
       }
     }
+  }
+}
+
+function Enable-XlflowUIStreamRuntimeInjection {
+  param(
+    $Workbook,
+    $State,
+    $VBProject
+  )
+
+  if ($null -eq $Workbook -or $null -eq $State -or -not [bool]$State.applied -or -not [bool]$State.ui_stream_enabled) {
+    return $false
+  }
+  if ($null -eq $VBProject -or [string]::IsNullOrWhiteSpace([string]$State.ui_stream_pipe_name)) {
+    return $false
+  }
+
+  $State.ui_stream_module = "XlflowUIStream_" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+  Install-XlflowUIStreamModule -VBProject $VBProject -ModuleName $State.ui_stream_module -PipeName ([string]$State.ui_stream_pipe_name)
+  Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_HELPER__" -RefersTo (Get-XlflowStringRefersTo -Value ($State.ui_stream_module + ".EmitEvent")) -Visible $false
+  Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_REDACT_INPUT__" -RefersTo (Get-XlflowStringRefersTo -Value (([bool]$State.ui_stream_redact_input).ToString().ToLowerInvariant())) -Visible $false
+  return $true
+}
+
+function New-XlflowUIStreamModuleCode {
+  param([string]$PipeName)
+
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.AppendLine("Option Explicit")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("#If VBA7 Then")
+  [void]$builder.AppendLine('  Private Declare PtrSafe Function CreateFileW Lib "kernel32" (ByVal lpFileName As LongPtr, ByVal dwDesiredAccess As Long, ByVal dwShareMode As Long, ByVal lpSecurityAttributes As LongPtr, ByVal dwCreationDisposition As Long, ByVal dwFlagsAndAttributes As Long, ByVal hTemplateFile As LongPtr) As LongPtr')
+  [void]$builder.AppendLine('  Private Declare PtrSafe Function WriteFile Lib "kernel32" (ByVal hFile As LongPtr, ByVal lpBuffer As LongPtr, ByVal nNumberOfBytesToWrite As Long, ByRef lpNumberOfBytesWritten As Long, ByVal lpOverlapped As LongPtr) As Long')
+  [void]$builder.AppendLine('  Private Declare PtrSafe Function CloseHandle Lib "kernel32" (ByVal hObject As LongPtr) As Long')
+  [void]$builder.AppendLine('  Private Const INVALID_HANDLE_VALUE As LongPtr = -1')
+  [void]$builder.AppendLine("#Else")
+  [void]$builder.AppendLine('  Private Declare Function CreateFileW Lib "kernel32" (ByVal lpFileName As Long, ByVal dwDesiredAccess As Long, ByVal dwShareMode As Long, ByVal lpSecurityAttributes As Long, ByVal dwCreationDisposition As Long, ByVal dwFlagsAndAttributes As Long, ByVal hTemplateFile As Long) As Long')
+  [void]$builder.AppendLine('  Private Declare Function WriteFile Lib "kernel32" (ByVal hFile As Long, ByVal lpBuffer As Long, ByVal nNumberOfBytesToWrite As Long, ByRef lpNumberOfBytesWritten As Long, ByVal lpOverlapped As Long) As Long')
+  [void]$builder.AppendLine('  Private Declare Function CloseHandle Lib "kernel32" (ByVal hObject As Long) As Long')
+  [void]$builder.AppendLine('  Private Const INVALID_HANDLE_VALUE As Long = -1')
+  [void]$builder.AppendLine("#End If")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Private Const GENERIC_WRITE As Long = &H40000000")
+  [void]$builder.AppendLine("Private Const OPEN_EXISTING As Long = 3")
+  [void]$builder.AppendLine('Private Const mPipeName As String = "' + $PipeName.Replace('"', '""') + '"')
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Public Sub EmitEvent(ByVal jsonText As String)")
+  [void]$builder.AppendLine("  SendPipeText jsonText & vbLf")
+  [void]$builder.AppendLine("End Sub")
+  [void]$builder.AppendLine("")
+  [void]$builder.AppendLine("Private Sub SendPipeText(ByVal payload As String)")
+  [void]$builder.AppendLine("  Dim bytesWritten As Long")
+  [void]$builder.AppendLine("#If VBA7 Then")
+  [void]$builder.AppendLine("  Dim pipeHandle As LongPtr")
+  [void]$builder.AppendLine("#Else")
+  [void]$builder.AppendLine("  Dim pipeHandle As Long")
+  [void]$builder.AppendLine("#End If")
+  [void]$builder.AppendLine("  pipeHandle = CreateFileW(StrPtr(mPipeName), GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0)")
+  [void]$builder.AppendLine("  If pipeHandle = INVALID_HANDLE_VALUE Then")
+  [void]$builder.AppendLine("    Exit Sub")
+  [void]$builder.AppendLine("  End If")
+  [void]$builder.AppendLine("  On Error GoTo Cleanup")
+  [void]$builder.AppendLine("  Call WriteFile(pipeHandle, StrPtr(payload), Len(payload) * 2, bytesWritten, 0)")
+  [void]$builder.AppendLine("Cleanup:")
+  [void]$builder.AppendLine("  On Error Resume Next")
+  [void]$builder.AppendLine("  If pipeHandle <> INVALID_HANDLE_VALUE Then CloseHandle pipeHandle")
+  [void]$builder.AppendLine("  On Error GoTo 0")
+  [void]$builder.AppendLine("End Sub")
+  return $builder.ToString()
+}
+
+function Install-XlflowUIStreamModule {
+  param(
+    $VBProject,
+    [string]$ModuleName,
+    [string]$PipeName
+  )
+
+  $component = $VBProject.VBComponents.Add(1)
+  $component.Name = $ModuleName
+  $component.CodeModule.AddFromString((New-XlflowUIStreamModuleCode -PipeName $PipeName))
+  return $ModuleName
+}
+
+function Remove-XlflowUIStreamModule {
+  param(
+    $VBProject,
+    [string]$ModuleName
+  )
+
+  if ($null -eq $VBProject -or [string]::IsNullOrWhiteSpace($ModuleName)) {
+    return $false
+  }
+  try {
+    $existing = $VBProject.VBComponents.Item($ModuleName)
+    $VBProject.VBComponents.Remove($existing)
+    return $true
+  } catch {
+    return $false
   }
 }
 

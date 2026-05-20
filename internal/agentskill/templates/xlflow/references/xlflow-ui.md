@@ -38,6 +38,7 @@ Use repeated response flags on both `run` and `test`.
 
 - `--msgbox <dialog-id=result>`
 - `--inputbox <dialog-id=value>`
+- `--ui-stream`
 
 Supported `--msgbox` results:
 
@@ -55,6 +56,32 @@ Example:
 xlflow run Main.Run --headless --msgbox confirm-save=yes --inputbox customer-name=alice --json
 xlflow test --msgbox confirm-save=ok --inputbox customer-name=test-user --json
 ```
+
+Add `--ui-stream` when you need realtime visibility into how headless dialogs resolved:
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --inputbox customer-name=alice --ui-stream --json
+xlflow test --msgbox confirm-save=ok --inputbox customer-name=test-user --ui-stream --json
+```
+
+`--ui-stream` writes realtime `XlflowUI` summaries to stderr, not stdout, so `--json` stdout remains machine-readable. Example stderr lines:
+
+```text
+xlflow: ui kind=msgbox id=confirm-save source=default result=yes
+xlflow: ui kind=inputbox id=customer-name source=default value=[redacted]
+```
+
+InputBox values are redacted by default in both the streamed stderr lines and the final JSON payload.
+
+## Output Contract
+
+When `--ui-stream` is enabled:
+
+- stderr receives realtime `XlflowUI` event summaries
+- stdout still contains the final human output or JSON envelope only
+- final `run` / `test` results include top-level `ui.events`
+
+When `--json` is not used, human-readable `run` and `test` output may also include a `UI` section summarizing the same events after execution.
 
 ## VBA Pattern
 
@@ -83,9 +110,17 @@ Prefer ids that express the business decision, not UI wording.
 1. Read `xlflow.toml` and relevant source modules.
 2. If dialogs are involved, confirm the code uses `XlflowUI` rather than raw `MsgBox` / `InputBox`.
 3. Run `xlflow lint --json` and treat `VB007` on raw dialogs as a migration task.
-4. Run `xlflow test --session --msgbox ... --inputbox ... --json` when tests exist.
-5. Otherwise run `xlflow run --headless --session --msgbox ... --inputbox ... --json`.
+4. Run `xlflow test --session --msgbox ... --inputbox ... --ui-stream --json` when tests exist and realtime dialog visibility helps validation or debugging.
+5. Otherwise run `xlflow run --headless --session --msgbox ... --inputbox ... --ui-stream --json` when headless dialog behavior itself needs confirmation. Omit `--ui-stream` when only the final result matters.
 6. Use `xlflow run --interactive` only when a human must operate non-`XlflowUI` GUI.
+
+## Debugging Rule
+
+If headless `XlflowUI` behavior is suspicious, rerun with the same `--msgbox` / `--inputbox` values plus `--ui-stream` before adding extra trace or VBA logging. Compare:
+
+- realtime stderr lines for the order of dialog resolution
+- final `ui.events` for structured post-run inspection
+- workbook-side `DefaultResponse` / `DefaultValue` expectations when `response_source=default`
 
 ## Future Extension Rule
 

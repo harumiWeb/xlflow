@@ -285,6 +285,14 @@ xlflow run Main.Run --json
 xlflow run Main.Run --headless --json
 ```
 
+マクロが `XlflowUI.MsgBox` や `XlflowUI.InputBox` を使う場合は、scripted response を渡すことで headless のまま実行できます。JSON stdout を壊さずにダイアログ解決の様子をターミナルへリアルタイム表示したい場合は `--ui-stream` を付けてください。
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --inputbox customer-name=fallback-user --ui-stream --json
+```
+
+`--ui-stream` は `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` のような行を stderr に出力します。InputBox の値は既定で redact され、`--ui-stream` を有効にした実行では最終 JSON 結果にも同じダイアログイベントが top-level の `ui.events` として含まれます。
+
 ファイル選択、MsgBox、UserForm などを人間が操作する場合は interactive mode を使用します。
 
 ```bash
@@ -296,6 +304,12 @@ xlflow run Main.Run --interactive --timeout 5m --json
 ```bash
 xlflow lint --json
 xlflow test --json
+```
+
+テストが `XlflowUI` を使う場合も、同じ response flag と realtime stream を使えます。
+
+```bash
+xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 ```
 
 ---
@@ -339,6 +353,8 @@ xlflow new Book.xlsm --with-skill
 ```bash
 /xlflow VBAでセルA1に"Hello, world!"と入力するマクロを作成して
 ```
+
+同梱されている xlflow skill は、headless な `XlflowUI` フローで `--ui-stream` をいつ付けるべきか、stdout の JSON をどう安全に保つか、実行後の human-readable `UI` section や JSON の `ui.events` をどう読むかもガイドします。
 
 ### 人間が Excel を操作しながら進める
 

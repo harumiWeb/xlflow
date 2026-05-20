@@ -48,6 +48,9 @@ func TestRootCommandIncludesTestCommand(t *testing.T) {
 	if flag := cmd.Flags().Lookup("filter"); flag == nil {
 		t.Fatal("expected test command to define --filter")
 	}
+	if flag := cmd.Flags().Lookup("ui-stream"); flag == nil {
+		t.Fatal("expected test command to define --ui-stream")
+	}
 }
 
 func TestRootCommandIncludesVersionCommand(t *testing.T) {
@@ -211,7 +214,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval", "ui-stream"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
@@ -2461,6 +2464,28 @@ func TestBuildRunOptionsAllowsDirectWhenGUICompileErrorsOptOutIsSet(t *testing.T
 	}
 	if opts.SuppressModalErrors {
 		t.Fatalf("SuppressModalErrors = true, want false with gui error opt-out: %#v", opts)
+	}
+}
+
+func TestBuildRunOptionsWithUIStreamEnablesRedactedStreamByDefault(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptionsWithUIStream(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.UIStream.Enabled {
+		t.Fatalf("UIStream.Enabled = false, want true: %#v", opts)
+	}
+	if !opts.UIStream.RedactInput {
+		t.Fatalf("UIStream.RedactInput = false, want true: %#v", opts)
+	}
+}
+
+func TestBuildRunOptionsWithUIStreamRejectsDirect(t *testing.T) {
+	cfg := config.Default()
+	_, err := buildRunOptionsWithUIStream(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval, true)
+	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --ui-stream") {
+		t.Fatalf("expected direct ui-stream conflict, got %v", err)
 	}
 }
 

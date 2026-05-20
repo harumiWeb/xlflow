@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	winio "github.com/Microsoft/go-winio"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -690,6 +691,24 @@ func TestBuildRunScriptArgsPassesUIResponses(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesUIStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:    "Main.Run",
+		UIStream: UIStreamOptions{Enabled: true, RedactInput: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["UIStreamEnabled"] != "true" {
+		t.Fatalf("UIStreamEnabled = %q, want true", args["UIStreamEnabled"])
+	}
+	if args["UIStreamRedactInput"] != "true" {
+		t.Fatalf("UIStreamRedactInput = %q, want true", args["UIStreamRedactInput"])
+	}
+}
+
 func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -716,6 +735,76 @@ func TestBuildTestScriptArgsPassesUIResponses(t *testing.T) {
 	}
 	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"Jane"}`)); got != want {
 		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+}
+
+func TestBuildTestScriptArgsPassesUIStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{UIStream: UIStreamOptions{Enabled: true, RedactInput: true}})
+	if args["UIStreamEnabled"] != "true" {
+		t.Fatalf("UIStreamEnabled = %q, want true", args["UIStreamEnabled"])
+	}
+	if args["UIStreamRedactInput"] != "true" {
+		t.Fatalf("UIStreamRedactInput = %q, want true", args["UIStreamRedactInput"])
+	}
+}
+
+func TestMergeUIResultAppendsStreamEvents(t *testing.T) {
+	existing := map[string]any{"events": []any{map[string]any{"kind": "msgbox", "dialog_id": "existing"}}}
+	merged := mergeUIResult(existing, []map[string]any{{"kind": "inputbox", "dialog_id": "customer-name"}})
+	mergedMap, ok := merged.(map[string]any)
+	if !ok {
+		t.Fatalf("merged UI = %#v", merged)
+	}
+	events, ok := mergedMap["events"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("merged events = %#v", mergedMap["events"])
+	}
+}
+
+func TestFormatUIStreamEventRedactsInputValue(t *testing.T) {
+	got := formatUIStreamEvent(map[string]any{"kind": "inputbox", "dialog_id": "customer-name", "response_source": "default", "resolved_value": "Alice", "redacted": true})
+	for _, want := range []string{"xlflow: ui", "kind=inputbox", "id=customer-name", "source=default", "value=[redacted]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatUIStreamEvent() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUIStreamSessionCollectsNamedPipeEvents(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("named pipe stream is Windows-only")
+	}
+	var stderr bytes.Buffer
+	session, err := newUIStreamSession(&stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timeout := 2 * time.Second
+	conn, err := winio.DialPipe(session.PipePath(), &timeout)
+	if err != nil {
+		_ = session.Close()
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("{\"kind\":\"msgbox\",\"dialog_id\":\"confirm-save\",\"response_source\":\"scripted\",\"resolved_result\":\"yes\"}\n")); err != nil {
+		_ = conn.Close()
+		_ = session.Close()
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events := session.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1 event", events)
+	}
+	if events[0]["dialog_id"] != "confirm-save" {
+		t.Fatalf("dialog_id = %#v, want confirm-save", events[0]["dialog_id"])
+	}
+	if !strings.Contains(stderr.String(), "id=confirm-save") {
+		t.Fatalf("stderr = %q, want rendered event", stderr.String())
 	}
 }
 

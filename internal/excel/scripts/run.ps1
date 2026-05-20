@@ -15,6 +15,9 @@ param(
   [string]$RuntimeSource = "default",
   [string]$MsgBoxResponsesJSON = "",
   [string]$InputResponsesJSON = "",
+  [string]$UIStreamEnabled = "false",
+  [string]$UIStreamRedactInput = "true",
+  [string]$UIStreamPipeName = "",
   [string]$UseSession = "false",
   [string]$MetadataPath = "",
   [int]$TimeoutSeconds = 0
@@ -159,7 +162,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
-  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
   if ($null -ne $openResult.open_dialog -and [bool]$openResult.open_dialog.found) {
     Set-XlflowVBADialogFailure -ErrorCode "macro_failed" -FallbackSource "Excel" -FallbackNumber 0 -FallbackLine 0 -Dialog $openResult.open_dialog -Selection $openResult.open_selection
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
@@ -302,6 +305,7 @@ try {
   try {
     $currentPhase = "prepare_vbide"
     $vbProject = $workbook.VBProject
+    [void](Enable-XlflowUIStreamRuntimeInjection -Workbook $workbook -State $runtimeState -VBProject $vbProject)
     if ($traceRequested -and -not (Test-XlflowTraceModuleInjected -VBProject $vbProject)) {
       $traceComponent = $vbProject.VBComponents.Add(1)
       $traceComponent.Name = "XlflowTrace"

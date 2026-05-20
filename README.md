@@ -282,6 +282,14 @@ For unattended automation, prefer headless mode:
 xlflow run Main.Run --headless --json
 ```
 
+If the macro uses `XlflowUI.MsgBox` or `XlflowUI.InputBox`, keep the run headless by providing scripted responses. Add `--ui-stream` when you want realtime dialog visibility in the terminal while preserving JSON stdout:
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --inputbox customer-name=fallback-user --ui-stream --json
+```
+
+`--ui-stream` writes lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` to stderr and keeps InputBox values redacted by default. When `--ui-stream` is enabled, the final JSON result also includes the same dialog activity under top-level `ui.events`.
+
 If the macro intentionally shows file pickers, message boxes, or UserForms, use interactive mode:
 
 ```bash
@@ -293,6 +301,12 @@ xlflow run Main.Run --interactive --timeout 5m --json
 ```bash
 xlflow lint --json
 xlflow test --json
+```
+
+When a test run uses `XlflowUI`, you can use the same response flags and realtime stream:
+
+```bash
+xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 ```
 
 ---
@@ -336,6 +350,8 @@ Using the installed skill, please provide instructions for what you want to achi
 ```bash
 /xlflow Create a macro that enters "Hello, world!" into cell A1 using VBA
 ```
+
+The bundled xlflow skill also teaches agents when to add `--ui-stream` for headless `XlflowUI` flows, how to keep stdout JSON-safe, and how to interpret the final human-readable `UI` section or JSON `ui.events` payload.
 
 ### Human-assisted Excel sessions
 

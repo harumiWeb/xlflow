@@ -1867,6 +1867,10 @@ func normalizeMsgBoxResponseToken(value string) (string, error) {
 }
 
 func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
+	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, keepalive, keepaliveInterval, false)
+}
+
+func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration, uiStream bool) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -1881,6 +1885,9 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 	}
 	if direct && trace {
 		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --trace")
+	}
+	if direct && uiStream {
+		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --ui-stream")
 	}
 	if direct && diagnostic {
 		if diagnosticExplicit {
@@ -1947,6 +1954,7 @@ func buildRunOptions(cfg config.Config, macro, input string, argLiterals []strin
 		WorkbookPath:        input,
 		Args:                args,
 		UIResponses:         excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses},
+		UIStream:            excel.UIStreamOptions{Enabled: uiStream, RedactInput: true},
 		Save:                save,
 		SaveAs:              saveAs,
 		Trace:               trace,
@@ -2072,6 +2080,7 @@ func (a *app) runCommand() *cobra.Command {
 	var timeout time.Duration
 	var keepalive bool
 	var keepaliveInterval time.Duration
+	var uiStream bool
 
 	cmd := &cobra.Command{
 		Use:   "run [macro]",
@@ -2086,7 +2095,7 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
+			opts, err := buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, uiStream)
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
@@ -2150,6 +2159,7 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
 	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
+	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	return cmd
 }
 
@@ -2518,6 +2528,7 @@ func (a *app) testCommand() *cobra.Command {
 	var inputBoxLiterals []string
 	var keepalive keepaliveFlags
 	var session bool
+	var uiStream bool
 	cmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run workbook VBA tests",
@@ -2544,7 +2555,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
 				return runErr
 			})
 			if err != nil {
@@ -2556,6 +2567,7 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
+	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)
 	return cmd

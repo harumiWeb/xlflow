@@ -25,6 +25,7 @@ Default safety rules for AI-agent work:
 - When a task depends on UserForm spec authoring or review, load [references/forms.md](references/forms.md) before choosing `inspect form`, `form snapshot`, or `form build`. It defines the persisted `xlflow.userform` schema, flat `controls` contract, overwrite safety rules, supported control types, and the best-effort versus observed-only fields that should not be treated as round-trip guarantees.
 - When a task depends on `MsgBox`, `InputBox`, or other interactive VBA prompts, load [references/xlflow-ui.md](references/xlflow-ui.md) before editing. Agent-authored dialog flows should default to `XlflowUI` wrappers with stable dialog ids so `run` and `test` can stay headless.
 - When a dialog needs a workbook-side fallback if `run` or `test` omits a scripted response, use the optional `DefaultResponse` / `DefaultValue` parameters on `XlflowUI.MsgBox` and `XlflowUI.InputBox`.
+- When headless dialog flows need realtime terminal visibility, add `--ui-stream` to `xlflow run` or `xlflow test`. It streams resolved `XlflowUI` events to stderr without breaking `--json` stdout, and InputBox values stay redacted by default.
 - Treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for UserForm design. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where embedded `.frm` code remains canonical until migration. `.frm` / `.frx` are generated Designer artifacts. After `xlflow form build`, xlflow now re-materializes those artifacts back into `src/forms/`, and `push` blocks before Excel opens when spec filename, `form.name`, `.frm` basename, or `.frm` `Attribute VB_Name` disagree.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
@@ -74,6 +75,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow run <MacroName> --headless --session --keepalive --json` when you need a non-default headless entrypoint.
    - In projects scaffolded by recent xlflow versions, prefer branching on `XlflowRuntime.ModeName()` / `IsHeadless()` / `IsAgent()` / `IsTest()` instead of guessing execution context from UI state or process ancestry.
    - When a macro or test uses `XlflowUI.MsgBox` or `XlflowUI.InputBox`, keep unattended validation headless by passing repeated `--msgbox <dialog-id=result>` and `--inputbox <dialog-id=value>` flags to `xlflow run` or `xlflow test`.
+   - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes`, plus final `ui.events` in JSON or a UI section in human output.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
@@ -184,6 +186,7 @@ When the user reports a runtime failure:
 - When UserForms are involved, treat `pull` / `push` / `save` warnings about partial `.frm` fidelity and unsaved session state as actionable; do not review UserForm diffs until the live workbook has been saved and re-pulled.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
 - If a headless macro still needs simple confirmation or scalar input, replace raw `MsgBox` / `InputBox` with `XlflowUI` and rerun with repeated `--msgbox` / `--inputbox` flags instead of suppressing the boundary.
+- If headless `XlflowUI` behavior itself is under investigation, rerun with `--ui-stream` before adding extra logs. Use the streamed stderr lines for realtime progress and the final `ui.events` payload or `UI` section for post-run confirmation.
 - Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain that the preflight scans the configured source tree rather than the target macro call graph, then either refactor the macro or rerun with `--interactive` when a human is available.
 - If `lint` reports `VB007` for raw `MsgBox` or `InputBox`, replace them with `XlflowUI` wrappers before considering suppression. Use `[lint].forbid_interactive_input = false` only for genuinely human-only projects, and do not imply that this changes `run --headless`; headless preflight still blocks GUI boundaries.
@@ -265,6 +268,8 @@ If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, 
 If `xlflow run --diagnostic --session --json` fails with `vba_compile_failed`, inspect `run_diagnostic.kind`, `run_diagnostic.message`, `run_diagnostic.location`, and `run_diagnostic.nearby_code` before changing source. Treat dialog text as localized opaque text and fix the selected source location when available.
 
 If `xlflow run --trace --session` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --session --keepalive --json`.
+
+If a headless `XlflowUI` run behaves differently than expected, reproduce with the same `--msgbox` / `--inputbox` values plus `--ui-stream`. Compare the streamed stderr lines against the final `ui.events` payload to confirm which dialog ids resolved from scripted responses versus workbook defaults.
 
 If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`.
 

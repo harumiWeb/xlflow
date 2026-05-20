@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added XlflowUI module with MsgBox and InputBox wrappers to handle user prompts.
+- Added `--ui-stream` for `xlflow run` and `xlflow test`, streaming resolved headless `XlflowUI` dialog events to stderr in real time while preserving JSON stdout and returning final `ui.events` payloads plus human-readable `UI` summaries.
 - Updated run.ps1 and test.ps1 to accept MsgBoxResponsesJSON and InputResponsesJSON parameters.
 - Added explicit live-session inspect mode for `inspect workbook`, `inspect sheets`, `inspect range`, `inspect used-range`, and `inspect cell` via `--session`, including keepalive support, explicit `live_session` target metadata, and saved-file warnings that point callers to live-session inspect when disk may be stale.
 - Added runtime-aware execution mode injection for `run` and `test`, plus the scaffolded `XlflowRuntime` VBA helper for branching between interactive, headless, agent, CI, and test execution contexts.

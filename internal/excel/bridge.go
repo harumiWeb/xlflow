@@ -45,11 +45,17 @@ type UIResponses struct {
 	Input  map[string]string
 }
 
+type UIStreamOptions struct {
+	Enabled     bool
+	RedactInput bool
+}
+
 type RunOptions struct {
 	Macro               string
 	WorkbookPath        string
 	Args                []RunArgument
 	UIResponses         UIResponses
+	UIStream            UIStreamOptions
 	Save                bool
 	SaveAs              string
 	Trace               bool
@@ -166,6 +172,7 @@ type TestOptions struct {
 	RuntimeMode   string
 	RuntimeSource string
 	UIResponses   UIResponses
+	UIStream      UIStreamOptions
 }
 
 const (
@@ -492,6 +499,10 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		}
 		scriptArgs["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
 	}
+	if opts.UIStream.Enabled {
+		scriptArgs["UIStreamEnabled"] = strconv.FormatBool(true)
+		scriptArgs["UIStreamRedactInput"] = strconv.FormatBool(opts.UIStream.RedactInput)
+	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
 		scriptArgs["DisplayAlerts"] = "true"
@@ -607,6 +618,10 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 		if inputJSON, err := json.Marshal(opts.UIResponses.Input); err == nil {
 			args["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
 		}
+	}
+	if opts.UIStream.Enabled {
+		args["UIStreamEnabled"] = strconv.FormatBool(true)
+		args["UIStreamRedactInput"] = strconv.FormatBool(opts.UIStream.RedactInput)
 	}
 	return args
 }
@@ -1217,9 +1232,21 @@ type commandRunOptions struct {
 
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
+	var err error
 	if runtime.GOOS != "windows" {
 		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
 		return env, output.ExitEnvironment, nil
+	}
+
+	var uiSession *uiStreamSession
+	if enabled, _ := strconv.ParseBool(strings.TrimSpace(args["UIStreamEnabled"])); enabled {
+		uiSession, err = newUIStreamSession(opts.Keepalive.Stderr)
+		if err != nil {
+			env = output.Failure(commandName, output.Error{Code: "ui_stream_init_failed", Message: err.Error(), Source: "xlflow"})
+			return env, output.ExitEnvironment, nil
+		}
+		args = cloneStringMap(args)
+		args["UIStreamPipeName"] = uiSession.PipePath()
 	}
 
 	script, cleanup, err := scriptPath(r.RootDir, commandName)
@@ -1252,6 +1279,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		err = cmd.Wait()
 	}
 	stopKeepalive()
+	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded && commandName == "run" {
 			env = output.Failure(commandName, output.Error{
@@ -1264,6 +1292,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
 			}
+			if uiStreamErr != nil {
+				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+			}
+			env.UI = mergeUIResult(nil, uiEvents)
 			writeDoneMarker(commandName, env, opts.Keepalive)
 			return env, output.ExitValidation, nil
 		}
@@ -1272,6 +1304,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			message = stderr.String()
 		}
 		env = output.Failure(commandName, output.Error{Code: "script_failed", Message: message, Source: "powershell"})
+		if uiStreamErr != nil {
+			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		}
+		env.UI = mergeUIResult(nil, uiEvents)
 		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
@@ -1280,6 +1316,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: "powershell"})
 		env.Logs = []string{stdout.String()}
+		if uiStreamErr != nil {
+			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		}
+		env.UI = mergeUIResult(nil, uiEvents)
 		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
@@ -1305,7 +1345,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Trace = result.Trace
 	env.Runtime = result.Runtime
 	env.GUIBoundaries = result.GUIBoundaries
-	env.UI = result.UI
+	env.UI = mergeUIResult(result.UI, uiEvents)
 	env.Session = result.Session
 	env.Runner = result.Runner
 	env.Analysis = result.Analysis
@@ -1318,11 +1358,67 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints
 	env.Inspect = result.Inspect
+	if uiStreamErr != nil {
+		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+	}
 	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
 	return env, output.ExitSuccess, nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for k, v := range values {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func mergeUIResult(existing any, streamed []map[string]any) any {
+	if len(streamed) == 0 {
+		return existing
+	}
+	if existing == nil {
+		return map[string]any{"events": streamed}
+	}
+	existingMap, ok := existing.(map[string]any)
+	if !ok {
+		return map[string]any{"summary": existing, "events": streamed}
+	}
+	merged := make(map[string]any, len(existingMap)+1)
+	for k, v := range existingMap {
+		merged[k] = v
+	}
+	if prior, ok := merged["events"].([]map[string]any); ok {
+		merged["events"] = append(prior, streamed...)
+		return merged
+	}
+	if priorAny, ok := merged["events"].([]any); ok {
+		mergedEvents := make([]any, 0, len(priorAny)+len(streamed))
+		mergedEvents = append(mergedEvents, priorAny...)
+		for _, event := range streamed {
+			mergedEvents = append(mergedEvents, event)
+		}
+		merged["events"] = mergedEvents
+		return merged
+	}
+	merged["events"] = streamed
+	return merged
+}
+
+func closeUIStreamSession(session *uiStreamSession) ([]map[string]any, error) {
+	if session == nil {
+		return nil, nil
+	}
+	if err := session.Close(); err != nil {
+		return session.Events(), err
+	}
+	return session.Events(), nil
 }
 
 func startKeepalive(commandName string, opts CommandOptions) func() {
