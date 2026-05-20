@@ -1835,10 +1835,10 @@ func parseUIResponseLiterals(flagName string, literals []string, normalizer func
 		if normalizedID == "" {
 			return nil, fmt.Errorf("invalid --%s %q: dialog id must contain at least one ASCII letter or digit", flagName, literal)
 		}
-		if _, exists := responses[id]; exists {
-			return nil, fmt.Errorf("invalid --%s %q: duplicate dialog id %q", flagName, literal, id)
-		}
 		if existing, exists := normalizedIDs[normalizedID]; exists {
+			if existing == id {
+				return nil, fmt.Errorf("invalid --%s %q: duplicate dialog id %q", flagName, literal, id)
+			}
 			return nil, fmt.Errorf("invalid --%s %q: dialog id %q collides with %q after normalization", flagName, literal, id, existing)
 		}
 		value := parts[1]
@@ -1849,7 +1849,7 @@ func parseUIResponseLiterals(flagName string, literals []string, normalizer func
 			}
 			value = normalizedValue
 		}
-		responses[id] = value
+		responses[normalizedID] = value
 		normalizedIDs[normalizedID] = id
 	}
 	return responses, nil
@@ -2095,7 +2095,12 @@ func (a *app) runCommand() *cobra.Command {
 			if len(args) == 1 {
 				macro = args[0]
 			}
-			opts, err := buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, uiStream)
+			var opts excel.RunOptions
+			if uiStream {
+				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, true)
+			} else {
+				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
+			}
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}

@@ -30,6 +30,61 @@ type stubReleaseChecker struct {
 	err     error
 }
 
+type runOptionsInput struct {
+	Macro              string
+	Workbook           string
+	Args               []string
+	MsgBox             []string
+	InputBox           []string
+	Save               bool
+	SaveAs             string
+	Trace              bool
+	Headless           bool
+	Interactive        bool
+	Direct             bool
+	Fast               bool
+	Diagnostic         bool
+	DiagnosticExplicit bool
+	GUICompileErrors   bool
+	Session            bool
+	Timeout            time.Duration
+	Keepalive          bool
+	KeepaliveInterval  time.Duration
+	UIStream           bool
+}
+
+func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOptions, error) {
+	if in.Timeout == 0 {
+		in.Timeout = 5 * time.Minute
+	}
+	if in.KeepaliveInterval == 0 {
+		in.KeepaliveInterval = defaultKeepaliveInterval
+	}
+	return buildRunOptionsWithUIStream(
+		cfg,
+		in.Macro,
+		in.Workbook,
+		in.Args,
+		in.MsgBox,
+		in.InputBox,
+		in.Save,
+		in.SaveAs,
+		in.Trace,
+		in.Headless,
+		in.Interactive,
+		in.Direct,
+		in.Fast,
+		in.Diagnostic,
+		in.DiagnosticExplicit,
+		in.GUICompileErrors,
+		in.Session,
+		in.Timeout,
+		in.Keepalive,
+		in.KeepaliveInterval,
+		in.UIStream,
+	)
+}
+
 func (s stubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {
 	return s.release, s.err
 }
@@ -2278,7 +2333,7 @@ code_source = "sidecar"
 
 func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, nil, nil, true, "build\\result.xlsm", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{"string:hello"}, Save: true, SaveAs: "build\\result.xlsm"})
 	if err == nil || !strings.Contains(err.Error(), "--save and --save-as cannot be combined") {
 		t.Fatalf("expected save conflict error, got %v", err)
 	}
@@ -2286,7 +2341,7 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "", "fixtures\\Book.xlsm", []string{"string:hello", "int:7", "bool:true"}, nil, nil, false, "", true, true, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "bool:true"}, Trace: true, Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2327,42 +2382,42 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsParsesUIResponses(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, []string{"confirm-save=yes"}, []string{"customer-name=John"}, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"confirm-save=yes"}, InputBox: []string{"customer-name=John"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := opts.UIResponses.MsgBox["confirm-save"]; got != "yes" {
+	if got := opts.UIResponses.MsgBox["confirm_save"]; got != "yes" {
 		t.Fatalf("msgbox response = %q, want yes", got)
 	}
-	if got := opts.UIResponses.Input["customer-name"]; got != "John" {
+	if got := opts.UIResponses.Input["customer_name"]; got != "John" {
 		t.Fatalf("input response = %q, want John", got)
 	}
 }
 
 func TestBuildRunOptionsPreservesInputBoxWhitespaceAndNormalizesMsgBox(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, []string{"confirm-save= YES "}, []string{"customer-name=  Alice  ", "single-space= "}, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"confirm-save= YES "}, InputBox: []string{"customer-name=  Alice  ", "single-space= "}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := opts.UIResponses.MsgBox["confirm-save"]; got != "yes" {
+	if got := opts.UIResponses.MsgBox["confirm_save"]; got != "yes" {
 		t.Fatalf("msgbox response = %q, want yes", got)
 	}
-	if got := opts.UIResponses.Input["customer-name"]; got != "  Alice  " {
+	if got := opts.UIResponses.Input["customer_name"]; got != "  Alice  " {
 		t.Fatalf("input response = %q, want preserved whitespace", got)
 	}
-	if got := opts.UIResponses.Input["single-space"]; got != " " {
+	if got := opts.UIResponses.Input["single_space"]; got != " " {
 		t.Fatalf("single-space input response = %q, want one space", got)
 	}
 }
 
 func TestBuildRunOptionsRejectsNonStableDialogIDs(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, []string{"!!!=yes"}, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"!!!=yes"}})
 	if err == nil || !strings.Contains(err.Error(), "must contain at least one ASCII letter or digit") {
 		t.Fatalf("expected invalid dialog id error, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", nil, []string{"confirm save=yes", "confirm-save=no"}, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"confirm save=yes", "confirm-save=no"}})
 	if err == nil || !strings.Contains(err.Error(), "collides with") {
 		t.Fatalf("expected normalized collision error, got %v", err)
 	}
@@ -2371,7 +2426,7 @@ func TestBuildRunOptionsRejectsNonStableDialogIDs(t *testing.T) {
 func TestBuildRunOptionsUsesEnvironmentRuntimeOverrideByDefault(t *testing.T) {
 	t.Setenv("XLFLOW_MODE", excel.RuntimeModeAgent)
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2385,7 +2440,7 @@ func TestBuildRunOptionsUsesEnvironmentRuntimeOverrideByDefault(t *testing.T) {
 
 func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", []string{"string:"}, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{"string:"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2396,7 +2451,7 @@ func TestBuildRunOptionsAllowsEmptyStringArguments(t *testing.T) {
 
 func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, true, true, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Headless: true, Interactive: true})
 	if err == nil || !strings.Contains(err.Error(), "--headless and --interactive") {
 		t.Fatalf("expected run mode conflict error, got %v", err)
 	}
@@ -2404,11 +2459,11 @@ func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
 
 func TestBuildRunOptionsRejectsDirectWithTraceOrArgs(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", true, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Trace: true, Direct: true})
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --trace") {
 		t.Fatalf("expected direct trace conflict, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", []string{"string:hello"}, nil, nil, false, "", false, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{"string:hello"}, Direct: true})
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be used with --arg") {
 		t.Fatalf("expected direct arg conflict, got %v", err)
 	}
@@ -2416,7 +2471,7 @@ func TestBuildRunOptionsRejectsDirectWithTraceOrArgs(t *testing.T) {
 
 func TestBuildRunOptionsRejectsDirectWithDiagnostic(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, true, false, true, true, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Direct: true, Diagnostic: true, DiagnosticExplicit: true})
 	if err == nil || !strings.Contains(err.Error(), "--gui-compile-errors") {
 		t.Fatalf("expected direct diagnostic conflict, got %v", err)
 	}
@@ -2424,7 +2479,7 @@ func TestBuildRunOptionsRejectsDirectWithDiagnostic(t *testing.T) {
 
 func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForDirect(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, true, false, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Direct: true, Diagnostic: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2441,7 +2496,7 @@ func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForDirect(t *testing.T) {
 
 func TestBuildRunOptionsAllowsFastDiagnostic(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, false, true, true, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Fast: true, Diagnostic: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2452,7 +2507,7 @@ func TestBuildRunOptionsAllowsFastDiagnostic(t *testing.T) {
 
 func TestBuildRunOptionsAllowsDirectWhenGUICompileErrorsOptOutIsSet(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, true, false, true, false, true, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Direct: true, Diagnostic: true, GUICompileErrors: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2469,7 +2524,7 @@ func TestBuildRunOptionsAllowsDirectWhenGUICompileErrorsOptOutIsSet(t *testing.T
 
 func TestBuildRunOptionsWithUIStreamEnablesRedactedStreamByDefault(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptionsWithUIStream(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval, true)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", UIStream: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2483,7 +2538,7 @@ func TestBuildRunOptionsWithUIStreamEnablesRedactedStreamByDefault(t *testing.T)
 
 func TestBuildRunOptionsWithUIStreamRejectsDirect(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptionsWithUIStream(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, true, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval, true)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Direct: true, UIStream: true})
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --ui-stream") {
 		t.Fatalf("expected direct ui-stream conflict, got %v", err)
 	}
@@ -2663,26 +2718,36 @@ func TestRunHeadlessPreflightRejectsGUIBoundariesBeforeExcel(t *testing.T) {
 }
 
 func TestRunHeadlessPreflightRejectsFullyQualifiedRawDialogsBeforeExcel(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default()
-	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
-		t.Fatal(err)
-	}
-	src := filepath.Join(dir, "src", "modules")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := "Option Explicit\nPublic Sub Run()\n  Dim decision As VbMsgBoxResult\n  decision = VBA.Interaction.MsgBox(\"stop\")\nEnd Sub\n"
-	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range []struct {
+		name string
+		expr string
+	}{
+		{name: "msgbox", expr: `VBA.Interaction.MsgBox("stop")`},
+		{name: "inputbox", expr: `VBA.Interaction.InputBox("name?")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.Default()
+			if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+				t.Fatal(err)
+			}
+			src := filepath.Join(dir, "src", "modules")
+			if err := os.MkdirAll(src, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := "Option Explicit\nPublic Sub Run()\n  Dim value As Variant\n  value = " + tc.expr + "\nEnd Sub\n"
+			if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	a := &app{cwd: dir}
-	root := a.rootCommand()
-	root.SetArgs([]string{"--json", "run", "Main.Run", "--headless"})
-	err := root.Execute()
-	if err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("expected validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+			a := &app{cwd: dir}
+			root := a.rootCommand()
+			root.SetArgs([]string{"--json", "run", "Main.Run", "--headless"})
+			err := root.Execute()
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("expected validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+			}
+		})
 	}
 }
 
@@ -2936,7 +3001,7 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.literal, func(t *testing.T) {
-			_, err := buildRunOptions(cfg, "Main.Run", "", []string{tt.literal}, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+			_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{tt.literal}})
 			if err == nil {
 				t.Fatalf("expected %q to fail", tt.literal)
 			}
@@ -2949,19 +3014,19 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 
 func TestBuildRunOptionsRejectsMalformedUIResponses(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptions(cfg, "Main.Run", "", nil, []string{"missing-delimiter"}, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"missing-delimiter"}})
 	if err == nil || !strings.Contains(err.Error(), "expected id=value") {
 		t.Fatalf("expected malformed msgbox response error, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", nil, []string{"confirm-save=maybe"}, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"confirm-save=maybe"}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported msgbox result") {
 		t.Fatalf("expected unsupported msgbox result error, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", nil, []string{"confirm-save=yes", "confirm-save=no"}, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", MsgBox: []string{"confirm-save=yes", "confirm-save=no"}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate dialog id") {
 		t.Fatalf("expected duplicate dialog id error, got %v", err)
 	}
-	_, err = buildRunOptions(cfg, "Main.Run", "", nil, nil, []string{"customer name=John", "customer-name=Jane"}, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, false, defaultKeepaliveInterval)
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", InputBox: []string{"customer name=John", "customer-name=Jane"}})
 	if err == nil || !strings.Contains(err.Error(), "collides with") {
 		t.Fatalf("expected normalized inputbox collision error, got %v", err)
 	}
@@ -2969,7 +3034,7 @@ func TestBuildRunOptionsRejectsMalformedUIResponses(t *testing.T) {
 
 func TestBuildRunOptionsEnablesKeepalive(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptions(cfg, "Main.Run", "", nil, nil, nil, false, "", false, false, false, false, false, false, false, false, false, 5*time.Minute, true, 3*time.Second)
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Keepalive: true, KeepaliveInterval: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

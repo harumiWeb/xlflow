@@ -561,6 +561,10 @@ Private Function ResolveInputResponse(ByVal Id As String, Optional ByVal Default
 	Exit Function
 
 UseDefault:
+	If Len(DefaultValue) = 0 Then
+		ResponseSource = "error"
+		Err.Raise xlflowErrMissingInputResponse, "XlflowUI.InputBox", "Missing scripted InputBox response for dialog id '" & Id & "'."
+	End If
 	ResponseSource = "default"
 	ResolveInputResponse = DefaultValue
 End Function

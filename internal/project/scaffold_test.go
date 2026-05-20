@@ -216,6 +216,8 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 		"If XlflowRuntime.IsHeadless() Then",
 		"EmitHeadlessUIEvent \"msgbox\"",
 		"EmitHeadlessUIEvent \"inputbox\"",
+		"If Len(DefaultValue) = 0 Then",
+		"Err.Raise xlflowErrMissingInputResponse, \"XlflowUI.InputBox\", \"Missing scripted InputBox response",
 		"Private Function ResolveStreamHelperMacro() As String",
 		"Private Function JsonEscape(ByVal value As String) As String",
 		`ThisWorkbook.Names(BuildResponseName(Kind, Id)).RefersTo`,

@@ -54,7 +54,8 @@ End Sub
 	}
 	foundBoundaryMetadata := false
 	foundDisableHint := false
-	foundDialogWrapperHint := false
+	foundMsgBoxWrapperHint := false
+	foundInputBoxWrapperHint := false
 	for _, issue := range issues {
 		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
 			foundBoundaryMetadata = true
@@ -62,8 +63,11 @@ End Sub
 		if issue.Code == "VB007" && strings.Contains(issue.Message, "[lint].forbid_interactive_input = false") {
 			foundDisableHint = true
 		}
-		if issue.Code == "VB007" && (issue.Symbol == "MsgBox" || issue.Symbol == "InputBox") && strings.Contains(issue.Suggestion, "XlflowUI") && strings.Contains(issue.Message, "XlflowUI") {
-			foundDialogWrapperHint = true
+		if issue.Code == "VB007" && issue.Symbol == "MsgBox" && strings.Contains(issue.Suggestion, "XlflowUI") && strings.Contains(issue.Message, "XlflowUI") {
+			foundMsgBoxWrapperHint = true
+		}
+		if issue.Code == "VB007" && issue.Symbol == "InputBox" && strings.Contains(issue.Suggestion, "XlflowUI") && strings.Contains(issue.Message, "XlflowUI") {
+			foundInputBoxWrapperHint = true
 		}
 	}
 	if !foundBoundaryMetadata {
@@ -72,8 +76,11 @@ End Sub
 	if !foundDisableHint {
 		t.Fatalf("expected VB007 to explain how to disable interactive-input lint: %+v", issues)
 	}
-	if !foundDialogWrapperHint {
-		t.Fatalf("expected VB007 to recommend XlflowUI for raw MsgBox/InputBox usage: %+v", issues)
+	if !foundMsgBoxWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw MsgBox usage: %+v", issues)
+	}
+	if !foundInputBoxWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw InputBox usage: %+v", issues)
 	}
 }
 

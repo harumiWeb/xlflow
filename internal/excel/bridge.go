@@ -1252,6 +1252,12 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	script, cleanup, err := scriptPath(r.RootDir, commandName)
 	if err != nil {
 		env = output.Failure(commandName, output.Error{Code: "script_not_found", Message: err.Error(), Source: "xlflow"})
+		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
+			env.UI = mergeUIResult(nil, uiEvents)
+			if uiStreamErr != nil {
+				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+			}
+		}
 		return env, output.ExitEnvironment, nil
 	}
 	if cleanup != nil {

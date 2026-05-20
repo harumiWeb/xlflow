@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--ui-stream] [--session] [--keepalive]
+xlflow test [--filter <pattern>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--ui-stream] [--session] [--keepalive] [--json]
 ```
 
 ## Options and Arguments

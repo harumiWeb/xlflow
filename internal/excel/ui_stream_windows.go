@@ -164,11 +164,11 @@ func formatUIStreamEvent(event map[string]any) string {
 	if len(event) == 0 {
 		return ""
 	}
-	kind := stringifyUIStreamField(event, "kind")
-	id := stringifyUIStreamField(event, "dialog_id")
-	source := stringifyUIStreamField(event, "response_source")
-	result := stringifyUIStreamField(event, "resolved_result")
-	value := stringifyUIStreamField(event, "resolved_value")
+	kind := escapeUIStreamToken(stringifyUIStreamField(event, "kind"))
+	id := escapeUIStreamToken(stringifyUIStreamField(event, "dialog_id"))
+	source := escapeUIStreamToken(stringifyUIStreamField(event, "response_source"))
+	result := escapeUIStreamToken(stringifyUIStreamField(event, "resolved_result"))
+	value := escapeUIStreamToken(stringifyUIStreamField(event, "resolved_value"))
 	if value != "" && truthyUIStreamField(event, "redacted") {
 		value = "[redacted]"
 	}
@@ -189,6 +189,30 @@ func formatUIStreamEvent(event map[string]any) string {
 		parts = append(parts, "value="+value)
 	}
 	return strings.Join(parts, " ")
+}
+
+func escapeUIStreamToken(value string) string {
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\n':
+			builder.WriteString(`\n`)
+		case '\r':
+			builder.WriteString(`\r`)
+		case '\t':
+			builder.WriteString(`\t`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&builder, `\\x%02X`, r)
+				continue
+			}
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 func stringifyUIStreamField(event map[string]any, key string) string {
