@@ -206,7 +206,9 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowUI"`,
 		"Public Function MsgBox(ByVal Id As String, ByVal Prompt As String",
+		"Optional ByVal DefaultResponse As String = \"\"",
 		"Public Function InputBox(ByVal Id As String, ByVal Prompt As String",
+		"Optional ByVal DefaultValue As String = \"\"",
 		"ValidateDialogId Id, \"XlflowUI.MsgBox\"",
 		"ValidateDialogId Id, \"XlflowUI.InputBox\"",
 		"Private Const xlflowErrInvalidDialogId As Long",

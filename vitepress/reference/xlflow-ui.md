@@ -18,6 +18,8 @@ Raw `MsgBox` and `InputBox` calls block unattended Excel automation. `XlflowUI` 
 
 This lets one workbook support both autonomous agent workflows and normal Excel users.
 
+`DefaultResponse` and `DefaultValue` are workbook-side fallbacks used when xlflow does not receive a scripted `--msgbox` or `--inputbox` value for that dialog id.
+
 ## VBA Contract
 
 Recent `xlflow new` scaffolds include `src/modules/XlflowUI.bas` with these wrappers:

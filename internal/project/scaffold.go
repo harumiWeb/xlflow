@@ -467,29 +467,39 @@ Private Const xlflowErrInvalidDialogId As Long = xlflowResponseErrorBase + 1
 Private Const xlflowErrInvalidMsgBoxResponse As Long = xlflowResponseErrorBase + 2
 Private Const xlflowErrMissingInputResponse As Long = xlflowResponseErrorBase + 3
 
-Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "") As VbMsgBoxResult
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "", Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
 	ValidateDialogId Id, "XlflowUI.MsgBox"
 	If XlflowRuntime.IsHeadless() Then
-		MsgBox = ResolveMsgBoxResponse(Id)
+		MsgBox = ResolveMsgBoxResponse(Id, DefaultResponse)
 		Exit Function
 	End If
 
 	MsgBox = VBA.Interaction.MsgBox(Prompt, Buttons, Title)
 End Function
 
-Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "") As String
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "", Optional ByVal DefaultValue As String = "") As String
 	ValidateDialogId Id, "XlflowUI.InputBox"
 	If XlflowRuntime.IsHeadless() Then
-		InputBox = ResolveInputResponse(Id)
+		InputBox = ResolveInputResponse(Id, DefaultValue)
 		Exit Function
 	End If
 
 	InputBox = VBA.Interaction.InputBox(Prompt, Title, Default)
 End Function
 
-Private Function ResolveMsgBoxResponse(ByVal Id As String) As VbMsgBoxResult
+Private Function ResolveMsgBoxResponse(ByVal Id As String, Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
 	Dim response As String
+	On Error GoTo UseDefault
 	response = LCase$(Trim$(ReadResponseValue("msgbox", Id)))
+	GoTo Resolve
+
+UseDefault:
+	If Len(Trim$(DefaultResponse)) = 0 Then
+		Err.Raise xlflowErrInvalidMsgBoxResponse, "XlflowUI.MsgBox", "Missing scripted MsgBox response for dialog id '" & Id & "'."
+	End If
+	response = LCase$(Trim$(DefaultResponse))
+
+Resolve:
 
 	Select Case response
 		Case "abort"
@@ -511,8 +521,13 @@ Private Function ResolveMsgBoxResponse(ByVal Id As String) As VbMsgBoxResult
 	End Select
 End Function
 
-Private Function ResolveInputResponse(ByVal Id As String) As String
+Private Function ResolveInputResponse(ByVal Id As String, Optional ByVal DefaultValue As String = "") As String
+	On Error GoTo UseDefault
 	ResolveInputResponse = ReadResponseValue("input", Id)
+	Exit Function
+
+UseDefault:
+	ResolveInputResponse = DefaultValue
 End Function
 
 Private Function ReadResponseValue(ByVal Kind As String, ByVal Id As String) As String

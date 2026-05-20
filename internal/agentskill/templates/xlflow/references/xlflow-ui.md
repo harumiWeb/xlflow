@@ -29,6 +29,8 @@ That means the same workbook code can be used by:
 - xlflow normalizes ids to lowercase ASCII letters and digits joined by `_` for workbook-marker lookup.
 - Do not create ids that normalize to the same value, such as `confirm save` and `confirm-save`.
 - Keep ids semantic and stable across refactors so test fixtures and agent prompts remain reusable.
+- `DefaultResponse` is the workbook-side fallback when no `--msgbox` value is supplied for a headless run or test.
+- `DefaultValue` is the workbook-side fallback when no `--inputbox` value is supplied for a headless run or test.
 
 ## CLI Contract
 

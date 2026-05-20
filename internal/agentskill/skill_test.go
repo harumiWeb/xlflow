@@ -43,6 +43,8 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"[references/forms.md](references/forms.md)",
 		"[references/xlflow-ui.md](references/xlflow-ui.md)",
 		"XlflowUI.MsgBox",
+		"DefaultResponse",
+		"DefaultValue",
 		"--msgbox",
 		"--inputbox",
 		"Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json`",
