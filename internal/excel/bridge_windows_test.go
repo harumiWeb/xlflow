@@ -80,6 +80,12 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 		_ = session.Close()
 		t.Fatal(err)
 	}
+	events := waitForUIStreamEvents(session, 1, 2*time.Second)
+	if len(events) != 1 {
+		_ = conn.Close()
+		_ = session.Close()
+		t.Fatalf("events = %#v, want 1 event", events)
+	}
 	closed := make(chan error, 1)
 	go func() {
 		closed <- session.Close()
@@ -96,10 +102,7 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if events := session.Events(); len(events) != 1 {
-		t.Fatalf("events = %#v, want 1 event", events)
-	}
-	if events := session.Events(); events[0]["dialog_id"] != "hang-check" {
+	if events[0]["dialog_id"] != "hang-check" {
 		t.Fatalf("dialog_id = %#v, want hang-check", events[0]["dialog_id"])
 	}
 }
