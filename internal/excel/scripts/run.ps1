@@ -16,6 +16,8 @@ param(
   [string]$MsgBoxResponsesJSON = "",
   [string]$InputResponsesJSON = "",
   [string]$FileDialogResponsesJSON = "",
+  [string]$DebugStreamEnabled = "false",
+  [string]$DebugStreamPipeName = "",
   [string]$UIStreamEnabled = "false",
   [string]$UIStreamRedactInput = "true",
   [string]$UIStreamPipeName = "",
@@ -163,7 +165,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
-  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -FileDialogResponsesJSON $FileDialogResponsesJSON -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -FileDialogResponsesJSON $FileDialogResponsesJSON -DebugStreamEnabled $DebugStreamEnabled -DebugStreamPipeName $DebugStreamPipeName -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
   if ($null -ne $openResult.open_dialog -and [bool]$openResult.open_dialog.found) {
     Set-XlflowVBADialogFailure -ErrorCode "macro_failed" -FallbackSource "Excel" -FallbackNumber 0 -FallbackLine 0 -Dialog $openResult.open_dialog -Selection $openResult.open_selection
     $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
@@ -193,7 +195,8 @@ try {
     }
     $currentPhase = "invoke_macro"
     $startedAt = Get-Date
-    $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($MacroName) } -DialogKind "any_vba" -CaptureDialogs ([bool]$suppressModalErrors)
+    $directMacroName = "'" + [string]$workbook.Name + "'!" + $MacroName
+    $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($directMacroName) } -DialogKind "any_vba" -CaptureDialogs ([bool]$suppressModalErrors)
     $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
     if (-not [bool]$invokeResult.dialog.found -and [bool]$suppressModalErrors -and $null -ne $invokeResult.exception) {
       $pendingDialog = Find-XlflowPendingVBADialog -Excel $excel -Workbook $workbook -CaptureDialogs $true

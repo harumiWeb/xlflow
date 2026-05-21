@@ -58,12 +58,18 @@ type UIStreamOptions struct {
 	RedactInput bool
 }
 
+type DebugStreamOptions struct {
+	Enabled  bool
+	PipeName string
+}
+
 type RunOptions struct {
 	Macro               string
 	WorkbookPath        string
 	Args                []RunArgument
 	UIResponses         UIResponses
 	UIStream            UIStreamOptions
+	DebugStream         DebugStreamOptions
 	Save                bool
 	SaveAs              string
 	Trace               bool
@@ -181,6 +187,7 @@ type TestOptions struct {
 	RuntimeSource string
 	UIResponses   UIResponses
 	UIStream      UIStreamOptions
+	DebugStream   DebugStreamOptions
 }
 
 const (
@@ -306,6 +313,7 @@ type ScriptResult struct {
 	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
 	Target        any           `json:"target,omitempty"`
 	Output        any           `json:"output,omitempty"`
+	Debug         any           `json:"debug,omitempty"`
 	Spec          any           `json:"spec,omitempty"`
 	Edit          any           `json:"edit,omitempty"`
 	Warnings      any           `json:"warnings,omitempty"`
@@ -518,6 +526,12 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		scriptArgs["UIStreamEnabled"] = strconv.FormatBool(true)
 		scriptArgs["UIStreamRedactInput"] = strconv.FormatBool(opts.UIStream.RedactInput)
 	}
+	if opts.DebugStream.Enabled {
+		scriptArgs["DebugStreamEnabled"] = strconv.FormatBool(true)
+		if strings.TrimSpace(opts.DebugStream.PipeName) != "" {
+			scriptArgs["DebugStreamPipeName"] = strings.TrimSpace(opts.DebugStream.PipeName)
+		}
+	}
 	if opts.Mode == "interactive" {
 		scriptArgs["Visible"] = "true"
 		scriptArgs["DisplayAlerts"] = "true"
@@ -642,6 +656,12 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 	if opts.UIStream.Enabled {
 		args["UIStreamEnabled"] = strconv.FormatBool(true)
 		args["UIStreamRedactInput"] = strconv.FormatBool(opts.UIStream.RedactInput)
+	}
+	if opts.DebugStream.Enabled {
+		args["DebugStreamEnabled"] = strconv.FormatBool(true)
+		if strings.TrimSpace(opts.DebugStream.PipeName) != "" {
+			args["DebugStreamPipeName"] = strings.TrimSpace(opts.DebugStream.PipeName)
+		}
 	}
 	return args
 }
@@ -1259,6 +1279,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	}
 
 	var uiSession *uiStreamSession
+	var debugSession *debugStreamSession
 	if enabled, _ := strconv.ParseBool(strings.TrimSpace(args["UIStreamEnabled"])); enabled {
 		uiSession, err = newUIStreamSession(opts.Keepalive.Stderr)
 		if err != nil {
@@ -1268,10 +1289,33 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		args = cloneStringMap(args)
 		args["UIStreamPipeName"] = uiSession.PipePath()
 	}
+	if enabled, _ := strconv.ParseBool(strings.TrimSpace(args["DebugStreamEnabled"])); enabled {
+		debugSession, err = newDebugStreamSession(opts.Keepalive.Stderr)
+		if err != nil {
+			env = output.Failure(commandName, output.Error{Code: "debug_stream_init_failed", Message: err.Error(), Source: "xlflow"})
+			if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
+				env.UI = mergeUIResult(nil, uiEvents)
+				if uiStreamErr != nil {
+					env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+				}
+			}
+			return env, output.ExitEnvironment, nil
+		}
+		if uiSession == nil {
+			args = cloneStringMap(args)
+		}
+		args["DebugStreamPipeName"] = debugSession.PipePath()
+	}
 
 	script, cleanup, err := scriptPath(r.RootDir, commandName)
 	if err != nil {
 		env = output.Failure(commandName, output.Error{Code: "script_not_found", Message: err.Error(), Source: "xlflow"})
+		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
+			env.Debug = mergeDebugResult(nil, debugResult)
+			if debugStreamErr != nil {
+				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+			}
+		}
 		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
 			env.UI = mergeUIResult(nil, uiEvents)
 			if uiStreamErr != nil {
@@ -1305,6 +1349,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		err = cmd.Wait()
 	}
 	stopKeepalive()
+	debugResult, debugStreamErr := closeDebugStreamSession(debugSession)
 	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded && commandName == "run" {
@@ -1318,6 +1363,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
 			}
+			if debugStreamErr != nil {
+				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+			}
+			env.Debug = mergeDebugResult(nil, debugResult)
 			if uiStreamErr != nil {
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
@@ -1330,6 +1379,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			message = stderr.String()
 		}
 		env = output.Failure(commandName, output.Error{Code: "script_failed", Message: message, Source: "powershell"})
+		if debugStreamErr != nil {
+			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+		}
+		env.Debug = mergeDebugResult(nil, debugResult)
 		if uiStreamErr != nil {
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
@@ -1371,6 +1424,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Trace = result.Trace
 	env.Runtime = result.Runtime
 	env.GUIBoundaries = result.GUIBoundaries
+	env.Debug = mergeDebugResult(result.Debug, debugResult)
 	env.UI = mergeUIResult(result.UI, uiEvents)
 	env.Session = result.Session
 	env.Runner = result.Runner
@@ -1379,6 +1433,9 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.RunDiagnostic = result.RunDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
+	if debugStreamErr != nil {
+		env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+	}
 	env.Spec = result.Spec
 	env.Edit = result.Edit
 	env.Warnings = result.Warnings
@@ -1437,6 +1494,95 @@ func mergeUIResult(existing any, streamed []map[string]any) any {
 	return merged
 }
 
+func mergeDebugResult(existing any, streamed any) any {
+	if streamed == nil {
+		return existing
+	}
+	streamedMap, ok := streamed.(map[string]any)
+	if !ok {
+		return existing
+	}
+	if existing == nil {
+		return streamedMap
+	}
+	existingMap, ok := existing.(map[string]any)
+	if !ok {
+		return streamedMap
+	}
+	merged := make(map[string]any, len(existingMap)+len(streamedMap))
+	for k, v := range existingMap {
+		merged[k] = v
+	}
+	for k, v := range streamedMap {
+		merged[k] = v
+	}
+	prior := debugEventList(merged["events"])
+	additional := debugEventList(streamedMap["events"])
+	if len(prior) > 0 || len(additional) > 0 {
+		combined := make([]map[string]any, 0, len(prior)+len(additional))
+		combined = append(combined, prior...)
+		combined = append(combined, additional...)
+		merged["events"] = combined
+	}
+	count := len(debugEventList(merged["events"]))
+	if n, ok := numberValueFromAny(existingMap["count"]); ok && int(n) > count {
+		count = int(n)
+	}
+	if n, ok := numberValueFromAny(streamedMap["count"]); ok && int(n) > count {
+		count = int(n)
+	}
+	merged["count"] = count
+	if truthyValue(existingMap["truncated"]) || truthyValue(streamedMap["truncated"]) {
+		merged["truncated"] = true
+	}
+	return merged
+}
+
+func numberValueFromAny(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float32:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	default:
+		return 0, false
+	}
+}
+
+func truthyValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func debugEventList(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if event, ok := item.(map[string]any); ok {
+				result = append(result, event)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 func closeUIStreamSession(session *uiStreamSession) ([]map[string]any, error) {
 	if session == nil {
 		return nil, nil
@@ -1445,6 +1591,16 @@ func closeUIStreamSession(session *uiStreamSession) ([]map[string]any, error) {
 		return session.Events(), err
 	}
 	return session.Events(), nil
+}
+
+func closeDebugStreamSession(session *debugStreamSession) (any, error) {
+	if session == nil {
+		return nil, nil
+	}
+	if err := session.Close(); err != nil {
+		return session.Result(), err
+	}
+	return session.Result(), nil
 }
 
 func startKeepalive(commandName string, opts CommandOptions) func() {

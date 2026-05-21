@@ -2596,9 +2596,23 @@ func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForDirect(t *testing.T) {
 	}
 }
 
-func TestBuildRunOptionsAllowsFastDiagnostic(t *testing.T) {
+func TestBuildRunOptionsAutoDisablesDefaultDiagnosticForFast(t *testing.T) {
 	cfg := config.Default()
 	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Fast: true, Diagnostic: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Fast {
+		t.Fatalf("fast = false, want true: %#v", opts)
+	}
+	if opts.Diagnostic {
+		t.Fatalf("diagnostic = true, want false for default fast run: %#v", opts)
+	}
+}
+
+func TestBuildRunOptionsAllowsExplicitFastDiagnostic(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Fast: true, Diagnostic: true, DiagnosticExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2635,6 +2649,9 @@ func TestBuildRunOptionsWithUIStreamEnablesRedactedStreamByDefault(t *testing.T)
 	}
 	if !opts.UIStream.RedactInput {
 		t.Fatalf("UIStream.RedactInput = false, want true: %#v", opts)
+	}
+	if !opts.DebugStream.Enabled {
+		t.Fatalf("DebugStream.Enabled = false, want true: %#v", opts)
 	}
 }
 

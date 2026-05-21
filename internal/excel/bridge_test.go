@@ -712,6 +712,24 @@ func TestBuildRunScriptArgsPassesUIStreamOptions(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesDebugStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:       "Main.Run",
+		DebugStream: DebugStreamOptions{Enabled: true, PipeName: `\\.\pipe\xlflow-debug-test`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["DebugStreamEnabled"] != "true" {
+		t.Fatalf("DebugStreamEnabled = %q, want true", args["DebugStreamEnabled"])
+	}
+	if args["DebugStreamPipeName"] != `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("DebugStreamPipeName = %q, want debug pipe name", args["DebugStreamPipeName"])
+	}
+}
+
 func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -754,6 +772,18 @@ func TestBuildTestScriptArgsPassesUIStreamOptions(t *testing.T) {
 	}
 	if args["UIStreamRedactInput"] != "true" {
 		t.Fatalf("UIStreamRedactInput = %q, want true", args["UIStreamRedactInput"])
+	}
+}
+
+func TestBuildTestScriptArgsPassesDebugStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{DebugStream: DebugStreamOptions{Enabled: true, PipeName: `\\.\pipe\xlflow-debug-test`}})
+	if args["DebugStreamEnabled"] != "true" {
+		t.Fatalf("DebugStreamEnabled = %q, want true", args["DebugStreamEnabled"])
+	}
+	if args["DebugStreamPipeName"] != `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("DebugStreamPipeName = %q, want debug pipe name", args["DebugStreamPipeName"])
 	}
 }
 

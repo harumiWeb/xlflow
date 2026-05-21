@@ -261,6 +261,45 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldCreatesDebugHelper(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowDebug.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{
+		`Attribute VB_Name = "XlflowDebug"`,
+		"XlflowDebug mirrors workbook-side debug output to the terminal during xlflow runs",
+		"Public Sub Log(ParamArray Parts() As Variant)",
+		"Debug.Print message",
+		"Debug.Print",
+		"EmitDebugEvent message",
+		`Private Const xlflowDebugPipeName As String = "__XLFLOW_DEBUG_PIPE__"`,
+		"JsonProperty(\"event\", \"debug_log\")",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\")",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName())",
+		"ResolveDebugPipeName()",
+		`ThisWorkbook.Names(Name).RefersTo`,
+		"CreateFileW",
+		"WriteFile",
+		"CloseHandle",
+		"StringifyValue(ByVal Value As Variant)",
+		"[Object ",
+		"[Array]",
+		"[Empty]",
+		"[Null]",
+		"[Unsupported Variant]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug helper should contain %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestNewScaffoldRuntimeHelperLintsCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
@@ -300,6 +339,27 @@ func TestNewScaffoldUIHelperLintsCleanly(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("UI helper should lint cleanly: %+v", issues)
+	}
+}
+
+func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	debugPath := filepath.Join(dir, "src", "modules", "XlflowDebug.bas")
+	issues, err := lint.Linter{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(path) == filepath.Clean(debugPath)
+		},
+	}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("debug helper should lint cleanly: %+v", issues)
 	}
 }
 

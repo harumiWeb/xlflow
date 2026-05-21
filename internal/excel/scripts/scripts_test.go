@@ -1878,6 +1878,7 @@ func TestRunScriptWatchesAnyVBADialogDuringInvoke(t *testing.T) {
 		`Set-XlflowError -Result $result -Code "vba_compile_failed"`,
 		"function Find-XlflowPendingVBADialog",
 		`CaptureOpenVBADialogs $SuppressModalErrors`,
+		`$directMacroName = "'" + [string]$workbook.Name + "'!" + $MacroName`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("run.ps1 missing %q:\n%s", want, text)
@@ -2203,6 +2204,37 @@ func TestRunScriptRestoresRuntimeMarkersBeforePersistingWorkbook(t *testing.T) {
 		if restoreIndex == -1 || saveIndex == -1 || restoreIndex > saveIndex {
 			t.Fatalf("run.ps1 should restore runtime markers before persistence restore=%q save=%q:\n%s", want.restore, want.save, text)
 		}
+	}
+}
+
+func TestCommonScriptTracksDebugStreamState(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $state = Start-XlflowRuntimeInjection -Workbook $null -Result $null -Mode 'headless' -DebugStreamEnabled 'true' -DebugStreamPipeName '\\\\.\\pipe\\xlflow-debug-test'; [ordered]@{ enabled = [bool]$state.debug_stream_enabled; pipe = [string]$state.debug_stream_pipe_name; tracked = $state.names.Contains('__XLFLOW_DEBUG_PIPE__') } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("common.ps1 debug stream state check failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Enabled bool   `json:"enabled"`
+		Pipe    string `json:"pipe"`
+		Tracked bool   `json:"tracked"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse debug stream state output: %v\n%s", err, out)
+	}
+	if !got.Enabled {
+		t.Fatal("debug stream state should be enabled")
+	}
+	if got.Pipe != `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("debug stream pipe = %q, want debug pipe name", got.Pipe)
+	}
+	if !got.Tracked {
+		t.Fatal("debug stream defined name should be tracked for restore")
 	}
 }
 
