@@ -1,3 +1,63 @@
+# Headless File Dialog Wrapper Spec
+
+## Goal
+
+Extend the existing XlflowUI headless dialog path so file-selection flows can run unattended through explicit wrappers, while raw `Application.*` file dialog APIs remain blocked by GUI-boundary preflight.
+
+## Contract
+
+- New scaffolded `XlflowUI.bas` wrappers provide headless-compatible file dialog entrypoints instead of making raw `Application.GetOpenFilename`, `Application.GetSaveAsFilename`, or `Application.FileDialog(...)` directly headless-safe.
+- Raw `Application.GetOpenFilename`, `Application.GetSaveAsFilename`, and `Application.FileDialog` remain `VB007` / `gui_boundary_detected` findings in headless runs.
+- `xlflow run` and `xlflow test` accept a repeated `--filedialog <kind>:<dialog-id>=<value>` flag.
+- Supported `kind` values are `get-open`, `file-open`, `save-as`, and `folder`.
+- Dialog ids use the same normalization and collision rules as `--msgbox` / `--inputbox`.
+- Repeating the same `kind:id` pair accumulates ordered selections for open-style dialogs.
+- `@cancel` is the explicit scripted cancel token and cannot be combined with path values for the same dialog.
+- `save-as` and `folder` reject multiple scripted values before Excel starts.
+- `get-open` and `file-open` accept repeated scripted values at the CLI layer; wrapper calls that use `MultiSelect:=False` reject multiple scripted values when the VBA wrapper resolves the response.
+- Headless UI events expose file-dialog results in structured `ui.events` output and realtime `--ui-stream` stderr summaries.
+
+## VBA Contract
+
+`XlflowUI.bas` adds these public wrappers:
+
+```vb
+Public Function GetOpenFilename(ByVal Id As String, Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
+Public Function FileDialogOpen(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
+Public Function GetSaveAsFilename(ByVal Id As String, Optional ByVal InitialFileName As String = "", Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal DefaultValue As Variant) As Variant
+Public Function FolderPicker(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal InitialPath As String = "", Optional ByVal DefaultValue As Variant) As Variant
+```
+
+- All wrappers return `Variant` so they can preserve Excel-compatible interactive behavior while representing headless single-path, multi-path, and explicit-cancel results.
+- In interactive mode, wrappers delegate to the corresponding native Excel API.
+- In headless-like modes, wrappers resolve scripted values from xlflow-injected workbook markers keyed by normalized dialog id and kind.
+- Explicit cancel returns `False`.
+- Single-select wrappers return a `String` path.
+- Multi-select wrappers return a one-dimensional `Variant` array of `String` paths in the order provided by CLI fixtures.
+- Missing scripted responses remain deterministic XlflowUI-owned errors unless a wrapper-specific `DefaultValue` is supplied.
+
+## CLI / Transport Contract
+
+- `--filedialog` literals use `kind:id=value`.
+- `value` is an opaque path string except for reserved `@cancel`.
+- JSON transport between Go and PowerShell uses a dedicated `FileDialogResponsesJSON` payload, not the existing MsgBox/InputBox scalar maps.
+- Each encoded dialog response includes `kind`, normalized `dialog_id`, ordered `values`, and `cancelled` state.
+- Workbook defined names continue to be the runtime marker mechanism; the new payload only changes how file-dialog values are encoded and decoded.
+
+## Output Contract
+
+- `ui.events` for file dialogs may include `kind`, `dialog_id`, `response_source`, `cancelled`, `resolved_path`, `resolved_paths`, `error`, and `runtime_mode`.
+- Human-readable UI summaries should keep single-select dialogs compact and summarize multi-select dialogs by count plus a short preview.
+
+## Verification
+
+- `go test ./internal/cli -run "FileDialog|UI|RunOptions|Test"`
+- `go test ./internal/excel -run "FileDialog|UI|RunScriptArgs|TestScriptArgs"`
+- `go test ./internal/excel/scripts -run "FileDialog|UI|RuntimeInjection"`
+- `go test ./internal/project -run "FileDialog|UI"`
+- `go test ./internal/gui ./internal/lint ./internal/output`
+- Windows Excel COM E2E in `tmp_workspaces` covering single-select open, multi-select open, save-as, folder picker, and explicit cancel.
+
 # winget Release Publishing Spec
 
 ## Goal

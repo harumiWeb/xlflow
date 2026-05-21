@@ -194,6 +194,27 @@ function Get-XlflowUIResponseDefinedName {
   return "__XLFLOW_UI_" + $normalizedKind.ToUpperInvariant() + "_" + $normalizedId + "__"
 }
 
+function Get-XlflowFileDialogResponseDefinedName {
+  param(
+    [string]$Kind,
+    [string]$Id
+  )
+
+  $normalizedKind = ([string]$Kind).Trim().ToLowerInvariant()
+  switch ($normalizedKind) {
+    "get-open" { $kindToken = "GET_OPEN" }
+    "file-open" { $kindToken = "FILE_OPEN" }
+    "save-as" { $kindToken = "SAVE_AS" }
+    "folder" { $kindToken = "FOLDER" }
+    default { throw "unsupported xlflow file dialog kind: $Kind" }
+  }
+  $normalizedId = ConvertTo-XlflowUIResponseId -Value $Id
+  if ([string]::IsNullOrWhiteSpace($normalizedId)) {
+    throw "xlflow file dialog response id cannot be empty"
+  }
+  return "__XLFLOW_UI_FILEDIALOG_" + $kindToken + "_" + $normalizedId + "__"
+}
+
 function ConvertFrom-XlflowUIResponsesJson {
   param([string]$Json)
 
@@ -211,6 +232,39 @@ function ConvertFrom-XlflowUIResponsesJson {
     $responses[[string]$property.Name] = [string]$property.Value
   }
   return $responses
+}
+
+function ConvertFrom-XlflowFileDialogResponsesJson {
+  param([string]$Json)
+
+  if ([string]::IsNullOrWhiteSpace([string]$Json)) {
+    return @()
+  }
+  $decodedBytes = [System.Convert]::FromBase64String([string]$Json)
+  $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
+  $parsed = ConvertFrom-Json -InputObject $decodedJson
+  if ($null -eq $parsed) {
+    return @()
+  }
+  return @($parsed)
+}
+
+function ConvertTo-XlflowFileDialogMarkerValue {
+  param($Response)
+
+  if ($null -eq $Response) {
+    return ""
+  }
+  if ([bool]$Response.cancelled) {
+    return "@cancel"
+  }
+  $values = New-Object System.Collections.Generic.List[string]
+  foreach ($value in @($Response.values)) {
+    if ($null -ne $value) {
+      $values.Add([string]$value) | Out-Null
+    }
+  }
+  return [string]::Join("`n", $values.ToArray())
 }
 
 function Get-XlflowWorkbookDefinedNameState {
@@ -329,6 +383,7 @@ function Start-XlflowRuntimeInjection {
     [string]$Source = "default",
     [string]$MsgBoxResponsesJSON = "",
     [string]$InputResponsesJSON = "",
+    [string]$FileDialogResponsesJSON = "",
     [string]$UIStreamEnabled = "false",
     [string]$UIStreamPipeName = "",
     [string]$UIStreamRedactInput = "true"
@@ -337,6 +392,7 @@ function Start-XlflowRuntimeInjection {
   $modeName = Get-XlflowRuntimeModeName -Mode $Mode
   $msgBoxResponses = ConvertFrom-XlflowUIResponsesJson -Json $MsgBoxResponsesJSON
   $inputResponses = ConvertFrom-XlflowUIResponsesJson -Json $InputResponsesJSON
+  $fileDialogResponses = @(ConvertFrom-XlflowFileDialogResponsesJson -Json $FileDialogResponsesJSON)
   $uiStreamEnabled = (ConvertTo-XlflowBool $UIStreamEnabled) -and -not [string]::IsNullOrWhiteSpace([string]$UIStreamPipeName)
   $state = [ordered]@{
     applied = $false
@@ -358,6 +414,10 @@ function Start-XlflowRuntimeInjection {
   }
   foreach ($entry in $inputResponses.GetEnumerator()) {
     $name = Get-XlflowUIResponseDefinedName -Kind "input" -Id ([string]$entry.Key)
+    $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
+  }
+  foreach ($entry in $fileDialogResponses) {
+    $name = Get-XlflowFileDialogResponseDefinedName -Kind ([string]$entry.kind) -Id ([string]$entry.dialog_id)
     $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
   }
   $state.names["__XLFLOW_UI_STREAM_HELPER__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_HELPER__"
@@ -390,6 +450,9 @@ function Start-XlflowRuntimeInjection {
   }
   foreach ($entry in $inputResponses.GetEnumerator()) {
     Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name (Get-XlflowUIResponseDefinedName -Kind "input" -Id ([string]$entry.Key)) -RefersTo (Get-XlflowStringRefersTo -Value ([string]$entry.Value)) -Visible $false
+  }
+  foreach ($entry in $fileDialogResponses) {
+    Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name (Get-XlflowFileDialogResponseDefinedName -Kind ([string]$entry.kind) -Id ([string]$entry.dialog_id)) -RefersTo (Get-XlflowStringRefersTo -Value (ConvertTo-XlflowFileDialogMarkerValue -Response $entry)) -Visible $false
   }
   $state.applied = $true
 

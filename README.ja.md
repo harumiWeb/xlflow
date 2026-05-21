@@ -111,6 +111,36 @@ pull → edit → push → lint → test/run → trace → diff
 > Excel COM を使う command は、xlflow 自身が使った bridge host を top-level `bridge` に返します。
 > ただし workbook 側の VBA が別途 PowerShell を起動する場合、その host は xlflow の bridge host と一致するとは限りません。`powershell.exe` と `pwsh.exe` の差を追うときは、workbook 側で解決された実行ファイルも確認してください。
 
+## Headless dialog wrapper
+
+新しい project では、workbook 側 helper module として `src/modules/XlflowRuntime.bas`、`src/modules/XlflowUI.bas`、`src/modules/XlflowAssert.bas` が scaffold されます。
+
+- `XlflowRuntime` は `interactive` / `headless` / `ci` / `agent` / `test` の実行モード分岐に使います。
+- `XlflowUI` は `MsgBox`、`InputBox`、`Application.GetOpenFilename`、open `Application.FileDialog`、`Application.GetSaveAsFilename`、folder picker を包み、同じ VBA を対話実行と無人実行の両方で使えるようにします。
+- `XlflowAssert` は workbook 側 test で使う最小限の scalar assertion helper です。
+
+例:
+
+```vb
+Dim answer As VbMsgBoxResult
+Dim files As Variant
+
+answer = XlflowUI.MsgBox("confirm-save", "Save workbook?", vbYesNo + vbQuestion, "Orders")
+files = XlflowUI.GetOpenFilename("source-files", MultiSelect:=True)
+```
+
+無人実行では CLI から dialog response を与えます。
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --filedialog get-open:source-files=C:\temp\a.txt --filedialog get-open:source-files=C:\temp\b.txt --ui-stream --json
+```
+
+headless file dialog を Cancel 扱いにしたい場合は `@cancel` を使います。
+
+```bash
+xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
+```
+
 ---
 
 ## 動作要件

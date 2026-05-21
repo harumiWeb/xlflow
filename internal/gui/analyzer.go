@@ -40,9 +40,9 @@ var (
 )
 
 var detectors = []detector{
-	detect(`(?i)\bapplication\s*\.\s*getopenfilename\b`, "file_picker", "Application.GetOpenFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
-	detect(`(?i)\bapplication\s*\.\s*getsaveasfilename\b`, "file_picker", "Application.GetSaveAsFilename", "File picker requires human interaction.", "Pass the path with xlflow run --arg or extract a headless entrypoint that accepts a path."),
-	detect(`(?i)\bapplication\s*\.\s*filedialog\b`, "file_picker", "Application.FileDialog", "File dialog requires human interaction.", "Pass the path with xlflow run --arg or keep this code behind an interactive-only adapter."),
+	detect(`(?i)\bapplication\s*\.\s*getopenfilename\b`, "file_picker", "Application.GetOpenFilename", "File picker requires human interaction and bypasses XlflowUI.", "Replace it with XlflowUI.GetOpenFilename(\"<dialog-id>\", ...) or XlflowUI.FileDialogOpen(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
+	detect(`(?i)\bapplication\s*\.\s*getsaveasfilename\b`, "file_picker", "Application.GetSaveAsFilename", "File picker requires human interaction and bypasses XlflowUI.", "Replace it with XlflowUI.GetSaveAsFilename(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
+	detect(`(?i)\bapplication\s*\.\s*filedialog\b`, "file_picker", "Application.FileDialog", "File dialog requires human interaction and bypasses XlflowUI.", "Replace file-open and folder-picker flows with XlflowUI.FileDialogOpen(\"<dialog-id>\", ...) or XlflowUI.FolderPicker(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
 	detect(`(?i)\binputbox\s*(?:\(|")?`, "modal_dialog", "InputBox", "Raw InputBox requires human input and bypasses XlflowUI.", "Replace it with XlflowUI.InputBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --inputbox responses."),
 	detect(`(?i)\bmsgbox\s*(?:\(|")?`, "modal_dialog", "MsgBox", "Raw MsgBox blocks unattended execution and bypasses XlflowUI.", "Replace it with XlflowUI.MsgBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --msgbox responses."),
 	detect(`(?i)\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*show\b`, "user_form", "UserForm.Show", "UserForm display requires human interaction.", "Keep UserForm entrypoints interactive-only and extract core logic into parameterized procedures."),
@@ -156,7 +156,7 @@ func (a Analyzer) AnalyzeFile(path string) (boundaries []Boundary, err error) {
 		code := StripComment(scanner.Text())
 		codeWithoutStrings := detectionText(code)
 		for _, detector := range detectors {
-			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox") {
+			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox" || detector.symbol == "UserForm.Show" || detector.kind == "file_picker") {
 				continue
 			}
 			if shouldIgnoreDetectorLine(detector, code) {

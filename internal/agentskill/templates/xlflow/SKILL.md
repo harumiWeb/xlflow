@@ -1,6 +1,6 @@
 ---
 name: xlflow
-description: Use when Codex or another AI agent needs to edit, test, debug, or validate Excel VBA workbooks with xlflow. Provides the safe VBA development workflow for xlflow projects, including pull/push, lint, run, trace, test, diff, XlflowUI MsgBox/InputBox guidance, headless dialog responses, failure handling, and final reporting rules.
+description: Use when Codex or another AI agent needs to edit, test, debug, or validate Excel VBA workbooks with xlflow. Provides the safe VBA development workflow for xlflow projects, including pull/push, lint, run, trace, test, diff, XlflowUI dialog and file dialog wrapper guidance, headless dialog responses, failure handling, and final reporting rules.
 ---
 
 # xlflow Skill
@@ -23,8 +23,8 @@ Default safety rules for AI-agent work:
 - Use `xlflow form build <spec> --session --overwrite --keepalive --json` when the intended workflow is to replace an existing UserForm from spec rather than mutate it in place.
 - Use `xlflow form export-image <FormName> --out <path> --session --keepalive --json` when visual verification depends on the runtime-rendered UserForm rather than structured inspection alone. Treat it as secondary visual confirmation because the capture path is experimental; prefer `inspect form` or `form snapshot` as the authoritative shape/state source.
 - When a task depends on UserForm spec authoring or review, load [references/forms.md](references/forms.md) before choosing `inspect form`, `form snapshot`, or `form build`. It defines the persisted `xlflow.userform` schema, flat `controls` contract, overwrite safety rules, supported control types, and the best-effort versus observed-only fields that should not be treated as round-trip guarantees.
-- When a task depends on `MsgBox`, `InputBox`, or other interactive VBA prompts, load [references/xlflow-ui.md](references/xlflow-ui.md) before editing. Agent-authored dialog flows should default to `XlflowUI` wrappers with stable dialog ids so `run` and `test` can stay headless.
-- When a dialog needs a workbook-side fallback if `run` or `test` omits a scripted response, use the optional `DefaultResponse` / `DefaultValue` parameters on `XlflowUI.MsgBox` and `XlflowUI.InputBox`.
+- When a task depends on `MsgBox`, `InputBox`, file pickers, or other interactive VBA prompts, load [references/xlflow-ui.md](references/xlflow-ui.md) before editing. Agent-authored dialog flows should default to `XlflowUI` wrappers with stable dialog ids so `run` and `test` can stay headless.
+- When a dialog needs a workbook-side fallback if `run` or `test` omits a scripted response, use the optional `DefaultResponse` / `DefaultValue` parameters on `XlflowUI.MsgBox`, `XlflowUI.InputBox`, and the file dialog wrappers.
 - When headless dialog flows need realtime terminal visibility, add `--ui-stream` to `xlflow run` or `xlflow test`. It streams resolved `XlflowUI` events to stderr without breaking `--json` stdout, and InputBox values stay redacted by default.
 - Treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for UserForm design. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where embedded `.frm` code remains canonical until migration. `.frm` / `.frx` are generated Designer artifacts. After `xlflow form build`, xlflow now re-materializes those artifacts back into `src/forms/`, and `push` blocks before Excel opens when spec filename, `form.name`, `.frm` basename, or `.frm` `Attribute VB_Name` disagree.
 - Use `xlflow export-image` when verification depends on rendered appearance rather than saved workbook cell/style snapshots alone.
@@ -74,8 +74,8 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Prefer `xlflow run --headless --session --keepalive --json` when `project.entry` is correct for unattended agent work that should still use the open session.
    - Use `xlflow run <MacroName> --headless --session --keepalive --json` when you need a non-default headless entrypoint.
    - In projects scaffolded by recent xlflow versions, prefer branching on `XlflowRuntime.ModeName()` / `IsHeadless()` / `IsAgent()` / `IsTest()` instead of guessing execution context from UI state or process ancestry.
-   - When a macro or test uses `XlflowUI.MsgBox` or `XlflowUI.InputBox`, keep unattended validation headless by passing repeated `--msgbox <dialog-id=result>` and `--inputbox <dialog-id=value>` flags to `xlflow run` or `xlflow test`.
-   - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes`, plus final `ui.events` in JSON or a UI section in human output.
+   - When a macro or test uses `XlflowUI.MsgBox`, `XlflowUI.InputBox`, or `XlflowUI` file dialog wrappers, keep unattended validation headless by passing repeated `--msgbox <dialog-id=result>`, `--inputbox <dialog-id=value>`, and `--filedialog <kind>:<dialog-id>=<value>` flags to `xlflow run` or `xlflow test`.
+   - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` and `xlflow: ui kind=file-open id=source-files source=scripted value=C:\temp\a.txt | C:\temp\b.txt`, plus final `ui.events` in JSON or a UI section in human output.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
@@ -130,9 +130,9 @@ Before designing a CLI-run macro, decide how inputs are supplied:
 
 - Prefer `xlflow run <MacroName> --arg <type:value>` for user-provided paths, flags, and scalar settings.
 - Use deterministic paths, environment variables, or configuration cells only when they are part of the project contract.
-- Do not introduce raw `MsgBox` / `InputBox` in agent-authored VBA. Use `XlflowUI.MsgBox` / `XlflowUI.InputBox` with stable dialog ids and plan the matching `--msgbox` / `--inputbox` responses for headless or test runs.
+- Do not introduce raw `MsgBox`, `InputBox`, or file dialog calls in agent-authored VBA. Use `XlflowUI.MsgBox`, `XlflowUI.InputBox`, `XlflowUI.GetOpenFilename`, `XlflowUI.FileDialogOpen`, `XlflowUI.GetSaveAsFilename`, and `XlflowUI.FolderPicker` with stable dialog ids and plan the matching `--msgbox`, `--inputbox`, and `--filedialog` responses for headless or test runs.
 - Avoid other UI prompts and active-window assumptions because unattended Excel automation cannot reliably answer them.
-- When GUI behavior is required, keep the GUI entrypoint thin and extract the core logic into parameterized procedures that can run with `xlflow run --headless --arg`, or route simple dialogs through `XlflowUI`.
+- When GUI behavior is required, keep the GUI entrypoint thin and extract the core logic into parameterized procedures that can run with `xlflow run --headless --arg`, or route simple dialogs and file pickers through `XlflowUI`.
 
 ## Decision Flow
 
@@ -185,11 +185,11 @@ When the user reports a runtime failure:
 - Treat `xlflow inspect workbook|sheets|range|used-range|cell` without `--session` as disk-backed workbook readers, `xlflow inspect ... --session` as live Excel inspectors, and `xlflow inspect form` as a specialized Excel COM inspection command whose runtime mode executes against a temporary workbook copy derived from the current source workbook state.
 - When UserForms are involved, treat `pull` / `push` / `save` warnings about partial `.frm` fidelity and unsaved session state as actionable; do not review UserForm diffs until the live workbook has been saved and re-pulled.
 - Use `xlflow inspect-gui --json` when a macro may require file pickers, message boxes, UserForms, or external process launches.
-- If a headless macro still needs simple confirmation or scalar input, replace raw `MsgBox` / `InputBox` with `XlflowUI` and rerun with repeated `--msgbox` / `--inputbox` flags instead of suppressing the boundary.
+- If a headless macro still needs simple confirmation, scalar input, or file selection, replace raw dialogs with `XlflowUI` and rerun with repeated `--msgbox`, `--inputbox`, and `--filedialog` flags instead of suppressing the boundary.
 - If headless `XlflowUI` behavior itself is under investigation, rerun with `--ui-stream` before adding extra logs. Use the streamed stderr lines for realtime progress and the final `ui.events` payload or `UI` section for post-run confirmation.
 - Use `xlflow edit --session` only for development-time workbook mutations; if the final application behavior depends on the styling or layout change, move that behavior back into reproducible VBA before finalizing.
 - Use `xlflow run --headless --session --keepalive` for repeatable automation during normal development; if it reports `gui_boundary_detected`, explain that the preflight scans the configured source tree rather than the target macro call graph, then either refactor the macro or rerun with `--interactive` when a human is available.
-- If `lint` reports `VB007` for raw `MsgBox` or `InputBox`, replace them with `XlflowUI` wrappers before considering suppression. Use `[lint].forbid_interactive_input = false` only for genuinely human-only projects, and do not imply that this changes `run --headless`; headless preflight still blocks GUI boundaries.
+- If `lint` reports `VB007` for raw `MsgBox`, `InputBox`, or file dialog calls, replace them with `XlflowUI` wrappers before considering suppression. Use `[lint].forbid_interactive_input = false` only for genuinely human-only projects, and do not imply that this changes `run --headless`; headless preflight still blocks GUI boundaries.
 - Plain `xlflow run --session --keepalive --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --keepalive --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.

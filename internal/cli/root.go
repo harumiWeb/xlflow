@@ -1800,6 +1800,13 @@ var allowedMsgBoxResults = map[string]struct{}{
 	"yes":    {},
 }
 
+var allowedFileDialogKinds = map[string]struct{}{
+	"get-open":  {},
+	"file-open": {},
+	"save-as":   {},
+	"folder":    {},
+}
+
 func normalizeUIResponseID(value string) string {
 	trimmed := strings.ToLower(strings.TrimSpace(value))
 	var builder strings.Builder
@@ -1866,11 +1873,81 @@ func normalizeMsgBoxResponseToken(value string) (string, error) {
 	return trimmed, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
-	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, keepalive, keepaliveInterval, false)
+func normalizeFileDialogKind(value string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if _, ok := allowedFileDialogKinds[trimmed]; !ok {
+		return "", fmt.Errorf("unsupported filedialog kind %q", value)
+	}
+	return trimmed, nil
 }
 
-func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration, uiStream bool) (excel.RunOptions, error) {
+func parseFileDialogResponseLiterals(literals []string) ([]excel.FileDialogResponse, error) {
+	responses := make(map[string]*excel.FileDialogResponse, len(literals))
+	originalIDs := make(map[string]string, len(literals))
+	order := make([]string, 0, len(literals))
+	for _, literal := range literals {
+		parts := strings.SplitN(literal, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid --filedialog %q: expected kind:id=value", literal)
+		}
+		selector := strings.SplitN(strings.TrimSpace(parts[0]), ":", 2)
+		if len(selector) != 2 {
+			return nil, fmt.Errorf("invalid --filedialog %q: expected kind:id=value", literal)
+		}
+		kind, err := normalizeFileDialogKind(selector[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid --filedialog %q: %w", literal, err)
+		}
+		id := strings.TrimSpace(selector[1])
+		if id == "" {
+			return nil, fmt.Errorf("invalid --filedialog %q: dialog id cannot be empty", literal)
+		}
+		normalizedID := normalizeUIResponseID(id)
+		if normalizedID == "" {
+			return nil, fmt.Errorf("invalid --filedialog %q: dialog id must contain at least one ASCII letter or digit", literal)
+		}
+		key := kind + ":" + normalizedID
+		if existing, exists := originalIDs[key]; exists && existing != id {
+			return nil, fmt.Errorf("invalid --filedialog %q: dialog id %q collides with %q after normalization", literal, id, existing)
+		}
+		response, exists := responses[key]
+		if !exists {
+			response = &excel.FileDialogResponse{Kind: kind, DialogID: normalizedID}
+			responses[key] = response
+			originalIDs[key] = id
+			order = append(order, key)
+		}
+		value := parts[1]
+		if strings.TrimSpace(value) == "@cancel" {
+			if response.Cancelled || len(response.Values) > 0 {
+				return nil, fmt.Errorf("invalid --filedialog %q: @cancel cannot be combined with path values for the same dialog", literal)
+			}
+			response.Cancelled = true
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("invalid --filedialog %q: scripted path cannot be empty", literal)
+		}
+		if response.Cancelled {
+			return nil, fmt.Errorf("invalid --filedialog %q: path values cannot be combined with @cancel for the same dialog", literal)
+		}
+		response.Values = append(response.Values, value)
+		if (kind == "save-as" || kind == "folder") && len(response.Values) > 1 {
+			return nil, fmt.Errorf("invalid --filedialog %q: kind %q accepts only one scripted path", literal, kind)
+		}
+	}
+	parsed := make([]excel.FileDialogResponse, 0, len(order))
+	for _, key := range order {
+		parsed = append(parsed, *responses[key])
+	}
+	return parsed, nil
+}
+
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
+	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, keepalive, keepaliveInterval, false)
+}
+
+func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration, uiStream bool) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -1941,6 +2018,10 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 	if err != nil {
 		return excel.RunOptions{}, err
 	}
+	fileDialogResponses, err := parseFileDialogResponseLiterals(fileDialogLiterals)
+	if err != nil {
+		return excel.RunOptions{}, err
+	}
 	mode := ""
 	if headless {
 		mode = "headless"
@@ -1956,7 +2037,7 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		Macro:               macro,
 		WorkbookPath:        input,
 		Args:                args,
-		UIResponses:         excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses},
+		UIResponses:         excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses},
 		UIStream:            excel.UIStreamOptions{Enabled: uiStream, RedactInput: true},
 		Save:                save,
 		SaveAs:              saveAs,
@@ -2056,7 +2137,7 @@ func headlessGUIBoundaryLogs(cfg config.Config) []string {
 	logs := []string{
 		"Headless preflight scans the configured source tree, not the target macro call graph.",
 		"Use xlflow run --interactive if a human can operate Excel dialogs.",
-		"For simple dialogs, replace raw MsgBox/InputBox with XlflowUI wrappers and drive them with --msgbox/--inputbox.",
+		"For simple dialogs, replace raw MsgBox/InputBox/file dialog calls with XlflowUI wrappers and drive them with --msgbox/--inputbox/--filedialog.",
 		"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
 	}
 	if cfg.Lint.ForbidInteractiveInput {
@@ -2070,6 +2151,7 @@ func (a *app) runCommand() *cobra.Command {
 	var input string
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
+	var fileDialogLiterals []string
 	var save bool
 	var saveAs string
 	var trace bool
@@ -2100,9 +2182,9 @@ func (a *app) runCommand() *cobra.Command {
 			}
 			var opts excel.RunOptions
 			if uiStream {
-				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, true)
+				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, true)
 			} else {
-				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
+				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
 			}
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
@@ -2153,6 +2235,7 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, or bool:true")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
+	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
@@ -2534,6 +2617,7 @@ func (a *app) testCommand() *cobra.Command {
 	var filter string
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
+	var fileDialogLiterals []string
 	var keepalive keepaliveFlags
 	var session bool
 	var uiStream bool
@@ -2561,9 +2645,13 @@ func (a *app) testCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
 			}
+			fileDialogResponses, err := parseFileDialogResponseLiterals(fileDialogLiterals)
+			if err != nil {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
+			}
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
 				return runErr
 			})
 			if err != nil {
@@ -2575,6 +2663,7 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
+	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	addKeepaliveFlags(cmd, &keepalive)

@@ -110,6 +110,36 @@ pull → edit → push → lint → test/run → trace → diff
 > Excel COM-backed commands report the xlflow bridge host in top-level `bridge`.
 > If workbook VBA launches its own external PowerShell process, that host can still differ from xlflow's bridge host. Inspect or log the workbook-side executable when debugging `powershell.exe` vs `pwsh.exe` behavior.
 
+## Headless Dialog Wrappers
+
+New projects scaffold `src/modules/XlflowRuntime.bas`, `src/modules/XlflowUI.bas`, and `src/modules/XlflowAssert.bas` as workbook-side helper modules.
+
+- `XlflowRuntime` lets VBA branch between `interactive`, `headless`, `ci`, `agent`, and `test` execution modes.
+- `XlflowUI` wraps `MsgBox`, `InputBox`, `Application.GetOpenFilename`, open `Application.FileDialog`, `Application.GetSaveAsFilename`, and folder picker dialogs so the same VBA can run both interactively and unattended.
+- `XlflowAssert` gives basic scalar assertions for workbook-side tests.
+
+Example:
+
+```vb
+Dim answer As VbMsgBoxResult
+Dim files As Variant
+
+answer = XlflowUI.MsgBox("confirm-save", "Save workbook?", vbYesNo + vbQuestion, "Orders")
+files = XlflowUI.GetOpenFilename("source-files", MultiSelect:=True)
+```
+
+For unattended execution, script those dialog responses at the CLI:
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --filedialog get-open:source-files=C:\temp\a.txt --filedialog get-open:source-files=C:\temp\b.txt --ui-stream --json
+```
+
+Use `@cancel` when a headless file dialog should behave like the user pressed Cancel:
+
+```bash
+xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
+```
+
 ---
 
 ## Requirements
