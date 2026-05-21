@@ -6,6 +6,7 @@ param(
   [string]$RuntimeSource = "command",
   [string]$MsgBoxResponsesJSON = "",
   [string]$InputResponsesJSON = "",
+  [string]$FileDialogResponsesJSON = "",
   [string]$UIStreamEnabled = "false",
   [string]$UIStreamRedactInput = "true",
   [string]$UIStreamPipeName = "",
@@ -29,7 +30,7 @@ try {
   $workbook = $openResult.workbook
   $sessionAttached = [bool]$openResult.session_attached
   $sessionMode = [string]$openResult.session_mode
-  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
+  $runtimeState = Start-XlflowRuntimeInjection -Workbook $workbook -Result $result -Mode $RuntimeMode -Source $RuntimeSource -MsgBoxResponsesJSON $MsgBoxResponsesJSON -InputResponsesJSON $InputResponsesJSON -FileDialogResponsesJSON $FileDialogResponsesJSON -UIStreamEnabled $UIStreamEnabled -UIStreamPipeName $UIStreamPipeName -UIStreamRedactInput $UIStreamRedactInput
 
   try {
     $project = $workbook.VBProject

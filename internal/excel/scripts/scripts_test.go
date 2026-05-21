@@ -1666,7 +1666,7 @@ func TestRunScriptAcceptsDiagnosticParameter(t *testing.T) {
 }
 
 func TestRunScriptAcceptsUIResponseParameters(t *testing.T) {
-	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON"} {
+	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON", "FileDialogResponsesJSON"} {
 		t.Run(parameter, func(t *testing.T) {
 			cmd := exec.Command(
 				"pwsh",
@@ -1687,7 +1687,7 @@ func TestRunScriptAcceptsUIResponseParameters(t *testing.T) {
 }
 
 func TestTestScriptAcceptsUIResponseParameters(t *testing.T) {
-	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON"} {
+	for _, parameter := range []string{"MsgBoxResponsesJSON", "InputResponsesJSON", "FileDialogResponsesJSON"} {
 		t.Run(parameter, func(t *testing.T) {
 			cmd := exec.Command(
 				"pwsh",
@@ -1726,11 +1726,12 @@ func TestRunScriptAcceptsSuppressModalErrorsParameter(t *testing.T) {
 
 func TestCommonScriptParsesUIResponsesAndBuildsDefinedNames(t *testing.T) {
 	json64 := base64.StdEncoding.EncodeToString([]byte(`{"confirm save":"yes","customer-name":"Jane"}`))
+	fileDialogJSON64 := base64.StdEncoding.EncodeToString([]byte(`[{"kind":"get-open","dialog_id":"source_files","values":["C:\\tmp\\a.txt","C:\\tmp\\b.txt"]},{"kind":"folder","dialog_id":"target_dir","cancelled":true}]`))
 	cmd := exec.Command(
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		fmt.Sprintf(". ./common.ps1; $responses = ConvertFrom-XlflowUIResponsesJson -Json '%s'; [ordered]@{ id = (ConvertTo-XlflowUIResponseId -Value 'Confirm Save'); msgbox = (Get-XlflowUIResponseDefinedName -Kind 'msgbox' -Id 'Confirm Save'); input = (Get-XlflowUIResponseDefinedName -Kind 'input' -Id 'Customer Name'); confirm = $responses['confirm save']; customer = $responses['customer-name'] } | ConvertTo-Json -Compress", json64),
+		fmt.Sprintf(". ./common.ps1; $responses = ConvertFrom-XlflowUIResponsesJson -Json '%s'; $fileDialogs = @(ConvertFrom-XlflowFileDialogResponsesJson -Json '%s'); [ordered]@{ id = (ConvertTo-XlflowUIResponseId -Value 'Confirm Save'); msgbox = (Get-XlflowUIResponseDefinedName -Kind 'msgbox' -Id 'Confirm Save'); input = (Get-XlflowUIResponseDefinedName -Kind 'input' -Id 'Customer Name'); open = (Get-XlflowFileDialogResponseDefinedName -Kind 'get-open' -Id 'Source Files'); folder = (Get-XlflowFileDialogResponseDefinedName -Kind 'folder' -Id 'Target Dir'); confirm = $responses['confirm save']; customer = $responses['customer-name']; open_value = (ConvertTo-XlflowFileDialogMarkerValue -Response $fileDialogs[0]); folder_value = (ConvertTo-XlflowFileDialogMarkerValue -Response $fileDialogs[1]) } | ConvertTo-Json -Compress", json64, fileDialogJSON64),
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -1750,8 +1751,116 @@ func TestCommonScriptParsesUIResponsesAndBuildsDefinedNames(t *testing.T) {
 	if got["input"] != "__XLFLOW_UI_INPUT_customer_name__" {
 		t.Fatalf("input defined name = %#v", got["input"])
 	}
+	if got["open"] != "__XLFLOW_UI_FILEDIALOG_GET_OPEN_source_files__" {
+		t.Fatalf("open defined name = %#v", got["open"])
+	}
+	if got["folder"] != "__XLFLOW_UI_FILEDIALOG_FOLDER_target_dir__" {
+		t.Fatalf("folder defined name = %#v", got["folder"])
+	}
 	if got["confirm"] != "yes" || got["customer"] != "Jane" {
 		t.Fatalf("decoded responses = %#v", got)
+	}
+	if got["open_value"] != "C:\\tmp\\a.txt\nC:\\tmp\\b.txt" {
+		t.Fatalf("open marker value = %#v", got["open_value"])
+	}
+	if got["folder_value"] != "@cancel" {
+		t.Fatalf("folder marker value = %#v", got["folder_value"])
+	}
+}
+
+func TestRuntimeInjectionPreservesFileDialogMultiselectDefinedNameAcrossExcelCOM(t *testing.T) {
+	fileDialogJSON64 := base64.StdEncoding.EncodeToString([]byte(`[{"kind":"get-open","dialog_id":"source_files","values":["C:\\tmp\\a.txt","C:\\tmp\\b.txt"]}]`))
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+	skip = $false
+	skipReason = ''
+	refersTo = ''
+	decoded = ''
+	lineCount = 0
+}
+$excel = $null
+$workbook = $null
+$reopened = $null
+$path = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.xlsm')
+try {
+	. ./common.ps1
+	try {
+		$excel = New-Object -ComObject Excel.Application
+	} catch {
+		$result.skip = $true
+		$result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+		$result | ConvertTo-Json -Compress
+		exit 0
+	}
+
+	$excel.Visible = $false
+	$excel.DisplayAlerts = $false
+	$workbook = $excel.Workbooks.Add()
+	$workbook.SaveAs($path, 52)
+
+	[void](Start-XlflowRuntimeInjection -Workbook $workbook -Result $null -Mode 'headless' -FileDialogResponsesJSON '%s')
+	$workbook.Save()
+	$workbook.Close($false) | Out-Null
+	[System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
+	$workbook = $null
+
+	$reopened = $excel.Workbooks.Open($path)
+	$name = Get-XlflowFileDialogResponseDefinedName -Kind 'get-open' -Id 'source_files'
+	$definedName = $reopened.Names.Item($name)
+	$result.refersTo = [string]$definedName.RefersTo
+	$result.decoded = DecodeWorkbookDefinedName $definedName.RefersTo
+	$result.lineCount = @($result.decoded -split ([string][char]10)).Count
+	$result | ConvertTo-Json -Compress
+} finally {
+	if ($null -ne $reopened) {
+		try { $reopened.Close($false) | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($reopened) | Out-Null } catch {}
+	}
+	if ($null -ne $workbook) {
+		try { $workbook.Close($false) | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+	}
+	if ($null -ne $excel) {
+		try { $excel.Quit() | Out-Null } catch {}
+		try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+	}
+	[GC]::Collect()
+	[GC]::WaitForPendingFinalizers()
+	if (Test-Path -LiteralPath $path) {
+		Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+	}
+}`, fileDialogJSON64),
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime injection file dialog COM roundtrip failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip       bool   `json:"skip"`
+		SkipReason string `json:"skipReason"`
+		RefersTo   string `json:"refersTo"`
+		Decoded    string `json:"decoded"`
+		LineCount  int    `json:"lineCount"`
+	}
+	if err := json.Unmarshal(trailingJSONLine(out), &got); err != nil {
+		t.Fatalf("failed to parse runtime injection COM output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if !strings.Contains(got.RefersTo, `C:\tmp\a.txt`) || !strings.Contains(got.RefersTo, `C:\tmp\b.txt`) {
+		t.Fatalf("defined name refersTo = %q, want both paths", got.RefersTo)
+	}
+	if got.Decoded != "C:\\tmp\\a.txt\nC:\\tmp\\b.txt" {
+		t.Fatalf("decoded marker value = %q, want newline-delimited paths", got.Decoded)
+	}
+	if got.LineCount != 2 {
+		t.Fatalf("decoded line count = %d, want 2", got.LineCount)
 	}
 }
 

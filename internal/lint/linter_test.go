@@ -56,6 +56,9 @@ End Sub
 	foundDisableHint := false
 	foundMsgBoxWrapperHint := false
 	foundInputBoxWrapperHint := false
+	foundGetOpenWrapperHint := false
+	foundSaveAsWrapperHint := false
+	foundFileDialogWrapperHint := false
 	for _, issue := range issues {
 		if issue.Code == "VB007" && issue.Kind != "" && issue.Symbol != "" && issue.Suggestion != "" {
 			foundBoundaryMetadata = true
@@ -69,6 +72,15 @@ End Sub
 		if issue.Code == "VB007" && issue.Symbol == "InputBox" && strings.Contains(issue.Suggestion, "XlflowUI") && strings.Contains(issue.Message, "XlflowUI") {
 			foundInputBoxWrapperHint = true
 		}
+		if issue.Code == "VB007" && issue.Symbol == "Application.GetOpenFilename" && strings.Contains(issue.Suggestion, "XlflowUI.GetOpenFilename") && strings.Contains(issue.Message, "XlflowUI") {
+			foundGetOpenWrapperHint = true
+		}
+		if issue.Code == "VB007" && issue.Symbol == "Application.GetSaveAsFilename" && strings.Contains(issue.Suggestion, "XlflowUI.GetSaveAsFilename") && strings.Contains(issue.Message, "XlflowUI") {
+			foundSaveAsWrapperHint = true
+		}
+		if issue.Code == "VB007" && issue.Symbol == "Application.FileDialog" && strings.Contains(issue.Suggestion, "XlflowUI.FileDialogOpen") && strings.Contains(issue.Message, "XlflowUI") {
+			foundFileDialogWrapperHint = true
+		}
 	}
 	if !foundBoundaryMetadata {
 		t.Fatalf("expected VB007 to include GUI boundary metadata: %+v", issues)
@@ -81,6 +93,15 @@ End Sub
 	}
 	if !foundInputBoxWrapperHint {
 		t.Fatalf("expected VB007 to recommend XlflowUI for raw InputBox usage: %+v", issues)
+	}
+	if !foundGetOpenWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw GetOpenFilename usage: %+v", issues)
+	}
+	if !foundSaveAsWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw GetSaveAsFilename usage: %+v", issues)
+	}
+	if !foundFileDialogWrapperHint {
+		t.Fatalf("expected VB007 to recommend XlflowUI for raw FileDialog usage: %+v", issues)
 	}
 }
 

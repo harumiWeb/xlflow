@@ -327,6 +327,8 @@ build/
 const defaultAssertModule = `Attribute VB_Name = "XlflowAssert"
 Option Explicit
 
+' Minimal assertion helpers for workbook-side tests.
+' Keep assertions scalar so failures stay easy to read from xlflow JSON and terminal output.
 Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = "")
   If IsObject(expected) Or IsObject(actual) Then
     Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals", "AssertEquals supports scalar values only. Compare object properties such as Range.Value2."
@@ -371,12 +373,15 @@ End Function
 const defaultRuntimeModule = `Attribute VB_Name = "XlflowRuntime"
 Option Explicit
 
+' XlflowRuntime exposes the execution mode that xlflow injected before user VBA started.
+' Use these helpers when workbook code must branch between interactive and unattended flows.
 Private Const xlflowInteractive As Long = 0
 Private Const xlflowHeadless As Long = 1
 Private Const xlflowCI As Long = 2
 Private Const xlflowAgent As Long = 3
 Private Const xlflowTest As Long = 4
 
+' Returns a stable numeric mode value for lightweight branching.
 Public Function Mode() As Long
 	Select Case ModeName()
 		Case "headless"
@@ -392,6 +397,7 @@ Public Function Mode() As Long
 	End Select
 End Function
 
+' Returns the normalized mode name injected by xlflow.
 Public Function ModeName() As String
 	Dim raw As String
 	raw = ReadWorkbookModeName()
@@ -408,10 +414,12 @@ Public Function ModeName() As String
 	End Select
 End Function
 
+' True only for normal human-driven Excel usage.
 Public Function IsInteractive() As Boolean
 	IsInteractive = (Mode() = xlflowInteractive)
 End Function
 
+' True for all unattended-style modes such as headless, CI, agent, and test.
 Public Function IsHeadless() As Boolean
 	Select Case Mode()
 		Case xlflowHeadless, xlflowCI, xlflowAgent, xlflowTest
@@ -462,13 +470,19 @@ End Function
 const defaultUIRuntimeModule = `Attribute VB_Name = "XlflowUI"
 Option Explicit
 
+' XlflowUI keeps one workbook-side dialog API that works in both interactive Excel and xlflow headless runs.
+' Use stable dialog ids because xlflow maps scripted responses to those ids during unattended execution.
 Private Const xlflowResponseErrorBase As Long = vbObjectError + 520
 Private Const xlflowErrInvalidDialogId As Long = xlflowResponseErrorBase + 1
 Private Const xlflowErrInvalidMsgBoxResponse As Long = xlflowResponseErrorBase + 2
 Private Const xlflowErrMissingInputResponse As Long = xlflowResponseErrorBase + 3
+Private Const xlflowErrMissingFileDialogResponse As Long = xlflowResponseErrorBase + 4
+Private Const xlflowErrInvalidFileDialogResponse As Long = xlflowResponseErrorBase + 5
+Private Const xlflowFileDialogCancelToken As String = "@cancel"
 Private Const xlflowStreamHelperName As String = "__XLFLOW_UI_STREAM_HELPER__"
 Private Const xlflowStreamRedactInputName As String = "__XLFLOW_UI_STREAM_REDACT_INPUT__"
 
+' Wrapper for VBA.MsgBox. In headless-like modes xlflow resolves the response from --msgbox.
 Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "", Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
 	Dim responseSource As String
 	Dim responseToken As String
@@ -488,6 +502,7 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
+' Wrapper for VBA.InputBox. Default is interactive-only UI text, while DefaultValue is the headless fallback.
 Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "", Optional ByVal DefaultValue As String = "") As String
 	Dim responseSource As String
 	Dim responseValue As String
@@ -520,6 +535,115 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
+' Wrapper for Application.GetOpenFilename.
+' In headless mode, repeat --filedialog get-open:<id>=<path> to simulate multi-select results.
+Public Function GetOpenFilename(ByVal Id As String, Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
+	Dim responseSource As String
+	Dim displayValue As String
+	ValidateDialogId Id, "XlflowUI.GetOpenFilename"
+	If XlflowRuntime.IsHeadless() Then
+		On Error GoTo HandleHeadlessFailure
+		GetOpenFilename = ResolveFileDialogResponse("get-open", Id, MultiSelect, DefaultValue, responseSource, displayValue)
+		EmitHeadlessUIEvent "get-open", Id, "", Title, responseSource, "", displayValue, False, ""
+		Exit Function
+	End If
+
+	GetOpenFilename = Application.GetOpenFilename(FileFilter, FilterIndex, Title, ButtonText, MultiSelect)
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "get-open", Id, "", Title, "error", "", "", False, Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Wrapper for Application.FileDialog(msoFileDialogOpen).
+' In headless mode, this uses the same --filedialog file-open:<id>=<path> contract as other xlflow runs.
+Public Function FileDialogOpen(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
+	Dim responseSource As String
+	Dim displayValue As String
+	Dim dialog As FileDialog
+	ValidateDialogId Id, "XlflowUI.FileDialogOpen"
+	If XlflowRuntime.IsHeadless() Then
+		On Error GoTo HandleHeadlessFailure
+		FileDialogOpen = ResolveFileDialogResponse("file-open", Id, MultiSelect, DefaultValue, responseSource, displayValue)
+		EmitHeadlessUIEvent "file-open", Id, "", Title, responseSource, "", displayValue, False, ""
+		Exit Function
+	End If
+
+	Set dialog = Application.FileDialog(msoFileDialogOpen)
+	With dialog
+		If Len(Title) > 0 Then .Title = Title
+		If Len(ButtonText) > 0 Then .ButtonName = ButtonText
+		.AllowMultiSelect = MultiSelect
+		If .Show <> -1 Then
+			FileDialogOpen = False
+		ElseIf MultiSelect Then
+			FileDialogOpen = SelectedItemsToVariantArray(.SelectedItems)
+		Else
+			FileDialogOpen = CStr(.SelectedItems(1))
+		End If
+	End With
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "file-open", Id, "", Title, "error", "", "", False, Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Wrapper for Application.GetSaveAsFilename.
+' Use --filedialog save-as:<id>=<path> in unattended runs, or @cancel to simulate Cancel.
+Public Function GetSaveAsFilename(ByVal Id As String, Optional ByVal InitialFileName As String = "", Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal DefaultValue As Variant) As Variant
+	Dim responseSource As String
+	Dim displayValue As String
+	ValidateDialogId Id, "XlflowUI.GetSaveAsFilename"
+	If XlflowRuntime.IsHeadless() Then
+		On Error GoTo HandleHeadlessFailure
+		GetSaveAsFilename = ResolveFileDialogResponse("save-as", Id, False, DefaultValue, responseSource, displayValue)
+		EmitHeadlessUIEvent "save-as", Id, "", Title, responseSource, "", displayValue, False, ""
+		Exit Function
+	End If
+
+	GetSaveAsFilename = Application.GetSaveAsFilename(InitialFileName, FileFilter, FilterIndex, Title, ButtonText)
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "save-as", Id, "", Title, "error", "", "", False, Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Wrapper for Application.FileDialog(msoFileDialogFolderPicker).
+' Use --filedialog folder:<id>=<path> in unattended runs, or @cancel to simulate Cancel.
+Public Function FolderPicker(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal InitialPath As String = "", Optional ByVal DefaultValue As Variant) As Variant
+	Dim responseSource As String
+	Dim displayValue As String
+	Dim dialog As FileDialog
+	ValidateDialogId Id, "XlflowUI.FolderPicker"
+	If XlflowRuntime.IsHeadless() Then
+		On Error GoTo HandleHeadlessFailure
+		FolderPicker = ResolveFileDialogResponse("folder", Id, False, DefaultValue, responseSource, displayValue)
+		EmitHeadlessUIEvent "folder", Id, "", Title, responseSource, "", displayValue, False, ""
+		Exit Function
+	End If
+
+	Set dialog = Application.FileDialog(msoFileDialogFolderPicker)
+	With dialog
+		If Len(Title) > 0 Then .Title = Title
+		If Len(ButtonText) > 0 Then .ButtonName = ButtonText
+		If Len(InitialPath) > 0 Then .InitialFileName = InitialPath
+		If .Show <> -1 Then
+			FolderPicker = False
+		Else
+			FolderPicker = CStr(.SelectedItems(1))
+		End If
+	End With
+	Exit Function
+
+HandleHeadlessFailure:
+	EmitHeadlessUIEvent "folder", Id, "", Title, "error", "", "", False, Err.Description
+	Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Resolves a headless MsgBox response from xlflow markers or workbook defaults.
 Private Function ResolveMsgBoxResponse(ByVal Id As String, Optional ByVal DefaultResponse As String = "", Optional ByRef ResponseSource As String = "", Optional ByRef ResponseToken As String = "") As VbMsgBoxResult
 	Dim response As String
 	On Error GoTo UseDefault
@@ -575,6 +699,198 @@ UseDefault:
 	End If
 	ResponseSource = "default"
 	ResolveInputResponse = DefaultValue
+End Function
+
+' Resolves file dialog responses from injected markers.
+' Cancel is represented as False, and multi-select responses return a Variant string array.
+Private Function ResolveFileDialogResponse(ByVal Kind As String, ByVal Id As String, ByVal MultiSelect As Boolean, Optional ByVal DefaultValue As Variant, Optional ByRef ResponseSource As String = "", Optional ByRef DisplayValue As String = "") As Variant
+	Dim markerValue As String
+
+	On Error GoTo UseDefault
+	markerValue = ReadFileDialogResponseValue(Kind, Id)
+	On Error GoTo InvalidScripted
+	ResponseSource = "scripted"
+	ResolveFileDialogResponse = NormalizeFileDialogResponse(Kind, Id, MultiSelect, markerValue, DisplayValue)
+	Exit Function
+
+UseDefault:
+	If IsEmpty(DefaultValue) Then
+		ResponseSource = "error"
+		Err.Raise xlflowErrMissingFileDialogResponse, FileDialogSourceName(Kind), "Missing scripted file dialog response for dialog id '" & Id & "'."
+	End If
+	ResponseSource = "default"
+	ResolveFileDialogResponse = NormalizeFileDialogDefault(Kind, Id, MultiSelect, DefaultValue, DisplayValue)
+	Exit Function
+
+InvalidScripted:
+	ResponseSource = "error"
+	Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Converts injected newline-delimited marker values into the same Variant shape Excel would normally return.
+Private Function NormalizeFileDialogResponse(ByVal Kind As String, ByVal Id As String, ByVal MultiSelect As Boolean, ByVal MarkerValue As String, Optional ByRef DisplayValue As String = "") As Variant
+	Dim values As Variant
+	Dim count As Long
+
+	If LCase$(Trim$(MarkerValue)) = xlflowFileDialogCancelToken Then
+		DisplayValue = xlflowFileDialogCancelToken
+		NormalizeFileDialogResponse = False
+		Exit Function
+	End If
+
+	values = SplitFileDialogValues(MarkerValue)
+	count = FileDialogValueCount(values)
+	If MultiSelect Then
+		DisplayValue = JoinStringArray(values, " | ")
+		NormalizeFileDialogResponse = values
+		Exit Function
+	End If
+	If count <> 1 Then
+		Err.Raise xlflowErrInvalidFileDialogResponse, FileDialogSourceName(Kind), "File dialog '" & Id & "' expected one scripted path but received " & CStr(count) & "."
+	End If
+	DisplayValue = CStr(values(LBound(values)))
+	NormalizeFileDialogResponse = CStr(values(LBound(values)))
+End Function
+
+Private Function NormalizeFileDialogDefault(ByVal Kind As String, ByVal Id As String, ByVal MultiSelect As Boolean, ByVal DefaultValue As Variant, Optional ByRef DisplayValue As String = "") As Variant
+	Dim values As Variant
+	Dim count As Long
+
+	If VarType(DefaultValue) = vbBoolean Then
+		If CBool(DefaultValue) = False Then
+			DisplayValue = xlflowFileDialogCancelToken
+			NormalizeFileDialogDefault = False
+			Exit Function
+		End If
+	End If
+
+	If IsArray(DefaultValue) Then
+		values = VariantArrayToStringArray(DefaultValue)
+		count = FileDialogValueCount(values)
+		If MultiSelect Then
+			DisplayValue = JoinStringArray(values, " | ")
+			NormalizeFileDialogDefault = values
+			Exit Function
+		End If
+		If count <> 1 Then
+			Err.Raise xlflowErrInvalidFileDialogResponse, FileDialogSourceName(Kind), "File dialog '" & Id & "' default value must contain exactly one path."
+		End If
+		DisplayValue = CStr(values(LBound(values)))
+		NormalizeFileDialogDefault = CStr(values(LBound(values)))
+		Exit Function
+	End If
+
+	If MultiSelect Then
+		values = Array(CStr(DefaultValue))
+		DisplayValue = JoinStringArray(values, " | ")
+		NormalizeFileDialogDefault = values
+		Exit Function
+	End If
+
+	DisplayValue = CStr(DefaultValue)
+	NormalizeFileDialogDefault = DisplayValue
+End Function
+
+' Reads the workbook-defined name that xlflow injected for one file dialog wrapper call.
+Private Function ReadFileDialogResponseValue(ByVal Kind As String, ByVal Id As String) As String
+	On Error GoTo Missing
+	ReadFileDialogResponseValue = DecodeWorkbookDefinedName(ThisWorkbook.Names(BuildFileDialogResponseName(Kind, Id)).RefersTo)
+	Exit Function
+
+Missing:
+	Err.Raise xlflowErrMissingFileDialogResponse, FileDialogSourceName(Kind), "Missing scripted file dialog response for dialog id '" & Id & "'."
+End Function
+
+Private Function BuildFileDialogResponseName(ByVal Kind As String, ByVal Id As String) As String
+	Dim normalizedKind As String
+
+	normalizedKind = LCase$(Trim$(Kind))
+	Select Case normalizedKind
+		Case "get-open"
+			BuildFileDialogResponseName = "__XLFLOW_UI_FILEDIALOG_GET_OPEN_" & NormalizeResponseId(Id) & "__"
+		Case "file-open"
+			BuildFileDialogResponseName = "__XLFLOW_UI_FILEDIALOG_FILE_OPEN_" & NormalizeResponseId(Id) & "__"
+		Case "save-as"
+			BuildFileDialogResponseName = "__XLFLOW_UI_FILEDIALOG_SAVE_AS_" & NormalizeResponseId(Id) & "__"
+		Case "folder"
+			BuildFileDialogResponseName = "__XLFLOW_UI_FILEDIALOG_FOLDER_" & NormalizeResponseId(Id) & "__"
+		Case Else
+			Err.Raise xlflowErrInvalidFileDialogResponse, FileDialogSourceName(Kind), "Unsupported file dialog kind '" & Kind & "'."
+	End Select
+End Function
+
+Private Function FileDialogSourceName(ByVal Kind As String) As String
+	Select Case LCase$(Trim$(Kind))
+		Case "get-open"
+			FileDialogSourceName = "XlflowUI.GetOpenFilename"
+		Case "file-open"
+			FileDialogSourceName = "XlflowUI.FileDialogOpen"
+		Case "save-as"
+			FileDialogSourceName = "XlflowUI.GetSaveAsFilename"
+		Case "folder"
+			FileDialogSourceName = "XlflowUI.FolderPicker"
+		Case Else
+			FileDialogSourceName = "XlflowUI.FileDialog"
+	End Select
+End Function
+
+' Headless multi-select responses are stored as newline-delimited paths.
+Private Function SplitFileDialogValues(ByVal MarkerValue As String) As Variant
+	Dim normalizedValue As String
+	Dim values As Variant
+	Dim i As Long
+
+	normalizedValue = Replace$(MarkerValue, vbCrLf, vbLf)
+	normalizedValue = Replace$(normalizedValue, vbCr, vbLf)
+	If Len(normalizedValue) = 0 Then
+		Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "Scripted file dialog response must contain at least one path."
+	End If
+	values = Split(normalizedValue, vbLf)
+	For i = LBound(values) To UBound(values)
+		If Len(CStr(values(i))) = 0 Then
+			Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "Scripted file dialog response contains an empty path entry."
+		End If
+	Next i
+	SplitFileDialogValues = values
+End Function
+
+Private Function VariantArrayToStringArray(ByVal Values As Variant) As Variant
+	Dim result() As String
+	Dim i As Long
+
+	ReDim result(LBound(Values) To UBound(Values))
+	For i = LBound(Values) To UBound(Values)
+		result(i) = CStr(Values(i))
+		If Len(result(i)) = 0 Then
+			Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "File dialog default values cannot contain empty paths."
+		End If
+	Next i
+	VariantArrayToStringArray = result
+End Function
+
+Private Function FileDialogValueCount(ByVal Values As Variant) As Long
+	FileDialogValueCount = UBound(Values) - LBound(Values) + 1
+End Function
+
+Private Function JoinStringArray(ByVal Values As Variant, ByVal Separator As String) As String
+	Dim i As Long
+	For i = LBound(Values) To UBound(Values)
+		If i > LBound(Values) Then
+			JoinStringArray = JoinStringArray & Separator
+		End If
+		JoinStringArray = JoinStringArray & CStr(Values(i))
+	Next i
+End Function
+
+Private Function SelectedItemsToVariantArray(ByVal SelectedItems As Office.FileDialogSelectedItems) As Variant
+	Dim values() As String
+	Dim i As Long
+
+	ReDim values(0 To SelectedItems.Count - 1)
+	For i = 1 To SelectedItems.Count
+		values(i - 1) = CStr(SelectedItems(i))
+	Next i
+	SelectedItemsToVariantArray = values
 End Function
 
 Private Sub EmitHeadlessUIEvent(ByVal Kind As String, ByVal Id As String, ByVal Prompt As String, ByVal Title As String, ByVal ResponseSource As String, Optional ByVal ResolvedResult As String = "", Optional ByVal ResolvedValue As String = "", Optional ByVal Redacted As Boolean = False, Optional ByVal FailureMessage As String = "")

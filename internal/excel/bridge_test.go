@@ -675,8 +675,9 @@ func TestBuildRunScriptArgsPassesUIResponses(t *testing.T) {
 	args, err := buildRunScriptArgs(root, cfg, RunOptions{
 		Macro: "Main.Run",
 		UIResponses: UIResponses{
-			MsgBox: map[string]string{"confirm-save": "yes"},
-			Input:  map[string]string{"customer-name": "John"},
+			MsgBox:     map[string]string{"confirm-save": "yes"},
+			Input:      map[string]string{"customer-name": "John"},
+			FileDialog: []FileDialogResponse{{Kind: "get-open", DialogID: "source_files", Values: []string{"C:\\tmp\\a.txt", "C:\\tmp\\b.txt"}}},
 		},
 	})
 	if err != nil {
@@ -687,6 +688,9 @@ func TestBuildRunScriptArgsPassesUIResponses(t *testing.T) {
 	}
 	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"John"}`)); got != want {
 		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["FileDialogResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`[{"kind":"get-open","dialog_id":"source_files","values":["C:\\tmp\\a.txt","C:\\tmp\\b.txt"]}]`)); got != want {
+		t.Fatalf("FileDialogResponsesJSON = %q, want %q", got, want)
 	}
 }
 
@@ -725,8 +729,9 @@ func TestBuildTestScriptArgsPassesUIResponses(t *testing.T) {
 	cfg := config.Default()
 	args := buildTestScriptArgs(root, cfg, "", TestOptions{
 		UIResponses: UIResponses{
-			MsgBox: map[string]string{"confirm-save": "no"},
-			Input:  map[string]string{"customer-name": "Jane"},
+			MsgBox:     map[string]string{"confirm-save": "no"},
+			Input:      map[string]string{"customer-name": "Jane"},
+			FileDialog: []FileDialogResponse{{Kind: "folder", DialogID: "target_dir", Cancelled: true}},
 		},
 	})
 	if got, want := args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"no"}`)); got != want {
@@ -734,6 +739,9 @@ func TestBuildTestScriptArgsPassesUIResponses(t *testing.T) {
 	}
 	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"Jane"}`)); got != want {
 		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["FileDialogResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`[{"kind":"folder","dialog_id":"target_dir","cancelled":true}]`)); got != want {
+		t.Fatalf("FileDialogResponsesJSON = %q, want %q", got, want)
 	}
 }
 

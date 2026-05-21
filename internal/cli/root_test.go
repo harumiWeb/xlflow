@@ -36,6 +36,7 @@ type runOptionsInput struct {
 	Args               []string
 	MsgBox             []string
 	InputBox           []string
+	FileDialog         []string
 	Save               bool
 	SaveAs             string
 	Trace              bool
@@ -67,6 +68,7 @@ func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOpt
 		in.Args,
 		in.MsgBox,
 		in.InputBox,
+		in.FileDialog,
 		in.Save,
 		in.SaveAs,
 		in.Trace,
@@ -269,7 +271,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval", "ui-stream"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
@@ -298,7 +300,8 @@ func TestHeadlessGUIBoundaryLogsExplainProjectWideScanAndLintOverride(t *testing
 	for _, want := range []string{
 		"Headless preflight scans the configured source tree, not the target macro call graph.",
 		"Use xlflow run --interactive if a human can operate Excel dialogs.",
-		"replace raw MsgBox/InputBox with XlflowUI wrappers",
+		"replace raw MsgBox/InputBox/file dialog calls with XlflowUI wrappers",
+		"--msgbox/--inputbox/--filedialog",
 		"[lint].forbid_interactive_input = false",
 	} {
 		found := false
@@ -2391,6 +2394,68 @@ func TestBuildRunOptionsParsesUIResponses(t *testing.T) {
 	}
 	if got := opts.UIResponses.Input["customer_name"]; got != "John" {
 		t.Fatalf("input response = %q, want John", got)
+	}
+}
+
+func TestBuildRunOptionsParsesFileDialogResponses(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"get-open:source-files=C:\\tmp\\a.txt", "get-open:source-files=C:\\tmp\\b.txt", "save-as:result-file=C:\\tmp\\out.xlsx"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.UIResponses.FileDialog) != 2 {
+		t.Fatalf("file dialog responses = %#v, want 2 entries", opts.UIResponses.FileDialog)
+	}
+	openDialog := opts.UIResponses.FileDialog[0]
+	if openDialog.Kind != "get-open" || openDialog.DialogID != "source_files" {
+		t.Fatalf("open dialog = %#v", openDialog)
+	}
+	if !reflect.DeepEqual(openDialog.Values, []string{"C:\\tmp\\a.txt", "C:\\tmp\\b.txt"}) {
+		t.Fatalf("open dialog values = %#v", openDialog.Values)
+	}
+	saveDialog := opts.UIResponses.FileDialog[1]
+	if saveDialog.Kind != "save-as" || saveDialog.DialogID != "result_file" {
+		t.Fatalf("save dialog = %#v", saveDialog)
+	}
+	if !reflect.DeepEqual(saveDialog.Values, []string{"C:\\tmp\\out.xlsx"}) {
+		t.Fatalf("save dialog values = %#v", saveDialog.Values)
+	}
+	if saveDialog.Cancelled {
+		t.Fatalf("save dialog cancelled = true, want false: %#v", saveDialog)
+	}
+}
+
+func TestBuildRunOptionsParsesCancelledFileDialogResponses(t *testing.T) {
+	cfg := config.Default()
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"folder:target-dir=@cancel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.UIResponses.FileDialog) != 1 {
+		t.Fatalf("file dialog responses = %#v, want 1 entry", opts.UIResponses.FileDialog)
+	}
+	if !opts.UIResponses.FileDialog[0].Cancelled {
+		t.Fatalf("cancelled = false, want true: %#v", opts.UIResponses.FileDialog[0])
+	}
+}
+
+func TestBuildRunOptionsRejectsInvalidFileDialogResponses(t *testing.T) {
+	cfg := config.Default()
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"unknown:pick=C:\\tmp\\a.txt"}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported filedialog kind") {
+		t.Fatalf("expected filedialog kind error, got %v", err)
+	}
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"save-as:result=C:\\tmp\\a.txt", "save-as:result=C:\\tmp\\b.txt"}})
+	if err == nil || !strings.Contains(err.Error(), "accepts only one scripted path") {
+		t.Fatalf("expected single-path error, got %v", err)
+	}
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"folder:target=@cancel", "folder:target=C:\\tmp"}})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected cancel/path conflict, got %v", err)
+	}
+	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"get-open:confirm save=C:\\tmp\\a.txt", "get-open:confirm-save=C:\\tmp\\b.txt"}})
+	if err == nil || !strings.Contains(err.Error(), "collides with") {
+		t.Fatalf("expected normalized collision error, got %v", err)
 	}
 }
 

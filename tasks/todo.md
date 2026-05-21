@@ -1,3 +1,13 @@
+# Headless File Dialog Wrapper Todo
+
+- [ ] Add the file-dialog wrapper contract and CLI grammar to `tasks/feature_spec.md`.
+- [ ] Add `--filedialog` parsing and validation to `run` / `test` CLI wiring.
+- [ ] Extend Go bridge payloads with structured file-dialog response transport.
+- [ ] Extend PowerShell runtime injection with file-dialog response decoding and cleanup.
+- [ ] Add scaffolded `XlflowUI` wrappers for open/save/folder picker headless flows.
+- [ ] Extend UI stream / output rendering and keep raw file dialog APIs blocked by analyzer/lint.
+- [ ] Update CLI/docs/skill guidance and run focused tests plus Windows Excel E2E.
+
 # winget Release Publishing Todo
 
 # Live Session Inspect Todo

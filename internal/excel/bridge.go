@@ -40,9 +40,17 @@ type RunArgument struct {
 	Value string `json:"value"`
 }
 
+type FileDialogResponse struct {
+	Kind      string   `json:"kind"`
+	DialogID  string   `json:"dialog_id"`
+	Values    []string `json:"values,omitempty"`
+	Cancelled bool     `json:"cancelled,omitempty"`
+}
+
 type UIResponses struct {
-	MsgBox map[string]string
-	Input  map[string]string
+	MsgBox     map[string]string
+	Input      map[string]string
+	FileDialog []FileDialogResponse
 }
 
 type UIStreamOptions struct {
@@ -499,6 +507,13 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 		}
 		scriptArgs["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
 	}
+	if len(opts.UIResponses.FileDialog) > 0 {
+		fileDialogJSON, err := json.Marshal(opts.UIResponses.FileDialog)
+		if err != nil {
+			return nil, err
+		}
+		scriptArgs["FileDialogResponsesJSON"] = base64.StdEncoding.EncodeToString(fileDialogJSON)
+	}
 	if opts.UIStream.Enabled {
 		scriptArgs["UIStreamEnabled"] = strconv.FormatBool(true)
 		scriptArgs["UIStreamRedactInput"] = strconv.FormatBool(opts.UIStream.RedactInput)
@@ -617,6 +632,11 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 	if len(opts.UIResponses.Input) > 0 {
 		if inputJSON, err := json.Marshal(opts.UIResponses.Input); err == nil {
 			args["InputResponsesJSON"] = base64.StdEncoding.EncodeToString(inputJSON)
+		}
+	}
+	if len(opts.UIResponses.FileDialog) > 0 {
+		if fileDialogJSON, err := json.Marshal(opts.UIResponses.FileDialog); err == nil {
+			args["FileDialogResponsesJSON"] = base64.StdEncoding.EncodeToString(fileDialogJSON)
 		}
 	}
 	if opts.UIStream.Enabled {

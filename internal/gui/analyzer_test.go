@@ -77,6 +77,15 @@ End Sub
 	if !strings.Contains(foundMessages["InputBox"], "XlflowUI") || !strings.Contains(foundSuggestions["InputBox"], "XlflowUI.InputBox") {
 		t.Fatalf("expected InputBox boundary to recommend XlflowUI, got message=%q suggestion=%q", foundMessages["InputBox"], foundSuggestions["InputBox"])
 	}
+	if !strings.Contains(foundMessages["Application.GetOpenFilename"], "XlflowUI") || !strings.Contains(foundSuggestions["Application.GetOpenFilename"], "XlflowUI.GetOpenFilename") {
+		t.Fatalf("expected GetOpenFilename boundary to recommend XlflowUI, got message=%q suggestion=%q", foundMessages["Application.GetOpenFilename"], foundSuggestions["Application.GetOpenFilename"])
+	}
+	if !strings.Contains(foundMessages["Application.GetSaveAsFilename"], "XlflowUI") || !strings.Contains(foundSuggestions["Application.GetSaveAsFilename"], "XlflowUI.GetSaveAsFilename") {
+		t.Fatalf("expected GetSaveAsFilename boundary to recommend XlflowUI, got message=%q suggestion=%q", foundMessages["Application.GetSaveAsFilename"], foundSuggestions["Application.GetSaveAsFilename"])
+	}
+	if !strings.Contains(foundMessages["Application.FileDialog"], "XlflowUI") || !strings.Contains(foundSuggestions["Application.FileDialog"], "XlflowUI.FileDialogOpen") {
+		t.Fatalf("expected FileDialog boundary to recommend XlflowUI, got message=%q suggestion=%q", foundMessages["Application.FileDialog"], foundSuggestions["Application.FileDialog"])
+	}
 }
 
 func TestStripCommentKeepsApostropheInsideStrings(t *testing.T) {

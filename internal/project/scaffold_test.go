@@ -149,6 +149,9 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 	if !strings.Contains(got, "Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = \"\")") {
 		t.Fatalf("AssertEquals signature missing from helper:\n%s", got)
 	}
+	if !strings.Contains(got, "Minimal assertion helpers for workbook-side tests") {
+		t.Fatalf("Assert helper should explain its intended use:\n%s", got)
+	}
 	if !strings.Contains(got, "Err.Raise vbObjectError + 513") {
 		t.Fatalf("AssertEquals should raise a VBA error on mismatch:\n%s", got)
 	}
@@ -180,6 +183,7 @@ func TestNewScaffoldCreatesRuntimeHelper(t *testing.T) {
 	got := string(body)
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowRuntime"`,
+		"XlflowRuntime exposes the execution mode",
 		"Private Const xlflowInteractive As Long = 0",
 		"Public Function Mode() As Long",
 		"Public Function ModeName() As String",
@@ -205,25 +209,51 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 	got := string(body)
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowUI"`,
+		"XlflowUI keeps one workbook-side dialog API",
 		"Public Function MsgBox(ByVal Id As String, ByVal Prompt As String",
 		"Optional ByVal DefaultResponse As String = \"\"",
 		"Public Function InputBox(ByVal Id As String, ByVal Prompt As String",
 		"Optional ByVal DefaultValue As String = \"\"",
+		"Public Function GetOpenFilename(ByVal Id As String",
+		"Public Function FileDialogOpen(ByVal Id As String",
+		"Public Function GetSaveAsFilename(ByVal Id As String",
+		"Public Function FolderPicker(ByVal Id As String",
 		"ValidateDialogId Id, \"XlflowUI.MsgBox\"",
 		"ValidateDialogId Id, \"XlflowUI.InputBox\"",
+		"ValidateDialogId Id, \"XlflowUI.GetOpenFilename\"",
+		"ValidateDialogId Id, \"XlflowUI.FileDialogOpen\"",
+		"ValidateDialogId Id, \"XlflowUI.GetSaveAsFilename\"",
+		"ValidateDialogId Id, \"XlflowUI.FolderPicker\"",
 		"Private Const xlflowErrInvalidDialogId As Long",
+		"Private Const xlflowErrMissingFileDialogResponse As Long",
+		"Private Const xlflowFileDialogCancelToken As String = \"@cancel\"",
 		"Private Sub ValidateDialogId(ByVal Id As String, ByVal SourceName As String)",
 		"If XlflowRuntime.IsHeadless() Then",
 		"EmitHeadlessUIEvent \"msgbox\"",
 		"EmitHeadlessUIEvent \"inputbox\"",
+		"EmitHeadlessUIEvent \"get-open\"",
+		"EmitHeadlessUIEvent \"file-open\"",
+		"EmitHeadlessUIEvent \"save-as\"",
+		"EmitHeadlessUIEvent \"folder\"",
+		"ResolveFileDialogResponse(\"get-open\"",
+		"ResolveFileDialogResponse(\"file-open\"",
+		"ResolveFileDialogResponse(\"save-as\"",
+		"ResolveFileDialogResponse(\"folder\"",
 		"If Len(DefaultValue) = 0 Then",
 		"Err.Raise xlflowErrMissingInputResponse, \"XlflowUI.InputBox\", \"Missing scripted InputBox response",
+		"BuildFileDialogResponseName(ByVal Kind As String, ByVal Id As String)",
+		"SelectedItemsToVariantArray(ByVal SelectedItems As Office.FileDialogSelectedItems)",
 		"Private Function ResolveStreamHelperMacro() As String",
 		"Private Function JsonEscape(ByVal value As String) As String",
 		`ThisWorkbook.Names(BuildResponseName(Kind, Id)).RefersTo`,
+		`ThisWorkbook.Names(BuildFileDialogResponseName(Kind, Id)).RefersTo`,
 		"__XLFLOW_UI_",
 		"VBA.Interaction.MsgBox",
 		"VBA.Interaction.InputBox",
+		"Application.GetOpenFilename",
+		"Application.GetSaveAsFilename",
+		"Application.FileDialog(msoFileDialogOpen)",
+		"Application.FileDialog(msoFileDialogFolderPicker)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("UI helper should contain %q:\n%s", want, got)
