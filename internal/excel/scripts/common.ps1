@@ -156,6 +156,22 @@ function Get-XlflowStringRefersTo {
   return '="' + ([string]$Value).Replace('"', '""') + '"'
 }
 
+function DecodeWorkbookDefinedName {
+  param([string]$RefersTo)
+
+  $value = [string]$RefersTo
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return ""
+  }
+  if ($value.StartsWith('="') -and $value.EndsWith('"') -and $value.Length -ge 3) {
+    return $value.Substring(2, $value.Length - 3).Replace('""', '"')
+  }
+  if ($value.StartsWith('=')) {
+    return $value.Substring(1)
+  }
+  return $value
+}
+
 function ConvertTo-XlflowUIResponseId {
   param([string]$Value)
 
@@ -384,6 +400,8 @@ function Start-XlflowRuntimeInjection {
     [string]$MsgBoxResponsesJSON = "",
     [string]$InputResponsesJSON = "",
     [string]$FileDialogResponsesJSON = "",
+    [string]$DebugStreamEnabled = "false",
+    [string]$DebugStreamPipeName = "",
     [string]$UIStreamEnabled = "false",
     [string]$UIStreamPipeName = "",
     [string]$UIStreamRedactInput = "true"
@@ -393,11 +411,14 @@ function Start-XlflowRuntimeInjection {
   $msgBoxResponses = ConvertFrom-XlflowUIResponsesJson -Json $MsgBoxResponsesJSON
   $inputResponses = ConvertFrom-XlflowUIResponsesJson -Json $InputResponsesJSON
   $fileDialogResponses = @(ConvertFrom-XlflowFileDialogResponsesJson -Json $FileDialogResponsesJSON)
+  $debugStreamEnabled = (ConvertTo-XlflowBool $DebugStreamEnabled) -and -not [string]::IsNullOrWhiteSpace([string]$DebugStreamPipeName)
   $uiStreamEnabled = (ConvertTo-XlflowBool $UIStreamEnabled) -and -not [string]::IsNullOrWhiteSpace([string]$UIStreamPipeName)
   $state = [ordered]@{
     applied = $false
     saved_before = $null
     baseline_hash = ""
+    debug_stream_enabled = $debugStreamEnabled
+    debug_stream_pipe_name = [string]$DebugStreamPipeName
     ui_stream_enabled = $uiStreamEnabled
     ui_stream_pipe_name = [string]$UIStreamPipeName
     ui_stream_redact_input = (ConvertTo-XlflowBool $UIStreamRedactInput)
@@ -420,6 +441,7 @@ function Start-XlflowRuntimeInjection {
     $name = Get-XlflowFileDialogResponseDefinedName -Kind ([string]$entry.kind) -Id ([string]$entry.dialog_id)
     $state.names[$name] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name $name
   }
+  $state.names["__XLFLOW_DEBUG_PIPE__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_DEBUG_PIPE__"
   $state.names["__XLFLOW_UI_STREAM_HELPER__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_HELPER__"
   $state.names["__XLFLOW_UI_STREAM_REDACT_INPUT__"] = Get-XlflowWorkbookDefinedNameState -Workbook $Workbook -Name "__XLFLOW_UI_STREAM_REDACT_INPUT__"
   if ($null -eq $Workbook) {
@@ -453,6 +475,9 @@ function Start-XlflowRuntimeInjection {
   }
   foreach ($entry in $fileDialogResponses) {
     Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name (Get-XlflowFileDialogResponseDefinedName -Kind ([string]$entry.kind) -Id ([string]$entry.dialog_id)) -RefersTo (Get-XlflowStringRefersTo -Value (ConvertTo-XlflowFileDialogMarkerValue -Response $entry)) -Visible $false
+  }
+  if ($debugStreamEnabled) {
+    Set-XlflowWorkbookDefinedName -Workbook $Workbook -Name "__XLFLOW_DEBUG_PIPE__" -RefersTo (Get-XlflowStringRefersTo -Value ([string]$DebugStreamPipeName)) -Visible $false
   }
   $state.applied = $true
 

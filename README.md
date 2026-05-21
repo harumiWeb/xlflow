@@ -112,10 +112,11 @@ pull → edit → push → lint → test/run → trace → diff
 
 ## Headless Dialog Wrappers
 
-New projects scaffold `src/modules/XlflowRuntime.bas`, `src/modules/XlflowUI.bas`, and `src/modules/XlflowAssert.bas` as workbook-side helper modules.
+New projects scaffold `src/modules/XlflowRuntime.bas`, `src/modules/XlflowUI.bas`, `src/modules/XlflowDebug.bas`, and `src/modules/XlflowAssert.bas` as workbook-side helper modules.
 
 - `XlflowRuntime` lets VBA branch between `interactive`, `headless`, `ci`, `agent`, and `test` execution modes.
 - `XlflowUI` wraps `MsgBox`, `InputBox`, `Application.GetOpenFilename`, open `Application.FileDialog`, `Application.GetSaveAsFilename`, and folder picker dialogs so the same VBA can run both interactively and unattended.
+- `XlflowDebug` mirrors explicit `XlflowDebug.Log` calls to the terminal during `xlflow run` and `xlflow test` while still writing to the normal VBA Immediate Window.
 - `XlflowAssert` gives basic scalar assertions for workbook-side tests.
 
 Example:
@@ -126,6 +127,7 @@ Dim files As Variant
 
 answer = XlflowUI.MsgBox("confirm-save", "Save workbook?", vbYesNo + vbQuestion, "Orders")
 files = XlflowUI.GetOpenFilename("source-files", MultiSelect:=True)
+XlflowDebug.Log "running in", XlflowRuntime.ModeName()
 ```
 
 For unattended execution, script those dialog responses at the CLI:
@@ -139,6 +141,8 @@ Use `@cancel` when a headless file dialog should behave like the user pressed Ca
 ```bash
 xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
 ```
+
+`XlflowDebug.Log` does not need an extra CLI flag. During `xlflow run` and `xlflow test`, xlflow streams those debug lines to stderr by default and includes the recent events under top-level `debug` in the final JSON envelope.
 
 ---
 

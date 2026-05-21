@@ -1975,6 +1975,9 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		}
 		diagnostic = false
 	}
+	if fast && diagnostic && !diagnosticExplicit {
+		diagnostic = false
+	}
 	keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
 	if err != nil {
 		return excel.RunOptions{}, err
@@ -2038,6 +2041,7 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		WorkbookPath:        input,
 		Args:                args,
 		UIResponses:         excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses},
+		DebugStream:         excel.DebugStreamOptions{Enabled: true},
 		UIStream:            excel.UIStreamOptions{Enabled: uiStream, RedactInput: true},
 		Save:                save,
 		SaveAs:              saveAs,
@@ -2651,7 +2655,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
 				return runErr
 			})
 			if err != nil {

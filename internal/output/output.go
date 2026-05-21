@@ -51,6 +51,7 @@ type Envelope struct {
 	Trace         any `json:"trace,omitempty"`
 	Runtime       any `json:"runtime,omitempty"`
 	GUIBoundaries any `json:"gui_boundaries,omitempty"`
+	Debug         any `json:"debug,omitempty"`
 	UI            any `json:"ui,omitempty"`
 	Session       any `json:"session,omitempty"`
 	Runner        any `json:"runner,omitempty"`
@@ -461,10 +462,12 @@ func (r renderer) renderRun(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	trace := objectMap(env.Trace)
 	runtime := objectMap(env.Runtime)
+	debugResult := objectMap(env.Debug)
 	ui := objectMap(env.UI)
-	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && len(runtime) == 0 && len(ui) == 0 && env.RunDiagnostic == nil {
+	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && len(runtime) == 0 && len(debugResult) == 0 && len(ui) == 0 && env.RunDiagnostic == nil {
 		var b strings.Builder
 		b.WriteString(r.renderLogs(env))
+		b.WriteString(r.renderDebug(env))
 		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
@@ -515,6 +518,7 @@ func (r renderer) renderRun(env Envelope) string {
 		}
 	}
 	b.WriteString(r.renderUI(env))
+	b.WriteString(r.renderDebug(env))
 	if diag := objectMap(env.RunDiagnostic); len(diag) > 0 {
 		b.WriteString("\n")
 		b.WriteString(r.style("Diagnostic", "", true))
@@ -577,6 +581,7 @@ func (r renderer) renderTest(env Envelope) string {
 		var b strings.Builder
 		b.WriteString(r.renderLogs(env))
 		b.WriteString(r.renderUI(env))
+		b.WriteString(r.renderDebug(env))
 		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
@@ -638,8 +643,52 @@ func (r renderer) renderTest(env Envelope) string {
 		}
 	}
 	b.WriteString(r.renderUI(env))
+	b.WriteString(r.renderDebug(env))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func (r renderer) renderDebug(env Envelope) string {
+	debugResult := objectMap(env.Debug)
+	events := listOfObjects(debugResult["events"])
+	count := len(events)
+	if total, ok := numberValue(debugResult, "count"); ok && int(total) > count {
+		count = int(total)
+	}
+	if count == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.style("Debug", "", true))
+	b.WriteString("\n")
+	b.WriteString(kv("Events", fmt.Sprintf("%d", count)))
+	if boolValue(debugResult, "truncated") {
+		b.WriteString(kv("Retention", "truncated to recent events"))
+	}
+	for _, event := range events {
+		b.WriteString("- ")
+		b.WriteString(summarizeDebugEvent(event))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func summarizeDebugEvent(event map[string]any) string {
+	parts := []string{"log"}
+	if message := stringValue(event, "message"); message != "" {
+		parts = append(parts, "message="+message)
+	}
+	if source := stringValue(event, "source"); source != "" {
+		parts = append(parts, "source="+source)
+	}
+	if mode := stringValue(event, "runtime_mode"); mode != "" {
+		parts = append(parts, "mode="+mode)
+	}
+	if errText := stringValue(event, "error"); errText != "" {
+		parts = append(parts, "error="+errText)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (r renderer) renderUI(env Envelope) string {

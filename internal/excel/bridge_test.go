@@ -712,6 +712,24 @@ func TestBuildRunScriptArgsPassesUIStreamOptions(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesDebugStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:       "Main.Run",
+		DebugStream: DebugStreamOptions{Enabled: true, PipeName: `\\.\pipe\xlflow-debug-test`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["DebugStreamEnabled"] != "true" {
+		t.Fatalf("DebugStreamEnabled = %q, want true", args["DebugStreamEnabled"])
+	}
+	if args["DebugStreamPipeName"] != `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("DebugStreamPipeName = %q, want debug pipe name", args["DebugStreamPipeName"])
+	}
+}
+
 func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -757,6 +775,18 @@ func TestBuildTestScriptArgsPassesUIStreamOptions(t *testing.T) {
 	}
 }
 
+func TestBuildTestScriptArgsPassesDebugStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{DebugStream: DebugStreamOptions{Enabled: true, PipeName: `\\.\pipe\xlflow-debug-test`}})
+	if args["DebugStreamEnabled"] != "true" {
+		t.Fatalf("DebugStreamEnabled = %q, want true", args["DebugStreamEnabled"])
+	}
+	if args["DebugStreamPipeName"] != `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("DebugStreamPipeName = %q, want debug pipe name", args["DebugStreamPipeName"])
+	}
+}
+
 func TestMergeUIResultAppendsStreamEvents(t *testing.T) {
 	existing := map[string]any{"events": []any{map[string]any{"kind": "msgbox", "dialog_id": "existing"}}}
 	merged := mergeUIResult(existing, []map[string]any{{"kind": "inputbox", "dialog_id": "customer-name"}})
@@ -767,6 +797,41 @@ func TestMergeUIResultAppendsStreamEvents(t *testing.T) {
 	events, ok := mergedMap["events"].([]any)
 	if !ok || len(events) != 2 {
 		t.Fatalf("merged events = %#v", mergedMap["events"])
+	}
+}
+
+func TestMergeDebugResultPreservesExistingEvents(t *testing.T) {
+	existing := map[string]any{
+		"events":    []any{map[string]any{"message": "existing"}},
+		"count":     4,
+		"truncated": true,
+	}
+	streamed := map[string]any{
+		"events": []any{map[string]any{"message": "streamed"}},
+		"count":  3,
+	}
+
+	merged := mergeDebugResult(existing, streamed)
+	mergedMap, ok := merged.(map[string]any)
+	if !ok {
+		t.Fatalf("merged debug = %#v", merged)
+	}
+
+	events := debugEventList(mergedMap["events"])
+	if len(events) != 2 {
+		t.Fatalf("merged debug events = %#v", mergedMap["events"])
+	}
+	if got := events[0]["message"]; got != "existing" {
+		t.Fatalf("first merged debug event = %#v, want existing", got)
+	}
+	if got := events[1]["message"]; got != "streamed" {
+		t.Fatalf("second merged debug event = %#v, want streamed", got)
+	}
+	if got := mergedMap["count"]; got != 4 {
+		t.Fatalf("merged debug count = %#v, want 4", got)
+	}
+	if got := mergedMap["truncated"]; got != true {
+		t.Fatalf("merged debug truncated = %#v, want true", got)
 	}
 }
 
