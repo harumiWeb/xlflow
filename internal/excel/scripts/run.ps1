@@ -195,7 +195,8 @@ try {
     }
     $currentPhase = "invoke_macro"
     $startedAt = Get-Date
-    $directMacroName = "'" + [string]$workbook.Name + "'!" + $MacroName
+    $escapedWorkbookName = ([string]$workbook.Name).Replace("'", "''")
+    $directMacroName = "'" + $escapedWorkbookName + "'!" + $MacroName
     $invokeResult = Invoke-XlflowExcelCallWithDialogWatch -Excel $excel -Workbook $workbook -Invocation { $excel.Run($directMacroName) } -DialogKind "any_vba" -CaptureDialogs ([bool]$suppressModalErrors)
     $durationMs = [int]((Get-Date) - $startedAt).TotalMilliseconds
     if (-not [bool]$invokeResult.dialog.found -and [bool]$suppressModalErrors -and $null -ne $invokeResult.exception) {

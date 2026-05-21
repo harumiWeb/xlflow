@@ -1084,14 +1084,7 @@ Private Const xlflowOpenExisting As Long = 3
 
 Public Sub Log(ParamArray Parts() As Variant)
 	Dim message As String
-	Dim index As Long
-
-	For index = LBound(Parts) To UBound(Parts)
-		If index > LBound(Parts) Then
-			message = message & " "
-		End If
-		message = message & StringifyValue(Parts(index))
-	Next index
+	message = JoinLogMessage(Parts)
 	If Len(message) = 0 Then
 		Debug.Print
 	Else
@@ -1100,6 +1093,39 @@ Public Sub Log(ParamArray Parts() As Variant)
 
 	EmitDebugEvent message
 End Sub
+
+Private Function JoinLogMessage(ByRef Parts() As Variant) As String
+	Dim index As Long
+	Dim lowerBound As Long
+	Dim upperBound As Long
+	Dim errorNumber As Long
+	Dim errorSource As String
+	Dim errorDescription As String
+
+	On Error GoTo EmptyParts
+	lowerBound = LBound(Parts)
+	upperBound = UBound(Parts)
+	On Error GoTo 0
+
+	For index = lowerBound To upperBound
+		If index > lowerBound Then
+			JoinLogMessage = JoinLogMessage & " "
+		End If
+		JoinLogMessage = JoinLogMessage & StringifyValue(Parts(index))
+	Next index
+	Exit Function
+
+EmptyParts:
+	errorNumber = Err.Number
+	errorSource = Err.Source
+	errorDescription = Err.Description
+	Err.Clear
+	On Error GoTo 0
+	If errorNumber = 9 Then
+		Exit Function
+	End If
+	Err.Raise errorNumber, errorSource, errorDescription
+End Function
 
 Private Sub EmitDebugEvent(ByVal Message As String)
 	Dim pipeName As String

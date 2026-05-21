@@ -1878,7 +1878,8 @@ func TestRunScriptWatchesAnyVBADialogDuringInvoke(t *testing.T) {
 		`Set-XlflowError -Result $result -Code "vba_compile_failed"`,
 		"function Find-XlflowPendingVBADialog",
 		`CaptureOpenVBADialogs $SuppressModalErrors`,
-		`$directMacroName = "'" + [string]$workbook.Name + "'!" + $MacroName`,
+		`$escapedWorkbookName = ([string]$workbook.Name).Replace("'", "''")`,
+		`$directMacroName = "'" + $escapedWorkbookName + "'!" + $MacroName`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("run.ps1 missing %q:\n%s", want, text)

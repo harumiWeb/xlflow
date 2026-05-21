@@ -140,9 +140,9 @@ Use `@cancel` when a headless file dialog should behave like the user pressed Ca
 
 ```bash
 xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
+```
 
 `XlflowDebug.Log` does not need an extra CLI flag. During `xlflow run` and `xlflow test`, xlflow streams those debug lines to stderr by default and includes the recent events under top-level `debug` in the final JSON envelope.
-```
 
 ---
 

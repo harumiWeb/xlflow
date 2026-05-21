@@ -1513,10 +1513,10 @@ func mergeDebugResult(existing any, streamed any) any {
 	for k, v := range existingMap {
 		merged[k] = v
 	}
+	prior := debugEventList(existingMap["events"])
 	for k, v := range streamedMap {
 		merged[k] = v
 	}
-	prior := debugEventList(merged["events"])
 	additional := debugEventList(streamedMap["events"])
 	if len(prior) > 0 || len(additional) > 0 {
 		combined := make([]map[string]any, 0, len(prior)+len(additional))

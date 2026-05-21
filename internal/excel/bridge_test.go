@@ -800,6 +800,41 @@ func TestMergeUIResultAppendsStreamEvents(t *testing.T) {
 	}
 }
 
+func TestMergeDebugResultPreservesExistingEvents(t *testing.T) {
+	existing := map[string]any{
+		"events":    []any{map[string]any{"message": "existing"}},
+		"count":     4,
+		"truncated": true,
+	}
+	streamed := map[string]any{
+		"events": []any{map[string]any{"message": "streamed"}},
+		"count":  3,
+	}
+
+	merged := mergeDebugResult(existing, streamed)
+	mergedMap, ok := merged.(map[string]any)
+	if !ok {
+		t.Fatalf("merged debug = %#v", merged)
+	}
+
+	events := debugEventList(mergedMap["events"])
+	if len(events) != 2 {
+		t.Fatalf("merged debug events = %#v", mergedMap["events"])
+	}
+	if got := events[0]["message"]; got != "existing" {
+		t.Fatalf("first merged debug event = %#v, want existing", got)
+	}
+	if got := events[1]["message"]; got != "streamed" {
+		t.Fatalf("second merged debug event = %#v, want streamed", got)
+	}
+	if got := mergedMap["count"]; got != 4 {
+		t.Fatalf("merged debug count = %#v, want 4", got)
+	}
+	if got := mergedMap["truncated"]; got != true {
+		t.Fatalf("merged debug truncated = %#v, want true", got)
+	}
+}
+
 func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,

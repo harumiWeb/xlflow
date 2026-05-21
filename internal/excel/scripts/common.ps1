@@ -156,6 +156,22 @@ function Get-XlflowStringRefersTo {
   return '="' + ([string]$Value).Replace('"', '""') + '"'
 }
 
+function DecodeWorkbookDefinedName {
+  param([string]$RefersTo)
+
+  $value = [string]$RefersTo
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return ""
+  }
+  if ($value.StartsWith('="') -and $value.EndsWith('"') -and $value.Length -ge 3) {
+    return $value.Substring(2, $value.Length - 3).Replace('""', '"')
+  }
+  if ($value.StartsWith('=')) {
+    return $value.Substring(1)
+  }
+  return $value
+}
+
 function ConvertTo-XlflowUIResponseId {
   param([string]$Value)
 
