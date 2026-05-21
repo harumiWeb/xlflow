@@ -35,8 +35,8 @@ type detector struct {
 }
 
 var (
-	msgBoxFunctionRe   = regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+msgbox\b`)
-	inputBoxFunctionRe = regexp.MustCompile(`(?i)\b(?:public|private|friend)\s+function\s+inputbox\b`)
+	msgBoxFunctionRe   = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+msgbox\b`)
+	inputBoxFunctionRe = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+inputbox\b`)
 )
 
 var detectors = []detector{

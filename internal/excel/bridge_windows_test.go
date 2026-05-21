@@ -107,6 +107,31 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 	}
 }
 
+func TestUIStreamSessionRejectsOversizedPendingLine(t *testing.T) {
+	var stderr bytes.Buffer
+	session, err := newUIStreamSession(&stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timeout := 2 * time.Second
+	conn, err := winio.DialPipe(session.PipePath(), &timeout)
+	if err != nil {
+		_ = session.Close()
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte(strings.Repeat("x", uiStreamMaxPendingBytes+1))); err != nil {
+		_ = conn.Close()
+		_ = session.Close()
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(); err == nil || !strings.Contains(err.Error(), "ui stream message exceeds") {
+		t.Fatalf("session.Close() error = %v, want oversized line error", err)
+	}
+}
+
 func waitForUIStreamEvents(session *uiStreamSession, want int, timeout time.Duration) []map[string]any {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

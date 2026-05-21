@@ -120,6 +120,32 @@ End Sub
 	}
 }
 
+func TestAnalyzerIgnoresModifierlessWrapperDeclarations(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+End Function
+
+Function InputBox(ByVal Id As String, ByVal Prompt As String) As String
+End Function
+`
+	if err := os.WriteFile(filepath.Join(src, "DialogWrappers.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("expected modifierless wrapper declarations to be ignored, got %+v", boundaries)
+	}
+}
+
 func TestAnalyzerDetectsFullyQualifiedRawDialogsOutsideXlflowUI(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

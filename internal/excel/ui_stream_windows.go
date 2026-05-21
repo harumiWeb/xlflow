@@ -17,6 +17,19 @@ import (
 	winio "github.com/Microsoft/go-winio"
 )
 
+const (
+	uiStreamReadDeadline    = 250 * time.Millisecond
+	uiStreamMaxPendingBytes = 64 * 1024
+)
+
+type uiStreamEncoding int
+
+const (
+	uiStreamEncodingUnknown uiStreamEncoding = iota
+	uiStreamEncodingText
+	uiStreamEncodingUTF16LE
+)
+
 type uiStreamSession struct {
 	pipePath string
 	listener net.Listener
@@ -103,29 +116,13 @@ func (s *uiStreamSession) acceptLoop() {
 		s.mu.Lock()
 		s.activeConn = conn
 		s.mu.Unlock()
-		payload, readErr := s.readPayload(conn)
+		readErr := s.readEvents(conn)
 		s.mu.Lock()
 		if s.activeConn == conn {
 			s.activeConn = nil
 		}
 		s.mu.Unlock()
 		_ = conn.Close()
-		for _, line := range decodeUIStreamLines(payload) {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				continue
-			}
-			var event map[string]any
-			if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
-				continue
-			}
-			s.mu.Lock()
-			s.events = append(s.events, event)
-			s.mu.Unlock()
-			if rendered := formatUIStreamEvent(event); rendered != "" {
-				_, _ = fmt.Fprintln(s.stderr, rendered)
-			}
-		}
 		if readErr != nil && !isClosedPipeAccept(readErr) {
 			s.closeErr = readErr
 			return
@@ -133,49 +130,160 @@ func (s *uiStreamSession) acceptLoop() {
 	}
 }
 
-func (s *uiStreamSession) readPayload(conn net.Conn) ([]byte, error) {
-	var buffer bytes.Buffer
+func (s *uiStreamSession) readEvents(conn net.Conn) error {
 	chunk := make([]byte, 4096)
+	pending := make([]byte, 0, len(chunk))
+	encoding := uiStreamEncodingUnknown
 	for {
-		if err := conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
-			return buffer.Bytes(), err
+		if err := conn.SetReadDeadline(time.Now().Add(uiStreamReadDeadline)); err != nil {
+			return err
 		}
 		n, err := conn.Read(chunk)
 		if n > 0 {
-			_, _ = buffer.Write(chunk[:n])
+			pending = append(pending, chunk[:n]...)
+			if len(pending) > uiStreamMaxPendingBytes {
+				return fmt.Errorf("ui stream message exceeds %d bytes", uiStreamMaxPendingBytes)
+			}
+			if encoding == uiStreamEncodingUnknown {
+				encoding = detectUIStreamEncoding(pending, false)
+			}
+			var lines []string
+			lines, pending = splitUIStreamLines(pending, encoding, false)
+			for _, line := range lines {
+				s.handleUIStreamLine(line)
+			}
 		}
 		if err == nil {
 			continue
 		}
 		if err == io.EOF {
-			return buffer.Bytes(), nil
+			s.flushUIStreamPending(&pending, &encoding)
+			return nil
 		}
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			select {
 			case <-s.closed:
-				return buffer.Bytes(), nil
+				s.flushUIStreamPending(&pending, &encoding)
+				return nil
 			default:
 				continue
 			}
 		}
 		select {
 		case <-s.closed:
-			return buffer.Bytes(), nil
+			s.flushUIStreamPending(&pending, &encoding)
+			return nil
 		default:
-			return buffer.Bytes(), err
+			return err
 		}
 	}
 }
 
-func decodeUIStreamLines(payload []byte) []string {
-	if len(payload) == 0 {
-		return nil
+func (s *uiStreamSession) flushUIStreamPending(pending *[]byte, encoding *uiStreamEncoding) {
+	if len(*pending) == 0 {
+		return
 	}
-	text := string(payload)
-	if looksLikeUTF16LE(payload) {
-		text = decodeUTF16LE(payload)
+	if *encoding == uiStreamEncodingUnknown {
+		*encoding = detectUIStreamEncoding(*pending, true)
 	}
-	return strings.Split(text, "\n")
+	lines, rest := splitUIStreamLines(*pending, *encoding, true)
+	*pending = rest
+	for _, line := range lines {
+		s.handleUIStreamLine(line)
+	}
+}
+
+func detectUIStreamEncoding(pending []byte, flush bool) uiStreamEncoding {
+	if len(pending) == 0 {
+		return uiStreamEncodingUnknown
+	}
+	evenLen := len(pending)
+	if evenLen%2 != 0 {
+		evenLen--
+	}
+	if evenLen >= 2 && pending[1] == 0 {
+		if evenLen < 4 || looksLikeUTF16LE(pending[:evenLen]) {
+			return uiStreamEncodingUTF16LE
+		}
+	}
+	if evenLen >= 4 || flush {
+		return uiStreamEncodingText
+	}
+	return uiStreamEncodingUnknown
+}
+
+func splitUIStreamLines(pending []byte, encoding uiStreamEncoding, flush bool) ([]string, []byte) {
+	switch encoding {
+	case uiStreamEncodingUTF16LE:
+		return splitUTF16LELines(pending, flush)
+	case uiStreamEncodingText:
+		return splitTextLines(pending, flush)
+	default:
+		if flush && len(pending) > 0 {
+			return []string{string(pending)}, nil
+		}
+		return nil, pending
+	}
+}
+
+func splitTextLines(pending []byte, flush bool) ([]string, []byte) {
+	lines := make([]string, 0)
+	for {
+		idx := bytes.IndexByte(pending, '\n')
+		if idx < 0 {
+			break
+		}
+		lines = append(lines, string(pending[:idx]))
+		pending = pending[idx+1:]
+	}
+	if flush && len(pending) > 0 {
+		lines = append(lines, string(pending))
+		return lines, nil
+	}
+	return lines, pending
+}
+
+func splitUTF16LELines(pending []byte, flush bool) ([]string, []byte) {
+	lines := make([]string, 0)
+	limit := len(pending)
+	if !flush && limit%2 != 0 {
+		limit--
+	}
+	start := 0
+	for i := 0; i+1 < limit; i += 2 {
+		if pending[i] == '\n' && pending[i+1] == 0 {
+			lines = append(lines, decodeUTF16LE(pending[start:i]))
+			start = i + 2
+		}
+	}
+	if flush {
+		tail := pending[start:]
+		if len(tail)%2 != 0 {
+			tail = tail[:len(tail)-1]
+		}
+		if len(tail) > 0 {
+			lines = append(lines, decodeUTF16LE(tail))
+		}
+		return lines, nil
+	}
+	return lines, pending[start:]
+}
+
+func (s *uiStreamSession) handleUIStreamLine(line string) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return
+	}
+	var event map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.events = append(s.events, event)
+	s.mu.Unlock()
+	if rendered := formatUIStreamEvent(event); rendered != "" {
+		_, _ = fmt.Fprintln(s.stderr, rendered)
+	}
 }
 
 func looksLikeUTF16LE(payload []byte) bool {
