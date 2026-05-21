@@ -156,10 +156,7 @@ func (a Analyzer) AnalyzeFile(path string) (boundaries []Boundary, err error) {
 		code := StripComment(scanner.Text())
 		codeWithoutStrings := detectionText(code)
 		for _, detector := range detectors {
-			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox" || detector.symbol == "UserForm.Show") {
-				continue
-			}
-			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && detector.kind == "file_picker" {
+			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox" || detector.symbol == "UserForm.Show" || detector.kind == "file_picker") {
 				continue
 			}
 			if shouldIgnoreDetectorLine(detector, code) {

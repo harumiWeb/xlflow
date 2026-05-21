@@ -2439,6 +2439,43 @@ func TestBuildRunOptionsParsesCancelledFileDialogResponses(t *testing.T) {
 	}
 }
 
+func TestTestCommandParsesFileDialogFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	cmd, _, err := root.Find([]string{"test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.ParseFlags([]string{
+		"--filedialog", "get-open:source-files=C:\\tmp\\a.txt",
+		"--filedialog", "get-open:source-files=C:\\tmp\\b.txt",
+		"--filedialog", "save-as:result-file=C:\\tmp\\out.xlsx",
+		"--filedialog", "folder:target-dir=@cancel",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	literals, err := cmd.Flags().GetStringArray("filedialog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parseFileDialogResponseLiterals(literals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed) != 3 {
+		t.Fatalf("file dialog responses = %#v, want 3 entries", parsed)
+	}
+	if got := parsed[0]; got.Kind != "get-open" || got.DialogID != "source_files" || !reflect.DeepEqual(got.Values, []string{"C:\\tmp\\a.txt", "C:\\tmp\\b.txt"}) || got.Cancelled {
+		t.Fatalf("open dialog = %#v", got)
+	}
+	if got := parsed[1]; got.Kind != "save-as" || got.DialogID != "result_file" || !reflect.DeepEqual(got.Values, []string{"C:\\tmp\\out.xlsx"}) || got.Cancelled {
+		t.Fatalf("save dialog = %#v", got)
+	}
+	if got := parsed[2]; got.Kind != "folder" || got.DialogID != "target_dir" || !got.Cancelled || len(got.Values) != 0 {
+		t.Fatalf("folder dialog = %#v", got)
+	}
+}
+
 func TestBuildRunOptionsRejectsInvalidFileDialogResponses(t *testing.T) {
 	cfg := config.Default()
 	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", FileDialog: []string{"unknown:pick=C:\\tmp\\a.txt"}})

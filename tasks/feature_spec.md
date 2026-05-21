@@ -13,7 +13,8 @@ Extend the existing XlflowUI headless dialog path so file-selection flows can ru
 - Dialog ids use the same normalization and collision rules as `--msgbox` / `--inputbox`.
 - Repeating the same `kind:id` pair accumulates ordered selections for open-style dialogs.
 - `@cancel` is the explicit scripted cancel token and cannot be combined with path values for the same dialog.
-- `save-as`, `folder`, and single-select open wrappers reject multiple scripted values before Excel starts.
+- `save-as` and `folder` reject multiple scripted values before Excel starts.
+- `get-open` and `file-open` accept repeated scripted values at the CLI layer; wrapper calls that use `MultiSelect:=False` reject multiple scripted values when the VBA wrapper resolves the response.
 - Headless UI events expose file-dialog results in structured `ui.events` output and realtime `--ui-stream` stderr summaries.
 
 ## VBA Contract

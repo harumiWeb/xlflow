@@ -75,7 +75,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow run <MacroName> --headless --session --keepalive --json` when you need a non-default headless entrypoint.
    - In projects scaffolded by recent xlflow versions, prefer branching on `XlflowRuntime.ModeName()` / `IsHeadless()` / `IsAgent()` / `IsTest()` instead of guessing execution context from UI state or process ancestry.
    - When a macro or test uses `XlflowUI.MsgBox`, `XlflowUI.InputBox`, or `XlflowUI` file dialog wrappers, keep unattended validation headless by passing repeated `--msgbox <dialog-id=result>`, `--inputbox <dialog-id=value>`, and `--filedialog <kind>:<dialog-id>=<value>` flags to `xlflow run` or `xlflow test`.
-   - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes`, plus final `ui.events` in JSON or a UI section in human output.
+   - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` and `xlflow: ui kind=file-open id=source-files source=scripted value=C:\temp\a.txt | C:\temp\b.txt`, plus final `ui.events` in JSON or a UI section in human output.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
    - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
