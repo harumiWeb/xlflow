@@ -29,6 +29,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/erikgeiser/coninput`        |    `v0.0.0-20211004153227-1c3628e74d0f` | MIT          | `https://github.com/erikgeiser/coninput/blob/1c3628e74d0f/LICENSE`        |
 | `github.com/inconshreveable/mousetrap`  |                                `v1.1.0` | Apache-2.0   | `https://github.com/inconshreveable/mousetrap/blob/v1.1.0/LICENSE`        |
 | `github.com/lucasb-eyer/go-colorful`    |                                `v1.2.0` | MIT          | `https://github.com/lucasb-eyer/go-colorful/blob/v1.2.0/LICENSE`          |
+| `github.com/Microsoft/go-winio`         |                                `v0.6.2` | MIT          | `https://github.com/Microsoft/go-winio/blob/v0.6.2/LICENSE`               |
 | `github.com/mattn/go-isatty`            |                               `v0.0.20` | MIT          | `https://github.com/mattn/go-isatty/blob/v0.0.20/LICENSE`                 |
 | `github.com/mattn/go-localereader`      |                                `v0.0.1` | MIT          | `https://github.com/mattn/go-localereader/blob/v0.0.1/LICENSE`            |
 | `github.com/mattn/go-runewidth`         |                               `v0.0.16` | MIT          | `https://github.com/mattn/go-runewidth/blob/v0.0.16`                      |

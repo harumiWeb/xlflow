@@ -387,14 +387,62 @@ func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
 	env.Session = map[string]any{"active": false, "workbook_path": "build/Book.xlsm", "dirty": false, "save_required": false}
 	env.Trace = map[string]any{"events": []map[string]any{{"timestamp": "2026-04-30 10:00:00", "message": "start"}}}
+	env.UI = map[string]any{"events": []map[string]any{{"kind": "msgbox", "dialog_id": "confirm-save", "response_source": "default", "resolved_result": "yes"}, {"kind": "inputbox", "dialog_id": "customer-name", "response_source": "default", "resolved_value": "[redacted]"}}}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Target:", "Saved workbook file on disk", "Session state:", "inactive", "Main.Run", "42ms", "left unchanged", "Trace", "start"} {
+	for _, want := range []string{"Target:", "Saved workbook file on disk", "Session state:", "inactive", "Main.Run", "42ms", "left unchanged", "Trace", "start", "UI", "Events:", "msgbox id=confirm-save source=default result=yes", "inputbox id=customer-name source=default value=[redacted]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersTestUISummary(t *testing.T) {
+	env := New("test")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+	env.Tests = []map[string]any{{"name": "TestDialogDefaults", "module": "DialogTests", "status": "passed", "duration_ms": 12}}
+	env.UI = map[string]any{"events": []map[string]any{{"kind": "msgbox", "dialog_id": "test-confirm", "response_source": "scripted", "resolved_result": "ok"}}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Summary:", "1 passed, 0 failed, 1 total", "UI", "Events:", "msgbox id=test-confirm source=scripted result=ok"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("test output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRunUIOnFailure(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_timeout", Message: "Macro timed out."})
+	env.UI = map[string]any{"events": []map[string]any{{"kind": "msgbox", "dialog_id": "confirm-save", "response_source": "default", "resolved_result": "yes"}}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Macro timed out.", "UI", "Events:", "msgbox id=confirm-save source=default result=yes"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failed run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersTestUIOnFailure(t *testing.T) {
+	env := Failure("test", Error{Code: "test_environment_failed", Message: "VBIDE access is not available."})
+	env.UI = map[string]any{"events": []map[string]any{{"kind": "inputbox", "dialog_id": "customer-name", "response_source": "default", "resolved_value": "[redacted]"}}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"VBIDE access is not available.", "UI", "Events:", "inputbox id=customer-name source=default value=[redacted]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failed test output missing %q:\n%s", want, got)
 		}
 	}
 }

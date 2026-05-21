@@ -26,6 +26,37 @@ Failures set `status` to `failed` and populate `error`:
 }
 ```
 
-Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `trace`, `backups`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`.
+Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `trace`, `ui`, `backups`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`.
+
+`run --ui-stream` and `test --ui-stream` may add a top-level `ui` object when `XlflowUI` dialogs are resolved. The stable field is `ui.events`, where each event may contain keys such as `kind`, `dialog_id`, `response_source`, `resolved_result`, `resolved_value`, `redacted`, and `error`.
+
+Example:
+
+```json
+{
+  "status": "ok",
+  "command": "run",
+  "ui": {
+    "events": [
+      {
+        "kind": "msgbox",
+        "dialog_id": "confirm-save",
+        "response_source": "default",
+        "resolved_result": "yes",
+        "redacted": false
+      },
+      {
+        "kind": "inputbox",
+        "dialog_id": "customer-name",
+        "response_source": "default",
+        "resolved_value": "[redacted]",
+        "redacted": true
+      }
+    ]
+  }
+}
+```
+
+When `--ui-stream` is enabled, xlflow also writes realtime `XlflowUI` summaries to stderr. Those streamed lines are not part of stdout JSON.
 
 Source: `docs/specs/cli-contract.md`.

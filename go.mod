@@ -3,6 +3,7 @@ module github.com/harumiWeb/xlflow
 go 1.26.3
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0

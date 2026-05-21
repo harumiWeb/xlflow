@@ -669,6 +669,45 @@ func TestBuildRunScriptArgsPassesRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestBuildRunScriptArgsPassesUIResponses(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro: "Main.Run",
+		UIResponses: UIResponses{
+			MsgBox: map[string]string{"confirm-save": "yes"},
+			Input:  map[string]string{"customer-name": "John"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"yes"}`)); got != want {
+		t.Fatalf("MsgBoxResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"John"}`)); got != want {
+		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+}
+
+func TestBuildRunScriptArgsPassesUIStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args, err := buildRunScriptArgs(root, cfg, RunOptions{
+		Macro:    "Main.Run",
+		UIStream: UIStreamOptions{Enabled: true, RedactInput: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["UIStreamEnabled"] != "true" {
+		t.Fatalf("UIStreamEnabled = %q, want true", args["UIStreamEnabled"])
+	}
+	if args["UIStreamRedactInput"] != "true" {
+		t.Fatalf("UIStreamRedactInput = %q, want true", args["UIStreamRedactInput"])
+	}
+}
+
 func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -678,6 +717,48 @@ func TestBuildTestScriptArgsPassesRuntimeMode(t *testing.T) {
 	}
 	if args["RuntimeSource"] != RuntimeSourceCommand {
 		t.Fatalf("RuntimeSource = %q, want %q", args["RuntimeSource"], RuntimeSourceCommand)
+	}
+}
+
+func TestBuildTestScriptArgsPassesUIResponses(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{
+		UIResponses: UIResponses{
+			MsgBox: map[string]string{"confirm-save": "no"},
+			Input:  map[string]string{"customer-name": "Jane"},
+		},
+	})
+	if got, want := args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"no"}`)); got != want {
+		t.Fatalf("MsgBoxResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"Jane"}`)); got != want {
+		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+}
+
+func TestBuildTestScriptArgsPassesUIStreamOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildTestScriptArgs(root, cfg, "", TestOptions{UIStream: UIStreamOptions{Enabled: true, RedactInput: true}})
+	if args["UIStreamEnabled"] != "true" {
+		t.Fatalf("UIStreamEnabled = %q, want true", args["UIStreamEnabled"])
+	}
+	if args["UIStreamRedactInput"] != "true" {
+		t.Fatalf("UIStreamRedactInput = %q, want true", args["UIStreamRedactInput"])
+	}
+}
+
+func TestMergeUIResultAppendsStreamEvents(t *testing.T) {
+	existing := map[string]any{"events": []any{map[string]any{"kind": "msgbox", "dialog_id": "existing"}}}
+	merged := mergeUIResult(existing, []map[string]any{{"kind": "inputbox", "dialog_id": "customer-name"}})
+	mergedMap, ok := merged.(map[string]any)
+	if !ok {
+		t.Fatalf("merged UI = %#v", merged)
+	}
+	events, ok := mergedMap["events"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("merged events = %#v", mergedMap["events"])
 	}
 }
 

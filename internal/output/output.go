@@ -461,8 +461,12 @@ func (r renderer) renderRun(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	trace := objectMap(env.Trace)
 	runtime := objectMap(env.Runtime)
-	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && len(runtime) == 0 && env.RunDiagnostic == nil {
-		return r.renderLogs(env)
+	ui := objectMap(env.UI)
+	if len(macro) == 0 && len(workbook) == 0 && len(trace) == 0 && len(runtime) == 0 && len(ui) == 0 && env.RunDiagnostic == nil {
+		var b strings.Builder
+		b.WriteString(r.renderLogs(env))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
 	}
 	var b strings.Builder
 	b.WriteString("\n")
@@ -510,6 +514,7 @@ func (r renderer) renderRun(env Envelope) string {
 			b.WriteString("\n")
 		}
 	}
+	b.WriteString(r.renderUI(env))
 	if diag := objectMap(env.RunDiagnostic); len(diag) > 0 {
 		b.WriteString("\n")
 		b.WriteString(r.style("Diagnostic", "", true))
@@ -569,7 +574,11 @@ func (r renderer) renderRun(env Envelope) string {
 func (r renderer) renderTest(env Envelope) string {
 	tests := listOfObjects(env.Tests)
 	if env.Tests == nil {
-		return r.renderLogs(env)
+		var b strings.Builder
+		b.WriteString(r.renderLogs(env))
+		b.WriteString(r.renderUI(env))
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
 	}
 	workbook := objectMap(env.Workbook)
 	runtime := objectMap(env.Runtime)
@@ -628,8 +637,56 @@ func (r renderer) renderTest(env Envelope) string {
 			b.WriteString("\n")
 		}
 	}
+	b.WriteString(r.renderUI(env))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func (r renderer) renderUI(env Envelope) string {
+	ui := objectMap(env.UI)
+	events := listOfObjects(ui["events"])
+	if len(events) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.style("UI", "", true))
+	b.WriteString("\n")
+	b.WriteString(kv("Events", fmt.Sprintf("%d", len(events))))
+	for _, event := range events {
+		b.WriteString("- ")
+		b.WriteString(summarizeUIEvent(event))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func summarizeUIEvent(event map[string]any) string {
+	kind := stringValue(event, "kind")
+	if kind == "" {
+		kind = "dialog"
+	}
+	id := stringValue(event, "dialog_id")
+	parts := []string{kind}
+	if id != "" {
+		parts = append(parts, "id="+id)
+	}
+	if source := stringValue(event, "response_source"); source != "" {
+		parts = append(parts, "source="+source)
+	}
+	if result := stringValue(event, "resolved_result"); result != "" {
+		parts = append(parts, "result="+result)
+	}
+	if value := stringValue(event, "resolved_value"); value != "" {
+		if boolValue(event, "redacted") {
+			value = "[redacted]"
+		}
+		parts = append(parts, "value="+value)
+	}
+	if errText := stringValue(event, "error"); errText != "" {
+		parts = append(parts, "error="+errText)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (r renderer) renderLint(env Envelope) string {

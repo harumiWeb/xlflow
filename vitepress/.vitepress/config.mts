@@ -105,6 +105,7 @@ function referenceSidebar() {
         { text: "JSON Output", link: "/reference/json-output" },
         { text: "Project Structure", link: "/reference/project-structure" },
         { text: "Config File", link: "/reference/config-file" },
+        { text: "XlflowUI", link: "/reference/xlflow-ui" },
         { text: "Exit Codes", link: "/reference/exit-codes" },
         { text: "Error Codes", link: "/reference/error-codes" },
         { text: "Environment Variables", link: "/reference/environment-variables" },

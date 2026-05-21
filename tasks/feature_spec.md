@@ -711,7 +711,10 @@ Expose a stable VBA-visible execution mode so workbook code can branch between n
 ## Scope
 
 - Phase 1 covers execution context resolution and injection for `xlflow run` and `xlflow test`.
-- Phase 1 does not add dialog abstractions such as `XlflowUI.MsgBox` or `XlflowUI.InputBox`; it only provides the runtime state those helpers can read later.
+- Phase 2 builds on that transport with `XlflowUI.MsgBox` and `XlflowUI.InputBox` plus repeated CLI flags `--msgbox <dialog-id=result>` and `--inputbox <dialog-id=value>` on both `run` and `test`.
+- `XlflowUI` requires stable dialog ids. Ids must contain at least one ASCII letter or digit and are normalized to lowercase ASCII letters/digits separated by `_` for workbook-marker lookup.
+- In `interactive` mode, `XlflowUI` delegates to native `VBA.Interaction.MsgBox` and `VBA.Interaction.InputBox`.
+- In `headless`, `ci`, `agent`, and `test` modes, `XlflowUI` resolves scripted responses from xlflow-injected workbook markers and must fail deterministically when a required response is missing or invalid.
 - Manual Excel usage remains backward compatible: when no xlflow marker is present, VBA falls back to interactive mode.
 
 ## Runtime Modes
@@ -737,6 +740,7 @@ Expose a stable VBA-visible execution mode so workbook code can branch between n
 
 - Before user VBA starts, `run.ps1` and `test.ps1` write a workbook-scoped hidden defined name `__XLFLOW_MODE__` with the resolved mode string.
 - xlflow may also write a reserved compatibility marker such as `__XLFLOW_RUNTIME_VERSION__ = 1` for future helper evolution.
+- Phase 2 additionally writes temporary workbook-scoped hidden defined names for scripted `XlflowUI` dialog responses, keyed by normalized dialog id and wrapper kind (`msgbox` or `input`).
 - Runtime markers are removed or restored in `finally`, even when macro/test execution fails.
 - Cleanup occurs before `Save`, `SaveCopyAs`, and final result serialization so runtime markers are not persisted as workbook content.
 - If a reserved name already exists, xlflow preserves its prior value and restores it after execution rather than silently overwriting it permanently.
@@ -763,7 +767,16 @@ Public Function IsTest() As Boolean
 ```
 
 - `XlflowRuntime` reads workbook-scoped state first, then `Environ$("XLFLOW_MODE")`, then defaults to `interactive`.
-- Existing projects are not auto-migrated in Phase 1; documentation should show how to add the helper module manually when a project wants runtime-aware branching.
+- Phase 2 also scaffolds `src/modules/XlflowUI.bas` with the stable wrapper surface:
+
+```vb
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "") As VbMsgBoxResult
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "") As String
+```
+
+- `XlflowUI` validates dialog ids before interactive or headless dispatch.
+- `MsgBox` scripted responses accept `abort`, `cancel`, `ignore`, `no`, `ok`, `retry`, and `yes`.
+- Existing projects are not auto-migrated in Phase 2; documentation should show how to add `XlflowRuntime.bas` and `XlflowUI.bas` manually when a project opts into runtime-aware dialogs.
 
 ## Output Contract
 
