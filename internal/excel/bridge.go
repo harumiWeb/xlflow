@@ -259,7 +259,8 @@ type SessionOptions struct {
 }
 
 type CommandOptions struct {
-	Stderr io.Writer
+	Stderr   io.Writer
+	Progress bool
 }
 
 type ScriptLogs []string

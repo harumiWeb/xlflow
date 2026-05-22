@@ -60,7 +60,7 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"--gui-compile-errors",
 		"[lint].forbid_interactive_input = false",
 		"xlflow session stop",
-		"Interactive terminals show a spinner, and non-interactive or --json runs keep the same progress channel on stderr",
+		"Interactive terminals show a spinner, non-interactive or --json runs fall back to a single stderr progress line",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("installed skill is missing %q:\n%s", want, body)

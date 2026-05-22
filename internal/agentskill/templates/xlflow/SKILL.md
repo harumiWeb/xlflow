@@ -228,7 +228,7 @@ End Sub
 
 ## Progress Rules
 
-Use normal Excel COM-backed commands with or without --json; xlflow now always reports in-flight progress on stderr. Interactive terminals show a spinner, and non-interactive or --json runs keep the same progress channel on stderr so stdout remains valid JSON.
+Use normal Excel COM-backed commands with or without --json; xlflow reports progress on stderr. Interactive terminals show a spinner, non-interactive or --json runs fall back to a single stderr progress line, and commands that stream UI/debug events may suppress separate progress output so those stderr records stay parseable.
 
 After starting a workbook-dependent command, wait for the process to exit before beginning the next step. Do not synchronize on transient stderr frames or assume silence means the command is stalled.
 

@@ -1696,7 +1696,7 @@ func buildCommandOptions(stderr io.Writer) excel.CommandOptions {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	return excel.CommandOptions{Stderr: stderr}
+	return excel.CommandOptions{Stderr: stderr, Progress: true}
 }
 
 var allowedMsgBoxResults = map[string]struct{}{
@@ -2089,6 +2089,7 @@ func (a *app) runCommand() *cobra.Command {
 			}
 			var opts excel.RunOptions
 			commandOpts := buildCommandOptions(a.stderrWriter())
+			commandOpts.Progress = false
 			if uiStream {
 				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts, true)
 			} else {
@@ -2498,6 +2499,7 @@ func (a *app) testCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts := buildCommandOptions(a.stderrWriter())
+			commandOpts.Progress = false
 			cfg, err := a.loadConfig("test")
 			if err != nil {
 				return err
@@ -4087,6 +4089,14 @@ func stdoutIsTerminal() bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+func stderrIsTerminal() bool {
+	info, err := os.Stderr.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
 func (a *app) stdoutWriter() io.Writer {
 	if a.stdout != nil {
 		return a.stdout
@@ -4106,6 +4116,13 @@ func (a *app) stdoutIsInteractive() bool {
 		return a.stdoutTerminal()
 	}
 	return stdoutIsTerminal()
+}
+
+func (a *app) stderrIsInteractive() bool {
+	if a.stderrTerminal != nil {
+		return a.stderrTerminal()
+	}
+	return stderrIsTerminal()
 }
 
 func (a *app) loadConfig(command string) (config.Config, error) {
@@ -4194,9 +4211,16 @@ func (a *app) runExcelWithProgress(label string, opts excel.CommandOptions, fn f
 }
 
 func (a *app) withExcelProgress(label string, opts excel.CommandOptions, fn func() error) error {
+	if !opts.Progress {
+		return fn()
+	}
 	return a.withSpinner(label, fn)
 }
 
 func (a *app) withSpinner(label string, fn func() error) error {
+	if !a.stderrIsInteractive() {
+		_, _ = fmt.Fprintf(a.stderrWriter(), "xlflow: %s...\n", label)
+		return fn()
+	}
 	return runSpinner(a.stderrWriter(), label, fn)
 }

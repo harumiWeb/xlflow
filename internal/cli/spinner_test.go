@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/harumiWeb/xlflow/internal/excel"
 )
 
 func TestSpinnerModelQuitsOnDone(t *testing.T) {
@@ -44,7 +45,7 @@ func TestRunSpinnerReturnsWorkError(t *testing.T) {
 	}
 }
 
-func TestWithSpinnerRunsForJSONAndNonInteractive(t *testing.T) {
+func TestWithSpinnerWritesSingleLineProgressForNonInteractive(t *testing.T) {
 	var stderr bytes.Buffer
 	a := &app{
 		json:           true,
@@ -59,7 +60,22 @@ func TestWithSpinnerRunsForJSONAndNonInteractive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("withSpinner err = %v", err)
 	}
-	if !strings.Contains(stderr.String(), "Running macro") {
-		t.Fatalf("spinner output = %q", stderr.String())
+	if got := stderr.String(); got != "xlflow: Running macro...\n" {
+		t.Fatalf("progress output = %q", got)
+	}
+}
+
+func TestWithExcelProgressSkipsWhenProgressDisabled(t *testing.T) {
+	var stderr bytes.Buffer
+	a := &app{stderr: &stderr}
+
+	err := a.withExcelProgress("Running macro", excel.CommandOptions{Stderr: &stderr, Progress: false}, func() error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withExcelProgress err = %v", err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("expected no progress output, got %q", got)
 	}
 }

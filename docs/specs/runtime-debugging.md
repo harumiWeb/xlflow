@@ -134,9 +134,9 @@ Windows review checklist:
 
 ## Agent Progress Output
 
-Excel COM-backed commands always report in-flight progress on stderr. Interactive terminals show a spinner, and `--json` or non-interactive runs keep that same progress channel on stderr so stdout stays reserved for the final human output or JSON envelope.
+Excel COM-backed commands report progress on stderr. Interactive stderr terminals show a spinner; non-interactive or `--json` runs fall back to a single line of progress on stderr so stdout stays reserved for the final human output or JSON envelope. Commands that stream UI or debug events to stderr may suppress separate progress output so those event lines remain parseable.
 
-Agents should use normal commands such as `xlflow pull --json`, `xlflow push --json`, and `xlflow run --json`, ignore transient spinner frames on stderr, and synchronize on process exit instead of any interim progress text.
+Agents should use normal commands such as `xlflow pull --json`, `xlflow push --json`, and `xlflow run --json`, treat stderr progress as advisory only, and synchronize on process exit instead of any interim progress text.
 
 ## Bundled Skill Workflow Guidance
 
