@@ -5,7 +5,7 @@ List workbook resources. The public resource command is `list forms`.
 ## Usage
 
 ```bash
-xlflow list forms [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow list forms [--session]
 ```
 
 ## Options and Arguments

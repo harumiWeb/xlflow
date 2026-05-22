@@ -4,20 +4,21 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Removed `--keepalive` / `--keepalive-interval` from Excel COM-backed commands and the final `XLFLOW_DONE` marker; interactive stderr now uses spinner progress where available, while non-interactive runs fall back to line-oriented progress and streamed UI/debug stderr output suppresses separate progress frames.
 - Added XlflowUI module with MsgBox and InputBox wrappers to handle user prompts.
 - Extended XlflowUI with headless-safe file dialog wrappers for `Application.GetOpenFilename`, `Application.GetSaveAsFilename`, open `Application.FileDialog`, and folder picker flows, plus repeated `--filedialog <kind>:<dialog-id>=<value>` CLI responses for `run` and `test`.
 - Added `--ui-stream` for `xlflow run` and `xlflow test`, streaming resolved headless `XlflowUI` dialog events to stderr in real time while preserving JSON stdout and returning final `ui.events` payloads plus human-readable `UI` summaries.
 - Added scaffolded `XlflowDebug` helper support so explicit `XlflowDebug.Log` calls stream to stderr and final top-level `debug` payloads during `xlflow run` and `xlflow test` without a separate CLI flag, including direct and fast run paths.
 - Updated run.ps1 and test.ps1 to accept MsgBoxResponsesJSON and InputResponsesJSON parameters.
 - Added explanatory comments to scaffolded `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowAssert.bas` so workbook authors can adopt the helper modules more easily.
-- Added explicit live-session inspect mode for `inspect workbook`, `inspect sheets`, `inspect range`, `inspect used-range`, and `inspect cell` via `--session`, including keepalive support, explicit `live_session` target metadata, and saved-file warnings that point callers to live-session inspect when disk may be stale.
+- Added explicit live-session inspect mode for `inspect workbook`, `inspect sheets`, `inspect range`, `inspect used-range`, and `inspect cell` via `--session`, plus explicit `live_session` target metadata and saved-file warnings that point callers to live-session inspect when disk may be stale.
 - Added runtime-aware execution mode injection for `run` and `test`, plus the scaffolded `XlflowRuntime` VBA helper for branching between interactive, headless, agent, CI, and test execution contexts.
 
 ## v0.9.0
 
 - Added winget release publishing so GoReleaser can generate the `HarumiWeb.Xlflow` manifest and push it to the `harumiWeb/winget-pkgs` fork for upstream submission.
 - Updated `xlflow new` to bootstrap the workbook/source sync automatically by pushing scaffolded VBA into the new workbook before the command reports success, and added placeholder `src/workbook/ThisWorkbook.bas` / `Sheet1.bas` files with `Option Explicit` for new projects.
-- Updated `xlflow init` to bootstrap source sync automatically by pulling VBA from the copied workbook into `src/`, and added scaffold-level keepalive handling so `new` / `init --keepalive` emit a single final `XLFLOW_DONE` marker only after bootstrap sync completes.
+- Updated `xlflow init` to bootstrap source sync automatically by pulling VBA from the copied workbook into `src/`.
 - Added first-class workbook rollback support with `xlflow backup list` and `xlflow rollback`, including metadata-backed workbook-file backups under `.xlflow/backups/<backup-id>/`, automatic safety backups before restore, and session-aware guards that refuse rollback while the target workbook is open in an active xlflow session.
 - Changed default `push` backups from component-export snapshots to rollback-capable workbook snapshots, and updated the CLI/docs surface, JSON output, and VitePress command/concept pages to reflect the new backup and recovery workflow.
 

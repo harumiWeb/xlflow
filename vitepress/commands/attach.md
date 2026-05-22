@@ -5,7 +5,7 @@ Validate that the active Excel workbook matches the configured workbook.
 ## Usage
 
 ```bash
-xlflow attach --active [--keepalive] [--keepalive-interval <duration>]
+xlflow attach --active
 ```
 
 ## Options and Arguments
@@ -13,7 +13,6 @@ xlflow attach --active [--keepalive] [--keepalive-interval <duration>]
 | Option / argument | Description                                     | Default  |
 | ----------------- | ----------------------------------------------- | -------- |
 | `--active`        | Inspect the currently active workbook in Excel. | required |
-| `--keepalive`     | Keep the bridge process alive.                  | false    |
 | `--json`          | Emit a machine-readable match result.           | false    |
 
 ## Examples

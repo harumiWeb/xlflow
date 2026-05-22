@@ -5,7 +5,7 @@ Export workbook VBA components and form artifacts into configured source directo
 ## Usage
 
 ```bash
-xlflow pull [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow pull [--session]
 ```
 
 ## Options and Arguments
@@ -13,7 +13,6 @@ xlflow pull [--session] [--keepalive] [--keepalive-interval <duration>]
 | Option / argument | Description                                  | Default |
 | ----------------- | -------------------------------------------- | ------- |
 | `--session`       | Pull from the managed live session workbook. | false   |
-| `--keepalive`     | Reuse the bridge process.                    | false   |
 | `--json`          | Report exported files and warnings.          | false   |
 
 ## Examples

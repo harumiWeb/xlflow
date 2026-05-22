@@ -259,9 +259,8 @@ type SessionOptions struct {
 }
 
 type CommandOptions struct {
-	Keepalive         bool
-	KeepaliveInterval time.Duration
-	Stderr            io.Writer
+	Stderr   io.Writer
+	Progress bool
 }
 
 type ScriptLogs []string
@@ -1343,12 +1342,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	stopKeepalive := startKeepalive(commandName, opts.Keepalive)
 	err = cmd.Start()
 	if err == nil {
 		err = cmd.Wait()
 	}
-	stopKeepalive()
 	debugResult, debugStreamErr := closeDebugStreamSession(debugSession)
 	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
 	if err != nil {
@@ -1371,7 +1368,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
 			env.UI = mergeUIResult(nil, uiEvents)
-			writeDoneMarker(commandName, env, opts.Keepalive)
 			return env, output.ExitValidation, nil
 		}
 		message := err.Error()
@@ -1387,7 +1383,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
-		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -1399,7 +1394,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
-		writeDoneMarker(commandName, env, opts.Keepalive)
 		return env, output.ExitEnvironment, nil
 	}
 	if result.Status == "" {
@@ -1444,7 +1438,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 	}
-	writeDoneMarker(commandName, env, opts.Keepalive)
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
@@ -1601,61 +1594,6 @@ func closeDebugStreamSession(session *debugStreamSession) (any, error) {
 		return session.Result(), err
 	}
 	return session.Result(), nil
-}
-
-func startKeepalive(commandName string, opts CommandOptions) func() {
-	if !opts.Keepalive {
-		return func() {}
-	}
-	w := opts.Stderr
-	if w == nil {
-		w = os.Stderr
-	}
-	interval := opts.KeepaliveInterval
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	started := time.Now()
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	_, _ = fmt.Fprintf(w, "xlflow: %s still running... elapsed=0s\n", commandName)
-	go func() {
-		defer close(stopped)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				elapsed := time.Since(started).Truncate(time.Second)
-				_, _ = fmt.Fprintf(w, "xlflow: %s still running... elapsed=%s\n", commandName, elapsed)
-			}
-		}
-	}()
-	return func() {
-		close(done)
-		<-stopped
-	}
-}
-
-func writeDoneMarker(commandName string, env output.Envelope, opts CommandOptions) {
-	if !opts.Keepalive {
-		return
-	}
-	w := opts.Stderr
-	if w == nil {
-		w = os.Stderr
-	}
-	status := "success"
-	if env.Status == output.StatusFailed {
-		status = "failed"
-	}
-	_, _ = fmt.Fprintf(w, "XLFLOW_DONE status=%s command=%s", status, commandName)
-	if env.Error != nil && env.Error.Code != "" {
-		_, _ = fmt.Fprintf(w, " code=%s", env.Error.Code)
-	}
-	_, _ = fmt.Fprintln(w)
 }
 
 func exitCodeForScriptResult(result ScriptResult) int {

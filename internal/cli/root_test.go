@@ -21,7 +21,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
-	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -49,17 +48,13 @@ type runOptionsInput struct {
 	GUICompileErrors   bool
 	Session            bool
 	Timeout            time.Duration
-	Keepalive          bool
-	KeepaliveInterval  time.Duration
+	CommandOptions     excel.CommandOptions
 	UIStream           bool
 }
 
 func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOptions, error) {
 	if in.Timeout == 0 {
 		in.Timeout = 5 * time.Minute
-	}
-	if in.KeepaliveInterval == 0 {
-		in.KeepaliveInterval = defaultKeepaliveInterval
 	}
 	return buildRunOptionsWithUIStream(
 		cfg,
@@ -81,8 +76,7 @@ func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOpt
 		in.GUICompileErrors,
 		in.Session,
 		in.Timeout,
-		in.Keepalive,
-		in.KeepaliveInterval,
+		in.CommandOptions,
 		in.UIStream,
 	)
 }
@@ -271,7 +265,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "keepalive", "keepalive-interval", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
@@ -359,164 +353,6 @@ func TestRootCommandIncludesSessionSaveAndRunnerCommands(t *testing.T) {
 		}
 		if cmd == nil || cmd.Name() != args[len(args)-1] {
 			t.Fatalf("expected command %v, got %#v", args, cmd)
-		}
-	}
-}
-
-func TestRootCommandIncludesExcelCommandKeepaliveFlags(t *testing.T) {
-	a := &app{}
-	root := a.rootCommand()
-
-	for _, args := range [][]string{
-		{"new"},
-		{"init"},
-		{"doctor"},
-		{"attach"},
-		{"list", "forms"},
-		{"inspect", "workbook"},
-		{"inspect", "sheets"},
-		{"inspect", "range"},
-		{"inspect", "used-range"},
-		{"inspect", "cell"},
-		{"pull"},
-		{"push"},
-		{"export-image"},
-		{"edit", "cell"},
-		{"edit", "range"},
-		{"edit", "rows"},
-		{"edit", "columns"},
-		{"trace", "inject"},
-		{"macros"},
-		{"test"},
-		{"ui", "button", "add"},
-		{"ui", "button", "list"},
-		{"ui", "button", "remove"},
-		{"check"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			cmd, _, err := root.Find(args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, name := range []string{"keepalive", "keepalive-interval"} {
-				if cmd.Flags().Lookup(name) == nil {
-					t.Fatalf("expected %v command to define --%s", args, name)
-				}
-			}
-		})
-	}
-}
-
-func TestRootCommandDoesNotAddKeepaliveToNonExcelCommands(t *testing.T) {
-	a := &app{}
-	root := a.rootCommand()
-
-	for _, args := range [][]string{
-		{"lint"},
-		{"analyze"},
-		{"diff"},
-		{"inspect-gui"},
-		{"skill", "install"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			cmd, _, err := root.Find(args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cmd.Flags().Lookup("keepalive") != nil || cmd.Flags().Lookup("keepalive-interval") != nil {
-				t.Fatalf("expected %v command not to define keepalive flags", args)
-			}
-		})
-	}
-}
-
-func TestAddKeepaliveFlagsUsesDefaultInterval(t *testing.T) {
-	var flags keepaliveFlags
-	cmd := &cobra.Command{Use: "sample"}
-	addKeepaliveFlags(cmd, &flags)
-
-	if err := cmd.Flags().Set("keepalive", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Flags().Set("keepalive-interval", "3s"); err != nil {
-		t.Fatal(err)
-	}
-	if !flags.enabled {
-		t.Fatal("expected keepalive to be enabled")
-	}
-	if flags.interval != 3*time.Second {
-		t.Fatalf("interval = %s, want 3s", flags.interval)
-	}
-}
-
-func TestPullCommandRejectsInvalidKeepaliveIntervalBeforeConfigLoad(t *testing.T) {
-	dir := t.TempDir()
-	a := &app{cwd: dir}
-	root := a.rootCommand()
-	root.SetArgs([]string{"pull", "--keepalive", "--keepalive-interval", "0s"})
-
-	err := root.Execute()
-	if err == nil || output.ExitCode(err) != output.ExitConfig {
-		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
-	}
-	if !strings.Contains(err.Error(), "--keepalive-interval") {
-		t.Fatalf("error = %v, want keepalive interval message", err)
-	}
-}
-
-func TestInitCommandRejectsInvalidKeepaliveIntervalBeforeScaffold(t *testing.T) {
-	dir := t.TempDir()
-	workbook := filepath.Join(dir, "Input.xlsm")
-	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	a := &app{cwd: dir}
-	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook, "--keepalive", "--keepalive-interval", "0s"})
-
-	err := root.Execute()
-	if err == nil || output.ExitCode(err) != output.ExitConfig {
-		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
-	}
-	if !strings.Contains(err.Error(), "--keepalive-interval") {
-		t.Fatalf("error = %v, want keepalive interval message", err)
-	}
-}
-
-func TestUIButtonCommandRejectsInvalidKeepaliveIntervalWithUIButtonError(t *testing.T) {
-	dir := t.TempDir()
-	a := &app{cwd: dir}
-	root := a.rootCommand()
-	root.SetArgs([]string{
-		"ui", "button", "add",
-		"--sheet", "Menu",
-		"--cell", "B2",
-		"--text", "Run",
-		"--macro", "Main.Run",
-		"--keepalive",
-		"--keepalive-interval", "0s",
-	})
-
-	err := root.Execute()
-	if err == nil || output.ExitCode(err) != output.ExitConfig {
-		t.Fatalf("expected config exit for invalid interval, got err=%v exit=%d", err, output.ExitCode(err))
-	}
-	if !strings.Contains(err.Error(), "--keepalive-interval") {
-		t.Fatalf("error = %v, want keepalive interval message", err)
-	}
-}
-
-func TestKeepaliveFlagsAreNotDuplicatedOnRun(t *testing.T) {
-	a := &app{}
-	root := a.rootCommand()
-
-	cmd, _, err := root.Find([]string{"run"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"keepalive", "keepalive-interval"} {
-		if flag := cmd.Flags().Lookup(name); flag == nil {
-			t.Fatalf("expected run command to define --%s", name)
 		}
 	}
 }
@@ -656,7 +492,7 @@ func TestRootCommandIncludesListFormsCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "forms" {
 		t.Fatalf("expected list forms command, got %#v", cmd)
 	}
-	for _, name := range []string{"session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"session"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected list forms command to define --%s", name)
 		}
@@ -674,7 +510,7 @@ func TestRootCommandIncludesFormSnapshotCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "snapshot" {
 		t.Fatalf("expected form snapshot command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"out", "session"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected form snapshot command to define --%s", name)
 		}
@@ -695,7 +531,7 @@ func TestRootCommandIncludesFormBuildCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "build" {
 		t.Fatalf("expected form build command, got %#v", cmd)
 	}
-	for _, name := range []string{"overwrite", "session", "no-save", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"overwrite", "session", "no-save"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected form build command to define --%s", name)
 		}
@@ -716,7 +552,7 @@ func TestRootCommandIncludesFormApplyCommand(t *testing.T) {
 	if !cmd.Hidden {
 		t.Fatal("expected form apply command to be hidden")
 	}
-	for _, name := range []string{"session", "no-save", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"session", "no-save"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected form apply command to define --%s", name)
 		}
@@ -734,7 +570,7 @@ func TestRootCommandIncludesFormExportImageCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "export-image" {
 		t.Fatalf("expected form export-image command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "initializer", "overwrite", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"out", "initializer", "overwrite", "session"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected form export-image command to define --%s", name)
 		}
@@ -752,7 +588,7 @@ func TestRootCommandIncludesInspectFormCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "form" {
 		t.Fatalf("expected inspect form command, got %#v", cmd)
 	}
-	for _, name := range []string{"runtime", "designer", "both", "initializer", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"runtime", "designer", "both", "initializer", "session"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected inspect form command to define --%s", name)
 		}
@@ -770,7 +606,7 @@ func TestRootCommandIncludesExportImageCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "export-image" {
 		t.Fatalf("expected export-image command, got %#v", cmd)
 	}
-	for _, name := range []string{"sheet", "range", "out", "output-dir", "name", "format", "overwrite", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"sheet", "range", "out", "output-dir", "name", "format", "overwrite", "session"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected export-image command to define --%s", name)
 		}
@@ -800,7 +636,7 @@ func TestRootCommandIncludesEditCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sheet", "cell", "value", "formula", "fill", "events", "session", "keepalive", "keepalive-interval"} {
+	for _, name := range []string{"sheet", "cell", "value", "formula", "fill", "events", "session"} {
 		if cell.Flags().Lookup(name) == nil {
 			t.Fatalf("expected edit cell to define --%s", name)
 		}
@@ -857,7 +693,8 @@ func TestBuildExportImageOptionsRejectsInvalidCombinations(t *testing.T) {
 }
 
 func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
-	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	stderr := bytes.Buffer{}
+	opts, err := buildFormSnapshotOptions(" UserForm1 ", " artifacts\\UserForm1.form.yaml ", true, excel.CommandOptions{Stderr: &stderr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,8 +704,8 @@ func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
 	if !opts.Inspect.StrictDesigner {
 		t.Fatalf("expected strict designer snapshot opts = %#v", opts.Inspect)
 	}
-	if !opts.Inspect.Session || !opts.Inspect.Keepalive.Keepalive || opts.Inspect.Keepalive.KeepaliveInterval != 7*time.Second {
-		t.Fatalf("keepalive/session opts = %#v", opts.Inspect)
+	if !opts.Inspect.Session || opts.Inspect.Keepalive.Stderr != &stderr {
+		t.Fatalf("command/session opts = %#v", opts.Inspect)
 	}
 	if opts.OutPath != "artifacts\\UserForm1.form.yaml" {
 		t.Fatalf("out path = %q", opts.OutPath)
@@ -876,32 +713,33 @@ func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
 }
 
 func TestBuildFormSnapshotOptionsRejectsMissingRequirements(t *testing.T) {
-	if _, err := buildFormSnapshotOptions("UserForm1", "", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+	if _, err := buildFormSnapshotOptions("UserForm1", "", false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
 		t.Fatalf("expected out requirement error, got %v", err)
 	}
-	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+	if _, err := buildFormSnapshotOptions("", "artifacts\\UserForm1.form.yaml", false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
 		t.Fatalf("expected form name error, got %v", err)
 	}
 }
 
 func TestBuildFormExportImageOptionsValidatesAndNormalizes(t *testing.T) {
-	opts, err := buildFormExportImageOptions(" UserForm1 ", " artifacts\\UserForm1.png ", " InitializeForm ", true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second})
+	stderr := bytes.Buffer{}
+	opts, err := buildFormExportImageOptions(" UserForm1 ", " artifacts\\UserForm1.png ", " InitializeForm ", true, true, excel.CommandOptions{Stderr: &stderr})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Name != "UserForm1" || opts.OutPath != "artifacts\\UserForm1.png" || opts.Initializer != "InitializeForm" {
 		t.Fatalf("unexpected form export-image opts: %#v", opts)
 	}
-	if !opts.Overwrite || !opts.Session || !opts.Keepalive.Keepalive || opts.Keepalive.KeepaliveInterval != 7*time.Second {
-		t.Fatalf("unexpected keepalive/session opts: %#v", opts)
+	if !opts.Overwrite || !opts.Session || opts.Keepalive.Stderr != &stderr {
+		t.Fatalf("unexpected command/session opts: %#v", opts)
 	}
 }
 
 func TestBuildFormExportImageOptionsRejectsMissingRequirements(t *testing.T) {
-	if _, err := buildFormExportImageOptions("", "artifacts\\UserForm1.png", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
+	if _, err := buildFormExportImageOptions("", "artifacts\\UserForm1.png", "", false, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "form name is required") {
 		t.Fatalf("expected form name error, got %v", err)
 	}
-	if _, err := buildFormExportImageOptions("UserForm1", "", "", false, false, keepaliveFlags{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
+	if _, err := buildFormExportImageOptions("UserForm1", "", "", false, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--out is required") {
 		t.Fatalf("expected out requirement error, got %v", err)
 	}
 }
@@ -917,7 +755,8 @@ func TestBuildFormWriteOptionsValidatesAndNormalizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts, err := buildFormWriteOptions(" build ", specPath, true, true, true, keepaliveFlags{enabled: true, interval: 7 * time.Second}, root)
+	stderr := bytes.Buffer{}
+	opts, err := buildFormWriteOptions(" build ", specPath, true, true, true, excel.CommandOptions{Stderr: &stderr}, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -927,8 +766,8 @@ func TestBuildFormWriteOptionsValidatesAndNormalizes(t *testing.T) {
 	if !opts.Overwrite || !opts.Session || !opts.NoSave {
 		t.Fatalf("expected overwrite/session/no-save to be preserved: %#v", opts)
 	}
-	if !opts.Keepalive.Keepalive || opts.Keepalive.KeepaliveInterval != 7*time.Second {
-		t.Fatalf("unexpected keepalive opts: %#v", opts.Keepalive)
+	if opts.Keepalive.Stderr != &stderr {
+		t.Fatalf("unexpected command opts: %#v", opts.Keepalive)
 	}
 	if !strings.HasSuffix(opts.SpecInput.DisplayPath, "specs/UserForm1.form.yaml") {
 		t.Fatalf("unexpected display path: %q", opts.SpecInput.DisplayPath)
@@ -937,10 +776,10 @@ func TestBuildFormWriteOptionsValidatesAndNormalizes(t *testing.T) {
 
 func TestBuildFormWriteOptionsRejectsInvalidRequirements(t *testing.T) {
 	root := t.TempDir()
-	if _, err := buildFormWriteOptions("apply", "missing.form.yaml", false, false, true, keepaliveFlags{}, root); err == nil || !strings.Contains(err.Error(), "--no-save requires --session") {
+	if _, err := buildFormWriteOptions("apply", "missing.form.yaml", false, false, true, excel.CommandOptions{}, root); err == nil || !strings.Contains(err.Error(), "--no-save requires --session") {
 		t.Fatalf("expected no-save/session error, got %v", err)
 	}
-	if _, err := buildFormWriteOptions("noop", "missing.form.yaml", false, false, false, keepaliveFlags{}, root); err == nil || !strings.Contains(err.Error(), "unsupported form action") {
+	if _, err := buildFormWriteOptions("noop", "missing.form.yaml", false, false, false, excel.CommandOptions{}, root); err == nil || !strings.Contains(err.Error(), "unsupported form action") {
 		t.Fatalf("expected action error, got %v", err)
 	}
 }
@@ -1417,29 +1256,6 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 	}
 }
 
-func TestNewCommandKeepaliveReportsOnlyFinalCommandDoneMarker(t *testing.T) {
-	skipWindowsPowerShellOnlyTest(t)
-	dir := t.TempDir()
-	writeTestNewScript(t, dir)
-	writeTestPushScript(t, dir)
-
-	var stderr bytes.Buffer
-	a := &app{cwd: dir, stderr: &stderr}
-	root := a.rootCommand()
-	root.SetArgs([]string{"new", "Book.xlsm", "--keepalive"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
-	}
-
-	got := stderr.String()
-	if count := strings.Count(got, "XLFLOW_DONE status=success command=new"); count != 1 {
-		t.Fatalf("expected exactly one final new done marker, got %d:\n%s", count, got)
-	}
-	if strings.Contains(got, "command=push") {
-		t.Fatalf("expected internal bootstrap push not to emit its own done marker:\n%s", got)
-	}
-}
-
 func TestSkillInstallCommandRefusesOverwriteUnlessForced(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cwd: dir}
@@ -1753,16 +1569,9 @@ func TestBuildInspectFormBasisRejectsConflictingModes(t *testing.T) {
 }
 
 func TestBuildInspectFormOptionsRejectsInitializerForDesigner(t *testing.T) {
-	_, err := buildInspectFormOptions("UserForm1", "designer", "InitializeForm", false, keepaliveFlags{})
+	_, err := buildInspectFormOptions("UserForm1", "designer", "InitializeForm", false, excel.CommandOptions{})
 	if err == nil || !strings.Contains(err.Error(), "--initializer can only be used") {
 		t.Fatalf("expected initializer validation error, got %v", err)
-	}
-}
-
-func TestBuildInspectBridgeOptionsRejectsKeepaliveWithoutSession(t *testing.T) {
-	_, err := buildInspectBridgeOptions(false, keepaliveFlags{enabled: true, interval: 5 * time.Second})
-	if err == nil || !strings.Contains(err.Error(), "--keepalive requires --session") {
-		t.Fatalf("expected keepalive/session validation error, got %v", err)
 	}
 }
 
@@ -2372,11 +2181,8 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	if opts.Timeout != 5*time.Minute {
 		t.Fatalf("timeout = %s", opts.Timeout)
 	}
-	if opts.Keepalive.Keepalive {
-		t.Fatal("keepalive should default to disabled")
-	}
-	if opts.Keepalive.KeepaliveInterval != defaultKeepaliveInterval {
-		t.Fatalf("keepalive interval = %s, want %s", opts.Keepalive.KeepaliveInterval, defaultKeepaliveInterval)
+	if opts.Keepalive.Stderr != nil {
+		t.Fatalf("command stderr = %#v, want nil", opts.Keepalive.Stderr)
 	}
 	if !reflect.DeepEqual(opts.Args, want) {
 		t.Fatalf("run args = %#v, want %#v", opts.Args, want)
@@ -3159,24 +2965,15 @@ func TestBuildRunOptionsRejectsMalformedUIResponses(t *testing.T) {
 	}
 }
 
-func TestBuildRunOptionsEnablesKeepalive(t *testing.T) {
+func TestBuildRunOptionsPreservesCommandStderr(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Keepalive: true, KeepaliveInterval: 3 * time.Second})
+	stderr := bytes.Buffer{}
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", CommandOptions: excel.CommandOptions{Stderr: &stderr}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Keepalive.Keepalive {
-		t.Fatal("expected keepalive to be enabled")
-	}
-	if opts.Keepalive.KeepaliveInterval != 3*time.Second {
-		t.Fatalf("keepalive interval = %s, want 3s", opts.Keepalive.KeepaliveInterval)
-	}
-}
-
-func TestBuildKeepaliveOptionsRejectsNonPositiveIntervalWhenEnabled(t *testing.T) {
-	_, err := buildKeepaliveOptions(true, 0)
-	if err == nil || !strings.Contains(err.Error(), "--keepalive-interval") {
-		t.Fatalf("expected keepalive interval error, got %v", err)
+	if opts.Keepalive.Stderr != &stderr {
+		t.Fatalf("command stderr = %#v, want %p", opts.Keepalive.Stderr, &stderr)
 	}
 }
 

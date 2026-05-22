@@ -9,18 +9,18 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
-xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] doctor [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] attach --active [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] doctor
+xlflow [--json] attach --active
 xlflow [--json] backup list
-xlflow [--json] list forms [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] inspect form <name> [--runtime|--designer|--both] [--initializer <method>] [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
-xlflow [--json] form snapshot <name> --out <path.json|path.yaml|path.yml> [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] form build <spec.json|spec.yaml|spec.yml> [--overwrite] [--session] [--no-save] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] form export-image <name> --out <path.png> [--initializer <method>] [--overwrite] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] pull [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] push [--backup always|never] [--fast] [--changed-only] [--session] [--no-save] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] list forms [--session]
+xlflow [--json] inspect form <name> [--runtime|--designer|--both] [--initializer <method>] [--session] [--format text|json|markdown]
+xlflow [--json] form snapshot <name> --out <path.json|path.yaml|path.yml> [--session]
+xlflow [--json] form build <spec.json|spec.yaml|spec.yml> [--overwrite] [--session] [--no-save]
+xlflow [--json] form export-image <name> --out <path.png> [--initializer <method>] [--overwrite] [--session]
+xlflow [--json] pull [--session]
+xlflow [--json] push [--backup always|never] [--fast] [--changed-only] [--session] [--no-save]
 xlflow [--json] rollback (--latest | --backup <backup-id>)
 xlflow [--json] session start
 xlflow [--json] session status
@@ -29,32 +29,32 @@ xlflow [--json] save [--session]
 xlflow [--json] runner install
 xlflow [--json] runner remove
 xlflow [--json] runner status
-xlflow [--json] trace enable [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace disable [workbook] [--force] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace status [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace clean [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] trace inject [workbook] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--save | --save-as <path>] [--trace] [--headless | --interactive] [--direct] [--fast] [--diagnostic] [--session] [--timeout <duration>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] export-image [workbook] --sheet <name> --range <A1:B2> [--out <path> | --output-dir <dir>] [--name <filename>] [--format png] [--overwrite] [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] edit cell [workbook] --sheet <name> --cell <A1> (--value <text> | --formula <formula> | --fill <#RGB|#RRGGBB>) --session [--events keep|on|off] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] edit range [workbook] --sheet <name> --range <A1:B2> (--fill <#RGB|#RRGGBB> | --clear contents|formats|all) --session [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] edit rows [workbook] --sheet <name> --rows <1:31> --height <points> --session [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] edit columns [workbook] --sheet <name> --columns <A:AE> --width <chars> --session [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] macros [--session] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] ui button list [--sheet <name>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] ui button remove --id <id> [--sheet <name>] [--keepalive] [--keepalive-interval <duration>]
-xlflow [--json] test [--filter <name>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] trace enable [workbook] [--session]
+xlflow [--json] trace disable [workbook] [--force] [--session]
+xlflow [--json] trace status [workbook] [--session]
+xlflow [--json] trace clean
+xlflow [--json] trace inject [workbook] [--session]
+xlflow [--json] run [macro] [--input <workbook>] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--save | --save-as <path>] [--trace] [--headless | --interactive] [--direct] [--fast] [--diagnostic] [--session] [--timeout <duration>]
+xlflow [--json] export-image [workbook] --sheet <name> --range <A1:B2> [--out <path> | --output-dir <dir>] [--name <filename>] [--format png] [--overwrite] [--session]
+xlflow [--json] edit cell [workbook] --sheet <name> --cell <A1> (--value <text> | --formula <formula> | --fill <#RGB|#RRGGBB>) --session [--events keep|on|off]
+xlflow [--json] edit range [workbook] --sheet <name> --range <A1:B2> (--fill <#RGB|#RRGGBB> | --clear contents|formats|all) --session
+xlflow [--json] edit rows [workbook] --sheet <name> --rows <1:31> --height <points> --session
+xlflow [--json] edit columns [workbook] --sheet <name> --columns <A:AE> --width <chars> --session
+xlflow [--json] macros [--session]
+xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]
+xlflow [--json] ui button list [--sheet <name>]
+xlflow [--json] ui button remove --id <id> [--sheet <name>]
+xlflow [--json] test [--filter <name>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
-xlflow [--json] inspect workbook [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
-xlflow [--json] inspect sheets [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
-xlflow [--json] inspect range [<sheet!A1:B2>] [--sheet <name> --address <A1:B2>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
-xlflow [--json] inspect used-range [<sheet>] [--sheet <name>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
-xlflow [--json] inspect cell [<sheet!A1>] [--sheet <name> --address <A1>] [--session] [--keepalive] [--keepalive-interval <duration>] [--format text|json|markdown]
+xlflow [--json] inspect workbook [--session] [--format text|json|markdown]
+xlflow [--json] inspect sheets [--session] [--format text|json|markdown]
+xlflow [--json] inspect range [<sheet!A1:B2>] [--sheet <name> --address <A1:B2>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--session] [--format text|json|markdown]
+xlflow [--json] inspect used-range [<sheet>] [--sheet <name>] [--max-rows <n>] [--max-cols <n>] [--include-style] [--session] [--format text|json|markdown]
+xlflow [--json] inspect cell [<sheet!A1>] [--sheet <name> --address <A1>] [--session] [--format text|json|markdown]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
 xlflow [--json] analyze
-xlflow [--json] check [--keepalive] [--keepalive-interval <duration>]
+xlflow [--json] check
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 xlflow [--json] version [--verbose]
 ```
@@ -63,7 +63,7 @@ xlflow [--json] version [--verbose]
 
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
 
-Excel COM-backed commands support `--keepalive` for AI agent and task-runner environments that may treat long silent Excel COM operations as stalled. This includes `new`, `init`, `doctor`, `attach`, `list forms`, `inspect form`, `inspect workbook|sheets|range|used-range|cell --session`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `trace enable/disable/status/inject/clean`, `run`, `export-image`, `edit cell/range/rows/columns`, `macros`, `ui button add/list/remove`, `test`, and `check`. When enabled, xlflow writes heartbeat lines to stderr while the PowerShell/Excel bridge is still running, starting immediately and then repeating every `--keepalive-interval` duration. The default interval is `5s`; non-positive intervals are CLI argument errors when keepalive is enabled. Keepalive output never writes to stdout, so `--json` stdout remains a single machine-readable envelope. At completion, xlflow writes a stderr marker such as `XLFLOW_DONE status=success command=pull` or `XLFLOW_DONE status=failed command=run code=macro_timeout`. Agents should not begin the next workbook-dependent step until the command exits and this marker has been observed.
+Excel COM-backed commands report progress on stderr. Interactive stderr terminals may show Bubble Tea/Lipgloss spinner output, while `--json` or non-interactive runs fall back to line-oriented stderr progress so stdout remains a single final human result or JSON envelope. Commands that stream UI or debug events to stderr may suppress separate progress output. Agents should wait for process exit instead of parsing interim stderr progress text.
 
 `run --ui-stream` and `test --ui-stream` add a second stderr-only channel for headless `XlflowUI` activity. When enabled, xlflow streams resolved `XlflowUI.MsgBox`, `XlflowUI.InputBox`, and `XlflowUI` file dialog wrapper events to stderr in real time as lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` or `xlflow: ui kind=file-open id=input-files source=scripted value=C:\temp\a.txt | C:\temp\b.txt`. This stream never writes to stdout, so `--json` stdout remains valid. When `--ui-stream` is enabled, final command results also include the structured `ui.events` payload. InputBox values are redacted by default in both the streamed stderr lines and the final event payload.
 
@@ -157,7 +157,7 @@ New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/Xlf
 
 `ui button remove` deletes an xlflow-managed form-control button by `--id`, optionally restricted to `--sheet`. Missing worksheets fail with `sheet_not_found`; missing buttons fail with `button_not_found`. `remove` saves the workbook only after a successful deletion.
 
-`inspect` keeps the current saved-workbook behavior by default, but `inspect workbook|sheets|range|used-range|cell --session` reads the live workbook currently attached to the managed xlflow session through Excel COM. Default file-backed inspect continues to return workbook path, name, active sheet when available from file metadata, per-sheet summaries, rectangular range snapshots, single-cell snapshots, and the lightweight saved-file used range. `--session` uses the same target-specific payload shapes but sets `inspect.source="excel_com"` and `inspect.target_info.kind="live_session"` so callers can distinguish live-session reads from saved-file reads. Range-based inspect commands still default to `--max-rows 100` and `--max-cols 30`; when output is clipped they return `truncated=true`, `returned_range`, and a warning. `inspect range` and `inspect used-range` accept `--include-style` in both file-backed and live-session modes to preserve the existing `values` matrix and deterministically add style metadata for the returned range: `style_included=true`, `cells`, `rows`, `columns`, and `merged_ranges`. When `--include-style` is passed, those style blocks are always present; empty selections return empty arrays for the style blocks. When `--include-style` is absent, `style_included` and the style blocks are omitted. File-backed inspect still warns when a matching live session has unsaved changes and now adds hints for `inspect ... --session` and `save --session`. `--keepalive` is valid only together with `--session` for these worksheet/workbook inspect subcommands. Without `--json`, `--format text` is the default human output. `--format markdown` emits Markdown tables, and `--format json` emits the inspect payload only; machine consumers should still prefer the stable top-level `--json` envelope.
+`inspect` keeps the current saved-workbook behavior by default, but `inspect workbook|sheets|range|used-range|cell --session` reads the live workbook currently attached to the managed xlflow session through Excel COM. Default file-backed inspect continues to return workbook path, name, active sheet when available from file metadata, per-sheet summaries, rectangular range snapshots, single-cell snapshots, and the lightweight saved-file used range. `--session` uses the same target-specific payload shapes but sets `inspect.source="excel_com"` and `inspect.target_info.kind="live_session"` so callers can distinguish live-session reads from saved-file reads. Range-based inspect commands still default to `--max-rows 100` and `--max-cols 30`; when output is clipped they return `truncated=true`, `returned_range`, and a warning. `inspect range` and `inspect used-range` accept `--include-style` in both file-backed and live-session modes to preserve the existing `values` matrix and deterministically add style metadata for the returned range: `style_included=true`, `cells`, `rows`, `columns`, and `merged_ranges`. When `--include-style` is passed, those style blocks are always present; empty selections return empty arrays for the style blocks. When `--include-style` is absent, `style_included` and the style blocks are omitted. File-backed inspect still warns when a matching live session has unsaved changes and now adds hints for `inspect ... --session` and `save --session`. Live-session inspect reports progress on stderr just like other Excel COM-backed commands. Without `--json`, `--format text` is the default human output. `--format markdown` emits Markdown tables, and `--format json` emits the inspect payload only; machine consumers should still prefer the stable top-level `--json` envelope.
 
 `inspect-gui` scans configured source directories and reports GUI interaction boundaries without opening Excel. JSON output includes top-level `gui_boundaries`. Human output shows each boundary location, kind, symbol, and suggested refactor.
 

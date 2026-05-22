@@ -27,7 +27,6 @@ xlflow inspect form <name> [--runtime|--designer|--both]
 | `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100     |
 | `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30      |
 | `--session`                       | Inspect the live workbook in the managed xlflow session.  | false   |
-| `--keepalive`                     | Emit heartbeat lines while live session inspect runs.     | false   |
 | `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | runtime |
 
 ## Examples

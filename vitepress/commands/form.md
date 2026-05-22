@@ -12,17 +12,16 @@ xlflow form export-image <name> --out <png>
 
 ## Options and Arguments
 
-| Option / argument      | Description                                                                   | Default |
-| ---------------------- | ----------------------------------------------------------------------------- | ------- |
-| `snapshot <name>`      | Save Designer state as JSON or YAML.                                          | -       |
-| `build <spec>`         | Create or update a UserForm from a saved spec.                                | -       |
-| `export-image <name>`  | Render a runtime UserForm to PNG.                                             | -       |
-| `--out <path>`         | Output path for snapshots or images.                                          | -       |
-| `--overwrite`          | Allow replacing an existing UserForm on build.                                | false   |
-| `--session`            | Operate against the managed live session workbook.                            | false   |
-| `--no-save`            | Leave session-backed build changes unsaved until `xlflow save`.               | false   |
-| `--initializer <mode>` | Control initializer execution for image export.                               | default |
-| `--keepalive`          | Write periodic progress heartbeat lines to stderr for long Excel-backed work. | false   |
+| Option / argument      | Description                                                     | Default |
+| ---------------------- | --------------------------------------------------------------- | ------- |
+| `snapshot <name>`      | Save Designer state as JSON or YAML.                            | -       |
+| `build <spec>`         | Create or update a UserForm from a saved spec.                  | -       |
+| `export-image <name>`  | Render a runtime UserForm to PNG.                               | -       |
+| `--out <path>`         | Output path for snapshots or images.                            | -       |
+| `--overwrite`          | Allow replacing an existing UserForm on build.                  | false   |
+| `--session`            | Operate against the managed live session workbook.              | false   |
+| `--no-save`            | Leave session-backed build changes unsaved until `xlflow save`. | false   |
+| `--initializer <mode>` | Control initializer execution for image export.                 | default |
 
 ## Examples
 
