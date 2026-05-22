@@ -47,8 +47,6 @@ type app struct {
 	updateChecker  releaseChecker
 }
 
-const defaultKeepaliveInterval = 5 * time.Second
-
 type BuildInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
@@ -79,11 +77,6 @@ type versionVerbosePayload struct {
 	BuildSettings  []versionBuildSetting `json:"build_settings,omitempty"`
 	Scripts        []versionScriptInfo   `json:"scripts,omitempty"`
 	Features       []versionFeature      `json:"features,omitempty"`
-}
-
-type keepaliveFlags struct {
-	enabled  bool
-	interval time.Duration
 }
 
 type formSnapshotCommandOptions struct {
@@ -310,26 +303,22 @@ func buildSettingsFromInfo(info *debug.BuildInfo) []versionBuildSetting {
 }
 
 func (a *app) macrosCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	cmd := &cobra.Command{
 		Use:   "macros",
 		Short: "Discover runnable workbook macros",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("macros", output.ExitConfig, "macros_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("macros")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Reading VBA project", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Reading VBA project", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -339,7 +328,6 @@ func (a *app) macrosCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -471,7 +459,6 @@ func (a *app) formCommand() *cobra.Command {
 }
 
 func (a *app) formSnapshotCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	var outPath string
 	cmd := &cobra.Command{
@@ -479,7 +466,7 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 		Short: "Write a strict designer UserForm snapshot spec to a file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts, err := buildFormSnapshotOptions(args[0], outPath, session, keepalive)
+			opts, err := buildFormSnapshotOptions(args[0], outPath, session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("form snapshot", output.ExitConfig, "form_snapshot_args_invalid", err)
 			}
@@ -544,12 +531,10 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&outPath, "out", "", "write the snapshot spec to a .json, .yaml, or .yml file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) formBuildCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	var overwrite bool
 	var noSave bool
@@ -558,7 +543,7 @@ func (a *app) formBuildCommand() *cobra.Command {
 		Short: "Create a UserForm from a persisted spec",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts, err := buildFormWriteOptions("build", args[0], overwrite, session, noSave, keepalive, a.cwd)
+			opts, err := buildFormWriteOptions("build", args[0], overwrite, session, noSave, buildCommandOptions(a.stderrWriter()), a.cwd)
 			if err != nil {
 				var specErr *forms.SpecError
 				if errors.As(err, &specErr) {
@@ -597,12 +582,10 @@ func (a *app) formBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing UserForm with the same spec form name")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave session-backed workbook changes unsaved until xlflow save")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) formApplyCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	var noSave bool
 	cmd := &cobra.Command{
@@ -611,7 +594,7 @@ func (a *app) formApplyCommand() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts, err := buildFormWriteOptions("apply", args[0], false, session, noSave, keepalive, a.cwd)
+			opts, err := buildFormWriteOptions("apply", args[0], false, session, noSave, buildCommandOptions(a.stderrWriter()), a.cwd)
 			if err != nil {
 				var specErr *forms.SpecError
 				if errors.As(err, &specErr) {
@@ -649,12 +632,10 @@ func (a *app) formApplyCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave session-backed workbook changes unsaved until xlflow save")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) formExportImageCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	var overwrite bool
 	var outPath string
@@ -664,7 +645,7 @@ func (a *app) formExportImageCommand() *cobra.Command {
 		Short: "Export a runtime UserForm as a PNG image",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts, err := buildFormExportImageOptions(args[0], outPath, initializer, overwrite, session, keepalive)
+			opts, err := buildFormExportImageOptions(args[0], outPath, initializer, overwrite, session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("form export-image", output.ExitConfig, "form_export_image_args_invalid", err)
 			}
@@ -689,31 +670,26 @@ func (a *app) formExportImageCommand() *cobra.Command {
 	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method to invoke with ThisWorkbook before capture")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) listFormsCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	cmd := &cobra.Command{
 		Use:   "forms",
 		Short: "List workbook UserForms",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("list", output.ExitConfig, "list_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("list")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Listing workbook forms", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Listing workbook forms", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -723,7 +699,6 @@ func (a *app) listFormsCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -751,7 +726,6 @@ func (a *app) uiButtonCommand() *cobra.Command {
 
 func (a *app) uiButtonAddCommand() *cobra.Command {
 	var opts excel.UIButtonAddOptions
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add or update a workbook form-control button",
@@ -761,19 +735,16 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
 			}
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("ui")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Adding workbook button", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Adding workbook button", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -791,31 +762,26 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 	cmd.Flags().IntVar(&opts.Height, "height", 40, "button height in points")
 	cmd.Flags().BoolVar(&opts.CreateSheet, "create-sheet", false, "create the target worksheet when it does not exist")
 	cmd.Flags().BoolVar(&opts.VerifyMacro, "verify-macro", false, "verify that the assigned macro exists before saving")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) uiButtonListCommand() *cobra.Command {
 	var opts excel.UIButtonListOptions
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List xlflow-managed workbook buttons",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("ui")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Listing workbook buttons", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Listing workbook buttons", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -825,13 +791,11 @@ func (a *app) uiButtonListCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) uiButtonRemoveCommand() *cobra.Command {
 	var opts excel.UIButtonRemoveOptions
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "remove",
 		Short: "Remove an xlflow-managed workbook button",
@@ -841,19 +805,16 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
 			}
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("ui", output.ExitConfig, "ui_button_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("ui")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Removing workbook button", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Removing workbook button", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -864,7 +825,6 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.ID, "id", "", "stable xlflow button id")
 	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -933,7 +893,6 @@ func (a *app) newCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
 	var noUpdateCheck bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "new [workbook]",
@@ -943,10 +902,7 @@ func (a *app) newCommand() *cobra.Command {
 			if err := a.writeScaffoldWelcome("new", noUpdateCheck); err != nil {
 				return output.WithExitCode(output.ExitEnvironment, err)
 			}
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("new", output.ExitConfig, "new_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			var skillOpts agentskill.InstallOptions
 			if withSkill {
 				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
@@ -959,7 +915,8 @@ func (a *app) newCommand() *cobra.Command {
 			if len(args) == 1 {
 				workbook = args[0]
 			}
-			return a.withScaffoldKeepalive("new", keepaliveOpts, func(runOpts excel.CommandOptions) error {
+			{
+				runOpts := commandOpts
 				var excelEnv output.Envelope
 				var excelCode int
 				result, err := project.New(a.cwd, workbook, func(path string) error {
@@ -1010,13 +967,12 @@ func (a *app) newCommand() *cobra.Command {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
 				return a.write(env, output.ExitSuccess)
-			})
+			}
 		},
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -1024,7 +980,6 @@ func (a *app) initCommand() *cobra.Command {
 	var withSkill bool
 	var skillAgent string
 	var noUpdateCheck bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "init <workbook>",
@@ -1034,10 +989,7 @@ func (a *app) initCommand() *cobra.Command {
 			if err := a.writeScaffoldWelcome("init", noUpdateCheck); err != nil {
 				return output.WithExitCode(output.ExitEnvironment, err)
 			}
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("init", output.ExitConfig, "init_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			var skillOpts agentskill.InstallOptions
 			if withSkill {
 				opts, err := a.resolveSkillInstallOptions(skillAgent, "", false)
@@ -1046,7 +998,8 @@ func (a *app) initCommand() *cobra.Command {
 				}
 				skillOpts = opts
 			}
-			return a.withScaffoldKeepalive("init", keepaliveOpts, func(runOpts excel.CommandOptions) error {
+			{
+				runOpts := commandOpts
 				result, err := project.Init(a.cwd, args[0])
 				if err != nil {
 					return a.writeFailure("init", output.ExitConfig, "init_failed", err)
@@ -1076,13 +1029,12 @@ func (a *app) initCommand() *cobra.Command {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
 				return a.write(env, output.ExitSuccess)
-			})
+			}
 		},
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -1111,40 +1063,22 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 	})
 }
 
-func (a *app) withScaffoldKeepalive(command string, opts excel.CommandOptions, fn func(runOpts excel.CommandOptions) error) error {
-	reportDone := a.startCommandKeepalive(command, opts)
-	err := fn(withoutKeepalive(opts))
-	if reportDone != nil {
-		reportDone(err)
-	}
-	return err
-}
-
-func withoutKeepalive(opts excel.CommandOptions) excel.CommandOptions {
-	opts.Keepalive = false
-	return opts
-}
-
 func (a *app) doctorCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose Excel COM and VBIDE access",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("doctor", output.ExitConfig, "doctor_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("doctor")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Checking Excel automation", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -1159,31 +1093,26 @@ func (a *app) doctorCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) attachCommand() *cobra.Command {
 	var active bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "attach --active",
 		Short: "Inspect the active Excel workbook connection",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("attach", output.ExitConfig, "attach_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("attach")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Inspecting active workbook", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Inspecting active workbook", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -1193,31 +1122,26 @@ func (a *app) attachCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&active, "active", false, "attach to the active Excel workbook")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) pullCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Export VBA components from the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("pull")
 			if err != nil {
 				return err
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Exporting VBA source", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: keepaliveOpts})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -1227,12 +1151,10 @@ func (a *app) pullCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) pushCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	var backupMode string
 	var fast bool
 	var changedOnly bool
@@ -1244,15 +1166,12 @@ func (a *app) pushCommand() *cobra.Command {
 		Short: "Import source VBA components into the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("push")
 			if err != nil {
 				return err
 			}
-			pushOpts, err := buildPushOptions(backupMode, fast, changedOnly, session, noSave, keepaliveOpts)
+			pushOpts, err := buildPushOptions(backupMode, fast, changedOnly, session, noSave, commandOpts)
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
@@ -1272,7 +1191,7 @@ func (a *app) pushCommand() *cobra.Command {
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, pushOpts)
 				return runErr
 			}
-			err = a.withExcelProgress("Importing VBA source", keepaliveOpts, run)
+			err = a.withExcelProgress("Importing VBA source", commandOpts, run)
 			if err != nil {
 				return err
 			}
@@ -1284,7 +1203,6 @@ func (a *app) pushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -1774,20 +1692,11 @@ func sessionUsageHint() string {
 	return "reuse the matching xlflow session workbook when available"
 }
 
-func addKeepaliveFlags(cmd *cobra.Command, keepalive *keepaliveFlags) {
-	cmd.Flags().BoolVar(&keepalive.enabled, "keepalive", false, "write periodic progress heartbeat lines to stderr")
-	cmd.Flags().DurationVar(&keepalive.interval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
-}
-
-func buildKeepaliveOptions(keepalive bool, interval time.Duration) (excel.CommandOptions, error) {
-	if keepalive && interval <= 0 {
-		return excel.CommandOptions{}, fmt.Errorf("--keepalive-interval must be greater than 0")
+func buildCommandOptions(stderr io.Writer) excel.CommandOptions {
+	if stderr == nil {
+		stderr = os.Stderr
 	}
-	return excel.CommandOptions{
-		Keepalive:         keepalive,
-		KeepaliveInterval: interval,
-		Stderr:            os.Stderr,
-	}, nil
+	return excel.CommandOptions{Stderr: stderr}
 }
 
 var allowedMsgBoxResults = map[string]struct{}{
@@ -1943,11 +1852,11 @@ func parseFileDialogResponseLiterals(literals []string) ([]excel.FileDialogRespo
 	return parsed, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration) (excel.RunOptions, error) {
-	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, keepalive, keepaliveInterval, false)
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions) (excel.RunOptions, error) {
+	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, commandOpts, false)
 }
 
-func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, keepalive bool, keepaliveInterval time.Duration, uiStream bool) (excel.RunOptions, error) {
+func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions, uiStream bool) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -1977,10 +1886,6 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 	}
 	if fast && diagnostic && !diagnosticExplicit {
 		diagnostic = false
-	}
-	keepaliveOpts, err := buildKeepaliveOptions(keepalive, keepaliveInterval)
-	if err != nil {
-		return excel.RunOptions{}, err
 	}
 	if macro == "" {
 		macro = cfg.Project.Entry
@@ -2055,7 +1960,7 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		SuppressModalErrors: !guiCompileErrors,
 		Session:             session,
 		Timeout:             timeout,
-		Keepalive:           keepaliveOpts,
+		Keepalive:           commandOpts,
 	}, nil
 }
 
@@ -2167,8 +2072,6 @@ func (a *app) runCommand() *cobra.Command {
 	var guiCompileErrors bool
 	var session bool
 	var timeout time.Duration
-	var keepalive bool
-	var keepaliveInterval time.Duration
 	var uiStream bool
 
 	cmd := &cobra.Command{
@@ -2185,10 +2088,11 @@ func (a *app) runCommand() *cobra.Command {
 				macro = args[0]
 			}
 			var opts excel.RunOptions
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			if uiStream {
-				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval, true)
+				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts, true)
 			} else {
-				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, keepalive, keepaliveInterval)
+				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts)
 			}
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
@@ -2222,11 +2126,7 @@ func (a *app) runCommand() *cobra.Command {
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
 				return runErr
 			}
-			if opts.Keepalive.Keepalive {
-				err = run()
-			} else {
-				err = a.withSpinner("Running macro", run)
-			}
+			err = a.withSpinner("Running macro", run)
 			if err != nil {
 				return err
 			}
@@ -2252,8 +2152,6 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBA compile and runtime error dialogs to surface via the GUI instead of structured diagnostics")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
-	cmd.Flags().BoolVar(&keepalive, "keepalive", false, "write periodic progress heartbeat lines to stderr")
-	cmd.Flags().DurationVar(&keepaliveInterval, "keepalive-interval", defaultKeepaliveInterval, "interval between keepalive heartbeat lines")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	return cmd
 }
@@ -2267,17 +2165,13 @@ func (a *app) exportImageCommand() *cobra.Command {
 	var format string
 	var overwrite bool
 	var session bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "export-image [workbook]",
 		Short: "Export a worksheet range as an image",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("export-image", output.ExitConfig, "export_image_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("export-image")
 			if err != nil {
 				return err
@@ -2286,13 +2180,13 @@ func (a *app) exportImageCommand() *cobra.Command {
 			if len(args) == 1 {
 				workbook = args[0]
 			}
-			opts, err := buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format, overwrite, session, keepaliveOpts)
+			opts, err := buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format, overwrite, session, commandOpts)
 			if err != nil {
 				return a.writeFailure("export-image", output.ExitConfig, "export_image_args_invalid", err)
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Exporting worksheet range image", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Exporting worksheet range image", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.ExportImage(cfg, opts)
 				return runErr
@@ -2311,7 +2205,6 @@ func (a *app) exportImageCommand() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "png", "image format; only png is currently supported")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing output file")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2337,17 +2230,13 @@ func (a *app) editCellCommand() *cobra.Command {
 	var fill string
 	var events string
 	var session bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "cell [workbook]",
 		Short: "Edit one live-session cell",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("edit")
 			if err != nil {
 				return err
@@ -2364,13 +2253,13 @@ func (a *app) editCellCommand() *cobra.Command {
 			if cmd.Flags().Changed("formula") {
 				formulaPtr = &formula
 			}
-			opts, err := buildEditCellOptions(workbook, sheet, cell, fill, events, valuePtr, formulaPtr, session, keepaliveOpts)
+			opts, err := buildEditCellOptions(workbook, sheet, cell, fill, events, valuePtr, formulaPtr, session, commandOpts)
 			if err != nil {
 				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Editing workbook cell", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Editing workbook cell", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditCell(cfg, opts)
 				return runErr
@@ -2388,7 +2277,6 @@ func (a *app) editCellCommand() *cobra.Command {
 	cmd.Flags().StringVar(&fill, "fill", "", "set fill color using #RGB or #RRGGBB")
 	cmd.Flags().StringVar(&events, "events", string(excel.EditEventKeep), "event mode for value/formula edits: keep, on, or off")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2398,17 +2286,13 @@ func (a *app) editRangeCommand() *cobra.Command {
 	var fill string
 	var clear string
 	var session bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "range [workbook]",
 		Short: "Edit one live-session range",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("edit")
 			if err != nil {
 				return err
@@ -2417,13 +2301,13 @@ func (a *app) editRangeCommand() *cobra.Command {
 			if len(args) == 1 {
 				workbook = args[0]
 			}
-			opts, err := buildEditRangeOptions(workbook, sheet, cellRange, fill, clear, session, keepaliveOpts)
+			opts, err := buildEditRangeOptions(workbook, sheet, cellRange, fill, clear, session, commandOpts)
 			if err != nil {
 				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Editing workbook range", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Editing workbook range", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRange(cfg, opts)
 				return runErr
@@ -2439,7 +2323,6 @@ func (a *app) editRangeCommand() *cobra.Command {
 	cmd.Flags().StringVar(&fill, "fill", "", "set fill color using #RGB or #RRGGBB")
 	cmd.Flags().StringVar(&clear, "clear", "", "clear contents, formats, or all")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2448,17 +2331,13 @@ func (a *app) editRowsCommand() *cobra.Command {
 	var rows string
 	var height float64
 	var session bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "rows [workbook]",
 		Short: "Set row height on a live-session worksheet",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("edit")
 			if err != nil {
 				return err
@@ -2467,13 +2346,13 @@ func (a *app) editRowsCommand() *cobra.Command {
 			if len(args) == 1 {
 				workbook = args[0]
 			}
-			opts, err := buildEditRowsOptions(workbook, sheet, rows, height, session, keepaliveOpts)
+			opts, err := buildEditRowsOptions(workbook, sheet, rows, height, session, commandOpts)
 			if err != nil {
 				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Editing workbook row heights", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Editing workbook row heights", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRows(cfg, opts)
 				return runErr
@@ -2488,7 +2367,6 @@ func (a *app) editRowsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&rows, "rows", "", "row selector such as 1 or 1:31")
 	cmd.Flags().Float64Var(&height, "height", 0, "row height in points")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2497,17 +2375,13 @@ func (a *app) editColumnsCommand() *cobra.Command {
 	var columns string
 	var width float64
 	var session bool
-	var keepalive keepaliveFlags
 
 	cmd := &cobra.Command{
 		Use:   "columns [workbook]",
 		Short: "Set column width on a live-session worksheet",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("edit")
 			if err != nil {
 				return err
@@ -2516,13 +2390,13 @@ func (a *app) editColumnsCommand() *cobra.Command {
 			if len(args) == 1 {
 				workbook = args[0]
 			}
-			opts, err := buildEditColumnsOptions(workbook, sheet, columns, width, session, keepaliveOpts)
+			opts, err := buildEditColumnsOptions(workbook, sheet, columns, width, session, commandOpts)
 			if err != nil {
 				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Editing workbook column widths", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Editing workbook column widths", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditColumns(cfg, opts)
 				return runErr
@@ -2537,7 +2411,6 @@ func (a *app) editColumnsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&columns, "columns", "", "column selector such as A or A:AE")
 	cmd.Flags().Float64Var(&width, "width", 0, "column width in Excel character units")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2563,7 +2436,6 @@ func (a *app) traceInjectCommand() *cobra.Command {
 }
 
 func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
-	var keepalive keepaliveFlags
 	var force bool
 	var session bool
 	cmd := &cobra.Command{
@@ -2571,10 +2443,7 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 		Short: short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("trace", output.ExitConfig, "trace_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := config.Load(a.cwd)
 			workbook := ""
 			if len(args) == 1 {
@@ -2596,9 +2465,9 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 			if traceAction == "clean" {
 				label = "Cleaning trace logs"
 			}
-			err = a.withExcelProgress(label, keepaliveOpts, func() error {
+			err = a.withExcelProgress(label, commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, keepaliveOpts)
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -2613,7 +2482,6 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 	if action != "clean" {
 		cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	}
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2622,7 +2490,6 @@ func (a *app) testCommand() *cobra.Command {
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
-	var keepalive keepaliveFlags
 	var session bool
 	var uiStream bool
 	cmd := &cobra.Command{
@@ -2630,10 +2497,7 @@ func (a *app) testCommand() *cobra.Command {
 		Short: "Run workbook VBA tests",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("test")
 			if err != nil {
 				return err
@@ -2653,9 +2517,9 @@ func (a *app) testCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
 			}
-			err = a.withExcelProgress("Running VBA tests", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: keepaliveOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
 				return runErr
 			})
 			if err != nil {
@@ -2670,7 +2534,6 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2725,7 +2588,6 @@ func (a *app) inspectCommand() *cobra.Command {
 
 func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 	var session bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "workbook",
 		Short: "Inspect workbook summary information",
@@ -2735,7 +2597,7 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
-			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			bridgeOpts, err := buildInspectBridgeOptions(session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
@@ -2781,13 +2643,11 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 	var session bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "sheets",
 		Short: "Inspect workbook worksheets",
@@ -2797,7 +2657,7 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
-			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			bridgeOpts, err := buildInspectBridgeOptions(session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
@@ -2844,12 +2704,10 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
 func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
-	var keepalive keepaliveFlags
 	var session bool
 	var runtime bool
 	var designer bool
@@ -2868,7 +2726,7 @@ func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
 			}
-			opts, err := buildInspectFormOptions(args[0], basis, initializer, session, keepalive)
+			opts, err := buildInspectFormOptions(args[0], basis, initializer, session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_form_args_invalid", err)
 			}
@@ -2915,7 +2773,6 @@ func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&both, "both", false, "inspect both runtime and designer state")
 	cmd.Flags().StringVar(&initializer, "initializer", "", "optional public form method invoked with ThisWorkbook during runtime inspection")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -2926,7 +2783,6 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	var maxCols int
 	var includeStyle bool
 	var session bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "range [<sheet!A1:B2>]",
 		Short: "Inspect a worksheet range",
@@ -2944,7 +2800,7 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
-			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			bridgeOpts, err := buildInspectBridgeOptions(session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
@@ -3003,7 +2859,6 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -3034,13 +2889,9 @@ func buildInspectFormBasis(runtime, designer, both bool) (string, error) {
 	}
 }
 
-func buildInspectFormOptions(name, basis, initializer string, session bool, keepalive keepaliveFlags) (excel.InspectFormOptions, error) {
+func buildInspectFormOptions(name, basis, initializer string, session bool, commandOpts excel.CommandOptions) (excel.InspectFormOptions, error) {
 	if strings.TrimSpace(name) == "" {
 		return excel.InspectFormOptions{}, fmt.Errorf("form name is required")
-	}
-	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-	if err != nil {
-		return excel.InspectFormOptions{}, err
 	}
 	trimmedBasis := strings.ToLower(strings.TrimSpace(basis))
 	if trimmedBasis != "runtime" && trimmedBasis != "designer" && trimmedBasis != "both" {
@@ -3055,21 +2906,14 @@ func buildInspectFormOptions(name, basis, initializer string, session bool, keep
 		Basis:       trimmedBasis,
 		Initializer: trimmedInitializer,
 		Session:     session,
-		Keepalive:   keepaliveOpts,
+		Keepalive:   commandOpts,
 	}, nil
 }
 
-func buildInspectBridgeOptions(session bool, keepalive keepaliveFlags) (inspectBridgeOptions, error) {
-	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-	if err != nil {
-		return inspectBridgeOptions{}, err
-	}
-	if keepalive.enabled && !session {
-		return inspectBridgeOptions{}, fmt.Errorf("--keepalive requires --session")
-	}
+func buildInspectBridgeOptions(session bool, commandOpts excel.CommandOptions) (inspectBridgeOptions, error) {
 	return inspectBridgeOptions{
 		Session:   session,
-		Keepalive: keepaliveOpts,
+		Keepalive: commandOpts,
 	}, nil
 }
 
@@ -3104,8 +2948,8 @@ func staleFileInspectHints(target string, args ...string) []map[string]any {
 	}
 }
 
-func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keepaliveFlags) (formSnapshotCommandOptions, error) {
-	inspectOpts, err := buildInspectFormOptions(name, "designer", "", session, keepalive)
+func buildFormSnapshotOptions(name, outPath string, session bool, commandOpts excel.CommandOptions) (formSnapshotCommandOptions, error) {
+	inspectOpts, err := buildInspectFormOptions(name, "designer", "", session, commandOpts)
 	if err != nil {
 		return formSnapshotCommandOptions{}, err
 	}
@@ -3120,11 +2964,7 @@ func buildFormSnapshotOptions(name, outPath string, session bool, keepalive keep
 	}, nil
 }
 
-func buildFormWriteOptions(action, specPath string, overwrite, session, noSave bool, keepalive keepaliveFlags, root string) (formWriteCommandOptions, error) {
-	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-	if err != nil {
-		return formWriteCommandOptions{}, err
-	}
+func buildFormWriteOptions(action, specPath string, overwrite, session, noSave bool, commandOpts excel.CommandOptions, root string) (formWriteCommandOptions, error) {
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	if normalizedAction != "build" && normalizedAction != "apply" {
 		return formWriteCommandOptions{}, fmt.Errorf("unsupported form action %q", action)
@@ -3147,17 +2987,13 @@ func buildFormWriteOptions(action, specPath string, overwrite, session, noSave b
 		Overwrite: overwrite,
 		Session:   session,
 		NoSave:    noSave,
-		Keepalive: keepaliveOpts,
+		Keepalive: commandOpts,
 	}, nil
 }
 
-func buildFormExportImageOptions(name, outPath, initializer string, overwrite bool, session bool, keepalive keepaliveFlags) (excel.FormExportImageOptions, error) {
+func buildFormExportImageOptions(name, outPath, initializer string, overwrite bool, session bool, commandOpts excel.CommandOptions) (excel.FormExportImageOptions, error) {
 	if strings.TrimSpace(name) == "" {
 		return excel.FormExportImageOptions{}, fmt.Errorf("form name is required")
-	}
-	keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-	if err != nil {
-		return excel.FormExportImageOptions{}, err
 	}
 	trimmedOut := strings.TrimSpace(outPath)
 	if trimmedOut == "" {
@@ -3169,7 +3005,7 @@ func buildFormExportImageOptions(name, outPath, initializer string, overwrite bo
 		Initializer: strings.TrimSpace(initializer),
 		Overwrite:   overwrite,
 		Session:     session,
-		Keepalive:   keepaliveOpts,
+		Keepalive:   commandOpts,
 	}, nil
 }
 
@@ -3179,7 +3015,6 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	var maxCols int
 	var includeStyle bool
 	var session bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "used-range [<sheet>]",
 		Short: "Inspect the lightweight used range for a worksheet",
@@ -3197,7 +3032,7 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
-			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			bridgeOpts, err := buildInspectBridgeOptions(session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
@@ -3254,7 +3089,6 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 	cmd.Flags().IntVar(&maxCols, "max-cols", 30, "maximum columns returned")
 	cmd.Flags().BoolVar(&includeStyle, "include-style", false, "include style, row, column, and merge metadata in the result")
 	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -3262,7 +3096,6 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 	var sheet string
 	var address string
 	var session bool
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "cell [<sheet!A1>]",
 		Short: "Inspect a single worksheet cell",
@@ -3276,7 +3109,7 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
-			bridgeOpts, err := buildInspectBridgeOptions(session, keepalive)
+			bridgeOpts, err := buildInspectBridgeOptions(session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
 			}
@@ -3327,7 +3160,6 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
 	cmd.Flags().StringVar(&address, "address", "", "cell address such as A1")
 	cmd.Flags().BoolVar(&session, "session", false, "inspect the live workbook through the managed xlflow session")
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -3744,16 +3576,12 @@ func (a *app) analyzeCommand() *cobra.Command {
 }
 
 func (a *app) checkCommand() *cobra.Command {
-	var keepalive keepaliveFlags
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Run lint, analyze, and doctor",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keepaliveOpts, err := buildKeepaliveOptions(keepalive.enabled, keepalive.interval)
-			if err != nil {
-				return a.writeFailure("check", output.ExitConfig, "check_args_invalid", err)
-			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("check")
 			if err != nil {
 				return err
@@ -3772,9 +3600,9 @@ func (a *app) checkCommand() *cobra.Command {
 			check["analyze"] = map[string]any{"status": statusForCount(len(findings)), "count": len(findings)}
 			var doctor output.Envelope
 			var doctorCode int
-			err = a.withExcelProgress("Checking Excel automation", keepaliveOpts, func() error {
+			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				doctor, doctorCode, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, keepaliveOpts)
+				doctor, doctorCode, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -3800,7 +3628,6 @@ func (a *app) checkCommand() *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
-	addKeepaliveFlags(cmd, &keepalive)
 	return cmd
 }
 
@@ -4260,14 +4087,6 @@ func stdoutIsTerminal() bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
-func stderrIsTerminal() bool {
-	info, err := os.Stderr.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
-}
-
 func (a *app) stdoutWriter() io.Writer {
 	if a.stdout != nil {
 		return a.stdout
@@ -4287,13 +4106,6 @@ func (a *app) stdoutIsInteractive() bool {
 		return a.stdoutTerminal()
 	}
 	return stdoutIsTerminal()
-}
-
-func (a *app) stderrIsInteractive() bool {
-	if a.stderrTerminal != nil {
-		return a.stderrTerminal()
-	}
-	return stderrIsTerminal()
 }
 
 func (a *app) loadConfig(command string) (config.Config, error) {
@@ -4382,52 +4194,9 @@ func (a *app) runExcelWithProgress(label string, opts excel.CommandOptions, fn f
 }
 
 func (a *app) withExcelProgress(label string, opts excel.CommandOptions, fn func() error) error {
-	if opts.Keepalive {
-		return fn()
-	}
 	return a.withSpinner(label, fn)
 }
 
-func (a *app) startCommandKeepalive(command string, opts excel.CommandOptions) func(error) {
-	if !opts.Keepalive {
-		return nil
-	}
-	w := a.stderrWriter()
-	interval := opts.KeepaliveInterval
-	if interval <= 0 {
-		interval = defaultKeepaliveInterval
-	}
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	started := time.Now()
-	go func() {
-		defer close(stopped)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				elapsed := time.Since(started).Truncate(time.Second)
-				_, _ = fmt.Fprintf(w, "xlflow: %s still running... elapsed=%s\n", command, elapsed)
-			}
-		}
-	}()
-	return func(err error) {
-		close(done)
-		<-stopped
-		status := "success"
-		if err != nil {
-			status = "failed"
-		}
-		_, _ = fmt.Fprintf(w, "XLFLOW_DONE status=%s command=%s\n", status, command)
-	}
-}
-
 func (a *app) withSpinner(label string, fn func() error) error {
-	if a.json || !a.stdoutIsInteractive() || !a.stderrIsInteractive() {
-		return fn()
-	}
 	return runSpinner(a.stderrWriter(), label, fn)
 }

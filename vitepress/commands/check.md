@@ -5,22 +5,19 @@ Run lint, analyze, and doctor as a combined preflight.
 ## Usage
 
 ```bash
-xlflow check [--keepalive] [--keepalive-interval <duration>]
+xlflow check
 ```
 
 ## Options and Arguments
 
-| Option / argument                 | Description                                    | Default         |
-| --------------------------------- | ---------------------------------------------- | --------------- |
-| `--keepalive`                     | Reuse the bridge process during doctor checks. | false           |
-| `--keepalive-interval <duration>` | Bridge keepalive interval.                     | command default |
-| `--json`                          | Return a combined report.                      | false           |
+| Option / argument | Description               | Default |
+| ----------------- | ------------------------- | ------- |
+| `--json`          | Return a combined report. | false   |
 
 ## Examples
 
 ```bash
 xlflow check
-xlflow check --keepalive --json
 ```
 
 ## Notes

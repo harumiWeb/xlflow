@@ -9,15 +9,15 @@ Load this reference when the task depends on `xlflow list forms`, `xlflow inspec
 
 ## Command Selection
 
-- Use `xlflow list forms --session --keepalive --json` to discover workbook UserForm names and expected `.frm` / `.frx` source paths.
-- Use `xlflow inspect form <FormName> --designer --session --keepalive --json` for direct VBIDE Designer inspection without running workbook VBA.
-- Use `xlflow inspect form <FormName> --runtime --session --keepalive --json` for runtime-populated state from a temporary workbook copy. Add `--initializer <MethodName>` when the form must be explicitly populated before inspection.
-- Use `xlflow inspect form <FormName> --both --session --keepalive --json` when you need designer and runtime snapshots in one pass.
-- Use `xlflow form snapshot <FormName> --out <path.json|path.yaml|path.yml> --session --keepalive --json` when you need a persisted strict Designer spec suitable for review, diff, or later `form build`.
+- Use `xlflow list forms --session --json` to discover workbook UserForm names and expected `.frm` / `.frx` source paths.
+- Use `xlflow inspect form <FormName> --designer --session --json` for direct VBIDE Designer inspection without running workbook VBA.
+- Use `xlflow inspect form <FormName> --runtime --session --json` for runtime-populated state from a temporary workbook copy. Add `--initializer <MethodName>` when the form must be explicitly populated before inspection.
+- Use `xlflow inspect form <FormName> --both --session --json` when you need designer and runtime snapshots in one pass.
+- Use `xlflow form snapshot <FormName> --out <path.json|path.yaml|path.yml> --session --json` when you need a persisted strict Designer spec suitable for review, diff, or later `form build`.
 - Prefer `src/forms/specs/<FormName>.yaml` as that persisted artifact path in normal projects.
-- Use `xlflow form build <spec> --session --keepalive --json` to create a new Designer-backed UserForm from a persisted spec.
-- Use `xlflow form build <spec> --session --overwrite --keepalive --json` when the intended workflow is to replace an existing UserForm from spec.
-- Use `xlflow form export-image <FormName> --out <path.png> --session --keepalive --json` when visual verification depends on the runtime-rendered form.
+- Use `xlflow form build <spec> --session --json` to create a new Designer-backed UserForm from a persisted spec.
+- Use `xlflow form build <spec> --session --overwrite --json` when the intended workflow is to replace an existing UserForm from spec.
+- Use `xlflow form export-image <FormName> --out <path.png> --session --json` when visual verification depends on the runtime-rendered form.
 - In `sidecar` mode, run `pull` before reviewing or editing `src/forms/code/<FormName>.bas`; `form snapshot` does not emit code-behind.
 - `form apply` is hidden and should not be used for sidecar-aware UserForm workflows; prefer `form build --overwrite`.
 
@@ -138,13 +138,13 @@ When `progId` is present in the spec, xlflow prefers it. Otherwise it falls back
 
 When an agent needs to review or regenerate a UserForm safely:
 
-1. `xlflow list forms --session --keepalive --json`
-2. `xlflow inspect form <FormName> --designer --session --keepalive --json`
-3. `xlflow pull --session --keepalive --json`
-4. `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --keepalive --json`
+1. `xlflow list forms --session --json`
+2. `xlflow inspect form <FormName> --designer --session --json`
+3. `xlflow pull --session --json`
+4. `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json`
 5. in `sidecar` mode, review or edit `src/forms/code/<FormName>.bas` if code-behind changed
 6. edit the persisted spec under `src/forms/specs/`
-7. `xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --keepalive --json`
+7. `xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json`
 8. inspect the result with `inspect form` and, when visuals matter, `form export-image`
 
 Treat `form build` as a deterministic scaffold/rebuild command for supported structure and common properties, not as a promise of lossless Designer round-trip fidelity.

@@ -30,7 +30,6 @@ xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--i
 | `--gui-compile-errors`         | Let Excel/VBE compile dialogs surface instead of structured diagnostics.                   | false               |
 | `--input <path>`               | Override workbook path for this run.                                                       | configured workbook |
 | `--timeout <duration>`         | Maximum macro runtime before timeout.                                                      | 5m0s                |
-| `--keepalive`                  | Write periodic progress heartbeat lines to stderr.                                         | false               |
 
 ## Examples
 

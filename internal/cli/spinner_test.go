@@ -43,3 +43,23 @@ func TestRunSpinnerReturnsWorkError(t *testing.T) {
 		t.Fatalf("spinner output = %q", buf.String())
 	}
 }
+
+func TestWithSpinnerRunsForJSONAndNonInteractive(t *testing.T) {
+	var stderr bytes.Buffer
+	a := &app{
+		json:           true,
+		stderr:         &stderr,
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+
+	err := a.withSpinner("Running macro", func() error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withSpinner err = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Running macro") {
+		t.Fatalf("spinner output = %q", stderr.String())
+	}
+}

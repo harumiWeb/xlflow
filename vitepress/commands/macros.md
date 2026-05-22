@@ -5,7 +5,7 @@ Discover runnable public workbook macro entrypoints without executing user code.
 ## Usage
 
 ```bash
-xlflow macros [--session] [--keepalive] [--keepalive-interval <duration>]
+xlflow macros [--session]
 ```
 
 ## Options and Arguments
@@ -13,7 +13,6 @@ xlflow macros [--session] [--keepalive] [--keepalive-interval <duration>]
 | Option / argument | Description                                         | Default |
 | ----------------- | --------------------------------------------------- | ------- |
 | `--session`       | Read macro metadata from the managed live workbook. | false   |
-| `--keepalive`     | Reuse the bridge process.                           | false   |
 | `--json`          | Return macro names and module metadata.             | false   |
 
 ## Examples

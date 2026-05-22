@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session] [--keepalive] [--json]
+
 ```
 
 ## Options and Arguments
@@ -18,7 +18,6 @@ xlflow test [--filter <pattern>] [--msgbox <dialog-id=result>]... [--inputbox <d
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed. | -       |
 | `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.    | false   |
 | `--session`                    | Run tests in the managed live workbook.                               | false   |
-| `--keepalive`                  | Reuse the bridge process.                                             | false   |
 | `--json`                       | Return structured test results.                                       | false   |
 
 ## Examples

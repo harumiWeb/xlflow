@@ -5,22 +5,19 @@ Diagnose Excel, COM, PowerShell, VBIDE access, workbook access, and GUI-boundary
 ## Usage
 
 ```bash
-xlflow doctor [--keepalive] [--keepalive-interval <duration>]
+xlflow doctor
 ```
 
 ## Options and Arguments
 
-| Option / argument                 | Description                                           | Default         |
-| --------------------------------- | ----------------------------------------------------- | --------------- |
-| `--keepalive`                     | Keep the Excel bridge process alive across checks.    | false           |
-| `--keepalive-interval <duration>` | Bridge keepalive interval such as `30s`.              | command default |
-| `--json`                          | Return structured diagnostics for agents and CI logs. | false           |
+| Option / argument | Description                                           | Default |
+| ----------------- | ----------------------------------------------------- | ------- |
+| `--json`          | Return structured diagnostics for agents and CI logs. | false   |
 
 ## Examples
 
 ```bash
 xlflow doctor
-xlflow doctor --keepalive --json
 ```
 
 ## Notes

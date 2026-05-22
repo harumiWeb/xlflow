@@ -132,13 +132,11 @@ Windows review checklist:
 2. Check the workbook-side command or resolved executable if VBA launches `powershell.exe`, `pwsh.exe`, or another shell.
 3. Prefer one host consistently when debugging encoding or environment differences across external-process VBA flows.
 
-## Agent Keepalive Output
+## Agent Progress Output
 
-`--keepalive` on Excel COM-backed commands is for AI agents and task runners that may stop waiting when Excel COM operations are silent for too long. It is available on `new`, `doctor`, `attach`, `pull`, `push`, trace lifecycle commands, `run`, `macros`, `ui button add/list/remove`, `test`, and `check`. Keepalive writes only to stderr. Stdout remains reserved for normal human output or the JSON envelope when `--json` is set.
+Excel COM-backed commands always report in-flight progress on stderr. Interactive terminals show a spinner, and `--json` or non-interactive runs keep that same progress channel on stderr so stdout stays reserved for the final human output or JSON envelope.
 
-Heartbeat output starts immediately with `xlflow: <command> still running... elapsed=0s` and repeats at `--keepalive-interval`, which defaults to `5s`. At command completion, xlflow writes `XLFLOW_DONE status=success command=<command>` or `XLFLOW_DONE status=failed command=<command> code=<error-code>` when a structured error code is available.
-
-Agents should use `--keepalive --json` for long Excel COM-backed calls, wait for process exit, and treat the `XLFLOW_DONE` marker as the synchronization point before starting the next workbook-dependent command.
+Agents should use normal commands such as `xlflow pull --json`, `xlflow push --json`, and `xlflow run --json`, ignore transient spinner frames on stderr, and synchronize on process exit instead of any interim progress text.
 
 ## Bundled Skill Workflow Guidance
 
