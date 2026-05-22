@@ -117,6 +117,15 @@
 
 # xlflow Folder Structure Todo
 
+# Bundled Helper Module Install Todo
+
+- [x] Extract reusable bundled helper-module installation from the project scaffold logic.
+- [x] Add `xlflow init --with-module` and keep its install ordering as `pull -> install helper source -> push`.
+- [x] Add `xlflow module install [--push]` with source-only default behavior.
+- [x] Honor configured `[src].modules` roots and fail on helper-file collisions.
+- [x] Add focused project and CLI regression coverage.
+- [ ] Run broader Go test validation and Windows Excel COM verification if needed.
+
 # UserForm Phase 1 Warning Todo
 
 - [x] Add shared UserForm detection/warning helpers in `internal/excel/scripts/common.ps1`.

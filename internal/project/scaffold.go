@@ -17,6 +17,15 @@ type InitResult struct {
 	Created    []string `json:"created"`
 }
 
+type InstallModulesResult struct {
+	Created []string `json:"created"`
+}
+
+type bundledModuleTemplate struct {
+	fileName string
+	body     string
+}
+
 type WorkbookCreator func(path string) error
 
 func Init(cwd, workbookPath string) (InitResult, error) {
@@ -56,18 +65,13 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string, scaffoldWorkbookModules bool, scaffoldRuntimeHelper bool) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
-	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
-	runtimePath := filepath.Join(cwd, "src", "modules", "XlflowRuntime.bas")
-	uiHelperPath := filepath.Join(cwd, "src", "modules", "XlflowUI.bas")
-	debugHelperPath := filepath.Join(cwd, "src", "modules", "XlflowDebug.bas")
-	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
-	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
-	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
+	moduleDir := filepath.Join(cwd, "src", "modules")
 	thisWorkbookPath := filepath.Join(cwd, "src", "workbook", "ThisWorkbook.bas")
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
-	protectedPaths := []string{destPath, configPath, assertPath, mainPath, appPath, uiPath}
+	protectedPaths := []string{destPath, configPath}
+	protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldBaseModuleTemplates())...)
 	if scaffoldRuntimeHelper {
-		protectedPaths = append(protectedPaths, runtimePath, uiHelperPath, debugHelperPath)
+		protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldRuntimeHelperModuleTemplates())...)
 	}
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
@@ -114,36 +118,17 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	result.ConfigPath = config.FileName
 	result.Created = append(result.Created, config.FileName)
 
-	if err := writeExclusive(assertPath, defaultAssertModule); err != nil {
+	installedDefaults, err := installBundledModules(cwd, moduleDir, scaffoldBaseModuleTemplates())
+	if err != nil {
 		return result, err
 	}
-	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, assertPath)))
+	result.Created = append(result.Created, installedDefaults.Created...)
 	if scaffoldRuntimeHelper {
-		if err := writeExclusive(runtimePath, defaultRuntimeModule); err != nil {
+		installedHelpers, err := installBundledModules(cwd, moduleDir, scaffoldRuntimeHelperModuleTemplates())
+		if err != nil {
 			return result, err
 		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, runtimePath)))
-		if err := writeExclusive(uiHelperPath, defaultUIRuntimeModule); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, uiHelperPath)))
-		if err := writeExclusive(debugHelperPath, defaultDebugRuntimeModule); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, debugHelperPath)))
-	}
-	for _, item := range []struct {
-		path string
-		body string
-	}{
-		{mainPath, defaultMainModule},
-		{appPath, defaultAppModule},
-		{uiPath, defaultUiModule},
-	} {
-		if err := writeExclusive(item.path, item.body); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
+		result.Created = append(result.Created, installedHelpers.Created...)
 	}
 	if scaffoldWorkbookModules {
 		for _, item := range []struct {
@@ -169,6 +154,84 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 		result.Created = append(result.Created, ".gitignore")
 	}
 	return result, nil
+}
+
+func InstallHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
+	moduleRoot := resolveModuleRoot(cwd, src)
+	return installBundledModules(cwd, moduleRoot, installHelperModuleTemplates())
+}
+
+func InstallRuntimeHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
+	moduleRoot := resolveModuleRoot(cwd, src)
+	return installBundledModules(cwd, moduleRoot, scaffoldRuntimeHelperModuleTemplates())
+}
+
+func resolveModuleRoot(cwd string, src config.SourceConfig) string {
+	moduleRoot := strings.TrimSpace(src.Modules)
+	if moduleRoot == "" {
+		moduleRoot = config.Default().Src.Modules
+	}
+	if !filepath.IsAbs(moduleRoot) {
+		moduleRoot = filepath.Join(cwd, filepath.FromSlash(moduleRoot))
+	}
+	return moduleRoot
+}
+
+func installBundledModules(cwd, moduleDir string, templates []bundledModuleTemplate) (InstallModulesResult, error) {
+	var result InstallModulesResult
+	paths := bundledModulePaths(moduleDir, templates)
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return result, err
+		}
+	}
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		return result, err
+	}
+	for index, template := range templates {
+		path := paths[index]
+		if err := writeExclusive(path, template.body); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, path)))
+	}
+	return result, nil
+}
+
+func bundledModulePaths(moduleDir string, templates []bundledModuleTemplate) []string {
+	paths := make([]string, 0, len(templates))
+	for _, template := range templates {
+		paths = append(paths, filepath.Join(moduleDir, template.fileName))
+	}
+	return paths
+}
+
+func installHelperModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
+		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
+		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
+		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+	}
+}
+
+func scaffoldRuntimeHelperModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
+		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
+		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+	}
+}
+
+func scaffoldBaseModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
+		{fileName: "Main.bas", body: defaultMainModule},
+		{fileName: "App.bas", body: defaultAppModule},
+		{fileName: "Ui.bas", body: defaultUiModule},
+	}
 }
 
 func copyFile(src, dest string) (err error) {

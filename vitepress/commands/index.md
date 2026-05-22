@@ -36,6 +36,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [lint](./lint)                 | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.       |
 | [analyze](./analyze)           | Analyze VBA source for runtime-risk patterns without Excel COM.                  |
 | [check](./check)               | Run lint, analyze, and doctor as a combined preflight.                           |
+| [module](./module)             | Install bundled xlflow helper modules into an existing project.                  |
 | [completion](./completion)     | Generate shell completion scripts through Cobra.                                 |
 | [skill](./skill)               | Install the bundled xlflow skill for AI agent tools.                             |
 | [version](./version)           | Show xlflow build metadata.                                                      |

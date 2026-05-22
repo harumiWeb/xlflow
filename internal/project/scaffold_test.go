@@ -68,6 +68,49 @@ func TestNewScaffoldCreatesGitignore(t *testing.T) {
 	}
 }
 
+func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
+	dir := t.TempDir()
+	result, err := InstallHelperModules(dir, config.SourceConfig{Modules: filepath.ToSlash(filepath.Join("custom", "modules"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"custom/modules/XlflowAssert.bas",
+		"custom/modules/XlflowRuntime.bas",
+		"custom/modules/XlflowUI.bas",
+		"custom/modules/XlflowDebug.bas",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !containsString(result.Created, path) {
+			t.Fatalf("expected %s in created paths: %v", path, result.Created)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "custom", "modules", "Main.bas")); !os.IsNotExist(err) {
+		t.Fatalf("expected Main.bas not to be installed for helper bundle, got %v", err)
+	}
+	if len(result.Created) != 4 {
+		t.Fatalf("created count = %d, want 4", len(result.Created))
+	}
+}
+
+func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "XlflowUI.bas"), []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallHelperModules(dir, config.SourceConfig{}); err == nil {
+		t.Fatal("expected overwrite refusal")
+	} else if !strings.Contains(err.Error(), "refusing to overwrite existing file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestScaffoldAppendsMissingGitignoreEntries(t *testing.T) {
 	dir := t.TempDir()
 	existing := "# User\n.env\n"

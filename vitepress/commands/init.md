@@ -5,22 +5,24 @@ Initialize an xlflow project from an existing workbook.
 ## Usage
 
 ```bash
-xlflow init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
 ```
 
 ## Options and Arguments
 
-| Option / argument    | Description                                   | Default  |
-| -------------------- | --------------------------------------------- | -------- |
-| `workbook`           | Existing workbook to bind to the new project. | required |
-| `--with-skill`       | Install the bundled AI-agent skill.           | false    |
-| `--agent <provider>` | Choose the agent skill provider.              | -        |
-| `--no-update-check`  | Skip the startup update check.                | false    |
+| Option / argument    | Description                                                      | Default  |
+| -------------------- | ---------------------------------------------------------------- | -------- |
+| `workbook`           | Existing workbook to bind to the new project.                    | required |
+| `--with-module`      | Add bundled helper modules and push them to the copied workbook. | false    |
+| `--with-skill`       | Install the bundled AI-agent skill.                              | false    |
+| `--agent <provider>` | Choose the agent skill provider.                                 | -        |
+| `--no-update-check`  | Skip the startup update check.                                   | false    |
 
 ## Examples
 
 ```bash
 xlflow init LegacyBook.xlsm
+xlflow init LegacyBook.xlsm --with-module
 xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 ```
 
@@ -30,7 +32,11 @@ xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 > Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
 
 ::: tip
-Run `xlflow pull --json` after `init` to create the first source-controlled snapshot.
+Use `--with-module` when the imported workbook should immediately gain `XlflowAssert`, `XlflowRuntime`, `XlflowUI`, and `XlflowDebug` helpers for workbook-side tests, headless runs, scripted dialogs, and terminal-visible logging.
+:::
+
+::: warning
+`--with-module` refuses to overwrite existing helper source files. Resolve any `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, or `XlflowDebug.bas` collisions before retrying.
 :::
 
 ## JSON Output Example

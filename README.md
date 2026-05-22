@@ -144,6 +144,15 @@ xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
 
 `XlflowDebug.Log` does not need an extra CLI flag. During `xlflow run` and `xlflow test`, xlflow streams those debug lines to stderr by default and includes the recent events under top-level `debug` in the final JSON envelope.
 
+For existing projects, you can add the bundled helper modules during bootstrap or later:
+
+```bash
+xlflow init LegacyBook.xlsm --with-module
+xlflow module install --push
+```
+
+`init --with-module` adds `XlflowAssert`, `XlflowRuntime`, `XlflowUI`, and `XlflowDebug` after the initial bootstrap pull, then pushes them back into the copied workbook. `module install` is source-only by default and installs the same helper bundle into the configured module source root; add `--push` when the workbook should be updated immediately.
+
 ---
 
 ## Requirements

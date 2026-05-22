@@ -262,6 +262,35 @@ List workbook UserForms through Excel COM so agents can discover form names and 
 
 Support Rubberduck-compatible `@Folder(...)` annotations and nested source directories while preserving the existing type-specific `[src]` roots.
 
+## Bundled Helper Module Install Spec
+
+### Goal
+
+Allow existing xlflow projects to adopt the bundled helper modules without recreating the project scaffold.
+
+### Commands
+
+- `xlflow init <workbook> --with-module`
+- `xlflow module install [--push]`
+
+### Behavior
+
+- `init` keeps its existing bootstrap copy plus `pull` behavior when `--with-module` is absent.
+- `init --with-module` installs `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` after the bootstrap `pull`, then automatically `push`es them into the copied workbook so source and workbook remain synchronized.
+- `module install` installs `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules` root of an existing xlflow project.
+- `module install` is source-only by default.
+- `module install --push` reuses the normal push preflight and workbook import path after writing the helper source files.
+- Both commands refuse to overwrite existing target helper source files.
+- Existing-project helper installation must honor custom `[src].modules` roots instead of hardcoding `src/modules`.
+
+### Verification
+
+- `go test ./internal/project ./internal/cli`
+- `xlflow init LegacyBook.xlsm --with-module`
+- `xlflow module install`
+- `xlflow module install --push`
+- Collision case where one of `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, or `XlflowDebug.bas` already exists
+
 ## Config Contract
 
 ```toml
