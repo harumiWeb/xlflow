@@ -12,6 +12,7 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
+- When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, lifecycle hooks, tags/filters, and failure diagnosis.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --json`.
 - When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.
 - If `push` or `run` leaves the live session workbook unsaved, treat the live workbook as newer than disk until `xlflow save --json`.
@@ -146,6 +147,10 @@ When the user asks to create or change VBA behavior:
 5. Run `xlflow push --fast --session --no-save --json`.
 6. Run `xlflow lint --json`.
 7. Run `xlflow test --session --json` when tests exist.
+   - Use `xlflow test --filter <name> --session --json` for focused iteration.
+   - Use `xlflow test --module <ModuleName> --session --json` to run one suite.
+   - Use `xlflow test --tag <tag> --session --json` for tag-based subsets.
+   - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, or debugging test failures.
 8. If tests do not cover the behavior, run `xlflow macros --session --json`, then `xlflow run --headless --session --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --json` / `xlflow run <qualified_name> --trace --session --json` for non-default entrypoints.
 9. When workbook output matters, run `xlflow save --json` if needed, then inspect the result with `xlflow inspect workbook|sheets|range|used-range|cell --json`, or use `xlflow inspect form <FormName> --session --json` for live UserForm state.
 10. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
@@ -170,6 +175,10 @@ When the user reports a runtime failure:
 - Use `xlflow rollback --latest --json` or `xlflow rollback --backup <id> --json` only after the workbook is closed or the xlflow session has been stopped; then run `xlflow pull --json` if source files should match the restored workbook.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - Use `xlflow test --session --json` as the primary correctness signal when tests exist.
+- Use `xlflow test --module <ModuleName> --session --json` to run only the tests in one module.
+- Use `xlflow test --tag <tag> --session --json` to run only tests matching a tag.
+- Use `xlflow test --filter <TestName> --session --json` for exact-name focused iteration.
+- Read [references/testing.md](references/testing.md) for detailed guidance on `XlflowAssert`, lifecycle hooks, tag conventions, and failure diagnosis.
 - Use `xlflow macros --session --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
 - Use `xlflow inspect workbook --json` to confirm saved workbook metadata after save, or `xlflow inspect workbook --session --json` to inspect the live workbook before saving.
 - Use `xlflow inspect sheets --json` to verify saved worksheet names, visibility, and lightweight used ranges, or `xlflow inspect sheets --session --json` for the live workbook.
@@ -258,7 +267,7 @@ When workbook code launches an external PowerShell process, separate xlflow's br
 
 ## Failure Handling
 
-If `xlflow test` fails, read the failing test name, module, VBA error number, description, and line. Patch the smallest relevant area, rerun the focused test first, then run the full test suite.
+If `xlflow test` fails, read the failing test name, module, `error.code`, VBA error number, description, and line. Distinct `error.code` values include `test_failed`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`, and `test_inconclusive`. Hook failures (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`) indicate setup/cleanup problems rather than assertion failures in the test body. Load [references/testing.md](references/testing.md) for a full failure-code reference. Patch the smallest relevant area, rerun the focused test with `--filter` first, then run the full test suite.
 
 If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls. Plain `run` already includes compile-first diagnostics by default; do not switch to `--gui-compile-errors` unless a human explicitly wants GUI dialogs.
 
