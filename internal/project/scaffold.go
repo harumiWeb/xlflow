@@ -68,6 +68,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	moduleDir := filepath.Join(cwd, "src", "modules")
 	thisWorkbookPath := filepath.Join(cwd, "src", "workbook", "ThisWorkbook.bas")
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
+	sampleTestPath := filepath.Join(cwd, "src", "modules", "Tests", "SampleTests.bas")
 	protectedPaths := []string{destPath, configPath}
 	protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldBaseModuleTemplates())...)
 	if scaffoldRuntimeHelper {
@@ -76,6 +77,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
 	}
+	protectedPaths = append(protectedPaths, sampleTestPath)
 	for _, path := range protectedPaths {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
@@ -86,6 +88,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 
 	dirs := []string{
 		filepath.Join(cwd, "src", "modules"),
+		filepath.Join(cwd, "src", "modules", "Tests"),
 		filepath.Join(cwd, "src", "classes"),
 		filepath.Join(cwd, "src", "forms"),
 		filepath.Join(cwd, "src", "workbook"),
@@ -143,6 +146,10 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 			result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
 		}
 	}
+	if err := writeExclusive(sampleTestPath, sampleTestModule); err != nil {
+		return result, err
+	}
+	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, sampleTestPath)))
 
 	gitignorePath := filepath.Join(cwd, ".gitignore")
 	updatedGitignore, err := ensureGitignore(gitignorePath)
@@ -1383,3 +1390,115 @@ Cleanup:
 	End If
 End Sub
 `
+
+const sampleTestModule = `Attribute VB_Name = "SampleTests"
+Option Explicit
+
+' xlflow tests are public parameterless Sub procedures whose names match
+' Test* or *_Test.  xlflow discovers them automatically at run time.
+'
+' Use XlflowAssert helpers to raise clear, JSON-friendly failures.
+'
+' Tags: add '@Tag("name")' comment lines directly above a test sub
+' and run only matching tests with  xlflow test --tag <name>.
+'
+' Hooks: BeforeAll / AfterAll / BeforeEach / AfterEach are optional
+' reserved names.  They must be public parameterless Subs and they
+' affect only tests in the same module.
+'
+' Keep tests independent.  Use BeforeEach / AfterEach for isolation
+' and BeforeAll for expensive one-time setup.
+
+Public Sub BeforeAll()
+    ' Runs once before the first test in this module.
+End Sub
+
+Public Sub AfterAll()
+    ' Runs once after the last test in this module.
+End Sub
+
+Public Sub BeforeEach()
+    ' Runs before every test in this module.
+End Sub
+
+Public Sub AfterEach()
+    ' Runs after every test in this module.
+End Sub
+
+'@Tag("smoke")
+Public Sub Test_Sample_Pass()
+    ' A passing test demonstrates the AssertEquals helper.
+    XlflowAssert.AssertEquals 1 + 1, 2, "basic arithmetic should work"
+End Sub
+
+Public Sub Test_Sample_Fail()
+    ' This test fails on purpose so you can see how xlflow reports
+    ' errors.  After observing the failure, delete or rename this
+    ' procedure.
+    XlflowAssert.AssertEquals 1 + 1, 3, "intentional failure"
+End Sub
+
+Public Sub Test_Sample_Inconclusive()
+    ' Mark not-yet-implemented tests as inconclusive instead of
+    ' commenting them out.  They appear as [?] in terminal output.
+    XlflowAssert.AssertInconclusive "not implemented yet"
+End Sub
+`
+
+// GenerateTestModuleResult is returned by GenerateTestModule.
+type GenerateTestModuleResult struct {
+	Path    string `json:"path"`
+	Created bool   `json:"created"`
+}
+
+// GenerateTestModule creates a new test module file at the configured modules directory.
+// The moduleName should not include the .bas extension.
+func GenerateTestModule(cwd, moduleName string, src config.SourceConfig) (GenerateTestModuleResult, error) {
+	var result GenerateTestModuleResult
+	if moduleName == "" {
+		return result, errors.New("module name is required")
+	}
+	cleanName := strings.TrimSpace(moduleName)
+	cleanName = strings.TrimSuffix(cleanName, ".bas")
+	if cleanName == "" {
+		return result, errors.New("module name is empty after cleaning")
+	}
+
+	moduleDir := filepath.Join(cwd, src.Modules)
+	destPath := filepath.Join(moduleDir, cleanName+".bas")
+
+	if _, err := os.Stat(destPath); err == nil {
+		return result, fmt.Errorf("test module already exists: %s", destPath)
+	}
+
+	body := fmt.Sprintf(`Attribute VB_Name = "%s"
+Option Explicit
+
+Public Sub BeforeAll()
+End Sub
+
+Public Sub AfterAll()
+End Sub
+
+Public Sub BeforeEach()
+End Sub
+
+Public Sub AfterEach()
+End Sub
+
+Public Sub Test_Sample()
+    XlflowAssert.AssertTrue True, "replace with real assertions"
+End Sub
+`, cleanName)
+
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		return result, fmt.Errorf("failed to create modules directory: %w", err)
+	}
+	if err := os.WriteFile(destPath, []byte(body), 0644); err != nil {
+		return result, fmt.Errorf("failed to write test module: %w", err)
+	}
+
+	result.Path = destPath
+	result.Created = true
+	return result, nil
+}

@@ -2473,7 +2473,7 @@ func TestTestProcedureTagDiscovery(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $body = @('Option Explicit',''' @tag smoke','Public Sub Test_Smoke()','End Sub',''' @tag integration','Public Sub Test_Integration()','End Sub','Public Sub Test_NoTag()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'TagTests' -Code $body | ConvertTo-Json -Compress",
+		". ./common.ps1; $body = @('Option Explicit','''@Tag(\"smoke\")','Public Sub Test_Smoke()','End Sub','''@Tag(\"integration\")','Public Sub Test_Integration()','End Sub','Public Sub Test_NoTag()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'TagTests' -Code $body | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()

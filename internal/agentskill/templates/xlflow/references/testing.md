@@ -47,14 +47,14 @@ Important constraints:
 
 ## Tags
 
-Add `' @tag <name>` comment lines directly above a test sub to attach tags:
+Add `' @Tag("name")` comment lines directly above a test sub to attach tags:
 
 ```vb
-' @tag smoke
+'@Tag("smoke")
 Public Sub Test_CreateWorksheet()
 
-' @tag integration
-' @tag slow
+'@Tag("integration")
+'@Tag("slow")
 Public Sub Test_ImportLargeFile()
 ```
 
@@ -212,4 +212,5 @@ When `status` is `failed`, inspect `error.code` and `error.message` first. The m
 - **Tag slow or fragile tests** with `' @tag slow` or `' @tag flaky` so CI or quick-check runs can exclude them.
 - **Use `AssertInconclusive`** for tests that describe desired behavior not yet implemented, rather than commenting them out.
 - **Remove E2E-only test modules** before committing. If you create intentional-failure modules to verify hook behavior, do not check them into version control.
+- **Use `xlflow generate test <ModuleName>`** to scaffold a new test module with hook stubs and a sample test sub. This is faster than writing the boilerplate by hand and keeps the module structure consistent.
 - **Run `xlflow lint --json` after editing test source**. xlflow lint validates both production and test VBA.

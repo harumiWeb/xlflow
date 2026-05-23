@@ -2706,7 +2706,7 @@ function Find-XlflowTestProcedures {
         if ([string]::IsNullOrWhiteSpace($prev)) {
           continue
         }
-        $tagMatch = [regex]::Match($prev, "^'\s*@tag\s+(\S+)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        $tagMatch = [regex]::Match($prev, "^'\s*@Tag\s*\(""([^""]+)""\)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if ($tagMatch.Success) {
           $tags.Add($tagMatch.Groups[1].Value) | Out-Null
           continue

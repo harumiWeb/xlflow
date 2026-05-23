@@ -55,6 +55,7 @@ xlflow [--json] inspect-gui
 xlflow [--json] lint
 xlflow [--json] analyze
 xlflow [--json] check
+xlflow [--json] generate test <module-name>
 xlflow [--json] module install [--push]
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 xlflow [--json] version [--verbose]
@@ -79,6 +80,8 @@ Excel COM-backed commands also include top-level `bridge` metadata with `host`, 
 `new` and `init` create or update a project-local `.gitignore`. The managed entries ignore Excel temporary files (`~$*.xls*`, `*.tmp`) and xlflow-generated state (`.xlflow/`, `build/`). Existing `.gitignore` content is preserved; missing managed entries are appended without duplicating entries that are already present.
 
 `module install` installs the bundled helper modules `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules` root of an existing xlflow project without changing the workbook by default. `module install --push` additionally imports those helper modules into the configured workbook through the normal `push` path. The command refuses to overwrite any existing target helper source file.
+
+`generate test <module-name>` creates a new test module file under the configured `[src].modules` directory. The generated file includes the standard module header, `Option Explicit`, lifecycle hook stubs (`BeforeAll`, `AfterAll`, `BeforeEach`, `AfterEach`), and a sample test sub. The command fails if a file with the same name already exists. The module name must not include the `.bas` extension.
 
 `new` and `init` do not create `prompts/agent.md`. Use `--with-skill` to install the bundled `xlflow` AI agent skill during project creation. `--agent` selects one of `agents`, `codex`, `claude`, `cursor`, or `gemini`. When `--with-skill` is used without `--agent` in an interactive terminal, xlflow opens a Bubble Tea provider selector. With `--json` or non-interactive input, `--agent` is required.
 
@@ -166,7 +169,7 @@ New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/Xlf
 
 `attach --active` inspects the current active Excel workbook. It verifies that the active workbook path matches configured `excel.path` and reports top-level `workbook.path`, `workbook.configured_path`, `workbook.active`, and `workbook.matches_config`. In this version, `attach` does not change the connection target for `pull`, `push`, or `run`; it only validates the human-opened workbook.
 
-`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Because `test` executes user VBA, xlflow must keep workbook macros executable for both fresh opens and `test --session`. `test --session` runs against the workbook opened by `session start` via the recorded session metadata. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
+`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. `--module` filters by exact module name. `--tag` filters by tag attached via `' @Tag("name")` comment lines directly above the test sub. Because `test` executes user VBA, xlflow must keep workbook macros executable for both fresh opens and `test --session`. `test --session` runs against the workbook opened by `session start` via the recorded session metadata. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 
 For session-aware workbooks, `test --session` is the preferred validation path whenever the workbook is already open or when it will be followed by additional workbook-backed commands. Avoid reopening the workbook between `run`, `test`, `save`, and inspect commands unless the specific behavior under test is the reopen boundary itself.
 
@@ -252,7 +255,7 @@ Command-specific fields are added at the top level:
 - `ui` for `run --ui-stream` / `test --ui-stream` dialog events and `ui button` commands
 - `debug` for `run` / `test` `XlflowDebug.Log` events
 
-`test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
+`test` result objects contain `name`, `module`, `status`, `duration_ms`, `tags`, and an optional `error`.
 
 `status` values are `passed`, `failed`, and `inconclusive`. `inconclusive` is produced when a test calls `XlflowAssert.AssertInconclusive`.
 

@@ -211,6 +211,7 @@ try {
             module = $test.module
             status = $status
             duration_ms = [int]$stopwatch.ElapsedMilliseconds
+            tags = $test.tags
             error = [ordered]@{
               code = $errorCode
               message = $errorMessage
@@ -236,6 +237,7 @@ try {
             module = $test.module
             status = "failed"
             duration_ms = [int]$stopwatch.ElapsedMilliseconds
+            tags = $test.tags
             error = [ordered]@{
               code = "test_failed"
               message = $message

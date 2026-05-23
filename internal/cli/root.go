@@ -165,6 +165,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.lintCommand(),
 		a.analyzeCommand(),
 		a.checkCommand(),
+		a.generateCommand(),
 		a.moduleCommand(),
 		a.skillCommand(),
 		a.versionCommand(),
@@ -1218,6 +1219,38 @@ func (a *app) pushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
+	return cmd
+}
+
+func (a *app) generateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "generate",
+		Short: "Generate project artifacts",
+	}
+	cmd.AddCommand(a.generateTestCommand())
+	return cmd
+}
+
+func (a *app) generateTestCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "test <module-name>",
+		Short: "Generate a new VBA test module",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("generate test")
+			if err != nil {
+				return err
+			}
+			result, err := project.GenerateTestModule(a.cwd, args[0], cfg.Src)
+			if err != nil {
+				return a.writeFailure("generate test", output.ExitConfig, "generate_test_failed", err)
+			}
+			env := output.New("generate test")
+			env.Source = map[string]any{"path": result.Path, "created": result.Created}
+			env.Logs = []string{fmt.Sprintf("created test module: %s", result.Path)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 	return cmd
 }
 
@@ -2623,7 +2656,7 @@ func (a *app) testCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
 	cmd.Flags().StringVar(&moduleFilter, "module", "", "run only tests in the module whose name exactly matches filter")
-	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag (Phase 3: requires comment metadata)")
+	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
