@@ -1011,6 +1011,21 @@ func TestInitCommandIncludesWithModuleFlag(t *testing.T) {
 	}
 }
 
+func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	cmd, _, err := root.Find([]string{"test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Flags().Lookup("module") == nil {
+		t.Fatal("expected test command to define --module")
+	}
+	if cmd.Flags().Lookup("tag") == nil {
+		t.Fatal("expected test command to define --tag")
+	}
+}
+
 func TestSkillInstallCommandInstallsProviderSkill(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cwd: dir}

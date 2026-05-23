@@ -1027,6 +1027,7 @@ func (a *app) initCommand() *cobra.Command {
 					pushEnv, pushCode, pushErr := a.pushSource("init", cfg, excel.PushOptions{
 						BackupMode: "always",
 						Keepalive:  runOpts,
+						SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
 					}, "Importing bundled helper modules")
 					if pushErr != nil {
 						return pushErr
@@ -1288,6 +1289,7 @@ func (a *app) moduleInstallCommand() *cobra.Command {
 			pushEnv, pushCode, pushErr := a.pushSource("module install", cfg, excel.PushOptions{
 				BackupMode: "always",
 				Keepalive:  commandOpts,
+				SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
 			}, "Importing bundled helper modules")
 			if pushErr != nil {
 				return pushErr

@@ -73,12 +73,12 @@ Public Sub AfterEach()
 
 Hook behavior:
 
-| Hook         | Runs when                                | Failure impact                                                                                                                                                |
-| ------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BeforeAll`  | Once before the first test in the module | All tests in the module are marked `failed` with `before_all_failed`                                                                                          |
-| `AfterAll`   | Once after the last test in the module   | All tests that were `passed` or `inconclusive` in that module are overwritten to `failed` with `after_all_failed`                                             |
-| `BeforeEach` | Before every test in the module          | The individual test is marked `failed` with `before_each_failed`; the test body is skipped                                                                    |
-| `AfterEach`  | After every test in the module           | The individual test is marked `failed` with `after_each_failed`; if the test body already failed, the `after_each` failure is still reported in `error.phase` |
+| Hook         | Runs when                                | Failure impact                                                                                                                                               |
+| ------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BeforeAll`  | Once before the first test in the module | All tests in the module are marked `failed` with `before_all_failed`                                                                                         |
+| `AfterAll`   | Once after the last test in the module   | All tests that were `passed` or `inconclusive` in that module are overwritten to `failed` with `after_all_failed`                                            |
+| `BeforeEach` | Before every test in the module          | The individual test is marked `failed` with `before_each_failed`; the test body is skipped                                                                   |
+| `AfterEach`  | After every test in the module           | The individual test is marked `failed` with `after_each_failed`; if the test body already failed, the `after_each` failure is still reported in `error.code` |
 
 `BeforeEach` failure skips the test body, but `AfterEach` still runs for cleanup. `AfterAll` runs even when some tests in the module failed.
 
@@ -158,7 +158,7 @@ xlflow session stop --json
 
 ### Terminal output
 
-```
+```text
 PASS Test_CreateWorksheet
 FAIL Test_TotalPrice: expected <110> but got <100>
 ? Test_ImportLargeFile: inconclusive

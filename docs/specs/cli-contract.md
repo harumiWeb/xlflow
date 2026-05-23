@@ -255,7 +255,7 @@ Command-specific fields are added at the top level:
 - `ui` for `run --ui-stream` / `test --ui-stream` dialog events and `ui button` commands
 - `debug` for `run` / `test` `XlflowDebug.Log` events
 
-`test` result objects contain `name`, `module`, `status`, `duration_ms`, `tags`, and an optional `error`.
+`test` result objects contain `name`, `module`, `status`, `duration_ms`, `tags`, and an optional `error`. `tags` is always present; in Phase 2 it is an empty array (`[]`) for forward compatibility, and Phase 3 populates it when tag parsing is implemented.
 
 `status` values are `passed`, `failed`, and `inconclusive`. `inconclusive` is produced when a test calls `XlflowAssert.AssertInconclusive`.
 

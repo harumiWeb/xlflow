@@ -2973,6 +2973,8 @@ function New-XlflowTestRunnerCode {
       [void]$builder.AppendLine('      End If')
     }
     [void]$builder.AppendLine('      If Not IsEmpty(afterEachErr) Then')
+    [void]$builder.AppendLine('        phaseHint = "after_each"')
+    [void]$builder.AppendLine('        statusHint = "failed"')
     [void]$builder.AppendLine('        RunTest = Array(False, afterEachErr(1), afterEachErr(2), afterEachErr(3), statusHint, phaseHint)')
     [void]$builder.AppendLine('      ElseIf Not IsEmpty(testErr) Then')
     [void]$builder.AppendLine('        RunTest = Array(False, testErr(1), testErr(2), testErr(3), statusHint, phaseHint)')

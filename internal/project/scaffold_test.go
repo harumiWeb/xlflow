@@ -90,7 +90,6 @@ func TestNewScaffoldCreatesSampleTests(t *testing.T) {
 		"Public Sub BeforeEach()",
 		"Public Sub AfterEach()",
 		"Public Sub Test_Sample_Pass()",
-		"Public Sub Test_Sample_Fail()",
 		"Public Sub Test_Sample_Inconclusive()",
 		"XlflowAssert.AssertInconclusive",
 	} {
@@ -630,6 +629,30 @@ func TestGenerateTestModuleEmptyName(t *testing.T) {
 	_, err := GenerateTestModule(dir, "", src)
 	if err == nil {
 		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestGenerateTestModuleRejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: "src/modules"}
+	for _, name := range []string{"../Escape", "foo/bar", "foo\\bar", "..\\Escape"} {
+		_, err := GenerateTestModule(dir, name, src)
+		if err == nil {
+			t.Fatalf("expected error for invalid module name %q", name)
+		}
+	}
+}
+
+func TestGenerateTestModuleDefaultsToTestsDirWhenModulesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: ""}
+	result, err := GenerateTestModule(dir, "SampleTests", src)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedPath := filepath.Join(dir, "src", "modules", "Tests", "SampleTests.bas")
+	if result.Path != expectedPath {
+		t.Fatalf("path = %q, want %q", result.Path, expectedPath)
 	}
 }
 

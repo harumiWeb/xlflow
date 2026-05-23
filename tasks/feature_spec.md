@@ -109,7 +109,7 @@ function Find-XlflowModuleHooks {
 
 **New flow:**
 
-```
+```text
 foreach ($moduleGroup in $selected | Group-Object module) {
     $moduleName = $moduleGroup.Name
     $hooks = Find-XlflowModuleHooks -ModuleName $moduleName -Code (Get-XlflowCodeModuleText ...)

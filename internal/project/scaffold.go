@@ -163,16 +163,16 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 }
 
 func InstallHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
-	moduleRoot := resolveModuleRoot(cwd, src)
+	moduleRoot := ResolveModuleRoot(cwd, src)
 	return installBundledModules(cwd, moduleRoot, installHelperModuleTemplates())
 }
 
 func InstallRuntimeHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
-	moduleRoot := resolveModuleRoot(cwd, src)
+	moduleRoot := ResolveModuleRoot(cwd, src)
 	return installBundledModules(cwd, moduleRoot, scaffoldRuntimeHelperModuleTemplates())
 }
 
-func resolveModuleRoot(cwd string, src config.SourceConfig) string {
+func ResolveModuleRoot(cwd string, src config.SourceConfig) string {
 	moduleRoot := strings.TrimSpace(src.Modules)
 	if moduleRoot == "" {
 		moduleRoot = config.Default().Src.Modules
@@ -1431,13 +1431,6 @@ Public Sub Test_Sample_Pass()
     XlflowAssert.AssertEquals 1 + 1, 2, "basic arithmetic should work"
 End Sub
 
-Public Sub Test_Sample_Fail()
-    ' This test fails on purpose so you can see how xlflow reports
-    ' errors.  After observing the failure, delete or rename this
-    ' procedure.
-    XlflowAssert.AssertEquals 1 + 1, 3, "intentional failure"
-End Sub
-
 Public Sub Test_Sample_Inconclusive()
     ' Mark not-yet-implemented tests as inconclusive instead of
     ' commenting them out.  They appear as [?] in terminal output.
@@ -1463,8 +1456,15 @@ func GenerateTestModule(cwd, moduleName string, src config.SourceConfig) (Genera
 	if cleanName == "" {
 		return result, errors.New("module name is empty after cleaning")
 	}
+	if cleanName != filepath.Base(cleanName) || strings.Contains(cleanName, "..") {
+		return result, errors.New("invalid module name")
+	}
 
-	moduleDir := filepath.Join(cwd, src.Modules)
+	modulesRoot := src.Modules
+	if modulesRoot == "" {
+		modulesRoot = filepath.Join("src", "modules", "Tests")
+	}
+	moduleDir := filepath.Join(cwd, filepath.Clean(modulesRoot))
 	destPath := filepath.Join(moduleDir, cleanName+".bas")
 
 	if _, err := os.Stat(destPath); err == nil {

@@ -60,4 +60,4 @@ End Sub
 ## Related
 
 - [test](./test)
-- [module install](./module-install)
+- [module install](./module)
