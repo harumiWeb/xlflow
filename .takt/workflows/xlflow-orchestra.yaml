@@ -22,6 +22,7 @@ steps:
 
     provider: codex
     model: gpt-5.4
+    required_permission_mode: full
 
     provider_options:
       codex:
@@ -259,6 +260,7 @@ steps:
 
     provider: codex
     model: gpt-5.4
+    required_permission_mode: full
 
     provider_options:
       codex:
