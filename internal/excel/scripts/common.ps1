@@ -2097,6 +2097,18 @@ function Get-XlflowComponentExtension {
   }
 }
 
+function Get-XlflowComponentTypeName {
+  param([int]$ComponentType)
+
+  switch ($ComponentType) {
+    1 { return "standard_module" }
+    2 { return "class_module" }
+    3 { return "userform" }
+    100 { return "document_module" }
+    default { return "unknown" }
+  }
+}
+
 function Get-XlflowComponentRootDir {
   param(
     [int]$ComponentType,
@@ -3888,13 +3900,27 @@ function Read-XlflowTraceEvents {
   }
 }
 
+function Test-XlflowEventProcedureName {
+  param([string]$ProcedureName)
+
+  if ($ProcedureName -match '^(?:Workbook|Worksheet)_') {
+    return $true
+  }
+  if ($ProcedureName -match '^(?:Auto_Open|Auto_Close)$') {
+    return $true
+  }
+  return $false
+}
+
 function Find-XlflowMacroProcedures {
-  param([string]$ModuleName, [string]$Code)
+  param([string]$ModuleName, [int]$ComponentType = 0, [string]$Code)
 
   $macros = New-Object System.Collections.Generic.List[object]
   if ([string]::IsNullOrEmpty($Code)) {
     return $macros
   }
+
+  $componentTypeName = Get-XlflowComponentTypeName -ComponentType $ComponentType
 
   $lines = $Code -split "`r?`n"
   for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -3910,18 +3936,42 @@ function Find-XlflowMacroProcedures {
     if ([string]::IsNullOrWhiteSpace($name)) {
       continue
     }
+    $visibility = if ($match.Groups[1].Success) { "Public" } else { "Public" }
     $argText = $match.Groups[4].Value.Trim()
     $macroArgs = @()
+    $hasParams = $false
     if (-not [string]::IsNullOrWhiteSpace($argText)) {
       $macroArgs = @($argText -split "," | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      $hasParams = ($macroArgs.Count -gt 0)
     }
+
+    $reason = $null
+    $runnable = $false
+
+    if ($hasParams) {
+      $reason = "has_parameters"
+    } elseif (Test-XlflowEventProcedureName -ProcedureName $name) {
+      $reason = "event_procedure"
+    } elseif ($componentTypeName -eq "userform" -or $componentTypeName -eq "document_module" -or $componentTypeName -eq "unknown") {
+      $reason = "unsupported_component_type"
+    } else {
+      $runnable = $true
+    }
+
+    $qualifiedName = $ModuleName + "." + $name
+
     $macros.Add([pscustomobject][ordered]@{
       module = $ModuleName
       name = $name
-      qualified_name = ($ModuleName + "." + $name)
+      qualified_name = $qualifiedName
       kind = $match.Groups[2].Value.ToLowerInvariant()
       args = @($macroArgs)
       line = $i + 1
+      component_type = $componentTypeName
+      visibility = $visibility
+      has_parameters = $hasParams
+      runnable = $runnable
+      reason_not_runnable = $reason
     })
   }
 

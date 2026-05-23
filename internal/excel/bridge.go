@@ -183,6 +183,13 @@ type SessionCommandOptions struct {
 	Keepalive CommandOptions
 }
 
+type MacrosOptions struct {
+	Session      bool
+	Keepalive    CommandOptions
+	Entry        string
+	RunnableOnly bool
+}
+
 type TestOptions struct {
 	Session       bool
 	Keepalive     CommandOptions
@@ -323,6 +330,8 @@ type ScriptResult struct {
 	Warnings      any           `json:"warnings,omitempty"`
 	Hints         any           `json:"hints,omitempty"`
 	Inspect       any           `json:"inspect,omitempty"`
+	DefaultEntry  string        `json:"default_entry,omitempty"`
+	Suggestions   any           `json:"suggestions,omitempty"`
 }
 
 type UIButtonAddOptions struct {
@@ -687,19 +696,21 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 }
 
 func (r Runner) Macros(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
-	cmdOpts := SessionCommandOptions{}
+	cmdOpts := CommandOptions{}
 	if len(opts) > 0 {
-		cmdOpts.Keepalive = opts[0]
+		cmdOpts = opts[0]
 	}
-	return r.MacrosWithOptions(cfg, cmdOpts)
+	return r.MacrosWithOptions(cfg, MacrosOptions{Keepalive: cmdOpts})
 }
 
-func (r Runner) MacrosWithOptions(cfg config.Config, opts SessionCommandOptions) (output.Envelope, int, error) {
+func (r Runner) MacrosWithOptions(cfg config.Config, opts MacrosOptions) (output.Envelope, int, error) {
 	return r.run("macros", map[string]string{
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":   strconv.FormatBool(opts.Session),
 		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"Entry":        opts.Entry,
+		"RunnableOnly": strconv.FormatBool(opts.RunnableOnly),
 	}, opts.Keepalive)
 }
 
@@ -1456,6 +1467,12 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints
 	env.Inspect = result.Inspect
+	if result.DefaultEntry != "" {
+		env.DefaultEntry = result.DefaultEntry
+	}
+	if result.Suggestions != nil {
+		env.Suggestions = result.Suggestions
+	}
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 	}

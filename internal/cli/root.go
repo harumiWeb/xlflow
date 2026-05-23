@@ -306,6 +306,7 @@ func buildSettingsFromInfo(info *debug.BuildInfo) []versionBuildSetting {
 
 func (a *app) macrosCommand() *cobra.Command {
 	var session bool
+	var runnable bool
 	cmd := &cobra.Command{
 		Use:   "macros",
 		Short: "Discover runnable workbook macros",
@@ -320,7 +321,7 @@ func (a *app) macrosCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Reading VBA project", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.MacrosOptions{Session: session, Entry: cfg.Project.Entry, RunnableOnly: runnable, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -330,6 +331,7 @@ func (a *app) macrosCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	cmd.Flags().BoolVar(&runnable, "runnable", false, "show only runnable macros")
 	return cmd
 }
 

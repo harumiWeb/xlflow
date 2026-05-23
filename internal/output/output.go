@@ -67,6 +67,8 @@ type Envelope struct {
 	Edit          any `json:"edit,omitempty"`
 	Warnings      any `json:"warnings,omitempty"`
 	Hints         any `json:"hints,omitempty"`
+	DefaultEntry  any `json:"default_entry,omitempty"`
+	Suggestions   any `json:"suggestions,omitempty"`
 }
 
 type Options struct {
@@ -850,6 +852,37 @@ func (r renderer) renderMacros(env Envelope) string {
 			kind = " [" + kind + "]"
 		}
 		fmt.Fprintf(&b, "- %s%s%s\n", name, args, kind)
+		runnable := boolValue(macro, "runnable")
+		if runnable {
+			b.WriteString("    Runnable: yes\n")
+			if cmd := stringValue(macro, "run_command"); cmd != "" {
+				fmt.Fprintf(&b, "    Run: %s\n", cmd)
+			}
+		} else {
+			reason := stringValue(macro, "reason_not_runnable")
+			if reason == "" {
+				reason = "unknown"
+			}
+			fmt.Fprintf(&b, "    Runnable: no\n    Reason: %s\n", reason)
+		}
+	}
+	if entry, ok := env.DefaultEntry.(string); ok && entry != "" {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "Default entry:\n  %s\n", entry)
+	}
+	suggestions := listOfObjects(env.Suggestions)
+	if len(suggestions) > 0 {
+		b.WriteString("\nNext:\n")
+		for _, s := range suggestions {
+			title := stringValue(s, "title")
+			cmd := stringValue(s, "command")
+			if title != "" {
+				fmt.Fprintf(&b, "  %s:\n", title)
+			}
+			if cmd != "" {
+				fmt.Fprintf(&b, "    %s\n", cmd)
+			}
+		}
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
