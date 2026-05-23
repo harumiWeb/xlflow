@@ -1,0 +1,309 @@
+name: xlflow-orchestra-low
+description: DeepSeek V4 Pro planner/auditor + DeepSeek V4 Flash implementer/reviewer workflow
+
+workflow_config:
+  provider_options:
+    codex:
+      network_access: true
+
+    opencode:
+      network_access: true
+
+max_steps: 40
+initial_step: plan
+
+steps:
+  # =========================================================
+  # PLAN
+  # =========================================================
+  - name: plan
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+    required_permission_mode: full
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    instruction: |
+      Analyze the request carefully.
+
+      Produce:
+      - architecture plan
+      - implementation strategy
+      - affected files
+      - invariants
+      - migration concerns
+      - testing strategy
+      - risk analysis
+
+      Important:
+      - minimize breaking changes
+      - preserve public APIs
+      - maintain workbook compatibility
+      - keep exports deterministic
+
+    rules:
+      - condition: 要件が明確で実装可能
+        next: write_tests
+
+      - condition: ユーザーが質問をしている（実装タスクではない）
+        next: COMPLETE
+
+      - condition: 要件が不明確、情報不足
+        next: ABORT
+        appendix: |
+          確認事項:
+          - {質問1}
+          - {質問2}
+
+    output_contracts:
+      report:
+        - name: plan.md
+          format: plan
+
+  # =========================================================
+  # WRITE TESTS
+  # =========================================================
+  - name: write_tests
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-flash
+
+    persona: tester
+
+    policy:
+      - coding
+      - testing
+
+    knowledge:
+      - architecture
+      - unit-testing
+      - e2e-testing
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Write tests before implementation.
+
+      Focus on:
+      - public behavior
+      - edge cases
+      - regression prevention
+      - backward compatibility
+
+      Prefer:
+      - deterministic tests
+      - isolated tests
+      - maintainable fixtures
+
+      Do not:
+      - rewrite unrelated tests
+      - change architecture
+
+    rules:
+      - condition: テスト作成が完了した
+        next: implementation
+
+      - condition: テスト対象が未実装のためテスト作成をスキップする
+        next: implementation
+
+      - condition: テスト作成を進行できない
+        next: ABORT
+
+      - condition: ユーザーへの確認事項があるためユーザー入力が必要
+        next: write_tests
+        requires_user_input: true
+        interactive_only: true
+
+    output_contracts:
+      report:
+        - name: test-report.md
+          format: test-report
+
+  # =========================================================
+  # IMPLEMENTATION
+  # =========================================================
+  - name: implementation
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-flash
+
+    persona: implementer
+
+    policy:
+      - coding
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Implement exactly as specified in the plan.
+
+      Constraints:
+      - preserve public APIs
+      - preserve workbook compatibility
+      - keep exports deterministic
+      - avoid unnecessary refactors
+      - avoid unrelated changes
+
+      Requirements:
+      - follow existing architecture
+      - maintain naming consistency
+      - write maintainable code
+      - minimize side effects
+
+      After implementation:
+      - run tests
+      - fix failures
+      - ensure lint passes
+
+    rules:
+      - condition: 実装が完了した
+        next: self_review
+
+      - condition: 設計の問題により再計画が必要
+        next: plan
+
+      - condition: 実装を継続できない
+        next: ABORT
+
+      - condition: ユーザー入力が必要
+        next: implementation
+        requires_user_input: true
+        interactive_only: true
+
+    output_contracts:
+      report:
+        - name: implementation-report.md
+          format: implementation-report
+
+  # =========================================================
+  # SELF REVIEW
+  # =========================================================
+  - name: self_review
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: reviewer
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - security
+
+    instruction: |
+      Critically review the implementation.
+
+      Find:
+      - hidden bugs
+      - edge cases
+      - regression risks
+      - architecture violations
+      - maintainability issues
+      - naming inconsistencies
+      - dead code
+      - unnecessary complexity
+
+      Validate:
+      - tests are meaningful
+      - implementation matches the plan
+      - no unrelated files changed
+
+      Be strict and skeptical.
+
+    rules:
+      - condition: 修正が必要
+        next: implementation
+
+      - condition: 実装品質が十分
+        next: final_audit
+
+      - condition: レビュー継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: self-review.md
+          format: review-report
+
+  # =========================================================
+  # FINAL AUDIT
+  # =========================================================
+  - name: final_audit
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+    required_permission_mode: full
+
+    persona: architect
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+      - security
+
+    instruction: |
+      Perform final architecture and quality audit.
+
+      Validate:
+      - architecture consistency
+      - long-term maintainability
+      - hidden coupling
+      - regression risks
+      - extensibility
+      - correctness of abstractions
+      - compatibility guarantees
+
+      Check carefully for:
+      - subtle design flaws
+      - future maintenance hazards
+      - specification drift
+      - accidental complexity
+
+      Prefer:
+      - simplicity
+      - explicitness
+      - stable interfaces
+
+    rules:
+      - condition: 承認
+        next: COMPLETE
+
+      - condition: 軽微な修正が必要
+        next: implementation
+
+      - condition: 設計見直しが必要
+        next: plan
+
+      - condition: 監査継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: final-audit.md
+          format: audit-report

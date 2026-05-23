@@ -1,0 +1,351 @@
+name: xlflow-pr-review-high
+description: GPT-5.4 review triage/auditor + DeepSeek V4 Pro fixer workflow for addressing PR review feedback
+
+workflow_config:
+  provider_options:
+    codex:
+      network_access: true
+
+    opencode:
+      network_access: true
+
+max_steps: 48
+initial_step: review_intake
+
+steps:
+  # =========================================================
+  # REVIEW INTAKE
+  # =========================================================
+  - name: review_intake
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: high
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+
+    instruction: |
+      Analyze the PR review feedback before changing code.
+
+      Produce:
+      - actionable comment list
+      - non-actionable or already-resolved comments
+      - affected files and call chains
+      - expected behavior and compatibility constraints
+      - required tests, docs, and spec updates
+      - risks if the feedback is implemented incorrectly
+
+      For each actionable comment, identify:
+      - the concrete defect or concern
+      - whether code, tests, docs, or only reviewer response is needed
+      - whether the comment conflicts with existing xlflow contracts
+
+      Important:
+      - do not blindly accept incorrect review feedback
+      - preserve public APIs and workbook compatibility unless the review explicitly requires change
+      - check durable docs/spec needs for user-visible or contract-visible changes
+
+    rules:
+      - condition: 指摘が明確で対応方針を確定できる
+        next: fix_plan
+
+      - condition: 実装変更が不要で説明のみで十分
+        next: final_audit
+
+      - condition: 指摘がすべて解消済みまたは非対応で妥当
+        next: COMPLETE
+
+      - condition: 指摘内容が不明確、または追加コンテキストが必要
+        next: ABORT
+        appendix: |
+          確認事項:
+          - {不足しているレビューコメントまたは差分}
+          - {必要な背景情報}
+
+    output_contracts:
+      report:
+        - name: review-intake.md
+          format: plan
+
+  # =========================================================
+  # FIX PLAN
+  # =========================================================
+  - name: fix_plan
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    instruction: |
+      Turn the accepted review feedback into an implementation plan.
+
+      Produce:
+      - exact files to edit
+      - per-comment fix strategy
+      - required regression tests
+      - required docs/spec/changelog updates
+      - verification commands
+      - rollback or re-plan triggers
+
+      Plan standards:
+      - keep scope minimal
+      - prefer existing package boundaries and helper patterns
+      - separate code fixes from reviewer-response-only items
+      - call out any feedback that should be answered rather than implemented
+
+    rules:
+      - condition: 計画が確定した
+        next: implementation
+
+      - condition: 設計上の不一致がありユーザー判断が必要
+        next: fix_plan
+        requires_user_input: true
+        interactive_only: true
+
+      - condition: 計画を確定できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: fix-plan.md
+          format: plan
+
+  # =========================================================
+  # IMPLEMENTATION
+  # =========================================================
+  - name: implementation
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: implementer
+
+    policy:
+      - coding
+      - testing
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Implement the approved review-feedback fixes exactly as planned.
+
+      Requirements:
+      - address each accepted review comment completely
+      - keep edits tightly scoped
+      - add or update regression tests where the review exposes a bug or contract gap
+      - update docs/specs/changelog when the change is user-visible or contract-visible
+
+      Avoid:
+      - unrelated refactors
+      - speculative cleanup
+      - silent behavior changes outside the reviewed scope
+
+      After implementation:
+      - run the planned verification commands
+      - fix any failures caused by the changes
+
+    rules:
+      - condition: 実装が完了した
+        next: verification
+
+      - condition: 再計画が必要
+        next: fix_plan
+
+      - condition: 実装を継続できない
+        next: ABORT
+
+      - condition: ユーザー入力が必要
+        next: implementation
+        requires_user_input: true
+        interactive_only: true
+
+    output_contracts:
+      report:
+        - name: implementation-report.md
+          format: implementation-report
+
+  # =========================================================
+  # VERIFICATION
+  # =========================================================
+  - name: verification
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: tester
+
+    policy:
+      - testing
+
+    knowledge:
+      - unit-testing
+      - e2e-testing
+      - coding-rules
+      - invariants
+
+    required_permission_mode: full
+
+    instruction: |
+      Verify that the implemented fixes actually resolve the review feedback.
+
+      Validate:
+      - each addressed comment has evidence in code or tests
+      - targeted regression tests pass
+      - docs/spec updates match the new behavior
+      - no unrelated failures or contract regressions were introduced
+
+      Prefer:
+      - targeted verification first
+      - broader regression coverage when shared behavior changed
+      - explicit note of anything still unverified
+
+    rules:
+      - condition: 検証が通過した
+        next: self_review
+
+      - condition: 実装修正が必要
+        next: implementation
+
+      - condition: 検証を継続できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: verification-report.md
+          format: test-report
+
+  # =========================================================
+  # SELF REVIEW
+  # =========================================================
+  - name: self_review
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: reviewer
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - security
+
+    instruction: |
+      Review the resulting diff against the original PR feedback.
+
+      Find:
+      - unresolved review comments
+      - partial fixes
+      - missing tests or missing docs/spec updates
+      - regressions introduced while addressing comments
+      - over-scoped changes unrelated to the feedback
+
+      Be strict about whether the resulting patch would satisfy a demanding reviewer.
+
+    rules:
+      - condition: 修正が必要
+        next: implementation
+
+      - condition: 品質が十分
+        next: final_audit
+
+      - condition: レビュー継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: self-review.md
+          format: review-report
+
+  # =========================================================
+  # FINAL AUDIT
+  # =========================================================
+  - name: final_audit
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: architect
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+      - security
+
+    instruction: |
+      Perform a final audit of the PR review response.
+
+      Validate:
+      - accepted comments are fully addressed
+      - rejected comments are rejected for defensible reasons
+      - tests and documentation are sufficient for the change
+      - no contract drift or hidden compatibility break was introduced
+      - the resulting patch is concise and reviewable
+
+      Include:
+      - residual risks
+      - unverified items
+      - reviewer-facing summary of what changed
+
+    rules:
+      - condition: 承認
+        next: COMPLETE
+
+      - condition: 軽微な修正が必要
+        next: implementation
+
+      - condition: 再計画が必要
+        next: fix_plan
+
+      - condition: 監査継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: final-audit.md
+          format: audit-report

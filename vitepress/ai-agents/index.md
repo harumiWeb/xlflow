@@ -4,10 +4,17 @@ xlflow gives coding agents a stable interface for Excel VBA projects: source fil
 
 Every command can return a stable JSON envelope, so coding agents can parse results without scraping terminal text. See [JSON Output](../reference/json-output) and [Error Codes](../reference/error-codes).
 
+Before editing, confirm workbook and source state:
+
+```bash
+xlflow status --json
+```
+
 Recommended loop:
 
 ```bash
 xlflow doctor --json
+xlflow status --json
 xlflow session start --json
 xlflow pull --session --json
 xlflow push --fast --session --no-save --json
@@ -19,9 +26,10 @@ xlflow run Main.Run --headless --session --json
 xlflow save --session --json
 ```
 
-If a run fails, recover with a short loop before retrying:
+If a run fails, check state and recover with a short loop:
 
 ```bash
+xlflow status --json
 xlflow lint --json
 xlflow analyze --json
 xlflow run Main.Run --diagnostic --session --json

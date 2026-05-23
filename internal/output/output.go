@@ -65,6 +65,8 @@ type Envelope struct {
 	Output        any `json:"output,omitempty"`
 	Spec          any `json:"spec,omitempty"`
 	Edit          any `json:"edit,omitempty"`
+	Project       any `json:"project,omitempty"`
+	State         any `json:"state,omitempty"`
 	Warnings      any `json:"warnings,omitempty"`
 	Hints         any `json:"hints,omitempty"`
 	DefaultEntry  any `json:"default_entry,omitempty"`
@@ -184,7 +186,7 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.errorBlock(env))
 	}
 	b.WriteString(r.renderBridge(env))
-	if env.Command != "inspect" {
+	if env.Command != "inspect" && env.Command != "status" {
 		b.WriteString(r.renderTargetSession(env))
 	}
 	switch env.Command {
@@ -226,6 +228,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderRollback(env))
 	case "session":
 		b.WriteString(r.renderSession(env))
+	case "status":
+		b.WriteString(r.renderStatus(env))
 	case "save":
 		b.WriteString(r.renderSave(env))
 	case "trace":
@@ -1926,6 +1930,76 @@ func (r renderer) renderSave(env Envelope) string {
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
+}
+
+func (r renderer) renderStatus(env Envelope) string {
+	project := objectMap(env.Project)
+	session := objectMap(env.Session)
+	state := objectMap(env.State)
+	if len(project) == 0 && len(session) == 0 && len(state) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(project) > 0 {
+		b.WriteString("Project:\n")
+		b.WriteString(kv("Root", stringValue(project, "root")))
+		b.WriteString(kv("Workbook", stringValue(project, "workbook_path")))
+		srcPaths := stringList(project["src_paths"])
+		for _, srcPath := range srcPaths {
+			b.WriteString(kv("Source", srcPath))
+		}
+	}
+	if len(session) > 0 {
+		b.WriteString("Session:\n")
+		if active, ok := boolValueOK(session, "active"); ok {
+			dirty, dirtyKnown := boolValueOK(session, "dirty")
+			b.WriteString(kv("Status", sessionSummary(active, dirty, dirtyKnown)))
+		}
+		if dirty, ok := boolValueOK(session, "dirty"); ok && dirty {
+			b.WriteString(kv("Dirty", "true"))
+		}
+	}
+	if len(state) > 0 {
+		b.WriteString("State:\n")
+		if srcNewer, ok := boolValueOK(state, "src_newer_than_workbook"); ok {
+			b.WriteString(kv("Source newer", fmt.Sprintf("%t", srcNewer)))
+		}
+		if liveNewer, ok := boolValueOK(state, "live_session_newer_than_disk"); ok {
+			b.WriteString(kv("Live newer", fmt.Sprintf("%t", liveNewer)))
+		}
+		if saved, ok := boolValueOK(state, "workbook_saved"); ok {
+			b.WriteString(kv("Workbook saved", fmt.Sprintf("%t", saved)))
+		}
+		if sourceOfTruth := stringValue(state, "source_of_truth"); sourceOfTruth != "" {
+			b.WriteString(kv("Source of truth", sourceOfTruth))
+		}
+		if mtime := stringValue(state, "workbook_last_modified_at"); mtime != "" {
+			b.WriteString(kv("Workbook mtime", mtime))
+		}
+		if mtime := stringValue(state, "latest_source_modified_at"); mtime != "" {
+			b.WriteString(kv("Source mtime", mtime))
+		}
+		if mtime := stringValue(state, "push_state_last_modified_at"); mtime != "" {
+			b.WriteString(kv("Push state mtime", mtime))
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func sessionSummary(active, dirty, dirtyKnown bool) string {
+	if !active {
+		return "inactive"
+	}
+	if !dirtyKnown {
+		return "active"
+	}
+	if dirty {
+		return "active, dirty"
+	}
+	return "active, clean"
 }
 
 func (r renderer) renderLogs(env Envelope) string {

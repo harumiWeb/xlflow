@@ -453,6 +453,7 @@ End If
 | `push`              | Import VBA source back into the workbook                        | `xlflow push --json`                                                         |
 | `rollback`          | Restore the workbook from a saved backup                        | `xlflow rollback --latest --json`                                            |
 | `session`           | Keep the configured workbook open for fast loops                | `xlflow session start`                                                       |
+| `status`            | Show project, source, workbook, and session state               | `xlflow status --json`                                                       |
 | `save`              | Save the workbook held by a session                             | `xlflow save --session --json`                                               |
 | `runner`            | Manage the persistent xlflow runner marker module               | `xlflow runner install --json`                                               |
 | `macros`            | Discover runnable macro entrypoints                             | `xlflow macros --json`                                                       |

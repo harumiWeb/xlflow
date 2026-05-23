@@ -20,6 +20,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
 | [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
+| [status](./status)             | Show project, source, workbook, and session state in one read-only command.      |
 | [session](./session)           | Keep Excel and the configured workbook open across repeated commands.            |
 | [save](./save)                 | Save the workbook held by the managed xlflow session.                            |
 | [runner](./runner)             | Manage the persistent xlflow runner marker module.                               |

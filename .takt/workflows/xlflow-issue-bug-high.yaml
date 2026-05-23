@@ -1,0 +1,512 @@
+name: xlflow-issue-bug-high
+description: GPT-5.4 triage/auditor + DeepSeek V4 Pro implementer workflow for reproducing and fixing issue-reported bugs
+
+workflow_config:
+  provider_options:
+    codex:
+      network_access: true
+
+    opencode:
+      network_access: true
+
+max_steps: 56
+initial_step: issue_intake
+
+steps:
+  # =========================================================
+  # ISSUE INTAKE
+  # =========================================================
+  - name: issue_intake
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: high
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+
+    instruction: |
+      Analyze the bug report from the issue, even if the report is incomplete or vague.
+
+      Produce:
+      - a normalized bug summary
+      - expected behavior vs reported behavior
+      - likely affected commands, packages, scripts, or files
+      - missing information that would be useful
+      - a first-pass reproduction hypothesis
+      - likely risk areas such as Excel COM, VBIDE, session reuse, modal dialogs, or CLI contracts
+
+      Important:
+      - do not require a well-written issue before proceeding
+      - prefer trying to reproduce locally over stopping for clarification
+      - only treat the issue as blocked if no plausible reproduction path can be formed
+      - preserve public APIs, workbook compatibility, and deterministic exports unless the bug fix explicitly requires change
+
+    rules:
+      - condition: 再現の糸口があり調査を進められる
+        next: reproduction_plan
+
+      - condition: バグではなく質問・要望・仕様相談である
+        next: COMPLETE
+
+      - condition: 再現の仮説すら立てられず調査を開始できない
+        next: ABORT
+        appendix: |
+          確認事項:
+          - {再現に必要な最小限の情報}
+          - {期待動作または失敗時の具体的な症状}
+
+    output_contracts:
+      report:
+        - name: issue-intake.md
+          format: plan
+
+  # =========================================================
+  # REPRODUCTION PLAN
+  # =========================================================
+  - name: reproduction_plan
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    instruction: |
+      Create the smallest practical plan to reproduce the reported bug locally.
+
+      Produce:
+      - prioritized reproduction attempts
+      - target commands, tests, fixtures, logs, and files to inspect
+      - whether to create a failing regression test first
+      - whether Windows + Excel E2E is required
+      - what evidence will count as successful reproduction
+
+      Planning standards:
+      - start with the fastest realistic reproduction path
+      - prefer existing tests, fixtures, and local workflows
+      - use session-first Excel workflows when repeated workbook commands are likely
+      - keep the plan tight and evidence-driven
+
+    rules:
+      - condition: 再現計画が確定した
+        next: reproduce
+
+      - condition: 追加情報なしでは計画を具体化できない
+        next: ABORT
+        appendix: |
+          確認事項:
+          - {不足している入力または環境情報}
+          - {確認したいコマンドまたは再現条件}
+
+    output_contracts:
+      report:
+        - name: reproduction-plan.md
+          format: plan
+
+  # =========================================================
+  # REPRODUCE
+  # =========================================================
+  - name: reproduce
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: tester
+
+    policy:
+      - testing
+      - coding
+
+    knowledge:
+      - architecture
+      - unit-testing
+      - e2e-testing
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Try to reproduce the reported bug locally.
+
+      Requirements:
+      - prioritize direct reproduction over asking for clarification
+      - use the planned commands, tests, and fixtures first
+      - create a focused failing test when that is the clearest proof of reproduction
+      - capture the concrete evidence of failure
+
+      If initial attempts fail:
+      - try the next plausible reproduction path
+      - refine the hypothesis from observed behavior
+      - continue until reproduction succeeds or the available local evidence is exhausted
+
+      Important:
+      - do not fix the bug yet unless reproduction evidence already makes the root cause obvious and stable
+      - if repeated Excel workbook commands are needed, prefer a session-first workflow
+
+    rules:
+      - condition: バグを再現できた
+        next: root_cause_analysis
+
+      - condition: 有力な再現仮説が残っており追加試行が必要
+        next: reproduce
+
+      - condition: 再現できないが原因が十分に明白で修正計画へ進める
+        next: fix_plan
+
+      - condition: 再現不能で追加情報なしでは前進できない
+        next: ABORT
+        appendix: |
+          確認事項:
+          - {試した再現手順}
+          - {観測結果}
+          - {必要な追加情報}
+
+    output_contracts:
+      report:
+        - name: reproduction-report.md
+          format: test-report
+
+  # =========================================================
+  # ROOT CAUSE ANALYSIS
+  # =========================================================
+  - name: root_cause_analysis
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+
+    instruction: |
+      Determine the actual root cause of the reproduced bug.
+
+      Produce:
+      - the failing contract, assumption, or cleanup path
+      - the concrete code path responsible
+      - why the current behavior escaped earlier validation or tests
+      - compatibility constraints on the fix
+      - whether the issue is truly a bug, a spec gap, or a misunderstanding
+
+      Be explicit about cause versus symptom.
+
+    rules:
+      - condition: 原因を特定できた
+        next: fix_plan
+
+      - condition: 原因分析に追加の再現や観測が必要
+        next: reproduce
+
+      - condition: 分析を継続できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: root-cause.md
+          format: plan
+
+  # =========================================================
+  # FIX PLAN
+  # =========================================================
+  - name: fix_plan
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    instruction: |
+      Turn the reproduction evidence and root cause into a minimal bug-fix plan.
+
+      Produce:
+      - exact files to change
+      - the smallest safe fix strategy
+      - regression tests to add or update
+      - docs/spec/ADR/changelog updates if required
+      - verification commands
+      - release-risk notes, including Excel E2E when needed
+
+      Plan standards:
+      - fix the root cause, not only the symptom
+      - keep scope minimal
+      - preserve compatibility intentionally
+      - call out durable documentation needs for user-visible or contract-visible changes
+
+    rules:
+      - condition: 修正計画が確定した
+        next: implementation
+
+      - condition: 再現または原因分析へ戻る必要がある
+        next: reproduce
+
+      - condition: 計画を確定できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: fix-plan.md
+          format: plan
+
+  # =========================================================
+  # IMPLEMENTATION
+  # =========================================================
+  - name: implementation
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: implementer
+
+    policy:
+      - coding
+      - testing
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Implement the bug fix exactly as planned.
+
+      Requirements:
+      - fix the identified root cause
+      - keep edits tightly scoped
+      - add or update regression tests that prove the failure is fixed
+      - update durable docs/specs/changelog when the bug fix changes user-visible behavior or contracts
+
+      Avoid:
+      - unrelated refactors
+      - speculative cleanup outside the failing path
+      - workaround-only fixes that leave the actual cause intact
+
+      After implementation:
+      - run planned verification commands
+      - fix test or lint failures caused by the change
+
+    rules:
+      - condition: 実装が完了した
+        next: verification
+
+      - condition: 再計画が必要
+        next: fix_plan
+
+      - condition: 実装を継続できない
+        next: ABORT
+
+      - condition: ユーザー入力が必要
+        next: implementation
+        requires_user_input: true
+        interactive_only: true
+
+    output_contracts:
+      report:
+        - name: implementation-report.md
+          format: implementation-report
+
+  # =========================================================
+  # VERIFICATION
+  # =========================================================
+  - name: verification
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: tester
+
+    policy:
+      - testing
+
+    knowledge:
+      - unit-testing
+      - e2e-testing
+      - coding-rules
+      - invariants
+
+    required_permission_mode: full
+
+    instruction: |
+      Verify that the bug is actually fixed.
+
+      Validate:
+      - the original reproduction no longer fails
+      - regression tests pass
+      - nearby behavior and compatibility contracts still hold
+      - docs/spec changes match the implemented behavior
+
+      Prefer:
+      - direct proof against the reproduced case
+      - broader regression checks when the fix touches shared behavior
+      - explicit note of any remaining unverified environments
+
+    rules:
+      - condition: 検証が通過した
+        next: self_review
+
+      - condition: 実装修正が必要
+        next: implementation
+
+      - condition: 検証継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: verification-report.md
+          format: test-report
+
+  # =========================================================
+  # SELF REVIEW
+  # =========================================================
+  - name: self_review
+
+    edit: false
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: reviewer
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - security
+
+    instruction: |
+      Review the resulting fix critically.
+
+      Find:
+      - cases where the symptom is fixed but the root cause is not
+      - missing regression coverage
+      - compatibility, cleanup, session, Excel COM, or modal-dialog regressions
+      - missing docs/spec/changelog updates
+      - over-scoped changes unrelated to the bug
+
+      Be strict about whether the fix would survive staff-level review.
+
+    rules:
+      - condition: 修正が必要
+        next: implementation
+
+      - condition: 品質が十分
+        next: final_audit
+
+      - condition: レビュー継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: self-review.md
+          format: review-report
+
+  # =========================================================
+  # FINAL AUDIT
+  # =========================================================
+  - name: final_audit
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: architect
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+      - security
+
+    instruction: |
+      Perform a final audit of the bug-fix workflow result.
+
+      Validate:
+      - the issue is explained in concrete engineering terms
+      - the reproduced bug is fixed with evidence
+      - the chosen fix matches xlflow contracts and compatibility requirements
+      - tests and documentation are sufficient
+      - remaining risks, gaps, and unverified items are explicit
+
+      Include:
+      - concise issue-facing summary
+      - residual risks
+      - follow-up work that should be tracked separately if needed
+
+    rules:
+      - condition: 承認
+        next: COMPLETE
+
+      - condition: 軽微な修正が必要
+        next: implementation
+
+      - condition: 再現または計画の見直しが必要
+        next: reproduce
+
+      - condition: 監査継続不可
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: final-audit.md
+          format: audit-report

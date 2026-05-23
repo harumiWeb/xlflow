@@ -248,6 +248,7 @@ Command-specific fields are added at the top level:
 - `output` for `form export-image`
 - `forms` for `form build`
 - `edit` for `edit`
+- `project`, `session`, `state`, `warnings`, and `hints` for `status`
 - `session` for session status metadata
 - `runner` for persistent runner module status
 - `version` for `version`
@@ -287,6 +288,39 @@ Command-specific fields are added at the top level:
 `rollback` success results add top-level `rollback`, plus the normal `target`, `warnings`, and `hints`. `rollback.restored_from` contains `id`, `path`, `reason`, and `created_at` for the restored backup. `rollback.safety_backup` contains `id` and `path` for the safety backup created before restore. `rollback.target.path` identifies the restored workbook path.
 
 Workbook-state-aware commands may return top-level `target`, `session`, `warnings`, and `hints`. `target.kind` uses the fixed vocabulary `source`, `file`, or `live_session`. `target` may also include `path`, `description`, `note`, and command-specific fields such as `sheet`, `range`, `form`, and `capture_state`. `session` may include `active`, `workbook_path`, `workbook_name`, `dirty`, `save_required`, `live_newer_than_disk`, `source_of_truth`, `userforms_present`, `userform_count`, and `mode`; `session status` also keeps `running`, `workbook_open`, and `metadata`. Warning and hint objects contain `code` and `message`. `push`, `pull`, `run`, `save`, `session`, `macros`, `inspect`, `export-image`, `form build`, `form export-image`, and `edit` should use these fields to make workbook state explicit without removing the existing compatibility fields under `workbook`.
+
+### `status`
+
+`xlflow status` is a read-only project-level command that aggregates project, source, workbook, and session state. It does not modify workbook files, source files, or `.xlflow/state`.
+
+`status` success results add top-level `project`, `session`, `state`, `warnings`, and `hints`. The `command` envelope field is `"status"`.
+
+`project` contains:
+
+- `root` — resolved project root directory.
+- `workbook_path` — resolved configured workbook path.
+- `src_paths` — array of resolved source directory paths (modules, classes, forms, workbook).
+- `project_name` — configured project name from `xlflow.toml`.
+
+`session` reuses the `session status` payload. When no session is active, `session` contains `active: false` and the command still succeeds. When a live session matches the configured workbook but the workbook dirty state cannot be inspected, `session.dirty` may be `null` rather than `false`; `session.save_required` remains the authoritative signal for unsaved changes.
+
+`state` contains:
+
+- `src_newer_than_workbook` — true when any workbook-affecting source file (`.bas`, `.cls`, `.frm`, `.frx`, plus sidecar code) has an mtime newer than the saved workbook mtime.
+- `live_session_newer_than_disk` — reported by the session probe when a live session workbook differs from the saved file on disk.
+- `workbook_saved` — true when no live session workbook is open with unsaved changes.
+- `source_of_truth` — `"saved_workbook"`, `"live_workbook"`, or `"unknown"`.
+- `workbook_last_modified_at` — ISO 8601 mtime of the saved workbook file (omitted when the file is missing).
+- `latest_source_modified_at` — ISO 8601 mtime of the most recent workbook-affecting source file (omitted when no source files exist).
+- `push_state_last_modified_at` — ISO 8601 mtime of `.xlflow/state/push.json` (omitted when the file does not exist).
+
+`warnings` and `hints` are arrays of objects with `code` and `message`. Warning and hint codes include:
+
+- `session_dirty` / `save_session` — live session has unsaved changes; `xlflow save --session` is recommended.
+- `source_newer_than_workbook` / `push_source` — source files are newer than the saved workbook; `xlflow push` is recommended.
+- `live_session_newer_than_disk` / `save_before_push` — live session workbook is newer than the saved file on disk.
+
+Source freshness (`src_newer_than_workbook`) is a heuristic based on file modification times. Clock skew, manual file copies, and filesystem timestamp granularity can cause false positives or negatives. Consumers should treat this as an indication, not a strict synchronisation guarantee.
 
 ## Exit Codes
 

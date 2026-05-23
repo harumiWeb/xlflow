@@ -1,50 +1,48 @@
-# Phase 1-2 Implementation Todo
+# xlflow status implementation
 
-## Phase 1: Scaffold Cleanup + XlflowAssert Expansion
+## Status
 
-- [x] 1.1 Create feature_spec.md and todo.md
-- [ ] 1.2 Remove `tests/` from scaffold directories in `internal/project/scaffold.go`
-- [ ] 1.3 Update `TestInitScaffold` in `internal/project/scaffold_test.go` to remove `tests/` assertion
-- [ ] 1.4 Expand `defaultAssertModule` in `internal/project/scaffold.go` with new assertions
-- [ ] 1.5 Update `TestScaffoldCreatesAssertHelper` in `scaffold_test.go` for expanded assertions
-- [ ] 1.6 Update `docs/specs/cli-contract.md` to document `inconclusive` status
-- [ ] 1.7 Update `vitepress/commands/test.md` with `src/modules/Tests/` recommendation
-- [ ] 1.8 Update `vitepress/reference/project-structure.md` to remove `tests/` mention
-- [ ] 1.9 Create ADR for src-located test policy
-- [ ] 1.10 Run `go test ./internal/project/...` to verify scaffold changes
+- [x] Read existing plan (`.takt/runs/20260523-071517-issue-26-github-issue-26-xlflo/reports/plan.md`)
+- [x] Add `xlflow status` CLI command (`internal/cli/root.go:2144`)
+- [x] Add `xlflow status --json` with stable JSON envelope
+- [x] Implement `buildStatusProject()` — project root, workbook path, src_paths
+- [x] Implement `buildStatusState()` — source/workbook freshness, mtimes, push state mtime
+- [x] Implement `buildStatusSession()` — status-dedicated session probe with `running`, `workbook_open`, `metadata` from session.ps1
+- [x] Implement `buildStatusWarningsAndHints()` — actionable warnings/hints for dirty session, source newer, live newer
+- [x] Add human-readable renderer (`renderStatus()`) with section headers (Project/Session/State/Hints)
+- [x] Remove dead code (`boolValueOKForStatus` duplicate, `running`/`workbook_open` rendering in renderStatus)
+- [x] Fix P0: `live_session_newer_than_disk` dead code — statePayload derived from session
+- [x] Fix P0: `inspectStateForWorkbook` warnings not recycled into status
+- [x] Fix P0: Contradictory state/session `source_of_truth`/`workbook_saved`
+- [x] Fix: `inspectStateForWorkbook` no longer leaks `running`/`workbook_open`/`metadata` into inspect output
+- [x] Fix: Unused `project` param removed from `buildStatusWarningsAndHints`
+- [x] Add CLI tests: `TestStatusJSONBaseline`, `TestStatusJSONSourceNewerThanWorkbook`, `TestStatusJSONSessionFieldShape`, `TestStatusWarningsExcludeInspectSpecificMessages`
+- [x] Add unit tests: `TestBuildStatusWarningsAndHintsSessionDirty`, `TestBuildStatusWarningsAndHintsSourceNewer`, `TestBuildStatusWarningsAndHintsSessionInactive`, `TestBuildStatusWarningsAndHintsProducesStatusSpecificCodes`
+- [x] Add output tests: `TestWriteWithOptionsRendersStatusBaseline`, `TestWriteWithOptionsRendersStatusSessionActiveDirty`, `TestWriteWithOptionsRendersStatusSourceNewerThanWorkbook`, `TestWriteWithOptionsRendersStatusSessionLiveNewerThanDisk`, `TestWriteWithOptionsRendersStatusSectionHeaders`
+- [x] Add test: `TestInspectStateForWorkbookExcludesStatusOnlyFields` (regression guard for inspect contract)
+- [x] Update `docs/specs/cli-contract.md` — status JSON contract with heuristic note
+- [x] Create `vitepress/commands/status.md` — with `running`/`workbook_open`/`metadata` in session example
+- [x] Update `vitepress/commands/index.md` — add status row
+- [x] Update `vitepress/ai-agents/index.md` — add status to agent loops
+- [x] Update `vitepress/concepts/workbook-session-source.md` — add status usage
+- [x] Update `vitepress/concepts/source-of-truth.md` — add status usage
+- [x] Update `README.md` — add status command
+- [x] Update `README.ja.md` — add status command
+- [x] Update `CHANGELOG.md` — add status entry
+- [x] Full CLI test suite passes (10.4s)
+- [x] Full output test suite passes (0.6s)
+- [x] `go vet` clean
+- [x] Windows + Excel COM E2E — `session start -> push --no-save -> status` confirms all warnings/hints fire, session payload has 14 fields
+- [x] Windows + Excel COM E2E — `save -> status` confirms divergence resolved (0 warnings/hints)
+- [x] Windows + Excel COM E2E — `inspect workbook` session payload correctly has 11 fields (no `running`/`workbook_open`/`metadata`)
 
-## Phase 2: Lifecycle Hooks + Filters
+## E2E workspaces
 
-- [ ] 2.1 Add `Find-XlflowModuleHooks` to `internal/excel/scripts/common.ps1`
-- [ ] 2.2 Rewrite `New-XlflowTestRunnerCode` in `common.ps1` for per-test-case execution
-- [ ] 2.3 Add `RunHook` and `RunTestCase` VBA functions to runner template
-- [ ] 2.4 Rewrite `test.ps1` execution loop to group by module and invoke hooks
-- [ ] 2.5 Add `BeforeAll`/`AfterAll` failure: mark all tests in module as failed
-- [ ] 2.6 Add `BeforeEach` failure: skip test body but still run `AfterEach`
-- [ ] 2.7 Add `AfterEach` failure: override test status to `failed`
-- [ ] 2.8 Add `AssertInconclusive` mapping to `inconclusive` status (`vbObjectError + 516`)
-- [ ] 2.9 Add `--module` flag to `test` command in `internal/cli/root.go`
-- [ ] 2.10 Add `--tag` flag to `test` command in `internal/cli/root.go`
-- [ ] 2.11 Pass `--module`/`--tag` through `buildTestScriptArgs` in `internal/excel/bridge.go`
-- [ ] 2.12 Accept `ModuleFilter` and `TagFilter` in `test.ps1` params
-- [ ] 2.13 Update `Select-XlflowTests` in `common.ps1` for module/tag selection
-- [ ] 2.14 Update `internal/output/output.go` for `inconclusive` display (`[?]`)
-- [ ] 2.15 Update `docs/specs/cli-contract.md` for hook failures and filter flags
-- [ ] 2.16 Update `vitepress/commands/test.md` for hooks and filters
-- [ ] 2.17 Create ADR for lifecycle hooks design
-- [ ] 2.18 Run `go test ./...` for Go-side changes
-- [ ] 2.19 E2E verification with `xlflow-tmp-workspace-e2e` skill
+- `C:\dev\go\xlflow\tmp_workspaces\status-e2e` — initial E2E
+- `C:\dev\go\xlflow\tmp_workspaces\status-e2e-fix` — P0 fixes verified
+- `C:\dev\go\xlflow\tmp_workspaces\status-e2e-v2` — session field fix verified
+- `C:\dev\go\xlflow\tmp_workspaces\status-e2e-v3` — separation of concerns verified (status 14 fields, inspect 11 fields)
 
-## Verification Checklist
+## Unverified
 
-- [ ] `xlflow new` does NOT create `tests/` directory
-- [ ] `xlflow init` does NOT create `tests/` directory
-- [ ] `xlflow module install` writes expanded `XlflowAssert.bas`
-- [ ] Hook execution order: `BeforeAll` -> per-test(`BeforeEach` -> `Test` -> `AfterEach`) -> `AfterAll`
-- [ ] `BeforeAll` failure marks all module tests as `failed` with `before_all_failed`
-- [ ] `AfterAll` failure marks all module tests as `failed` with `after_all_failed`
-- [ ] `BeforeEach` failure skips test body but still runs `AfterEach`
-- [ ] `AfterEach` failure overrides test status
-- [ ] `AssertInconclusive` maps to `inconclusive` status
-- [ ] `--module` filter works (exact module name match)
-- [ ] `--tag` flag accepted at CLI (selection logic wired, Phase 3 will implement tag extraction)
+- None
