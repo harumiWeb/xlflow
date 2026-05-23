@@ -54,6 +54,13 @@ try {
     $macros = [System.Collections.Generic.List[object]]($macros | Where-Object { $_.runnable })
   }
 
+  $sessionArg = if ($sessionAttached) { " --session" } else { "" }
+  foreach ($macro in $macros) {
+    if ($macro.runnable) {
+      $macro | Add-Member -NotePropertyName "run_command" -NotePropertyValue "xlflow run $($macro.qualified_name)$sessionArg --json"
+    }
+  }
+
   $defaultEntry = ""
   if (-not [string]::IsNullOrWhiteSpace($Entry)) {
     $entryMatch = $macros | Where-Object { $_.qualified_name -eq $Entry -and $_.runnable }
@@ -64,7 +71,7 @@ try {
 
   $suggestions = @()
   if ($defaultEntry -ne "") {
-    $suggestions += @([ordered]@{ title = "Run the default entrypoint"; command = "xlflow run $defaultEntry --session --json" })
+    $suggestions += @([ordered]@{ title = "Run the default entrypoint"; command = "xlflow run $defaultEntry$sessionArg --json" })
   } else {
     $firstRunnable = $macros | Where-Object { $_.runnable } | Select-Object -First 1
     if ($firstRunnable) {

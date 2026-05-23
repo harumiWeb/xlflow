@@ -1467,8 +1467,12 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Warnings = result.Warnings
 	env.Hints = result.Hints
 	env.Inspect = result.Inspect
-	env.DefaultEntry = result.DefaultEntry
-	env.Suggestions = result.Suggestions
+	if result.DefaultEntry != "" {
+		env.DefaultEntry = result.DefaultEntry
+	}
+	if result.Suggestions != nil {
+		env.Suggestions = result.Suggestions
+	}
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 	}

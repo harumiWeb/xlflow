@@ -3959,7 +3959,6 @@ function Find-XlflowMacroProcedures {
     }
 
     $qualifiedName = $ModuleName + "." + $name
-    $runCommand = if ($runnable) { "xlflow run $qualifiedName --session --json" } else { $null }
 
     $macros.Add([pscustomobject][ordered]@{
       module = $ModuleName
@@ -3973,7 +3972,6 @@ function Find-XlflowMacroProcedures {
       has_parameters = $hasParams
       runnable = $runnable
       reason_not_runnable = $reason
-      run_command = $runCommand
     })
   }
 
