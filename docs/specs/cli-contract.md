@@ -302,7 +302,7 @@ Workbook-state-aware commands may return top-level `target`, `session`, `warning
 - `src_paths` — array of resolved source directory paths (modules, classes, forms, workbook).
 - `project_name` — configured project name from `xlflow.toml`.
 
-`session` reuses the `session status` payload. When no session is active, `session` contains `active: false` and the command still succeeds.
+`session` reuses the `session status` payload. When no session is active, `session` contains `active: false` and the command still succeeds. When a live session matches the configured workbook but the workbook dirty state cannot be inspected, `session.dirty` may be `null` rather than `false`; `session.save_required` remains the authoritative signal for unsaved changes.
 
 `state` contains:
 

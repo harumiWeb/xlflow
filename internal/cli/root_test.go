@@ -3419,6 +3419,17 @@ func TestStatusJSONSourceNewerThanWorkbook(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	wbInfo, err := os.Stat(workbookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wbMtime := wbInfo.ModTime()
+	sourceLater := wbMtime.Add(time.Minute)
+	if err := os.Chtimes(srcFile, sourceLater, sourceLater); err != nil {
+		t.Fatal(err)
+	}
+
 	var stdout bytes.Buffer
 	a := &app{
 		cwd:    dir,

@@ -186,7 +186,7 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.errorBlock(env))
 	}
 	b.WriteString(r.renderBridge(env))
-	if env.Command != "inspect" {
+	if env.Command != "inspect" && env.Command != "status" {
 		b.WriteString(r.renderTargetSession(env))
 	}
 	switch env.Command {
@@ -1953,7 +1953,8 @@ func (r renderer) renderStatus(env Envelope) string {
 	if len(session) > 0 {
 		b.WriteString("Session:\n")
 		if active, ok := boolValueOK(session, "active"); ok {
-			b.WriteString(kv("Status", sessionSummary(active, boolValue(session, "dirty"))))
+			dirty, dirtyKnown := boolValueOK(session, "dirty")
+			b.WriteString(kv("Status", sessionSummary(active, dirty, dirtyKnown)))
 		}
 		if dirty, ok := boolValueOK(session, "dirty"); ok && dirty {
 			b.WriteString(kv("Dirty", "true"))
@@ -1988,9 +1989,12 @@ func (r renderer) renderStatus(env Envelope) string {
 	return b.String()
 }
 
-func sessionSummary(active, dirty bool) string {
+func sessionSummary(active, dirty, dirtyKnown bool) string {
 	if !active {
 		return "inactive"
+	}
+	if !dirtyKnown {
+		return "active"
 	}
 	if dirty {
 		return "active, dirty"

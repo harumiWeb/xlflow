@@ -2307,14 +2307,15 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 		return session
 	}
 	statusWorkbookPath := stringValueForCLI(status, "workbook_path")
-	if strings.TrimSpace(statusWorkbookPath) == "" || !strings.EqualFold(filepath.Clean(statusWorkbookPath), filepath.Clean(workbookPath)) {
+	if strings.TrimSpace(statusWorkbookPath) == "" || !samePath(statusWorkbookPath, workbookPath) {
 		return session
 	}
 	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
-	dirty := boolValueForCLI(status, "dirty")
 	saveRequired := boolValueForCLI(status, "save_required") || boolValueForCLI(status, "needs_save")
 	session["active"] = active
-	session["dirty"] = dirty
+	if rawDirty, exists := status["dirty"]; exists {
+		session["dirty"] = rawDirty
+	}
 	session["save_required"] = saveRequired
 	session["live_newer_than_disk"] = saveRequired
 	if saveRequired {
@@ -3554,14 +3555,15 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 		return target, session, nil
 	}
 	statusWorkbookPath := stringValueForCLI(status, "workbook_path")
-	if strings.TrimSpace(statusWorkbookPath) == "" || !strings.EqualFold(filepath.Clean(statusWorkbookPath), filepath.Clean(workbookPath)) {
+	if strings.TrimSpace(statusWorkbookPath) == "" || !samePath(statusWorkbookPath, workbookPath) {
 		return target, session, nil
 	}
 	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
-	dirty := boolValueForCLI(status, "dirty")
 	saveRequired := boolValueForCLI(status, "save_required") || boolValueForCLI(status, "needs_save")
 	session["active"] = active
-	session["dirty"] = dirty
+	if rawDirty, exists := status["dirty"]; exists {
+		session["dirty"] = rawDirty
+	}
 	session["save_required"] = saveRequired
 	session["live_newer_than_disk"] = saveRequired
 	if saveRequired {
@@ -3582,7 +3584,7 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 	if known, ok := status["userforms_known"]; ok {
 		session["userforms_known"] = known
 	}
-	if !active || !dirty {
+	if !active || !saveRequired {
 		return target, session, nil
 	}
 	warnings := []map[string]any{

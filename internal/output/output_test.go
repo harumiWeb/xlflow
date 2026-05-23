@@ -1415,6 +1415,57 @@ func TestWriteWithOptionsRendersStatusSessionLiveNewerThanDisk(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersStatusSessionActiveDirtyUnknown(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules"},
+	}
+	env.Session = map[string]any{
+		"active":               true,
+		"dirty":                nil,
+		"save_required":        true,
+		"live_newer_than_disk": true,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": true,
+		"workbook_saved":               false,
+		"source_of_truth":              "live_workbook",
+	}
+	env.Warnings = []map[string]any{
+		{"code": "session_dirty", "message": "The live session workbook has unsaved changes."},
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Session:",
+		"Status:",
+		"active",
+		"Warnings:",
+		"session_dirty",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "clean") {
+		t.Fatalf("dirty unknown should not render as clean:\n%s", got)
+	}
+	if strings.Contains(got, "Dirty:") {
+		t.Fatalf("dirty unknown should not render a dirty line:\n%s", got)
+	}
+	if strings.Contains(got, "Session state:") {
+		t.Fatalf("status should not render target/session state from renderTargetSession:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersStatusSectionHeaders(t *testing.T) {
 	env := New("status")
 	env.Project = map[string]any{
@@ -1450,9 +1501,7 @@ func TestWriteWithOptionsRendersStatusSectionHeaders(t *testing.T) {
 		t.Fatalf("expected exactly one 'Project:' header, got %d:\n%s", strings.Count(got, "Project:"), got)
 	}
 	if strings.Count(got, "Session:") != 1 {
-		// "Session:" may appear as "Session state:" from renderTargetSession and "Session:" from renderStatus
-		// so we count only the standalone section header
-		t.Logf("Session markers found: %d (may include 'Session state:')", strings.Count(got, "Session:"))
+		t.Fatalf("expected exactly one 'Session:' header, got %d:\n%s", strings.Count(got, "Session:"), got)
 	}
 	if strings.Count(got, "State:") != 1 {
 		t.Fatalf("expected exactly one 'State:' header, got %d:\n%s", strings.Count(got, "State:"), got)
