@@ -151,6 +151,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.rollbackCommand(),
 		a.sessionCommand(),
 		a.saveCommand(),
+		a.statusCommand(),
 		a.runnerCommand(),
 		a.traceCommand(),
 		a.runCommand(),
@@ -2138,6 +2139,209 @@ func (a *app) saveCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	return cmd
+}
+
+func (a *app) statusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show project, source, workbook, and session state",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("status")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			env := output.New("status")
+			projectPayload := buildStatusProject(a.cwd, cfg, workbookPath)
+			statePayload := buildStatusState(a.cwd, cfg, workbookPath)
+			sessionState := a.buildStatusSession(cfg, workbookPath)
+			if liveNewer, ok := sessionState["live_newer_than_disk"]; ok {
+				statePayload["live_session_newer_than_disk"] = liveNewer
+			}
+			if sourceOfTruth, ok := sessionState["source_of_truth"]; ok {
+				statePayload["source_of_truth"] = sourceOfTruth
+			}
+			if active := boolValueForCLI(sessionState, "active"); active {
+				statePayload["workbook_saved"] = !boolValueForCLI(sessionState, "dirty")
+			}
+			env.Project = projectPayload
+			env.Session = sessionState
+			env.State = statePayload
+			warnings, hints := buildStatusWarningsAndHints(sessionState, statePayload)
+			env.Warnings = warnings
+			env.Hints = hints
+			env.Logs = []string{"status reported"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+}
+
+func buildStatusProject(root string, cfg config.Config, workbookPath string) map[string]any {
+	return map[string]any{
+		"root":          displayPath(root, root),
+		"workbook_path": displayPath(root, workbookPath),
+		"src_paths": []string{
+			displayPath(root, workbookArgPath(root, cfg.Src.Modules)),
+			displayPath(root, workbookArgPath(root, cfg.Src.Classes)),
+			displayPath(root, workbookArgPath(root, cfg.Src.Forms)),
+			displayPath(root, workbookArgPath(root, cfg.Src.Workbook)),
+		},
+		"project_name": cfg.Project.Name,
+	}
+}
+
+func buildStatusState(root string, cfg config.Config, workbookPath string) map[string]any {
+	state := map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": false,
+		"workbook_saved":               true,
+		"source_of_truth":              "saved_workbook",
+	}
+	workbookInfo, wbErr := os.Stat(workbookPath)
+	if wbErr == nil {
+		state["workbook_last_modified_at"] = workbookInfo.ModTime().Format(time.RFC3339)
+	}
+	srcPaths := []string{
+		workbookArgPath(root, cfg.Src.Modules),
+		workbookArgPath(root, cfg.Src.Classes),
+		workbookArgPath(root, cfg.Src.Forms),
+		workbookArgPath(root, cfg.Src.Workbook),
+	}
+	latestMtime := latestSourceModTime(srcPaths)
+	if !latestMtime.IsZero() {
+		state["latest_source_modified_at"] = latestMtime.Format(time.RFC3339)
+		if wbErr == nil && latestMtime.After(workbookInfo.ModTime()) {
+			state["src_newer_than_workbook"] = true
+		}
+	}
+	pushStatePath := filepath.Join(root, ".xlflow", "state", "push.json")
+	if pushInfo, err := os.Stat(pushStatePath); err == nil {
+		state["push_state_last_modified_at"] = pushInfo.ModTime().Format(time.RFC3339)
+	}
+	return state
+}
+
+func latestSourceModTime(srcPaths []string) time.Time {
+	var latest time.Time
+	for _, srcPath := range srcPaths {
+		_ = filepath.WalkDir(srcPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			switch ext {
+			case ".bas", ".cls", ".frm", ".frx":
+			default:
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
+			return nil
+		})
+	}
+	return latest
+}
+
+func buildStatusWarningsAndHints(session, state map[string]any) ([]map[string]any, []map[string]any) {
+	var warnings []map[string]any
+	var hints []map[string]any
+	if boolValueForCLI(session, "active") {
+		if boolValueForCLI(session, "dirty") {
+			warnings = append(warnings, map[string]any{
+				"code":    "session_dirty",
+				"message": "The live session workbook has unsaved changes.",
+			})
+			hints = append(hints, map[string]any{
+				"code":    "save_session",
+				"message": "Run `xlflow save --session` to persist the live workbook to disk.",
+			})
+		}
+	}
+	if boolValueForCLI(state, "src_newer_than_workbook") {
+		warnings = append(warnings, map[string]any{
+			"code":    "source_newer_than_workbook",
+			"message": "Source files are newer than the saved workbook.",
+		})
+		hints = append(hints, map[string]any{
+			"code":    "push_source",
+			"message": "Run `xlflow push` to import the latest source into the workbook.",
+		})
+	}
+	if boolValueForCLI(state, "live_session_newer_than_disk") {
+		warnings = append(warnings, map[string]any{
+			"code":    "live_session_newer_than_disk",
+			"message": "The live session workbook is newer than the saved workbook on disk.",
+		})
+		hints = append(hints, map[string]any{
+			"code":    "save_before_push",
+			"message": "Run `xlflow save --session` before `xlflow push` when the live session has unsaved changes you want to keep.",
+		})
+	}
+	return warnings, hints
+}
+
+func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[string]any {
+	session := map[string]any{
+		"active":               false,
+		"workbook_path":        workbookPath,
+		"workbook_name":        filepath.Base(workbookPath),
+		"dirty":                false,
+		"save_required":        false,
+		"live_newer_than_disk": false,
+		"source_of_truth":      "saved_workbook",
+	}
+	if runtime.GOOS != "windows" {
+		return session
+	}
+	status, ok := a.inspectSessionStatus(cfg)
+	if !ok {
+		return session
+	}
+	statusWorkbookPath := stringValueForCLI(status, "workbook_path")
+	if strings.TrimSpace(statusWorkbookPath) == "" || !strings.EqualFold(filepath.Clean(statusWorkbookPath), filepath.Clean(workbookPath)) {
+		return session
+	}
+	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
+	dirty := boolValueForCLI(status, "dirty")
+	saveRequired := boolValueForCLI(status, "save_required") || boolValueForCLI(status, "needs_save")
+	session["active"] = active
+	session["dirty"] = dirty
+	session["save_required"] = saveRequired
+	session["live_newer_than_disk"] = saveRequired
+	if saveRequired {
+		session["source_of_truth"] = "live_workbook"
+	}
+	if running, ok := status["running"]; ok {
+		session["running"] = running
+	}
+	if open, ok := status["workbook_open"]; ok {
+		session["workbook_open"] = open
+	}
+	if metadata, ok := status["metadata"]; ok {
+		session["metadata"] = metadata
+	}
+	if mode := stringValueForCLI(status, "mode"); mode != "" {
+		session["mode"] = mode
+	}
+	if name := stringValueForCLI(status, "workbook_name"); strings.TrimSpace(name) != "" {
+		session["workbook_name"] = name
+	}
+	if present, ok := status["userforms_present"]; ok {
+		session["userforms_present"] = present
+	}
+	if count, ok := status["userform_count"]; ok {
+		session["userform_count"] = count
+	}
+	if known, ok := status["userforms_known"]; ok {
+		session["userforms_known"] = known
+	}
+	return session
 }
 
 func (a *app) runnerCommand() *cobra.Command {

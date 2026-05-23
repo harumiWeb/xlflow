@@ -4,6 +4,14 @@ For normal development, source files under `src/` are the authority. Agents shou
 
 The workbook can become newer than source when a user edits in Excel, when a session is dirty, or when a command intentionally mutates workbook state. In that case, run `pull` before editing source.
 
+Use `xlflow status` to quickly check whether source, workbook, and session are in sync:
+
+```bash
+xlflow status
+```
+
+If `src_newer_than_workbook` is `true`, run `xlflow push`. If the session is dirty, run `xlflow save --session`.
+
 UserForms have two tracked concerns:
 
 - Designer structure: `src/forms/specs/*.yaml`

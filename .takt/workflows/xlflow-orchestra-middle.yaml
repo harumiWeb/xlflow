@@ -1,5 +1,5 @@
-name: xlflow-orchestra
-description: GPT-5.4 planner/auditor + DeepSeek V4 Pro implementer/reviewer workflow
+name: xlflow-orchestra-middle
+description: Kimi K2.6 planner/auditor + DeepSeek V4 Pro implementer/reviewer workflow
 
 workflow_config:
   provider_options:
@@ -21,7 +21,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: opencode-go/deepseek-v4-pro
+    model: opencode-go/kimi-k2.6
     required_permission_mode: full
 
     persona: planner
@@ -254,13 +254,9 @@ steps:
 
     edit: false
 
-    provider: codex
-    model: gpt-5.4
+    provider: opencode
+    model: opencode-go/kimi-k2.6
     required_permission_mode: full
-
-    provider_options:
-      codex:
-        reasoning_effort: high
 
     persona: architect
 

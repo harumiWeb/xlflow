@@ -22,3 +22,11 @@ When a session-backed command leaves the live workbook newer than disk, xlflow r
 ```bash
 xlflow save --session --json
 ```
+
+To check the current state of all three layers at once, use `status`:
+
+```bash
+xlflow status --json
+```
+
+`status` shows whether source files are newer than the saved workbook, whether a live session is active and dirty, and which path is the current source of truth.

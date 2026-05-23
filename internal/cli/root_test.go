@@ -999,6 +999,98 @@ func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
 	}
 }
 
+func TestBuildStatusWarningsAndHintsSessionDirty(t *testing.T) {
+	session := map[string]any{
+		"active":               true,
+		"dirty":                true,
+		"live_newer_than_disk": true,
+	}
+	state := map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": true,
+	}
+	warnings, hints := buildStatusWarningsAndHints(session, state)
+
+	foundDirty := false
+	foundLiveNewer := false
+	for _, w := range warnings {
+		switch w["code"] {
+		case "session_dirty":
+			foundDirty = true
+		case "live_session_newer_than_disk":
+			foundLiveNewer = true
+		}
+	}
+	if !foundDirty {
+		t.Fatal("expected session_dirty warning")
+	}
+	if !foundLiveNewer {
+		t.Fatal("expected live_session_newer_than_disk warning")
+	}
+
+	foundSave := false
+	foundSaveBeforePush := false
+	for _, h := range hints {
+		switch h["code"] {
+		case "save_session":
+			foundSave = true
+		case "save_before_push":
+			foundSaveBeforePush = true
+		}
+	}
+	if !foundSave {
+		t.Fatal("expected save_session hint")
+	}
+	if !foundSaveBeforePush {
+		t.Fatal("expected save_before_push hint")
+	}
+}
+
+func TestBuildStatusWarningsAndHintsSourceNewer(t *testing.T) {
+	session := map[string]any{"active": false}
+	state := map[string]any{
+		"src_newer_than_workbook":      true,
+		"live_session_newer_than_disk": false,
+	}
+	warnings, hints := buildStatusWarningsAndHints(session, state)
+
+	found := false
+	for _, w := range warnings {
+		if w["code"] == "source_newer_than_workbook" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected source_newer_than_workbook warning")
+	}
+
+	found = false
+	for _, h := range hints {
+		if h["code"] == "push_source" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected push_source hint")
+	}
+}
+
+func TestBuildStatusWarningsAndHintsSessionInactive(t *testing.T) {
+	session := map[string]any{"active": false}
+	state := map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": false,
+	}
+	warnings, hints := buildStatusWarningsAndHints(session, state)
+
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings for inactive session, got %v", warnings)
+	}
+	if len(hints) != 0 {
+		t.Fatalf("expected no hints for inactive session, got %v", hints)
+	}
+}
+
 func TestInitCommandIncludesWithModuleFlag(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -1680,6 +1772,15 @@ func TestInspectWorkbookJSONIncludesTargetAndSessionState(t *testing.T) {
 	if got.Session["active"] != false {
 		t.Fatalf("session = %#v", got.Session)
 	}
+	if _, ok := got.Session["running"]; ok {
+		t.Fatalf("inspect session must not contain running field (status-specific contract)")
+	}
+	if _, ok := got.Session["workbook_open"]; ok {
+		t.Fatalf("inspect session must not contain workbook_open field (status-specific contract)")
+	}
+	if _, ok := got.Session["metadata"]; ok {
+		t.Fatalf("inspect session must not contain metadata field (status-specific contract)")
+	}
 	if _, ok := got.Inspect["target_info"].(map[string]any); !ok {
 		t.Fatalf("inspect target_info missing: %s", stdout.String())
 	}
@@ -1732,6 +1833,17 @@ func TestInspectStateForWorkbookIncludesWorkbookNameFallback(t *testing.T) {
 	_, session, _ := a.inspectStateForWorkbook(config.Config{}, workbookPath)
 	if got := session["workbook_name"]; got != filepath.Base(workbookPath) {
 		t.Fatalf("workbook_name = %v, want %q", got, filepath.Base(workbookPath))
+	}
+}
+
+func TestInspectStateForWorkbookExcludesStatusOnlyFields(t *testing.T) {
+	_, session, _ := new(app).inspectStateForWorkbook(config.Config{}, filepath.Join("build", "Book.xlsm"))
+
+	statusOnly := []string{"running", "workbook_open", "metadata"}
+	for _, field := range statusOnly {
+		if _, ok := session[field]; ok {
+			t.Errorf("inspectStateForWorkbook must not include field %q (leaks session-status-specific fields into inspect output)", field)
+		}
 	}
 }
 
@@ -3224,5 +3336,326 @@ Set-Content -LiteralPath $markerPath -Value ($names -join [Environment]::NewLine
 `
 	if err := os.WriteFile(filepath.Join(scriptsDir, "push.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRootCommandIncludesStatusCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "status" {
+		t.Fatalf("expected status command, got %#v", cmd)
+	}
+}
+
+func TestStatusJSONBaseline(t *testing.T) {
+	dir := t.TempDir()
+	createStatusCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "status"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status  string         `json:"status"`
+		Command string         `json:"command"`
+		Project map[string]any `json:"project"`
+		Session map[string]any `json:"session"`
+		State   map[string]any `json:"state"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != output.StatusOK {
+		t.Fatalf("status = %q, want %q", got.Status, output.StatusOK)
+	}
+	if got.Command != "status" {
+		t.Fatalf("command = %q, want status", got.Command)
+	}
+	if got.Project == nil {
+		t.Fatal("expected project in JSON envelope")
+	}
+	if got.Project["root"] == nil {
+		t.Fatal("expected project.root in JSON envelope")
+	}
+	if got.Project["workbook_path"] == nil {
+		t.Fatal("expected project.workbook_path in JSON envelope")
+	}
+	if got.State == nil {
+		t.Fatal("expected state in JSON envelope")
+	}
+	if got.State["src_newer_than_workbook"] == nil {
+		t.Fatal("expected state.src_newer_than_workbook in JSON envelope")
+	}
+	if got.Session == nil {
+		t.Fatal("expected session in JSON envelope")
+	}
+}
+
+func TestStatusJSONSourceNewerThanWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	createStatusCommandFixture(t, dir)
+
+	srcDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\nEnd Sub\n"
+	srcFile := filepath.Join(srcDir, "Main.bas")
+	if err := os.WriteFile(srcFile, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "status"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		State    map[string]any   `json:"state"`
+		Warnings []map[string]any `json:"warnings"`
+		Hints    []map[string]any `json:"hints"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.State == nil {
+		t.Fatal("expected state in JSON envelope")
+	}
+	srcNewer, ok := got.State["src_newer_than_workbook"].(bool)
+	if !ok || !srcNewer {
+		t.Fatalf("expected src_newer_than_workbook=true, got %v", got.State["src_newer_than_workbook"])
+	}
+	if got.State["latest_source_modified_at"] == nil || got.State["latest_source_modified_at"].(string) == "" {
+		t.Fatal("expected latest_source_modified_at in state")
+	}
+
+	foundSourceNewerWarning := false
+	for _, w := range got.Warnings {
+		if code, _ := w["code"].(string); code == "source_newer_than_workbook" {
+			foundSourceNewerWarning = true
+			break
+		}
+	}
+	if !foundSourceNewerWarning {
+		t.Fatalf("expected source_newer_than_workbook warning in envelope: %s", stdout.String())
+	}
+
+	foundPushHint := false
+	for _, h := range got.Hints {
+		if code, _ := h["code"].(string); code == "push_source" {
+			foundPushHint = true
+			break
+		}
+	}
+	if !foundPushHint {
+		t.Fatalf("expected push_source hint in envelope: %s", stdout.String())
+	}
+}
+
+func createStatusCommandFixture(t *testing.T, dir string) {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	buildDir := filepath.Join(dir, "build")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(buildDir, "Book.xlsm")
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "Data"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellValue("Data", "A1", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	srcModules := filepath.Join(dir, "src", "modules")
+	srcClasses := filepath.Join(dir, "src", "classes")
+	srcForms := filepath.Join(dir, "src", "forms")
+	srcWorkbook := filepath.Join(dir, "src", "workbook")
+	for _, d := range []string{srcModules, srcClasses, srcForms, srcWorkbook} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStatusJSONSessionFieldShape(t *testing.T) {
+	dir := t.TempDir()
+	createStatusCommandFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "status"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Session map[string]any `json:"session"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Session == nil {
+		t.Fatal("expected session in JSON envelope")
+	}
+
+	if got.Session["running"] == nil {
+		t.Fatal("expected session.running in status JSON (must match session status contract)")
+	}
+	running, ok := got.Session["running"].(bool)
+	if !ok {
+		t.Fatalf("session.running must be bool, got %T: %v", got.Session["running"], got.Session["running"])
+	}
+	if running {
+		t.Log("session.running=true is valid when a real session is active")
+	}
+
+	if got.Session["workbook_open"] == nil {
+		t.Fatal("expected session.workbook_open in status JSON (must match session status contract)")
+	}
+	wbOpen, ok := got.Session["workbook_open"].(bool)
+	if !ok {
+		t.Fatalf("session.workbook_open must be bool, got %T: %v", got.Session["workbook_open"], got.Session["workbook_open"])
+	}
+	if wbOpen {
+		t.Log("session.workbook_open=true is valid when a real session is active")
+	}
+}
+
+func TestStatusWarningsExcludeInspectSpecificMessages(t *testing.T) {
+	dir := t.TempDir()
+	createStatusCommandFixture(t, dir)
+
+	srcDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "status"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	forbiddenCodes := map[string]bool{
+		"command_reads_saved_file": true,
+	}
+	for _, w := range got.Warnings {
+		code, _ := w["code"].(string)
+		if forbiddenCodes[code] {
+			t.Fatalf("status output must not contain inspect-specific warning %q: have %+v", code, w)
+		}
+		if code == "live_session_dirty" {
+			msg, _ := w["message"].(string)
+			if strings.Contains(msg, "inspect") || strings.Contains(msg, "inspected") {
+				t.Fatalf("status output must not contain inspect-specific wording in live_session_dirty: %s", msg)
+			}
+		}
+	}
+}
+
+func TestBuildStatusWarningsAndHintsProducesStatusSpecificCodes(t *testing.T) {
+	session := map[string]any{
+		"active": true,
+		"dirty":  true,
+	}
+	state := map[string]any{
+		"src_newer_than_workbook":      true,
+		"live_session_newer_than_disk": true,
+	}
+
+	warnings, hints := buildStatusWarningsAndHints(session, state)
+
+	expectedWarnings := map[string]bool{
+		"session_dirty":                false,
+		"source_newer_than_workbook":   false,
+		"live_session_newer_than_disk": false,
+	}
+	for _, w := range warnings {
+		code, _ := w["code"].(string)
+		if _, expected := expectedWarnings[code]; expected {
+			expectedWarnings[code] = true
+		}
+	}
+	for code, found := range expectedWarnings {
+		if !found {
+			t.Errorf("expected warning %q not found in %v", code, warnings)
+		}
+	}
+
+	expectedHints := map[string]bool{
+		"save_session":     false,
+		"push_source":      false,
+		"save_before_push": false,
+	}
+	for _, h := range hints {
+		code, _ := h["code"].(string)
+		if _, expected := expectedHints[code]; expected {
+			expectedHints[code] = true
+		}
+	}
+	for code, found := range expectedHints {
+		if !found {
+			t.Errorf("expected hint %q not found in %v", code, hints)
+		}
 	}
 }

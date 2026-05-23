@@ -456,6 +456,7 @@ End If
 | `push`              | VBA source を workbook へインポート                               | `xlflow push --json`                                                         |
 | `rollback`          | 保存済み backup から workbook を復元                              | `xlflow rollback --latest --json`                                            |
 | `session`           | 高速ループ用に workbook を開いたままにする                        | `xlflow session start`                                                       |
+| `status`            | プロジェクト、source、workbook、session の状態を表示              | `xlflow status --json`                                                       |
 | `save`              | session 中の workbook を保存                                      | `xlflow save --session --json`                                               |
 | `runner`            | 永続 xlflow runner marker module を管理                           | `xlflow runner install --json`                                               |
 | `macros`            | 実行可能な macro entrypoint を検出                                | `xlflow macros --json`                                                       |

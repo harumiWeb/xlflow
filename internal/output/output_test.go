@@ -1201,3 +1201,260 @@ func TestWriteWithOptionsRendersDiffSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteWithOptionsRendersStatusBaseline(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules", "src/classes", "src/forms", "src/workbook"},
+		"project_name":  "sample",
+	}
+	env.Session = map[string]any{
+		"active":               false,
+		"dirty":                false,
+		"save_required":        false,
+		"live_newer_than_disk": false,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": false,
+		"workbook_saved":               true,
+		"source_of_truth":              "saved_workbook",
+		"workbook_last_modified_at":    "2026-05-23T10:00:00Z",
+		"latest_source_modified_at":    "2026-05-22T10:00:00Z",
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"status",
+		"Root:",
+		"Workbook:",
+		"build/Book.xlsm",
+		"Source:",
+		"src/modules",
+		"Session:",
+		"inactive",
+		"Source newer:",
+		"false",
+		"Workbook saved:",
+		"true",
+		"Source of truth:",
+		"saved_workbook",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersStatusSessionActiveDirty(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules"},
+	}
+	env.Session = map[string]any{
+		"active":               true,
+		"dirty":                true,
+		"save_required":        true,
+		"live_newer_than_disk": true,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": true,
+		"workbook_saved":               false,
+		"source_of_truth":              "live_workbook",
+	}
+	env.Warnings = []map[string]any{
+		{"code": "session_dirty", "message": "The live session workbook has unsaved changes."},
+	}
+	env.Hints = []map[string]any{
+		{"code": "save_session", "message": "Run `xlflow save --session` to persist the live workbook to disk."},
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Session:",
+		"active, dirty",
+		"Dirty:",
+		"true",
+		"Live newer:",
+		"true",
+		"Source of truth:",
+		"live_workbook",
+		"Warnings:",
+		"session_dirty",
+		"Hints:",
+		"save_session",
+		"xlflow save --session",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersStatusSourceNewerThanWorkbook(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules"},
+	}
+	env.Session = map[string]any{
+		"active":               false,
+		"dirty":                false,
+		"save_required":        false,
+		"live_newer_than_disk": false,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook":      true,
+		"live_session_newer_than_disk": false,
+		"workbook_saved":               true,
+		"source_of_truth":              "saved_workbook",
+		"workbook_last_modified_at":    "2026-05-22T10:00:00Z",
+		"latest_source_modified_at":    "2026-05-23T10:00:00Z",
+	}
+	env.Warnings = []map[string]any{
+		{"code": "source_newer_than_workbook", "message": "Source files are newer than the saved workbook."},
+	}
+	env.Hints = []map[string]any{
+		{"code": "push_source", "message": "Run `xlflow push` to import the latest source into the workbook."},
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Source newer:",
+		"true",
+		"Warnings:",
+		"source_newer_than_workbook",
+		"Hints:",
+		"push_source",
+		"xlflow push",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersStatusSessionLiveNewerThanDisk(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules"},
+	}
+	env.Session = map[string]any{
+		"active":               true,
+		"dirty":                true,
+		"save_required":        true,
+		"live_newer_than_disk": true,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": true,
+		"workbook_saved":               false,
+		"source_of_truth":              "live_workbook",
+	}
+	env.Warnings = []map[string]any{
+		{"code": "session_dirty", "message": "The live session workbook has unsaved changes."},
+		{"code": "live_session_newer_than_disk", "message": "The live session workbook is newer than the saved workbook on disk."},
+	}
+	env.Hints = []map[string]any{
+		{"code": "save_session", "message": "Run `xlflow save --session` to persist the live workbook to disk."},
+		{"code": "save_before_push", "message": "Run `xlflow save --session` before `xlflow push` when the live session has unsaved changes you want to keep."},
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Session:",
+		"Status:",
+		"active, dirty",
+		"Dirty:",
+		"true",
+		"State:",
+		"Live newer:",
+		"true",
+		"Workbook saved:",
+		"false",
+		"Source of truth:",
+		"live_workbook",
+		"Warnings:",
+		"session_dirty",
+		"live_session_newer_than_disk",
+		"Hints:",
+		"save_session",
+		"save_before_push",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersStatusSectionHeaders(t *testing.T) {
+	env := New("status")
+	env.Project = map[string]any{
+		"root":          ".",
+		"workbook_path": "build/Book.xlsm",
+		"src_paths":     []any{"src/modules"},
+	}
+	env.Session = map[string]any{
+		"active": false,
+		"dirty":  false,
+	}
+	env.State = map[string]any{
+		"src_newer_than_workbook": false,
+		"workbook_saved":          true,
+	}
+	env.Logs = []string{"status reported"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Project:",
+		"Session:",
+		"State:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing section header %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "Project:") != 1 {
+		t.Fatalf("expected exactly one 'Project:' header, got %d:\n%s", strings.Count(got, "Project:"), got)
+	}
+	if strings.Count(got, "Session:") != 1 {
+		// "Session:" may appear as "Session state:" from renderTargetSession and "Session:" from renderStatus
+		// so we count only the standalone section header
+		t.Logf("Session markers found: %d (may include 'Session state:')", strings.Count(got, "Session:"))
+	}
+	if strings.Count(got, "State:") != 1 {
+		t.Fatalf("expected exactly one 'State:' header, got %d:\n%s", strings.Count(got, "State:"), got)
+	}
+}
