@@ -1,4 +1,3 @@
-```markdown
 # Final Audit Report
 
 ## Architecture Verdict
@@ -18,4 +17,3 @@
 ## Final Notes
 
 - {notes or "None"}
-```
