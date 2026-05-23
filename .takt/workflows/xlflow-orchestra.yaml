@@ -80,7 +80,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: deepseek/deepseek-chat-v4-pro
+    model: deepseek-v4-pro
 
     persona: tester
 
@@ -143,7 +143,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: deepseek/deepseek-chat-v4-pro
+    model: deepseek-v4-pro
 
     persona: implementer
 
@@ -206,7 +206,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: deepseek/deepseek-chat-v4-pro
+    model: deepseek-v4-pro
 
     persona: reviewer
 
