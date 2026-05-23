@@ -2,7 +2,9 @@ param(
   [string]$WorkbookPath,
   [string]$Visible = "false",
   [string]$UseSession = "false",
-  [string]$MetadataPath = ""
+  [string]$MetadataPath = "",
+  [string]$Entry = "",
+  [string]$RunnableOnly = "false"
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -39,7 +41,7 @@ try {
       continue
     }
     $code = Get-XlflowCodeModuleText -CodeModule $component.CodeModule
-    $componentMacros = Find-XlflowMacroProcedures -ModuleName $component.Name -Code $code
+    $componentMacros = Find-XlflowMacroProcedures -ModuleName $component.Name -ComponentType $component.Type -Code $code
     foreach ($macro in @($componentMacros)) {
       if ($null -ne $macro) {
         $macros.Add($macro) | Out-Null
@@ -47,10 +49,37 @@ try {
     }
   }
 
+  $runnableOnly = $RunnableOnly -eq "true"
+  if ($runnableOnly) {
+    $macros = [System.Collections.Generic.List[object]]($macros | Where-Object { $_.runnable })
+  }
+
+  $defaultEntry = ""
+  if (-not [string]::IsNullOrWhiteSpace($Entry)) {
+    $entryMatch = $macros | Where-Object { $_.qualified_name -eq $Entry -and $_.runnable }
+    if ($entryMatch) {
+      $defaultEntry = $Entry
+    }
+  }
+
+  $suggestions = @()
+  if ($defaultEntry -ne "") {
+    $suggestions += @([ordered]@{ title = "Run the default entrypoint"; command = "xlflow run $defaultEntry --session --json" })
+  } else {
+    $firstRunnable = $macros | Where-Object { $_.runnable } | Select-Object -First 1
+    if ($firstRunnable) {
+      $suggestions += @([ordered]@{ title = "Run the first runnable macro"; command = $firstRunnable.run_command })
+    }
+  }
+
   $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
   $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
   $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
   $result.macros = $macros.ToArray()
+  if ($defaultEntry -ne "") {
+    $result.default_entry = $defaultEntry
+  }
+  $result.suggestions = $suggestions
   if ($saveState.needs_save) {
     Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
   }

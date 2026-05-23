@@ -2537,11 +2537,17 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 		t.Fatalf("macro discovery failed: %v\n%s", err, out)
 	}
 	var got []struct {
-		Module        string   `json:"module"`
-		Name          string   `json:"name"`
-		QualifiedName string   `json:"qualified_name"`
-		Kind          string   `json:"kind"`
-		Args          []string `json:"args"`
+		Module            string   `json:"module"`
+		Name              string   `json:"name"`
+		QualifiedName     string   `json:"qualified_name"`
+		Kind              string   `json:"kind"`
+		Args              []string `json:"args"`
+		ComponentType     string   `json:"component_type"`
+		Visibility        string   `json:"visibility"`
+		HasParameters     bool     `json:"has_parameters"`
+		Runnable          bool     `json:"runnable"`
+		ReasonNotRunnable *string  `json:"reason_not_runnable"`
+		RunCommand        *string  `json:"run_command"`
 	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("failed to parse discovery output: %v\n%s", err, out)
@@ -2552,11 +2558,26 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 	if got[0].QualifiedName != "Main.Run" || got[0].Kind != "sub" {
 		t.Fatalf("unexpected first macro: %+v", got[0])
 	}
+	if !got[0].Runnable {
+		t.Fatalf("expected Main.Run to be runnable (no params): %+v", got[0])
+	}
 	if got[1].Name != "Generate" || len(got[1].Args) != 2 || got[1].Args[0] != "path As String" {
 		t.Fatalf("unexpected argument discovery: %+v", got[1])
 	}
+	if got[1].Runnable || !got[1].HasParameters {
+		t.Fatalf("expected Generate to be not runnable with has_parameters: %+v", got[1])
+	}
+	if got[1].ReasonNotRunnable == nil || *got[1].ReasonNotRunnable != "has_parameters" {
+		t.Fatalf("expected reason_not_runnable=has_parameters, got %v", got[1].ReasonNotRunnable)
+	}
 	if got[2].Name != "Build" || got[2].Kind != "function" {
 		t.Fatalf("unexpected function discovery: %+v", got[2])
+	}
+	if !got[2].Runnable {
+		t.Fatalf("expected Build to be runnable: %+v", got[2])
+	}
+	if got[2].RunCommand == nil || *got[2].RunCommand != "xlflow run Main.Build --session --json" {
+		t.Fatalf("expected run_command for Build, got %v", got[2].RunCommand)
 	}
 }
 
