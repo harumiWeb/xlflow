@@ -15,6 +15,9 @@ All notable changes to xlflow will be documented in this file.
 - Added explanatory comments to scaffolded `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowAssert.bas` so workbook authors can adopt the helper modules more easily.
 - Added explicit live-session inspect mode for `inspect workbook`, `inspect sheets`, `inspect range`, `inspect used-range`, and `inspect cell` via `--session`, plus explicit `live_session` target metadata and saved-file warnings that point callers to live-session inspect when disk may be stale.
 - Added runtime-aware execution mode injection for `run` and `test`, plus the scaffolded `XlflowRuntime` VBA helper for branching between interactive, headless, agent, CI, and test execution contexts.
+- Enhanced `xlflow macros --json` output with `component_type`, `visibility`, `has_parameters`, `runnable`, `reason_not_runnable`, and `run_command` fields per macro so AI agents and users can choose the correct entrypoint without guessing.
+- Added `default_entry` and `suggestions` fields to `xlflow macros --json` output, surfaced from `project.entry` in `xlflow.toml` and resolved against discovered runnable macros.
+- Added `--runnable` flag to `xlflow macros` to filter the output to only directly runnable procedures.
 
 ## v0.9.0
 
