@@ -20,13 +20,9 @@ steps:
 
     edit: false
 
-    provider: codex
-    model: gpt-5.4
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
     required_permission_mode: full
-
-    provider_options:
-      codex:
-        reasoning_effort: high
 
     persona: planner
 
@@ -80,7 +76,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: deepseek-v4-pro
+    model: opencode-go/deepseek-v4-pro
 
     persona: tester
 
@@ -143,7 +139,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: deepseek-v4-pro
+    model: opencode-go/deepseek-v4-pro
 
     persona: implementer
 
@@ -206,7 +202,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: deepseek-v4-pro
+    model: opencode-go/deepseek-v4-pro
 
     persona: reviewer
 
