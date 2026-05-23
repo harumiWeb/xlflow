@@ -2529,7 +2529,7 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $body = @('Option Explicit','Public Sub Run()','End Sub','Sub Generate(path As String, count As Long)','End Sub','Public Function Build() As Boolean','End Function','Private Sub Hidden()','End Sub') -join [Environment]::NewLine; Find-XlflowMacroProcedures -ModuleName 'Main' -Code $body | ConvertTo-Json -Compress",
+		". ./common.ps1; $body = @('Option Explicit','Public Sub Run()','End Sub','Sub Generate(path As String, count As Long)','End Sub','Public Function Build() As Boolean','End Function','Private Sub Hidden()','End Sub') -join [Environment]::NewLine; Find-XlflowMacroProcedures -ModuleName 'Main' -ComponentType 1 -Code $body | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()

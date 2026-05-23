@@ -3952,7 +3952,7 @@ function Find-XlflowMacroProcedures {
       $reason = "has_parameters"
     } elseif (Test-XlflowEventProcedureName -ProcedureName $name) {
       $reason = "event_procedure"
-    } elseif ($componentTypeName -eq "userform" -or $componentTypeName -eq "document_module") {
+    } elseif ($componentTypeName -eq "userform" -or $componentTypeName -eq "document_module" -or $componentTypeName -eq "unknown") {
       $reason = "unsupported_component_type"
     } else {
       $runnable = $true

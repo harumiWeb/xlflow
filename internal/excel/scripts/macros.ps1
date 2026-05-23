@@ -49,9 +49,15 @@ try {
     }
   }
 
-  $runnableOnly = $RunnableOnly -eq "true"
+  $runnableOnly = ConvertTo-XlflowBool $RunnableOnly
   if ($runnableOnly) {
-    $macros = [System.Collections.Generic.List[object]]($macros | Where-Object { $_.runnable })
+    $filtered = @($macros | Where-Object { $_.runnable })
+    $macros = New-Object System.Collections.Generic.List[object]
+    foreach ($macro in $filtered) {
+      if ($null -ne $macro) {
+        $macros.Add($macro) | Out-Null
+      }
+    }
   }
 
   $sessionArg = if ($sessionAttached) { " --session" } else { "" }
