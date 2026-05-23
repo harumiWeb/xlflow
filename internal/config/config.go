@@ -169,6 +169,81 @@ func Write(path string, cfg Config) (err error) {
 			err = closeErr
 		}
 	}()
-	enc := toml.NewEncoder(f)
-	return enc.Encode(cfg)
+
+	const tmpl = `# Project identity and entry point.
+[project]
+# Project name used in output messages. Falls back to the workbook base name.
+name = %q
+# Default macro invoked by xlflow run when no positional macro is given.
+entry = %q
+
+# Excel automation settings.
+[excel]
+# Path to the workbook, relative to the project root or absolute.
+path = %q
+# Make the Excel application window visible during automation.
+visible = %t
+# Suppress Excel alert dialogs (e.g. overwrite confirmations).
+display_alerts = %t
+
+# Source tree directories.
+[src]
+# Directory for standard .bas modules.
+modules = %q
+# Directory for class .cls modules.
+classes = %q
+# Directory for UserForm .frm files.
+forms = %q
+# Directory for workbook document module text.
+workbook = %q
+
+# VBE component folder support (Rubberduck-style).
+[vba]
+# Enable @Folder("A.B") annotations and nested source paths.
+folders = %t
+# How xlflow handles @Folder annotations during push.
+# Valid values: "update", "preserve", "ignore".
+#   "update"    – rewrite from source directory layout.
+#   "preserve"  – keep existing annotations as-is.
+#   "ignore"    – disable folder annotation read/write.
+folder_annotation = %q
+# Automatically assign default folder annotations based on source paths.
+default_component_folders = %t
+
+# UserForm source mode.
+[userform]
+# Where UserForm code-behind lives in the source tree.
+# Valid values: "frm", "sidecar".
+#   "frm"     – code is kept inside the exported .frm file.
+#   "sidecar" – code is split into src/forms/code/<FormName>.bas.
+code_source = %q
+
+# Static analysis rules.
+[lint]
+# Require Option Explicit in every module.
+require_option_explicit = %t
+# Forbid Select / Activate patterns.
+forbid_select = %t
+# Forbid Activate usage.
+forbid_activate = %t
+# Forbid On Error Resume Next.
+forbid_on_error_resume_next = %t
+# Detect implicitly typed Variant variables.
+detect_implicit_variant = %t
+# Forbid public fields in standard modules.
+forbid_public_module_fields = %t
+# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
+forbid_interactive_input = %t
+`
+	_, err = fmt.Fprintf(f, tmpl,
+		cfg.Project.Name, cfg.Project.Entry,
+		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts,
+		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
+		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
+		cfg.UserForm.CodeSource,
+		cfg.Lint.RequireOptionExplicit, cfg.Lint.ForbidSelect, cfg.Lint.ForbidActivate,
+		cfg.Lint.ForbidOnErrorResumeNext, cfg.Lint.DetectImplicitVariant,
+		cfg.Lint.ForbidPublicModuleFields, cfg.Lint.ForbidInteractiveInput,
+	)
+	return err
 }

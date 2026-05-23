@@ -114,3 +114,33 @@ code_source = "broken"
 		t.Fatal("expected invalid userform code source error")
 	}
 }
+
+func TestWriteProducesReadableConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Project.Name = "write-test"
+	cfg.UserForm.CodeSource = "frm"
+	cfg.Lint.ForbidInteractiveInput = false
+
+	p := filepath.Join(dir, FileName)
+	if err := Write(p, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed after Write: %v", err)
+	}
+	if loaded.Project.Name != "write-test" {
+		t.Fatalf("name mismatch: got %q, want write-test", loaded.Project.Name)
+	}
+	if loaded.UserForm.CodeSource != "frm" {
+		t.Fatalf("userform.code_source mismatch: got %q, want frm", loaded.UserForm.CodeSource)
+	}
+	if loaded.Lint.ForbidInteractiveInput {
+		t.Fatal("expected forbid_interactive_input=false")
+	}
+	if !loaded.Lint.RequireOptionExplicit {
+		t.Fatal("expected require_option_explicit=true")
+	}
+}
