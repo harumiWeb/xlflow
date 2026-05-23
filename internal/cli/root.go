@@ -2163,7 +2163,7 @@ func (a *app) statusCommand() *cobra.Command {
 				statePayload["source_of_truth"] = sourceOfTruth
 			}
 			if active := boolValueForCLI(sessionState, "active"); active {
-				statePayload["workbook_saved"] = !boolValueForCLI(sessionState, "dirty")
+				statePayload["workbook_saved"] = !boolValueForCLI(sessionState, "save_required")
 			}
 			env.Project = projectPayload
 			env.Session = sessionState
@@ -2252,7 +2252,7 @@ func buildStatusWarningsAndHints(session, state map[string]any) ([]map[string]an
 	var warnings []map[string]any
 	var hints []map[string]any
 	if boolValueForCLI(session, "active") {
-		if boolValueForCLI(session, "dirty") {
+		if boolValueForCLI(session, "save_required") {
 			warnings = append(warnings, map[string]any{
 				"code":    "session_dirty",
 				"message": "The live session workbook has unsaved changes.",
@@ -2295,6 +2295,9 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 		"save_required":        false,
 		"live_newer_than_disk": false,
 		"source_of_truth":      "saved_workbook",
+		"running":              false,
+		"workbook_open":        false,
+		"metadata":             nil,
 	}
 	if runtime.GOOS != "windows" {
 		return session

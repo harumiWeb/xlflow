@@ -1002,7 +1002,7 @@ func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
 func TestBuildStatusWarningsAndHintsSessionDirty(t *testing.T) {
 	session := map[string]any{
 		"active":               true,
-		"dirty":                true,
+		"save_required":        true,
 		"live_newer_than_disk": true,
 	}
 	state := map[string]any{
@@ -3561,6 +3561,10 @@ func TestStatusJSONSessionFieldShape(t *testing.T) {
 	if wbOpen {
 		t.Log("session.workbook_open=true is valid when a real session is active")
 	}
+
+	if _, ok := got.Session["metadata"]; !ok {
+		t.Fatal("expected session.metadata key in status JSON (must match session status contract)")
+	}
 }
 
 func TestStatusWarningsExcludeInspectSpecificMessages(t *testing.T) {
@@ -3615,8 +3619,8 @@ func TestStatusWarningsExcludeInspectSpecificMessages(t *testing.T) {
 
 func TestBuildStatusWarningsAndHintsProducesStatusSpecificCodes(t *testing.T) {
 	session := map[string]any{
-		"active": true,
-		"dirty":  true,
+		"active":        true,
+		"save_required": true,
 	}
 	state := map[string]any{
 		"src_newer_than_workbook":      true,
@@ -3657,5 +3661,162 @@ func TestBuildStatusWarningsAndHintsProducesStatusSpecificCodes(t *testing.T) {
 		if !found {
 			t.Errorf("expected hint %q not found in %v", code, hints)
 		}
+	}
+}
+
+func TestBuildStatusStateBaselineDefaults(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
+
+	state := buildStatusState(root, cfg, filepath.Join(root, "build", "Book.xlsm"))
+
+	if v, ok := state["workbook_saved"]; !ok {
+		t.Error("workbook_saved missing from baseline state")
+	} else if !v.(bool) {
+		t.Error("workbook_saved default should be true")
+	}
+
+	if v, ok := state["src_newer_than_workbook"]; !ok {
+		t.Error("src_newer_than_workbook missing from baseline state")
+	} else if v.(bool) {
+		t.Error("src_newer_than_workbook default should be false")
+	}
+
+	if v, ok := state["live_session_newer_than_disk"]; !ok {
+		t.Error("live_session_newer_than_disk missing from baseline state")
+	} else if v.(bool) {
+		t.Error("live_session_newer_than_disk default should be false")
+	}
+
+	if v, ok := state["source_of_truth"]; !ok {
+		t.Error("source_of_truth missing from baseline state")
+	} else if v.(string) != "saved_workbook" {
+		t.Errorf("source_of_truth default should be saved_workbook, got %v", v)
+	}
+}
+
+func TestStatusWorkbookSavedDerivesFromSaveRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		session   map[string]any
+		wantSaved bool
+	}{
+		{
+			name: "save_required true, dirty absent",
+			session: map[string]any{
+				"active":        true,
+				"save_required": true,
+			},
+			wantSaved: false,
+		},
+		{
+			name: "save_required false, dirty absent",
+			session: map[string]any{
+				"active":        true,
+				"save_required": false,
+			},
+			wantSaved: true,
+		},
+		{
+			name: "save_required true and dirty true",
+			session: map[string]any{
+				"active":        true,
+				"save_required": true,
+				"dirty":         true,
+			},
+			wantSaved: false,
+		},
+		{
+			name: "save_required false and dirty false",
+			session: map[string]any{
+				"active":        true,
+				"save_required": false,
+				"dirty":         false,
+			},
+			wantSaved: true,
+		},
+		{
+			name: "save_required true but session not active",
+			session: map[string]any{
+				"active":        false,
+				"save_required": true,
+				"dirty":         true,
+			},
+			wantSaved: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			active := boolValueForCLI(tt.session, "active")
+			saved := true
+			if active {
+				saved = !boolValueForCLI(tt.session, "save_required")
+			}
+			if saved != tt.wantSaved {
+				t.Errorf("workbook_saved = %v, want %v (save_required=%v, dirty=%v, active=%v)",
+					saved, tt.wantSaved,
+					boolValueForCLI(tt.session, "save_required"),
+					boolValueForCLI(tt.session, "dirty"),
+					active)
+			}
+		})
+	}
+}
+
+func TestBuildStatusWarningsAndHintsSaveRequiredDirtyAbsent(t *testing.T) {
+	session := map[string]any{
+		"active":        true,
+		"save_required": true,
+	}
+	state := map[string]any{
+		"src_newer_than_workbook":      false,
+		"live_session_newer_than_disk": true,
+	}
+
+	warnings, hints := buildStatusWarningsAndHints(session, state)
+
+	foundDirty := false
+	for _, w := range warnings {
+		if code, _ := w["code"].(string); code == "session_dirty" {
+			foundDirty = true
+			break
+		}
+	}
+	if !foundDirty {
+		t.Fatal("expected session_dirty warning when save_required=true (buildStatusWarningsAndHints must check save_required)")
+	}
+
+	foundSave := false
+	for _, h := range hints {
+		if code, _ := h["code"].(string); code == "save_session" {
+			foundSave = true
+			break
+		}
+	}
+	if !foundSave {
+		t.Fatal("expected save_session hint when save_required=true")
+	}
+}
+
+func TestBuildStatusSessionBaselineStableFields(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("on Windows, buildStatusSession calls the probe; baseline only reached on non-Windows")
+	}
+
+	a := &app{cwd: t.TempDir()}
+	cfg := config.Default()
+
+	session := a.buildStatusSession(cfg, filepath.Join("path", "to", "workbook.xlsm"))
+
+	if _, ok := session["running"]; !ok {
+		t.Error("baseline session must include 'running' field for stable JSON schema on all platforms")
+	}
+	if _, ok := session["workbook_open"]; !ok {
+		t.Error("baseline session must include 'workbook_open' field for stable JSON schema on all platforms")
+	}
+	if _, ok := session["metadata"]; !ok {
+		t.Error("baseline session must include 'metadata' field for stable JSON schema on all platforms")
 	}
 }

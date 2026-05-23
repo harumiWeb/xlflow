@@ -49,11 +49,15 @@ AI agents should prefer `xlflow status --json` before pushing or running to avoi
   },
   "session": {
     "active": false,
+    "workbook_path": "build/Book.xlsm",
+    "workbook_name": "Book.xlsm",
     "dirty": false,
     "running": false,
     "workbook_open": false,
+    "metadata": null,
     "save_required": false,
-    "live_newer_than_disk": false
+    "live_newer_than_disk": false,
+    "source_of_truth": "saved_workbook"
   },
   "state": {
     "src_newer_than_workbook": false,
