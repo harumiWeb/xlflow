@@ -2700,10 +2700,27 @@ function Find-XlflowTestProcedures {
     }
     $name = $match.Groups[1].Value
     if ($name -like "Test*" -or $name -like "*_Test") {
+      $tags = New-Object System.Collections.Generic.List[string]
+      for ($j = $i - 1; $j -ge 0; $j--) {
+        $prev = $lines[$j].Trim()
+        if ([string]::IsNullOrWhiteSpace($prev)) {
+          continue
+        }
+        $tagMatch = [regex]::Match($prev, "^'\s*@tag\s+(\S+)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($tagMatch.Success) {
+          $tags.Add($tagMatch.Groups[1].Value) | Out-Null
+          continue
+        }
+        if ($prev -like "''*") {
+          continue
+        }
+        break
+      }
       $tests.Add([pscustomobject][ordered]@{
         name = $name
         module = $ModuleName
         line = $i + 1
+        tags = @($tags.ToArray())
       })
     }
   }
@@ -2713,13 +2730,57 @@ function Find-XlflowTestProcedures {
   }
 }
 
+function Find-XlflowModuleHooks {
+  param([string]$ModuleName, [string]$Code)
+
+  $hooks = [ordered]@{ BeforeAll = $null; AfterAll = $null; BeforeEach = $null; AfterEach = $null }
+  if ([string]::IsNullOrEmpty($Code)) {
+    return $hooks
+  }
+
+  $lines = $Code -split "`r?`n"
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i].Trim()
+    $match = [regex]::Match($line, '^(?:Public\s+)?Sub\s+(BeforeAll|AfterAll|BeforeEach|AfterEach)\s*(?:\(\s*\))?\s*(?:''.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $match.Success) {
+      continue
+    }
+    $name = $match.Groups[1].Value
+    switch ($name.ToLowerInvariant()) {
+      "beforeall"  { $hooks.BeforeAll  = [pscustomobject][ordered]@{ name = $name; module = $ModuleName; line = $i + 1 } }
+      "afterall"   { $hooks.AfterAll   = [pscustomobject][ordered]@{ name = $name; module = $ModuleName; line = $i + 1 } }
+      "beforeeach" { $hooks.BeforeEach = [pscustomobject][ordered]@{ name = $name; module = $ModuleName; line = $i + 1 } }
+      "aftereach"  { $hooks.AfterEach  = [pscustomobject][ordered]@{ name = $name; module = $ModuleName; line = $i + 1 } }
+    }
+  }
+
+  return $hooks
+}
+
 function Select-XlflowTests {
-  param($Tests, [string]$Filter = "")
+  param($Tests, [string]$Filter = "", [string]$ModuleFilter = "", [string]$TagFilter = "")
 
   $selected = New-Object System.Collections.Generic.List[object]
   foreach ($test in $Tests) {
-    if ([string]::IsNullOrWhiteSpace($Filter) -or $test.name -eq $Filter) {
-      $selected.Add($test)
+    $include = $true
+    if (-not [string]::IsNullOrWhiteSpace($Filter)) {
+      if ($test.name -ne $Filter) { $include = $false }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ModuleFilter)) {
+      if ($test.module -ne $ModuleFilter) { $include = $false }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($TagFilter)) {
+      $tagFound = $false
+      foreach ($tag in $test.tags) {
+        if ($tag -ieq $TagFilter) {
+          $tagFound = $true
+          break
+        }
+      }
+      if (-not $tagFound) { $include = $false }
+    }
+    if ($include) {
+      $selected.Add($test) | Out-Null
     }
   }
   foreach ($test in $selected) {
@@ -2821,29 +2882,111 @@ function Sync-XlflowUserFormCodeBehind {
 }
 
 function New-XlflowTestRunnerCode {
-  param($Tests)
+  param($Tests, $HooksByModule)
 
   $builder = New-Object System.Text.StringBuilder
-  [void]$builder.AppendLine("Option Explicit")
-  [void]$builder.AppendLine("")
-  [void]$builder.AppendLine("Public Function RunTest(ByVal testIndex As Long) As Variant")
-  [void]$builder.AppendLine("  On Error Resume Next")
-  [void]$builder.AppendLine("  Err.Clear")
-  [void]$builder.AppendLine("  Select Case testIndex")
+  $dq = '"'
+  [void]$builder.AppendLine('Option Explicit')
+  [void]$builder.AppendLine('')
+
+  # Generate dedicated BeforeAll/AfterAll wrappers per module so On Error Resume Next
+  # works correctly without nesting Application.Run inside another COM invocation.
+  $moduleNames = $Tests | ForEach-Object { $_.module } | Select-Object -Unique
+  foreach ($mod in $moduleNames) {
+    $hooks = $HooksByModule[$mod]
+    if ($null -ne $hooks.BeforeAll) {
+      [void]$builder.AppendLine("Public Function RunBeforeAll_$mod() As Variant")
+      [void]$builder.AppendLine('  On Error GoTo Handler')
+      [void]$builder.AppendLine("  $mod.$($hooks.BeforeAll.name)")
+      [void]$builder.AppendLine("  RunBeforeAll_$mod = Array(True, CLng(0), $dq$dq, $dq$dq, $dq$dq)")
+      [void]$builder.AppendLine('  Exit Function')
+      [void]$builder.AppendLine('Handler:')
+      [void]$builder.AppendLine("  RunBeforeAll_$mod = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description), $dq$dq)")
+      [void]$builder.AppendLine('  Err.Clear')
+      [void]$builder.AppendLine('End Function')
+      [void]$builder.AppendLine('')
+    }
+    if ($null -ne $hooks.AfterAll) {
+      [void]$builder.AppendLine("Public Function RunAfterAll_$mod() As Variant")
+      [void]$builder.AppendLine('  On Error GoTo Handler')
+      [void]$builder.AppendLine("  $mod.$($hooks.AfterAll.name)")
+      [void]$builder.AppendLine("  RunAfterAll_$mod = Array(True, CLng(0), $dq$dq, $dq$dq, $dq$dq)")
+      [void]$builder.AppendLine('  Exit Function')
+      [void]$builder.AppendLine('Handler:')
+      [void]$builder.AppendLine("  RunAfterAll_$mod = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description), $dq$dq)")
+      [void]$builder.AppendLine('  Err.Clear')
+      [void]$builder.AppendLine('End Function')
+      [void]$builder.AppendLine('')
+    }
+  }
+
+  [void]$builder.AppendLine('Public Function RunTest(ByVal testIndex As Long) As Variant')
+  [void]$builder.AppendLine('  On Error Resume Next')
+  [void]$builder.AppendLine('  Err.Clear')
+  [void]$builder.AppendLine('  Dim beforeEachErr As Variant')
+  [void]$builder.AppendLine('  Dim testErr As Variant')
+  [void]$builder.AppendLine('  Dim afterEachErr As Variant')
+  [void]$builder.AppendLine('  Dim statusHint As String')
+  [void]$builder.AppendLine('  Dim phaseHint As String')
+  [void]$builder.AppendLine('  Select Case testIndex')
+
   $index = 0
   foreach ($test in $Tests) {
+    $hooks = $HooksByModule[$test.module]
+    $beforeEachName = ""
+    $afterEachName = ""
+    if ($null -ne $hooks) {
+      if ($null -ne $hooks.BeforeEach) { $beforeEachName = $hooks.BeforeEach.name }
+      if ($null -ne $hooks.AfterEach) { $afterEachName = $hooks.AfterEach.name }
+    }
+
     [void]$builder.AppendLine("    Case $index")
-    [void]$builder.AppendLine("      " + $test.module + "." + $test.name)
+    [void]$builder.AppendLine('      statusHint = ""')
+    [void]$builder.AppendLine('      phaseHint = ""')
+    if ($beforeEachName -ne "") {
+      [void]$builder.AppendLine("      $($test.module).$beforeEachName")
+      [void]$builder.AppendLine('      If Err.Number <> 0 Then')
+      [void]$builder.AppendLine('        beforeEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))')
+      [void]$builder.AppendLine('        phaseHint = "before_each"')
+      [void]$builder.AppendLine('        Err.Clear')
+      [void]$builder.AppendLine('      End If')
+    }
+    [void]$builder.AppendLine('      If IsEmpty(beforeEachErr) Then')
+    [void]$builder.AppendLine("        $($test.module).$($test.name)")
+    [void]$builder.AppendLine('        If Err.Number <> 0 Then')
+    [void]$builder.AppendLine('          If Err.Number = vbObjectError + 516 Then')
+    [void]$builder.AppendLine('            statusHint = "inconclusive"')
+    [void]$builder.AppendLine('          End If')
+    [void]$builder.AppendLine('          testErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))')
+    [void]$builder.AppendLine('          phaseHint = "test"')
+    [void]$builder.AppendLine('          Err.Clear')
+    [void]$builder.AppendLine('        End If')
+    [void]$builder.AppendLine('      End If')
+    if ($afterEachName -ne "") {
+      [void]$builder.AppendLine("      $($test.module).$afterEachName")
+      [void]$builder.AppendLine('      If Err.Number <> 0 Then')
+      [void]$builder.AppendLine('        afterEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))')
+      [void]$builder.AppendLine('        If phaseHint = "" Then')
+      [void]$builder.AppendLine('          phaseHint = "after_each"')
+      [void]$builder.AppendLine('        End If')
+      [void]$builder.AppendLine('        Err.Clear')
+      [void]$builder.AppendLine('      End If')
+    }
+    [void]$builder.AppendLine('      If Not IsEmpty(afterEachErr) Then')
+    [void]$builder.AppendLine('        RunTest = Array(False, afterEachErr(1), afterEachErr(2), afterEachErr(3), statusHint, phaseHint)')
+    [void]$builder.AppendLine('      ElseIf Not IsEmpty(testErr) Then')
+    [void]$builder.AppendLine('        RunTest = Array(False, testErr(1), testErr(2), testErr(3), statusHint, phaseHint)')
+    [void]$builder.AppendLine('      ElseIf Not IsEmpty(beforeEachErr) Then')
+    [void]$builder.AppendLine('        RunTest = Array(False, beforeEachErr(1), beforeEachErr(2), beforeEachErr(3), statusHint, phaseHint)')
+    [void]$builder.AppendLine('      Else')
+    [void]$builder.AppendLine('        RunTest = Array(True, CLng(0), "", "", statusHint, phaseHint)')
+    [void]$builder.AppendLine('      End If')
     $index++
   }
-  [void]$builder.AppendLine("  End Select")
-  [void]$builder.AppendLine("  If Err.Number <> 0 Then")
-  [void]$builder.AppendLine("    RunTest = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))")
-  [void]$builder.AppendLine("  Else")
-  [void]$builder.AppendLine("    RunTest = Array(True, CLng(0), """", """")")
-  [void]$builder.AppendLine("  End If")
-  [void]$builder.AppendLine("  Err.Clear")
-  [void]$builder.AppendLine("End Function")
+
+  [void]$builder.AppendLine('  End Select')
+  [void]$builder.AppendLine('  Err.Clear')
+  [void]$builder.AppendLine('End Function')
   return $builder.ToString()
 }
 

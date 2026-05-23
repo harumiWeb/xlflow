@@ -188,6 +188,8 @@ type TestOptions struct {
 	UIResponses   UIResponses
 	UIStream      UIStreamOptions
 	DebugStream   DebugStreamOptions
+	ModuleFilter  string
+	TagFilter     string
 }
 
 const (
@@ -661,6 +663,12 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 		if strings.TrimSpace(opts.DebugStream.PipeName) != "" {
 			args["DebugStreamPipeName"] = strings.TrimSpace(opts.DebugStream.PipeName)
 		}
+	}
+	if strings.TrimSpace(opts.ModuleFilter) != "" {
+		args["ModuleFilter"] = strings.TrimSpace(opts.ModuleFilter)
+	}
+	if strings.TrimSpace(opts.TagFilter) != "" {
+		args["TagFilter"] = strings.TrimSpace(opts.TagFilter)
 	}
 	return args
 }

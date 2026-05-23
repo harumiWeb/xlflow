@@ -44,7 +44,7 @@ xlflow [--json] macros [--session]
 xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]
 xlflow [--json] ui button list [--sheet <name>]
 xlflow [--json] ui button remove --id <id> [--sheet <name>]
-xlflow [--json] test [--filter <name>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
+xlflow [--json] test [--filter <name>] [--module <name>] [--tag <tag>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect workbook [--session] [--format text|json|markdown]
 xlflow [--json] inspect sheets [--session] [--format text|json|markdown]
@@ -253,6 +253,17 @@ Command-specific fields are added at the top level:
 - `debug` for `run` / `test` `XlflowDebug.Log` events
 
 `test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
+
+`status` values are `passed`, `failed`, and `inconclusive`. `inconclusive` is produced when a test calls `XlflowAssert.AssertInconclusive`.
+
+`error.code` values for test-level failures include:
+
+- `test_failed` — the test body raised an error or assertion failure.
+- `test_inconclusive` — the test called `AssertInconclusive`.
+- `before_all_failed` — the module's `BeforeAll` hook failed, causing all tests in that module to fail.
+- `after_all_failed` — the module's `AfterAll` hook failed, causing all tests in that module to fail.
+- `before_each_failed` — the test's `BeforeEach` hook failed before the test body ran.
+- `after_each_failed` — the test's `AfterEach` hook failed during cleanup.
 
 `run` and `test` may return `ui.events`, where each event contains `event`, `kind`, `dialog_id`, `prompt`, `title`, `response_source`, optional `resolved_result`, optional `resolved_value`, `redacted`, `runtime_mode`, and optional `error`. When `--ui-stream` is enabled, these same events are also summarized to stderr in real time. `run` and `test` may also return `debug.events`, where each event contains `event`, `message`, `runtime_mode`, `source`, and optional `error`; `debug.count` reports the total number of captured `XlflowDebug.Log` events and `debug.truncated=true` indicates that xlflow kept only the most recent events in the final envelope. `ui button add` and `ui button remove` return `ui.button` with `id`, `name`, `sheet`, `text`, `macro`, `cell`, `left`, `top`, `width`, `height`, and `updated`. `ui button list` returns `ui.buttons` with the same fields for each managed button.
 

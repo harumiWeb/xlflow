@@ -2577,6 +2577,8 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 
 func (a *app) testCommand() *cobra.Command {
 	var filter string
+	var moduleFilter string
+	var tagFilter string
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
@@ -2610,7 +2612,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -2620,6 +2622,8 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	cmd.Flags().StringVar(&moduleFilter, "module", "", "run only tests in the module whose name exactly matches filter")
+	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag (Phase 3: requires comment metadata)")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")

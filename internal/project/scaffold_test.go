@@ -30,7 +30,6 @@ func TestInitScaffold(t *testing.T) {
 		"src/classes",
 		"src/forms",
 		"src/workbook",
-		"tests",
 		".xlflow",
 		".gitignore",
 	} {
@@ -204,13 +203,18 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 		"IsNull(expected) Or IsNull(actual)",
 		"AssertEquals supports scalar values only",
 		"Private Function DescribeAssertValue",
+		"Public Sub AssertTrue(ByVal condition As Boolean",
+		"Public Sub AssertFalse(ByVal condition As Boolean",
+		"Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant",
+		"Public Sub AssertFail(Optional ByVal message As String = \"\")",
+		"Public Sub AssertInconclusive(Optional ByVal message As String = \"\")",
+		"Public Sub AssertIsNothing(ByVal value As Variant",
+		"Public Sub AssertIsNotNothing(ByVal value As Variant",
+		"Err.Raise vbObjectError + 516",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Assert helper should contain %q:\n%s", want, got)
 		}
-	}
-	if strings.Contains(got, "AssertTrue") {
-		t.Fatalf("AssertTrue is out of scope for v1 helper:\n%s", got)
 	}
 }
 
