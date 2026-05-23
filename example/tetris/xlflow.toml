@@ -1,28 +1,56 @@
+# Project identity and entry point.
 [project]
+# Project name used in output messages. Falls back to the workbook base name.
 name = "Book"
+# Default macro invoked by xlflow run when no positional macro is given.
 entry = "Main.Run"
 
+# Excel automation settings.
 [excel]
+# Path to the workbook, relative to the project root or absolute.
 path = "build/Book.xlsm"
+# Make the Excel application window visible during automation.
 visible = false
+# Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = false
 
+# Source tree directories.
 [src]
+# Directory for standard .bas modules.
 modules = "src/modules"
+# Directory for class .cls modules.
 classes = "src/classes"
+# Directory for UserForm .frm files.
 forms = "src/forms"
+# Directory for workbook document module text.
 workbook = "src/workbook"
 
+# VBE component folder support (Rubberduck-style).
 [vba]
+# Enable @Folder("A.B") annotations and nested source paths.
 folders = true
+# How xlflow handles @Folder annotations during push.
+# Valid values: "update", "preserve", "ignore".
+#   "update"    – rewrite from source directory layout.
+#   "preserve"  – keep existing annotations as-is.
+#   "ignore"    – disable folder annotation read/write.
 folder_annotation = "update"
+# Automatically assign default folder annotations based on source paths.
 default_component_folders = true
 
+# Static analysis rules.
 [lint]
+# Require Option Explicit in every module.
 require_option_explicit = true
+# Forbid Select / Activate patterns.
 forbid_select = true
+# Forbid Activate usage.
 forbid_activate = true
+# Forbid On Error Resume Next.
 forbid_on_error_resume_next = true
+# Detect implicitly typed Variant variables.
 detect_implicit_variant = true
+# Forbid public fields in standard modules.
 forbid_public_module_fields = true
+# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = true

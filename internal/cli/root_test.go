@@ -967,6 +967,22 @@ func TestRootCommandIncludesSkillInstallCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesModuleInstallCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"module", "install"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "install" {
+		t.Fatalf("expected module install command, got %#v", cmd)
+	}
+	if cmd.Flags().Lookup("push") == nil {
+		t.Fatal("expected module install command to define --push")
+	}
+}
+
 func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -980,6 +996,33 @@ func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
 				t.Fatalf("expected %s command to define --%s", command, name)
 			}
 		}
+	}
+}
+
+func TestInitCommandIncludesWithModuleFlag(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	cmd, _, err := root.Find([]string{"init"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Flags().Lookup("with-module") == nil {
+		t.Fatal("expected init command to define --with-module")
+	}
+}
+
+func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	cmd, _, err := root.Find([]string{"test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Flags().Lookup("module") == nil {
+		t.Fatal("expected test command to define --module")
+	}
+	if cmd.Flags().Lookup("tag") == nil {
+		t.Fatal("expected test command to define --tag")
 	}
 }
 
@@ -1230,6 +1273,46 @@ func TestInitCommandAutoPullsWorkbookSource(t *testing.T) {
 	}
 }
 
+func TestInitCommandWithModuleAutoPushesHelperSource(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPullScript(t, dir, false)
+	writeTestPushScript(t, dir)
+
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"init", workbook, "--with-module"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	for _, path := range []string{
+		filepath.Join(dir, "src", "modules", "XlflowAssert.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowRuntime.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowUI.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowDebug.bas"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected helper module at %s: %v", path, err)
+		}
+	}
+	markerPath := filepath.Join(dir, ".xlflow", "push.called")
+	body, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("expected auto-push marker at %s: %v", markerPath, err)
+	}
+	text := string(body)
+	for _, want := range []string{"XlflowAssert.bas", "XlflowRuntime.bas", "XlflowUI.bas", "XlflowDebug.bas"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected push marker to mention %s:\n%s", want, text)
+		}
+	}
+}
+
 func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 	skipWindowsPowerShellOnlyTest(t)
 	dir := t.TempDir()
@@ -1250,6 +1333,57 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{"Main.bas", "App.bas", "Ui.bas", "XlflowAssert.bas"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected push marker to mention %s:\n%s", want, text)
+		}
+	}
+}
+
+func TestModuleInstallCommandInstallsHelperModules(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"module", "install"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("module install command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "src", "modules", "XlflowAssert.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowRuntime.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowUI.bas"),
+		filepath.Join(dir, "src", "modules", "XlflowDebug.bas"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected installed helper module at %s: %v", path, err)
+		}
+	}
+}
+
+func TestModuleInstallCommandWithPushAutoPushesHelperSource(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPushScript(t, dir)
+	a := &app{cwd: dir}
+	root := a.rootCommand()
+	root.SetArgs([]string{"module", "install", "--push"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("module install --push command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	markerPath := filepath.Join(dir, ".xlflow", "push.called")
+	body, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("expected push marker at %s: %v", markerPath, err)
+	}
+	text := string(body)
+	for _, want := range []string{"XlflowAssert.bas", "XlflowRuntime.bas", "XlflowUI.bas", "XlflowDebug.bas"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected push marker to mention %s:\n%s", want, text)
 		}
@@ -3024,6 +3158,7 @@ func writeTestPullScript(t *testing.T, root string, createModule bool) {
   [string]$WorkbookDir
 )
 New-Item -ItemType Directory -Force -Path $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir | Out-Null
+Get-ChildItem -LiteralPath $ModulesDir, $ClassesDir, $FormsDir, $WorkbookDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
 if (%s) {
   Set-Content -LiteralPath (Join-Path $ModulesDir 'Imported.bas') -Value "Attribute VB_Name = ""Imported""" -Encoding UTF8
 }

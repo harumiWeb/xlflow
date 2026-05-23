@@ -2468,6 +2468,62 @@ func TestTestProcedureDiscoveryRules(t *testing.T) {
 	}
 }
 
+func TestTestProcedureTagDiscovery(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $body = @('Option Explicit','''@Tag(\"smoke\")','Public Sub Test_Smoke()','End Sub','''@Tag(\"integration\")','Public Sub Test_Integration()','End Sub','Public Sub Test_NoTag()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'TagTests' -Code $body | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tag discovery failed: %v\n%s", err, out)
+	}
+	var got []struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse tag discovery output: %v\n%s", err, out)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 discovered tests, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "Test_Smoke" || len(got[0].Tags) != 1 || got[0].Tags[0] != "smoke" {
+		t.Fatalf("unexpected first test tags: %+v", got[0])
+	}
+	if got[1].Name != "Test_Integration" || len(got[1].Tags) != 1 || got[1].Tags[0] != "integration" {
+		t.Fatalf("unexpected second test tags: %+v", got[1])
+	}
+	if got[2].Name != "Test_NoTag" || len(got[2].Tags) != 0 {
+		t.Fatalf("unexpected third test tags: %+v", got[2])
+	}
+}
+
+func TestTestProcedureFilterByTag(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $tests = @([ordered]@{ name = 'Test_A'; module = 'M'; tags = @('smoke') }, [ordered]@{ name = 'Test_B'; module = 'M'; tags = @('integration') }, [ordered]@{ name = 'Test_C'; module = 'M'; tags = @() }); $selected = @(Select-XlflowTests -Tests $tests -TagFilter 'smoke'); ConvertTo-Json -InputObject $selected -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tag filter failed: %v\n%s", err, out)
+	}
+	var got []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse tag filter output: %v\n%s", err, out)
+	}
+	if len(got) != 1 || got[0].Name != "Test_A" {
+		t.Fatalf("expected only smoke tag match, got %+v", got)
+	}
+}
+
 func TestMacroProcedureDiscoveryRules(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

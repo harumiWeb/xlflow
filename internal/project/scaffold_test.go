@@ -26,11 +26,11 @@ func TestInitScaffold(t *testing.T) {
 	for _, path := range []string{
 		config.FileName,
 		"src/modules/XlflowAssert.bas",
+		"src/modules/Tests/SampleTests.bas",
 		"src/modules",
 		"src/classes",
 		"src/forms",
 		"src/workbook",
-		"tests",
 		".xlflow",
 		".gitignore",
 	} {
@@ -65,6 +65,80 @@ func TestNewScaffoldCreatesGitignore(t *testing.T) {
 	}
 	if !containsString(result.Created, ".gitignore") {
 		t.Fatalf("expected .gitignore in created paths: %v", result.Created)
+	}
+}
+
+func TestNewScaffoldCreatesSampleTests(t *testing.T) {
+	dir := t.TempDir()
+	_, err := New(dir, "Book", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Tests", "SampleTests.bas")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected sample test module: %v", err)
+	}
+	content := string(body)
+	for _, want := range []string{
+		`Attribute VB_Name = "SampleTests"`,
+		"Option Explicit",
+		"xlflow tests are public parameterless Sub procedures",
+		"'@Tag(\"smoke\")",
+		"Public Sub BeforeAll()",
+		"Public Sub AfterAll()",
+		"Public Sub BeforeEach()",
+		"Public Sub AfterEach()",
+		"Public Sub Test_Sample_Pass()",
+		"Public Sub Test_Sample_Inconclusive()",
+		"XlflowAssert.AssertInconclusive",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("sample test module missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
+	dir := t.TempDir()
+	result, err := InstallHelperModules(dir, config.SourceConfig{Modules: filepath.ToSlash(filepath.Join("custom", "modules"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"custom/modules/XlflowAssert.bas",
+		"custom/modules/XlflowRuntime.bas",
+		"custom/modules/XlflowUI.bas",
+		"custom/modules/XlflowDebug.bas",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !containsString(result.Created, path) {
+			t.Fatalf("expected %s in created paths: %v", path, result.Created)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "custom", "modules", "Main.bas")); !os.IsNotExist(err) {
+		t.Fatalf("expected Main.bas not to be installed for helper bundle, got %v", err)
+	}
+	if len(result.Created) != 4 {
+		t.Fatalf("created count = %d, want 4", len(result.Created))
+	}
+}
+
+func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "XlflowUI.bas"), []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallHelperModules(dir, config.SourceConfig{}); err == nil {
+		t.Fatal("expected overwrite refusal")
+	} else if !strings.Contains(err.Error(), "refusing to overwrite existing file") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -161,13 +235,18 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 		"IsNull(expected) Or IsNull(actual)",
 		"AssertEquals supports scalar values only",
 		"Private Function DescribeAssertValue",
+		"Public Sub AssertTrue(ByVal condition As Boolean",
+		"Public Sub AssertFalse(ByVal condition As Boolean",
+		"Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant",
+		"Public Sub AssertFail(Optional ByVal message As String = \"\")",
+		"Public Sub AssertInconclusive(Optional ByVal message As String = \"\")",
+		"Public Sub AssertIsNothing(ByVal value As Variant",
+		"Public Sub AssertIsNotNothing(ByVal value As Variant",
+		"Err.Raise vbObjectError + 516",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Assert helper should contain %q:\n%s", want, got)
 		}
-	}
-	if strings.Contains(got, "AssertTrue") {
-		t.Fatalf("AssertTrue is out of scope for v1 helper:\n%s", got)
 	}
 }
 
@@ -490,6 +569,91 @@ func TestNewRefusesOverwrite(t *testing.T) {
 
 func fakeWorkbookCreator(path string) error {
 	return os.WriteFile(path, []byte("fake workbook"), 0o644)
+}
+
+func TestGenerateTestModule(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: "src/modules"}
+	result, err := GenerateTestModule(dir, "OrderServiceTests", src)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Created {
+		t.Fatal("expected Created=true")
+	}
+	expectedPath := filepath.Join(dir, "src", "modules", "OrderServiceTests.bas")
+	if result.Path != expectedPath {
+		t.Fatalf("path = %q, want %q", result.Path, expectedPath)
+	}
+
+	content, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("failed to read generated file: %v", err)
+	}
+	body := string(content)
+	for _, want := range []string{
+		`Attribute VB_Name = "OrderServiceTests"`,
+		"Option Explicit",
+		"Public Sub BeforeAll()",
+		"Public Sub AfterAll()",
+		"Public Sub BeforeEach()",
+		"Public Sub AfterEach()",
+		"Public Sub Test_Sample()",
+		"XlflowAssert.AssertTrue True",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("generated body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestGenerateTestModuleAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: "src/modules"}
+	expectedPath := filepath.Join(dir, "src", "modules", "DuplicateTests.bas")
+	if err := os.MkdirAll(filepath.Dir(expectedPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(expectedPath, []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := GenerateTestModule(dir, "DuplicateTests", src)
+	if err == nil {
+		t.Fatal("expected error for existing file")
+	}
+}
+
+func TestGenerateTestModuleEmptyName(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: "src/modules"}
+	_, err := GenerateTestModule(dir, "", src)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestGenerateTestModuleRejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: "src/modules"}
+	for _, name := range []string{"../Escape", "foo/bar", "foo\\bar", "..\\Escape"} {
+		_, err := GenerateTestModule(dir, name, src)
+		if err == nil {
+			t.Fatalf("expected error for invalid module name %q", name)
+		}
+	}
+}
+
+func TestGenerateTestModuleDefaultsToTestsDirWhenModulesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	src := config.SourceConfig{Modules: ""}
+	result, err := GenerateTestModule(dir, "SampleTests", src)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedPath := filepath.Join(dir, "src", "modules", "Tests", "SampleTests.bas")
+	if result.Path != expectedPath {
+		t.Fatalf("path = %q, want %q", result.Path, expectedPath)
+	}
 }
 
 func containsString(values []string, want string) bool {

@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
+xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
 
 ```
 
@@ -13,7 +13,9 @@ xlflow test [--filter <pattern>] [--msgbox <id=result>] [--inputbox <id=value>] 
 
 | Option / argument              | Description                                                           | Default |
 | ------------------------------ | --------------------------------------------------------------------- | ------- |
-| `--filter <pattern>`           | Run only matching test names.                                         | -       |
+| `--filter <pattern>`           | Run only the test whose procedure name exactly matches the filter.    | -       |
+| `--module <name>`              | Run only tests in the module whose name exactly matches the filter.   | -       |
+| `--tag <tag>`                  | Run only tests tagged with the given tag.                             | -       |
 | `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.      | -       |
 | `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.    | -       |
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed. | -       |
@@ -21,11 +23,52 @@ xlflow test [--filter <pattern>] [--msgbox <id=result>] [--inputbox <id=value>] 
 | `--session`                    | Run tests in the managed live workbook.                               | false   |
 | `--json`                       | Return structured test results.                                       | false   |
 
+## Test Location
+
+Tests should live under the configured module source directory (for example `src/modules/Tests/`). This keeps tests under the same source tree as production code so `push` naturally imports them into the workbook without a separate folder convention.
+
+```text
+src/
+  modules/
+    Main.bas
+    Tests/
+      SmokeTests.bas
+      IntegrationTests.bas
+```
+
+## Tags
+
+Add `' @Tag("name")` comment lines directly above a test sub to attach tags:
+
+```vb
+'@Tag("smoke")
+Public Sub Test_CreateWorksheet()
+
+'@Tag("integration")
+'@Tag("slow")
+Public Sub Test_ImportLargeFile()
+```
+
+Multiple tags are allowed. Tags are case-insensitive during filtering.
+
+## Lifecycle Hooks
+
+xlflow recognizes these reserved procedure names in each test module:
+
+- `BeforeAll` — runs once before any test in the same module.
+- `AfterAll` — runs once after all tests in the same module.
+- `BeforeEach` — runs before each individual test in the same module.
+- `AfterEach` — runs after each individual test in the same module.
+
+All hooks must be public parameterless `Sub` procedures. If a hook fails, the affected tests are recorded as failed with a dedicated error code.
+
 ## Examples
 
 ```bash
 xlflow test --json
-xlflow test --filter Smoke --session --json
+xlflow test --filter TestSmoke --session --json
+xlflow test --module SmokeTests --session --json
+xlflow test --tag smoke --session --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json
 ```
@@ -55,7 +98,41 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 {
   "status": "ok",
   "command": "test",
-  "tests": [{ "name": "TestSmoke", "status": "pass" }],
+  "tests": [
+    {
+      "name": "TestSmoke",
+      "module": "SmokeTests",
+      "status": "passed",
+      "duration_ms": 12,
+      "tags": ["smoke"]
+    },
+    {
+      "name": "TestDraft",
+      "module": "SmokeTests",
+      "status": "inconclusive",
+      "duration_ms": 5,
+      "tags": [],
+      "error": {
+        "code": "test_inconclusive",
+        "message": "draft",
+        "source": "XlflowAssert.AssertInconclusive",
+        "number": 51332
+      }
+    },
+    {
+      "name": "TestBad",
+      "module": "SmokeTests",
+      "status": "failed",
+      "duration_ms": 8,
+      "tags": [],
+      "error": {
+        "code": "test_failed",
+        "message": "expected <1> but got <2>",
+        "source": "XlflowAssert.AssertEquals",
+        "number": 51329
+      }
+    }
+  ],
   "ui": {
     "events": [
       {

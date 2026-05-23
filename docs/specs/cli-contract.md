@@ -10,7 +10,7 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 
 ```text
 xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
-xlflow [--json] init <workbook> [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] doctor
 xlflow [--json] attach --active
 xlflow [--json] backup list
@@ -44,7 +44,7 @@ xlflow [--json] macros [--session]
 xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]
 xlflow [--json] ui button list [--sheet <name>]
 xlflow [--json] ui button remove --id <id> [--sheet <name>]
-xlflow [--json] test [--filter <name>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
+xlflow [--json] test [--filter <name>] [--module <name>] [--tag <tag>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect workbook [--session] [--format text|json|markdown]
 xlflow [--json] inspect sheets [--session] [--format text|json|markdown]
@@ -55,6 +55,8 @@ xlflow [--json] inspect-gui
 xlflow [--json] lint
 xlflow [--json] analyze
 xlflow [--json] check
+xlflow [--json] generate test <module-name>
+xlflow [--json] module install [--push]
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 xlflow [--json] version [--verbose]
 ```
@@ -73,9 +75,13 @@ Excel COM-backed commands also include top-level `bridge` metadata with `host`, 
 
 `new` creates a fresh macro-enabled workbook under `build/`, scaffolds the same project layout as `init`, and then automatically `push`es the scaffolded VBA source into that workbook so the initial workbook and `src/` tree start in sync. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
 
-`init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`), and then automatically `pull`s VBA from the copied workbook into `src/` so the initial source tree reflects workbook reality without a second command. Initialized projects write `[userform].code_source = "frm"` so existing `.frm`-embedded code remains authoritative by default. Because this bootstrap pull opens Excel/VBIDE, `init` is now an Excel COM-backed command and returns an environment failure if the automatic import cannot complete.
+`init` accepts an existing workbook path, copies that workbook into the new project's `build/<basename>` path, records that project-local `build/...` path in `xlflow.toml` under `[excel].path` (for example `build/Sales.xlsx`), and then automatically `pull`s VBA from the copied workbook into `src/` so the initial source tree reflects workbook reality without a second command. Initialized projects write `[userform].code_source = "frm"` so existing `.frm`-embedded code remains authoritative by default. Because this bootstrap pull opens Excel/VBIDE, `init` is now an Excel COM-backed command and returns an environment failure if the automatic import cannot complete. `init --with-module` additionally installs `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured module source root after the bootstrap pull, then automatically `push`es those helper modules into the copied workbook so source and workbook finish in sync. `init --with-module` refuses to overwrite existing helper source files.
 
 `new` and `init` create or update a project-local `.gitignore`. The managed entries ignore Excel temporary files (`~$*.xls*`, `*.tmp`) and xlflow-generated state (`.xlflow/`, `build/`). Existing `.gitignore` content is preserved; missing managed entries are appended without duplicating entries that are already present.
+
+`module install` installs the bundled helper modules `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules` root of an existing xlflow project without changing the workbook by default. `module install --push` additionally imports those helper modules into the configured workbook through the normal `push` path. The command refuses to overwrite any existing target helper source file.
+
+`generate test <module-name>` creates a new test module file under the configured `[src].modules` directory. The generated file includes the standard module header, `Option Explicit`, lifecycle hook stubs (`BeforeAll`, `AfterAll`, `BeforeEach`, `AfterEach`), and a sample test sub. The command fails if a file with the same name already exists. The module name must not include the `.bas` extension.
 
 `new` and `init` do not create `prompts/agent.md`. Use `--with-skill` to install the bundled `xlflow` AI agent skill during project creation. `--agent` selects one of `agents`, `codex`, `claude`, `cursor`, or `gemini`. When `--with-skill` is used without `--agent` in an interactive terminal, xlflow opens a Bubble Tea provider selector. With `--json` or non-interactive input, `--agent` is required.
 
@@ -135,7 +141,7 @@ For multi-step Excel COM verification flows, the preferred contract is to keep o
 
 Before user VBA starts, `run` injects workbook-scoped reserved names that describe the resolved xlflow execution mode, currently including `__XLFLOW_MODE__` and a runtime helper version marker. New `xlflow new` projects also scaffold `src/modules/XlflowRuntime.bas`, which reads workbook-scoped mode first and falls back to `Environ$("XLFLOW_MODE")` only as a secondary override. Stable helper calls are module-qualified VBA functions such as `XlflowRuntime.ModeName()`, `XlflowRuntime.IsHeadless()`, `XlflowRuntime.IsAgent()`, and `XlflowRuntime.IsTest()`. `run --headless` resolves to `headless`; `run --interactive` resolves to `interactive`; plain `run` defaults to `interactive` unless the xlflow process environment sets `XLFLOW_MODE=interactive|headless|ci|agent|test`. During `run` and `test`, xlflow may also inject additional reserved names for helper modules, including `__XLFLOW_DEBUG_PIPE__` for `XlflowDebug.Log` transport and the existing `XlflowUI` runtime stream markers.
 
-New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/XlflowDebug.bas`. `XlflowUI.MsgBox`, `XlflowUI.InputBox`, `XlflowUI.GetOpenFilename`, `XlflowUI.FileDialogOpen`, `XlflowUI.GetSaveAsFilename`, and `XlflowUI.FolderPicker` require a stable dialog id that contains at least one ASCII letter or digit. In interactive mode they delegate to the native VBA or Excel dialog APIs. In headless-like modes (`headless`, `ci`, `agent`, `test`) they resolve scripted responses from xlflow-injected workbook markers keyed by the normalized dialog id. `GetOpenFilename` and `FileDialogOpen` return a Variant string array when `MultiSelect=True`, a single string when exactly one value is resolved, and `False` on cancel. `GetSaveAsFilename` and `FolderPicker` return a single string or `False` on cancel. Missing or invalid scripted responses are deterministic VBA errors owned by `XlflowUI` rather than interactive fallback. `XlflowDebug.Log` is an explicit workbook-side debug wrapper for terminal-visible logging. It always writes to the VBA Immediate Window and, during xlflow `run` or `test`, also mirrors the rendered message to xlflow's stderr/debug envelope.
+New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/XlflowDebug.bas`. Existing projects can add the same bundled helper modules later with `init --with-module` during bootstrap or `module install` after bootstrap. `XlflowUI.MsgBox`, `XlflowUI.InputBox`, `XlflowUI.GetOpenFilename`, `XlflowUI.FileDialogOpen`, `XlflowUI.GetSaveAsFilename`, and `XlflowUI.FolderPicker` require a stable dialog id that contains at least one ASCII letter or digit. In interactive mode they delegate to the native VBA or Excel dialog APIs. In headless-like modes (`headless`, `ci`, `agent`, `test`) they resolve scripted responses from xlflow-injected workbook markers keyed by the normalized dialog id. `GetOpenFilename` and `FileDialogOpen` return a Variant string array when `MultiSelect=True`, a single string when exactly one value is resolved, and `False` on cancel. `GetSaveAsFilename` and `FolderPicker` return a single string or `False` on cancel. Missing or invalid scripted responses are deterministic VBA errors owned by `XlflowUI` rather than interactive fallback. `XlflowDebug.Log` is an explicit workbook-side debug wrapper for terminal-visible logging. It always writes to the VBA Immediate Window and, during xlflow `run` or `test`, also mirrors the rendered message to xlflow's stderr/debug envelope.
 
 `run` adds a `macro` object with `name`, `args`, and `duration_ms`. Failed macro runs return `macro_failed` with `error.source`, `error.number`, `error.message`, `error.line` when VBA exposes a non-zero `Erl` value, and `error.phase` when the failed phase is known. Stable run phases are `open_workbook`, `prepare_vbide`, `compile_vba`, `verify_macro`, `inject_harness`, `invoke_macro`, `save_result`, and `read_trace`. When Excel exposes enough information to distinguish a missing or invalid target macro from user-code failure, `run` returns `macro_not_found` instead of `macro_failed`; when Excel blocks invocation because macros are disabled by workbook security state, `run` returns `macro_disabled`. Suppressed runtime error dialogs keep `error.phase = "invoke_macro"` and may populate `error.message` from the localized VBA dialog text plus `run_diagnostic.dialog` / `run_diagnostic.location` when Excel exposes that context. Plain-text success output must include the elapsed duration and whether the workbook was saved, copied, left unchanged on disk, or may now differ from disk because a live session workbook was used without an explicit save. When `ui.events` are present, human output also includes a `UI` section summarizing captured dialog activity. Plain-text failure output must use the formatted message `Module line <n> Err <n>: <description>` when line and error number are available, and otherwise omit the `line <n>` segment. Because `run` injects a temporary VBA harness to measure duration while avoiding modal VBA runtime error dialogs, VBIDE access failures return an environment error such as `vbide_access_denied` and exit code `3`.
 
@@ -163,7 +169,7 @@ New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/Xlf
 
 `attach --active` inspects the current active Excel workbook. It verifies that the active workbook path matches configured `excel.path` and reports top-level `workbook.path`, `workbook.configured_path`, `workbook.active`, and `workbook.matches_config`. In this version, `attach` does not change the connection target for `pull`, `push`, or `run`; it only validates the human-opened workbook.
 
-`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. Because `test` executes user VBA, xlflow must keep workbook macros executable for both fresh opens and `test --session`. `test --session` runs against the workbook opened by `session start` via the recorded session metadata. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
+`test` opens the configured workbook, discovers argument-free `Sub` procedures from the workbook VBIDE state, and runs procedures whose names start with `Test` or end with `_Test`. `--filter` uses exact procedure-name matching. `--module` filters by exact module name. `--tag` filters by tag attached via `' @Tag("name")` comment lines directly above the test sub. Because `test` executes user VBA, xlflow must keep workbook macros executable for both fresh opens and `test --session`. `test --session` runs against the workbook opened by `session start` via the recorded session metadata. Duplicate discovered test names, no discovered tests, missing filter targets, and VBA test failures are validation failures. Excel, COM, VBIDE, PowerShell, and script failures are environment failures.
 
 For session-aware workbooks, `test --session` is the preferred validation path whenever the workbook is already open or when it will be followed by additional workbook-backed commands. Avoid reopening the workbook between `run`, `test`, `save`, and inspect commands unless the specific behavior under test is the reopen boundary itself.
 
@@ -249,7 +255,18 @@ Command-specific fields are added at the top level:
 - `ui` for `run --ui-stream` / `test --ui-stream` dialog events and `ui button` commands
 - `debug` for `run` / `test` `XlflowDebug.Log` events
 
-`test` result objects contain `name`, `module`, `status`, `duration_ms`, and an optional `error`.
+`test` result objects contain `name`, `module`, `status`, `duration_ms`, `tags`, and an optional `error`. `tags` is always present; in Phase 2 it is an empty array (`[]`) for forward compatibility, and Phase 3 populates it when tag parsing is implemented.
+
+`status` values are `passed`, `failed`, and `inconclusive`. `inconclusive` is produced when a test calls `XlflowAssert.AssertInconclusive`.
+
+`error.code` values for test-level failures include:
+
+- `test_failed` — the test body raised an error or assertion failure.
+- `test_inconclusive` — the test called `AssertInconclusive`.
+- `before_all_failed` — the module's `BeforeAll` hook failed, causing all tests in that module to fail.
+- `after_all_failed` — the module's `AfterAll` hook failed, causing all tests in that module to fail.
+- `before_each_failed` — the test's `BeforeEach` hook failed before the test body ran.
+- `after_each_failed` — the test's `AfterEach` hook failed during cleanup.
 
 `run` and `test` may return `ui.events`, where each event contains `event`, `kind`, `dialog_id`, `prompt`, `title`, `response_source`, optional `resolved_result`, optional `resolved_value`, `redacted`, `runtime_mode`, and optional `error`. When `--ui-stream` is enabled, these same events are also summarized to stderr in real time. `run` and `test` may also return `debug.events`, where each event contains `event`, `message`, `runtime_mode`, `source`, and optional `error`; `debug.count` reports the total number of captured `XlflowDebug.Log` events and `debug.truncated=true` indicates that xlflow kept only the most recent events in the final envelope. `ui button add` and `ui button remove` return `ui.button` with `id`, `name`, `sheet`, `text`, `macro`, `cell`, `left`, `top`, `width`, `height`, and `updated`. `ui button list` returns `ui.buttons` with the same fields for each managed button.
 

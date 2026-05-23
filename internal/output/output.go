@@ -589,6 +589,7 @@ func (r renderer) renderTest(env Envelope) string {
 	runtime := objectMap(env.Runtime)
 	passed := 0
 	failed := 0
+	inconclusive := 0
 	notRun := 0
 	for _, test := range tests {
 		switch stringValue(test, "status") {
@@ -596,6 +597,8 @@ func (r renderer) renderTest(env Envelope) string {
 			passed++
 		case "failed":
 			failed++
+		case "inconclusive":
+			inconclusive++
 		default:
 			notRun++
 		}
@@ -615,6 +618,9 @@ func (r renderer) renderTest(env Envelope) string {
 		b.WriteString(kv("Save", needsSave))
 	}
 	summary := fmt.Sprintf("%d passed, %d failed", passed, failed)
+	if inconclusive > 0 {
+		summary += fmt.Sprintf(", %d inconclusive", inconclusive)
+	}
 	if notRun > 0 {
 		summary += fmt.Sprintf(", %d not run", notRun)
 	}
@@ -628,6 +634,8 @@ func (r renderer) renderTest(env Envelope) string {
 			marker = r.style("[ok]", "42", true)
 		case "failed":
 			marker = r.style("[x]", "196", true)
+		case "inconclusive":
+			marker = r.style("[?]", "214", true)
 		}
 		name := stringValue(test, "name")
 		module := stringValue(test, "module")

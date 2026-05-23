@@ -17,6 +17,15 @@ type InitResult struct {
 	Created    []string `json:"created"`
 }
 
+type InstallModulesResult struct {
+	Created []string `json:"created"`
+}
+
+type bundledModuleTemplate struct {
+	fileName string
+	body     string
+}
+
 type WorkbookCreator func(path string) error
 
 func Init(cwd, workbookPath string) (InitResult, error) {
@@ -56,22 +65,19 @@ func New(cwd, workbookName string, createWorkbook WorkbookCreator) (InitResult, 
 func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, userFormCodeSource string, scaffoldWorkbookModules bool, scaffoldRuntimeHelper bool) (InitResult, error) {
 	var result InitResult
 	configPath := filepath.Join(cwd, config.FileName)
-	assertPath := filepath.Join(cwd, "src", "modules", "XlflowAssert.bas")
-	runtimePath := filepath.Join(cwd, "src", "modules", "XlflowRuntime.bas")
-	uiHelperPath := filepath.Join(cwd, "src", "modules", "XlflowUI.bas")
-	debugHelperPath := filepath.Join(cwd, "src", "modules", "XlflowDebug.bas")
-	mainPath := filepath.Join(cwd, "src", "modules", "Main.bas")
-	appPath := filepath.Join(cwd, "src", "modules", "App.bas")
-	uiPath := filepath.Join(cwd, "src", "modules", "Ui.bas")
+	moduleDir := filepath.Join(cwd, "src", "modules")
 	thisWorkbookPath := filepath.Join(cwd, "src", "workbook", "ThisWorkbook.bas")
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
-	protectedPaths := []string{destPath, configPath, assertPath, mainPath, appPath, uiPath}
+	sampleTestPath := filepath.Join(cwd, "src", "modules", "Tests", "SampleTests.bas")
+	protectedPaths := []string{destPath, configPath}
+	protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldBaseModuleTemplates())...)
 	if scaffoldRuntimeHelper {
-		protectedPaths = append(protectedPaths, runtimePath, uiHelperPath, debugHelperPath)
+		protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldRuntimeHelperModuleTemplates())...)
 	}
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
 	}
+	protectedPaths = append(protectedPaths, sampleTestPath)
 	for _, path := range protectedPaths {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
@@ -82,10 +88,10 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 
 	dirs := []string{
 		filepath.Join(cwd, "src", "modules"),
+		filepath.Join(cwd, "src", "modules", "Tests"),
 		filepath.Join(cwd, "src", "classes"),
 		filepath.Join(cwd, "src", "forms"),
 		filepath.Join(cwd, "src", "workbook"),
-		filepath.Join(cwd, "tests"),
 		filepath.Join(cwd, "build"),
 		filepath.Join(cwd, ".xlflow"),
 	}
@@ -114,36 +120,17 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	result.ConfigPath = config.FileName
 	result.Created = append(result.Created, config.FileName)
 
-	if err := writeExclusive(assertPath, defaultAssertModule); err != nil {
+	installedDefaults, err := installBundledModules(cwd, moduleDir, scaffoldBaseModuleTemplates())
+	if err != nil {
 		return result, err
 	}
-	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, assertPath)))
+	result.Created = append(result.Created, installedDefaults.Created...)
 	if scaffoldRuntimeHelper {
-		if err := writeExclusive(runtimePath, defaultRuntimeModule); err != nil {
+		installedHelpers, err := installBundledModules(cwd, moduleDir, scaffoldRuntimeHelperModuleTemplates())
+		if err != nil {
 			return result, err
 		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, runtimePath)))
-		if err := writeExclusive(uiHelperPath, defaultUIRuntimeModule); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, uiHelperPath)))
-		if err := writeExclusive(debugHelperPath, defaultDebugRuntimeModule); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, debugHelperPath)))
-	}
-	for _, item := range []struct {
-		path string
-		body string
-	}{
-		{mainPath, defaultMainModule},
-		{appPath, defaultAppModule},
-		{uiPath, defaultUiModule},
-	} {
-		if err := writeExclusive(item.path, item.body); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
+		result.Created = append(result.Created, installedHelpers.Created...)
 	}
 	if scaffoldWorkbookModules {
 		for _, item := range []struct {
@@ -159,6 +146,10 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 			result.Created = append(result.Created, filepath.ToSlash(rel(cwd, item.path)))
 		}
 	}
+	if err := writeExclusive(sampleTestPath, sampleTestModule); err != nil {
+		return result, err
+	}
+	result.Created = append(result.Created, filepath.ToSlash(rel(cwd, sampleTestPath)))
 
 	gitignorePath := filepath.Join(cwd, ".gitignore")
 	updatedGitignore, err := ensureGitignore(gitignorePath)
@@ -169,6 +160,84 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 		result.Created = append(result.Created, ".gitignore")
 	}
 	return result, nil
+}
+
+func InstallHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
+	moduleRoot := ResolveModuleRoot(cwd, src)
+	return installBundledModules(cwd, moduleRoot, installHelperModuleTemplates())
+}
+
+func InstallRuntimeHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {
+	moduleRoot := ResolveModuleRoot(cwd, src)
+	return installBundledModules(cwd, moduleRoot, scaffoldRuntimeHelperModuleTemplates())
+}
+
+func ResolveModuleRoot(cwd string, src config.SourceConfig) string {
+	moduleRoot := strings.TrimSpace(src.Modules)
+	if moduleRoot == "" {
+		moduleRoot = config.Default().Src.Modules
+	}
+	if !filepath.IsAbs(moduleRoot) {
+		moduleRoot = filepath.Join(cwd, filepath.FromSlash(moduleRoot))
+	}
+	return moduleRoot
+}
+
+func installBundledModules(cwd, moduleDir string, templates []bundledModuleTemplate) (InstallModulesResult, error) {
+	var result InstallModulesResult
+	paths := bundledModulePaths(moduleDir, templates)
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return result, err
+		}
+	}
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		return result, err
+	}
+	for index, template := range templates {
+		path := paths[index]
+		if err := writeExclusive(path, template.body); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, filepath.ToSlash(rel(cwd, path)))
+	}
+	return result, nil
+}
+
+func bundledModulePaths(moduleDir string, templates []bundledModuleTemplate) []string {
+	paths := make([]string, 0, len(templates))
+	for _, template := range templates {
+		paths = append(paths, filepath.Join(moduleDir, template.fileName))
+	}
+	return paths
+}
+
+func installHelperModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
+		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
+		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
+		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+	}
+}
+
+func scaffoldRuntimeHelperModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
+		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
+		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+	}
+}
+
+func scaffoldBaseModuleTemplates() []bundledModuleTemplate {
+	return []bundledModuleTemplate{
+		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
+		{fileName: "Main.bas", body: defaultMainModule},
+		{fileName: "App.bas", body: defaultAppModule},
+		{fileName: "Ui.bas", body: defaultUiModule},
+	}
 }
 
 func copyFile(src, dest string) (err error) {
@@ -347,21 +416,83 @@ Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Opti
     If IsNull(expected) And IsNull(actual) Then
       Exit Sub
     End If
-    RaiseAssertEqualsFailure expected, actual, message
+    RaiseAssertFailure message, "expected <" & DescribeAssertValue(expected) & "> but got <" & DescribeAssertValue(actual) & ">", "XlflowAssert.AssertEquals"
   End If
 
   If expected <> actual Then
-    RaiseAssertEqualsFailure expected, actual, message
+    RaiseAssertFailure message, "expected <" & DescribeAssertValue(expected) & "> but got <" & DescribeAssertValue(actual) & ">", "XlflowAssert.AssertEquals"
   End If
 End Sub
 
-Private Sub RaiseAssertEqualsFailure(ByVal expected As Variant, ByVal actual As Variant, ByVal message As String)
+Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = "")
+  If IsObject(expected) Or IsObject(actual) Then
+    Err.Raise vbObjectError + 514, "XlflowAssert.AssertNotEqual", "AssertNotEqual supports scalar values only."
+  End If
+
+  If IsArray(expected) Or IsArray(actual) Then
+    Err.Raise vbObjectError + 515, "XlflowAssert.AssertNotEqual", "AssertNotEqual supports scalar values only."
+  End If
+
+  If IsNull(expected) And IsNull(actual) Then
+    RaiseAssertFailure message, "expected values to differ, but both are Null", "XlflowAssert.AssertNotEqual"
+    Exit Sub
+  End If
+
+  If expected = actual Then
+    RaiseAssertFailure message, "expected <" & DescribeAssertValue(expected) & "> to differ from <" & DescribeAssertValue(actual) & ">", "XlflowAssert.AssertNotEqual"
+  End If
+End Sub
+
+Public Sub AssertTrue(ByVal condition As Boolean, Optional ByVal message As String = "")
+  If Not condition Then
+    RaiseAssertFailure message, "expected True but got False", "XlflowAssert.AssertTrue"
+  End If
+End Sub
+
+Public Sub AssertFalse(ByVal condition As Boolean, Optional ByVal message As String = "")
+  If condition Then
+    RaiseAssertFailure message, "expected False but got True", "XlflowAssert.AssertFalse"
+  End If
+End Sub
+
+Public Sub AssertFail(Optional ByVal message As String = "")
+  RaiseAssertFailure message, "assertion failed", "XlflowAssert.AssertFail"
+End Sub
+
+Public Sub AssertInconclusive(Optional ByVal message As String = "")
   Dim detail As String
-  detail = "expected <" & DescribeAssertValue(expected) & "> but got <" & DescribeAssertValue(actual) & ">"
+  detail = "inconclusive"
+  If Len(message) > 0 Then
+    detail = message
+  End If
+  Err.Raise vbObjectError + 516, "XlflowAssert.AssertInconclusive", detail
+End Sub
+
+Public Sub AssertIsNothing(ByVal value As Variant, Optional ByVal message As String = "")
+  If Not IsObject(value) Then
+    RaiseAssertFailure message, "expected an object but got a non-object", "XlflowAssert.AssertIsNothing"
+    Exit Sub
+  End If
+  If Not value Is Nothing Then
+    RaiseAssertFailure message, "expected Nothing but got an object reference", "XlflowAssert.AssertIsNothing"
+  End If
+End Sub
+
+Public Sub AssertIsNotNothing(ByVal value As Variant, Optional ByVal message As String = "")
+  If Not IsObject(value) Then
+    RaiseAssertFailure message, "expected an object but got a non-object", "XlflowAssert.AssertIsNotNothing"
+    Exit Sub
+  End If
+  If value Is Nothing Then
+    RaiseAssertFailure message, "expected an object reference but got Nothing", "XlflowAssert.AssertIsNotNothing"
+  End If
+End Sub
+
+Private Sub RaiseAssertFailure(ByVal message As String, ByVal detail As String, ByVal source As String)
   If Len(message) > 0 Then
     detail = message & ": " & detail
   End If
-  Err.Raise vbObjectError + 513, "XlflowAssert.AssertEquals", detail
+  Err.Raise vbObjectError + 513, source, detail
 End Sub
 
 Private Function DescribeAssertValue(ByVal value As Variant) As String
@@ -1259,3 +1390,115 @@ Cleanup:
 	End If
 End Sub
 `
+
+const sampleTestModule = `Attribute VB_Name = "SampleTests"
+Option Explicit
+
+' xlflow tests are public parameterless Sub procedures whose names match
+' Test* or *_Test.  xlflow discovers them automatically at run time.
+'
+' Use XlflowAssert helpers to raise clear, JSON-friendly failures.
+'
+' Tags: add '@Tag("name")' comment lines directly above a test sub
+' and run only matching tests with  xlflow test --tag <name>.
+'
+' Hooks: BeforeAll / AfterAll / BeforeEach / AfterEach are optional
+' reserved names.  They must be public parameterless Subs and they
+' affect only tests in the same module.
+'
+' Keep tests independent.  Use BeforeEach / AfterEach for isolation
+' and BeforeAll for expensive one-time setup.
+
+Public Sub BeforeAll()
+    ' Runs once before the first test in this module.
+End Sub
+
+Public Sub AfterAll()
+    ' Runs once after the last test in this module.
+End Sub
+
+Public Sub BeforeEach()
+    ' Runs before every test in this module.
+End Sub
+
+Public Sub AfterEach()
+    ' Runs after every test in this module.
+End Sub
+
+'@Tag("smoke")
+Public Sub Test_Sample_Pass()
+    ' A passing test demonstrates the AssertEquals helper.
+    XlflowAssert.AssertEquals 1 + 1, 2, "basic arithmetic should work"
+End Sub
+
+Public Sub Test_Sample_Inconclusive()
+    ' Mark not-yet-implemented tests as inconclusive instead of
+    ' commenting them out.  They appear as [?] in terminal output.
+    XlflowAssert.AssertInconclusive "not implemented yet"
+End Sub
+`
+
+// GenerateTestModuleResult is returned by GenerateTestModule.
+type GenerateTestModuleResult struct {
+	Path    string `json:"path"`
+	Created bool   `json:"created"`
+}
+
+// GenerateTestModule creates a new test module file at the configured modules directory.
+// The moduleName should not include the .bas extension.
+func GenerateTestModule(cwd, moduleName string, src config.SourceConfig) (GenerateTestModuleResult, error) {
+	var result GenerateTestModuleResult
+	if moduleName == "" {
+		return result, errors.New("module name is required")
+	}
+	cleanName := strings.TrimSpace(moduleName)
+	cleanName = strings.TrimSuffix(cleanName, ".bas")
+	if cleanName == "" {
+		return result, errors.New("module name is empty after cleaning")
+	}
+	if cleanName != filepath.Base(cleanName) || strings.Contains(cleanName, "..") {
+		return result, errors.New("invalid module name")
+	}
+
+	modulesRoot := src.Modules
+	if modulesRoot == "" {
+		modulesRoot = filepath.Join("src", "modules", "Tests")
+	}
+	moduleDir := filepath.Join(cwd, filepath.Clean(modulesRoot))
+	destPath := filepath.Join(moduleDir, cleanName+".bas")
+
+	if _, err := os.Stat(destPath); err == nil {
+		return result, fmt.Errorf("test module already exists: %s", destPath)
+	}
+
+	body := fmt.Sprintf(`Attribute VB_Name = "%s"
+Option Explicit
+
+Public Sub BeforeAll()
+End Sub
+
+Public Sub AfterAll()
+End Sub
+
+Public Sub BeforeEach()
+End Sub
+
+Public Sub AfterEach()
+End Sub
+
+Public Sub Test_Sample()
+    XlflowAssert.AssertTrue True, "replace with real assertions"
+End Sub
+`, cleanName)
+
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		return result, fmt.Errorf("failed to create modules directory: %w", err)
+	}
+	if err := os.WriteFile(destPath, []byte(body), 0644); err != nil {
+		return result, fmt.Errorf("failed to write test module: %w", err)
+	}
+
+	result.Path = destPath
+	result.Created = true
+	return result, nil
+}

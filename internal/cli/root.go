@@ -165,6 +165,8 @@ func (a *app) rootCommand() *cobra.Command {
 		a.lintCommand(),
 		a.analyzeCommand(),
 		a.checkCommand(),
+		a.generateCommand(),
+		a.moduleCommand(),
 		a.skillCommand(),
 		a.versionCommand(),
 	)
@@ -978,6 +980,7 @@ func (a *app) newCommand() *cobra.Command {
 
 func (a *app) initCommand() *cobra.Command {
 	var withSkill bool
+	var withModule bool
 	var skillAgent string
 	var noUpdateCheck bool
 
@@ -1011,6 +1014,28 @@ func (a *app) initCommand() *cobra.Command {
 				if bootstrapCode != output.ExitSuccess {
 					return a.write(bootstrapEnv, bootstrapCode)
 				}
+				var installedModules project.InstallModulesResult
+				if withModule {
+					cfg, err := a.loadConfig("init")
+					if err != nil {
+						return err
+					}
+					installedModules, err = project.InstallHelperModules(a.cwd, cfg.Src)
+					if err != nil {
+						return a.writeFailure("init", output.ExitConfig, "module_install_failed", err)
+					}
+					pushEnv, pushCode, pushErr := a.pushSource("init", cfg, excel.PushOptions{
+						BackupMode: "always",
+						Keepalive:  runOpts,
+						SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
+					}, "Importing bundled helper modules")
+					if pushErr != nil {
+						return pushErr
+					}
+					if pushCode != output.ExitSuccess {
+						return a.write(pushEnv, pushCode)
+					}
+				}
 				var skillResult agentskill.InstallResult
 				if withSkill {
 					skillResult, err = agentskill.Install(skillOpts)
@@ -1025,6 +1050,13 @@ func (a *app) initCommand() *cobra.Command {
 					"copied workbook to " + result.Workbook,
 					"pulled workbook VBA into source",
 				}
+				if withModule {
+					env.Source = map[string]any{"created": installedModules.Created}
+					env.Logs = append(env.Logs,
+						fmt.Sprintf("installed %d bundled helper module(s) into source", len(installedModules.Created)),
+						"pushed bundled helper modules to workbook",
+					)
+				}
 				if withSkill {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
@@ -1033,6 +1065,7 @@ func (a *app) initCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&withSkill, "with-skill", false, "install the bundled xlflow AI agent skill")
+	cmd.Flags().BoolVar(&withModule, "with-module", false, "install bundled xlflow helper modules and push them to the workbook")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
 	return cmd
@@ -1175,23 +1208,7 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
-			if err := a.runUserFormCodeSourcePreflight("push", cfg, nil); err != nil {
-				return err
-			}
-			if err := a.runUserFormArtifactPreflight("push", cfg, nil); err != nil {
-				return err
-			}
-			if err := a.runSourcePreflight("push", cfg, "pushing to Excel", nil, nil); err != nil {
-				return err
-			}
-			var env output.Envelope
-			var code int
-			run := func() error {
-				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, pushOpts)
-				return runErr
-			}
-			err = a.withExcelProgress("Importing VBA source", commandOpts, run)
+			env, code, err := a.pushSource("push", cfg, pushOpts, "Importing VBA source")
 			if err != nil {
 				return err
 			}
@@ -1203,6 +1220,89 @@ func (a *app) pushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
+	return cmd
+}
+
+func (a *app) generateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "generate",
+		Short: "Generate project artifacts",
+	}
+	cmd.AddCommand(a.generateTestCommand())
+	return cmd
+}
+
+func (a *app) generateTestCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "test <module-name>",
+		Short: "Generate a new VBA test module",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("generate test")
+			if err != nil {
+				return err
+			}
+			result, err := project.GenerateTestModule(a.cwd, args[0], cfg.Src)
+			if err != nil {
+				return a.writeFailure("generate test", output.ExitConfig, "generate_test_failed", err)
+			}
+			env := output.New("generate test")
+			env.Source = map[string]any{"path": result.Path, "created": result.Created}
+			env.Logs = []string{fmt.Sprintf("created test module: %s", result.Path)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	return cmd
+}
+
+func (a *app) moduleCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "module",
+		Short: "Manage bundled xlflow helper modules",
+	}
+	cmd.AddCommand(a.moduleInstallCommand())
+	return cmd
+}
+
+func (a *app) moduleInstallCommand() *cobra.Command {
+	var push bool
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install bundled xlflow helper modules into the configured source tree",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("module install")
+			if err != nil {
+				return err
+			}
+			result, err := project.InstallHelperModules(a.cwd, cfg.Src)
+			if err != nil {
+				return a.writeFailure("module install", output.ExitConfig, "module_install_failed", err)
+			}
+			env := output.New("module install")
+			env.Source = map[string]any{"created": result.Created}
+			env.Logs = []string{fmt.Sprintf("installed %d bundled helper module(s) into source", len(result.Created))}
+			if !push {
+				return a.write(env, output.ExitSuccess)
+			}
+			commandOpts := buildCommandOptions(a.stderrWriter())
+			pushEnv, pushCode, pushErr := a.pushSource("module install", cfg, excel.PushOptions{
+				BackupMode: "always",
+				Keepalive:  commandOpts,
+				SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
+			}, "Importing bundled helper modules")
+			if pushErr != nil {
+				return pushErr
+			}
+			if pushCode != output.ExitSuccess {
+				return a.write(pushEnv, pushCode)
+			}
+			env.Workbook = cfg.Excel.Path
+			env.Logs = append(env.Logs, "pushed bundled helper modules to workbook")
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().BoolVar(&push, "push", false, "push the bundled helper modules to the configured workbook after installation")
 	return cmd
 }
 
@@ -1228,6 +1328,30 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 		NoSave:      noSave,
 		Keepalive:   keepalive,
 	}, nil
+}
+
+func (a *app) pushSource(command string, cfg config.Config, pushOpts excel.PushOptions, progressLabel string) (output.Envelope, int, error) {
+	if err := a.runUserFormCodeSourcePreflight(command, cfg, nil); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if err := a.runUserFormArtifactPreflight(command, cfg, nil); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if err := a.runSourcePreflight(command, cfg, "pushing to Excel", nil, nil); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	var env output.Envelope
+	var code int
+	run := func() error {
+		var runErr error
+		env, code, runErr = excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, pushOpts)
+		return runErr
+	}
+	err := a.withExcelProgress(progressLabel, pushOpts.Keepalive, run)
+	if err != nil {
+		return output.Envelope{}, 0, err
+	}
+	return env, code, nil
 }
 
 type rollbackTarget struct {
@@ -2488,6 +2612,8 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 
 func (a *app) testCommand() *cobra.Command {
 	var filter string
+	var moduleFilter string
+	var tagFilter string
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
@@ -2521,7 +2647,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}})
+				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -2531,6 +2657,8 @@ func (a *app) testCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	cmd.Flags().StringVar(&moduleFilter, "module", "", "run only tests in the module whose name exactly matches filter")
+	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")

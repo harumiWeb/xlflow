@@ -93,6 +93,9 @@ type PushOptions struct {
 	Session     bool
 	NoSave      bool
 	Keepalive   CommandOptions
+	// SourceRoot, if set, overrides the configured source directories and
+	// pushes only modules under this root. Other component dirs are cleared.
+	SourceRoot string
 }
 
 type ExportImageOptions struct {
@@ -188,6 +191,8 @@ type TestOptions struct {
 	UIResponses   UIResponses
 	UIStream      UIStreamOptions
 	DebugStream   DebugStreamOptions
+	ModuleFilter  string
+	TagFilter     string
 }
 
 const (
@@ -384,12 +389,22 @@ func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Env
 		backupMode = "never"
 		changedOnly = true
 	}
+	modulesDir := filepath.Join(r.RootDir, cfg.Src.Modules)
+	classesDir := filepath.Join(r.RootDir, cfg.Src.Classes)
+	formsDir := filepath.Join(r.RootDir, cfg.Src.Forms)
+	workbookDir := filepath.Join(r.RootDir, cfg.Src.Workbook)
+	if opts.SourceRoot != "" {
+		modulesDir = opts.SourceRoot
+		classesDir = ""
+		formsDir = ""
+		workbookDir = ""
+	}
 	return r.run("push", map[string]string{
 		"WorkbookPath":            workbookPath(r.RootDir, cfg.Excel.Path),
-		"ModulesDir":              filepath.Join(r.RootDir, cfg.Src.Modules),
-		"ClassesDir":              filepath.Join(r.RootDir, cfg.Src.Classes),
-		"FormsDir":                filepath.Join(r.RootDir, cfg.Src.Forms),
-		"WorkbookDir":             filepath.Join(r.RootDir, cfg.Src.Workbook),
+		"ModulesDir":              modulesDir,
+		"ClassesDir":              classesDir,
+		"FormsDir":                formsDir,
+		"WorkbookDir":             workbookDir,
 		"CodeSource":              cfg.UserForm.CodeSource,
 		"BackupRoot":              filepath.Join(r.RootDir, ".xlflow", "backups"),
 		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
@@ -661,6 +676,12 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 		if strings.TrimSpace(opts.DebugStream.PipeName) != "" {
 			args["DebugStreamPipeName"] = strings.TrimSpace(opts.DebugStream.PipeName)
 		}
+	}
+	if strings.TrimSpace(opts.ModuleFilter) != "" {
+		args["ModuleFilter"] = strings.TrimSpace(opts.ModuleFilter)
+	}
+	if strings.TrimSpace(opts.TagFilter) != "" {
+		args["TagFilter"] = strings.TrimSpace(opts.TagFilter)
 	}
 	return args
 }

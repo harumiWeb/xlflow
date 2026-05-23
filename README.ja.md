@@ -145,6 +145,15 @@ xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
 
 `XlflowDebug.Log` は追加の CLI flag を必要としません。`xlflow run` と `xlflow test` では既定で stderr に debug line を流し、最終 JSON envelope の top-level `debug` に最近の event を含めます。
 
+既存 project に bundled helper module を導入したい場合は、bootstrap 時か後付けで次の command を使えます。
+
+```bash
+xlflow init LegacyBook.xlsm --with-module
+xlflow module install --push
+```
+
+`init --with-module` は最初の bootstrap pull のあとに `XlflowAssert`、`XlflowRuntime`、`XlflowUI`、`XlflowDebug` を追加し、そのまま copied workbook へ push します。`module install` は既定では source のみを更新し、設定済み module root に同じ helper bundle を配置します。workbook もすぐ更新したい場合だけ `--push` を付けてください。
+
 ---
 
 ## 動作要件
