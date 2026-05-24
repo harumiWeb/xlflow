@@ -442,16 +442,16 @@ func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
 	}
 }
 
-func TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef(t *testing.T) {
+func TestXlflowDebugLogDoesNotForwardParamArrayToHelper(t *testing.T) {
 	body := defaultDebugRuntimeModule
-	if !strings.Contains(body, "JoinLogMessage") {
-		t.Fatal("template should contain JoinLogMessage")
-	}
 	if !strings.Contains(body, "Public Sub Log(ParamArray Parts() As Variant)") {
 		t.Fatal("template should contain ParamArray Log entry")
 	}
-	if strings.Contains(body, "ByRef Parts() As Variant") {
-		t.Fatalf("JoinLogMessage must not receive a ParamArray via ByRef; use ByVal Variant instead:\n%s", body)
+	if strings.Contains(body, "JoinLogMessage(Parts)") {
+		t.Fatalf("Log must not forward ParamArray Parts() to another helper; build the message inline instead:\n%s", body)
+	}
+	if strings.Contains(body, "Private Function JoinLogMessage") {
+		t.Fatalf("template should not declare JoinLogMessage; ParamArray forwarding is not portable across VBA hosts:\n%s", body)
 	}
 }
 

@@ -4,7 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Fixed `XlflowDebug.bas` helper module `JoinLogMessage` to use `ByVal Parts() As Variant` instead of `ByRef`, preventing "ParamArray usage is not appropriate" compile errors in VBA environments where explicit `ByRef` conflicts with `ParamArray` forwarding.
+- Fixed `XlflowDebug.bas` helper module to stop forwarding `Log`'s `ParamArray` into a secondary helper procedure, preventing VBA compile/runtime failures such as "Sub または Function が定義されていません" and "ParamArray の使い方が適切ではありません" in some hosts.
 - Fixed `xlflow run --diagnostic` compile watcher to return structured `vba_compile_failed` errors when the VBE compile command control cannot be found, instead of silently reclassifying the failure as `vbide_access_denied`.
 - Fixed `xlflow ui button add` so it auto-reuses a matching live session workbook when `.xlflow/session.json` points at the configured workbook, preventing the Excel SaveAs dialog that previously appeared when a session was active.
 - Extended `ui button add`, `ui button list`, and `ui button remove` to use the shared session-aware workbook open helper and explicit save/release cleanup, matching the behavior of `push`, `pull`, `run`, `trace`, and other workbook-backed commands.

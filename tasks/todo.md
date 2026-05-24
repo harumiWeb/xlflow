@@ -2,15 +2,15 @@
 
 ## Status
 
-- [x] Investigated `ParamArray` ByRef issue in `defaultDebugRuntimeModule` (`scaffold.go:1228`)
-- [x] Changed `JoinLogMessage(ByRef Parts() As Variant)` → `ByVal` — Fix A
+- [x] Investigated `ParamArray` forwarding issue in `defaultDebugRuntimeModule`
+- [x] Removed `JoinLogMessage(Parts)` forwarding and built the message inline in `Log` — Fix A
 - [x] Investigated `Invoke-XlflowVBECompile` catch block missing `$result.ok = $false` — Fix B
 - [x] Added `$result.ok = $false` in common.ps1 catch block for compile control lookup failure
-- [x] Added regression test: `TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef` (`scaffold_test.go`)
+- [x] Added regression test: `TestXlflowDebugLogDoesNotForwardParamArrayToHelper` (`scaffold_test.go`)
 - [x] Added regression test: `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` (`scripts_test.go`)
 - [x] Updated CHANGELOG.md with both fixes under Unreleased
 - [x] Updated tasks/feature_spec.md with bug fix spec
-- [x] Updated tasks/lessons.md with ParamArray/ByRef lesson
+- [x] Updated tasks/lessons.md with ParamArray forwarding lesson
 - [x] All scaffold tests pass (28)
 - [x] All compile/dialog/run tests pass (5+20 script parse)
 - [x] go vet clean

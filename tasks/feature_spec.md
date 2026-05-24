@@ -4,15 +4,15 @@
 
 Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebug.bas` compile errors and misclassify VBE compile control lookup failures.
 
-## Fix A: XlflowDebug ParamArray ByRef
+## Fix A: XlflowDebug ParamArray forwarding
 
 **Goal:** `XlflowDebug.bas` helper module must not cause additional compile errors when user code has compile errors.
 
-**Root cause:** `defaultDebugRuntimeModule` in `internal/project/scaffold.go` defined `JoinLogMessage(ByRef Parts() As Variant)`, which cannot receive a `ParamArray` in some VBA environments.
+**Root cause:** `defaultDebugRuntimeModule` in `internal/project/scaffold.go` forwarded `Log(ParamArray Parts() As Variant)` into a secondary helper call `JoinLogMessage(Parts)`. That forwarding is not portable across VBA hosts: changing the helper to `ByRef Parts() As Variant` triggers "ParamArray の使い方が適切ではありません", while `ByVal Parts() As Variant` can still leave `JoinLogMessage` unresolved at compile/runtime in real Excel.
 
-**Fix:** Change `ByRef` to `ByVal` in `JoinLogMessage` parameter declaration. Public interface `Log(ParamArray Parts() As Variant)` is preserved.
+**Fix:** Stop forwarding `Parts()` to another procedure. Build the rendered message inline inside `Log` while preserving the public interface `Log(ParamArray Parts() As Variant)`.
 
-**Regression test:** `TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef` in `internal/project/scaffold_test.go` — verifies the scaffolded module does not contain `ByRef Parts() As Variant`.
+**Regression test:** `TestXlflowDebugLogDoesNotForwardParamArrayToHelper` in `internal/project/scaffold_test.go` — verifies the scaffolded module does not call `JoinLogMessage(Parts)` or declare a forwarding helper.
 
 ## Fix B: compile watcher failure misclassification
 
