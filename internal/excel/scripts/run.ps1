@@ -233,7 +233,7 @@ try {
       throw "runtime dialog shown"
     }
     if ($null -ne $invokeResult.error) {
-      throw ([string]$invokeResult.error.message)
+      throw (New-XlflowErrorPayloadException -ErrorPayload $invokeResult.error)
     }
     $successLog = "ran " + $MacroName + " directly in " + $durationMs + "ms"
     $result.macro = [ordered]@{
@@ -418,7 +418,7 @@ try {
     throw "runtime dialog shown"
   }
   if ($null -ne $invokeResult.error) {
-    throw ([string]$invokeResult.error.message)
+    throw (New-XlflowErrorPayloadException -ErrorPayload $invokeResult.error)
   }
   $successLog = "ran " + $MacroName + " in " + $durationMs + "ms"
   if ($null -ne $runnerComponent) {

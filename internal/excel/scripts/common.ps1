@@ -1617,13 +1617,17 @@ function Invoke-XlflowExcelCallWithDialogWatch {
     $dialog = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds $WaitMilliseconds
     if ($null -ne $Workbook -and [bool]$dialog.found) {
       try {
-        if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
-          $selection = $dialog.selection
-        } elseif ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
-          $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+        if ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
+          if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+            $selection = $dialog.selection
+          } else {
+            $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+          }
           if (-not [bool]$dialog.break_mode_reset) {
             [void](Exit-XlflowVBEBreakMode -VBE $Workbook.VBProject.VBE)
           }
+        } elseif ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+          $selection = $dialog.selection
         } else {
           $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
         }
@@ -2000,7 +2004,7 @@ function Get-XlflowSelectionDiagnosticScore {
       } else {
         $score += 60
       }
-      if ($lineText -match "^\s*(''|Rem\b)") {
+      if ($lineText -match "^\s*('|Rem\b)") {
         $score -= 25
       }
     }
@@ -2258,11 +2262,13 @@ function Receive-XlflowExcelMacroRunnerProcess {
   } catch {
     Write-Verbose ("failed to receive macro runner process result: " + $_.Exception.Message)
   } finally {
-    if ($null -ne $Runner.process) {
-      try { $Runner.process.Dispose() } catch { Write-Verbose ("failed to dispose macro runner process: " + $_.Exception.Message) }
-    }
-    if (-not [string]::IsNullOrWhiteSpace([string]$Runner.output_path) -and (Test-Path -LiteralPath $Runner.output_path)) {
-      Remove-Item -LiteralPath $Runner.output_path -Force -ErrorAction SilentlyContinue
+    if ($result.completed) {
+      if ($null -ne $Runner.process) {
+        try { $Runner.process.Dispose() } catch { Write-Verbose ("failed to dispose macro runner process: " + $_.Exception.Message) }
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$Runner.output_path) -and (Test-Path -LiteralPath $Runner.output_path)) {
+        Remove-Item -LiteralPath $Runner.output_path -Force -ErrorAction SilentlyContinue
+      }
     }
   }
 
@@ -2357,13 +2363,17 @@ function Invoke-XlflowExcelMacroRunWithDialogWatch {
 
     if ($null -ne $Workbook -and [bool]$dialog.found) {
       try {
-        if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
-          $selection = $dialog.selection
-        } elseif ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
-          $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+        if ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
+          if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+            $selection = $dialog.selection
+          } else {
+            $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+          }
           if (-not [bool]$dialog.break_mode_reset) {
             [void](Exit-XlflowVBEBreakMode -VBE $Workbook.VBProject.VBE)
           }
+        } elseif ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+          $selection = $dialog.selection
         } else {
           $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
         }
@@ -2391,6 +2401,25 @@ function Invoke-XlflowExcelMacroRunWithDialogWatch {
     dialog = $dialog
     selection = $selection
   }
+}
+
+function New-XlflowErrorPayloadException {
+  param($ErrorPayload)
+
+  if ($null -eq $ErrorPayload) {
+    return $null
+  }
+
+  $message = [string]$ErrorPayload.message
+  $hresult = 0
+  if ($null -ne $ErrorPayload.hresult) {
+    $hresult = [int]$ErrorPayload.hresult
+  }
+  $exception = New-Object System.Runtime.InteropServices.COMException($message, $hresult)
+  if (-not [string]::IsNullOrWhiteSpace([string]$ErrorPayload.source)) {
+    $exception.Source = [string]$ErrorPayload.source
+  }
+  return $exception
 }
 
 function Invoke-XlflowVBECompile {
