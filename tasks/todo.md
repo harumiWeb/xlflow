@@ -29,6 +29,14 @@
 
 - `C:\dev\go\takt-worktrees\20260524T0200-xlflow-issue-bug-high-task-bri\tmp_workspaces\paramarray-e2e` — Fix A/B E2E verification
 
+## Runtime diagnostic follow-up
+
+- [x] Reproduced live break-mode selection on `Main.SampleFail` and confirmed the real failing statement is `Main` line 9 (`x = "abc"`) in `tmp_workspaces\runtime-diagnostic-e2e`
+- [x] Added runtime selection scoring so user-code statements beat structural lines and temporary `XlflowRun_*` harness panes
+- [x] Moved macro execution for dialog-watched runtime runs into a disposable child `powershell.exe` process so parent CLI can recover even if `excel.Run(...)` remains blocked after break-mode entry
+- [x] Verified `Get-XlflowRuntimeDebugSelectionByProcessId` captures `Main:9` and resets break mode on the live Excel instance
+- [ ] Full `xlflow run --session --diagnostic` E2E remains blocked in this environment by the separate pre-existing `VBE Compile command was not found.` compile-gate issue before runtime invocation
+
 ---
 
 # xlflow status implementation

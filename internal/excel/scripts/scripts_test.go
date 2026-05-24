@@ -1436,6 +1436,79 @@ func TestCommonScriptExposesReleaseComObjectHelper(t *testing.T) {
 	}
 }
 
+func TestGetXlflowExcelByProcessIdSearchesChildWindows(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Get-XlflowExcelByProcessId`,
+		`foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd)))`,
+		`AccessibleObjectFromWindow($candidateHwnd`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGetXlflowVBEByProcessIdSearchesChildWindows(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Get-XlflowVBEByProcessId`,
+		`foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd)))`,
+		`$candidate = $dispatch.Application.VBE`,
+		`$null = $candidate.ActiveCodePane`,
+		`$null = $candidate.CodePanes`,
+		`$null = $candidate.CommandBars`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGetXlflowRuntimeDebugSelectionByProcessIdUsesAccessibleVBEAndResets(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Get-XlflowRuntimeDebugSelectionByProcessId`,
+		`$vbe = $dispatch.Application.VBE`,
+		`$selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $vbe`,
+		`$result.break_mode_reset = Exit-XlflowVBEBreakMode -VBE $vbe`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestInvokeXlflowRuntimeDebugSelectionCaptureProcessUsesExternalPowerShell(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Invoke-XlflowRuntimeDebugSelectionCaptureProcess`,
+		`& powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -Command $command`,
+		`$capture = Get-XlflowRuntimeDebugSelectionByProcessId -ProcessId `,
+		`ConvertTo-Json -Depth 6 -Compress`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestUIButtonIdAndNameNormalization(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -2086,6 +2159,26 @@ func TestAnyVbaDialogWatcherDoesNotFallbackToFirstButtonForCompileDialogs(t *tes
 	}
 }
 
+func TestRuntimeDialogWatcherPrefersDebugButton(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$button.text -match "(?i)Debug"`,
+		`$button.text -match "デバッグ"`,
+		`$action = "runtime_debug"`,
+		`Invoke-XlflowRuntimeDebugSelectionCaptureProcess -CommonScriptPath $CommonScriptPath -ProcessId $TargetProcessId`,
+		`$selection = $debugCapture.selection`,
+		`break_mode_reset = $breakModeReset`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestInvokeXlflowExcelCallWithDialogWatchUsesShortPostInvokeWait(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -2116,6 +2209,289 @@ func TestInvokeXlflowExcelCallWithDialogWatchUsesShortPostInvokeWait(t *testing.
 	}
 	if got.Value != "ok" {
 		t.Fatalf("value = %q, want ok", got.Value)
+	}
+}
+
+func TestInvokeXlflowExcelCallWithDialogWatchCapturesRuntimeDebugSelectionAndResets(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"$script:resetCalled = $false; "+
+			"function Get-XlflowExcelProcessId { param($Excel) return 123 }; "+
+			"function Start-XlflowExcelDialogWatcher { param([int]$ProcessId, [string]$Kind = 'runtime', [int]$TimeoutMilliseconds = 10000, [int]$PollMilliseconds = 50) return [pscustomobject]@{ powershell = $null; async = $null } }; "+
+			"function Receive-XlflowExcelDialogWatcher { param($Watcher, [int]$WaitMilliseconds = 250) return [pscustomobject]@{ found = $true; kind = 'runtime'; action = 'runtime_debug' } }; "+
+			"function Get-XlflowVBERuntimeSelectionDiagnostic { param($VBE, [int]$WaitMilliseconds = 1500, [int]$PollMilliseconds = 50) return [ordered]@{ location = [ordered]@{ module = 'Main'; line = 9; column = 3; end_line = 9; end_column = 3; token = 'x' }; nearby_code = @('> 9 | x = \"abc\"') } }; "+
+			"function Exit-XlflowVBEBreakMode { param($VBE) $script:resetCalled = $true; return $true }; "+
+			"$r = Invoke-XlflowExcelCallWithDialogWatch -Excel ([pscustomobject]@{}) -Workbook ([pscustomobject]@{ VBProject = [pscustomobject]@{ VBE = [pscustomobject]@{} } }) -Invocation { throw 'boom' }; "+
+			"[pscustomobject]@{ module = [string]$r.selection.location.module; line = [int]$r.selection.location.line; action = [string]$r.dialog.action; reset = [bool]$script:resetCalled } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime debug selection command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Module string `json:"module"`
+		Line   int    `json:"line"`
+		Action string `json:"action"`
+		Reset  bool   `json:"reset"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse runtime debug selection output: %v\n%s", err, out)
+	}
+	if got.Module != "Main" || got.Line != 9 {
+		t.Fatalf("selection = %+v, want Main line 9", got)
+	}
+	if got.Action != "runtime_debug" {
+		t.Fatalf("action = %q, want runtime_debug", got.Action)
+	}
+	if !got.Reset {
+		t.Fatalf("expected break mode reset to be requested, got %+v", got)
+	}
+}
+
+func TestInvokeXlflowExcelCallWithDialogWatchUsesWatcherProvidedSelection(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"function Get-XlflowExcelProcessId { param($Excel) return 123 }; "+
+			"function Start-XlflowExcelDialogWatcher { param([int]$ProcessId, [string]$Kind = 'runtime', [int]$TimeoutMilliseconds = 10000, [int]$PollMilliseconds = 50) return [pscustomobject]@{ powershell = $null; async = $null } }; "+
+			"function Receive-XlflowExcelDialogWatcher { param($Watcher, [int]$WaitMilliseconds = 250) return [pscustomobject]@{ found = $true; kind = 'runtime'; action = 'runtime_debug'; selection = [ordered]@{ location = [ordered]@{ module = 'Main'; line = 9; column = 2; end_line = 9; end_column = 12; token = 'x = \"abc\"' }; nearby_code = @('> 9 | x = \"abc\"') }; break_mode_reset = $true } }; "+
+			"function Get-XlflowVBERuntimeSelectionDiagnostic { param($VBE, [int]$WaitMilliseconds = 1500, [int]$PollMilliseconds = 50) throw 'unexpected fallback capture' }; "+
+			"function Exit-XlflowVBEBreakMode { param($VBE) throw 'unexpected reset fallback' }; "+
+			"$r = Invoke-XlflowExcelCallWithDialogWatch -Excel ([pscustomobject]@{}) -Workbook ([pscustomobject]@{ VBProject = [pscustomobject]@{ VBE = [pscustomobject]@{} } }) -Invocation { throw 'boom' }; "+
+			"[pscustomobject]@{ module = [string]$r.selection.location.module; line = [int]$r.selection.location.line; token = [string]$r.selection.location.token } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("watcher-provided selection command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Module string `json:"module"`
+		Line   int    `json:"line"`
+		Token  string `json:"token"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse watcher-provided selection output: %v\n%s", err, out)
+	}
+	if got.Module != "Main" || got.Line != 9 || got.Token == "" {
+		t.Fatalf("selection = %+v, want Main line 9 with token", got)
+	}
+}
+
+func TestGetXlflowVBERuntimeSelectionDiagnosticIgnoresTemporaryHarnessSelection(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"$script:count = 0; "+
+			"function Get-XlflowVBESelectionDiagnostic { param($VBE) "+
+			"$script:count++; "+
+			"if ($script:count -eq 1) { return [ordered]@{ location = [ordered]@{ module = 'XlflowRun_deadbeef'; line = 17; column = 1; end_line = 17; end_column = 1; token = 'Application' }; nearby_code = @('> 17 |   Application.Run targetMacro') } } "+
+			"return [ordered]@{ location = [ordered]@{ module = 'Main'; line = 9; column = 3; end_line = 9; end_column = 3; token = 'x' }; nearby_code = @('> 9 | x = \"abc\"') } "+
+			"}; "+
+			"$r = Get-XlflowVBERuntimeSelectionDiagnostic -VBE ([pscustomobject]@{}) -WaitMilliseconds 50 -PollMilliseconds 1; "+
+			"[pscustomobject]@{ module = [string]$r.location.module; line = [int]$r.location.line; calls = [int]$script:count } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime selection diagnostic command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Module string `json:"module"`
+		Line   int    `json:"line"`
+		Calls  int    `json:"calls"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse runtime selection diagnostic output: %v\n%s", err, out)
+	}
+	if got.Module != "Main" || got.Line != 9 {
+		t.Fatalf("selection = %+v, want Main line 9", got)
+	}
+	if got.Calls < 2 {
+		t.Fatalf("expected polling past the temporary harness selection, got %+v", got)
+	}
+}
+
+func TestGetXlflowSelectionDiagnosticScorePrefersExecutableRuntimeLine(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"$structural = [ordered]@{ location = [ordered]@{ module = 'Main'; line = 15; column = 1; end_line = 15; end_column = 1; token = '' }; nearby_code = @('> 15 | End Sub') }; "+
+			"$executable = [ordered]@{ location = [ordered]@{ module = 'Main'; line = 10; column = 3; end_line = 10; end_column = 3; token = 'x' }; nearby_code = @('> 10 |   x = \"abc\"') }; "+
+			"[pscustomobject]@{ structural = (Get-XlflowSelectionDiagnosticScore -Selection $structural -PreferUserCode $true); executable = (Get-XlflowSelectionDiagnosticScore -Selection $executable -PreferUserCode $true) } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("selection score command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Structural int `json:"structural"`
+		Executable int `json:"executable"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse selection score output: %v\n%s", err, out)
+	}
+	if got.Executable <= got.Structural {
+		t.Fatalf("executable score = %d, structural score = %d; want executable > structural", got.Executable, got.Structural)
+	}
+}
+
+func TestGetXlflowVBESelectionDiagnosticPrefersExecutablePaneOverActiveStructuralPane(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`. ./common.ps1
+$activeModule = [pscustomobject]@{ Name = 'Main'; CountOfLines = 15; Content = @(
+  'Attribute VB_Name = "Main"',
+  'Option Explicit',
+  '',
+  'Public Sub Run()',
+  '  App.RunCore ThisWorkbook',
+  'End Sub',
+  '',
+  'Public Sub SampleFail()',
+  '  Dim x As Integer',
+  '  x = "abc"',
+  'End Sub',
+  '',
+  'Public Sub HelloWorld()',
+  '  XlflowDebug.Log "Hello, World!"',
+  'End Sub'
+) }
+$activeModule | Add-Member -MemberType ScriptMethod -Name Lines -Value { param($line, $count) return [string]$this.Content[$line - 1] }
+$activePane = [pscustomobject]@{ CodeModule = $activeModule }
+$activePane | Add-Member -MemberType ScriptMethod -Name GetSelection -Value { param([ref]$startLine, [ref]$startColumn, [ref]$endLine, [ref]$endColumn) $startLine.Value = 15; $startColumn.Value = 1; $endLine.Value = 15; $endColumn.Value = 1 }
+$execModule = [pscustomobject]@{ Name = 'Main'; CountOfLines = 15; Content = $activeModule.Content }
+$execModule | Add-Member -MemberType ScriptMethod -Name Lines -Value { param($line, $count) return [string]$this.Content[$line - 1] }
+$execPane = [pscustomobject]@{ CodeModule = $execModule }
+$execPane | Add-Member -MemberType ScriptMethod -Name GetSelection -Value { param([ref]$startLine, [ref]$startColumn, [ref]$endLine, [ref]$endColumn) $startLine.Value = 10; $startColumn.Value = 3; $endLine.Value = 10; $endColumn.Value = 3 }
+$vbe = [pscustomobject]@{ ActiveCodePane = $activePane; CodePanes = @($execPane) }
+$r = Get-XlflowVBESelectionDiagnostic -VBE $vbe -PreferUserCode $true
+[pscustomobject]@{ module = [string]$r.location.module; line = [int]$r.location.line; token = [string]$r.location.token } | ConvertTo-Json -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("VBE selection preference command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Module string `json:"module"`
+		Line   int    `json:"line"`
+		Token  string `json:"token"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse VBE selection preference output: %v\n%s", err, out)
+	}
+	if got.Module != "Main" || got.Line != 10 || got.Token != "x" {
+		t.Fatalf("selection = %+v, want Main line 10 token x", got)
+	}
+}
+
+func TestInvokeXlflowExcelMacroRunWithDialogWatchReturnsRunnerValue(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"function Get-XlflowExcelProcessId { param($Excel) return 123 }; "+
+			"function Start-XlflowExcelMacroRunnerProcess { param([string]$CommonScriptPath, [int]$ProcessId, [string]$MacroReference) return [pscustomobject]@{ result = [ordered]@{ completed = $true; ok = $true; value = @($true, 'Main', 0, '', 0, 12); error = $null } } }; "+
+			"function Test-XlflowExcelMacroRunnerProcessExited { param($Runner) return $true }; "+
+			"function Receive-XlflowExcelMacroRunnerProcess { param($Runner, [int]$WaitMilliseconds = 0) return $Runner.result }; "+
+			"$r = Invoke-XlflowExcelMacroRunWithDialogWatch -Excel ([pscustomobject]@{}) -Workbook $null -MacroReference 'Main.RunMacro' -CaptureDialogs $false; "+
+			"[pscustomobject]@{ ok = [bool]$r.value[0]; module = [string]$r.value[1]; duration = [int]$r.value[5]; dialog = [bool]$r.dialog.found } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro runner success command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		OK       bool   `json:"ok"`
+		Module   string `json:"module"`
+		Duration int    `json:"duration"`
+		Dialog   bool   `json:"dialog"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse macro runner success output: %v\n%s", err, out)
+	}
+	if !got.OK || got.Module != "Main" || got.Duration != 12 || got.Dialog {
+		t.Fatalf("unexpected macro runner success result: %+v", got)
+	}
+}
+
+func TestInvokeXlflowExcelMacroRunWithDialogWatchStopsHungRunnerAfterRuntimeDialog(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`. ./common.ps1
+$script:stopCalled = $false
+$script:watcherReads = 0
+function Get-XlflowExcelProcessId { param($Excel) return 123 }
+function Start-XlflowExcelDialogWatcher {
+  param([int]$ProcessId, [string]$Kind = 'runtime', [int]$TimeoutMilliseconds = 10000, [int]$PollMilliseconds = 50)
+  $waitHandle = [pscustomobject]@{}
+  $waitHandle | Add-Member -MemberType ScriptMethod -Name WaitOne -Value { param($milliseconds) return $true }
+  return [pscustomobject]@{ powershell = $null; async = [pscustomobject]@{ AsyncWaitHandle = $waitHandle } }
+}
+function Receive-XlflowExcelDialogWatcher {
+  param($Watcher, [int]$WaitMilliseconds = 250)
+  $script:watcherReads++
+  if ($script:watcherReads -eq 1) {
+    return [pscustomobject]@{
+      found = $true
+      kind = 'runtime'
+      action = 'runtime_debug'
+      selection = [ordered]@{
+        location = [ordered]@{ module = 'Main'; line = 10; column = 3; end_line = 10; end_column = 3; token = 'x' }
+        nearby_code = @('> 10 |   x = "abc"')
+      }
+      break_mode_reset = $true
+    }
+  }
+  return (New-XlflowExcelDialogWatcherResult)
+}
+function Start-XlflowExcelMacroRunnerProcess { param([string]$CommonScriptPath, [int]$ProcessId, [string]$MacroReference) return [pscustomobject]@{ result = [ordered]@{ completed = $false; ok = $false; value = $null; error = $null } } }
+function Test-XlflowExcelMacroRunnerProcessExited { param($Runner) return $script:stopCalled }
+function Stop-XlflowExcelMacroRunnerProcess { param($Runner) $script:stopCalled = $true }
+function Receive-XlflowExcelMacroRunnerProcess {
+  param($Runner, [int]$WaitMilliseconds = 0)
+  if ($script:stopCalled) {
+    return [ordered]@{ completed = $true; ok = $false; value = $null; error = $null }
+  }
+  return [ordered]@{ completed = $false; ok = $false; value = $null; error = $null }
+}
+$r = Invoke-XlflowExcelMacroRunWithDialogWatch -Excel ([pscustomobject]@{}) -Workbook ([pscustomobject]@{ VBProject = [pscustomobject]@{ VBE = [pscustomobject]@{} } }) -MacroReference 'Main.RunMacro'
+[pscustomobject]@{ stopped = [bool]$script:stopCalled; found = [bool]$r.dialog.found; module = [string]$r.selection.location.module; line = [int]$r.selection.location.line } | ConvertTo-Json -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macro runner hang command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Stopped bool   `json:"stopped"`
+		Found   bool   `json:"found"`
+		Module  string `json:"module"`
+		Line    int    `json:"line"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse macro runner hang output: %v\n%s", err, out)
+	}
+	if !got.Stopped || !got.Found || got.Module != "Main" || got.Line != 10 {
+		t.Fatalf("unexpected macro runner hang result: %+v", got)
 	}
 }
 

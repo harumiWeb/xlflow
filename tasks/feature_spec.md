@@ -1,5 +1,26 @@
 # Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
 
+## Runtime diagnostic follow-up: prefer user-code break lines and avoid parent CLI hangs
+
+**Goal:** When Excel enters VBA break mode for a runtime error, diagnostics must report the actual user module/statement instead of the temporary `XlflowRun_*` harness, and the parent `xlflow` process must still recover even if the COM `excel.Run(...)` caller remains blocked.
+
+**Root causes:**
+
+- VBE selection capture could return the active pane on a structural line or a temporary `XlflowRun_*` helper instead of the failing user statement.
+- The runtime macro invocation happened inside the parent PowerShell bridge process; if `excel.Run(...)` stayed blocked after a runtime dialog entered break mode, the CLI could hang even after selection capture/reset logic succeeded elsewhere.
+
+**Fix:**
+
+- Score VBE selection candidates so runtime diagnostics prefer meaningful user-code statements and strongly de-prioritize `XlflowRun_*` panes and structural lines such as `End Sub`.
+- Run dialog-watched macro execution in a disposable child `powershell.exe` process that reattaches to the target Excel instance by process id. When a runtime dialog is captured and break mode is reset, the parent process can stop the child runner if it remains blocked and still return structured diagnostics.
+
+**Regression tests:**
+
+- `TestGetXlflowSelectionDiagnosticScorePrefersExecutableRuntimeLine`
+- `TestGetXlflowVBESelectionDiagnosticPrefersExecutablePaneOverActiveStructuralPane`
+- `TestInvokeXlflowExcelMacroRunWithDialogWatchReturnsRunnerValue`
+- `TestInvokeXlflowExcelMacroRunWithDialogWatchStopsHungRunnerAfterRuntimeDialog`
+
 ## Overview
 
 Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebug.bas` compile errors and misclassify VBE compile control lookup failures.

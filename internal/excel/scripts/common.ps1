@@ -1214,6 +1214,18 @@ function New-XlflowExcelDialogWatcherResult {
     children = @()
     clicked_button = ""
     action = ""
+    selection = [ordered]@{
+      location = [ordered]@{
+        module = ""
+        line = 0
+        column = 0
+        end_line = 0
+        end_column = 0
+        token = ""
+      }
+      nearby_code = @()
+    }
+    break_mode_reset = $false
   }
 }
 
@@ -1303,9 +1315,10 @@ function Start-XlflowExcelDialogWatcher {
     return $null
   }
 
+  $commonScriptPath = Join-Path $PSScriptRoot "common.ps1"
   $ps = [PowerShell]::Create()
   $null = $ps.AddScript({
-    param([int]$TargetProcessId, [string]$DialogKind, [int]$TimeoutMs, [int]$PollMs)
+    param([int]$TargetProcessId, [string]$DialogKind, [int]$TimeoutMs, [int]$PollMs, [string]$CommonScriptPath)
 
     $bmClick = [uint32]0x00F5
     $wmClose = [uint32]0x0010
@@ -1384,11 +1397,20 @@ function Start-XlflowExcelDialogWatcher {
         switch ($matchedKind) {
           "runtime" {
             foreach ($button in $buttons) {
+              if ($button.text -match "(?i)Debug" -or $button.text -match "デバッグ") {
+                $buttonToClick = $button
+                $action = "runtime_debug"
+                break
+              }
+            }
+            if ($null -eq $buttonToClick) {
+              foreach ($button in $buttons) {
               if ($button.text -match "(?i)End" -or $button.text -match "終了") {
                 $buttonToClick = $button
                 $action = "runtime_end"
                 break
               }
+            }
             }
             if ($null -eq $buttonToClick) {
               foreach ($button in $buttons) {
@@ -1430,6 +1452,29 @@ function Start-XlflowExcelDialogWatcher {
           }
         }
 
+        $selection = [ordered]@{
+          location = [ordered]@{
+            module = ""
+            line = 0
+            column = 0
+            end_line = 0
+            end_column = 0
+            token = ""
+          }
+          nearby_code = @()
+        }
+        $breakModeReset = $false
+        if ($matchedKind -eq "runtime" -and $action -eq "runtime_debug") {
+          Start-Sleep -Milliseconds ([Math]::Max(50, $PollMs))
+          try {
+            $debugCapture = Invoke-XlflowRuntimeDebugSelectionCaptureProcess -CommonScriptPath $CommonScriptPath -ProcessId $TargetProcessId -WaitMilliseconds 5000 -PollMilliseconds ([Math]::Max(10, $PollMs))
+            $selection = $debugCapture.selection
+            $breakModeReset = [bool]$debugCapture.break_mode_reset
+          } catch {
+            Write-Verbose ("failed to capture runtime debug selection in watcher: " + $_.Exception.Message)
+          }
+        }
+
         return [pscustomobject][ordered]@{
           found = $true
           kind = $matchedKind
@@ -1441,6 +1486,8 @@ function Start-XlflowExcelDialogWatcher {
           children = @($childInfos.ToArray())
           clicked_button = $(if ($null -ne $buttonToClick) { [string]$buttonToClick.text } else { "" })
           action = $action
+          selection = $selection
+          break_mode_reset = $breakModeReset
         }
       }
       Start-Sleep -Milliseconds $PollMs
@@ -1457,12 +1504,25 @@ function Start-XlflowExcelDialogWatcher {
       children = @()
       clicked_button = ""
       action = ""
+      selection = [ordered]@{
+        location = [ordered]@{
+          module = ""
+          line = 0
+          column = 0
+          end_line = 0
+          end_column = 0
+          token = ""
+        }
+        nearby_code = @()
+      }
+      break_mode_reset = $false
     }
   })
   $null = $ps.AddArgument($ProcessId)
   $null = $ps.AddArgument($Kind)
   $null = $ps.AddArgument($TimeoutMilliseconds)
   $null = $ps.AddArgument($PollMilliseconds)
+  $null = $ps.AddArgument($commonScriptPath)
 
   return [pscustomobject][ordered]@{
     powershell = $ps
@@ -1557,7 +1617,16 @@ function Invoke-XlflowExcelCallWithDialogWatch {
     $dialog = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds $WaitMilliseconds
     if ($null -ne $Workbook -and [bool]$dialog.found) {
       try {
-        $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
+        if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+          $selection = $dialog.selection
+        } elseif ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
+          $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+          if (-not [bool]$dialog.break_mode_reset) {
+            [void](Exit-XlflowVBEBreakMode -VBE $Workbook.VBProject.VBE)
+          }
+        } else {
+          $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
+        }
       } catch {
         Write-Verbose ("failed to capture VBE selection after Excel dialog: " + $_.Exception.Message)
       }
@@ -1608,8 +1677,137 @@ function Get-XlflowVBECompileControl {
   return $null
 }
 
-function Get-XlflowVBESelectionDiagnostic {
+function Get-XlflowVBEResetControl {
   param($VBE)
+
+  try {
+    $commandBars = $VBE.CommandBars
+    foreach ($barName in @("Run", "実行")) {
+      try {
+        $bar = $commandBars.Item($barName)
+        foreach ($caption in @("Reset", "リセット")) {
+          try {
+            return $bar.Controls.Item($caption)
+          } catch {
+            Write-Verbose ("reset control was not found by caption " + $caption + ": " + $_.Exception.Message)
+          }
+        }
+        foreach ($control in @($bar.Controls)) {
+          try {
+            $caption = ([string]$control.Caption).Replace("&", "")
+            if ($caption -match "(?i)reset" -or $caption -match "リセット") {
+              return $control
+            }
+          } catch {
+            Write-Verbose ("failed to inspect VBE Run control: " + $_.Exception.Message)
+          }
+        }
+      } catch {
+        Write-Verbose ("VBE run command bar was not found: " + $_.Exception.Message)
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to inspect VBE run command bars: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowVBESelectionDiagnostic {
+  param(
+    $VBE,
+    [bool]$PreferUserCode = $false
+  )
+
+  function New-XlflowEmptySelectionDiagnostic {
+    return [ordered]@{
+      location = [ordered]@{
+        module = ""
+        line = 0
+        column = 0
+        end_line = 0
+        end_column = 0
+        token = ""
+      }
+      nearby_code = @()
+    }
+  }
+
+  function Get-XlflowCodePaneSelectionDiagnostic {
+    param($Pane)
+
+    $selection = New-XlflowEmptySelectionDiagnostic
+    if ($null -eq $Pane) {
+      return $selection
+    }
+
+    $location = $selection.location
+    $nearby = @()
+
+    try {
+      $module = $Pane.CodeModule
+      if ($null -ne $module) {
+        $location.module = [string]$module.Name
+      }
+      $startLine = 0
+      $startColumn = 0
+      $endLine = 0
+      $endColumn = 0
+      $Pane.GetSelection([ref]$startLine, [ref]$startColumn, [ref]$endLine, [ref]$endColumn)
+      $location.line = [int]$startLine
+      $location.column = [int]$startColumn
+      $location.end_line = [int]$endLine
+      $location.end_column = [int]$endColumn
+
+      if ($null -ne $module -and $startLine -gt 0 -and $startLine -le $module.CountOfLines) {
+        $lineText = [string]$module.Lines($startLine, 1)
+        if ($startColumn -gt 0 -and $startColumn -le $lineText.Length) {
+          $tokenStart = $startColumn - 1
+          $tokenLength = 1
+          if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
+            $tokenLength = [Math]::Min($endColumn - $startColumn, $lineText.Length - $tokenStart)
+          } else {
+            while ($tokenStart -gt 0 -and $lineText[$tokenStart - 1] -match "[A-Za-z0-9_]") {
+              $tokenStart--
+            }
+            $tokenEnd = $startColumn - 1
+            while ($tokenEnd -lt $lineText.Length -and $lineText[$tokenEnd] -match "[A-Za-z0-9_]") {
+              $tokenEnd++
+            }
+            $tokenLength = [Math]::Max(1, $tokenEnd - $tokenStart)
+          }
+          $location.token = $lineText.Substring($tokenStart, $tokenLength).Trim()
+        }
+
+        $first = [Math]::Max(1, $startLine - 2)
+        $last = [Math]::Min($module.CountOfLines, $startLine + 2)
+        $items = New-Object System.Collections.Generic.List[string]
+        for ($lineNo = $first; $lineNo -le $last; $lineNo++) {
+          $prefix = "  "
+          if ($lineNo -eq $startLine) {
+            $prefix = "> "
+          }
+          $items.Add($prefix + $lineNo + " | " + [string]$module.Lines($lineNo, 1))
+          if ($lineNo -eq $startLine -and $startColumn -gt 0) {
+            $caretWidth = 1
+            if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
+              $caretWidth = [Math]::Max(1, $endColumn - $startColumn)
+            } elseif (-not [string]::IsNullOrWhiteSpace($location.token)) {
+              $caretWidth = $location.token.Length
+            }
+            $items.Add("    | " + (" " * [Math]::Max(0, $startColumn - 1)) + ("^" * $caretWidth))
+          }
+        }
+        $nearby = @($items.ToArray())
+      }
+    } catch {
+      Write-Verbose ("failed to read code pane selection diagnostic: " + $_.Exception.Message)
+    }
+
+    return [ordered]@{
+      location = $location
+      nearby_code = @($nearby)
+    }
+  }
 
   $location = [ordered]@{
     module = ""
@@ -1622,64 +1820,26 @@ function Get-XlflowVBESelectionDiagnostic {
   $nearby = @()
 
   try {
-    $pane = $VBE.ActiveCodePane
-    if ($null -eq $pane) {
-      return [ordered]@{ location = $location; nearby_code = @() }
-    }
-    $module = $pane.CodeModule
-    if ($null -ne $module) {
-      $location.module = [string]$module.Name
-    }
-    $startLine = 0
-    $startColumn = 0
-    $endLine = 0
-    $endColumn = 0
-    $pane.GetSelection([ref]$startLine, [ref]$startColumn, [ref]$endLine, [ref]$endColumn)
-    $location.line = [int]$startLine
-    $location.column = [int]$startColumn
-    $location.end_line = [int]$endLine
-    $location.end_column = [int]$endColumn
+    $bestSelection = New-XlflowEmptySelectionDiagnostic
+    $bestScore = Get-XlflowSelectionDiagnosticScore -Selection $bestSelection
 
-    if ($null -ne $module -and $startLine -gt 0 -and $startLine -le $module.CountOfLines) {
-      $lineText = [string]$module.Lines($startLine, 1)
-      if ($startColumn -gt 0 -and $startColumn -le $lineText.Length) {
-        $tokenStart = $startColumn - 1
-        $tokenLength = 1
-        if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
-          $tokenLength = [Math]::Min($endColumn - $startColumn, $lineText.Length - $tokenStart)
-        } else {
-          while ($tokenStart -gt 0 -and $lineText[$tokenStart - 1] -match "[A-Za-z0-9_]") {
-            $tokenStart--
-          }
-          $tokenEnd = $startColumn - 1
-          while ($tokenEnd -lt $lineText.Length -and $lineText[$tokenEnd] -match "[A-Za-z0-9_]") {
-            $tokenEnd++
-          }
-          $tokenLength = [Math]::Max(1, $tokenEnd - $tokenStart)
-        }
-        $location.token = $lineText.Substring($tokenStart, $tokenLength).Trim()
-      }
+    $activePane = $null
+    try {
+      $activePane = $VBE.ActiveCodePane
+    } catch {
+      $activePane = $null
+    }
 
-      $first = [Math]::Max(1, $startLine - 2)
-      $last = [Math]::Min($module.CountOfLines, $startLine + 2)
-      $items = New-Object System.Collections.Generic.List[string]
-      for ($lineNo = $first; $lineNo -le $last; $lineNo++) {
-        $prefix = "  "
-        if ($lineNo -eq $startLine) {
-          $prefix = "> "
-        }
-        $items.Add($prefix + $lineNo + " | " + [string]$module.Lines($lineNo, 1))
-        if ($lineNo -eq $startLine -and $startColumn -gt 0) {
-          $caretWidth = 1
-          if ($endLine -eq $startLine -and $endColumn -gt $startColumn) {
-            $caretWidth = [Math]::Max(1, $endColumn - $startColumn)
-          } elseif (-not [string]::IsNullOrWhiteSpace($location.token)) {
-            $caretWidth = $location.token.Length
-          }
-          $items.Add("    | " + (" " * [Math]::Max(0, $startColumn - 1)) + ("^" * $caretWidth))
-        }
+    foreach ($candidate in @([pscustomobject]@{ pane = $activePane; active = $true }) + @($VBE.CodePanes | ForEach-Object { [pscustomobject]@{ pane = $_; active = $false } })) {
+      $selection = Get-XlflowCodePaneSelectionDiagnostic -Pane $candidate.pane
+      $score = Get-XlflowSelectionDiagnosticScore -Selection $selection -ActivePane ([bool]$candidate.active) -PreferUserCode $PreferUserCode
+      if ($score -gt $bestScore) {
+        $bestSelection = $selection
+        $bestScore = $score
       }
-      $nearby = @($items.ToArray())
+    }
+    if (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $bestSelection) {
+      return $bestSelection
     }
   } catch {
     Write-Verbose ("failed to read VBE selection diagnostic: " + $_.Exception.Message)
@@ -1688,6 +1848,504 @@ function Get-XlflowVBESelectionDiagnostic {
   return [ordered]@{
     location = $location
     nearby_code = @($nearby)
+  }
+}
+
+function Test-XlflowSelectionDiagnosticHasMeaningfulData {
+  param($Selection)
+
+  if ($null -eq $Selection) {
+    return $false
+  }
+  if ($null -ne $Selection.location) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$Selection.location.module)) {
+      return $true
+    }
+    if ([int]$Selection.location.line -gt 0) {
+      return $true
+    }
+    if ([int]$Selection.location.column -gt 0) {
+      return $true
+    }
+  }
+  return @($Selection.nearby_code).Count -gt 0
+}
+
+function Test-XlflowSelectionTargetsTemporaryRunHarness {
+  param($Selection)
+
+  if ($null -eq $Selection -or $null -eq $Selection.location) {
+    return $false
+  }
+  $module = [string]$Selection.location.module
+  return $module -like "XlflowRun_*"
+}
+
+function Get-XlflowSelectionDiagnosticCurrentLineText {
+  param($Selection)
+
+  if ($null -eq $Selection) {
+    return ""
+  }
+  foreach ($line in @($Selection.nearby_code)) {
+    $match = [regex]::Match([string]$line, '^\>\s+\d+\s+\|\s?(?<text>.*)$')
+    if ($match.Success) {
+      return [string]$match.Groups["text"].Value
+    }
+  }
+  return ""
+}
+
+function Test-XlflowSelectionDiagnosticLooksStructural {
+  param([string]$LineText)
+
+  if ([string]::IsNullOrWhiteSpace($LineText)) {
+    return $false
+  }
+
+  return (
+    $LineText -match '^\s*(Attribute|Option)\b' -or
+    $LineText -match '^\s*(Public|Private|Friend)\s+(Sub|Function|Property)\b' -or
+    $LineText -match '^\s*End\s+(Sub|Function|Property|If|With|Select|Type|Enum)\b' -or
+    $LineText -match '^\s*Exit\s+(Sub|Function|Property)\b'
+  )
+}
+
+function Get-XlflowSelectionDiagnosticScore {
+  param(
+    $Selection,
+    [bool]$ActivePane = $false,
+    [bool]$PreferUserCode = $false
+  )
+
+  if (-not (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $Selection)) {
+    return -10000
+  }
+
+  $score = 0
+  if ($ActivePane) {
+    $score += 10
+  }
+  if (Test-XlflowSelectionTargetsTemporaryRunHarness -Selection $Selection) {
+    $score -= 500
+  }
+  if ($null -ne $Selection.location) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$Selection.location.module)) {
+      $score += 50
+    }
+    if ([int]$Selection.location.line -gt 0) {
+      $score += 20
+    }
+    if ([int]$Selection.location.column -gt 0) {
+      $score += 10
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Selection.location.token)) {
+      $score += 15
+    }
+  }
+  if (@($Selection.nearby_code).Count -gt 0) {
+    $score += 20
+  }
+
+  $lineText = Get-XlflowSelectionDiagnosticCurrentLineText -Selection $Selection
+  if (-not [string]::IsNullOrWhiteSpace($lineText)) {
+    $score += 25
+    if ($PreferUserCode) {
+      if (Test-XlflowSelectionDiagnosticLooksStructural -LineText $lineText) {
+        $score -= 60
+      } else {
+        $score += 60
+      }
+      if ($lineText -match "^\s*(''|Rem\b)") {
+        $score -= 25
+      }
+    }
+  }
+
+  return $score
+}
+
+function Get-XlflowVBERuntimeSelectionDiagnostic {
+  param(
+    $VBE,
+    [int]$WaitMilliseconds = 1500,
+    [int]$PollMilliseconds = 50
+  )
+
+  $bestSelection = Get-XlflowVBESelectionDiagnostic -VBE $VBE -PreferUserCode $true
+  $bestScore = Get-XlflowSelectionDiagnosticScore -Selection $bestSelection -PreferUserCode $true
+  if ($bestScore -ge 120 -and -not (Test-XlflowSelectionTargetsTemporaryRunHarness -Selection $bestSelection)) {
+    return $bestSelection
+  }
+  $deadline = (Get-Date).AddMilliseconds([Math]::Max(0, $WaitMilliseconds))
+  while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds ([Math]::Max(1, $PollMilliseconds))
+    $selection = Get-XlflowVBESelectionDiagnostic -VBE $VBE -PreferUserCode $true
+    $score = Get-XlflowSelectionDiagnosticScore -Selection $selection -PreferUserCode $true
+    if ($score -gt $bestScore) {
+      $bestSelection = $selection
+      $bestScore = $score
+    }
+    if ($score -ge 120 -and -not (Test-XlflowSelectionTargetsTemporaryRunHarness -Selection $selection)) {
+      return $selection
+    }
+  }
+
+  return $bestSelection
+}
+
+function Exit-XlflowVBEBreakMode {
+  param($VBE)
+
+  try {
+    $control = Get-XlflowVBEResetControl -VBE $VBE
+    if ($null -eq $control) {
+      return $false
+    }
+    $control.Execute()
+    return $true
+  } catch {
+    Write-Verbose ("failed to reset VBE break mode: " + $_.Exception.Message)
+  }
+  return $false
+}
+
+function Get-XlflowRuntimeDebugSelectionByProcessId {
+  param(
+    [int]$ProcessId,
+    [int]$WaitMilliseconds = 5000,
+    [int]$PollMilliseconds = 50
+  )
+
+  $result = [ordered]@{
+    selection = [ordered]@{
+      location = [ordered]@{
+        module = ""
+        line = 0
+        column = 0
+        end_line = 0
+        end_column = 0
+        token = ""
+      }
+      nearby_code = @()
+    }
+    break_mode_reset = $false
+  }
+
+  if ($ProcessId -le 0) {
+    return $result
+  }
+
+  try {
+    Add-XlflowNativeMethods
+    $iid = [Guid]"00020400-0000-0000-C000-000000000046"
+    foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$ProcessId)) {
+      foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd))) {
+        $dispatch = $null
+        $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($candidateHwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+        if ($hr -ne 0 -or $null -eq $dispatch) {
+          continue
+        }
+
+        $vbe = $null
+        try {
+          $vbe = $dispatch.Application.VBE
+        } catch {
+          try {
+            $vbe = $dispatch.VBE
+          } catch {
+            $vbe = $null
+          }
+        }
+        if ($null -eq $vbe) {
+          continue
+        }
+
+        try {
+          $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $vbe -WaitMilliseconds $WaitMilliseconds -PollMilliseconds $PollMilliseconds
+          if (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $selection) {
+            $result.selection = $selection
+            $result.break_mode_reset = Exit-XlflowVBEBreakMode -VBE $vbe
+            return $result
+          }
+        } catch {
+          Write-Verbose ("failed to collect runtime debug selection for process " + $ProcessId + ": " + $_.Exception.Message)
+        }
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to inspect runtime debug selection for process " + $ProcessId + ": " + $_.Exception.Message)
+  }
+
+  return $result
+}
+
+function Invoke-XlflowRuntimeDebugSelectionCaptureProcess {
+  param(
+    [string]$CommonScriptPath,
+    [int]$ProcessId,
+    [int]$WaitMilliseconds = 5000,
+    [int]$PollMilliseconds = 50
+  )
+
+  $empty = [ordered]@{
+    selection = [ordered]@{
+      location = [ordered]@{
+        module = ""
+        line = 0
+        column = 0
+        end_line = 0
+        end_column = 0
+        token = ""
+      }
+      nearby_code = @()
+    }
+    break_mode_reset = $false
+  }
+
+  if ([string]::IsNullOrWhiteSpace($CommonScriptPath) -or $ProcessId -le 0) {
+    return $empty
+  }
+
+  $escapedPath = $CommonScriptPath.Replace("'", "''")
+  $command = "& { . '" + $escapedPath + "'; `$capture = Get-XlflowRuntimeDebugSelectionByProcessId -ProcessId " + $ProcessId + " -WaitMilliseconds " + $WaitMilliseconds + " -PollMilliseconds " + $PollMilliseconds + "; `$capture | ConvertTo-Json -Depth 6 -Compress }"
+  try {
+    $json = & powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -Command $command
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$json)) {
+      return $empty
+    }
+    return ($json | ConvertFrom-Json)
+  } catch {
+    Write-Verbose ("failed to capture runtime debug selection through external PowerShell: " + $_.Exception.Message)
+  }
+
+  return $empty
+}
+
+function New-XlflowExcelMacroRunnerResult {
+  return [ordered]@{
+    completed = $false
+    ok = $false
+    value = $null
+    error = $null
+  }
+}
+
+function Start-XlflowExcelMacroRunnerProcess {
+  param(
+    [string]$CommonScriptPath,
+    [int]$ProcessId,
+    [string]$MacroReference
+  )
+
+  if ([string]::IsNullOrWhiteSpace($CommonScriptPath) -or $ProcessId -le 0 -or [string]::IsNullOrWhiteSpace($MacroReference)) {
+    return $null
+  }
+
+  $outputPath = Join-Path ([System.IO.Path]::GetTempPath()) ("xlflow-macro-run-" + [guid]::NewGuid().ToString("N") + ".json")
+  $escapedPath = $CommonScriptPath.Replace("'", "''")
+  $escapedOutputPath = $outputPath.Replace("'", "''")
+  $escapedMacroReference = $MacroReference.Replace("'", "''")
+  $command = "& { . '" + $escapedPath + "'; `$result = [ordered]@{ ok = `$true; value = `$null; error = `$null }; try { `$excel = Get-XlflowExcelByProcessId -ProcessId " + $ProcessId + "; if (`$null -eq `$excel) { throw 'xlflow could not reconnect to the target Excel instance.' }; `$result.value = `$excel.Run('" + $escapedMacroReference + "') } catch { `$result.ok = `$false; `$result.error = [ordered]@{ message = [string]`$PSItem.Exception.Message; source = [string]`$PSItem.Exception.Source; hresult = [int]`$PSItem.Exception.HResult } }; `$result | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath '" + $escapedOutputPath + "' -Encoding UTF8 }"
+
+  try {
+    $process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command) -WindowStyle Hidden -PassThru
+    return [pscustomobject][ordered]@{
+      process = $process
+      output_path = $outputPath
+    }
+  } catch {
+    Write-Verbose ("failed to start macro runner process: " + $_.Exception.Message)
+    if (Test-Path -LiteralPath $outputPath) {
+      Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  return $null
+}
+
+function Test-XlflowExcelMacroRunnerProcessExited {
+  param($Runner)
+
+  if ($null -eq $Runner -or $null -eq $Runner.process) {
+    return $true
+  }
+  try {
+    return [bool]$Runner.process.HasExited
+  } catch {
+    Write-Verbose ("failed to inspect macro runner process exit state: " + $_.Exception.Message)
+    return $true
+  }
+}
+
+function Receive-XlflowExcelMacroRunnerProcess {
+  param(
+    $Runner,
+    [int]$WaitMilliseconds = 0
+  )
+
+  $result = New-XlflowExcelMacroRunnerResult
+  if ($null -eq $Runner) {
+    return $result
+  }
+
+  try {
+    if ($null -ne $Runner.process) {
+      if ($WaitMilliseconds -gt 0) {
+        [void]$Runner.process.WaitForExit($WaitMilliseconds)
+      } elseif (-not [bool]$Runner.process.HasExited) {
+        return $result
+      }
+    }
+
+    if ($null -ne $Runner.process -and -not [bool]$Runner.process.HasExited) {
+      return $result
+    }
+
+    $result.completed = $true
+    if (-not [string]::IsNullOrWhiteSpace([string]$Runner.output_path) -and (Test-Path -LiteralPath $Runner.output_path)) {
+      $payload = Get-Content -LiteralPath $Runner.output_path -Raw | ConvertFrom-Json
+      if ($null -ne $payload) {
+        $result.ok = [bool]$payload.ok
+        $result.value = $payload.value
+        $result.error = $payload.error
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to receive macro runner process result: " + $_.Exception.Message)
+  } finally {
+    if ($null -ne $Runner.process) {
+      try { $Runner.process.Dispose() } catch { Write-Verbose ("failed to dispose macro runner process: " + $_.Exception.Message) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Runner.output_path) -and (Test-Path -LiteralPath $Runner.output_path)) {
+      Remove-Item -LiteralPath $Runner.output_path -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  return $result
+}
+
+function Stop-XlflowExcelMacroRunnerProcess {
+  param($Runner)
+
+  if ($null -eq $Runner) {
+    return
+  }
+  try {
+    if ($null -ne $Runner.process -and -not [bool]$Runner.process.HasExited) {
+      Stop-Process -Id $Runner.process.Id -Force -ErrorAction SilentlyContinue
+      [void]$Runner.process.WaitForExit(1000)
+    }
+  } catch {
+    Write-Verbose ("failed to stop macro runner process: " + $_.Exception.Message)
+  }
+}
+
+function Invoke-XlflowExcelMacroRunWithDialogWatch {
+  param(
+    $Excel,
+    $Workbook,
+    [string]$MacroReference,
+    [string]$DialogKind = "runtime",
+    [bool]$CaptureDialogs = $true,
+    [int]$WaitMilliseconds = 250
+  )
+
+  $dialog = New-XlflowExcelDialogWatcherResult
+  $selection = [ordered]@{
+    location = [ordered]@{
+      module = ""
+      line = 0
+      column = 0
+      end_line = 0
+      end_column = 0
+      token = ""
+    }
+    nearby_code = @()
+  }
+  $run = New-XlflowExcelMacroRunnerResult
+  $watcher = $null
+  $runner = $null
+
+  try {
+    $processId = Get-XlflowExcelProcessId -Excel $Excel
+    if ($CaptureDialogs) {
+      $watcher = Start-XlflowExcelDialogWatcher -ProcessId $processId -Kind $DialogKind
+    }
+    $runner = Start-XlflowExcelMacroRunnerProcess -CommonScriptPath (Join-Path $PSScriptRoot "common.ps1") -ProcessId $processId -MacroReference $MacroReference
+    if ($null -eq $runner) {
+      return [pscustomobject][ordered]@{
+        value = $null
+        error = [ordered]@{
+          message = "xlflow could not start the macro runner process."
+          source = "xlflow"
+          hresult = 0
+        }
+        dialog = $dialog
+        selection = $selection
+      }
+    }
+
+    $dialogReady = $false
+    while ($true) {
+      if (-not $dialogReady -and $null -ne $watcher -and $watcher.async.AsyncWaitHandle.WaitOne(25)) {
+        $dialog = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds 0
+        $dialogReady = $true
+      }
+      if (Test-XlflowExcelMacroRunnerProcessExited -Runner $runner) {
+        break
+      }
+      if ($dialogReady -and [bool]$dialog.found) {
+        Start-Sleep -Milliseconds ([Math]::Max(50, $WaitMilliseconds))
+        if (-not (Test-XlflowExcelMacroRunnerProcessExited -Runner $runner)) {
+          Stop-XlflowExcelMacroRunnerProcess -Runner $runner
+        }
+        break
+      }
+      Start-Sleep -Milliseconds 25
+    }
+
+    if (-not $dialogReady) {
+      $dialog = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds $WaitMilliseconds
+      $dialogReady = $true
+    }
+    $run = Receive-XlflowExcelMacroRunnerProcess -Runner $runner -WaitMilliseconds $WaitMilliseconds
+
+    if ($null -ne $Workbook -and [bool]$dialog.found) {
+      try {
+        if ($null -ne $dialog.selection -and (Test-XlflowSelectionDiagnosticHasMeaningfulData -Selection $dialog.selection)) {
+          $selection = $dialog.selection
+        } elseif ([string]$dialog.kind -eq "runtime" -and [string]$dialog.action -eq "runtime_debug") {
+          $selection = Get-XlflowVBERuntimeSelectionDiagnostic -VBE $Workbook.VBProject.VBE
+          if (-not [bool]$dialog.break_mode_reset) {
+            [void](Exit-XlflowVBEBreakMode -VBE $Workbook.VBProject.VBE)
+          }
+        } else {
+          $selection = Get-XlflowVBESelectionDiagnostic -VBE $Workbook.VBProject.VBE
+        }
+      } catch {
+        Write-Verbose ("failed to capture VBE selection after Excel macro runner dialog: " + $_.Exception.Message)
+      }
+    }
+  } finally {
+    if ($null -ne $watcher) {
+      try {
+        $null = Receive-XlflowExcelDialogWatcher -Watcher $watcher -WaitMilliseconds 0
+      } catch {
+        Write-Verbose ("failed to finalize Excel dialog watcher: " + $_.Exception.Message)
+      }
+    }
+    if ($null -ne $runner -and -not $run.completed) {
+      Stop-XlflowExcelMacroRunnerProcess -Runner $runner
+      $run = Receive-XlflowExcelMacroRunnerProcess -Runner $runner -WaitMilliseconds 250
+    }
+  }
+
+  return [pscustomobject][ordered]@{
+    value = $run.value
+    error = $run.error
+    dialog = $dialog
+    selection = $selection
   }
 }
 
@@ -1742,27 +2400,71 @@ function Get-XlflowExcelByProcessId {
     Add-XlflowNativeMethods
     $iid = [Guid]"00020400-0000-0000-C000-000000000046"
     foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$ProcessId)) {
-      $dispatch = $null
-      $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($hwnd, 4294967280, [ref]$iid, [ref]$dispatch)
-      if ($hr -ne 0 -or $null -eq $dispatch) {
-        continue
-      }
-      $candidate = $dispatch
-      try {
-        $candidate = $dispatch.Application
-      } catch {
-        $candidate = $dispatch
-      }
-      try {
-        if ($candidate.Workbooks.Count -gt 0) {
-          return $candidate
+      foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd))) {
+        $dispatch = $null
+        $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($candidateHwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+        if ($hr -ne 0 -or $null -eq $dispatch) {
+          continue
         }
-      } catch {
-        Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
+        $candidate = $dispatch
+        try {
+          $candidate = $dispatch.Application
+        } catch {
+          $candidate = $dispatch
+        }
+        try {
+          if ($candidate.Workbooks.Count -gt 0) {
+            return ,$candidate
+          }
+        } catch {
+          Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
+        }
       }
     }
   } catch {
     Write-Verbose ("failed to resolve Excel by process id: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowVBEByProcessId {
+  param([int]$ProcessId)
+
+  if ($ProcessId -le 0) {
+    return $null
+  }
+  try {
+    Add-XlflowNativeMethods
+    $iid = [Guid]"00020400-0000-0000-C000-000000000046"
+    foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$ProcessId)) {
+      foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd))) {
+        $dispatch = $null
+        $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($candidateHwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+        if ($hr -ne 0 -or $null -eq $dispatch) {
+          continue
+        }
+        $candidate = $dispatch
+        try {
+          $candidate = $dispatch.Application.VBE
+        } catch {
+          try {
+            $candidate = $dispatch.VBE
+          } catch {
+            $candidate = $dispatch
+          }
+        }
+        try {
+          $null = $candidate.ActiveCodePane
+          $null = $candidate.CodePanes
+          $null = $candidate.CommandBars
+          return ,$candidate
+        } catch {
+          Write-Verbose ("accessible object is not a VBE automation object: " + $_.Exception.Message)
+        }
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to resolve VBE by process id: " + $_.Exception.Message)
   }
   return $null
 }
@@ -1790,7 +2492,7 @@ function Get-XlflowExcelByHwnd {
       }
       try {
         if ($candidate.Workbooks.Count -gt 0) {
-          return $candidate
+          return ,$candidate
         }
       } catch {
         Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
