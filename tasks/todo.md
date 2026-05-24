@@ -46,3 +46,16 @@
 ## Unverified
 
 - None
+
+---
+
+# Takt workflow monitor alignment
+
+## Todo
+
+- [x] Inspect existing `.takt` workflow and persona patterns
+- [x] Define minimal `self_review -> fix -> self_review` loop
+- [x] Add `.takt/facets/personas/supervisor.md`
+- [x] Add `fix` step and reroute `self_review` to it
+- [x] Validate YAML/persona references and summarize residual risks
+- [x] Mirror the same loop-monitor structure into `.takt/workflows/xlflow-orchestra-low.yaml`

@@ -344,15 +344,18 @@ type UIButtonAddOptions struct {
 	Height      int
 	CreateSheet bool
 	VerifyMacro bool
+	Session     bool
 }
 
 type UIButtonListOptions struct {
-	Sheet string
+	Sheet   string
+	Session bool
 }
 
 type UIButtonRemoveOptions struct {
-	Sheet string
-	ID    string
+	Sheet   string
+	ID      string
+	Session bool
 }
 
 func (r Runner) Doctor(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -955,6 +958,8 @@ func buildUIButtonAddScriptArgs(root string, cfg config.Config, opts UIButtonAdd
 		"Height":       strconv.Itoa(opts.Height),
 		"CreateSheet":  strconv.FormatBool(opts.CreateSheet),
 		"VerifyMacro":  strconv.FormatBool(opts.VerifyMacro),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 	}
 }
 
@@ -968,6 +973,8 @@ func buildUIButtonListScriptArgs(root string, cfg config.Config, opts UIButtonLi
 		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"Sheet":        opts.Sheet,
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 	}
 }
 
@@ -1017,6 +1024,8 @@ func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButton
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 		"Sheet":        opts.Sheet,
 		"Id":           opts.ID,
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 	}
 }
 

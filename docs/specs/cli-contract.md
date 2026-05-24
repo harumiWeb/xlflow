@@ -41,9 +41,9 @@ xlflow [--json] edit range [workbook] --sheet <name> --range <A1:B2> (--fill <#R
 xlflow [--json] edit rows [workbook] --sheet <name> --rows <1:31> --height <points> --session
 xlflow [--json] edit columns [workbook] --sheet <name> --columns <A:AE> --width <chars> --session
 xlflow [--json] macros [--session]
-xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro]
-xlflow [--json] ui button list [--sheet <name>]
-xlflow [--json] ui button remove --id <id> [--sheet <name>]
+xlflow [--json] ui button add --sheet <name> --cell <A1> --text <caption> --macro <module.proc> [--id <id>] [--width <points>] [--height <points>] [--create-sheet] [--verify-macro] [--session]
+xlflow [--json] ui button list [--sheet <name>] [--session]
+xlflow [--json] ui button remove --id <id> [--sheet <name>] [--session]
 xlflow [--json] test [--filter <name>] [--module <name>] [--tag <tag>] [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--session]
 xlflow [--json] diff <before-workbook> <after-workbook> [--vba-before <dir>] [--vba-after <dir>]
 xlflow [--json] inspect workbook [--session] [--format text|json|markdown]
@@ -157,7 +157,9 @@ New scaffolded projects also add `src/modules/XlflowUI.bas` and `src/modules/Xlf
 
 `macros` opens the configured workbook and discovers public runnable VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
 
-`ui button add` opens the configured workbook and adds or updates an xlflow-managed Excel form-control button. The target worksheet is selected by `--sheet`; if it does not exist, the command fails with `sheet_not_found` unless `--create-sheet` is set. `--cell` is the top-left placement anchor, `--text` becomes the button caption, and `--macro` is assigned to the button `OnAction`. `--width` and `--height` are in Excel points and default to `160` and `40`. The stable internal button name is `xlflow.button.<id>`, where `<id>` is the normalized `--id` value or, when omitted, a normalized value derived from `--macro`. Re-running `add` with the same id updates the existing button instead of creating duplicates. `--verify-macro` checks the workbook VBIDE project for the macro before saving; missing macros fail with `macro_not_found`, and unavailable VBIDE access is an environment failure.
+`ui button add`, `ui button list`, and `ui button remove` open the configured workbook through the same session-aware Excel bridge as other workbook-backed commands. `--session` forces attachment to the workbook kept open by `xlflow session start`. When `--session` is omitted and `.xlflow/session.json` points at the configured workbook, the commands auto-reuse that matching live session workbook instead of opening a fresh hidden instance. `add` and `remove` save the live session workbook explicitly via `Workbook.Save()` after successful mutation so the session workbook stays open; `list` is read-only and does not save. When `Workbook.Save()` fails after a successful add or remove, the command returns `save_failed` as an environment failure.
+
+`ui button add` adds or updates an xlflow-managed Excel form-control button. The target worksheet is selected by `--sheet`; if it does not exist, the command fails with `sheet_not_found` unless `--create-sheet` is set. `--cell` is the top-left placement anchor, `--text` becomes the button caption, and `--macro` is assigned to the button `OnAction`. `--width` and `--height` are in Excel points and default to `160` and `40`. The stable internal button name is `xlflow.button.<id>`, where `<id>` is the normalized `--id` value or, when omitted, a normalized value derived from `--macro`. Re-running `add` with the same id updates the existing button instead of creating duplicates. `--verify-macro` checks the workbook VBIDE project for the macro before saving; missing macros fail with `macro_not_found`, and unavailable VBIDE access is an environment failure.
 
 `ui button list` reports only xlflow-managed form-control buttons whose internal names start with `xlflow.button.`. When `--sheet` is provided, only that worksheet is inspected and a missing worksheet fails with `sheet_not_found`. `list` does not save the workbook.
 

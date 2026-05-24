@@ -1017,3 +1017,112 @@ func TestTraceInjectScriptArgsOmitModulesDirForStandaloneWorkbook(t *testing.T) 
 		t.Fatalf("standalone workbook should not receive ModulesDir: %+v", args)
 	}
 }
+
+func TestBuildUIButtonAddScriptArgsIncludesSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonAddScriptArgs(root, cfg, UIButtonAddOptions{
+		Sheet: "Menu",
+		Cell:  "B2",
+		Text:  "Run",
+		Macro: "Main.Run",
+	})
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q, want %q", args["MetadataPath"], filepath.Join(root, ".xlflow", "session.json"))
+	}
+}
+
+func TestBuildUIButtonListScriptArgsIncludesSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonListScriptArgs(root, cfg, UIButtonListOptions{Sheet: "Menu"})
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q, want %q", args["MetadataPath"], filepath.Join(root, ".xlflow", "session.json"))
+	}
+}
+
+func TestBuildUIButtonRemoveScriptArgsIncludesSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonRemoveScriptArgs(root, cfg, UIButtonRemoveOptions{ID: "run"})
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q, want %q", args["MetadataPath"], filepath.Join(root, ".xlflow", "session.json"))
+	}
+}
+
+func TestBuildUIButtonAddScriptArgsPassSessionFlag(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonAddScriptArgs(root, cfg, UIButtonAddOptions{
+		Sheet:   "Menu",
+		Cell:    "B2",
+		Text:    "Run",
+		Macro:   "Main.Run",
+		Session: true,
+	})
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
+func TestBuildUIButtonListScriptArgsPassSessionFlag(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonListScriptArgs(root, cfg, UIButtonListOptions{Sheet: "Menu", Session: true})
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
+func TestBuildUIButtonRemoveScriptArgsPassSessionFlag(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonRemoveScriptArgs(root, cfg, UIButtonRemoveOptions{ID: "run", Session: true})
+	if args["UseSession"] != "true" {
+		t.Fatalf("UseSession = %q, want true", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q", args["MetadataPath"])
+	}
+}
+
+func TestBuildUIButtonAddScriptArgsDefaultUseSessionFalse(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonAddScriptArgs(root, cfg, UIButtonAddOptions{
+		Sheet: "Menu",
+		Cell:  "B2",
+		Text:  "Run",
+		Macro: "Main.Run",
+	})
+	if args["UseSession"] != "false" {
+		t.Fatalf("UseSession = %q, want false when Session option is not set", args["UseSession"])
+	}
+	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
+		t.Fatalf("MetadataPath = %q, want %q (always set for auto-detection)", args["MetadataPath"], filepath.Join(root, ".xlflow", "session.json"))
+	}
+}
+
+func TestBuildUIButtonListScriptArgsDefaultUseSessionFalse(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonListScriptArgs(root, cfg, UIButtonListOptions{Sheet: "Menu"})
+	if args["UseSession"] != "false" {
+		t.Fatalf("UseSession = %q, want false when Session option is not set", args["UseSession"])
+	}
+}
+
+func TestBuildUIButtonRemoveScriptArgsDefaultUseSessionFalse(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	args := buildUIButtonRemoveScriptArgs(root, cfg, UIButtonRemoveOptions{ID: "run"})
+	if args["UseSession"] != "false" {
+		t.Fatalf("UseSession = %q, want false when Session option is not set", args["UseSession"])
+	}
+}

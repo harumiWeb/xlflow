@@ -4453,3 +4453,484 @@ End Sub
 		t.Fatalf("expected sidecar push/pull roundtrip to preserve B code-behind: %+v", got)
 	}
 }
+
+func TestUIScriptAcceptsSessionParameters(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh is not available")
+	}
+	for _, parameter := range []string{"MetadataPath", "UseSession"} {
+		t.Run(parameter, func(t *testing.T) {
+			cmd := exec.Command(
+				"pwsh",
+				"-NoProfile",
+				"-Command",
+				fmt.Sprintf("$command = Get-Command ./ui.ps1; $command.Parameters.ContainsKey('%s')", parameter),
+			)
+			cmd.Dir = "."
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ui script %s parameter check failed: %v\n%s", parameter, err, out)
+			}
+			if strings.TrimSpace(string(out)) != "True" {
+				t.Fatalf("expected ui.ps1 to expose %s, got %q", parameter, out)
+			}
+		})
+	}
+}
+
+func TestUIScriptUsesSharedWorkbookOpenHelper(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "Open-XlflowWorkbookForCommand") {
+		t.Fatalf("ui.ps1 should use Open-XlflowWorkbookForCommand for session-aware workbook open:\n%s", text)
+	}
+	if !strings.Contains(text, "-MetadataPath $MetadataPath") {
+		t.Fatalf("ui.ps1 should pass MetadataPath to workbook open helper:\n%s", text)
+	}
+}
+
+func TestUIScriptUsesSessionAwareReleaseAndSave(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "Release-XlflowComReferences") {
+		t.Fatalf("ui.ps1 should use Release-XlflowComReferences for session-attached cleanup instead of always closing:\n%s", text)
+	}
+	if !strings.Contains(text, "$workbook.Save()") {
+		t.Fatalf("ui.ps1 should call Workbook.Save() explicitly instead of relying only on close-save:\n%s", text)
+	}
+	if !strings.Contains(text, "if ($sessionAttached)") {
+		t.Fatalf("ui.ps1 should branch cleanup on $sessionAttached (Release-XlflowComReferences for session, Close-XlflowCom for non-session):\n%s", text)
+	}
+	if !strings.Contains(text, "Close-XlflowCom") {
+		t.Fatalf("ui.ps1 should include Close-XlflowCom in the non-session cleanup branch:\n%s", text)
+	}
+}
+
+func TestUIScriptReportsSaveFailureAsError(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `Set-XlflowError -Result $result -Code "save_failed"`) {
+		t.Fatalf("ui.ps1 should report save failure via Set-XlflowError with code save_failed instead of silently swallowing:\n%s", text)
+	}
+}
+
+func TestUIScriptCatchBlockRefreshesSaveState(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+
+	switchEnd := strings.Index(text, "switch ($Action)")
+	if switchEnd < 0 {
+		t.Fatalf("switch block not found in ui.ps1")
+	}
+
+	outerCatch := strings.Index(text[switchEnd:], "\n} catch {")
+	if outerCatch < 0 {
+		t.Fatalf("outer catch block not found after switch in ui.ps1")
+	}
+
+	catchStart := switchEnd + outerCatch
+	finallyBlock := strings.Index(text[catchStart:], "\n} finally {")
+	if finallyBlock < 0 {
+		t.Fatalf("finally block not found after catch in ui.ps1")
+	}
+
+	catchSection := text[catchStart : catchStart+finallyBlock]
+
+	saveStateLine := strings.Index(catchSection, "Get-XlflowWorkbookSaveState")
+	workbookResultLine := strings.Index(catchSection, "New-XlflowWorkbookResult")
+
+	if saveStateLine < 0 {
+		t.Fatal("outer catch block must refresh $saveState via Get-XlflowWorkbookSaveState before constructing $result.workbook")
+	}
+	if workbookResultLine < 0 {
+		t.Fatal("outer catch block must construct $result.workbook via New-XlflowWorkbookResult")
+	}
+	if saveStateLine > workbookResultLine {
+		t.Fatalf("Get-XlflowWorkbookSaveState must appear before New-XlflowWorkbookResult in catch block so $saveState is fresh")
+	}
+}
+
+func TestUIScriptFinallyBlockGuardOrder(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	switchLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "switch ($Action)") {
+			switchLine = i
+			break
+		}
+	}
+	if switchLine < 0 {
+		t.Fatalf("switch ($Action) not found in ui.ps1")
+	}
+
+	inFinally := false
+	braceDepth := 0
+	var statusCheckLine, saveGuardLine, saveCallLine, catchLine int
+	statusCheckLine = -1
+	saveGuardLine = -1
+	saveCallLine = -1
+	catchLine = -1
+	for i := switchLine; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "} finally {") {
+			inFinally = true
+			braceDepth = 1
+			continue
+		}
+		if !inFinally {
+			continue
+		}
+		for _, ch := range trimmed {
+			switch ch {
+			case '{':
+				braceDepth++
+			case '}':
+				braceDepth--
+			}
+		}
+		if braceDepth == 0 {
+			break
+		}
+		if strings.Contains(trimmed, `$result.status -ne "ok"`) {
+			statusCheckLine = i + 1
+		}
+		if strings.Contains(trimmed, "$saveWorkbook -and") {
+			saveGuardLine = i + 1
+		}
+		if strings.Contains(trimmed, "$workbook.Save()") {
+			saveCallLine = i + 1
+		}
+		if strings.Contains(trimmed, `Set-XlflowError`) && strings.Contains(trimmed, `"save_failed"`) {
+			catchLine = i + 1
+		}
+	}
+	if statusCheckLine == -1 {
+		t.Fatalf("ui.ps1 finally block must check $result.status before save:\n%s", string(data))
+	}
+	if saveGuardLine == -1 {
+		t.Fatalf("ui.ps1 finally block must guard save with $saveWorkbook check:\n%s", string(data))
+	}
+	if saveCallLine == -1 {
+		t.Fatalf("ui.ps1 finally block must call $workbook.Save():\n%s", string(data))
+	}
+	if catchLine == -1 {
+		t.Fatalf("ui.ps1 finally block must use Set-XlflowError with save_failed in catch:\n%s", string(data))
+	}
+	if statusCheckLine >= saveGuardLine {
+		t.Fatalf("ui.ps1 finally block: status check (line %d) must appear before save guard (line %d) so save is correctly suppressed on failure", statusCheckLine, saveGuardLine)
+	}
+	if saveGuardLine >= saveCallLine {
+		t.Fatalf("ui.ps1 finally block: save guard (line %d) must appear before $workbook.Save() (line %d)", saveGuardLine, saveCallLine)
+	}
+	if saveCallLine >= catchLine {
+		t.Fatalf("ui.ps1 finally block: $workbook.Save() (line %d) must appear before save_failed Set-XlflowError in catch (line %d)", saveCallLine, catchLine)
+	}
+}
+
+func TestUIScriptGathersWorkbookSaveState(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Get-XlflowWorkbookSaveState",
+		"$saveState",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ui.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestUIScriptPopulatesTargetAndSessionMetadata(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"$result.target = New-XlflowTargetResult",
+		"$result.session = New-XlflowSessionResult",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ui.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if count := strings.Count(text, "New-XlflowSessionResult -Active $sessionAttached"); count < 2 {
+		t.Fatalf("expected New-XlflowSessionResult on success and failure paths, found %d:\n%s", count, text)
+	}
+}
+
+func TestUIScriptEmitsSaveRequiredWarning(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`Add-XlflowStateWarning -Result $result -Code "save_required"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ui.ps1 missing %q:\n%s", want, text)
+		}
+	}
+	if count := strings.Count(text, `Add-XlflowStateWarning -Result $result -Code "save_required"`); count < 2 {
+		t.Fatalf("expected save_required warning on success and failure paths, found %d:\n%s", count, text)
+	}
+}
+
+func TestUIScriptPreservesSaveStateOnFailurePaths(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"-Dirty $saveState.dirty",
+		"-NeedsSave $saveState.needs_save",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ui.ps1 missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestUIScriptWarningsGuardPreventsNullElement(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `if (-not $result.Contains("warnings") -or $null -eq $result["warnings"])`) {
+		t.Fatalf("ui.ps1 must guard $result[\"warnings\"] before accessing it:\n%s", text)
+	}
+	if !strings.Contains(text, `$result.warnings = @($result.warnings | Where-Object { $_.code -ne "save_required" })`) {
+		t.Fatalf("ui.ps1 should filter out save_required warning after save:\n%s", text)
+	}
+
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh is not available")
+	}
+
+	script := `
+$r = [ordered]@{ status = "ok" }
+if (-not $r.Contains("warnings") -or $null -eq $r["warnings"]) { $r["warnings"] = @() }
+$r.warnings = @($r.warnings | Where-Object { $_.code -ne "save_required" })
+$json = $r | ConvertTo-Json -Compress
+if ($json -match '\[null\]') { throw "BUG: warnings contains [null]" }
+Write-Output "OK"
+`
+	cmd := exec.Command("pwsh", "-NoProfile", "-Command", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("warnings guard test failed: %v\n%s", err, out)
+	}
+}
+
+func TestCommonScriptGetXlflowWorkbookSaveStateBehavior(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh is not available")
+	}
+
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; $state = Get-XlflowWorkbookSaveState -Workbook $null -SessionAttached $false; Write-Output ($state.dirty, $state.needs_save); $state = Get-XlflowWorkbookSaveState -Workbook $null -SessionAttached $true; Write-Output ($state.dirty, $state.needs_save)",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Get-XlflowWorkbookSaveState behavior test failed: %v\n%s", err, out)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) != 4 {
+		t.Fatalf("unexpected output length %d: %q", len(lines), out)
+	}
+	if lines[0] != "False" || lines[1] != "False" {
+		t.Fatalf("expected non-session-attached dirty/needs_save to be False/False, got %s/%s", lines[0], lines[1])
+	}
+	if lines[2] != "True" || lines[3] != "True" {
+		t.Fatalf("expected session-attached (null workbook) dirty/needs_save to be True/True, got %s/%s", lines[2], lines[3])
+	}
+}
+
+func TestUIScriptSoftFailureIncludesTargetSession(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh is not available")
+	}
+
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`$ErrorActionPreference = 'Stop'
+$result = [ordered]@{
+  skip = $false
+  skipReason = ''
+  status = ''
+  errorCode = ''
+  hasTarget = $false
+  hasSession = $false
+  targetKind = ''
+  sessionMode = ''
+}
+$excel = $null
+$workbook = $null
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $wbPath = Join-Path $root 'soft-failure-target-session.xlsm'
+
+  try {
+    $excel = New-Object -ComObject Excel.Application
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'Excel COM is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  $workbook = $excel.Workbooks.Add()
+  try {
+    $module = $workbook.VBProject.VBComponents.Add(1)
+    $module.Name = 'Main'
+    $module.CodeModule.AddFromString(('Option Explicit', 'Public Sub Run()', 'End Sub') -join [Environment]::NewLine)
+  } catch {
+    $result.skip = $true
+    $result.skipReason = 'VBProject access is unavailable: ' + $_.Exception.Message
+    $result | ConvertTo-Json -Compress
+    exit 0
+  }
+  $workbook.SaveAs($wbPath, 52)
+  $workbook.Close($true) | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
+  $workbook = $null
+  $excel.Quit() | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+  $excel = $null
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+
+  $r = & ./ui.ps1 -Action add -Sheet 'MissingSheet' -Cell 'B2' -Text 'Run' -Macro 'Main.Run' -Id 'run' -WorkbookPath $wbPath | ConvertFrom-Json
+  $result.status = $r.status
+  if ($null -ne $r.error) {
+    $result.errorCode = $r.error.code
+  }
+  $result.hasTarget = ($null -ne $r.target)
+  $result.hasSession = ($null -ne $r.session)
+  if ($null -ne $r.target) {
+    $result.targetKind = [string]$r.target.kind
+  }
+  if ($null -ne $r.session) {
+    $result.sessionMode = [string]$r.session.mode
+  }
+  $result | ConvertTo-Json -Compress
+} catch {
+  $result.status = 'command_failed'
+  $result.errorCode = $_.Exception.Message
+  $result | ConvertTo-Json -Compress
+  exit 1
+} finally {
+  if ($null -ne $workbook) {
+    try { $workbook.Close($false) | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null } catch {}
+  }
+  if ($null -ne $excel) {
+    try { $excel.Quit() | Out-Null } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+  if (Test-Path -LiteralPath $root) {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ui soft failure target/session check failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Skip        bool   `json:"skip"`
+		SkipReason  string `json:"skipReason"`
+		Status      string `json:"status"`
+		ErrorCode   string `json:"errorCode"`
+		HasTarget   bool   `json:"hasTarget"`
+		HasSession  bool   `json:"hasSession"`
+		TargetKind  string `json:"targetKind"`
+		SessionMode string `json:"sessionMode"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse soft failure output: %v\n%s", err, out)
+	}
+	if got.Skip {
+		t.Skip(got.SkipReason)
+	}
+	if got.Status != "failed" || got.ErrorCode != "sheet_not_found" {
+		t.Fatalf("expected sheet_not_found failure, got status=%q errorCode=%q output=%s", got.Status, got.ErrorCode, out)
+	}
+	if !got.HasTarget {
+		t.Fatal("expected target metadata on soft failure path (workbook opened but action failed)")
+	}
+	if !got.HasSession {
+		t.Fatal("expected session metadata on soft failure path (workbook opened but action failed)")
+	}
+}
+
+func TestUIScriptUseSessionPassedToOpenHelper(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "-UseSession $UseSession") {
+		t.Fatalf("ui.ps1 must pass UseSession parameter through to Open-XlflowWorkbookForCommand:\n%s", text)
+	}
+}
+
+func TestUIScriptTargetSessionPopulatedBeforeCatch(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+
+	switchEnd := strings.Index(text, "switch ($Action)")
+	if switchEnd < 0 {
+		t.Fatalf("switch block not found in ui.ps1")
+	}
+	outerCatch := strings.Index(text[switchEnd:], "\n} catch {")
+	if outerCatch < 0 {
+		t.Fatalf("outer catch block not found after switch in ui.ps1")
+	}
+	postSwitchSection := text[switchEnd : switchEnd+outerCatch]
+
+	if !strings.Contains(postSwitchSection, "$result.target = New-XlflowTargetResult") {
+		t.Fatal("expected $result.target = New-XlflowTargetResult in the section between switch and outer catch (needs to be set on soft failure paths)")
+	}
+	if !strings.Contains(postSwitchSection, "$result.session = New-XlflowSessionResult") {
+		t.Fatal("expected $result.session = New-XlflowSessionResult in the section between switch and outer catch (needs to be set on soft failure paths)")
+	}
+}

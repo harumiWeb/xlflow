@@ -39,7 +39,7 @@ Default safety rules for AI-agent work:
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
-2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
+2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, `save`, `ui button add`, `ui button list`, and `ui button remove` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --json` while iterating, and use `xlflow run --session --json` or `xlflow run --headless --session --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
 5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
@@ -203,7 +203,7 @@ When the user reports a runtime failure:
 - Plain `xlflow run --session --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
-- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, and `save`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
+- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, `save`, `ui button add`, `ui button list`, and `ui button remove`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow attach --active --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
 - Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.

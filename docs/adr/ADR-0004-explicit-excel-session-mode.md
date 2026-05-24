@@ -19,7 +19,7 @@ Alternatives considered:
 
 Add explicit session mode for normal agent development, then extend workbook-backed commands to auto-reuse a matching recorded session workbook when that reuse is unambiguous.
 
-`xlflow session start` opens the configured workbook in Excel and records `.xlflow/session.json`. `xlflow push --session`, `xlflow run --session`, `xlflow save --session`, and the development-time workbook mutation helpers under `xlflow edit ... --session` force attachment to that open workbook. When `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, or `save` target the configured workbook and `.xlflow/session.json` still points at the same live workbook, those commands auto-reuse that matching session even if `--session` is omitted. Result payloads and human output surface whether session usage was explicit or auto-reused. `xlflow session status` reports whether the recorded process still exists, whether the workbook is open, and whether the live workbook needs save. `xlflow session stop` saves, closes the workbook, quits Excel, and removes the metadata.
+`xlflow session start` opens the configured workbook in Excel and records `.xlflow/session.json`. `xlflow push --session`, `xlflow run --session`, `xlflow save --session`, and the development-time workbook mutation helpers under `xlflow edit ... --session` force attachment to that open workbook. When `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, `save`, or `ui button add/list/remove` target the configured workbook and `.xlflow/session.json` still points at the same live workbook, those commands auto-reuse that matching session even if `--session` is omitted. `ui button add` and `ui button remove` save the live session workbook explicitly via `Workbook.Save()` after successful mutation; `ui button list` is read-only and does not save. Result payloads and human output surface whether session usage was explicit or auto-reused. `xlflow session status` reports whether the recorded process still exists, whether the workbook is open, and whether the live workbook needs save. `xlflow session stop` saves, closes the workbook, quits Excel, and removes the metadata.
 
 `--session` remains available as an explicit, fail-fast assertion that the matching session workbook must already be running.
 
@@ -47,7 +47,7 @@ Negative consequences:
 ## Rationale
 
 - Tests: CLI option tests, script syntax tests, and Excel COM-backed workflow tests.
-- Code: `internal/cli`, `internal/excel`, `internal/excel/scripts/session.ps1`, `internal/excel/scripts/push.ps1`, `internal/excel/scripts/run.ps1`.
+- Code: `internal/cli`, `internal/excel`, `internal/excel/scripts/session.ps1`, `internal/excel/scripts/push.ps1`, `internal/excel/scripts/run.ps1`, `internal/excel/scripts/ui.ps1`.
 - Related specs: `docs/specs/cli-contract.md`, `docs/specs/runtime-debugging.md`, `docs/design.md`.
 
 ## Supersedes
