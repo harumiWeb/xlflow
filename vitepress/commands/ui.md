@@ -5,9 +5,9 @@ Manage xlflow-owned worksheet buttons.
 ## Usage
 
 ```bash
-xlflow ui button add --sheet <sheet> --cell <cell> --text <label> --macro <entry>
-xlflow ui button list
-xlflow ui button remove --id <id>
+xlflow ui button add --sheet <sheet> --cell <cell> --text <label> --macro <entry> [--session]
+xlflow ui button list [--session]
+xlflow ui button remove --id <id> [--session]
 ```
 
 ## Options and Arguments
@@ -22,6 +22,7 @@ xlflow ui button remove --id <id>
 | `--text <label>`  | Button text.                                  | required for add |
 | `--macro <entry>` | Assigned macro entrypoint.                    | required for add |
 | `--verify-macro`  | Fail if the target macro is not discoverable. | false            |
+| `--session`       | Operate against the managed live session workbook. | false       |
 
 ## Examples
 
@@ -36,6 +37,8 @@ xlflow ui button list --json
 Give buttons stable ids or anchors so rerunning the command can update the intended control.
 :::
 
+When an xlflow session is active and `.xlflow/session.json` points at the configured workbook, `ui button` commands auto-reuse that matching live session workbook instead of opening a fresh hidden instance. `add` and `remove` save the live session workbook after successful mutation so the session workbook stays open; `list` is read-only and does not save.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.
@@ -43,8 +46,22 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 ```json
 {
   "status": "ok",
-  "command": "ui button add",
-  "button": { "sheet": "Home", "text": "Run", "macro": "Main.Run" }
+  "command": "ui",
+  "ui": {
+    "button": {
+      "id": "36c99bbe-f155-459e-9474-215b6b7db5c4",
+      "name": "xlflow.button.36c99bbe-f155-459e-9474-215b6b7db5c4",
+      "sheet": "Home",
+      "cell": "B2",
+      "text": "Run",
+      "macro": "Main.Run",
+      "left": 100,
+      "top": 50,
+      "width": 160,
+      "height": 40,
+      "updated": false
+    }
+  }
 }
 ```
 

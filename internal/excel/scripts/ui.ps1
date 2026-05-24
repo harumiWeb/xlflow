@@ -10,7 +10,9 @@ param(
   [int]$Width = 160,
   [int]$Height = 40,
   [string]$CreateSheet = "false",
-  [string]$VerifyMacro = "false"
+  [string]$VerifyMacro = "false",
+  [string]$MetadataPath = "",
+  [string]$UseSession = "false"
 )
 
 . "$PSScriptRoot/common.ps1"
@@ -19,6 +21,9 @@ $result = New-XlflowResult -Command "ui"
 $excel = $null
 $workbook = $null
 $saveWorkbook = $false
+$sessionAttached = $false
+$sessionMode = "none"
+$saveState = [ordered]@{ dirty = $false; needs_save = $false }
 
 function Set-UIButtonValidationError {
   param([string]$Message)
@@ -37,10 +42,13 @@ try {
     exit
   }
 
-  $excel = New-Object -ComObject Excel.Application
-  $excel.Visible = ConvertTo-XlflowBool $Visible
-  $workbook = Open-XlflowWorkbookWithXlflowDefaults -Excel $excel -WorkbookPath $WorkbookPath -DisplayAlerts $false -DisableAutomationMacros $true
-  $result.workbook = [ordered]@{ path = $WorkbookPath }
+  $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts "false" -DisableAutomationMacros "true" -MetadataPath $MetadataPath -UseSession $UseSession
+  $excel = $openResult.excel
+  $workbook = $openResult.workbook
+  $sessionAttached = [bool]$openResult.session_attached
+  $sessionMode = [string]$openResult.session_mode
+  $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+  $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
 
   switch ($Action) {
     "add" {
@@ -169,16 +177,60 @@ try {
       $result.logs = @("removed workbook button " + $buttonName)
     }
   }
+  if ($null -ne $workbook) {
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+  }
+  if ($result.status -eq "ok") {
+    if ($saveState.needs_save) {
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
+    }
+  }
 } catch {
   Set-XlflowError -Result $result -Code "ui_button_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
   if ($null -ne $WorkbookPath) {
-    $result.workbook = [ordered]@{ path = $WorkbookPath }
+    $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
+    $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+    $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+    if ($saveState.needs_save) {
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
+    }
   }
 } finally {
   if ($result.status -ne "ok") {
     $saveWorkbook = $false
   }
-  Close-XlflowCom -Workbook $workbook -Excel $excel -Save $saveWorkbook
+  if ($saveWorkbook -and $null -ne $workbook) {
+    try {
+      $workbook.Save()
+      $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $saveState.dirty -SaveRequired $saveState.needs_save -Mode $sessionMode
+      if (-not $result.Contains("warnings") -or $null -eq $result["warnings"]) {
+        $result["warnings"] = @()
+      }
+      $result.warnings = @($result.warnings | Where-Object { $_.code -ne "save_required" })
+      if ($saveState.needs_save) {
+        Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
+      }
+    } catch {
+      Set-XlflowError -Result $result -Code "save_failed" -Message ("Failed to save workbook: " + $_.Exception.Message) -Source "Excel"
+      $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $true -NeedsSave $true
+      $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath
+      $result.session = New-XlflowSessionResult -Active $sessionAttached -WorkbookPath $WorkbookPath -Dirty $true -SaveRequired $true -Mode $sessionMode
+      if (-not $result.Contains("warnings") -or $null -eq $result["warnings"]) {
+        $result["warnings"] = @()
+      }
+      $result.warnings = @($result.warnings | Where-Object { $_.code -ne "save_required" })
+      Add-XlflowStateWarning -Result $result -Code "save_required" -Message "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes."
+    }
+  }
+  if ($sessionAttached) {
+    Release-XlflowComReferences -Workbook $workbook -Excel $excel
+  } else {
+    Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
+  }
 }
 
 Write-XlflowJson -Result $result

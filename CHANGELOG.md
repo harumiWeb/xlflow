@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `xlflow ui button add` so it auto-reuses a matching live session workbook when `.xlflow/session.json` points at the configured workbook, preventing the Excel SaveAs dialog that previously appeared when a session was active.
+- Extended `ui button add`, `ui button list`, and `ui button remove` to use the shared session-aware workbook open helper and explicit save/release cleanup, matching the behavior of `push`, `pull`, `run`, `trace`, and other workbook-backed commands.
 - Added `xlflow status` and `xlflow status --json` as a read-only project-level command that shows project, source, workbook, and session state in one output. Source freshness is a heuristic based on file mtimes; the command does not modify workbook files, source files, or `.xlflow/state`. `workbook_saved` is now derived from `save_required` instead of `dirty` to avoid contradictory results when the session probe reports `save_required=true` but `dirty` is unknown; baseline `session` payload now always includes `running`, `workbook_open`, and `metadata` for schema stability.
 - Added `xlflow init --with-module` so imported projects can immediately receive bundled runtime helper modules and sync them back into the copied workbook.
 - Added `xlflow module install [--push]` so existing xlflow projects can install bundled helper modules on demand without rerunning `new`.

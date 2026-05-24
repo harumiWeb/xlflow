@@ -885,9 +885,29 @@ func TestRootCommandIncludesUIButtonCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sheet", "cell", "text", "macro", "id", "width", "height", "create-sheet", "verify-macro"} {
+	for _, name := range []string{"sheet", "cell", "text", "macro", "id", "width", "height", "create-sheet", "verify-macro", "session"} {
 		if add.Flags().Lookup(name) == nil {
 			t.Fatalf("expected ui button add to define --%s", name)
+		}
+	}
+
+	list, _, err := root.Find([]string{"ui", "button", "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sheet", "session"} {
+		if list.Flags().Lookup(name) == nil {
+			t.Fatalf("expected ui button list to define --%s", name)
+		}
+	}
+
+	remove, _, err := root.Find([]string{"ui", "button", "remove"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"id", "sheet", "session"} {
+		if remove.Flags().Lookup(name) == nil {
+			t.Fatalf("expected ui button remove to define --%s", name)
 		}
 	}
 }
@@ -925,6 +945,66 @@ func TestBuildUIButtonAddOptionsValidatesRequiredFields(t *testing.T) {
 	_, err = buildUIButtonAddOptions(excel.UIButtonAddOptions{Sheet: "Menu", Cell: "B2", Text: "Run", Macro: "Main.Run", Width: 0, Height: 40})
 	if err == nil || !strings.Contains(err.Error(), "--width") {
 		t.Fatalf("expected width error, got %v", err)
+	}
+}
+
+func TestBuildUIButtonAddOptionsPreservesSessionFlag(t *testing.T) {
+	opts, err := buildUIButtonAddOptions(excel.UIButtonAddOptions{
+		Sheet:   "Menu",
+		Cell:    "B2",
+		Text:    "Run",
+		Macro:   "Main.Run",
+		Width:   160,
+		Height:  40,
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Session {
+		t.Fatalf("expected Session to be preserved as true, got false")
+	}
+}
+
+func TestBuildUIButtonAddOptionsDefaultsSessionFalse(t *testing.T) {
+	opts, err := buildUIButtonAddOptions(excel.UIButtonAddOptions{
+		Sheet:  "Menu",
+		Cell:   "B2",
+		Text:   "Run",
+		Macro:  "Main.Run",
+		Width:  160,
+		Height: 40,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Session {
+		t.Fatalf("expected Session to default to false, got true")
+	}
+}
+
+func TestBuildUIButtonRemoveOptionsPreservesSessionFlag(t *testing.T) {
+	opts, err := buildUIButtonRemoveOptions(excel.UIButtonRemoveOptions{
+		ID:      "mybutton",
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Session {
+		t.Fatalf("expected Session to be preserved as true, got false")
+	}
+}
+
+func TestBuildUIButtonRemoveOptionsDefaultsSessionFalse(t *testing.T) {
+	opts, err := buildUIButtonRemoveOptions(excel.UIButtonRemoveOptions{
+		ID: "mybutton",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Session {
+		t.Fatalf("expected Session to default to false, got true")
 	}
 }
 

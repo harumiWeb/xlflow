@@ -767,6 +767,7 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 	cmd.Flags().IntVar(&opts.Height, "height", 40, "button height in points")
 	cmd.Flags().BoolVar(&opts.CreateSheet, "create-sheet", false, "create the target worksheet when it does not exist")
 	cmd.Flags().BoolVar(&opts.VerifyMacro, "verify-macro", false, "verify that the assigned macro exists before saving")
+	cmd.Flags().BoolVar(&opts.Session, "session", false, "force "+sessionUsageHint())
 	return cmd
 }
 
@@ -796,6 +797,7 @@ func (a *app) uiButtonListCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	cmd.Flags().BoolVar(&opts.Session, "session", false, "force "+sessionUsageHint())
 	return cmd
 }
 
@@ -830,6 +832,7 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.ID, "id", "", "stable xlflow button id")
 	cmd.Flags().StringVar(&opts.Sheet, "sheet", "", "worksheet name")
+	cmd.Flags().BoolVar(&opts.Session, "session", false, "force "+sessionUsageHint())
 	return cmd
 }
 
