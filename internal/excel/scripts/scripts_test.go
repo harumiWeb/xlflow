@@ -4523,12 +4523,63 @@ func TestUIScriptReportsSaveFailureAsError(t *testing.T) {
 	}
 }
 
+func TestUIScriptCatchBlockRefreshesSaveState(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+
+	switchEnd := strings.Index(text, "switch ($Action)")
+	if switchEnd < 0 {
+		t.Fatalf("switch block not found in ui.ps1")
+	}
+
+	outerCatch := strings.Index(text[switchEnd:], "\n} catch {")
+	if outerCatch < 0 {
+		t.Fatalf("outer catch block not found after switch in ui.ps1")
+	}
+
+	catchStart := switchEnd + outerCatch
+	finallyBlock := strings.Index(text[catchStart:], "\n} finally {")
+	if finallyBlock < 0 {
+		t.Fatalf("finally block not found after catch in ui.ps1")
+	}
+
+	catchSection := text[catchStart : catchStart+finallyBlock]
+
+	saveStateLine := strings.Index(catchSection, "Get-XlflowWorkbookSaveState")
+	workbookResultLine := strings.Index(catchSection, "New-XlflowWorkbookResult")
+
+	if saveStateLine < 0 {
+		t.Fatal("outer catch block must refresh $saveState via Get-XlflowWorkbookSaveState before constructing $result.workbook")
+	}
+	if workbookResultLine < 0 {
+		t.Fatal("outer catch block must construct $result.workbook via New-XlflowWorkbookResult")
+	}
+	if saveStateLine > workbookResultLine {
+		t.Fatalf("Get-XlflowWorkbookSaveState must appear before New-XlflowWorkbookResult in catch block so $saveState is fresh")
+	}
+}
+
 func TestUIScriptFinallyBlockGuardOrder(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
 	if err != nil {
 		t.Fatalf("failed to read ui.ps1: %v", err)
 	}
 	lines := strings.Split(string(data), "\n")
+
+	switchLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "switch ($Action)") {
+			switchLine = i
+			break
+		}
+	}
+	if switchLine < 0 {
+		t.Fatalf("switch ($Action) not found in ui.ps1")
+	}
+
 	inFinally := false
 	braceDepth := 0
 	var statusCheckLine, saveGuardLine, saveCallLine, catchLine int
@@ -4536,9 +4587,10 @@ func TestUIScriptFinallyBlockGuardOrder(t *testing.T) {
 	saveGuardLine = -1
 	saveCallLine = -1
 	catchLine = -1
-	for i, line := range lines {
+	for i := switchLine; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "} finally {") || strings.TrimPrefix(trimmed, "} finally {") != trimmed {
+		if strings.HasPrefix(trimmed, "} finally {") {
 			inFinally = true
 			braceDepth = 1
 			continue
@@ -4663,6 +4715,18 @@ func TestUIScriptPreservesSaveStateOnFailurePaths(t *testing.T) {
 }
 
 func TestUIScriptWarningsGuardPreventsNullElement(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "ui.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read ui.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `if (-not $result.Contains("warnings") -or $null -eq $result["warnings"])`) {
+		t.Fatalf("ui.ps1 must guard $result[\"warnings\"] before accessing it:\n%s", text)
+	}
+	if !strings.Contains(text, `$result.warnings = @($result.warnings | Where-Object { $_.code -ne "save_required" })`) {
+		t.Fatalf("ui.ps1 should filter out save_required warning after save:\n%s", text)
+	}
+
 	if _, err := exec.LookPath("pwsh"); err != nil {
 		t.Skip("pwsh is not available")
 	}

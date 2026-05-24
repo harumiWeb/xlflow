@@ -202,13 +202,17 @@ steps:
   # SELF REVIEW
   # =========================================================
   - name: self_review
+    persona: reviewer
 
     edit: false
 
-    provider: opencode
-    model: opencode-go/deepseek-v4-pro
-
-    persona: reviewer
+    promotion:
+      - at: 3
+        provider: opencode
+        model: opencode-go/deepseek-v4-pro
+      - condition: ai("レビュアーが reject を続けて進捗が止まっている")
+        provider: codex
+        model: gpt-5.4
 
     knowledge:
       - architecture
@@ -238,7 +242,7 @@ steps:
 
     rules:
       - condition: 修正が必要
-        next: implementation
+        next: fix
 
       - condition: 実装品質が十分
         next: final_audit
@@ -250,6 +254,67 @@ steps:
       report:
         - name: self-review.md
           format: review-report
+
+  # =========================================================
+  # FIX
+  # =========================================================
+  - name: fix
+
+    edit: true
+
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
+
+    persona: implementer
+
+    policy:
+      - coding
+      - testing
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+
+    required_permission_mode: edit
+
+    instruction: |
+      Address the concrete findings from self_review with the smallest safe patch.
+
+      Requirements:
+      - fix the highest-severity review findings first
+      - keep the scope tightly limited to the reported defects
+      - add or adjust regression tests when a review finding exposes a missing proof
+      - preserve public APIs, workbook compatibility, and deterministic exports
+
+      After changes:
+      - run the relevant tests or verification commands
+      - confirm each addressed finding has concrete evidence in code or test output
+
+      Avoid:
+      - restarting broad implementation work
+      - unrelated refactors or cleanup
+      - repeating the same failed approach without new evidence
+
+    rules:
+      - condition: 修正が完了した
+        next: self_review
+
+      - condition: 再計画が必要
+        next: plan
+
+      - condition: 修正を継続できない
+        next: ABORT
+
+      - condition: ユーザー入力が必要
+        next: fix
+        requires_user_input: true
+        interactive_only: true
+
+    output_contracts:
+      report:
+        - name: fix-report.md
+          format: implementation-report
 
   # =========================================================
   # FINAL AUDIT
@@ -315,3 +380,15 @@ steps:
       report:
         - name: final-audit.md
           format: audit-report
+
+loop_monitors:
+  - cycle: [self_review, fix]
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: "fix ループに進捗があるかを評価してください..."
+      rules:
+        - condition: "進捗あり"
+          next: fix
+        - condition: "進捗なし"
+          next: ABORT

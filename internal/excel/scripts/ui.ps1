@@ -188,6 +188,7 @@ try {
   }
 } catch {
   Set-XlflowError -Result $result -Code "ui_button_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult
+  $saveState = Get-XlflowWorkbookSaveState -Workbook $workbook -SessionAttached $sessionAttached
   if ($null -ne $WorkbookPath) {
     $result.workbook = New-XlflowWorkbookResult -WorkbookPath $WorkbookPath -SessionAttached $sessionAttached -SessionMode $sessionMode -Dirty $saveState.dirty -NeedsSave $saveState.needs_save
     $result.target = New-XlflowTargetResult -Kind $(if ($sessionAttached) { "live_session" } else { "file" }) -Path $WorkbookPath

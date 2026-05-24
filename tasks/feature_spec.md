@@ -243,3 +243,24 @@ foreach ($moduleGroup in $selected | Group-Object module) {
 - `docs/specs/cli-contract.md`
 - `vitepress/commands/test.md`
 - `docs/adr/NNNN-lifecycle-hooks.md`
+
+---
+
+# Takt Workflow Spec: supervisor monitor support
+
+## Goal
+
+Align `.takt/workflows/xlflow-orchestra-high.yaml` with the added `loop_monitors` entry for the `self_review` / `fix` cycle.
+
+## Required Changes
+
+- Add a `fix` step that performs focused remediation after `self_review`.
+- Change `self_review` so `修正が必要` transitions to `fix` instead of `implementation`.
+- Add a `supervisor` persona under `.takt/facets/personas/` for loop monitor judgments.
+
+## Behavioral Contract
+
+- `self_review -> fix -> self_review` becomes the dedicated remediation loop.
+- `fix` is narrower than `implementation`; it should address review findings with minimal scope and fresh verification.
+- The `supervisor` persona judges whether repeated `self_review` / `fix` cycles show concrete progress or should abort.
+- Apply the same structure to both `.takt/workflows/xlflow-orchestra-high.yaml` and `.takt/workflows/xlflow-orchestra-low.yaml`, preserving each workflow's existing model assignments.
