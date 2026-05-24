@@ -1,3 +1,36 @@
+# Bug Fix: XlflowDebug ParamArray + run compile watcher
+
+## Status
+
+- [x] Investigated `ParamArray` ByRef issue in `defaultDebugRuntimeModule` (`scaffold.go:1228`)
+- [x] Changed `JoinLogMessage(ByRef Parts() As Variant)` → `ByVal` — Fix A
+- [x] Investigated `Invoke-XlflowVBECompile` catch block missing `$result.ok = $false` — Fix B
+- [x] Added `$result.ok = $false` in common.ps1 catch block for compile control lookup failure
+- [x] Added regression test: `TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef` (`scaffold_test.go`)
+- [x] Added regression test: `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` (`scripts_test.go`)
+- [x] Updated CHANGELOG.md with both fixes under Unreleased
+- [x] Updated tasks/feature_spec.md with bug fix spec
+- [x] Updated tasks/lessons.md with ParamArray/ByRef lesson
+- [x] All scaffold tests pass (28)
+- [x] All compile/dialog/run tests pass (5+20 script parse)
+- [x] go vet clean
+- [x] PS lint passes (22 files)
+
+## E2E Verification
+
+- [x] `xlflow-tmp-workspace-e2e` skill: session-first workflow with `SampleFail` macro
+- [x] Confirm `ParamArray` compile error does not occur — `SampleFail` produces `macro_failed` (runtime type mismatch `HRESULT 0x800A9C68`), no `XlflowDebug.bas` ParamArray error
+- [x] Confirm no GUI dialog residual — all commands return normally, session save/stop clean
+- [x] Confirm structured failure in terminal output — `status: failed`, `error.code: macro_failed`, `phase: invoke_macro`
+- [x] Standard pull/lint flow passes cleanly after session stop
+- [ ] Fix B compile control not-found path — E2E verification not possible in this environment (compile control is available); regression test `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` passes
+
+## E2E workspace
+
+- `C:\dev\go\takt-worktrees\20260524T0200-xlflow-issue-bug-high-task-bri\tmp_workspaces\paramarray-e2e` — Fix A/B E2E verification
+
+---
+
 # xlflow status implementation
 
 ## Status

@@ -442,6 +442,19 @@ func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
 	}
 }
 
+func TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef(t *testing.T) {
+	body := defaultDebugRuntimeModule
+	if !strings.Contains(body, "JoinLogMessage") {
+		t.Fatal("template should contain JoinLogMessage")
+	}
+	if !strings.Contains(body, "Public Sub Log(ParamArray Parts() As Variant)") {
+		t.Fatal("template should contain ParamArray Log entry")
+	}
+	if strings.Contains(body, "ByRef Parts() As Variant") {
+		t.Fatalf("JoinLogMessage must not receive a ParamArray via ByRef; use ByVal Variant instead:\n%s", body)
+	}
+}
+
 func TestInitRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "Input.xlsm")

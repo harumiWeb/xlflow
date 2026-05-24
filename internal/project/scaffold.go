@@ -1225,7 +1225,7 @@ Public Sub Log(ParamArray Parts() As Variant)
 	EmitDebugEvent message
 End Sub
 
-Private Function JoinLogMessage(ByRef Parts() As Variant) As String
+Private Function JoinLogMessage(ByVal Parts() As Variant) As String
 	Dim index As Long
 	Dim lowerBound As Long
 	Dim upperBound As Long

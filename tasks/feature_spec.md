@@ -1,3 +1,44 @@
+# Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
+
+## Overview
+
+Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebug.bas` compile errors and misclassify VBE compile control lookup failures.
+
+## Fix A: XlflowDebug ParamArray ByRef
+
+**Goal:** `XlflowDebug.bas` helper module must not cause additional compile errors when user code has compile errors.
+
+**Root cause:** `defaultDebugRuntimeModule` in `internal/project/scaffold.go` defined `JoinLogMessage(ByRef Parts() As Variant)`, which cannot receive a `ParamArray` in some VBA environments.
+
+**Fix:** Change `ByRef` to `ByVal` in `JoinLogMessage` parameter declaration. Public interface `Log(ParamArray Parts() As Variant)` is preserved.
+
+**Regression test:** `TestXlflowDebugJoinLogMessageDoesNotForceParamArrayToByRef` in `internal/project/scaffold_test.go` — verifies the scaffolded module does not contain `ByRef Parts() As Variant`.
+
+## Fix B: compile watcher failure misclassification
+
+**Goal:** When `Invoke-XlflowVBECompile` cannot find the VBE compile command control, the failure must be reported as `vba_compile_failed`, not misclassified as `vbide_access_denied` or `macro_not_found`.
+
+**Root cause:** `Invoke-XlflowVBECompile` in `internal/excel/scripts/common.ps1` catch block did not set `$result.ok = $false`, allowing `run.ps1` to route the failure incorrectly.
+
+**Fix:** Set `$result.ok = $false` in the catch block of `Invoke-XlflowVBECompile` so callers can detect the failure.
+
+**Regression test:** `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` in `internal/excel/scripts/scripts_test.go` — dot-sources common.ps1, mocks `Get-XlflowVBECompileControl` returning `$null`, verifies `ok=false` with error message.
+
+## Expected Behavior After Fix
+
+- `xlflow run` with `SampleFail` macro executes without spurious `XlflowDebug.bas` compile errors
+- User code compile failure is reported as `vba_compile_failed` (structured error)
+- No GUI dialog residuals block subsequent workflow
+- Regression tests pass from failure to success
+
+## E2E Verification Points
+
+- `SampleFail` macro: `Public Sub SampleFail(): Dim x As Integer: x = "abc": End Sub`
+- session-first workflow: `session start → push --fast --session --no-save → run --session → save --session → session stop`
+- Confirm: no `ParamArray` compile error, no GUI dialog hang, structured failure in terminal
+
+---
+
 # Phase 1-2 Feature Spec: xlflow-native Test UX
 
 ## Overview

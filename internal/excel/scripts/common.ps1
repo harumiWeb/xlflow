@@ -1712,6 +1712,7 @@ function Invoke-XlflowVBECompile {
     $null = $control.Execute()
   } catch {
     $result.error = $_.Exception.Message
+    $result.ok = $false
   } finally {
     $dialog = Receive-XlflowVBEDialogWatcher -Watcher $watcher -WaitMilliseconds 3000
     if ($null -ne $dialog) {
@@ -1726,8 +1727,6 @@ function Invoke-XlflowVBECompile {
     } catch {
       Write-Verbose ("failed to collect compile selection diagnostic: " + $_.Exception.Message)
     }
-  } elseif (-not [string]::IsNullOrWhiteSpace($result.error)) {
-    throw $result.error
   }
 
   return $result

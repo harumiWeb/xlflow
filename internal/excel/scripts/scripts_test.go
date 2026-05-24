@@ -2160,6 +2160,39 @@ func TestCommonScriptCompileDialogSafetyHelpers(t *testing.T) {
 	}
 }
 
+func TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"function Get-XlflowExcelProcessId { param($Excel) return 123 }; "+
+			"function Start-XlflowVBEDialogWatcher { param([int]$ProcessId) return [pscustomobject]@{ powershell = $null; async = $null } }; "+
+			"function Get-XlflowVBECompileControl { param($VBE) return $null }; "+
+			"function Receive-XlflowVBEDialogWatcher { param($Watcher, [int]$WaitMilliseconds = 3000) return $null }; "+
+			"$r = Invoke-XlflowVBECompile -Excel ([pscustomobject]@{}) -Workbook ([pscustomobject]@{VBProject = [pscustomobject]@{VBE = [pscustomobject]@{}}}); "+
+			"[pscustomobject]@{ ok = $r.ok; error = [string]$r.error } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Invoke-XlflowVBECompile command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Ok    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse Invoke-XlflowVBECompile output: %v\n%s", err, out)
+	}
+	if got.Ok {
+		t.Fatalf("expected ok=false when compile control not found, got %+v", got)
+	}
+	if got.Error == "" {
+		t.Fatalf("expected error when compile control not found, got %+v", got)
+	}
+}
+
 func TestRunScriptRejectsDirectDiagnosticBeforeOpeningWorkbook(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
