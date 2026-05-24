@@ -1,3 +1,53 @@
+# Bug Fix: XlflowDebug ParamArray + run compile watcher
+
+## Status
+
+- [x] Investigated `ParamArray` forwarding issue in `defaultDebugRuntimeModule`
+- [x] Removed `JoinLogMessage(Parts)` forwarding and built the message inline in `Log` — Fix A
+- [x] Investigated `Invoke-XlflowVBECompile` catch block missing `$result.ok = $false` — Fix B
+- [x] Added `$result.ok = $false` in common.ps1 catch block for compile control lookup failure
+- [x] Added regression test: `TestXlflowDebugLogDoesNotForwardParamArrayToHelper` (`scaffold_test.go`)
+- [x] Added regression test: `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` (`scripts_test.go`)
+- [x] Updated CHANGELOG.md with both fixes under Unreleased
+- [x] Updated tasks/feature_spec.md with bug fix spec
+- [x] Updated tasks/lessons.md with ParamArray forwarding lesson
+- [x] All scaffold tests pass (28)
+- [x] All compile/dialog/run tests pass (5+20 script parse)
+- [x] go vet clean
+- [x] PS lint passes (22 files)
+
+## E2E Verification
+
+- [x] `xlflow-tmp-workspace-e2e` skill: session-first workflow with `SampleFail` macro
+- [x] Confirm `ParamArray` compile error does not occur — `SampleFail` produces `macro_failed` (runtime type mismatch `HRESULT 0x800A9C68`), no `XlflowDebug.bas` ParamArray error
+- [x] Confirm no GUI dialog residual — all commands return normally, session save/stop clean
+- [x] Confirm structured failure in terminal output — `status: failed`, `error.code: macro_failed`, `phase: invoke_macro`
+- [x] Standard pull/lint flow passes cleanly after session stop
+- [ ] Fix B compile control not-found path — E2E verification not possible in this environment (compile control is available); regression test `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` passes
+
+## E2E workspace
+
+- `C:\dev\go\takt-worktrees\20260524T0200-xlflow-issue-bug-high-task-bri\tmp_workspaces\paramarray-e2e` — Fix A/B E2E verification
+
+## Runtime diagnostic follow-up
+
+- [x] Reproduced live break-mode selection on `Main.SampleFail` and confirmed the real failing statement is `Main` line 9 (`x = "abc"`) in `tmp_workspaces\runtime-diagnostic-e2e`
+- [x] Added runtime selection scoring so user-code statements beat structural lines and temporary `XlflowRun_*` harness panes
+- [x] Moved macro execution for dialog-watched runtime runs into a disposable child `powershell.exe` process so parent CLI can recover even if `excel.Run(...)` remains blocked after break-mode entry
+- [x] Verified `Get-XlflowRuntimeDebugSelectionByProcessId` captures `Main:9` and resets break mode on the live Excel instance
+- [ ] Full `xlflow run --session --diagnostic` E2E remains blocked in this environment by the separate pre-existing `VBE Compile command was not found.` compile-gate issue before runtime invocation
+
+## Compile gate follow-up
+
+- [x] Inspected real VBE command bars and confirmed `Compile VBAProject` is exposed under `CommandBars("Menu Bar") -> Debug` as control `Id = 578`, not on the `CommandBars("Debug")` toolbar
+- [x] Updated compile control lookup to search by control id and menu-bar Debug popup before toolbar fallbacks
+- [x] Treated `compile control exists but Enabled = false` as "already compiled / no compile needed" instead of a hard failure
+- [x] Added regression tests for `FindControl` lookup, menu-bar fallback, and disabled compile control handling
+- [x] Verified `Invoke-XlflowVBECompile` returns `ok=true` on the live session workbook in `tmp_workspaces\runtime-diagnostic-e2e`
+- [x] Verified full `xlflow run Main.SampleFail --session --diagnostic --json` now returns structured `macro_failed` with `source=Main`, `line=9`, and nearby code for `x = "abc"`
+
+---
+
 # xlflow status implementation
 
 ## Status

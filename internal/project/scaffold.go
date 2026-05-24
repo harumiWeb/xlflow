@@ -1214,21 +1214,10 @@ Private Const xlflowGenericWrite As Long = &H40000000
 Private Const xlflowOpenExisting As Long = 3
 
 Public Sub Log(ParamArray Parts() As Variant)
-	Dim message As String
-	message = JoinLogMessage(Parts)
-	If Len(message) = 0 Then
-		Debug.Print
-	Else
-		Debug.Print message
-	End If
-
-	EmitDebugEvent message
-End Sub
-
-Private Function JoinLogMessage(ByRef Parts() As Variant) As String
 	Dim index As Long
 	Dim lowerBound As Long
 	Dim upperBound As Long
+	Dim message As String
 	Dim errorNumber As Long
 	Dim errorSource As String
 	Dim errorDescription As String
@@ -1240,11 +1229,12 @@ Private Function JoinLogMessage(ByRef Parts() As Variant) As String
 
 	For index = lowerBound To upperBound
 		If index > lowerBound Then
-			JoinLogMessage = JoinLogMessage & " "
+			message = message & " "
 		End If
-		JoinLogMessage = JoinLogMessage & StringifyValue(Parts(index))
+		message = message & StringifyValue(Parts(index))
 	Next index
-	Exit Function
+
+GoTo PrintMessage
 
 EmptyParts:
 	errorNumber = Err.Number
@@ -1252,11 +1242,19 @@ EmptyParts:
 	errorDescription = Err.Description
 	Err.Clear
 	On Error GoTo 0
-	If errorNumber = 9 Then
-		Exit Function
+	If errorNumber <> 9 Then
+		Err.Raise errorNumber, errorSource, errorDescription
 	End If
-	Err.Raise errorNumber, errorSource, errorDescription
-End Function
+
+PrintMessage:
+	If Len(message) = 0 Then
+		Debug.Print
+	Else
+		Debug.Print message
+	End If
+
+	EmitDebugEvent message
+End Sub
 
 Private Sub EmitDebugEvent(ByVal Message As String)
 	Dim pipeName As String

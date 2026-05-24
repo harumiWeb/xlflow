@@ -1,3 +1,67 @@
+# Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
+
+## Runtime diagnostic follow-up: prefer user-code break lines and avoid parent CLI hangs
+
+**Goal:** When Excel enters VBA break mode for a runtime error, diagnostics must report the actual user module/statement instead of the temporary `XlflowRun_*` harness, and the parent `xlflow` process must still recover even if the COM `excel.Run(...)` caller remains blocked.
+
+**Root causes:**
+
+- VBE selection capture could return the active pane on a structural line or a temporary `XlflowRun_*` helper instead of the failing user statement.
+- The runtime macro invocation happened inside the parent PowerShell bridge process; if `excel.Run(...)` stayed blocked after a runtime dialog entered break mode, the CLI could hang even after selection capture/reset logic succeeded elsewhere.
+
+**Fix:**
+
+- Score VBE selection candidates so runtime diagnostics prefer meaningful user-code statements and strongly de-prioritize `XlflowRun_*` panes and structural lines such as `End Sub`.
+- Run dialog-watched macro execution in a disposable child `powershell.exe` process that reattaches to the target Excel instance by process id. When a runtime dialog is captured and break mode is reset, the parent process can stop the child runner if it remains blocked and still return structured diagnostics.
+
+**Regression tests:**
+
+- `TestGetXlflowSelectionDiagnosticScorePrefersExecutableRuntimeLine`
+- `TestGetXlflowVBESelectionDiagnosticPrefersExecutablePaneOverActiveStructuralPane`
+- `TestInvokeXlflowExcelMacroRunWithDialogWatchReturnsRunnerValue`
+- `TestInvokeXlflowExcelMacroRunWithDialogWatchStopsHungRunnerAfterRuntimeDialog`
+
+## Overview
+
+Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebug.bas` compile errors and misclassify VBE compile control lookup failures.
+
+## Fix A: XlflowDebug ParamArray forwarding
+
+**Goal:** `XlflowDebug.bas` helper module must not cause additional compile errors when user code has compile errors.
+
+**Root cause:** `defaultDebugRuntimeModule` in `internal/project/scaffold.go` forwarded `Log(ParamArray Parts() As Variant)` into a secondary helper call `JoinLogMessage(Parts)`. That forwarding is not portable across VBA hosts: changing the helper to `ByRef Parts() As Variant` triggers "ParamArray の使い方が適切ではありません", while `ByVal Parts() As Variant` can still leave `JoinLogMessage` unresolved at compile/runtime in real Excel.
+
+**Fix:** Stop forwarding `Parts()` to another procedure. Build the rendered message inline inside `Log` while preserving the public interface `Log(ParamArray Parts() As Variant)`.
+
+**Regression test:** `TestXlflowDebugLogDoesNotForwardParamArrayToHelper` in `internal/project/scaffold_test.go` — verifies the scaffolded module does not call `JoinLogMessage(Parts)` or declare a forwarding helper.
+
+## Fix B: compile watcher failure misclassification
+
+**Goal:** When `Invoke-XlflowVBECompile` cannot find the VBE compile command control, the failure must be reported as `vba_compile_failed`, not misclassified as `vbide_access_denied` or `macro_not_found`.
+
+**Root cause:** `Invoke-XlflowVBECompile` in `internal/excel/scripts/common.ps1` catch block did not set `$result.ok = $false`, allowing `run.ps1` to route the failure incorrectly.
+
+**Fix:** Set `$result.ok = $false` in the catch block of `Invoke-XlflowVBECompile` so callers can detect the failure.
+
+**Implementation note:** In real Excel VBE, the compile command lives under `CommandBars("Menu Bar") -> Debug` and is exposed as control `Id = 578`; it is not reliably present on the `CommandBars("Debug")` toolbar. Also, when the compile control exists but `Enabled = false`, treat that state as "no compile needed / already compiled" instead of attempting `Execute()` and surfacing a COM failure.
+
+**Regression test:** `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` in `internal/excel/scripts/scripts_test.go` — dot-sources common.ps1, mocks `Get-XlflowVBECompileControl` returning `$null`, verifies `ok=false` with error message.
+
+## Expected Behavior After Fix
+
+- `xlflow run` with `SampleFail` macro executes without spurious `XlflowDebug.bas` compile errors
+- User code compile failure is reported as `vba_compile_failed` (structured error)
+- No GUI dialog residuals block subsequent workflow
+- Regression tests pass from failure to success
+
+## E2E Verification Points
+
+- `SampleFail` macro: `Public Sub SampleFail(): Dim x As Integer: x = "abc": End Sub`
+- session-first workflow: `session start → push --fast --session --no-save → run --session → save --session → session stop`
+- Confirm: no `ParamArray` compile error, no GUI dialog hang, structured failure in terminal
+
+---
+
 # Phase 1-2 Feature Spec: xlflow-native Test UX
 
 ## Overview
