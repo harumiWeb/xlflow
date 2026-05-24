@@ -4547,9 +4547,10 @@ func TestUIScriptFinallyBlockGuardOrder(t *testing.T) {
 			continue
 		}
 		for _, ch := range trimmed {
-			if ch == '{' {
+			switch ch {
+			case '{':
 				braceDepth++
-			} else if ch == '}' {
+			case '}':
 				braceDepth--
 			}
 		}

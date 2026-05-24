@@ -12,17 +12,17 @@ xlflow ui button remove --id <id> [--session]
 
 ## Options and Arguments
 
-| Option / argument | Description                                   | Default          |
-| ----------------- | --------------------------------------------- | ---------------- |
-| `button add`      | Create or update a worksheet button.          | -                |
-| `button list`     | List xlflow-owned buttons.                    | -                |
-| `button remove`   | Remove a managed button.                      | -                |
-| `--sheet <name>`  | Target worksheet.                             | required for add |
-| `--cell <addr>`   | Anchor cell.                                  | required for add |
-| `--text <label>`  | Button text.                                  | required for add |
-| `--macro <entry>` | Assigned macro entrypoint.                    | required for add |
-| `--verify-macro`  | Fail if the target macro is not discoverable. | false            |
-| `--session`       | Operate against the managed live session workbook. | false       |
+| Option / argument | Description                                        | Default          |
+| ----------------- | -------------------------------------------------- | ---------------- |
+| `button add`      | Create or update a worksheet button.               | -                |
+| `button list`     | List xlflow-owned buttons.                         | -                |
+| `button remove`   | Remove a managed button.                           | -                |
+| `--sheet <name>`  | Target worksheet.                                  | required for add |
+| `--cell <addr>`   | Anchor cell.                                       | required for add |
+| `--text <label>`  | Button text.                                       | required for add |
+| `--macro <entry>` | Assigned macro entrypoint.                         | required for add |
+| `--verify-macro`  | Fail if the target macro is not discoverable.      | false            |
+| `--session`       | Operate against the managed live session workbook. | false            |
 
 ## Examples
 
