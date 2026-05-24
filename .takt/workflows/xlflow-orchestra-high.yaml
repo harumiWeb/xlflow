@@ -80,7 +80,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: opencode-go/deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
 
     persona: tester
 
@@ -143,7 +143,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: opencode-go/deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
 
     persona: implementer
 
@@ -207,7 +207,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: opencode-go/deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
 
     knowledge:
       - architecture
@@ -258,7 +258,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: opencode-go/deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
 
     persona: implementer
 
