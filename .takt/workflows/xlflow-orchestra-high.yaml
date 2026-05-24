@@ -206,13 +206,8 @@ steps:
 
     edit: false
 
-    promotion:
-      - at: 3
-        provider: opencode
-        model: opencode-go/deepseek-v4-pro
-      - condition: ai("レビュアーが reject を続けて進捗が止まっている")
-        provider: codex
-        model: gpt-5.4
+    provider: opencode
+    model: opencode-go/deepseek-v4-pro
 
     knowledge:
       - architecture
