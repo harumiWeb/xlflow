@@ -2536,6 +2536,75 @@ func TestCommonScriptCompileDialogSafetyHelpers(t *testing.T) {
 	}
 }
 
+func TestGetXlflowVBECompileControlFindsControlById(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`. ./common.ps1
+$compile = [pscustomobject]@{ Caption = 'Compi&le VBAProject'; Id = 578 }
+$commandBars = [pscustomobject]@{}
+$commandBars | Add-Member -MemberType ScriptMethod -Name FindControl -Value { param($Type, $Id) if ($Id -eq 578) { return $compile }; return $null }
+$commandBars | Add-Member -MemberType ScriptMethod -Name Item -Value { param($Name) throw "unexpected Item($Name)" }
+$vbe = [pscustomobject]@{ CommandBars = $commandBars }
+$r = Get-XlflowVBECompileControl -VBE $vbe
+[pscustomobject]@{ caption = [string]$r.Caption; id = [int]$r.Id } | ConvertTo-Json -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compile control by id command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Caption string `json:"caption"`
+		ID      int    `json:"id"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse compile control by id output: %v\n%s", err, out)
+	}
+	if got.ID != 578 || !strings.Contains(got.Caption, "VBAProject") {
+		t.Fatalf("compile control by id = %+v, want id=578 compile caption", got)
+	}
+}
+
+func TestGetXlflowVBECompileControlFallsBackToMenuBarDebugPopup(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		`. ./common.ps1
+$compile = [pscustomobject]@{ Caption = 'Compi&le VBAProject'; Id = 578 }
+$debugPopup = [pscustomobject]@{ Caption = '&Debug'; Controls = @($compile) }
+$menuBar = [pscustomobject]@{ Controls = @($debugPopup) }
+$commandBars = [pscustomobject]@{}
+$commandBars | Add-Member -MemberType ScriptMethod -Name FindControl -Value { param($Type, $Id) return $null }
+$commandBars | Add-Member -MemberType ScriptMethod -Name Item -Value {
+  param($Name)
+  if ($Name -eq 'Menu Bar') { return $menuBar }
+  if ($Name -eq 'Debug') { return [pscustomobject]@{ Controls = @() } }
+  throw "unexpected Item($Name)"
+}
+$vbe = [pscustomobject]@{ CommandBars = $commandBars }
+$r = Get-XlflowVBECompileControl -VBE $vbe
+[pscustomobject]@{ caption = [string]$r.Caption; id = [int]$r.Id } | ConvertTo-Json -Compress`,
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compile control menu bar fallback command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Caption string `json:"caption"`
+		ID      int    `json:"id"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse compile control menu bar fallback output: %v\n%s", err, out)
+	}
+	if got.ID != 578 || !strings.Contains(got.Caption, "VBAProject") {
+		t.Fatalf("compile control menu bar fallback = %+v, want id=578 compile caption", got)
+	}
+}
+
 func TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -2566,6 +2635,36 @@ func TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound(t *testing
 	}
 	if got.Error == "" {
 		t.Fatalf("expected error when compile control not found, got %+v", got)
+	}
+}
+
+func TestInvokeXlflowVBECompileTreatsDisabledCompileControlAsAlreadyCompiled(t *testing.T) {
+	cmd := exec.Command(
+		"pwsh",
+		"-NoProfile",
+		"-Command",
+		". ./common.ps1; "+
+			"function Get-XlflowVBECompileControl { param($VBE) return [pscustomobject]@{ Enabled = $false } }; "+
+			"function Get-XlflowExcelProcessId { param($Excel) throw 'watcher should not start for disabled compile control' }; "+
+			"function Start-XlflowVBEDialogWatcher { param([int]$ProcessId) throw 'watcher should not start for disabled compile control' }; "+
+			"$r = Invoke-XlflowVBECompile -Excel ([pscustomobject]@{}) -Workbook ([pscustomobject]@{VBProject = [pscustomobject]@{VBE = [pscustomobject]@{}}}); "+
+			"[pscustomobject]@{ ok = $r.ok; error = [string]$r.error; dialog = [bool]$r.dialog.found } | ConvertTo-Json -Compress",
+	)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Invoke-XlflowVBECompile disabled-control command failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Ok     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Dialog bool   `json:"dialog"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("failed to parse Invoke-XlflowVBECompile disabled-control output: %v\n%s", err, out)
+	}
+	if !got.Ok || got.Error != "" || got.Dialog {
+		t.Fatalf("disabled compile control result = %+v, want ok=true with no error/dialog", got)
 	}
 }
 

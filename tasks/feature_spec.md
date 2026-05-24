@@ -43,6 +43,8 @@ Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebu
 
 **Fix:** Set `$result.ok = $false` in the catch block of `Invoke-XlflowVBECompile` so callers can detect the failure.
 
+**Implementation note:** In real Excel VBE, the compile command lives under `CommandBars("Menu Bar") -> Debug` and is exposed as control `Id = 578`; it is not reliably present on the `CommandBars("Debug")` toolbar. Also, when the compile control exists but `Enabled = false`, treat that state as "no compile needed / already compiled" instead of attempting `Execute()` and surfacing a COM failure.
+
 **Regression test:** `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` in `internal/excel/scripts/scripts_test.go` — dot-sources common.ps1, mocks `Get-XlflowVBECompileControl` returning `$null`, verifies `ok=false` with error message.
 
 ## Expected Behavior After Fix

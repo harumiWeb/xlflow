@@ -1645,8 +1645,52 @@ function Get-XlflowVBECompileControl {
   param($VBE)
 
   $captions = @("Compile VBAProject", "Compile Project", "コンパイル", "VBAProject のコンパイル")
+  $compileControlId = 578
   try {
     $commandBars = $VBE.CommandBars
+
+    try {
+      $control = $commandBars.FindControl($null, $compileControlId)
+      if ($null -ne $control) {
+        return $control
+      }
+    } catch {
+      Write-Verbose ("failed to resolve VBE compile control by id: " + $_.Exception.Message)
+    }
+
+    try {
+      $menuBar = $commandBars.Item("Menu Bar")
+      foreach ($menu in @($menuBar.Controls)) {
+        try {
+          $menuCaption = ([string]$menu.Caption).Replace("&", "")
+          if ($menuCaption -notmatch "^(?i:debug)$" -and $menuCaption -notmatch "^デバッグ$") {
+            continue
+          }
+          foreach ($control in @($menu.Controls)) {
+            try {
+              if ([int]$control.Id -eq $compileControlId) {
+                return $control
+              }
+            } catch {
+              Write-Verbose ("failed to inspect VBE compile control id in menu bar: " + $_.Exception.Message)
+            }
+            try {
+              $caption = ([string]$control.Caption).Replace("&", "")
+              if ($caption -match "(?i)^compile\b" -or $caption -match "コンパイル") {
+                return $control
+              }
+            } catch {
+              Write-Verbose ("failed to inspect VBE compile control caption in menu bar: " + $_.Exception.Message)
+            }
+          }
+        } catch {
+          Write-Verbose ("failed to inspect VBE menu bar popup: " + $_.Exception.Message)
+        }
+      }
+    } catch {
+      Write-Verbose ("VBE menu bar was not found: " + $_.Exception.Message)
+    }
+
     foreach ($barName in @("Debug", "デバッグ")) {
       try {
         $bar = $commandBars.Item($barName)
@@ -1660,7 +1704,7 @@ function Get-XlflowVBECompileControl {
         foreach ($control in @($bar.Controls)) {
           try {
             $caption = ([string]$control.Caption).Replace("&", "")
-            if ($caption -match "(?i)compile" -or $caption -match "コンパイル") {
+            if ([int]$control.Id -eq $compileControlId -or $caption -match "(?i)\bcompile\b" -or $caption -match "コンパイル") {
               return $control
             }
           } catch {
@@ -2361,12 +2405,23 @@ function Invoke-XlflowVBECompile {
 
   $watcher = $null
   try {
-    $processId = Get-XlflowExcelProcessId -Excel $Excel
-    $watcher = Start-XlflowVBEDialogWatcher -ProcessId $processId
     $control = Get-XlflowVBECompileControl -VBE $Workbook.VBProject.VBE
     if ($null -eq $control) {
       throw "VBE Compile command was not found."
     }
+
+    $compileEnabled = $true
+    try {
+      $compileEnabled = [bool]$control.Enabled
+    } catch {
+      $compileEnabled = $true
+    }
+    if (-not $compileEnabled) {
+      return $result
+    }
+
+    $processId = Get-XlflowExcelProcessId -Excel $Excel
+    $watcher = Start-XlflowVBEDialogWatcher -ProcessId $processId
     $null = $control.Execute()
   } catch {
     $result.error = $_.Exception.Message

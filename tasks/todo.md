@@ -37,6 +37,15 @@
 - [x] Verified `Get-XlflowRuntimeDebugSelectionByProcessId` captures `Main:9` and resets break mode on the live Excel instance
 - [ ] Full `xlflow run --session --diagnostic` E2E remains blocked in this environment by the separate pre-existing `VBE Compile command was not found.` compile-gate issue before runtime invocation
 
+## Compile gate follow-up
+
+- [x] Inspected real VBE command bars and confirmed `Compile VBAProject` is exposed under `CommandBars("Menu Bar") -> Debug` as control `Id = 578`, not on the `CommandBars("Debug")` toolbar
+- [x] Updated compile control lookup to search by control id and menu-bar Debug popup before toolbar fallbacks
+- [x] Treated `compile control exists but Enabled = false` as "already compiled / no compile needed" instead of a hard failure
+- [x] Added regression tests for `FindControl` lookup, menu-bar fallback, and disabled compile control handling
+- [x] Verified `Invoke-XlflowVBECompile` returns `ok=true` on the live session workbook in `tmp_workspaces\runtime-diagnostic-e2e`
+- [x] Verified full `xlflow run Main.SampleFail --session --diagnostic --json` now returns structured `macro_failed` with `source=Main`, `line=9`, and nearby code for `x = "abc"`
+
 ---
 
 # xlflow status implementation
