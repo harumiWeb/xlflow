@@ -2517,6 +2517,7 @@ function Get-XlflowWorkbookStateByProcessId {
   if ($ProcessId -le 0) {
     return $null
   }
+  $sawWorkbookFreeState = $false
   try {
     Add-XlflowNativeMethods
     $iid = [Guid]"00020400-0000-0000-C000-000000000046"
@@ -2540,9 +2541,10 @@ function Get-XlflowWorkbookStateByProcessId {
             Release-XlflowComObject -Object $dispatch -Name "dispatch COM object"
             return $true
           }
+          $sawWorkbookFreeState = $true
           Release-XlflowComObject -Object $candidate -Name "candidate Excel COM object"
           Release-XlflowComObject -Object $dispatch -Name "dispatch COM object"
-          return $false
+          continue
         } catch {
           Release-XlflowComObject -Object $candidate -Name "candidate COM object (non-Excel)"
           Release-XlflowComObject -Object $dispatch -Name "dispatch COM object (non-Excel)"
@@ -2552,6 +2554,9 @@ function Get-XlflowWorkbookStateByProcessId {
     }
   } catch {
     Write-Verbose ("failed to resolve workbook state by process id: " + $_.Exception.Message)
+  }
+  if ($sawWorkbookFreeState) {
+    return $false
   }
   return $null
 }

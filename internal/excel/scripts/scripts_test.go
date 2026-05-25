@@ -1691,6 +1691,35 @@ func TestGetXlflowWorkbookStateByProcessIdContinuesOnApplicationFailure(t *testi
 	}
 }
 
+func TestGetXlflowWorkbookStateByProcessIdDefersFalseUntilScanComplete(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `$sawWorkbookFreeState = $false`) {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should initialize workbook-free scan state")
+	}
+	if !strings.Contains(text, `$sawWorkbookFreeState = $true`) {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should record confirmed workbook-free windows before final return")
+	}
+	if !strings.Contains(text, "if ($sawWorkbookFreeState) {") {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should return false only after scanning all candidate windows")
+	}
+	start := strings.Index(text, `function Get-XlflowWorkbookStateByProcessId`)
+	if start == -1 {
+		t.Skip("Get-XlflowWorkbookStateByProcessId not found")
+	}
+	fnEnd := strings.Index(text[start:], `function Get-XlflowVBEByProcessId`)
+	if fnEnd == -1 {
+		fnEnd = len(text) - start
+	}
+	fnText := text[start : start+fnEnd]
+	if strings.Contains(fnText, "Release-XlflowComObject -Object $dispatch -Name \"dispatch COM object\"`r`n            return $false") || strings.Contains(fnText, "Release-XlflowComObject -Object $dispatch -Name \"dispatch COM object\"\n            return $false") {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should not return false immediately from the inner scan loop")
+	}
+}
+
 func TestProcessStopXlflowExcelProcessSetsMethodUnknownWhenProcessDiesAfterGracefulTimeout(t *testing.T) {
 	data, err := os.ReadFile("process.ps1")
 	if err != nil {

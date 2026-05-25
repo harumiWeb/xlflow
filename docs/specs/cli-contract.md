@@ -334,6 +334,7 @@ Source freshness (`src_newer_than_workbook`) is a heuristic based on file modifi
 `xlflow process list` enumerates all local Excel processes regardless of whether they were started by xlflow. The command is workbook- and configuration-independent.
 
 Success results add top-level `process` as an array of process objects. Each object contains:
+
 - `pid` — integer process ID.
 - `has_workbook` — boolean (`true` when at least one open workbook is confirmed, `false` when no workbook is confirmed, `null` when workbook state could not be determined).
 
@@ -342,6 +343,7 @@ When no Excel processes are running, `process` is an empty array and the command
 ### `process cleanup`
 
 `xlflow process cleanup` terminates Excel processes in one of three modes:
+
 - `<pid>` — graceful shutdown of a single process (falling back to force-stop if the process persists).
 - `--auto` — graceful shutdown of only those Excel processes that have no open workbooks.
 - `--all` — force-stop of ALL Excel processes regardless of workbook state.
@@ -349,12 +351,14 @@ When no Excel processes are running, `process` is an empty array and the command
 `cleanup --all` always prompts for interactive confirmation unless `--yes` is passed. When `--json` is set with `cleanup --all`, `--yes` is required; otherwise a configuration error is returned. Confirming cancellation returns `process_cancelled` (exit code 0).
 
 `cleanup` success results add top-level `process` as an object with:
+
 - `action` — `"cleanup"`.
 - `mode` — `"pid"`, `"auto"`, or `"all"`.
 - `total` — number of targeted processes.
 - `results` — array of per-process objects, each containing `pid`, `terminated` (boolean), and `method` (`"graceful"`, `"force"`, `"none"`, or `"unknown"` when the process exited but the shutdown method could not be determined).
 
 `process cleanup` may return these error codes:
+
 - `process_args_invalid` (exit code 2): invalid argument combinations.
 - `process_not_found` (exit code 2): the requested PID does not correspond to an Excel process.
 - `process_cancelled` (exit code 0): the user declined the `--all` confirmation prompt. This error code is set by the CLI layer and is never produced by the PowerShell bridge; its mapping does not belong in `exitCodeForScriptResult`.

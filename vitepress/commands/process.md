@@ -13,11 +13,11 @@ xlflow process cleanup --all [--yes]
 
 ## Options
 
-| Flag      | Command         | Description                                                                                     |
-| --------- | --------------- | ----------------------------------------------------------------------------------------------- |
-| `--auto`  | `cleanup`       | Terminate only Excel processes that have no open workbooks.                                     |
-| `--all`   | `cleanup`       | Force-terminate ALL Excel processes. Prompts for confirmation unless `--yes` is used.           |
-| `--yes`   | `cleanup --all` | Skip the interactive confirmation prompt for `--all`. Only valid with `--all`.                  |
+| Flag     | Command         | Description                                                                           |
+| -------- | --------------- | ------------------------------------------------------------------------------------- |
+| `--auto` | `cleanup`       | Terminate only Excel processes that have no open workbooks.                           |
+| `--all`  | `cleanup`       | Force-terminate ALL Excel processes. Prompts for confirmation unless `--yes` is used. |
+| `--yes`  | `cleanup --all` | Skip the interactive confirmation prompt for `--all`. Only valid with `--all`.        |
 
 ## list
 
@@ -64,9 +64,9 @@ xlflow process list --json
   "command": "process list",
   "error": null,
   "process": [
-    {"pid": 1234, "has_workbook": true},
-    {"pid": 5678, "has_workbook": false},
-    {"pid": 9012, "has_workbook": null}
+    { "pid": 1234, "has_workbook": true },
+    { "pid": 5678, "has_workbook": false },
+    { "pid": 9012, "has_workbook": null }
   ],
   "logs": ["found 3 Excel process(es)"]
 }
@@ -87,7 +87,7 @@ xlflow process cleanup 5678 --json
     "action": "cleanup",
     "mode": "pid",
     "total": 1,
-    "results": [{"pid": 5678, "terminated": true, "method": "graceful"}]
+    "results": [{ "pid": 5678, "terminated": true, "method": "graceful" }]
   },
   "logs": ["terminated 1 Excel process(es)"]
 }
@@ -108,7 +108,7 @@ xlflow process cleanup --auto --json
     "action": "cleanup",
     "mode": "auto",
     "total": 1,
-    "results": [{"pid": 5678, "terminated": true, "method": "graceful"}]
+    "results": [{ "pid": 5678, "terminated": true, "method": "graceful" }]
   },
   "logs": ["terminated 1 Excel process(es)"]
 }
@@ -130,8 +130,8 @@ xlflow process cleanup --all --yes --json
     "mode": "all",
     "total": 2,
     "results": [
-      {"pid": 1234, "terminated": true, "method": "force"},
-      {"pid": 5678, "terminated": true, "method": "force"}
+      { "pid": 1234, "terminated": true, "method": "force" },
+      { "pid": 5678, "terminated": true, "method": "force" }
     ]
   },
   "logs": ["terminated 2 Excel process(es)"]
@@ -153,9 +153,9 @@ When force-stop fails for an individual process, `method` is `"none"` and the co
     "mode": "all",
     "total": 3,
     "results": [
-      {"pid": 1234, "terminated": true, "method": "force"},
-      {"pid": 5678, "terminated": true, "method": "force"},
-      {"pid": 9012, "terminated": false, "method": "none"}
+      { "pid": 1234, "terminated": true, "method": "force" },
+      { "pid": 5678, "terminated": true, "method": "force" },
+      { "pid": 9012, "terminated": false, "method": "none" }
     ]
   },
   "logs": null

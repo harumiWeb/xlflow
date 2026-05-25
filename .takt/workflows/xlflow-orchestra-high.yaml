@@ -597,8 +597,7 @@ loop_monitors:
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle:
-      [final_audit, audit_triage, implementation, verification, self_review]
+  - cycle: [final_audit, audit_triage, implementation, verification, self_review]
     threshold: 2
     judge:
       persona: supervisor
