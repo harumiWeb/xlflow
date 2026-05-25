@@ -4040,6 +4040,11 @@ func TestProcessCleanupValidPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected valid PID 1 to pass, got %v", err)
 	}
+
+	err = validateProcessCleanupArgs(" 123 ", false, false, false)
+	if err != nil {
+		t.Fatalf("expected whitespace-padded PID to pass validation, got %v", err)
+	}
 }
 
 func TestResolvedVersionScriptsIncludesProcess(t *testing.T) {

@@ -124,7 +124,7 @@ pull → edit → push → lint → test/run → inspect
 >
 > Details
 > In Excel options, please enable "Trust Center" → "Macro Settings" → "Trust access to the VBA project object model".
-> ![](docs/images/trust_setting.png)
+> ![Excel Trust Center macro settings showing the Trust access to the VBA project object model option](docs/images/trust_setting.png)
 
 ---
 

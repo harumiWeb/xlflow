@@ -2940,7 +2940,10 @@ unsaved workbooks or active work. Use with extreme caution.`,
 			}
 			opts := excel.ProcessCleanupOptions{Action: "cleanup", Auto: auto, All: all}
 			if pid != "" {
-				pidInt, _ := strconv.Atoi(pid)
+				pidInt, err := strconv.Atoi(strings.TrimSpace(pid))
+				if err != nil || pidInt <= 0 {
+					return a.writeFailure("process cleanup", output.ExitConfig, "process_args_invalid", fmt.Errorf("PID must be a positive integer"))
+				}
 				opts.PID = pidInt
 			}
 			env, code, err := excel.Runner{RootDir: a.cwd}.ProcessCleanup(opts)

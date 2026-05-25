@@ -1004,16 +1004,24 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 }
 
 func (r Runner) ProcessList(opts ProcessListOptions) (output.Envelope, int, error) {
+	action := strings.TrimSpace(opts.Action)
+	if action == "" {
+		action = "list"
+	}
 	env, code, err := r.run("process", map[string]string{
-		"Action": opts.Action,
+		"Action": action,
 	})
 	env.Command = "process list"
 	return env, code, err
 }
 
 func (r Runner) ProcessCleanup(opts ProcessCleanupOptions) (output.Envelope, int, error) {
+	action := strings.TrimSpace(opts.Action)
+	if action == "" {
+		action = "cleanup"
+	}
 	args := map[string]string{
-		"Action": opts.Action,
+		"Action": action,
 		"Auto":   strconv.FormatBool(opts.Auto),
 		"All":    strconv.FormatBool(opts.All),
 	}

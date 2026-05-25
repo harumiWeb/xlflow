@@ -44,7 +44,7 @@ Terminates Excel processes in one of three modes:
 
 `cleanup --all` always prompts for interactive confirmation:
 
-```
+```text
 This will forcibly terminate ALL Excel processes. Unsaved work will be lost. Continue? [y/N]
 ```
 

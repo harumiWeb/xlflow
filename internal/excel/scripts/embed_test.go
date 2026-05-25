@@ -63,6 +63,9 @@ func TestMaterializeProcessScriptIsBundled(t *testing.T) {
 	if filepath.Base(path) != "process.ps1" {
 		t.Fatalf("script path = %q, want bundled process.ps1", path)
 	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected bundled process.ps1 to exist: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "common.ps1")); err != nil {
 		t.Fatalf("expected bundled common.ps1 alongside process.ps1: %v", err)
 	}

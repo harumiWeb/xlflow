@@ -125,7 +125,7 @@ pull → edit → push → lint → test/run → inspect
 >
 > 詳細
 > Excel のオプションで「トラスト センター」→「マクロの設定」→「VBA プロジェクト オブジェクト モデルへのアクセスを信頼する」を有効にしてください。
-> ![](docs/images/trust_setting.ja.png)
+> ![Excelのトラストセンター設定でVBAプロジェクトオブジェクトモデルへのアクセスを信頼する設定を有効にする画面](docs/images/trust_setting.ja.png)
 
 ---
 

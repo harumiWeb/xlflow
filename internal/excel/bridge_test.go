@@ -1191,6 +1191,33 @@ $result | ConvertTo-Json -Compress
 	}
 }
 
+func TestProcessListDefaultsActionArg(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action)
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok || m["action"] != "list" {
+		t.Fatalf("Process[0].action = %v, want list", m["action"])
+	}
+}
+
 func TestProcessCleanupSerializesPidModeArgs(t *testing.T) {
 	root := t.TempDir()
 	scriptsDir := filepath.Join(root, "scripts")
@@ -1230,6 +1257,39 @@ $result | ConvertTo-Json -Compress
 	}
 	if m["all"] != "false" {
 		t.Fatalf("all = %v, want false", m["all"])
+	}
+}
+
+func TestProcessCleanupDefaultsActionArg(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{PID: 1234})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if m["action"] != "cleanup" {
+		t.Fatalf("action = %v, want cleanup", m["action"])
+	}
+	if m["targetPid"] != "1234" {
+		t.Fatalf("targetPid = %v, want 1234", m["targetPid"])
 	}
 }
 
