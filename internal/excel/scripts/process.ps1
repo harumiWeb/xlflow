@@ -159,7 +159,7 @@ try {
               }) | Out-Null
               continue
             }
-            Stop-Process -Id $targetPid -Force -ErrorAction Stop
+            Stop-Process -InputObject $targetProc -Force -ErrorAction Stop
             $cleanupResults.Add([ordered]@{
               pid = $targetPid
               terminated = $true

@@ -1545,7 +1545,7 @@ func TestProcessCleanupAllUsesForceStopDirectly(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		`if ($isAll) {`,
-		`Stop-Process -Id $targetPid -Force -ErrorAction Stop`,
+		`Stop-Process -InputObject $targetProc -Force -ErrorAction Stop`,
 		`method = "force"`,
 	} {
 		if !strings.Contains(text, want) {
