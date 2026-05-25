@@ -1507,3 +1507,294 @@ func TestWriteWithOptionsRendersStatusSectionHeaders(t *testing.T) {
 		t.Fatalf("expected exactly one 'State:' header, got %d:\n%s", strings.Count(got, "State:"), got)
 	}
 }
+
+func TestWriteJSONEnvelopeIncludesProcessFields(t *testing.T) {
+	env := New("process list")
+	env.Process = []map[string]any{
+		{"pid": 1234, "has_workbook": true},
+		{"pid": 5678, "has_workbook": false},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	processList, ok := decoded["process"].([]any)
+	if !ok || len(processList) != 2 {
+		t.Fatalf("expected 2 process entries in JSON envelope: %s", buf.String())
+	}
+	first, _ := processList[0].(map[string]any)
+	if first["pid"] != float64(1234) || first["has_workbook"] != true {
+		t.Fatalf("unexpected first process entry: %+v", first)
+	}
+}
+
+func TestWriteJSONEnvelopeIncludesProcessCleanupResults(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action":  "cleanup",
+		"mode":    "auto",
+		"total":   2,
+		"results": []map[string]any{{"pid": 1234, "terminated": true, "method": "graceful"}},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	processResult, ok := decoded["process"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected process result in JSON envelope: %s", buf.String())
+	}
+	if processResult["action"] != "cleanup" || processResult["mode"] != "auto" {
+		t.Fatalf("unexpected process cleanup result: %+v", processResult)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessListSummary(t *testing.T) {
+	env := New("process list")
+	env.Process = []map[string]any{
+		{"pid": 1234, "has_workbook": true},
+		{"pid": 5678, "has_workbook": false},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow process list", "1234", "5678", "has workbook"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersProcessListEmptyResult(t *testing.T) {
+	env := New("process list")
+	env.Process = []map[string]any{}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "0 process") {
+		t.Fatalf("expected empty process list to show 0 count:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessListShowsUnknownForNullWorkbookState(t *testing.T) {
+	env := New("process list")
+	env.Process = []map[string]any{
+		{"pid": float64(1234), "has_workbook": nil},
+		{"pid": float64(5678), "has_workbook": true},
+		{"pid": float64(9012), "has_workbook": false},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"unknown", "has workbook", "no workbook"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupSummary(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action": "cleanup",
+		"mode":   "pid",
+		"total":  1,
+		"results": []map[string]any{
+			{"pid": 1234, "terminated": true, "method": "graceful"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow process cleanup", "PID:", "1234", "graceful", "1 terminated", "0 failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process cleanup output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupAllMode(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action": "cleanup",
+		"mode":   "all",
+		"total":  3,
+		"results": []map[string]any{
+			{"pid": 1234, "terminated": true, "method": "force"},
+			{"pid": 5678, "terminated": true, "method": "force"},
+			{"pid": 9012, "terminated": false, "method": "force"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow process cleanup", "all", "3", "2 terminated", "1 failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process cleanup --all output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupPidModePartialFailure(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action": "cleanup",
+		"mode":   "pid",
+		"total":  2,
+		"results": []map[string]any{
+			{"pid": 1234, "terminated": true, "method": "graceful"},
+			{"pid": 5678, "terminated": false, "method": "none"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"1 terminated", "1 failed", "PID: 1234", "PID: 5678", "none"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process cleanup pid partial failure output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupFailure(t *testing.T) {
+	env := Failure("process cleanup", Error{Code: "process_enumeration_failed", Message: "failed to enumerate Excel processes"})
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"process_enumeration_failed", "failed to enumerate Excel processes"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("process cleanup failure output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsDistinguishesProcessEmptyFromUnavailable(t *testing.T) {
+	env := Failure("process list", Error{Code: "process_enumeration_failed", Message: "could not enumerate"})
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "unavailable") || strings.Contains(got, "0 process") {
+		t.Fatalf("failed process list should not render count or unavailable:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessListNilProcessOK(t *testing.T) {
+	env := New("process list")
+	env.Process = nil
+	env.Status = StatusOK
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "unavailable") {
+		t.Fatalf("process list nil-Process + StatusOK should render unavailable:\n%s", got)
+	}
+	if !strings.Contains(got, "xlflow process list") {
+		t.Fatalf("process list nil-Process + StatusOK should include command label:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessDefaultsToLogs(t *testing.T) {
+	env := New("process")
+	env.Process = []map[string]any{
+		{"pid": 1234, "has_workbook": true},
+	}
+	env.Logs = []string{"process log entry"}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "has workbook") {
+		t.Fatalf("process command should not render process-specific table:\n%s", got)
+	}
+	if !strings.Contains(got, "process log entry") {
+		t.Fatalf("process command should render logs:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupUnknownMode(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action": "cleanup",
+		"total":  1,
+		"results": []map[string]any{
+			{"pid": 1234, "terminated": true, "method": "graceful"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "unknown") {
+		t.Fatalf("process cleanup with no mode should render as unknown:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupNilProcessStatusFailed(t *testing.T) {
+	env := New("process cleanup")
+	env.Status = StatusFailed
+	env.Process = nil
+	env.Error = &Error{Code: "process_no_fallback", Message: "process error fallback"}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "process error fallback") {
+		t.Fatalf("process cleanup nil-Process + StatusFailed should render logs:\n%s", got)
+	}
+	if strings.Contains(got, "Process cleanup result unavailable") {
+		t.Fatalf("process cleanup nil-Process + StatusFailed should not render unavailable fallback:\n%s", got)
+	}
+	if strings.Contains(got, "Mode") {
+		t.Fatalf("process cleanup nil-Process + StatusFailed should not render process table:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersProcessCleanupAutoZeroTargets(t *testing.T) {
+	env := New("process cleanup")
+	env.Process = map[string]any{
+		"action":  "cleanup",
+		"mode":    "auto",
+		"total":   0,
+		"results": []map[string]any{},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "auto") {
+		t.Fatalf("process cleanup auto zero targets should render mode:\n%s", got)
+	}
+	if !strings.Contains(got, "0") {
+		t.Fatalf("process cleanup auto zero targets should render total:\n%s", got)
+	}
+}

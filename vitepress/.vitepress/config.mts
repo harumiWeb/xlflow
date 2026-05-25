@@ -75,6 +75,7 @@ function commandSidebar() {
         { text: "analyze", link: "/commands/analyze" },
         { text: "check", link: "/commands/check" },
         { text: "completion", link: "/commands/completion" },
+        { text: "process", link: "/commands/process" },
         { text: "skill", link: "/commands/skill" },
         { text: "version", link: "/commands/version" },
       ],

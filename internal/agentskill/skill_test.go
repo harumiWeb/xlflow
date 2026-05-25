@@ -64,6 +64,8 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"`ui button add`",
 		"`ui button list`",
 		"`ui button remove`",
+		"process cleanup --all",
+		"process list",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("installed skill is missing %q:\n%s", want, body)

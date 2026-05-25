@@ -39,5 +39,6 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [check](./check)               | Run lint, analyze, and doctor as a combined preflight.                           |
 | [module](./module)             | Install bundled xlflow helper modules into an existing project.                  |
 | [completion](./completion)     | Generate shell completion scripts through Cobra.                                 |
+| [process](./process)           | List and manage local Excel processes.                                           |
 | [skill](./skill)               | Install the bundled xlflow skill for AI agent tools.                             |
 | [version](./version)           | Show xlflow build metadata.                                                      |

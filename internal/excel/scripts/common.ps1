@@ -772,7 +772,7 @@ function Get-XlflowUserFormCodeFiles {
 
 function ConvertTo-XlflowBool {
   param([string]$Value)
-  return (($Value -eq "true") -or ($Value -eq "True") -or ($Value -eq "1"))
+  return [bool](($Value -eq "true") -or ($Value -eq "True") -or ($Value -eq "1"))
 }
 
 function Get-XlflowRelativePath {
@@ -2507,6 +2507,51 @@ function Get-XlflowExcelByProcessId {
     }
   } catch {
     Write-Verbose ("failed to resolve Excel by process id: " + $_.Exception.Message)
+  }
+  return $null
+}
+
+function Get-XlflowWorkbookStateByProcessId {
+  param([int]$ProcessId)
+
+  if ($ProcessId -le 0) {
+    return $null
+  }
+  try {
+    Add-XlflowNativeMethods
+    $iid = [Guid]"00020400-0000-0000-C000-000000000046"
+    foreach ($hwnd in [XlflowNativeMethods]::GetWindowsForProcess([uint32]$ProcessId)) {
+      foreach ($candidateHwnd in @($hwnd) + @([XlflowNativeMethods]::GetChildWindows($hwnd))) {
+        $dispatch = $null
+        $hr = [XlflowNativeMethods]::AccessibleObjectFromWindow($candidateHwnd, 4294967280, [ref]$iid, [ref]$dispatch)
+        if ($hr -ne 0 -or $null -eq $dispatch) {
+          continue
+        }
+        $candidate = $dispatch
+        try {
+          $candidate = $dispatch.Application
+        } catch {
+          Release-XlflowComObject -Object $dispatch -Name "dispatch COM object (non-Excel)"
+          continue
+        }
+        try {
+          if ($candidate.Workbooks.Count -gt 0) {
+            Release-XlflowComObject -Object $candidate -Name "candidate Excel COM object"
+            Release-XlflowComObject -Object $dispatch -Name "dispatch COM object"
+            return $true
+          }
+          Release-XlflowComObject -Object $candidate -Name "candidate Excel COM object"
+          Release-XlflowComObject -Object $dispatch -Name "dispatch COM object"
+          return $false
+        } catch {
+          Release-XlflowComObject -Object $candidate -Name "candidate COM object (non-Excel)"
+          Release-XlflowComObject -Object $dispatch -Name "dispatch COM object (non-Excel)"
+          Write-Verbose ("accessible object is not an Excel application: " + $_.Exception.Message)
+        }
+      }
+    }
+  } catch {
+    Write-Verbose ("failed to resolve workbook state by process id: " + $_.Exception.Message)
   }
   return $null
 }
