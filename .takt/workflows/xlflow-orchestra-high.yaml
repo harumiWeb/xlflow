@@ -79,8 +79,12 @@ steps:
 
     edit: true
 
-    provider: opencode
-    model: deepseek/deepseek-v4-pro
+    provider: codex
+    model: gpt-5.4
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
 
     persona: tester
 
