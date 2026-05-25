@@ -57,6 +57,10 @@ xlflow [--json] analyze
 xlflow [--json] check
 xlflow [--json] generate test <module-name>
 xlflow [--json] module install [--push]
+xlflow [--json] process list
+xlflow [--json] process cleanup <pid>
+xlflow [--json] process cleanup --auto
+xlflow [--json] process cleanup --all [--yes]
 xlflow [--json] skill install [--agent <provider> | --target <dir>] [--force]
 xlflow [--json] version [--verbose]
 ```
@@ -250,6 +254,7 @@ Command-specific fields are added at the top level:
 - `output` for `form export-image`
 - `forms` for `form build`
 - `edit` for `edit`
+- `process` for `process list` (array of process objects) and `process cleanup` (cleanup result object)
 - `project`, `session`, `state`, `warnings`, and `hints` for `status`
 - `session` for session status metadata
 - `runner` for persistent runner module status
@@ -324,12 +329,49 @@ Workbook-state-aware commands may return top-level `target`, `session`, `warning
 
 Source freshness (`src_newer_than_workbook`) is a heuristic based on file modification times. Clock skew, manual file copies, and filesystem timestamp granularity can cause false positives or negatives. Consumers should treat this as an indication, not a strict synchronisation guarantee.
 
+### `process list`
+
+`xlflow process list` enumerates all local Excel processes regardless of whether they were started by xlflow. The command is workbook- and configuration-independent.
+
+Success results add top-level `process` as an array of process objects. Each object contains:
+
+- `pid` — integer process ID.
+- `has_workbook` — boolean (`true` when at least one open workbook is confirmed, `false` when no workbook is confirmed, `null` when workbook state could not be determined).
+
+When no Excel processes are running, `process` is an empty array and the command still succeeds.
+
+### `process cleanup`
+
+`xlflow process cleanup` terminates Excel processes in one of three modes:
+
+- `<pid>` — graceful shutdown of a single process (falling back to force-stop if the process persists).
+- `--auto` — graceful shutdown of only those Excel processes that have no open workbooks.
+- `--all` — force-stop of ALL Excel processes regardless of workbook state.
+
+`cleanup --all` always prompts for interactive confirmation unless `--yes` is passed. When `--json` is set with `cleanup --all`, `--yes` is required; otherwise a configuration error is returned. Confirming cancellation returns `process_cancelled` (exit code 0).
+
+`cleanup` success results add top-level `process` as an object with:
+
+- `action` — `"cleanup"`.
+- `mode` — `"pid"`, `"auto"`, or `"all"`.
+- `total` — number of targeted processes.
+- `results` — array of per-process objects, each containing `pid`, `terminated` (boolean), and `method` (`"graceful"`, `"force"`, `"none"`, or `"unknown"` when the process exited but the shutdown method could not be determined).
+
+`process cleanup` may return these error codes:
+
+- `process_args_invalid` (exit code 2): invalid argument combinations.
+- `process_not_found` (exit code 2): the requested PID does not correspond to an Excel process.
+- `process_cancelled` (exit code 0): the user declined the `--all` confirmation prompt. This error code is set by the CLI layer and is never produced by the PowerShell bridge; its mapping does not belong in `exitCodeForScriptResult`.
+- `process_enumeration_failed` (exit code 3): process enumeration failed at the system level.
+- `process_termination_failed` (exit code 3): one or more targeted processes could not be terminated.
+- `process_cleanup_failed` (exit code 3): an unexpected error occurred during process cleanup.
+
 ## Exit Codes
 
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, trace source removal refusal, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, duplicate test names, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, and workbook event-handler failures returned by the bridge
-- `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form build`, `form export-image`, and `edit` option combinations
-- `3`: environment failure, including Excel, COM, VBIDE, PowerShell, and script execution failures
+- `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form build`, `form export-image`, `edit`, and `process` option combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
+- `3`: environment failure, including Excel, COM, VBIDE, PowerShell, script execution failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

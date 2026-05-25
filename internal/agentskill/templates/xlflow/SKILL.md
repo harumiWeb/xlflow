@@ -265,6 +265,13 @@ When workbook code launches an external PowerShell process, separate xlflow's br
 2. Inspect the VBA command string or log the resolved executable from workbook code; it may be `powershell.exe` even when xlflow reports `pwsh.exe`, or the reverse.
 3. If the issue looks like encoding or environment drift, standardize on one host before changing xlflow or VBA logic.
 
+## Excel Process Management
+
+- Use `xlflow process list` to list all local Excel processes. The output includes PID and whether each process has open workbooks.
+- Use `xlflow process cleanup <pid>` to terminate a single Excel process by PID. The command tries graceful shutdown first and falls back to force-stop only if the process persists.
+- Use `xlflow process cleanup --auto` to terminate only Excel processes that have no open workbooks. This is safe for cleaning up zombie Excel instances.
+- Use `xlflow process cleanup --all` to force-terminate ALL Excel processes. **WARNING: `cleanup --all` is a destructive operation that WILL terminate every Excel process on the local machine, including any with unsaved workbooks.** This command always prompts for confirmation unless `--yes` is passed.
+
 ## Failure Handling
 
 If `xlflow test` fails, read the failing test name, module, `error.code`, VBA error number, description, and line. Distinct `error.code` values include `test_failed`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`, and `test_inconclusive`. Hook failures (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`) indicate setup/cleanup problems rather than assertion failures in the test body. Load [references/testing.md](references/testing.md) for a full failure-code reference. Patch the smallest relevant area, rerun the focused test with `--filter` first, then run the full test suite.

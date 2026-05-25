@@ -170,6 +170,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.moduleCommand(),
 		a.skillCommand(),
 		a.versionCommand(),
+		a.processCommand(),
 	)
 	return root
 }
@@ -254,7 +255,7 @@ func supportedVersionFeatures() []versionFeature {
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit"}
+	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit", "process"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -2878,6 +2879,127 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	return cmd
+}
+
+func (a *app) processCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "process",
+		Short: "Manage local Excel processes",
+	}
+	cmd.AddCommand(a.processListCommand(), a.processCleanupCommand())
+	return cmd
+}
+
+func (a *app) processListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List all local Excel processes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, code, err := excel.Runner{RootDir: a.cwd}.ProcessList(excel.ProcessListOptions{Action: "list"})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+}
+
+func (a *app) processCleanupCommand() *cobra.Command {
+	var auto bool
+	var all bool
+	var yes bool
+
+	cmd := &cobra.Command{
+		Use:   "cleanup [pid]",
+		Short: "Terminate Excel processes",
+		Long: `Terminate Excel processes by PID, by auto-detection (empty workbooks only), or by force-kill of all processes.
+
+WARNING: cleanup --all forcibly terminates ALL Excel processes regardless of
+unsaved workbooks or active work. Use with extreme caution.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pid := ""
+			if len(args) == 1 {
+				pid = args[0]
+			}
+			if err := validateProcessCleanupArgs(pid, auto, all, yes); err != nil {
+				return a.writeFailure("process cleanup", output.ExitConfig, "process_args_invalid", err)
+			}
+			if all && !yes {
+				if a.json {
+					return a.writeFailure("process cleanup", output.ExitConfig, "process_args_invalid", fmt.Errorf("--json with cleanup --all requires --yes for non-interactive safety"))
+				}
+				if !confirmPrompt(os.Stdin, a.stderrWriter(), "This will forcibly terminate ALL Excel processes. Unsaved work will be lost. Continue? [y/N] ") {
+					env := output.New("process cleanup")
+					env.Error = &output.Error{Code: "process_cancelled", Message: "cleanup --all cancelled by user"}
+					env.Status = output.StatusFailed
+					env.Logs = []string{"cleanup --all cancelled"}
+					return a.write(env, output.ExitSuccess)
+				}
+			}
+			opts := excel.ProcessCleanupOptions{Action: "cleanup", Auto: auto, All: all}
+			if pid != "" {
+				pidInt, err := strconv.Atoi(strings.TrimSpace(pid))
+				if err != nil || pidInt <= 0 {
+					return a.writeFailure("process cleanup", output.ExitConfig, "process_args_invalid", fmt.Errorf("PID must be a positive integer"))
+				}
+				opts.PID = pidInt
+			}
+			env, code, err := excel.Runner{RootDir: a.cwd}.ProcessCleanup(opts)
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().BoolVar(&auto, "auto", false, "terminate only Excel processes with no open workbooks")
+	cmd.Flags().BoolVar(&all, "all", false, "force-terminate ALL Excel processes (dangerous - prompts for confirmation)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation prompt for --all (use with caution)")
+	return cmd
+}
+
+func validateProcessCleanupArgs(pid string, auto bool, all bool, yes bool) error {
+	pid = strings.TrimSpace(pid)
+	if yes && !all {
+		return fmt.Errorf("--yes requires --all")
+	}
+	modeCount := 0
+	if pid != "" {
+		modeCount++
+	}
+	if auto {
+		modeCount++
+	}
+	if all {
+		modeCount++
+	}
+	if modeCount == 0 {
+		return fmt.Errorf("process cleanup requires a PID, --auto, or --all")
+	}
+	if modeCount > 1 {
+		return fmt.Errorf("PID, --auto, and --all cannot be combined")
+	}
+	if pid != "" {
+		pidInt, err := strconv.Atoi(pid)
+		if err != nil || pidInt <= 0 {
+			return fmt.Errorf("PID must be a positive integer")
+		}
+	}
+	return nil
+}
+
+func confirmPrompt(r io.Reader, w io.Writer, prompt string) bool {
+	if _, err := fmt.Fprint(w, prompt); err != nil {
+		return false
+	}
+	var response string
+	_, err := fmt.Fscanln(r, &response)
+	if err != nil {
+		return false
+	}
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
 }
 
 func (a *app) diffCommand() *cobra.Command {

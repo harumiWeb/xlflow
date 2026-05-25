@@ -75,17 +75,16 @@ These [samples](example) were created by an AI agent using xlflow with only mini
 Traditional VBA development is still heavily tied to the Excel UI and the Visual Basic Editor.
 That works for small manual edits, but it becomes painful when you want repeatable development, source control, tests, diffs, or AI-agent-assisted changes.
 
-| Pain in normal VBA development                       | What xlflow adds                                               |
-| ---------------------------------------------------- | -------------------------------------------------------------- |
-| VBA code is trapped inside `.xlsm` files             | Export/import VBA as `.bas`, `.cls`, and `.frm` source files   |
-| Macro entrypoints are unclear                        | Discover runnable `Public Sub` procedures with `xlflow macros` |
-| Existing UserForm layout is hard to review in diffs  | Persist Designer state with `xlflow form snapshot`             |
-| Runtime failures are hard to locate                  | Return structured errors, diagnostics, and trace logs          |
-| Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source      |
-| AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                    |
+| Pain in normal VBA development                       | What xlflow adds                                                  |
+| ---------------------------------------------------- | ----------------------------------------------------------------- |
+| VBA code is trapped inside `.xlsm` files             | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
+| UserForms cannot be handled declaratively            | Generate UserForms from YAML definitions with `xlflow form build` |
+| Runtime failures are hard to locate                  | Return structured errors, diagnostics, and trace logs             |
+| Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source         |
+| AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                       |
 
 ```text
-pull → edit → push → lint → test/run → trace → diff
+pull → edit → push → lint → test/run → inspect
 ```
 
 ---
@@ -106,53 +105,6 @@ pull → edit → push → lint → test/run → trace → diff
 > [!IMPORTANT]
 > xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM + PowerShell**.
 
-> [!NOTE]
-> Excel COM-backed commands report the xlflow bridge host in top-level `bridge`.
-> If workbook VBA launches its own external PowerShell process, that host can still differ from xlflow's bridge host. Inspect or log the workbook-side executable when debugging `powershell.exe` vs `pwsh.exe` behavior.
-
-## Headless Dialog Wrappers
-
-New projects scaffold `src/modules/XlflowRuntime.bas`, `src/modules/XlflowUI.bas`, `src/modules/XlflowDebug.bas`, and `src/modules/XlflowAssert.bas` as workbook-side helper modules.
-
-- `XlflowRuntime` lets VBA branch between `interactive`, `headless`, `ci`, `agent`, and `test` execution modes.
-- `XlflowUI` wraps `MsgBox`, `InputBox`, `Application.GetOpenFilename`, open `Application.FileDialog`, `Application.GetSaveAsFilename`, and folder picker dialogs so the same VBA can run both interactively and unattended.
-- `XlflowDebug` mirrors explicit `XlflowDebug.Log` calls to the terminal during `xlflow run` and `xlflow test` while still writing to the normal VBA Immediate Window.
-- `XlflowAssert` gives basic scalar assertions for workbook-side tests.
-
-Example:
-
-```vb
-Dim answer As VbMsgBoxResult
-Dim files As Variant
-
-answer = XlflowUI.MsgBox("confirm-save", "Save workbook?", vbYesNo + vbQuestion, "Orders")
-files = XlflowUI.GetOpenFilename("source-files", MultiSelect:=True)
-XlflowDebug.Log "running in", XlflowRuntime.ModeName()
-```
-
-For unattended execution, script those dialog responses at the CLI:
-
-```bash
-xlflow run Main.Run --headless --msgbox confirm-save=yes --filedialog get-open:source-files=C:\temp\a.txt --filedialog get-open:source-files=C:\temp\b.txt --ui-stream --json
-```
-
-Use `@cancel` when a headless file dialog should behave like the user pressed Cancel:
-
-```bash
-xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
-```
-
-`XlflowDebug.Log` does not need an extra CLI flag. During `xlflow run` and `xlflow test`, xlflow streams those debug lines to stderr by default and includes the recent events under top-level `debug` in the final JSON envelope.
-
-For existing projects, you can add the bundled helper modules during bootstrap or later:
-
-```bash
-xlflow init LegacyBook.xlsm --with-module
-xlflow module install --push
-```
-
-`init --with-module` adds `XlflowAssert`, `XlflowRuntime`, `XlflowUI`, and `XlflowDebug` after the initial bootstrap pull, then pushes them back into the copied workbook. `module install` is source-only by default and installs the same helper bundle into the configured module source root; add `--push` when the workbook should be updated immediately.
-
 ---
 
 ## Requirements
@@ -170,10 +122,9 @@ xlflow module install --push
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
 >
-> <details>
-> <summary>Details</summary>
+> Details
 > In Excel options, please enable "Trust Center" → "Macro Settings" → "Trust access to the VBA project object model".
-> </details>
+> ![Excel Trust Center macro settings showing the Trust access to the VBA project object model option](docs/images/trust_setting.png)
 
 ---
 
@@ -415,14 +366,14 @@ Inspect GUI boundaries before deciding whether a macro can run headlessly:
 xlflow inspect-gui --json
 ```
 
-| Result                                                        | Suggested mode                                             |
+| Result                                                        | Recommended action                                         |
 | ------------------------------------------------------------- | ---------------------------------------------------------- |
 | No GUI boundaries                                             | `xlflow run ... --headless --json`                         |
-| File picker, `InputBox`, modal `MsgBox`, or UserForm detected | `xlflow run ... --interactive --timeout 5m --json`         |
+| File picker, `InputBox`, modal `MsgBox`, or UserForm detected | Use `XlflowUI.MsgBox` and `XlflowUI.InputBox`              |
 | GUI code wraps core logic                                     | Refactor core logic into parameterized headless procedures |
 
 > [!WARNING]
-> Headless automation and modal Excel UI do not mix. Use `inspect-gui` before unattended runs and keep GUI entrypoints thin.
+> Headless automation and modal Excel UIs do not work well together. We recommend using `inspect-gui` before unattended execution and replacing existing `MsgBox` or `InputBox` calls with `XlflowUI`.
 
 ### Runtime-aware VBA branches
 
@@ -456,6 +407,7 @@ End If
 | `status`            | Show project, source, workbook, and session state               | `xlflow status --json`                                                       |
 | `save`              | Save the workbook held by a session                             | `xlflow save --session --json`                                               |
 | `runner`            | Manage the persistent xlflow runner marker module               | `xlflow runner install --json`                                               |
+| `process`           | Manage local Excel processes (list, cleanup)                    | `xlflow process list --json`                                                 |
 | `macros`            | Discover runnable macro entrypoints                             | `xlflow macros --json`                                                       |
 | `list forms`        | Discover workbook UserForms and expected source paths           | `xlflow list forms --json`                                                   |
 | `form snapshot`     | Persist strict Designer UserForm state as JSON or YAML spec     | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
@@ -495,36 +447,69 @@ Use the README as a quick overview and the documentation site as the source for 
 xlflow reads `xlflow.toml` from the project root.
 
 ```toml
+# Project identity and entry point.
 [project]
-name = "sample"
+# Project name used in output messages. Falls back to the workbook base name.
+name = "Book"
+# Default macro invoked by xlflow run when no positional macro is given.
 entry = "Main.Run"
 
+# Excel automation settings.
 [excel]
+# Path to the workbook, relative to the project root or absolute.
 path = "build/Book.xlsm"
+# Make the Excel application window visible during automation.
 visible = false
+# Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = false
 
+# Source tree directories.
 [src]
+# Directory for standard .bas modules.
 modules = "src/modules"
+# Directory for class .cls modules.
 classes = "src/classes"
+# Directory for UserForm .frm files.
 forms = "src/forms"
+# Directory for workbook document module text.
 workbook = "src/workbook"
 
+# VBE component folder support (Rubberduck-style).
 [vba]
+# Enable @Folder("A.B") annotations and nested source paths.
 folders = true
+# How xlflow handles @Folder annotations during push.
+# Valid values: "update", "preserve", "ignore".
+#   "update"    – rewrite from source directory layout.
+#   "preserve"  – keep existing annotations as-is.
+#   "ignore"    – disable folder annotation read/write.
 folder_annotation = "update"
+# Automatically assign default folder annotations based on source paths.
 default_component_folders = true
 
+# UserForm source mode.
 [userform]
+# Where UserForm code-behind lives in the source tree.
+# Valid values: "frm", "sidecar".
+#   "frm"     – code is kept inside the exported .frm file.
+#   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
+# Static analysis rules.
 [lint]
+# Require Option Explicit in every module.
 require_option_explicit = true
+# Forbid Select / Activate patterns.
 forbid_select = true
+# Forbid Activate usage.
 forbid_activate = true
+# Forbid On Error Resume Next.
 forbid_on_error_resume_next = true
+# Detect implicitly typed Variant variables.
 detect_implicit_variant = true
+# Forbid public fields in standard modules.
 forbid_public_module_fields = true
+# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = true
 ```
 
@@ -533,6 +518,54 @@ forbid_interactive_input = true
 Set `forbid_interactive_input = false` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries.
 
 Syntax safety lint rules for typographic quotes, C-style quote escapes, unclosed or mismatched procedures, and malformed line-continuation underscores are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+---
+
+## xlflow Dedicated Built-in Modules
+
+In new projects, the following helper modules are scaffolded on the workbook side:
+
+- `src/modules/XlflowRuntime.bas`
+- `src/modules/XlflowUI.bas`
+- `src/modules/XlflowDebug.bas`
+- `src/modules/XlflowAssert.bas`
+
+The purpose of each module is as follows:
+
+- `XlflowRuntime` is used for branching execution modes: `interactive`, `headless`, `ci`, `agent`, and `test`.
+- `XlflowUI` wraps `MsgBox`, `InputBox`, `Application.GetOpenFilename`, `Application.FileDialog`, `Application.GetSaveAsFilename`, and folder pickers, allowing the same VBA to be used for both interactive and unattended execution.
+- `XlflowDebug` mirrors `XlflowDebug.Log` to the terminal during `xlflow run` / `xlflow test` while maintaining standard VBA Immediate Window output.
+- `XlflowAssert` is a minimal scalar assertion helper used for workbook-side testing.
+
+Example:
+
+```vb
+Dim answer As VbMsgBoxResult
+Dim files As Variant
+
+answer = XlflowUI.MsgBox("confirm-save", "Save workbook?", vbYesNo + vbQuestion, "Orders")
+files = XlflowUI.GetOpenFilename("source-files", MultiSelect:=True)
+XlflowDebug.Log "running in", XlflowRuntime.ModeName()
+```
+
+In unattended execution, you provide dialog responses via the CLI.
+
+```bash
+xlflow run Main.Run --headless --msgbox confirm-save=yes --filedialog get-open:source-files=C:\temp\a.txt --filedialog get-open:source-files=C:\temp\b.txt --ui-stream --json
+```
+
+If you want to treat a headless file dialog as "Cancelled," use `@cancel`.
+
+```bash
+xlflow run Main.Run --headless --filedialog folder:export-dir=@cancel --json
+```
+
+To introduce bundled helper modules into an existing project, you can use the following commands during bootstrap or as an add-on:
+
+```bash
+xlflow init LegacyBook.xlsm --with-module
+xlflow module install --push
+```
 
 ---
 

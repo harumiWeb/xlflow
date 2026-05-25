@@ -1126,3 +1126,388 @@ func TestBuildUIButtonRemoveScriptArgsDefaultUseSessionFalse(t *testing.T) {
 		t.Fatalf("UseSession = %q, want false when Session option is not set", args["UseSession"])
 	}
 }
+
+func TestProcessArgsInvalidIsConfigFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "process_args_invalid", Message: "invalid process args"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitConfig {
+		t.Fatalf("exitCodeForScriptResult(process_args_invalid) = %d, want %d", got, output.ExitConfig)
+	}
+}
+
+func TestProcessNotFoundIsConfigFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "process_not_found", Message: "process not found"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitConfig {
+		t.Fatalf("exitCodeForScriptResult(process_not_found) = %d, want %d", got, output.ExitConfig)
+	}
+}
+
+func TestProcessEnvironmentFailureCodesAreEnvironmentFailures(t *testing.T) {
+	for _, code := range []string{"process_enumeration_failed", "process_termination_failed", "process_cleanup_failed"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitEnvironment {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitEnvironment)
+			}
+		})
+	}
+}
+
+func TestProcessListSerializesActionArg(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action)
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Command != "process list" {
+		t.Fatalf("Command = %q, want process list", env.Command)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok || m["action"] != "list" {
+		t.Fatalf("Process[0].action = %v, want list", m["action"])
+	}
+}
+
+func TestProcessListDefaultsActionArg(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action)
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok || m["action"] != "list" {
+		t.Fatalf("Process[0].action = %v, want list", m["action"])
+	}
+}
+
+func TestProcessCleanupSerializesPidModeArgs(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 1234})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Command != "process cleanup" {
+		t.Fatalf("Command = %q, want process cleanup", env.Command)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if m["action"] != "cleanup" {
+		t.Fatalf("action = %v, want cleanup", m["action"])
+	}
+	if m["targetPid"] != "1234" {
+		t.Fatalf("targetPid = %v, want 1234", m["targetPid"])
+	}
+	if m["auto"] != "false" {
+		t.Fatalf("auto = %v, want false", m["auto"])
+	}
+	if m["all"] != "false" {
+		t.Fatalf("all = %v, want false", m["all"])
+	}
+}
+
+func TestProcessCleanupDefaultsActionArg(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{PID: 1234})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if m["action"] != "cleanup" {
+		t.Fatalf("action = %v, want cleanup", m["action"])
+	}
+	if m["targetPid"] != "1234" {
+		t.Fatalf("targetPid = %v, want 1234", m["targetPid"])
+	}
+}
+
+func TestProcessCleanupSerializesAutoModeArgs(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", Auto: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if m["auto"] != "true" {
+		t.Fatalf("auto = %v, want true", m["auto"])
+	}
+	if m["all"] != "false" {
+		t.Fatalf("all = %v, want false", m["all"])
+	}
+	if m["targetPid"] != "" {
+		t.Fatalf("targetPid = %v, want empty string", m["targetPid"])
+	}
+}
+
+func TestProcessCleanupSerializesAllModeArgs(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	m, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if m["all"] != "true" {
+		t.Fatalf("all = %v, want true", m["all"])
+	}
+	if m["auto"] != "false" {
+		t.Fatalf("auto = %v, want false", m["auto"])
+	}
+}
+
+func TestProcessListDecodesListResult(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action)
+$result = @{
+	status="ok"
+	command="process"
+	error=$null
+	logs=@("found 2 Excel process(es)")
+	process=@(
+		@{pid=1234;has_workbook=$true}
+		@{pid=5678;has_workbook=$false}
+		@{pid=9012;has_workbook=$null}
+	)
+}
+$result | ConvertTo-Json -Compress
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, code, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Status != output.StatusOK {
+		t.Fatalf("Status = %q, want ok", env.Status)
+	}
+	if env.Command != "process list" {
+		t.Fatalf("Command = %q", env.Command)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok {
+		t.Fatalf("Process is not an array: %T", env.Process)
+	}
+	if len(processes) != 3 {
+		t.Fatalf("len(Process) = %d, want 3", len(processes))
+	}
+	p0, ok := processes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process[0] is not a map: %T", processes[0])
+	}
+	if pid, ok := p0["pid"]; !ok || pid.(float64) != 1234 {
+		t.Fatalf("Process[0].pid = %v", p0["pid"])
+	}
+	if hw, ok := p0["has_workbook"]; !ok || hw != true {
+		t.Fatalf("Process[0].has_workbook = %v", p0["has_workbook"])
+	}
+}
+
+func TestProcessCleanupDecodesCleanupResult(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+'{"status":"ok","command":"process","error":null,"logs":["terminated 1 Excel process(es)"],"process":{"action":"cleanup","mode":"pid","total":1,"results":[{"pid":5678,"terminated":true,"method":"graceful"}]}}'
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, code, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 5678})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Status != output.StatusOK {
+		t.Fatalf("Status = %q, want ok", env.Status)
+	}
+	if env.Command != "process cleanup" {
+		t.Fatalf("Command = %q", env.Command)
+	}
+	p, ok := env.Process.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process is not a map: %T", env.Process)
+	}
+	if p["action"] != "cleanup" {
+		t.Fatalf("action = %v, want cleanup", p["action"])
+	}
+	if p["mode"] != "pid" {
+		t.Fatalf("mode = %v, want pid", p["mode"])
+	}
+	if total, ok := p["total"]; !ok || total.(float64) != 1 {
+		t.Fatalf("total = %v", p["total"])
+	}
+	results, ok := p["results"].([]interface{})
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %v", p["results"])
+	}
+	r0, ok := results[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("results[0] is not a map: %T", results[0])
+	}
+	if r0["method"] != "graceful" {
+		t.Fatalf("method = %v, want graceful", r0["method"])
+	}
+}
+
+func TestProcessCleanupDecodesTerminationFailedResult(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
+'{"status":"failed","command":"process","error":{"code":"process_termination_failed","message":"1 of 3 Excel process(es) failed to terminate","source":"","number":0,"line":0,"phase":""},"logs":null,"process":{"action":"cleanup","mode":"all","total":3,"results":[{"pid":1234,"terminated":true,"method":"force"},{"pid":5678,"terminated":true,"method":"force"},{"pid":9012,"terminated":false,"method":"none"}]}}'
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, code, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want ExitEnvironment (%d)", code, output.ExitEnvironment)
+	}
+	if env.Status != output.StatusFailed {
+		t.Fatalf("Status = %q, want failed", env.Status)
+	}
+	if env.Command != "process cleanup" {
+		t.Fatalf("Command = %q", env.Command)
+	}
+	if env.Error == nil {
+		t.Fatal("Error is nil, want process_termination_failed")
+	}
+	if env.Error.Code != "process_termination_failed" {
+		t.Fatalf("Error.Code = %q, want process_termination_failed", env.Error.Code)
+	}
+	p, ok := env.Process.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Process is not a map: %T", env.Process)
+	}
+	if p["mode"] != "all" {
+		t.Fatalf("mode = %v, want all", p["mode"])
+	}
+	results, ok := p["results"].([]interface{})
+	if !ok || len(results) != 3 {
+		t.Fatalf("results = %v", p["results"])
+	}
+}
