@@ -2987,7 +2987,9 @@ func validateProcessCleanupArgs(pid string, auto bool, all bool, yes bool) error
 }
 
 func confirmPrompt(r io.Reader, w io.Writer, prompt string) bool {
-	fmt.Fprint(w, prompt)
+	if _, err := fmt.Fprint(w, prompt); err != nil {
+		return false
+	}
 	var response string
 	_, err := fmt.Fscanln(r, &response)
 	if err != nil {
