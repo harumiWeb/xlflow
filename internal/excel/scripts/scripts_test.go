@@ -1742,7 +1742,7 @@ func TestProcessCleanupTerminationLoopWrapsInTryCatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read process.ps1: %v", err)
 	}
-	text := string(data)
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, want := range []string{
 		`try {` + "\n" + `      foreach ($targetPid in $targets.ToArray())`,
 	} {
