@@ -1727,7 +1727,9 @@ func TestProcessStopXlflowExcelProcessSetsMethodUnknownWhenProcessDiesAfterGrace
 	}
 	text := string(data)
 	for _, want := range []string{
+		`$proc.Refresh()`,
 		`$method = "unknown"`,
+		`Stop-Process -InputObject $proc -Force -ErrorAction Stop`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("process.ps1 Stop-XlflowExcelProcess should set method to unknown when process exits after graceful timeout: missing %q", want)
@@ -1768,14 +1770,18 @@ func TestProcessCleanupAllPrecheckBeforeForceStop(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		`$stillExists = Get-Process -Id $targetPid -ErrorAction SilentlyContinue`,
+		`$targetProcesses = @{}`,
+		`$targetProcesses[$targetPid] = $proc`,
+		`$targetProc = $targetProcesses[$targetPid]`,
+		`$targetProc.Refresh()`,
 		`if (-not $stillExists) {`,
 		`terminated = $true`,
 		`method = "unknown"`,
+		`Stop-Process -InputObject $targetProc -Force -ErrorAction Stop`,
 		`continue`,
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("process.ps1 --all path should pre-check process existence before Stop-Process -Force: missing %q", want)
+			t.Fatalf("process.ps1 --all path should use the original Excel process object before Stop-Process -Force: missing %q", want)
 		}
 	}
 }

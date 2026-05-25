@@ -40,10 +40,16 @@ function Stop-XlflowExcelProcess {
     Write-Verbose ("graceful close failed for PID ${ProcessId}: " + $_.Exception.Message)
   }
 
-  $stillAlive = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  $stillAlive = $false
+  try {
+    $proc.Refresh()
+    $stillAlive = -not $proc.HasExited
+  } catch {
+    $stillAlive = $false
+  }
   if ($stillAlive) {
     try {
-      Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+      Stop-Process -InputObject $proc -Force -ErrorAction Stop
       $terminated = $true
       $method = "force"
     } catch {
@@ -79,6 +85,7 @@ try {
     $pidInt = 0
     $mode = ""
     $targets = New-Object System.Collections.Generic.List[int]
+    $targetProcesses = @{}
 
     if ([int]::TryParse($TargetPid, [ref]$pidInt) -and $pidInt -gt 0) {
       $mode = "pid"
@@ -101,7 +108,9 @@ try {
       $mode = "all"
       $processes = @(Get-Process -Name EXCEL -ErrorAction SilentlyContinue)
       foreach ($proc in $processes) {
-        $targets.Add([int]$proc.Id) | Out-Null
+        $targetPid = [int]$proc.Id
+        $targets.Add($targetPid) | Out-Null
+        $targetProcesses[$targetPid] = $proc
       }
     } else {
       Set-XlflowError -Result $result -Code "process_args_invalid" -Message "process cleanup requires a PID, --auto, or --all" -Source "xlflow"
@@ -126,7 +135,22 @@ try {
       foreach ($targetPid in $targets.ToArray()) {
         try {
           if ($isAll) {
-            $stillExists = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+            $targetProc = $targetProcesses[$targetPid]
+            if ($null -eq $targetProc) {
+              $cleanupResults.Add([ordered]@{
+                pid = $targetPid
+                terminated = $true
+                method = "unknown"
+              }) | Out-Null
+              continue
+            }
+            $stillExists = $false
+            try {
+              $targetProc.Refresh()
+              $stillExists = -not $targetProc.HasExited
+            } catch {
+              $stillExists = $false
+            }
             if (-not $stillExists) {
               $cleanupResults.Add([ordered]@{
                 pid = $targetPid
@@ -135,7 +159,7 @@ try {
               }) | Out-Null
               continue
             }
-            Stop-Process -Id $targetPid -Force -ErrorAction Stop
+            Stop-Process -InputObject $targetProc -Force -ErrorAction Stop
             $cleanupResults.Add([ordered]@{
               pid = $targetPid
               terminated = $true
