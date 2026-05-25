@@ -9,7 +9,7 @@ workflow_config:
     opencode:
       network_access: true
 
-max_steps: 56
+max_steps: 30
 initial_step: issue_intake
 
 steps:
@@ -324,9 +324,11 @@ steps:
 
       Requirements:
       - fix the identified root cause
+      - if re-entered from self_review or audit_triage, address only the remaining actionable findings
       - keep edits tightly scoped
       - add or update regression tests that prove the failure is fixed
       - update durable docs/specs/changelog when the bug fix changes user-visible behavior or contracts
+      - do not invent edits for allowed untracked files, auto-staging observations, or release-gate-only findings
 
       Avoid:
       - unrelated refactors
@@ -334,8 +336,9 @@ steps:
       - workaround-only fixes that leave the actual cause intact
 
       After implementation:
-      - run planned verification commands
+      - run planned or newly required targeted verification commands
       - fix test or lint failures caused by the change
+      - keep the patch unchanged when no actionable code/doc/test change remains
 
     rules:
       - condition: 実装が完了した
@@ -437,6 +440,11 @@ steps:
       - missing docs/spec/changelog updates
       - over-scoped changes unrelated to the bug
 
+      Validate:
+      - the patch still matches the bug-fix plan or audit triage
+      - intentional new files within scope are acceptable even if currently untracked
+      - auto-staging or transient git state is not treated as a blocker by itself
+
       Be strict about whether the fix would survive staff-level review.
 
     rules:
@@ -453,6 +461,144 @@ steps:
       report:
         - name: self-review.md
           format: review-report
+
+  # =========================================================
+  # AUDIT TRIAGE
+  # =========================================================
+  - name: audit_triage
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: planner
+
+    knowledge:
+      - architecture
+      - coding-rules
+      - invariants
+      - maintainability
+
+    instruction: |
+      Turn final_audit feedback into the smallest safe next action.
+
+      Separate findings into:
+      - actionable code/docs/tests changes
+      - manual or Windows + Excel release-gate and E2E verification
+      - gaps that require renewed reproduction, root-cause work, or plan refinement
+      - non-blocking or already-fixed notes that should not reopen implementation
+
+      Requirements:
+      - send work back to implementation only when concrete file edits remain
+      - route pure release-gate or environment-proof items to release_gate
+      - route unclear fix evidence back to reproduction or planning instead of guessing in implementation
+      - do not reopen implementation for allowed untracked files, auto-staging concerns, or stale already-fixed findings
+
+      Produce:
+      - exact files or commands
+      - verification evidence needed
+      - any user or environment dependency
+
+    rules:
+      - condition: コード/ドキュメント/テスト修正計画が確定した
+        next: implementation
+
+      - condition: 手動E2Eまたはリリースゲート確認が必要
+        next: release_gate
+
+      - condition: 再現または原因分析のやり直しが必要
+        next: reproduce
+
+      - condition: 修正計画の再整理が必要
+        next: fix_plan
+
+      - condition: 監査所見の整理により再監査で足りる
+        next: final_audit
+
+      - condition: ユーザー判断が必要
+        next: audit_triage
+        requires_user_input: true
+        interactive_only: true
+
+      - condition: 判断を継続できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: audit-triage.md
+          format: plan
+
+  # =========================================================
+  # RELEASE GATE
+  # =========================================================
+  - name: release_gate
+
+    edit: false
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
+
+    persona: tester
+
+    policy:
+      - testing
+
+    knowledge:
+      - e2e-testing
+      - architecture
+      - coding-rules
+      - invariants
+
+    instruction: |
+      Resolve remaining manual or environment-bound audit blockers without reopening broad implementation by default.
+
+      Focus on:
+      - Windows + Excel COM E2E and other release-gate proof
+      - docs or contract evidence that does not require new code edits
+      - clearly separating verified blockers from environment limitations
+
+      Requirements:
+      - run the narrowest release-gate checks that answer the remaining blocker
+      - if the gate exposes a concrete defect, hand it back through audit_triage with the exact failure
+      - if the gate is blocked by environment or human-only work, stop cleanly with explicit handoff instead of looping
+      - do not treat allowed untracked files or auto-staging state as gate failures
+
+    rules:
+      - condition: 検証が完了し再監査に進める
+        next: final_audit
+
+      - condition: 実装修正が必要と判明した
+        next: audit_triage
+
+      - condition: 再現または計画の見直しが必要
+        next: audit_triage
+
+      - condition: ユーザーまたは別環境での確認が必要
+        next: ABORT
+        appendix: |
+          release_gate handoff:
+          - remaining gate: {残件}
+          - recommended command or environment: {推奨手順}
+          - blocking reason: {阻害要因}
+
+      - condition: 検証を継続できない
+        next: ABORT
+
+    output_contracts:
+      report:
+        - name: release-gate-report.md
+          format: test-report
 
   # =========================================================
   # FINAL AUDIT
@@ -487,21 +633,33 @@ steps:
       - the chosen fix matches xlflow contracts and compatibility requirements
       - tests and documentation are sufficient
       - remaining risks, gaps, and unverified items are explicit
+      - actionable code/docs/tests blockers are separated from manual release-gate blockers
+      - report verdicts are internally consistent with the findings they cite
 
       Include:
       - concise issue-facing summary
       - residual risks
       - follow-up work that should be tracked separately if needed
 
+      Check carefully for:
+      - stale findings that are already fixed
+      - workflow-policy mismatches such as allowed untracked files or auto-staging being reported as blockers
+
+      Prefer:
+      - approval when only non-blocking notes remain
+
     rules:
       - condition: 承認
         next: COMPLETE
 
-      - condition: 軽微な修正が必要
-        next: implementation
+      - condition: コード/ドキュメント/テスト修正が必要
+        next: audit_triage
+
+      - condition: 手動E2Eまたはリリースゲート確認が必要
+        next: release_gate
 
       - condition: 再現または計画の見直しが必要
-        next: reproduce
+        next: audit_triage
 
       - condition: 監査継続不可
         next: ABORT
@@ -510,3 +668,53 @@ steps:
       report:
         - name: final-audit.md
           format: audit-report
+
+loop_monitors:
+  - cycle: [self_review, implementation, verification]
+    threshold: 2
+    judge:
+      persona: supervisor
+      instruction: |
+        self_review / implementation / verification ループに進捗があるかを評価してください。
+        進捗ありは、以前の blocking bug-fix finding が実際に解消された、
+        回帰テストや検証で blocker severity が下がった、
+        または誤った変更を除去してパッチが明確に改善した場合だけです。
+        許容された untracked files、auto-staging の状態、報告文面だけの変化は進捗に含めません。
+        手動E2Eや release gate だけが残っているなら implementation 継続ではなく進捗なしと判断してください。
+      rules:
+        - condition: "進捗あり"
+          next: implementation
+        - condition: "進捗なし"
+          next: ABORT
+
+  - cycle:
+      [final_audit, audit_triage, implementation, verification, self_review]
+    threshold: 2
+    judge:
+      persona: supervisor
+      instruction: |
+        final_audit から code remediation に戻るループに進捗があるかを評価してください。
+        進捗ありは、以前の audit blocker が実際に解消された、
+        blocker が code/docs/tests と manual release gate に明確に分離された、
+        または新しい検証で blocker severity が明確に下がった場合だけです。
+        同じ release-gate 項目、同じ docs/test 欠落、同じ stale finding が残るなら進捗なしです。
+      rules:
+        - condition: "進捗あり"
+          next: audit_triage
+        - condition: "進捗なし"
+          next: ABORT
+
+  - cycle: [final_audit, release_gate]
+    threshold: 2
+    judge:
+      persona: supervisor
+      instruction: |
+        final_audit / release_gate ループに進捗があるかを評価してください。
+        実際に E2E や手動ゲートが実行されたか、未検証項目が減ったか、
+        あるいはコード欠陥として切り分けられたかで判断してください。
+        同じ環境不足や同じ人手待ちが続くなら進捗なしです。
+      rules:
+        - condition: "進捗あり"
+          next: release_gate
+        - condition: "進捗なし"
+          next: ABORT
