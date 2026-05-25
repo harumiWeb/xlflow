@@ -71,6 +71,7 @@ type Envelope struct {
 	Hints         any `json:"hints,omitempty"`
 	DefaultEntry  any `json:"default_entry,omitempty"`
 	Suggestions   any `json:"suggestions,omitempty"`
+	Process       any `json:"process,omitempty"`
 }
 
 type Options struct {
@@ -266,6 +267,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderDiff(env))
 	case "inspect":
 		b.WriteString(r.renderInspect(env))
+	case "process list":
+		b.WriteString(r.renderProcessList(env))
+	case "process cleanup":
+		b.WriteString(r.renderProcessCleanup(env))
 	case "new", "init", "skill install":
 		b.WriteString(r.renderCreated(env))
 	default:
@@ -1321,6 +1326,81 @@ func (r renderer) renderEdit(env Envelope) string {
 		b.WriteString(kv("Save", save))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderProcessList(env Envelope) string {
+	processes := listOfObjects(env.Process)
+	if env.Process == nil && env.Status == StatusFailed {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if env.Process == nil {
+		b.WriteString(kv("Processes", "unavailable"))
+		return b.String()
+	}
+	b.WriteString(kv("Processes", fmt.Sprintf("%d", len(processes))))
+	for _, proc := range processes {
+		pid := intNumber(proc, "pid")
+		hasWorkbook, workbookKnown := boolValueOK(proc, "has_workbook")
+		workbookLabel := "unknown"
+		if workbookKnown {
+			if hasWorkbook {
+				workbookLabel = "has workbook"
+			} else {
+				workbookLabel = "no workbook"
+			}
+		}
+		fmt.Fprintf(&b, "- PID %d %s\n", pid, workbookLabel)
+	}
+	if len(processes) == 0 {
+		b.WriteString("0 processes found.\n")
+	}
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderProcessCleanup(env Envelope) string {
+	if env.Process == nil && env.Status == StatusFailed {
+		return r.renderLogs(env)
+	}
+	payload := objectMap(env.Process)
+	var b strings.Builder
+	b.WriteString("\n")
+	if env.Process == nil {
+		b.WriteString("Process cleanup result unavailable.\n")
+		return b.String()
+	}
+	mode := stringValue(payload, "mode")
+	if mode == "" {
+		mode = "unknown"
+	}
+	total := intNumber(payload, "total")
+	results := listOfObjects(payload["results"])
+	terminatedCount := 0
+	failedCount := 0
+	for _, res := range results {
+		if boolValue(res, "terminated") {
+			terminatedCount++
+		} else {
+			failedCount++
+		}
+	}
+	b.WriteString(kv("Mode", mode))
+	b.WriteString(kv("Total", fmt.Sprintf("%d", total)))
+	for _, res := range results {
+		pid := intNumber(res, "pid")
+		method := stringValue(res, "method")
+		terminated := boolValue(res, "terminated")
+		statusLabel := "terminated"
+		if !terminated {
+			statusLabel = "failed"
+		}
+		fmt.Fprintf(&b, "- PID: %d %s (%s)\n", pid, statusLabel, method)
+	}
+	fmt.Fprintf(&b, "%d terminated, %d failed\n", terminatedCount, failedCount)
 	b.WriteString(r.renderLogs(env))
 	return b.String()
 }

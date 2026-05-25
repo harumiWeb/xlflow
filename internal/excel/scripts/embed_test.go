@@ -49,3 +49,21 @@ func TestMaterializeUsesIndependentTempDirs(t *testing.T) {
 		t.Fatalf("expected second bundle common.ps1 to remain after first cleanup: %v", err)
 	}
 }
+
+func TestMaterializeProcessScriptIsBundled(t *testing.T) {
+	path, cleanup, err := Materialize("process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected cleanup for materialized bundle")
+	}
+	defer cleanup()
+	dir := filepath.Dir(path)
+	if filepath.Base(path) != "process.ps1" {
+		t.Fatalf("script path = %q, want bundled process.ps1", path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "common.ps1")); err != nil {
+		t.Fatalf("expected bundled common.ps1 alongside process.ps1: %v", err)
+	}
+}

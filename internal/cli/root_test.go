@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/backup"
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -3909,5 +3911,187 @@ func TestBuildStatusSessionBaselineStableFields(t *testing.T) {
 	}
 	if _, ok := session["metadata"]; !ok {
 		t.Error("baseline session must include 'metadata' field for stable JSON schema on all platforms")
+	}
+}
+
+func TestRootCommandIncludesProcessCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "process" {
+		t.Fatalf("expected process command, got %#v", cmd)
+	}
+}
+
+func TestRootCommandIncludesProcessListCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"process", "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "list" {
+		t.Fatalf("expected process list command, got %#v", cmd)
+	}
+}
+
+func TestRootCommandIncludesProcessCleanupCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"process", "cleanup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatalf("expected process cleanup command, got %#v", cmd)
+	}
+}
+
+func TestProcessCleanupCommandDefinesFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"process", "cleanup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"auto", "all", "yes"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected process cleanup command to define --%s", name)
+		}
+	}
+}
+
+func TestProcessListCommandArgCount(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"process", "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := cobra.NoArgs
+	if cmd.Args == nil {
+		t.Fatal("expected process list to define Args validator")
+	}
+	dummy := &cobra.Command{Args: expected}
+	if reflect.TypeOf(cmd.Args) != reflect.TypeOf(dummy.Args) {
+		t.Fatalf("expected process list to use NoArgs validator")
+	}
+}
+
+func TestProcessCleanupValidatesExclusiveModes(t *testing.T) {
+	err := validateProcessCleanupArgs("", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "requires a PID") {
+		t.Fatalf("expected PID requirement error, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("123", true, false, false)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected pid/auto conflict error, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("123", false, true, false)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected pid/all conflict error, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("", true, true, false)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected auto/all conflict error, got %v", err)
+	}
+}
+
+func TestProcessCleanupYesRequiresAllFlag(t *testing.T) {
+	err := validateProcessCleanupArgs("", false, false, true)
+	if err == nil || !strings.Contains(err.Error(), "--yes requires --all") {
+		t.Fatalf("expected --yes requires --all error, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("123", false, false, true)
+	if err == nil || !strings.Contains(err.Error(), "--yes requires --all") {
+		t.Fatalf("expected --yes requires --all error with pid, got %v", err)
+	}
+}
+
+func TestProcessCleanupValidPID(t *testing.T) {
+	err := validateProcessCleanupArgs("0", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("expected positive integer error for PID 0, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("-1", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("expected positive integer error for negative PID, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("abc", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("expected positive integer error for non-numeric PID, got %v", err)
+	}
+
+	err = validateProcessCleanupArgs("1", false, false, false)
+	if err != nil {
+		t.Fatalf("expected valid PID 1 to pass, got %v", err)
+	}
+}
+
+func TestResolvedVersionScriptsIncludesProcess(t *testing.T) {
+	scripts := resolvedVersionScripts(t.TempDir())
+	names := make([]string, 0, len(scripts))
+	for _, script := range scripts {
+		names = append(names, script.Command)
+	}
+	found := false
+	for _, name := range names {
+		if name == "process" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("resolvedVersionScripts missing %q in %#v", "process", names)
+	}
+}
+
+func TestConfirmPromptWritesToProvidedWriter(t *testing.T) {
+	var buf bytes.Buffer
+	result := confirmPrompt(strings.NewReader(""), &buf, "Test prompt? [y/N] ")
+	if result {
+		t.Fatalf("confirmPrompt should return false with no input")
+	}
+	got := buf.String()
+	if got != "Test prompt? [y/N] " {
+		t.Fatalf("confirmPrompt output = %q, want %q", got, "Test prompt? [y/N] ")
+	}
+}
+
+func TestConfirmPromptAcceptsYes(t *testing.T) {
+	var buf bytes.Buffer
+	result := confirmPrompt(strings.NewReader("yes"), &buf, "Prompt ")
+	if !result {
+		t.Fatalf("confirmPrompt should return true for 'yes'")
+	}
+}
+
+func TestConfirmPromptAcceptsY(t *testing.T) {
+	var buf bytes.Buffer
+	result := confirmPrompt(strings.NewReader("y"), &buf, "Prompt ")
+	if !result {
+		t.Fatalf("confirmPrompt should return true for 'y'")
+	}
+}
+
+func TestConfirmPromptRejectsNo(t *testing.T) {
+	var buf bytes.Buffer
+	result := confirmPrompt(strings.NewReader("n"), &buf, "Prompt ")
+	if result {
+		t.Fatalf("confirmPrompt should return false for 'n'")
 	}
 }

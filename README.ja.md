@@ -410,6 +410,7 @@ End If
 | `status`            | プロジェクト、source、workbook、session の状態を表示              | `xlflow status --json`                                                       |
 | `save`              | session 中の workbook を保存                                      | `xlflow save --session --json`                                               |
 | `runner`            | 永続 xlflow runner marker module を管理                           | `xlflow runner install --json`                                               |
+| `process`           | ローカル Excel プロセスの管理 (一覧表示、終了)                    | `xlflow process list --json`                                                 |
 | `macros`            | 実行可能な macro entrypoint を検出                                | `xlflow macros --json`                                                       |
 | `list forms`        | workbook の UserForm と想定 source path を列挙                    | `xlflow list forms --json`                                                   |
 | `form snapshot`     | 厳密な Designer UserForm state を JSON/YAML spec に保存           | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |

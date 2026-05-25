@@ -407,6 +407,7 @@ End If
 | `status`            | Show project, source, workbook, and session state               | `xlflow status --json`                                                       |
 | `save`              | Save the workbook held by a session                             | `xlflow save --session --json`                                               |
 | `runner`            | Manage the persistent xlflow runner marker module               | `xlflow runner install --json`                                               |
+| `process`           | Manage local Excel processes (list, cleanup)                    | `xlflow process list --json`                                                 |
 | `macros`            | Discover runnable macro entrypoints                             | `xlflow macros --json`                                                       |
 | `list forms`        | Discover workbook UserForms and expected source paths           | `xlflow list forms --json`                                                   |
 | `form snapshot`     | Persist strict Designer UserForm state as JSON or YAML spec     | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |

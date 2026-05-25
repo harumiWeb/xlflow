@@ -14,7 +14,7 @@ import (
 )
 
 func TestPowerShellScriptsParse(t *testing.T) {
-	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "inspect.ps1", "list.ps1", "macros.ps1", "new.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
+	scripts := []string{"attach.ps1", "common.ps1", "doctor.ps1", "edit.ps1", "export-image.ps1", "form-export-image.ps1", "form-write.ps1", "inspect-form.ps1", "inspect.ps1", "list.ps1", "macros.ps1", "new.ps1", "process.ps1", "pull.ps1", "push.ps1", "run.ps1", "runner.ps1", "session.ps1", "test.ps1", "trace.ps1", "ui.ps1"}
 	for _, script := range scripts {
 		script := script
 		t.Run(script, func(t *testing.T) {
@@ -1433,6 +1433,356 @@ func TestCommonScriptExposesReleaseComObjectHelper(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "Function" {
 		t.Fatalf("expected Release-XlflowComObject helper, got %q", out)
+	}
+}
+
+func TestProcessCleanupByPidChecksExcelProcessName(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`-or $proc.ProcessName -ne "EXCEL"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 missing EXCEL process name check %q", want)
+		}
+	}
+}
+
+func TestProcessCleanupNoDeadPidBranchInEmptyTargets(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, `$mode -eq "pid"`) {
+		t.Fatalf("process.ps1 should not contain dead mode==pid branch")
+	}
+}
+
+func TestProcessCleanupAutoExcludesUnknownWorkbookState(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, `-not [bool]$proc.has_workbook`) {
+		t.Fatalf("process.ps1 --auto should use strict -eq `$false (not [bool] cast which collapses $null to $false)")
+	}
+}
+
+func TestProcessCleanupAutoUsesStrictFalseCheck(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `$proc.has_workbook -eq $false`) {
+		t.Fatalf("process.ps1 --auto branch missing strict `$proc.has_workbook -eq `$false guard")
+	}
+}
+
+func TestGetXlflowExcelProcessesDistinguishesUnknownState(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `Get-XlflowWorkbookStateByProcessId`) {
+		t.Fatalf("process.ps1 should call Get-XlflowWorkbookStateByProcessId for COM-based workbook state detection")
+	}
+	if strings.Contains(text, ".MainWindowTitle") {
+		t.Fatalf("process.ps1 should not use MainWindowTitle for workbook state detection")
+	}
+	if strings.Contains(text, `$hasWorkbook = $false`) {
+		t.Fatalf("process.ps1 should not contain literal $hasWorkbook = $false (has_workbook must be confirmed via COM)")
+	}
+}
+
+func TestProcessScriptDoesNotConflateUnknownWithNoWorkbook(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, `$hasWorkbook = $false`) {
+		t.Fatalf("process.ps1 should not contain literal $hasWorkbook = $false (has_workbook=false must be confirmed via COM, not defaulted)")
+	}
+}
+
+func TestProcessCleanupUsesIsVariablesToAvoidParamCollision(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$isAuto = ConvertTo-XlflowBool`,
+		`$isAll = ConvertTo-XlflowBool`,
+		`} elseif ($isAuto) {`,
+		`} elseif ($isAll) {`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 should use $isAuto/$isAll to avoid collision with typed [string] params: missing %q", want)
+		}
+	}
+	for _, bad := range []string{
+		`$auto =`, `$all =`,
+	} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("process.ps1 must not use $auto or $all (collision with $Auto/$All params): found %q", bad)
+		}
+	}
+}
+
+func TestProcessCleanupAllUsesForceStopDirectly(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`if ($isAll) {`,
+		`Stop-Process -Id $targetPid -Force -ErrorAction Stop`,
+		`method = "force"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 --all should use Stop-Process -Force directly, not Stop-XlflowExcelProcess: missing %q", want)
+		}
+	}
+}
+
+func TestProcessStopXlflowExcelProcessSetsMethodNoneOnForceFailure(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `$method = "none"`) {
+		t.Fatalf("process.ps1 Stop-XlflowExcelProcess should set method to none when force stop fails")
+	}
+}
+
+func TestProcessStopXlflowExcelProcessMethodInitIsEmptyString(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `$method = ""`) {
+		t.Fatalf("process.ps1 Stop-XlflowExcelProcess should init method to empty string, not graceful")
+	}
+}
+
+func TestProcessCleanupPidDispatchDoesNotUseRedundantPidIntCheck(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, `$pidInt -eq 0 -and`) {
+		t.Fatalf("process.ps1 should not include redundant $pidInt -eq 0 check")
+	}
+}
+
+func TestProcessCleanupAutoEmptyTargetsPreservesMode(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$targets.Count -eq 0`,
+		`mode = $mode`,
+		`total = 0`,
+		`results = @()`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 should preserve mode in empty-targets result for display: missing %q", want)
+		}
+	}
+}
+
+func TestConvertToXlflowBoolHasBoolCast(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `return [bool]`) {
+		t.Fatalf("common.ps1 ConvertTo-XlflowBool should cast return to [bool]")
+	}
+}
+
+func TestGetXlflowWorkbookStateByProcessIdUsesCOM(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`function Get-XlflowWorkbookStateByProcessId`,
+		`AccessibleObjectFromWindow`,
+		`Workbooks.Count`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("common.ps1 missing workbook state helper pattern %q, expected COM-based workbook detection", want)
+		}
+	}
+}
+
+func TestGetXlflowWorkbookStateByProcessIdReleasesCOMReferences(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, `function Get-XlflowWorkbookStateByProcessId`) {
+		start := strings.Index(text, `function Get-XlflowWorkbookStateByProcessId`)
+		fnEnd := strings.Index(text[start:], `function Get-XlflowVBEByProcessId`)
+		if fnEnd == -1 {
+			fnEnd = len(text) - start
+		}
+		fnText := text[start : start+fnEnd]
+		fnReleaseCount := strings.Count(fnText, `Release-XlflowComObject`)
+		if fnReleaseCount < 2 {
+			t.Fatalf("Get-XlflowWorkbookStateByProcessId should release COM references before returning (found %d Release-XlflowComObject calls in function body, expected >= 2)", fnReleaseCount)
+		}
+	}
+}
+
+func TestGetXlflowWorkbookStateByProcessIdContinuesOnApplicationFailure(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "function Get-XlflowWorkbookStateByProcessId") {
+		t.Skip("Get-XlflowWorkbookStateByProcessId not found")
+	}
+	start := strings.Index(text, "function Get-XlflowWorkbookStateByProcessId")
+	fnEnd := strings.Index(text[start:], "function Get-XlflowVBEByProcessId")
+	if fnEnd == -1 {
+		fnEnd = len(text) - start
+	}
+	fnText := text[start : start+fnEnd]
+	if !strings.Contains(fnText, `catch {`) {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should have a try/catch for Application access")
+	}
+	appAccessCatchIdx := strings.Index(fnText, `$dispatch.Application`)
+	if appAccessCatchIdx == -1 {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should access dispatch.Application")
+	}
+	afterAppAccess := fnText[appAccessCatchIdx:]
+	appCatchStart := strings.Index(afterAppAccess, "catch {")
+	if appCatchStart == -1 {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should catch Application access failure")
+	}
+	appCatchBlock := afterAppAccess[appCatchStart:]
+	nextKeywordEnd := strings.Index(appCatchBlock, "}")
+	if nextKeywordEnd == -1 {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId Application catch block should close with }")
+	}
+	appCatchBody := appCatchBlock[:nextKeywordEnd]
+	if !strings.Contains(appCatchBody, "continue") {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId Application failure catch should `continue` to next window (not fall through to Workbooks.Count)")
+	}
+}
+
+func TestGetXlflowWorkbookStateByProcessIdDefersFalseUntilScanComplete(t *testing.T) {
+	data, err := os.ReadFile("common.ps1")
+	if err != nil {
+		t.Fatalf("failed to read common.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `$sawWorkbookFreeState = $false`) {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should initialize workbook-free scan state")
+	}
+	if !strings.Contains(text, `$sawWorkbookFreeState = $true`) {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should record confirmed workbook-free windows before final return")
+	}
+	if !strings.Contains(text, "if ($sawWorkbookFreeState) {") {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should return false only after scanning all candidate windows")
+	}
+	start := strings.Index(text, `function Get-XlflowWorkbookStateByProcessId`)
+	if start == -1 {
+		t.Skip("Get-XlflowWorkbookStateByProcessId not found")
+	}
+	fnEnd := strings.Index(text[start:], `function Get-XlflowVBEByProcessId`)
+	if fnEnd == -1 {
+		fnEnd = len(text) - start
+	}
+	fnText := text[start : start+fnEnd]
+	if strings.Contains(fnText, "Release-XlflowComObject -Object $dispatch -Name \"dispatch COM object\"`r`n            return $false") || strings.Contains(fnText, "Release-XlflowComObject -Object $dispatch -Name \"dispatch COM object\"\n            return $false") {
+		t.Fatalf("Get-XlflowWorkbookStateByProcessId should not return false immediately from the inner scan loop")
+	}
+}
+
+func TestProcessStopXlflowExcelProcessSetsMethodUnknownWhenProcessDiesAfterGracefulTimeout(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$proc.Refresh()`,
+		`$method = "unknown"`,
+		`Stop-Process -InputObject $proc -Force -ErrorAction Stop`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 Stop-XlflowExcelProcess should set method to unknown when process exits after graceful timeout: missing %q", want)
+		}
+	}
+}
+
+func TestProcessCleanupTerminationLoopWrapsInTryCatch(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`try {` + "\n" + `      foreach ($targetPid in $targets.ToArray())`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 cleanup termination loop should be wrapped in try-catch: missing pattern %q", want)
+		}
+	}
+}
+
+func TestProcessCleanupTerminationCatchesWithProcessTerminationFailed(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `Set-XlflowError -Result $result -Code "process_cleanup_failed" -Message $_.Exception.Message -Source $_.Exception.Source -Number $_.Exception.HResult`) {
+		t.Fatalf("process.ps1 cleanup outer catch should use process_cleanup_failed error code")
+	}
+}
+
+func TestProcessCleanupAllPrecheckBeforeForceStop(t *testing.T) {
+	data, err := os.ReadFile("process.ps1")
+	if err != nil {
+		t.Fatalf("failed to read process.ps1: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`$targetProcesses = @{}`,
+		`$targetProcesses[$targetPid] = $proc`,
+		`$targetProc = $targetProcesses[$targetPid]`,
+		`$targetProc.Refresh()`,
+		`if (-not $stillExists) {`,
+		`terminated = $true`,
+		`method = "unknown"`,
+		`Stop-Process -InputObject $targetProc -Force -ErrorAction Stop`,
+		`continue`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("process.ps1 --all path should use the original Excel process object before Stop-Process -Force: missing %q", want)
+		}
 	}
 }
 

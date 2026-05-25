@@ -332,6 +332,18 @@ type ScriptResult struct {
 	Inspect       any           `json:"inspect,omitempty"`
 	DefaultEntry  string        `json:"default_entry,omitempty"`
 	Suggestions   any           `json:"suggestions,omitempty"`
+	Process       any           `json:"process,omitempty"`
+}
+
+type ProcessListOptions struct {
+	Action string
+}
+
+type ProcessCleanupOptions struct {
+	Action string
+	PID    int
+	Auto   bool
+	All    bool
 }
 
 type UIButtonAddOptions struct {
@@ -991,6 +1003,28 @@ func (r Runner) ExportImage(cfg config.Config, opts ExportImageOptions) (output.
 	return r.run("export-image", scriptArgs, opts.Keepalive)
 }
 
+func (r Runner) ProcessList(opts ProcessListOptions) (output.Envelope, int, error) {
+	env, code, err := r.run("process", map[string]string{
+		"Action": opts.Action,
+	})
+	env.Command = "process list"
+	return env, code, err
+}
+
+func (r Runner) ProcessCleanup(opts ProcessCleanupOptions) (output.Envelope, int, error) {
+	args := map[string]string{
+		"Action": opts.Action,
+		"Auto":   strconv.FormatBool(opts.Auto),
+		"All":    strconv.FormatBool(opts.All),
+	}
+	if opts.PID > 0 {
+		args["TargetPid"] = strconv.Itoa(opts.PID)
+	}
+	env, code, err := r.run("process", args)
+	env.Command = "process cleanup"
+	return env, code, err
+}
+
 func (r Runner) EditCell(cfg config.Config, opts EditCellOptions) (output.Envelope, int, error) {
 	scriptArgs, err := buildEditCellScriptArgs(r.RootDir, cfg, opts)
 	if err != nil {
@@ -1482,6 +1516,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if result.Suggestions != nil {
 		env.Suggestions = result.Suggestions
 	}
+	env.Process = result.Process
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 	}
@@ -1652,6 +1687,10 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitValidation
 	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
 		return output.ExitValidation
+	case "process_args_invalid", "process_not_found":
+		return output.ExitConfig
+	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed":
+		return output.ExitEnvironment
 	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
 		return output.ExitConfig
 	default:
