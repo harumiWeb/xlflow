@@ -1355,8 +1355,8 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
-	if runtime.GOOS != "windows" && !hasExternalScriptOverride(r.RootDir, commandName) {
-		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
+	if !scriptExecutionSupported(r.RootDir, commandName) {
+		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP unless a script override is provided"})
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -1749,8 +1749,8 @@ func materializeBundledScript(commandName string) (string, func(), error) {
 func externalScriptPath(root, commandName string) (string, bool) {
 	name := commandName + ".ps1"
 	candidates := []string{}
-	if root != "" {
-		candidates = append(candidates, filepath.Join(root, "scripts", name))
+	if path, ok := rootScriptOverridePath(root, commandName); ok {
+		candidates = append(candidates, path)
 	}
 	if _, file, _, ok := runtime.Caller(0); ok {
 		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
@@ -1768,21 +1768,40 @@ func externalScriptPath(root, commandName string) (string, bool) {
 }
 
 func hasExternalScriptOverride(root, commandName string) bool {
-	_, ok := externalScriptPath(root, commandName)
+	_, ok := rootScriptOverridePath(root, commandName)
 	return ok
 }
 
+func scriptExecutionSupported(root, commandName string) bool {
+	return runtime.GOOS == "windows" || hasExternalScriptOverride(root, commandName)
+}
+
 func powerShellExecutable() (string, error) {
+	return powerShellExecutableFor(runtime.GOOS, exec.LookPath)
+}
+
+func powerShellExecutableFor(goos string, lookPath func(file string) (string, error)) (string, error) {
 	var candidates []string
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		candidates = []string{"powershell"}
 	} else {
 		candidates = []string{"pwsh", "powershell"}
 	}
 	for _, candidate := range candidates {
-		if _, err := exec.LookPath(candidate); err == nil {
+		if _, err := lookPath(candidate); err == nil {
 			return candidate, nil
 		}
 	}
 	return "", errors.New("PowerShell executable was not found")
+}
+
+func rootScriptOverridePath(root, commandName string) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	candidate := filepath.Clean(filepath.Join(root, "scripts", commandName+".ps1"))
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, true
+	}
+	return "", false
 }

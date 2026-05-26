@@ -3,6 +3,7 @@ package excel
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -76,6 +77,92 @@ func TestScriptResultAcceptsScalarLogString(t *testing.T) {
 	}
 	if len(result.Logs) != 1 || result.Logs[0] != "stopped xlflow Excel session" {
 		t.Fatalf("unexpected logs: %+v", result.Logs)
+	}
+}
+
+func TestHasExternalScriptOverride(t *testing.T) {
+	root := t.TempDir()
+	if hasExternalScriptOverride(root, "process") {
+		t.Fatal("expected no override before script exists")
+	}
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte("Write-Output '{}'"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !hasExternalScriptOverride(root, "process") {
+		t.Fatal("expected process override to be detected")
+	}
+}
+
+func TestPowerShellExecutableForWindows(t *testing.T) {
+	calls := []string{}
+	got, err := powerShellExecutableFor("windows", func(file string) (string, error) {
+		calls = append(calls, file)
+		if file == "powershell" {
+			return "/usr/bin/powershell", nil
+		}
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "powershell" {
+		t.Fatalf("executable = %q, want powershell", got)
+	}
+	if len(calls) != 1 || calls[0] != "powershell" {
+		t.Fatalf("lookPath calls = %v, want [powershell]", calls)
+	}
+}
+
+func TestPowerShellExecutableForNonWindowsPrefersPwsh(t *testing.T) {
+	calls := []string{}
+	got, err := powerShellExecutableFor("linux", func(file string) (string, error) {
+		calls = append(calls, file)
+		if file == "pwsh" {
+			return "/usr/bin/pwsh", nil
+		}
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "pwsh" {
+		t.Fatalf("executable = %q, want pwsh", got)
+	}
+	if len(calls) != 1 || calls[0] != "pwsh" {
+		t.Fatalf("lookPath calls = %v, want [pwsh]", calls)
+	}
+}
+
+func TestPowerShellExecutableForNonWindowsFallsBackToPowerShell(t *testing.T) {
+	calls := []string{}
+	got, err := powerShellExecutableFor("linux", func(file string) (string, error) {
+		calls = append(calls, file)
+		if file == "powershell" {
+			return "/usr/bin/powershell", nil
+		}
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "powershell" {
+		t.Fatalf("executable = %q, want powershell", got)
+	}
+	if len(calls) != 2 || calls[0] != "pwsh" || calls[1] != "powershell" {
+		t.Fatalf("lookPath calls = %v, want [pwsh powershell]", calls)
+	}
+}
+
+func TestPowerShellExecutableForReturnsErrorWhenUnavailable(t *testing.T) {
+	_, err := powerShellExecutableFor("linux", func(file string) (string, error) {
+		return "", errors.New("not found")
+	})
+	if err == nil {
+		t.Fatal("expected missing PowerShell error")
 	}
 }
 
