@@ -1356,7 +1356,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env := output.New(commandName)
 	var err error
 	if !scriptExecutionSupported(r.RootDir, commandName) {
-		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP unless a script override is provided"})
+		env = output.Failure(commandName, output.Error{Code: "environment", Message: fmt.Sprintf("Excel automation is only supported on Windows in the MVP unless a script override is provided at scripts/%s.ps1", commandName)})
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -1792,7 +1792,7 @@ func powerShellExecutableFor(goos string, lookPath func(file string) (string, er
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("PowerShell executable not found (searched: %s)", strings.Join(candidates, ", "))
+	return "", fmt.Errorf("PowerShell executable not found on %s (searched: %s)", goos, strings.Join(candidates, ", "))
 }
 
 func rootScriptOverridePath(root, commandName string) (string, bool) {
