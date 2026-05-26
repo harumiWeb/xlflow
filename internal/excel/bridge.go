@@ -1355,7 +1355,7 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && !hasExternalScriptOverride(r.RootDir, commandName) {
 		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
 		return env, output.ExitEnvironment, nil
 	}
@@ -1421,7 +1421,20 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		ctx, cancel = context.WithCancel(context.Background())
 	}
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", cmdArgs...)
+	powershellExe, err := powerShellExecutable()
+	if err != nil {
+		env = output.Failure(commandName, output.Error{Code: "environment", Message: err.Error(), Source: "xlflow"})
+		if debugStreamErr != nil {
+			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+		}
+		env.Debug = mergeDebugResult(nil, debugResult)
+		if uiStreamErr != nil {
+			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		}
+		env.UI = mergeUIResult(nil, uiEvents)
+		return env, output.ExitEnvironment, nil
+	}
+	cmd := exec.CommandContext(ctx, powershellExe, cmdArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1748,4 +1761,22 @@ func externalScriptPath(root, commandName string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func hasExternalScriptOverride(root, commandName string) bool {
+	_, ok := externalScriptPath(root, commandName)
+	return ok
+}
+
+func powerShellExecutable() (string, error) {
+	candidates := []string{"powershell"}
+	if runtime.GOOS != "windows" {
+		candidates = []string{"pwsh", "powershell"}
+	}
+	for _, candidate := range candidates {
+		if _, err := exec.LookPath(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("PowerShell executable was not found")
 }
