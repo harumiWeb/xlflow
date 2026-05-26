@@ -1355,8 +1355,8 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
-	if runtime.GOOS != "windows" {
-		env = output.Failure(commandName, output.Error{Code: "environment", Message: "Excel automation is only supported on Windows in the MVP"})
+	if !scriptExecutionSupported(r.RootDir, commandName) {
+		env = output.Failure(commandName, output.Error{Code: "environment", Message: fmt.Sprintf("Excel automation is only supported on Windows in the MVP unless a script override is provided at scripts/%s.ps1", commandName)})
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -1421,7 +1421,24 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		ctx, cancel = context.WithCancel(context.Background())
 	}
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", cmdArgs...)
+	powershellExe, err := powerShellExecutable()
+	if err != nil {
+		env = output.Failure(commandName, output.Error{Code: "environment", Message: err.Error(), Source: "xlflow"})
+		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
+			env.Debug = mergeDebugResult(nil, debugResult)
+			if debugStreamErr != nil {
+				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+			}
+		}
+		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
+			env.UI = mergeUIResult(nil, uiEvents)
+			if uiStreamErr != nil {
+				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+			}
+		}
+		return env, output.ExitEnvironment, nil
+	}
+	cmd := exec.CommandContext(ctx, powershellExe, cmdArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1732,8 +1749,8 @@ func materializeBundledScript(commandName string) (string, func(), error) {
 func externalScriptPath(root, commandName string) (string, bool) {
 	name := commandName + ".ps1"
 	candidates := []string{}
-	if root != "" {
-		candidates = append(candidates, filepath.Join(root, "scripts", name))
+	if path, ok := rootScriptOverridePath(root, commandName); ok {
+		candidates = append(candidates, path)
 	}
 	if _, file, _, ok := runtime.Caller(0); ok {
 		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
@@ -1746,6 +1763,45 @@ func externalScriptPath(root, commandName string) (string, bool) {
 		if _, err := os.Stat(clean); err == nil {
 			return clean, true
 		}
+	}
+	return "", false
+}
+
+func hasExternalScriptOverride(root, commandName string) bool {
+	_, ok := rootScriptOverridePath(root, commandName)
+	return ok
+}
+
+func scriptExecutionSupported(root, commandName string) bool {
+	return runtime.GOOS == "windows" || hasExternalScriptOverride(root, commandName)
+}
+
+func powerShellExecutable() (string, error) {
+	return powerShellExecutableFor(runtime.GOOS, exec.LookPath)
+}
+
+func powerShellExecutableFor(goos string, lookPath func(file string) (string, error)) (string, error) {
+	var candidates []string
+	if goos == "windows" {
+		candidates = []string{"powershell"}
+	} else {
+		candidates = []string{"pwsh", "powershell"}
+	}
+	for _, candidate := range candidates {
+		if _, err := lookPath(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("PowerShell executable not found on %s (searched: %s)", goos, strings.Join(candidates, ", "))
+}
+
+func rootScriptOverridePath(root, commandName string) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	candidate := filepath.Clean(filepath.Join(root, "scripts", commandName+".ps1"))
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, true
 	}
 	return "", false
 }

@@ -1454,7 +1454,10 @@ func GenerateTestModule(cwd, moduleName string, src config.SourceConfig) (Genera
 	if cleanName == "" {
 		return result, errors.New("module name is empty after cleaning")
 	}
-	if cleanName != filepath.Base(cleanName) || strings.Contains(cleanName, "..") {
+	if cleanName != filepath.Base(cleanName) ||
+		strings.Contains(cleanName, "..") ||
+		strings.Contains(cleanName, "/") ||
+		strings.Contains(cleanName, `\`) {
 		return result, errors.New("invalid module name")
 	}
 
