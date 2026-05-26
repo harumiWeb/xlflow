@@ -1424,14 +1424,18 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	powershellExe, err := powerShellExecutable()
 	if err != nil {
 		env = output.Failure(commandName, output.Error{Code: "environment", Message: err.Error(), Source: "xlflow"})
-		if debugStreamErr != nil {
-			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
+			env.Debug = mergeDebugResult(nil, debugResult)
+			if debugStreamErr != nil {
+				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+			}
 		}
-		env.Debug = mergeDebugResult(nil, debugResult)
-		if uiStreamErr != nil {
-			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
+			env.UI = mergeUIResult(nil, uiEvents)
+			if uiStreamErr != nil {
+				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+			}
 		}
-		env.UI = mergeUIResult(nil, uiEvents)
 		return env, output.ExitEnvironment, nil
 	}
 	cmd := exec.CommandContext(ctx, powershellExe, cmdArgs...)
