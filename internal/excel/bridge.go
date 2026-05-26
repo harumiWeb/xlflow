@@ -1792,7 +1792,7 @@ func powerShellExecutableFor(goos string, lookPath func(file string) (string, er
 			return candidate, nil
 		}
 	}
-	return "", errors.New("PowerShell executable was not found")
+	return "", fmt.Errorf("PowerShell executable not found (searched: %s)", strings.Join(candidates, ", "))
 }
 
 func rootScriptOverridePath(root, commandName string) (string, bool) {
