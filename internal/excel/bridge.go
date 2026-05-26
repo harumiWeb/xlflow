@@ -1773,9 +1773,11 @@ func hasExternalScriptOverride(root, commandName string) bool {
 }
 
 func powerShellExecutable() (string, error) {
-	candidates := []string{"pwsh", "powershell"}
+	var candidates []string
 	if runtime.GOOS == "windows" {
 		candidates = []string{"powershell"}
+	} else {
+		candidates = []string{"pwsh", "powershell"}
 	}
 	for _, candidate := range candidates {
 		if _, err := exec.LookPath(candidate); err == nil {
