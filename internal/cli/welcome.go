@@ -19,6 +19,8 @@ var scaffoldWelcomeLogo = []string{
 	` ╚═╝  ╚═╝ ╚══════╝ ╚═╝      ╚══════╝  ╚═════╝   ╚══╝╚══╝`,
 }
 
+const scaffoldWelcomeCommandsURL = "https://harumiweb.github.io/xlflow/commands/"
+
 type rgbColor struct {
 	r int
 	g int
@@ -28,7 +30,7 @@ type rgbColor struct {
 var (
 	welcomeTitleStart = rgbColor{r: 143, g: 211, b: 255}
 	welcomeTitleEnd   = rgbColor{r: 184, g: 245, b: 162}
-	welcomeInfoColor  = rgbColor{r: 208, g: 214, b: 220}
+	welcomeInfoColor  = rgbColor{r: 180, g: 189, b: 198}
 	welcomeAlertColor = rgbColor{r: 255, g: 165, b: 0}
 )
 
@@ -50,15 +52,31 @@ func shouldRenderScaffoldWelcome(command string, opts output.Options) bool {
 }
 
 func renderScaffoldWelcome(model scaffoldWelcomeModel, color bool) string {
+	heading := renderScaffoldWelcomeHeading("Welcome to", color)
 	logo := strings.Join(scaffoldWelcomeLogo, "\n")
 	meta := renderScaffoldWelcomeMeta(model, color)
 	if color {
 		logo = renderGradientBlock(scaffoldWelcomeLogo, welcomeTitleStart, welcomeTitleEnd)
 	}
-	if meta == "" {
-		return "\n\n" + logo + "\n\n"
+	body := logo
+	if heading != "" {
+		body = heading + "\n\n" + logo
 	}
-	return "\n\n" + logo + "\n\n" + meta + "\n\n"
+	if meta == "" {
+		return "\n\n" + body + "\n\n"
+	}
+	return "\n\n" + body + "\n\n" + meta + "\n\n"
+}
+
+func renderScaffoldWelcomeHeading(text string, color bool) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if !color {
+		return text
+	}
+	return renderGradientBlock([]string{text}, welcomeTitleStart, welcomeTitleEnd)
 }
 
 func renderScaffoldWelcomeBadge(text string) string {
@@ -67,12 +85,23 @@ func renderScaffoldWelcomeBadge(text string) string {
 }
 
 func renderScaffoldWelcomeMeta(model scaffoldWelcomeModel, color bool) string {
-	lines := make([]string, 0, 2)
+	lines := make([]string, 0, 3)
+	if url := strings.TrimSpace(scaffoldWelcomeCommandsURL); url != "" {
+		line := "Docs: " + url
+		if color {
+			line = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(welcomeInfoColor.hex())).
+				Faint(true).
+				Render(line)
+		}
+		lines = append(lines, line)
+	}
 	if version := strings.TrimSpace(model.Version); version != "" {
 		line := "Version: " + version
 		if color {
 			line = lipgloss.NewStyle().
 				Foreground(lipgloss.Color(welcomeInfoColor.hex())).
+				Faint(true).
 				Render(line)
 		}
 		lines = append(lines, line)

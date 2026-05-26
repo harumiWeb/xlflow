@@ -1,5 +1,33 @@
 # Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
 
+## Welcome header refresh for new/init
+
+**Goal:** Improve the interactive scaffold welcome shown by `xlflow new` and `xlflow init`.
+
+**Requested layout:**
+
+- `Welcome to`
+- ASCII logo
+- `https://harumiweb.github.io/xlflow/commands/`
+- `Version: <version>`
+- `Update available: <version>` (only when present)
+
+**Color rules:**
+
+- `Welcome to` should use the same color treatment as the logo.
+- `Version` should be slightly grayer than the current white-like info text.
+- The command reference URL should use the same muted info color as `Version`.
+
+**Non-goals:**
+
+- No change to JSON output or non-interactive output behavior.
+- No expansion of the welcome screen to commands other than `new` and `init`.
+
+**Regression coverage:**
+
+- `welcome.go` tests should assert the new text and ordering.
+- `root.go` init/new welcome tests should assert the new interactive output while keeping JSON output clean.
+
 ## Runtime diagnostic follow-up: prefer user-code break lines and avoid parent CLI hangs
 
 **Goal:** When Excel enters VBA break mode for a runtime error, diagnostics must report the actual user module/statement instead of the temporary `XlflowRun_*` harness, and the parent `xlflow` process must still recover even if the COM `excel.Run(...)` caller remains blocked.

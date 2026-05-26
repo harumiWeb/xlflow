@@ -1,5 +1,15 @@
 # Bug Fix: XlflowDebug ParamArray + run compile watcher
 
+## Welcome header refresh for new/init
+
+- [ ] Update `internal/cli/welcome.go` to render `Welcome to` above the logo
+- [ ] Add command reference URL below the logo and above version text
+- [ ] Mute the `Version`/URL info color slightly compared to the current welcome info text
+- [ ] Update `internal/cli/welcome_test.go` expectations for content and ordering
+- [ ] Update `internal/cli/root_test.go` interactive welcome expectations and add `new` regression coverage if needed
+- [ ] Run focused `internal/cli` tests for welcome rendering and command output
+- [ ] Add an Unreleased changelog note for the welcome screen refresh
+
 ## Status
 
 - [x] Investigated `ParamArray` forwarding issue in `defaultDebugRuntimeModule`
