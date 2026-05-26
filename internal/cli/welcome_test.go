@@ -59,6 +59,8 @@ func TestShouldRenderScaffoldWelcome(t *testing.T) {
 func TestRenderScaffoldWelcomeIncludesLogoAndVersion(t *testing.T) {
 	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
 	for _, want := range []string{
+		"Welcome to",
+		"Docs: https://harumiweb.github.io/xlflow/commands/",
 		"Version: 1.2.3",
 		" ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗",
 		" ╚═╝  ╚═╝ ╚══════╝ ╚═╝      ╚══════╝  ╚═════╝   ╚══╝╚══╝",
@@ -67,24 +69,23 @@ func TestRenderScaffoldWelcomeIncludesLogoAndVersion(t *testing.T) {
 			t.Fatalf("welcome output missing %q:\n%s", want, got)
 		}
 	}
-}
-
-func TestRenderScaffoldWelcomeOmitsWelcomeBadge(t *testing.T) {
-	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
-	if strings.Contains(got, "Welcome to xlflow") {
-		t.Fatalf("welcome output should not include welcome badge:\n%s", got)
+	if strings.Contains(got, "+-") {
+		t.Fatalf("welcome output should not render badge borders:\n%s", got)
 	}
 }
 
-func TestRenderScaffoldWelcomePlacesVersionBelowLogo(t *testing.T) {
+func TestRenderScaffoldWelcomePlacesMetaBelowLogoInRequestedOrder(t *testing.T) {
 	got := renderScaffoldWelcome(scaffoldWelcomeModel{Version: "1.2.3"}, false)
+	headingIndex := strings.Index(got, "Welcome to")
+	gapIndex := strings.Index(got, "Welcome to\n\n ██╗  ██╗")
+	urlIndex := strings.Index(got, "Docs: https://harumiweb.github.io/xlflow/commands/")
 	versionIndex := strings.Index(got, "Version: 1.2.3")
 	logoIndex := strings.Index(got, " ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗")
-	if versionIndex < 0 || logoIndex < 0 {
-		t.Fatalf("welcome output missing logo or version:\n%s", got)
+	if headingIndex < 0 || gapIndex < 0 || urlIndex < 0 || versionIndex < 0 || logoIndex < 0 {
+		t.Fatalf("welcome output missing heading, gap, logo, url, or version:\n%s", got)
 	}
-	if versionIndex < logoIndex {
-		t.Fatalf("expected version below logo:\n%s", got)
+	if headingIndex >= logoIndex || logoIndex >= urlIndex || urlIndex >= versionIndex {
+		t.Fatalf("expected Welcome to -> logo -> url -> version order:\n%s", got)
 	}
 }
 
@@ -94,12 +95,19 @@ func TestRenderScaffoldWelcomeIncludesUpdateNotice(t *testing.T) {
 		UpdateVersion: "v1.2.4",
 	}, false)
 	for _, want := range []string{
+		"Docs: https://harumiweb.github.io/xlflow/commands/",
 		"Version: 1.2.3",
 		"Update available: v1.2.4",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("welcome output missing %q:\n%s", want, got)
 		}
+	}
+	urlIndex := strings.Index(got, "Docs: https://harumiweb.github.io/xlflow/commands/")
+	versionIndex := strings.Index(got, "Version: 1.2.3")
+	updateIndex := strings.Index(got, "Update available: v1.2.4")
+	if urlIndex >= versionIndex || versionIndex >= updateIndex {
+		t.Fatalf("expected url -> version -> update order:\n%s", got)
 	}
 }
 

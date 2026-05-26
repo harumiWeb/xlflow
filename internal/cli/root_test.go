@@ -1259,13 +1259,17 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	got := stdout.String()
-	for _, want := range []string{"Version: 1.2.3", "copied workbook to build/Input.xlsm", "pulled workbook VBA into source"} {
+	for _, want := range []string{"Welcome to", "Docs: https://harumiweb.github.io/xlflow/commands/", "Version: 1.2.3", "copied workbook to build/Input.xlsm", "pulled workbook VBA into source"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("interactive init output missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "Welcome to xlflow") {
-		t.Fatalf("interactive init output should not include welcome text:\n%s", got)
+	if strings.Contains(got, "+-") {
+		t.Fatalf("interactive init output should not include badge borders:\n%s", got)
+	}
+	if strings.Index(got, "Welcome to") >= strings.Index(got, " ██╗  ██╗ ██╗      ███████╗ ██╗       ██████╗  ██╗    ██╗") ||
+		strings.Index(got, "Docs: https://harumiweb.github.io/xlflow/commands/") >= strings.Index(got, "Version: 1.2.3") {
+		t.Fatalf("expected welcome heading and meta order before command summary:\n%s", got)
 	}
 	if strings.Index(got, "Version: 1.2.3") > strings.Index(got, "xlflow init") {
 		t.Fatalf("expected welcome UI before command summary:\n%s", got)
@@ -1510,6 +1514,40 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected push marker to mention %s:\n%s", want, text)
 		}
+	}
+}
+
+func TestNewCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+	dir := t.TempDir()
+	writeTestNewScript(t, dir)
+	writeTestPushScript(t, dir)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return true },
+		stderrTerminal: func() bool { return true },
+		buildInfo:      BuildInfo{Version: "1.2.3"},
+		updateChecker:  stubReleaseChecker{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"new", "Book.xlsm"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{"Welcome to", "Docs: https://harumiweb.github.io/xlflow/commands/", "Version: 1.2.3", "created xlflow.toml"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("interactive new output missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "Welcome to\n\n ██╗  ██╗") {
+		t.Fatalf("expected one blank line between heading and logo:\n%s", got)
+	}
+	if strings.Index(got, "Docs: https://harumiweb.github.io/xlflow/commands/") > strings.Index(got, "Version: 1.2.3") {
+		t.Fatalf("expected command reference before version:\n%s", got)
 	}
 }
 
