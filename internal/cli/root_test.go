@@ -439,6 +439,437 @@ func TestRootCommandIncludesAnalyzeAndCheckCommands(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesFmtCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"fmt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "fmt" {
+		t.Fatalf("expected fmt command, got %#v", cmd)
+	}
+	for _, name := range []string{"write", "check", "diff", "stdin"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected fmt command to define --%s", name)
+		}
+	}
+}
+
+func TestFmtCommandStdinConflictsWithWrite(t *testing.T) {
+	a := &app{
+		stdout: new(bytes.Buffer),
+		stderr: new(bytes.Buffer),
+		cwd:    t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	cmd := a.fmtCommand()
+	cmd.SetArgs([]string{"--stdin", "--write"})
+	_, err := cmd.ExecuteC()
+	if err == nil {
+		t.Fatal("expected error for --stdin combined with --write")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestFmtCommandModeConflict(t *testing.T) {
+	a := &app{
+		stdout: new(bytes.Buffer),
+		stderr: new(bytes.Buffer),
+		cwd:    t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	cmd := a.fmtCommand()
+	cmd.SetArgs([]string{"--write", "--check"})
+	_, err := cmd.ExecuteC()
+	if err == nil {
+		t.Fatal("expected error for --write combined with --check")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func setupFmtProjectDir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "classes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "workbook"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFmtWriteViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "test.bas")
+	original := "Sub Main()\nx=1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--write", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --write error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == original {
+		t.Fatal("expected file to be written with formatted content")
+	}
+}
+
+func TestFmtCheckViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "test.bas")
+	original := "Sub Main()\nx=1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--check", path})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected non-0 exit for unformatted file with --check")
+	}
+	if code := output.ExitCode(err); code != output.ExitValidation {
+		t.Fatalf("expected exit code %d for --check, got %d", output.ExitValidation, code)
+	}
+}
+
+func TestFmtDiffViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "test.bas")
+	original := "Sub Main()\nx=1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--diff", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --diff error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "would be reformatted") {
+		t.Fatalf("expected diff summary in output:\n%s", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatal("--diff mode should not modify files")
+	}
+}
+
+func TestFmtJSONEnvelopeViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "test.bas")
+	formatted := "Sub Main()\n    x = 1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(formatted), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	if env["command"] != "fmt" {
+		t.Fatalf("expected command=fmt, got %v", env["command"])
+	}
+	outputMap, ok := env["output"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output map in envelope")
+	}
+	for _, key := range []string{"mode", "changed", "unchanged", "skipped", "total"} {
+		if _, ok := outputMap[key]; !ok {
+			t.Fatalf("expected output.%s in JSON envelope", key)
+		}
+	}
+	if changed := outputMap["changed"].(float64); changed != 0 {
+		t.Fatalf("expected changed=0 for already formatted file, got %v", changed)
+	}
+}
+
+func TestFmtJSONTargetContractDefaultScope(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(a.stdout.(*bytes.Buffer).Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v", err)
+	}
+	target, ok := env["target"].(map[string]any)
+	if !ok {
+		t.Fatal("expected target in JSON envelope")
+	}
+	if target["kind"] != "source" {
+		t.Fatalf("expected target.kind=source, got %v", target["kind"])
+	}
+	path, ok := target["path"].(string)
+	if !ok {
+		t.Fatal("expected target.path string")
+	}
+	if !strings.Contains(path, "tests") {
+		t.Fatalf("expected default target.path to include tests/, got %q", path)
+	}
+	if strings.Contains(path, "src") {
+		// ok: default scope includes src/*
+	} else {
+		t.Fatalf("expected default target.path to include src dirs, got %q", path)
+	}
+}
+
+func TestFmtJSONTargetContractExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "src", "modules", "test.bas")
+	formatted := "Sub Main()\n    x = 1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(formatted), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v", err)
+	}
+	target, ok := env["target"].(map[string]any)
+	if !ok {
+		t.Fatal("expected target in JSON envelope")
+	}
+	if target["kind"] != "source" {
+		t.Fatalf("expected target.kind=source, got %v", target["kind"])
+	}
+	pathStr, ok := target["path"].(string)
+	if !ok {
+		t.Fatal("expected target.path string")
+	}
+	if pathStr == "" {
+		t.Fatal("expected non-empty target.path for explicit path")
+	}
+}
+
+func TestFmtStdinViaCLI(t *testing.T) {
+	input := "Sub Main()\nx=1\nEnd Sub\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		stdinWriter.Write([]byte(input))
+		stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--stdin"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --stdin error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected non-empty formatted output from --stdin")
+	}
+}
+
+func TestFmtStdinJSONViaCLI(t *testing.T) {
+	input := "Sub Main()\nx=1\nEnd Sub\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		stdinWriter.Write([]byte(input))
+		stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--stdin"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --stdin --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw: %s", err, stdout.String())
+	}
+	if env.Command != "fmt" {
+		t.Fatalf("expected command 'fmt', got %q", env.Command)
+	}
+	if env.Status != "ok" {
+		t.Fatalf("expected status 'ok', got %q", env.Status)
+	}
+	if env.Output == nil {
+		t.Fatal("expected non-nil output field in JSON envelope")
+	}
+	outMap, ok := env.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("expected output to be a map, got %T", env.Output)
+	}
+	if mode, _ := outMap["mode"].(string); mode != "inspect" {
+		t.Fatalf("expected mode 'inspect', got %q", mode)
+	}
+	if changed, _ := outMap["changed"].(float64); changed != 1 {
+		t.Fatalf("expected changed=1, got %v", changed)
+	}
+	if total, _ := outMap["total"].(float64); total != 1 {
+		t.Fatalf("expected total=1, got %v", total)
+	}
+}
+
+func TestFmtDiffCheckModeConflictViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--diff", "--check"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for --diff combined with --check")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestFmtEmptyProjectViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt in empty project error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	outputMap, ok := env["output"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output map in envelope for empty project")
+	}
+	if total, ok := outputMap["total"]; !ok {
+		t.Fatal("expected output.total in empty project envelope")
+	} else {
+		totalFloat, _ := total.(float64)
+		if totalFloat != 0 {
+			t.Fatalf("expected total=0 for empty project, got %v", total)
+		}
+	}
+}
+
 func TestRootCommandIncludesMacrosCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

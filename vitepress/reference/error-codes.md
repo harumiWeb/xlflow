@@ -15,5 +15,11 @@ Common examples:
 - `unsupported_image_format`
 - `form_not_found`
 - `spec_validation_failed`
+- `fmt_failed`
+- `fmt_check_failed`
+- `fmt_skipped_unsupported_extension`
+- `fmt_args_invalid`
+- `fmt_stdin_read_failed`
+- `fmt_stdin_write_failed`
 
 Lint codes include `VB001` through `VB013`. Analyzer codes include `VBA101` and later runtime-risk findings.

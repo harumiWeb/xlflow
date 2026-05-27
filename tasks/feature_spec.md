@@ -356,3 +356,66 @@ Align `.takt/workflows/xlflow-orchestra-high.yaml` with the added `loop_monitors
 - `fix` is narrower than `implementation`; it should address review findings with minimal scope and fresh verification.
 - The `supervisor` persona judges whether repeated `self_review` / `fix` cycles show concrete progress or should abort.
 - Apply the same structure to both `.takt/workflows/xlflow-orchestra-high.yaml` and `.takt/workflows/xlflow-orchestra-low.yaml`, preserving each workflow's existing model assignments.
+
+---
+
+# write_tests Spec: `xlflow fmt`
+
+## Goal
+
+Add regression tests ahead of implementation for the new source-only `xlflow fmt` command.
+
+## Public contracts to fix with tests
+
+- `xlflow fmt` is registered as a top-level CLI command.
+- `xlflow fmt` exposes `--write`, `--check`, `--diff`, and `--stdin`.
+- Human-readable output for `fmt` is not a raw log dump; it must render a result summary plus warnings/hints when present.
+- `fmt` keeps using the existing JSON envelope contract rather than introducing a separate output path.
+
+## Out of scope for this step
+
+- Formatter implementation.
+- Excel COM / workbook automation E2E.
+- Config schema changes.
+
+# Implementation Spec: `xlflow fmt`
+
+## What was built
+
+- `internal/vbafmt/` — source-only VBA formatter for `.bas` and `.cls`
+- `internal/cli/root.go` — `fmtCommand()` with `--write`/`--check`/`--diff`/`--stdin`
+- `internal/output/output.go` — `renderFmt()` for human-readable summaries
+
+## Formatter behavior
+
+- Indent: 4 spaces. Indent keywords: `Sub`, `Function`, `Property Get/Let/Set`, `If`, `For`, `For Each`, `Do`, `While`, `Select Case`, `With`, `Type`, `Enum`, `#If`
+- Dedent keywords: `End Sub/Function/Property`, `End If`, `Else`, `ElseIf`, `Next`, `Loop`, `Wend`, `End Select`, `End With`, `End Type`, `End Enum`, `#Else`, `#ElseIf`, `#End If`
+- `Case` and `Case Else` both dedent (end previous case block) and indent (start new case block), preserving net level
+- VBA access modifiers (`Public`, `Private`, `Friend`, `Static`) are stripped before keyword matching
+- Trailing whitespace removal, blank line normalization (max 2 consecutive), 1 blank after `Option Explicit` and between procedures
+- `.cls` attribute header lines (`Attribute VB_*`, `VERSION`) preserved verbatim
+- Comment lines (`'`, `Rem`) and blank lines preserved with current indent level
+- Idempotent: second pass produces no changes
+
+## File discovery
+
+- Default: walks `src/modules`, `src/classes`, `src/workbook`, `tests/` for `.bas` and `.cls`
+- Explicit paths: accepts file or directory arguments
+- `.frm` skipped by default (not in extension filter)
+- `--stdin`: reads from stdin, formats as `.bas`, writes to stdout
+
+## CLI contract
+
+- `--write`: apply formatting to files
+- `--check`: exit non-0 if any files are not formatted. Returns `fmt_check_failed` with `ExitValidation (1)`
+- `--diff`: log unified diffs to output without modifying files
+- `--stdin`: read/stdout pipe formatter
+- Mutually exclusive: `--write`/`--check`/`--diff`
+- All mode flags can be omitted (default: report-only check with exit 0, summary in output)
+
+## JSON envelope
+
+- `command: "fmt"`
+- `target: { kind: "source", path: "src", description: "source files" }`
+- `output: { mode, changed, unchanged, skipped, total, changed_paths, skipped_paths, skipped_reasons }`
+- `warnings`/`hints` for skipped files and actionable hints
