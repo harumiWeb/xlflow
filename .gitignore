@@ -21,3 +21,5 @@ build/
 
 tmp_workspaces/
 node_modules/
+
+.gocache/
