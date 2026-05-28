@@ -196,6 +196,36 @@ End Sub
 	}
 }
 
+func TestFormatClsPreservesAdditionalBeginEndProperties(t *testing.T) {
+	input := "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\n  Persistable = 0  'NotPersistable\r\nEND\r\nAttribute VB_Name = \"ThisWorkbook\"\r\nOption Explicit\r\nPublic Sub Hello()\r\nx = 1\r\nEnd Sub\r\n"
+	got, err := FormatText(input, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"VERSION 1.0 CLASS",
+		"BEGIN",
+		"MultiUse = -1  'True",
+		"Persistable = 0  'NotPersistable",
+		"END",
+		"Attribute VB_Name = \"ThisWorkbook\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing cls header line %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "    Persistable") {
+		t.Fatalf("Persistable inside BEGIN/END should not be re-indented:\n%s", got)
+	}
+	second, err := FormatText(got, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
 func TestFormatRemComment(t *testing.T) {
 	input := `Sub Main()
 Rem this is a comment
@@ -1160,5 +1190,46 @@ End Sub
 	}
 	if second != got {
 		t.Fatalf("format not idempotent for multi-case Select:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
+func TestFormatBasColonClosedBlockNotIndented(t *testing.T) {
+	input := `Sub Main()
+Do While i < 10: i = i + 1: Loop
+j = 1
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "Do While i < 10: i = i + 1: Loop" {
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent != 4 {
+				t.Fatalf("colon-closed Do block should be at indent 4, got %d:\n%s", indent, got)
+			}
+		}
+		if trimmed == "j = 1" {
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent != 4 {
+				t.Fatalf("line after colon-closed block should be at indent 4, got %d:\n%s", indent, got)
+			}
+		}
+		if trimmed == "End Sub" {
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent != 0 {
+				t.Fatalf("End Sub should be at indent 0, got %d:\n%s", indent, got)
+			}
+		}
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
 	}
 }

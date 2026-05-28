@@ -96,7 +96,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                |
 | Execution      | Run macros from the CLI with typed arguments                                                                                                      |
 | Testing        | Discover and run VBA test procedures                                                                                                              |
-| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                    |
+| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                   |
 | Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
 | GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                    |
 | Debugging      | Collect trace events and return runtime diagnostics                                                                                               |

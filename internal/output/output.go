@@ -2147,8 +2147,12 @@ func (r renderer) renderLogsSkipping(env Envelope, skip map[string]bool) string 
 		if skip[line] {
 			continue
 		}
-		b.WriteString("- ")
-		b.WriteString(line)
+		if strings.HasPrefix(line, "--- a/") {
+			b.WriteString(line)
+		} else {
+			b.WriteString("- ")
+			b.WriteString(line)
+		}
 		b.WriteString("\n")
 	}
 	return b.String()

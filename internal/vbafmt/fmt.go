@@ -250,11 +250,25 @@ func FormatText(text string, isClass bool) (string, error) {
 	}
 
 	headerEnded := false
+	inBeginBlock := false
 	for _, line := range lines {
 		if !headerEnded && isClass {
+			trimmedForHeader := strings.TrimLeft(line, " \t")
+			upperForHeader := strings.ToUpper(trimmedForHeader)
+			if inBeginBlock {
+				ind.fileCtx.result.WriteString(line)
+				ind.fileCtx.result.WriteByte('\n')
+				if upperForHeader == "END" {
+					inBeginBlock = false
+				}
+				continue
+			}
 			if isClassHeaderLine(line) || isBlankLine(line) {
 				ind.fileCtx.result.WriteString(line)
 				ind.fileCtx.result.WriteByte('\n')
+				if upperForHeader == "BEGIN" {
+					inBeginBlock = true
+				}
 				continue
 			}
 			headerEnded = true
@@ -366,6 +380,9 @@ func classifyLine(trimmedLine string) (keyword string, isStructural bool) {
 
 	for _, kw := range indentKeywords {
 		if matchKeywordStartsWith(upper, kw) {
+			if lineContainsDedentForIndent(upper, kw) {
+				return "", false
+			}
 			return kw, true
 		}
 	}
@@ -410,6 +427,56 @@ func matchKeywordStartsWith(upper, keyword string) bool {
 	upper = strings.TrimLeft(upper, " \t")
 	upper = stripModifiers(upper)
 	return strings.HasPrefix(upper, keyword+" ") || upper == keyword
+}
+
+// lineContainsDedentForIndent checks whether a colon-separated statement
+// contains both an indent keyword and its matching dedent keyword on the same
+// line (e.g. "Do While i < 1: i = i + 1: Loop"). When this returns true the
+// line should not increase indentation because the block is fully closed.
+func lineContainsDedentForIndent(upper, indentKW string) bool {
+	parts := strings.Split(upper, ":")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, dk := range dedentKeywords {
+		if !isMatchingPair(indentKW, dk) {
+			continue
+		}
+		for _, part := range parts[1:] {
+			if matchKeywordStartsWith(part, dk) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isMatchingPair(indentKW, dedentKW string) bool {
+	switch indentKW {
+	case "DO", "DO WHILE", "DO UNTIL":
+		return dedentKW == "LOOP"
+	case "FOR", "FOR EACH":
+		return dedentKW == "NEXT"
+	case "WHILE":
+		return dedentKW == "WEND"
+	case "WITH":
+		return dedentKW == "END WITH"
+	case "SELECT CASE":
+		return dedentKW == "END SELECT"
+	case "IF":
+		return dedentKW == "END IF"
+	case "ENUM":
+		return dedentKW == "END ENUM"
+	case "TYPE":
+		return dedentKW == "END TYPE"
+	case "SUB":
+		return dedentKW == "END SUB"
+	case "FUNCTION":
+		return dedentKW == "END FUNCTION"
+	case "PROPERTY GET", "PROPERTY LET", "PROPERTY SET":
+		return dedentKW == "END PROPERTY"
+	}
+	return false
 }
 
 func stripModifiers(upper string) string {

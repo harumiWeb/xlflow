@@ -10,14 +10,14 @@ xlflow fmt [--write | --check | --diff] [--json] [--stdin] [<path>...]
 
 ## Options and Arguments
 
-| Option / argument | Description                                              | Default      |
-| ----------------- | -------------------------------------------------------- | ------------ |
-| `<path>...`       | Files or directories to format. Defaults to project src. | project src  |
-| `--write`         | Write formatted source back to files.                   | false        |
-| `--check`         | Check formatting without modifying files.               | false        |
-| `--diff`          | Show unified diff of formatting changes.                | false        |
-| `--stdin`         | Read VBA source from stdin, write formatted to stdout.  | false        |
-| `--json`          | Return structured machine-readable output.              | false        |
+| Option / argument | Description                                              | Default     |
+| ----------------- | -------------------------------------------------------- | ----------- |
+| `<path>...`       | Files or directories to format. Defaults to project src. | project src |
+| `--write`         | Write formatted source back to files.                    | false       |
+| `--check`         | Check formatting without modifying files.                | false       |
+| `--diff`          | Show unified diff of formatting changes.                 | false       |
+| `--stdin`         | Read VBA source from stdin, write formatted to stdout.   | false       |
+| `--json`          | Return structured machine-readable output.               | false       |
 
 At most one of `--write`, `--check`, or `--diff` may be used. When none is set, `fmt` runs in inspect mode and reports which files would be changed.
 
@@ -84,7 +84,7 @@ Successful `--json` output uses the xlflow envelope with command-specific fields
     "changed_paths": ["src/modules/Main.bas", "src/modules/Utils.bas"],
     "skipped_paths": ["src/forms/UserForm1.frm"],
     "skipped_reasons": [
-      {"path": "src/forms/UserForm1.frm", "reason": "unsupported extension: .frm"}
+      { "path": "src/forms/UserForm1.frm", "reason": "unsupported extension: .frm" }
     ]
   }
 }
