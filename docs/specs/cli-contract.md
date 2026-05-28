@@ -9,10 +9,10 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ## Commands
 
 ```text
-xlflow [--json] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
-xlflow [--json] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
-xlflow [--json] doctor
-xlflow [--json] attach --active
+xlflow [--json] [--bridge <auto|powershell|dotnet>] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] [--bridge <auto|powershell|dotnet>] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] [--bridge <auto|powershell|dotnet>] doctor
+xlflow [--json] [--bridge <auto|powershell|dotnet>] attach --active
 xlflow [--json] backup list
 xlflow [--json] list forms [--session]
 xlflow [--json] inspect form <name> [--runtime|--designer|--both] [--initializer <method>] [--session] [--format text|json|markdown]
@@ -67,6 +67,8 @@ xlflow [--json] version [--verbose]
 ```
 
 `--json` is a persistent global flag and can be used with every command, including `new` and `init`.
+
+`--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto`, `powershell`, and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. In the current phase, `auto` resolves to the PowerShell bridge. Explicit `--bridge dotnet` is strict and does not implicitly fall back to PowerShell.
 
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
 
@@ -197,6 +199,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 visible = false
 display_alerts = false
+bridge = "auto"
 
 [src]
 modules = "src/modules"

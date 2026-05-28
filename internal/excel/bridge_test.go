@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
@@ -163,6 +164,47 @@ func TestPowerShellExecutableForReturnsErrorWhenUnavailable(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected missing PowerShell error")
+	}
+}
+
+func TestResolveBridgeModePrecedence(t *testing.T) {
+	mode, source, err := excelbridge.ResolveMode("", "powershell", "dotnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != excelbridge.ModePowerShell || source != "env" {
+		t.Fatalf("ResolveMode env precedence = (%q, %q), want (powershell, env)", mode, source)
+	}
+
+	mode, source, err = excelbridge.ResolveMode("dotnet", "powershell", "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != excelbridge.ModeDotNet || source != "cli" {
+		t.Fatalf("ResolveMode cli precedence = (%q, %q), want (dotnet, cli)", mode, source)
+	}
+}
+
+func TestRunnerRejectsDotNetBridgeWithoutFallback(t *testing.T) {
+	root := t.TempDir()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `@{ status = "ok"; command = "run"; logs = @("unexpected powershell execution") } | ConvertTo-Json -Compress`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "run.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.Run(config.Default(), RunOptions{Macro: "Main.Run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
+	}
+	if env.Error == nil || env.Error.Code != "bridge_not_available" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
