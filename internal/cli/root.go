@@ -34,6 +34,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 
 type app struct {
@@ -164,6 +165,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.inspectCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
+		a.fmtCommand(),
 		a.analyzeCommand(),
 		a.checkCommand(),
 		a.generateCommand(),
@@ -3985,6 +3987,286 @@ func parseInspectSheetLiteral(sheet string) string {
 		trimmed = strings.ReplaceAll(trimmed, "''", "'")
 	}
 	return trimmed
+}
+
+func (a *app) fmtCommand() *cobra.Command {
+	var write bool
+	var check bool
+	var diff bool
+	var stdin bool
+
+	cmd := &cobra.Command{
+		Use:   "fmt [path...]",
+		Short: "Format VBA source files (.bas, .cls)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if stdin {
+				if len(args) > 0 {
+					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with path arguments"))
+				}
+				if write || check || diff {
+					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with --write, --check, or --diff"))
+				}
+				return a.runFmtStdin()
+			}
+			modeCount := 0
+			if write {
+				modeCount++
+			}
+			if check {
+				modeCount++
+			}
+			if diff {
+				modeCount++
+			}
+			if modeCount > 1 {
+				return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--write, --check, and --diff cannot be combined"))
+			}
+			cfg, err := a.loadConfig("fmt")
+			if err != nil {
+				return err
+			}
+			opts := vbafmt.FmtOptions{
+				Write: write,
+				Check: check,
+				Diff:  diff,
+				Paths: args,
+				Root:  a.cwd,
+				Cfg:   cfg,
+			}
+			result, err := vbafmt.Run(opts)
+			if err != nil {
+				return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
+			}
+
+			env := output.New("fmt")
+			targetPath := buildFmtTargetPath(cfg, args)
+			env.Target = map[string]any{
+				"kind":        "source",
+				"path":        targetPath,
+				"description": "source files",
+			}
+			mode := "inspect"
+			if write {
+				mode = "write"
+			} else if check {
+				mode = "check"
+			} else if diff {
+				mode = "diff"
+			}
+			outputPayload := map[string]any{
+				"mode":      mode,
+				"changed":   result.Changed,
+				"unchanged": result.Unchanged,
+				"skipped":   result.Skipped,
+				"total":     result.Total,
+			}
+			if len(result.ChangedPaths) > 0 {
+				outputPayload["changed_paths"] = pathsToAny(result.ChangedPaths)
+			}
+			if len(result.SkippedPaths) > 0 {
+				outputPayload["skipped_paths"] = pathsToAny(result.SkippedPaths)
+			}
+			if len(result.SkippedReasons) > 0 {
+				reasons := make([]map[string]any, 0, len(result.SkippedReasons))
+				for _, sr := range result.SkippedReasons {
+					reasons = append(reasons, map[string]any{
+						"path":   sr.Path,
+						"reason": sr.Reason,
+					})
+				}
+				outputPayload["skipped_reasons"] = reasons
+			}
+			env.Output = outputPayload
+
+			var warnings []map[string]any
+			for _, sr := range result.SkippedReasons {
+				code := sr.Reason
+				if code == "" {
+					code = "fmt_skipped_unsupported_extension"
+				}
+				warnings = append(warnings, map[string]any{
+					"code":    code,
+					"message": fmt.Sprintf("Skipped file: %s", sr.Path),
+				})
+			}
+			if len(warnings) > 0 {
+				env.Warnings = warnings
+			}
+
+			if check && result.Changed > 0 {
+				env.Hints = []map[string]any{
+					{"code": "fmt_write_hint", "message": "Run `xlflow fmt --write` to apply formatting changes."},
+				}
+				env.Status = output.StatusFailed
+				env.Error = &output.Error{
+					Code:    "fmt_check_failed",
+					Message: fmt.Sprintf("%d file(s) not formatted", result.Changed),
+				}
+				return a.write(env, output.ExitValidation)
+			}
+
+			if diff && result.Changed > 0 {
+				env.Hints = []map[string]any{
+					{"code": "fmt_write_hint", "message": "Run `xlflow fmt --write` to apply formatting changes."},
+				}
+				env.Logs = a.buildFmtDiffLogs(result)
+				return a.write(env, output.ExitSuccess)
+			}
+
+			if result.Changed > 0 {
+				env.Logs = a.buildFmtWriteLogs(write, result)
+			} else {
+				env.Logs = []string{fmt.Sprintf("%d file(s) already formatted", result.Total)}
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().BoolVar(&write, "write", false, "write formatted source back to files")
+	cmd.Flags().BoolVar(&check, "check", false, "check whether source files are formatted without modifying them")
+	cmd.Flags().BoolVar(&diff, "diff", false, "show unified diff of formatting changes without modifying files")
+	cmd.Flags().BoolVar(&stdin, "stdin", false, "read VBA source from stdin and write formatted output to stdout")
+	return cmd
+}
+
+func (a *app) runFmtStdin() error {
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, os.Stdin); err != nil {
+		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_stdin_read_failed", err)
+	}
+	input := buf.String()
+	if strings.TrimSpace(input) == "" {
+		if a.json {
+			env := output.New("fmt")
+			env.Target = map[string]any{
+				"kind":        "source",
+				"description": "stdin input",
+			}
+			env.Output = map[string]any{
+				"mode":      "inspect",
+				"changed":   0,
+				"unchanged": 1,
+				"skipped":   0,
+				"total":     1,
+			}
+			env.Logs = []string{"0 file(s) formatted"}
+			return a.write(env, output.ExitSuccess)
+		}
+		_, _ = fmt.Fprintln(a.stdoutWriter())
+		return nil
+	}
+	formatted, err := vbafmt.FormatText(input, looksLikeClassModule(input))
+	if err != nil {
+		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
+	}
+	if a.json {
+		env := output.New("fmt")
+		env.Target = map[string]any{
+			"kind":        "source",
+			"description": "stdin input",
+		}
+		changed := 0
+		if formatted != input {
+			changed = 1
+		}
+		env.Output = map[string]any{
+			"mode":      "inspect",
+			"changed":   changed,
+			"unchanged": 1 - changed,
+			"skipped":   0,
+			"total":     1,
+		}
+		env.Logs = []string{fmt.Sprintf("%d file(s) formatted", changed)}
+		return a.write(env, output.ExitSuccess)
+	}
+	_, err = fmt.Fprint(a.stdoutWriter(), formatted)
+	if err != nil {
+		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_stdin_write_failed", err)
+	}
+	return nil
+}
+
+func looksLikeClassModule(input string) bool {
+	for _, line := range strings.Split(input, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "VERSION ") && strings.Contains(upper, "CLASS") {
+			return true
+		}
+		if strings.HasPrefix(upper, "ATTRIBUTE VB_") {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func (a *app) buildFmtWriteLogs(wasWritten bool, result *vbafmt.Result) []string {
+	var logs []string
+	if wasWritten {
+		logs = append(logs, fmt.Sprintf("%d file(s) formatted", result.Changed))
+	} else {
+		logs = append(logs, fmt.Sprintf("%d file(s) would be formatted", result.Changed))
+	}
+	for _, path := range result.ChangedPaths {
+		logs = append(logs, fmt.Sprintf("formatted %s", displayPath(a.cwd, path)))
+	}
+	for _, path := range result.SkippedPaths {
+		logs = append(logs, fmt.Sprintf("skipped %s", displayPath(a.cwd, path)))
+	}
+	return logs
+}
+
+func (a *app) buildFmtDiffLogs(result *vbafmt.Result) []string {
+	var logs []string
+	logs = append(logs, fmt.Sprintf("%d file(s) would be reformatted", result.Changed))
+	for _, path := range result.ChangedPaths {
+		formatted, ok := result.FormattedByPath[path]
+		if !ok {
+			logs = append(logs, fmt.Sprintf("error reading %s: formatted content not found", displayPath(a.cwd, path)))
+			continue
+		}
+		original, err := os.ReadFile(path)
+		if err != nil {
+			logs = append(logs, fmt.Sprintf("error reading %s: %v", displayPath(a.cwd, path), err))
+			continue
+		}
+		if diffText := vbafmt.Diff(displayPath(a.cwd, path), string(original), formatted); diffText != "" {
+			logs = append(logs, diffText)
+		}
+	}
+	return logs
+}
+
+func pathsToAny(paths []string) []any {
+	result := make([]any, 0, len(paths))
+	for _, p := range paths {
+		result = append(result, p)
+	}
+	return result
+}
+
+func buildFmtTargetPath(cfg config.Config, args []string) string {
+	if len(args) > 0 {
+		return strings.Join(args, ", ")
+	}
+	modules := cfg.Src.Modules
+	if modules == "" {
+		modules = filepath.ToSlash(filepath.Join("src", "modules"))
+	}
+	classes := cfg.Src.Classes
+	if classes == "" {
+		classes = filepath.ToSlash(filepath.Join("src", "classes"))
+	}
+	workbook := cfg.Src.Workbook
+	if workbook == "" {
+		workbook = filepath.ToSlash(filepath.Join("src", "workbook"))
+	}
+	dirs := []string{modules, classes, workbook, "tests"}
+	return strings.Join(dirs, ", ")
 }
 
 func (a *app) lintCommand() *cobra.Command {

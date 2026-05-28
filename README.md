@@ -84,7 +84,7 @@ That works for small manual edits, but it becomes painful when you want repeatab
 | AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                       |
 
 ```text
-pull → edit → push → lint → test/run → inspect
+pull → fmt → edit → push → lint → test/run → inspect
 ```
 
 ---
@@ -96,6 +96,7 @@ pull → edit → push → lint → test/run → inspect
 | Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                |
 | Execution      | Run macros from the CLI with typed arguments                                                                                                      |
 | Testing        | Discover and run VBA test procedures                                                                                                              |
+| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                   |
 | Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
 | GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                    |
 | Debugging      | Collect trace events and return runtime diagnostics                                                                                               |
@@ -117,7 +118,7 @@ pull → edit → push → lint → test/run → inspect
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
 
 > [!NOTE]
-> Commands that do not require Excel COM, such as `lint`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+> Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
@@ -421,6 +422,7 @@ End If
 | `diff`              | Compare workbook content and optional VBA source                | `xlflow diff before.xlsm after.xlsm --json`                                  |
 | `inspect`           | Inspect saved workbook snapshots or explicit live session state | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
 | `lint`              | Lint VBA source                                                 | `xlflow lint --json`                                                         |
+| `fmt`               | Format VBA source conservatively                                | `xlflow fmt --write --json`                                                  |
 | `analyze`           | Analyze runtime-risk patterns without opening Excel             | `xlflow analyze --json`                                                      |
 | `check`             | Run `lint`, `analyze`, and `doctor` as a preflight              | `xlflow check --keepalive --json`                                            |
 | `inspect-gui`       | Detect GUI interaction boundaries                               | `xlflow inspect-gui --json`                                                  |

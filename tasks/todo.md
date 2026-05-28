@@ -119,3 +119,26 @@
 - [x] Add `fix` step and reroute `self_review` to it
 - [x] Validate YAML/persona references and summarize residual risks
 - [x] Mirror the same loop-monitor structure into `.takt/workflows/xlflow-orchestra-low.yaml`
+
+---
+
+# `xlflow fmt` write_tests
+
+## Todo
+
+- [x] Re-read `order.md`, policy, lessons, and current CLI/output tests
+- [x] Add failing CLI contract tests for top-level `fmt` registration and flags
+- [x] Add failing output rendering tests for human-readable `fmt` summaries
+- [x] Run focused `go test` for touched packages and capture failures as implementation targets
+
+# `xlflow fmt` implementation
+
+## Todo
+
+- [x] Create `internal/vbafmt/` package: `fmt.go` (formatter + file discovery + diff), `fmt_test.go` (27 tests)
+- [x] Add `fmtCommand()` to `internal/cli/root.go` with `--write`/`--check`/`--diff`/`--stdin` flags
+- [x] Register `fmt` in `rootCommand()` AddCommand list
+- [x] Add `renderFmt()` to `internal/output/output.go`
+- [x] Run focused tests: `go test ./internal/vbafmt ./internal/cli ./internal/output` — all pass
+- [x] `go vet` clean on affected packages
+- [x] Pre-existing write_tests tests (`TestRootCommandIncludesFmtCommand`, `TestWriteWithOptionsRendersFmtSummary`) now pass
