@@ -2147,7 +2147,13 @@ func (r renderer) renderLogsSkipping(env Envelope, skip map[string]bool) string 
 		if skip[line] {
 			continue
 		}
-		if strings.HasPrefix(line, "--- a/") {
+		if strings.HasPrefix(line, "diff ") ||
+			strings.HasPrefix(line, "+++ b/") ||
+			strings.HasPrefix(line, "--- a/") ||
+			strings.HasPrefix(line, "@@ ") ||
+			strings.HasPrefix(line, "+") ||
+			strings.HasPrefix(line, "-") ||
+			strings.HasPrefix(line, " ") {
 			b.WriteString(line)
 		} else {
 			b.WriteString("- ")

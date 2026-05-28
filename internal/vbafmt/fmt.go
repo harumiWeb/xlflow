@@ -127,9 +127,19 @@ func resolvePath(root, path string) string {
 }
 
 func resolveProjectFiles(opts FmtOptions) ([]string, error) {
+	formsDir := opts.Cfg.Src.Forms
+	if formsDir == "" {
+		formsDir = filepath.ToSlash(filepath.Join("src", "forms"))
+	}
+	userFormCodeSource := opts.Cfg.UserForm.CodeSource
+	if userFormCodeSource == "" {
+		userFormCodeSource = config.Default().UserForm.CodeSource
+	}
+
 	dirs := []string{
 		opts.Cfg.Src.Modules,
 		opts.Cfg.Src.Classes,
+		formsDir,
 		opts.Cfg.Src.Workbook,
 	}
 	if opts.Cfg.Src.Modules == "" {
@@ -138,8 +148,11 @@ func resolveProjectFiles(opts FmtOptions) ([]string, error) {
 	if opts.Cfg.Src.Classes == "" {
 		dirs[1] = filepath.ToSlash(filepath.Join("src", "classes"))
 	}
+	if userFormCodeSource == "sidecar" {
+		dirs = append(dirs, filepath.ToSlash(filepath.Join(formsDir, "code")))
+	}
 	if opts.Cfg.Src.Workbook == "" {
-		dirs[2] = filepath.ToSlash(filepath.Join("src", "workbook"))
+		dirs[3] = filepath.ToSlash(filepath.Join("src", "workbook"))
 	}
 	dirs = append(dirs, "tests")
 
@@ -373,6 +386,9 @@ func classifyLine(trimmedLine string) (keyword string, isStructural bool) {
 	if strings.HasPrefix(strings.TrimLeft(upper, " \t"), "IF") {
 		stripped := stripTrailingComment(upper)
 		stripped = strings.TrimRight(stripped, " \t")
+		if strings.HasSuffix(stripped, "_") {
+			stripped = strings.TrimRight(strings.TrimSuffix(stripped, "_"), " \t")
+		}
 		if !strings.HasSuffix(stripped, "THEN") {
 			return "", false
 		}
@@ -505,8 +521,6 @@ var indentKeywords = []string{
 	"PROPERTY LET",
 	"PROPERTY SET",
 	"SELECT CASE",
-	"#ELSEIF",
-	"#ELSE",
 	"CASE",
 	"DO",
 	"ELSE",
@@ -519,7 +533,6 @@ var indentKeywords = []string{
 	"TYPE",
 	"WHILE",
 	"WITH",
-	"#IF",
 }
 
 var dedentKeywords = []string{
@@ -533,7 +546,6 @@ var dedentKeywords = []string{
 	"END TYPE",
 	"END ENUM",
 	"END IF",
-	"#END IF",
 	"CASE ELSE",
 	"ELSEIF",
 	"ELSE",
@@ -541,8 +553,6 @@ var dedentKeywords = []string{
 	"LOOP",
 	"NEXT",
 	"WEND",
-	"#ELSEIF",
-	"#ELSE",
 }
 
 func isIndentKeyword(kw string) bool {
@@ -580,7 +590,7 @@ func normalizeBlankLines(text string) string {
 			if i == len(lines)-1 {
 				continue
 			}
-			if consecutiveBlanks <= 2 {
+			if consecutiveBlanks == 1 {
 				buf.WriteByte('\n')
 			}
 			continue

@@ -61,4 +61,20 @@ When `--ui-stream` is enabled, xlflow also writes realtime `XlflowUI` summaries 
 
 `fmt --json` returns `output` with `changed`, `unchanged`, `skipped`, and `total` summary fields. `fmt --stdin --json` returns the same envelope shape instead of formatted text; the formatted source body is not included in the JSON output.
 
+Example:
+
+```json
+{
+  "status": "ok",
+  "command": "fmt",
+  "output": {
+    "changed": 2,
+    "unchanged": 5,
+    "skipped": 1,
+    "total": 8
+  },
+  "logs": []
+}
+```
+
 Source: `docs/specs/cli-contract.md`.

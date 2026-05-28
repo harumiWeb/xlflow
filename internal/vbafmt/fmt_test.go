@@ -137,6 +137,47 @@ End Sub
 	if !strings.Contains(got, "_") {
 		t.Fatalf("line continuation missing:\n%s", got)
 	}
+
+	continuedIf := `Sub Main()
+If condition Then _
+    condition = False
+value = 1
+End If
+End Sub
+`
+	continuedIfGot, err := FormatText(continuedIf, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(continuedIfGot, "Then _") {
+		t.Fatalf("continued If opener missing continuation:\n%s", continuedIfGot)
+	}
+	if !strings.Contains(continuedIfGot, "End If") {
+		t.Fatalf("continued If block missing End If:\n%s", continuedIfGot)
+	}
+	assertTrimmedLineIndent(t, continuedIfGot, "value = 1", 8)
+	second, err := FormatText(continuedIfGot, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != continuedIfGot {
+		t.Fatalf("continued If format not idempotent:\nfirst:\n%s\nsecond:\n%s", continuedIfGot, second)
+	}
+}
+
+func assertTrimmedLineIndent(t *testing.T, text, trimmed string, want int) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if strings.TrimSpace(line) != trimmed {
+			continue
+		}
+		got := len(line) - len(strings.TrimLeft(line, " "))
+		if got != want {
+			t.Fatalf("expected %q indent %d, got %d:\n%s", trimmed, want, got, text)
+		}
+		return
+	}
+	t.Fatalf("line %q not found:\n%s", trimmed, text)
 }
 
 func TestFormatBasRemoveTrailingWhitespace(t *testing.T) {
@@ -440,6 +481,11 @@ End Sub
 	if second != got {
 		t.Fatalf("format not idempotent for #If/#Else/#End If:\n%s\n%s", got, second)
 	}
+	assertTrimmedLineIndent(t, got, "#If Win64 Then", 4)
+	assertTrimmedLineIndent(t, got, "x = 1", 4)
+	assertTrimmedLineIndent(t, got, "#Else", 4)
+	assertTrimmedLineIndent(t, got, "x = 0", 4)
+	assertTrimmedLineIndent(t, got, "#End If", 4)
 }
 
 func TestFormatBasProperty(t *testing.T) {
@@ -505,8 +551,8 @@ func TestFormatBasBlankLineNormalization(t *testing.T) {
 			consecutiveBlanks = 0
 		}
 	}
-	if maxBlanks > 2 {
-		t.Fatalf("max 2 consecutive blank lines expected, got %d:\n%s", maxBlanks, got)
+	if maxBlanks > 1 {
+		t.Fatalf("max 1 consecutive blank line expected, got %d:\n%s", maxBlanks, got)
 	}
 }
 
@@ -715,16 +761,34 @@ End Sub
 	if second != got {
 		t.Fatalf("format not idempotent for #If/#ElseIf/#Else/#End If:\nfirst:\n%s\nsecond:\n%s", got, second)
 	}
-	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "#ElseIf Win32 Then" || trimmed == "#Else" {
-			indent := len(line) - len(strings.TrimLeft(line, " "))
-			if indent != 4 {
-				t.Fatalf("expected #ElseIf/#Else at indent 4:\n%s", got)
-			}
+	assertTrimmedLineIndent(t, got, "#If Win64 Then", 4)
+	assertTrimmedLineIndent(t, got, "x = 1", 4)
+	assertTrimmedLineIndent(t, got, "#ElseIf Win32 Then", 4)
+	assertTrimmedLineIndent(t, got, "x = 0", 4)
+	assertTrimmedLineIndent(t, got, "#Else", 4)
+	assertTrimmedLineIndent(t, got, "x = -1", 4)
+	assertTrimmedLineIndent(t, got, "#End If", 4)
+}
+
+func TestResolveProjectFilesIncludesSidecarFormCode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "forms", "code", "UserForm1.bas")
+	if err := os.WriteFile(path, []byte("Option Explicit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := resolveProjectFiles(FmtOptions{Root: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if filepath.Clean(file) == filepath.Clean(path) {
+			return
 		}
 	}
+	t.Fatalf("expected sidecar form code file in default project files: %v", files)
 }
 
 func TestFormatBasPrivateStaticSub(t *testing.T) {

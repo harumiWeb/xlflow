@@ -509,6 +509,9 @@ func setupFmtProjectDir(t *testing.T, dir string) {
 	if err := os.MkdirAll(filepath.Join(dir, "src", "workbook"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -593,6 +596,18 @@ func TestFmtDiffViaCLI(t *testing.T) {
 	got := stdout.String()
 	if !strings.Contains(got, "would be reformatted") {
 		t.Fatalf("expected diff summary in output:\n%s", got)
+	}
+	if !strings.Contains(got, "--- a/") {
+		t.Fatalf("expected unified diff old-file header in output:\n%s", got)
+	}
+	if !strings.Contains(got, "+++ b/") {
+		t.Fatalf("expected unified diff new-file header in output:\n%s", got)
+	}
+	if !strings.Contains(got, "@@") {
+		t.Fatalf("expected unified diff hunk header in output:\n%s", got)
+	}
+	if strings.Contains(got, "- +++ b/") || strings.Contains(got, "- @@") {
+		t.Fatalf("diff lines should not be list-prefixed:\n%s", got)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -756,6 +771,96 @@ func TestFmtStdinViaCLI(t *testing.T) {
 	got := stdout.String()
 	if strings.TrimSpace(got) == "" {
 		t.Fatal("expected non-empty formatted output from --stdin")
+	}
+}
+
+func TestFmtStdinRejectsPathArgsViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--stdin", "src/modules/Test.bas"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for --stdin combined with path args")
+	}
+	if !strings.Contains(err.Error(), "path arguments") {
+		t.Fatalf("expected path-argument validation error, got %v", err)
+	}
+}
+
+func TestFmtStdinDetectsClassModuleViaCLI(t *testing.T) {
+	input := "VERSION 1.0 CLASS\nBEGIN\nMultiUse = -1\nEND\nAttribute VB_Name = \"Test\"\nOption Explicit\nPublic Sub Run()\nx=1\nEnd Sub\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--stdin"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --stdin error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "VERSION 1.0 CLASS") || !strings.Contains(got, `Attribute VB_Name = "Test"`) {
+		t.Fatalf("expected class header to be preserved for stdin class input:\n%s", got)
+	}
+}
+
+func TestFmtJSONWarningsUseSkipReasonViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "UserForm1.frm")
+	if err := os.WriteFile(path, []byte("VERSION 5.00\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("expected one warning, got %v", env["warnings"])
+	}
+	warning, ok := warnings[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected warning map, got %T", warnings[0])
+	}
+	if warning["code"] != "unsupported extension: .frm" {
+		t.Fatalf("expected warning code to use skip reason, got %v", warning["code"])
 	}
 }
 

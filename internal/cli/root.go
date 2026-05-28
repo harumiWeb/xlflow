@@ -4001,6 +4001,9 @@ func (a *app) fmtCommand() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if stdin {
+				if len(args) > 0 {
+					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with path arguments"))
+				}
 				if write || check || diff {
 					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with --write, --check, or --diff"))
 				}
@@ -4078,9 +4081,13 @@ func (a *app) fmtCommand() *cobra.Command {
 
 			var warnings []map[string]any
 			for _, sr := range result.SkippedReasons {
+				code := sr.Reason
+				if code == "" {
+					code = "fmt_skipped_unsupported_extension"
+				}
 				warnings = append(warnings, map[string]any{
-					"code":    "fmt_skipped_unsupported_extension",
-					"message": fmt.Sprintf("Skipped unsupported file: %s", sr.Path),
+					"code":    code,
+					"message": fmt.Sprintf("Skipped file: %s", sr.Path),
 				})
 			}
 			if len(warnings) > 0 {
@@ -4148,7 +4155,7 @@ func (a *app) runFmtStdin() error {
 		_, _ = fmt.Fprintln(a.stdoutWriter())
 		return nil
 	}
-	formatted, err := vbafmt.FormatText(input, false) // --stdin assumes .bas format; .cls attributes are not preserved
+	formatted, err := vbafmt.FormatText(input, looksLikeClassModule(input))
 	if err != nil {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
 	}
@@ -4177,6 +4184,24 @@ func (a *app) runFmtStdin() error {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_stdin_write_failed", err)
 	}
 	return nil
+}
+
+func looksLikeClassModule(input string) bool {
+	for _, line := range strings.Split(input, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "VERSION ") && strings.Contains(upper, "CLASS") {
+			return true
+		}
+		if strings.HasPrefix(upper, "ATTRIBUTE VB_") {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func (a *app) buildFmtWriteLogs(wasWritten bool, result *vbafmt.Result) []string {
