@@ -263,6 +263,8 @@ func renderHuman(env Envelope, opts Options) string {
 		} else {
 			b.WriteString(r.renderWorkbookSource(env))
 		}
+	case "fmt":
+		b.WriteString(r.renderFmt(env))
 	case "diff":
 		b.WriteString(r.renderDiff(env))
 	case "inspect":
@@ -1405,6 +1407,56 @@ func (r renderer) renderProcessCleanup(env Envelope) string {
 	return b.String()
 }
 
+func (r renderer) renderFmt(env Envelope) string {
+	output := objectMap(env.Output)
+	warnings := listOfObjects(env.Warnings)
+	hints := listOfObjects(env.Hints)
+	if len(output) == 0 && len(warnings) == 0 && len(hints) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+
+	changed, _ := numberValue(output, "changed")
+	unchanged, _ := numberValue(output, "unchanged")
+	skipped, _ := numberValue(output, "skipped")
+	total, _ := numberValue(output, "total")
+
+	summaryParts := []string{}
+	if changed > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d changed", int(changed)))
+	}
+	if unchanged > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d unchanged", int(unchanged)))
+	}
+	if skipped > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d skipped", int(skipped)))
+	}
+	if total > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d total", int(total)))
+	}
+	if len(summaryParts) > 0 {
+		b.WriteString(kv("Summary", strings.Join(summaryParts, ", ")))
+	}
+
+	if paths := stringList(output["changed_paths"]); len(paths) > 0 {
+		b.WriteString("Changed:\n")
+		for _, p := range paths {
+			fmt.Fprintf(&b, "- %s\n", p)
+		}
+	}
+	if paths := stringList(output["skipped_paths"]); len(paths) > 0 {
+		b.WriteString("Skipped:\n")
+		for _, p := range paths {
+			fmt.Fprintf(&b, "- %s\n", p)
+		}
+	}
+
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
 func (r renderer) renderDiff(env Envelope) string {
 	diff := objectMap(env.Diff)
 	if len(diff) == 0 {
@@ -2095,8 +2147,12 @@ func (r renderer) renderLogsSkipping(env Envelope, skip map[string]bool) string 
 		if skip[line] {
 			continue
 		}
-		b.WriteString("- ")
-		b.WriteString(line)
+		if strings.HasPrefix(line, "--- a/") {
+			b.WriteString(line)
+		} else {
+			b.WriteString("- ")
+			b.WriteString(line)
+		}
 		b.WriteString("\n")
 	}
 	return b.String()

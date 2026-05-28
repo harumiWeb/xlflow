@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow fmt` as a conservative, non-destructive VBA source formatter for `.bas` and `.cls` files. Supports `--write`, `--check`, `--diff`, `--json`, and `--stdin` modes. The formatter uses 4-space indentation, strips trailing whitespace, normalizes blank lines, preserves class module metadata, and is idempotent. Typical workflow: `fmt -> lint -> push -> run/test`.
 - Refined the interactive `xlflow new` / `init` welcome screen with a new `Welcome to` heading, a command reference URL, and softer muted version/info text below the ASCII logo.
 - Hardened the bundled TAKT orchestra, PR review, and issue bug workflows with explicit verification, audit-triage, and release-gate handling, broader loop monitoring around remediation and final audit, and clearer guidance to treat allowed untracked files and auto-staging state as non-blocking.
 - Added `xlflow process list` to enumerate all local Excel processes with PID and open-workbook status.
