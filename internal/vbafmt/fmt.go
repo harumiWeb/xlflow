@@ -16,22 +16,22 @@ const (
 )
 
 type FileResult struct {
-	Path      string
-	Changed   bool
-	Formatted string
-	Original  string
-	Skipped   bool
+	Path       string
+	Changed    bool
+	Formatted  string
+	Original   string
+	Skipped    bool
 	SkipReason string
 }
 
 type Result struct {
-	Changed        int
-	Unchanged      int
-	Skipped        int
-	Total          int
-	ChangedPaths   []string
-	SkippedPaths   []string
-	SkippedReasons []SkippedReason
+	Changed         int
+	Unchanged       int
+	Skipped         int
+	Total           int
+	ChangedPaths    []string
+	SkippedPaths    []string
+	SkippedReasons  []SkippedReason
 	FormattedByPath map[string]string
 }
 
@@ -314,9 +314,7 @@ func splitLines(text string) []string {
 	text = strings.ReplaceAll(text, "\r", "\n")
 	lines := strings.Split(text, "\n")
 	clean := make([]string, 0, len(lines))
-	for _, line := range lines {
-		clean = append(clean, line)
-	}
+	clean = append(clean, lines...)
 	if len(clean) > 0 && clean[len(clean)-1] == "" {
 		clean = clean[:len(clean)-1]
 	}
@@ -569,7 +567,7 @@ func isProcedureGap(prev, current string) bool {
 
 func summarizeResults(results []FileResult, opts FmtOptions) (*Result, error) {
 	r := &Result{
-		Total:          len(results),
+		Total:           len(results),
 		FormattedByPath: make(map[string]string),
 	}
 	for _, fr := range results {

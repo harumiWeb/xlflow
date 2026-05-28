@@ -79,7 +79,7 @@ End Sub
 	}
 	wantIndent := map[string]int{
 		`s = "If this is a string then End If not real"`: 4,
-		"End Sub":                                        0,
+		"End Sub": 0,
 	}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -346,15 +346,15 @@ End Sub
 	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		switch {
-		case trimmed == "Sub Main()" || trimmed == "End Sub":
+		switch trimmed {
+		case "Sub Main()", "End Sub":
 			// top-level
-		case trimmed == "If x = 1 Then" || trimmed == "Else" || trimmed == "End If":
+		case "If x = 1 Then", "Else", "End If":
 			indent := len(line) - len(strings.TrimLeft(line, " "))
 			if indent != 4 {
 				t.Fatalf("expected %q at indent 4, got indent %d:\n%s", trimmed, indent, got)
 			}
-		case trimmed == "y = 1" || trimmed == "y = 0":
+		case "y = 1", "y = 0":
 			indent := len(line) - len(strings.TrimLeft(line, " "))
 			if indent != 8 {
 				t.Fatalf("expected %q at indent 8 (body under If/Else), got indent %d:\n%s", trimmed, indent, got)
@@ -561,8 +561,12 @@ func TestResolveExplicitPathsDir(t *testing.T) {
 	}
 	p1 := filepath.Join(sub, "A.bas")
 	p2 := filepath.Join(sub, "B.cls")
-	os.WriteFile(p1, []byte("x"), 0644)
-	os.WriteFile(p2, []byte("x"), 0644)
+	if err := os.WriteFile(p1, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p2, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	opts := FmtOptions{Root: dir, Paths: []string{filepath.Join(dir, "src")}}
 	files, err := resolveExplicitPaths(opts)
 	if err != nil {

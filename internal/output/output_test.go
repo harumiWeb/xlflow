@@ -1210,14 +1210,14 @@ func TestWriteWithOptionsRendersFmtSummary(t *testing.T) {
 		"description": "source files",
 	}
 	env.Output = map[string]any{
-		"mode":             "check",
-		"changed":          1,
-		"unchanged":        1,
-		"skipped":          1,
-		"total":            3,
-		"changed_paths":    []any{"src/modules/Main.bas"},
-		"skipped_paths":    []any{"src/forms/UserForm1.frm"},
-		"skipped_reasons":  []map[string]any{{"path": "src/forms/UserForm1.frm", "reason": "unsupported extension: .frm"}},
+		"mode":            "check",
+		"changed":         1,
+		"unchanged":       1,
+		"skipped":         1,
+		"total":           3,
+		"changed_paths":   []any{"src/modules/Main.bas"},
+		"skipped_paths":   []any{"src/forms/UserForm1.frm"},
+		"skipped_reasons": []map[string]any{{"path": "src/forms/UserForm1.frm", "reason": "unsupported extension: .frm"}},
 	}
 	env.Warnings = []map[string]any{
 		{"code": "fmt_skipped_unsupported_extension", "message": "Skipped unsupported file: src/forms/UserForm1.frm"},

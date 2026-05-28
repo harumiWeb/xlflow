@@ -459,9 +459,9 @@ func TestRootCommandIncludesFmtCommand(t *testing.T) {
 
 func TestFmtCommandStdinConflictsWithWrite(t *testing.T) {
 	a := &app{
-		stdout: new(bytes.Buffer),
-		stderr: new(bytes.Buffer),
-		cwd:    t.TempDir(),
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		cwd:            t.TempDir(),
 		stdoutTerminal: func() bool { return false },
 		stderrTerminal: func() bool { return false },
 	}
@@ -478,9 +478,9 @@ func TestFmtCommandStdinConflictsWithWrite(t *testing.T) {
 
 func TestFmtCommandModeConflict(t *testing.T) {
 	a := &app{
-		stdout: new(bytes.Buffer),
-		stderr: new(bytes.Buffer),
-		cwd:    t.TempDir(),
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		cwd:            t.TempDir(),
 		stdoutTerminal: func() bool { return false },
 		stderrTerminal: func() bool { return false },
 	}
@@ -733,8 +733,8 @@ func TestFmtStdinViaCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		stdinWriter.Write([]byte(input))
-		stdinWriter.Close()
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
 	}()
 	dir := t.TempDir()
 	var stdout bytes.Buffer
@@ -766,8 +766,8 @@ func TestFmtStdinJSONViaCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		stdinWriter.Write([]byte(input))
-		stdinWriter.Close()
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
 	}()
 	dir := t.TempDir()
 	var stdout bytes.Buffer
