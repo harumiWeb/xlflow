@@ -9,7 +9,7 @@ workflow_config:
     opencode:
       network_access: true
 
-max_steps: 30
+max_steps: 60
 initial_step: plan
 
 steps:
@@ -26,7 +26,7 @@ steps:
 
     provider_options:
       codex:
-        reasoning_effort: high
+        reasoning_effort: xhigh
 
     persona: planner
 
@@ -147,7 +147,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: xiaomi/mimo-v2.5-pro
+    model: opencode-go/mimo-v2.5-pro
 
     persona: implementer
 
@@ -211,7 +211,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: xiaomi/mimo-v2.5-pro
+    model: opencode-go/mimo-v2.5-pro
 
     persona: tester
 
@@ -264,7 +264,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: xiaomi/mimo-v2.5-pro
+    model: opencode-go/mimo-v2.5-pro
 
     knowledge:
       - architecture
@@ -317,7 +317,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: xiaomi/mimo-v2.5-pro
+    model: opencode-go/mimo-v2.5-pro
 
     persona: implementer
 
