@@ -29,6 +29,7 @@ type ExcelConfig struct {
 	Path          string `toml:"path"`
 	Visible       bool   `toml:"visible"`
 	DisplayAlerts bool   `toml:"display_alerts"`
+	Bridge        string `toml:"bridge"`
 }
 
 type SourceConfig struct {
@@ -68,6 +69,7 @@ func Default() Config {
 			Path:          filepath.ToSlash(filepath.Join("build", "Book.xlsm")),
 			Visible:       false,
 			DisplayAlerts: false,
+			Bridge:        "auto",
 		},
 		Src: SourceConfig{
 			Modules:  filepath.ToSlash(filepath.Join("src", "modules")),
@@ -119,6 +121,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Excel.Path == "" {
 		cfg.Excel.Path = defaults.Excel.Path
 	}
+	if cfg.Excel.Bridge == "" {
+		cfg.Excel.Bridge = defaults.Excel.Bridge
+	}
 	if cfg.Src.Modules == "" {
 		cfg.Src.Modules = defaults.Src.Modules
 	}
@@ -145,6 +150,11 @@ func validate(cfg Config) error {
 	}
 	if cfg.Excel.Path == "" {
 		return errors.New("excel.path is required")
+	}
+	switch cfg.Excel.Bridge {
+	case "auto", "powershell", "dotnet":
+	default:
+		return fmt.Errorf("excel.bridge must be one of auto, powershell, dotnet")
 	}
 	switch cfg.VBA.FolderAnnotation {
 	case "update", "preserve", "ignore":
@@ -185,6 +195,8 @@ path = %q
 visible = %t
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = %t
+# Excel bridge mode. Valid values: "auto", "powershell", "dotnet".
+bridge = %q
 
 # Source tree directories.
 [src]
@@ -237,7 +249,7 @@ forbid_interactive_input = %t
 `
 	_, err = fmt.Fprintf(f, tmpl,
 		cfg.Project.Name, cfg.Project.Entry,
-		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts,
+		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts, cfg.Excel.Bridge,
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,

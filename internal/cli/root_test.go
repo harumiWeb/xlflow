@@ -119,6 +119,16 @@ func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesBridgeFlag(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	flag := root.PersistentFlags().Lookup("bridge")
+	if flag == nil {
+		t.Fatal("expected persistent --bridge flag")
+	}
+}
+
 func TestRootCommandIncludesBackupAndRollbackCommands(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

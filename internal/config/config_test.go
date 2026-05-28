@@ -37,6 +37,9 @@ path = "build/Sales.xlsm"
 	if !cfg.Lint.RequireOptionExplicit {
 		t.Fatalf("lint defaults were not applied")
 	}
+	if cfg.Excel.Bridge != "auto" {
+		t.Fatalf("unexpected excel bridge default: %q", cfg.Excel.Bridge)
+	}
 	if !cfg.Lint.ForbidInteractiveInput {
 		t.Fatalf("interactive input lint default was not applied")
 	}
@@ -115,10 +118,29 @@ code_source = "broken"
 	}
 }
 
+func TestLoadRejectsInvalidExcelBridge(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+bridge = "broken"
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected invalid excel bridge error")
+	}
+}
+
 func TestWriteProducesReadableConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Default()
 	cfg.Project.Name = "write-test"
+	cfg.Excel.Bridge = "powershell"
 	cfg.UserForm.CodeSource = "frm"
 	cfg.Lint.ForbidInteractiveInput = false
 
@@ -136,6 +158,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.UserForm.CodeSource != "frm" {
 		t.Fatalf("userform.code_source mismatch: got %q, want frm", loaded.UserForm.CodeSource)
+	}
+	if loaded.Excel.Bridge != "powershell" {
+		t.Fatalf("excel.bridge mismatch: got %q, want powershell", loaded.Excel.Bridge)
 	}
 	if loaded.Lint.ForbidInteractiveInput {
 		t.Fatal("expected forbid_interactive_input=false")
