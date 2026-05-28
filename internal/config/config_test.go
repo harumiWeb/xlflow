@@ -136,6 +136,27 @@ bridge = "broken"
 	}
 }
 
+func TestLoadNormalizesExcelBridgeValue(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+bridge = " PowerShell "
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Excel.Bridge != "powershell" {
+		t.Fatalf("excel.bridge = %q, want powershell", cfg.Excel.Bridge)
+	}
+}
+
 func TestWriteProducesReadableConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Default()

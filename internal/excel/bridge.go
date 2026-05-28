@@ -1465,12 +1465,16 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		if len(response.Stderr) > 0 {
 			message = string(response.Stderr)
 		}
-		if strings.Contains(message, "Excel automation is only supported on Windows in the MVP") || strings.Contains(message, "PowerShell executable not found") {
-			code = "environment"
-			source = "xlflow"
-		} else if strings.Contains(message, "script ") && strings.Contains(message, "was not available from on-disk script locations or embedded runtime assets") {
-			code = "script_not_found"
-			source = "xlflow"
+		var bridgeErr *excelbridge.Error
+		if errors.As(err, &bridgeErr) {
+			switch bridgeErr.Kind {
+			case excelbridge.ErrorUnsupportedHost, excelbridge.ErrorPowerShellMissing:
+				code = "environment"
+				source = "xlflow"
+			case excelbridge.ErrorScriptNotFound:
+				code = "script_not_found"
+				source = "xlflow"
+			}
 		}
 		env = output.Failure(commandName, output.Error{Code: code, Message: message, Source: source})
 		if debugStreamErr != nil {

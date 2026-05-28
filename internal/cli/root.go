@@ -28,6 +28,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
@@ -4875,10 +4876,24 @@ func (a *app) stderrIsInteractive() bool {
 
 func (a *app) loadConfig(command string) (config.Config, error) {
 	cfg, err := config.Load(a.cwd)
+	if err != nil && errors.Is(err, config.ErrInvalidExcelBridge) && a.hasValidBridgeOverride() {
+		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
+	}
 	if err != nil {
 		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
 	}
 	return cfg, nil
+}
+
+func (a *app) hasValidBridgeOverride() bool {
+	for _, candidate := range []string{a.bridge, os.Getenv(excelbridge.EnvBridge)} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		_, err := excelbridge.ParseMode(candidate)
+		return err == nil
+	}
+	return false
 }
 
 func (a *app) excelRunner() excel.Runner {

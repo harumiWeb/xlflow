@@ -31,7 +31,10 @@ func (p PowerShellProvider) Info(context.Context) (Info, error) {
 
 func (p PowerShellProvider) Execute(ctx context.Context, req Request) (Response, error) {
 	if !ScriptExecutionSupported(p.RootDir, req.Command) {
-		return Response{}, fmt.Errorf("excel automation is only supported on Windows in the MVP unless a script override is provided at scripts/%s.ps1", req.Command)
+		return Response{}, &Error{
+			Kind:    ErrorUnsupportedHost,
+			Message: fmt.Sprintf("excel automation is only supported on Windows in the MVP unless a script override is provided at scripts/%s.ps1", req.Command),
+		}
 	}
 
 	script, cleanup, err := ScriptPath(p.RootDir, req.Command)
@@ -78,7 +81,11 @@ func MaterializeBundledScript(commandName string) (string, func(), error) {
 	name := commandName + ".ps1"
 	path, cleanup, err := bundledscripts.Materialize(commandName)
 	if err != nil {
-		return "", nil, fmt.Errorf("script %s was not available from on-disk script locations or embedded runtime assets: %w", name, err)
+		return "", nil, &Error{
+			Kind:    ErrorScriptNotFound,
+			Message: fmt.Sprintf("script %s was not available from on-disk script locations or embedded runtime assets", name),
+			Err:     err,
+		}
 	}
 	return path, cleanup, nil
 }
@@ -129,7 +136,10 @@ func PowerShellExecutableFor(goos string, lookPath func(file string) (string, er
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("PowerShell executable not found on %s (searched: %s)", goos, strings.Join(candidates, ", "))
+	return "", &Error{
+		Kind:    ErrorPowerShellMissing,
+		Message: fmt.Sprintf("PowerShell executable not found on %s (searched: %s)", goos, strings.Join(candidates, ", ")),
+	}
 }
 
 func RootScriptOverridePath(root, commandName string) (string, bool) {

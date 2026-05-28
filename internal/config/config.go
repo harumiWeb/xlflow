@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 )
 
 const FileName = "xlflow.toml"
+
+var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, powershell, dotnet")
 
 type Config struct {
 	Project  ProjectConfig  `toml:"project"`
@@ -98,6 +101,14 @@ func Default() Config {
 }
 
 func Load(cwd string) (Config, error) {
+	return load(cwd, false)
+}
+
+func LoadAllowInvalidExcelBridge(cwd string) (Config, error) {
+	return load(cwd, true)
+}
+
+func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	cfg := Default()
 	path := filepath.Join(cwd, FileName)
 	if _, err := os.Stat(path); err != nil {
@@ -110,6 +121,9 @@ func Load(cwd string) (Config, error) {
 		return cfg, err
 	}
 	applyDefaults(&cfg)
+	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
+		return cfg, err
+	}
 	return cfg, validate(cfg)
 }
 
@@ -151,11 +165,6 @@ func validate(cfg Config) error {
 	if cfg.Excel.Path == "" {
 		return errors.New("excel.path is required")
 	}
-	switch cfg.Excel.Bridge {
-	case "auto", "powershell", "dotnet":
-	default:
-		return fmt.Errorf("excel.bridge must be one of auto, powershell, dotnet")
-	}
 	switch cfg.VBA.FolderAnnotation {
 	case "update", "preserve", "ignore":
 	default:
@@ -166,6 +175,21 @@ func validate(cfg Config) error {
 	default:
 		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
 	}
+	return nil
+}
+
+func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
+	mode, err := excelbridge.ParseMode(cfg.Excel.Bridge)
+	if err != nil {
+		if allowInvalid {
+			return nil
+		}
+		if errors.Is(err, excelbridge.ErrInvalidMode) {
+			return ErrInvalidExcelBridge
+		}
+		return err
+	}
+	cfg.Excel.Bridge = string(mode)
 	return nil
 }
 

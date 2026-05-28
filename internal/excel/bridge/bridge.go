@@ -2,11 +2,13 @@ package bridge
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 )
 
 const EnvBridge = "XLFLOW_EXCEL_BRIDGE"
+
+var ErrInvalidMode = errors.New("bridge mode must be one of auto, powershell, dotnet")
 
 type Mode string
 
@@ -39,16 +41,44 @@ type Provider interface {
 	Execute(context.Context, Request) (Response, error)
 }
 
+type ErrorKind string
+
+const (
+	ErrorUnsupportedHost   ErrorKind = "unsupported_host"
+	ErrorPowerShellMissing ErrorKind = "powershell_missing"
+	ErrorScriptNotFound    ErrorKind = "script_not_found"
+)
+
+type Error struct {
+	Kind    ErrorKind
+	Message string
+	Err     error
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 func ParseMode(raw string) (Mode, error) {
 	mode := Mode(strings.ToLower(strings.TrimSpace(raw)))
 	if mode == "" {
-		return "", fmt.Errorf("bridge mode must be one of auto, powershell, dotnet")
+		return "", ErrInvalidMode
 	}
 	switch mode {
 	case ModeAuto, ModePowerShell, ModeDotNet:
 		return mode, nil
 	default:
-		return "", fmt.Errorf("bridge mode must be one of auto, powershell, dotnet")
+		return "", ErrInvalidMode
 	}
 }
 

@@ -129,6 +129,28 @@ func TestRootCommandIncludesBridgeFlag(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAllowsValidBridgeOverrideWhenConfigBridgeIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+bridge = "broken"
+`)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir, bridge: "powershell"}
+	cfg, err := a.loadConfig("fmt")
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.Excel.Bridge != "broken" {
+		t.Fatalf("excel.bridge = %q, want broken", cfg.Excel.Bridge)
+	}
+}
+
 func TestRootCommandIncludesBackupAndRollbackCommands(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
