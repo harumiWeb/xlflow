@@ -51,6 +51,7 @@ tasks:
     cmds:
       - go fmt ./...
       - pnpm run format
+      - dotnet format bridge/dotnet/Xlflow.ExcelBridge.sln
 
   tidy:
     cmds:

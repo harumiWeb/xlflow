@@ -1,6 +1,8 @@
 # Go
 /bin/
 /dist/
+**/bin/
+**/obj/
 *.exe
 *.test
 coverage.out
