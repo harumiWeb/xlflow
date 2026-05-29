@@ -10,6 +10,43 @@ import (
 	"time"
 )
 
+func TestDotNetBridgeCommandFallsBackToInstalledBridgeWhenSDKMissing(t *testing.T) {
+	originalLookPath := dotNetLookPath
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetLookPath = originalLookPath
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+
+	dotNetBridgeCandidatesFunc = func() []string { return nil }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) {
+		return `C:\dev\go\xlflow\bridge\dotnet\src\Xlflow.ExcelBridge\Xlflow.ExcelBridge.csproj`, true
+	}
+	dotNetLookPath = func(file string) (string, error) {
+		switch file {
+		case "dotnet":
+			return "", errors.New("not found")
+		case dotNetBridgeBinaryName + ".exe":
+			return `C:\tools\xlflow-excel-bridge.exe`, nil
+		default:
+			return "", errors.New("not found")
+		}
+	}
+
+	command, args, err := DotNetBridgeCommand()
+	if err != nil {
+		t.Fatalf("DotNetBridgeCommand() error = %v", err)
+	}
+	if command != `C:\tools\xlflow-excel-bridge.exe` {
+		t.Fatalf("command = %q, want installed bridge executable", command)
+	}
+	if args != nil {
+		t.Fatalf("args = %v, want nil for installed bridge executable", args)
+	}
+}
+
 func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	projectPath, ok := repoLocalDotNetBridgeProjectPath()
 	if !ok {

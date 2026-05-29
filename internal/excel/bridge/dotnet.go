@@ -16,6 +16,10 @@ import (
 const dotNetBridgeBinaryName = "xlflow-excel-bridge"
 const dotNetBridgeProjectRelativePath = "bridge/dotnet/src/Xlflow.ExcelBridge/Xlflow.ExcelBridge.csproj"
 
+var dotNetLookPath = exec.LookPath
+var dotNetBridgeCandidatesFunc = dotNetBridgeCandidates
+var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
+
 var dotNetSupportedCommands = map[string]struct{}{
 	"doctor": {},
 }
@@ -122,17 +126,22 @@ func (p DotNetProvider) Execute(ctx context.Context, req Request) (Response, err
 }
 
 func DotNetBridgeCommand() (string, []string, error) {
-	for _, candidate := range dotNetBridgeCandidates() {
+	var deferredErr error
+
+	for _, candidate := range dotNetBridgeCandidatesFunc() {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			switch strings.ToLower(filepath.Ext(candidate)) {
 			case ".dll":
-				dotnetExe, err := exec.LookPath("dotnet")
+				dotnetExe, err := dotNetLookPath("dotnet")
 				if err != nil {
-					return "", nil, &Error{
-						Kind:    ErrorDotNetRuntime,
-						Message: "dotnet executable not found while resolving the .NET Excel bridge runtime",
-						Err:     err,
+					if deferredErr == nil {
+						deferredErr = &Error{
+							Kind:    ErrorDotNetRuntime,
+							Message: "dotnet executable not found while resolving the .NET Excel bridge runtime",
+							Err:     err,
+						}
 					}
+					continue
 				}
 				return dotnetExe, []string{candidate}, nil
 			default:
@@ -141,22 +150,28 @@ func DotNetBridgeCommand() (string, []string, error) {
 		}
 	}
 
-	if projectPath, ok := repoLocalDotNetBridgeProjectPath(); ok {
-		dotnetExe, err := exec.LookPath("dotnet")
-		if err != nil {
-			return "", nil, &Error{
+	if projectPath, ok := repoLocalDotNetBridgeProjectPathFunc(); ok {
+		dotnetExe, err := dotNetLookPath("dotnet")
+		if err == nil {
+			return dotnetExe, []string{"run", "--project", projectPath, "--configuration", "Release", "--"}, nil
+		}
+		if deferredErr == nil {
+			deferredErr = &Error{
 				Kind:    ErrorDotNetRuntime,
 				Message: "dotnet executable not found while resolving the repo-local .NET Excel bridge project",
 				Err:     err,
 			}
 		}
-		return dotnetExe, []string{"run", "--project", projectPath, "--configuration", "Release", "--"}, nil
 	}
 
 	for _, candidate := range []string{dotNetBridgeBinaryName + ".exe", dotNetBridgeBinaryName} {
-		if path, err := exec.LookPath(candidate); err == nil {
+		if path, err := dotNetLookPath(candidate); err == nil {
 			return path, nil, nil
 		}
+	}
+
+	if deferredErr != nil {
+		return "", nil, deferredErr
 	}
 
 	return "", nil, &Error{
