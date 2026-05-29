@@ -80,4 +80,34 @@ public sealed class BridgeHostTests
         Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
         Assert.Equal("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
+
+    [Fact]
+    public void EmptyStdinReturnsStructuredRequestEmptyError()
+    {
+        using var stdin = new StringReader(string.Empty);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.Equal(2, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal("BRIDGE_REQUEST_EMPTY", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void InvalidJsonReturnsStructuredRequestInvalidJsonError()
+    {
+        using var stdin = new StringReader("{");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.Equal(2, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal("BRIDGE_REQUEST_INVALID_JSON", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
 }
