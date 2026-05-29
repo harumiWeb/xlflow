@@ -445,7 +445,7 @@ steps:
   # =========================================================
   - name: release_gate
 
-    edit: false
+    edit: true
 
     provider: codex
     model: gpt-5.4
