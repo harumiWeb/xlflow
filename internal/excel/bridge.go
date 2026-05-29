@@ -27,6 +27,15 @@ type Runner struct {
 	ConfigBridgeMode string
 }
 
+var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+	switch mode {
+	case excelbridge.ModeDotNet:
+		return excelbridge.DotNetProvider{RootDir: root}
+	default:
+		return excelbridge.PowerShellProvider{RootDir: root}
+	}
+}
+
 type WorkbookRef struct {
 	Path string `json:"path"`
 }
@@ -300,39 +309,40 @@ func (l *ScriptLogs) UnmarshalJSON(data []byte) error {
 }
 
 type ScriptResult struct {
-	Status        string        `json:"status"`
-	Command       string        `json:"command"`
-	Error         *output.Error `json:"error"`
-	Logs          ScriptLogs    `json:"logs"`
-	Diagnostics   any           `json:"diagnostics,omitempty"`
-	Workbook      any           `json:"workbook,omitempty"`
-	Backup        any           `json:"backup,omitempty"`
-	Source        any           `json:"source,omitempty"`
-	Bridge        any           `json:"bridge,omitempty"`
-	Macro         any           `json:"macro,omitempty"`
-	Macros        any           `json:"macros,omitempty"`
-	Forms         any           `json:"forms,omitempty"`
-	Tests         any           `json:"tests,omitempty"`
-	Trace         any           `json:"trace,omitempty"`
-	Runtime       any           `json:"runtime,omitempty"`
-	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
-	UI            any           `json:"ui,omitempty"`
-	Session       any           `json:"session,omitempty"`
-	Runner        any           `json:"runner,omitempty"`
-	Analysis      any           `json:"analysis,omitempty"`
-	Check         any           `json:"check,omitempty"`
-	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
-	Target        any           `json:"target,omitempty"`
-	Output        any           `json:"output,omitempty"`
-	Debug         any           `json:"debug,omitempty"`
-	Spec          any           `json:"spec,omitempty"`
-	Edit          any           `json:"edit,omitempty"`
-	Warnings      any           `json:"warnings,omitempty"`
-	Hints         any           `json:"hints,omitempty"`
-	Inspect       any           `json:"inspect,omitempty"`
-	DefaultEntry  string        `json:"default_entry,omitempty"`
-	Suggestions   any           `json:"suggestions,omitempty"`
-	Process       any           `json:"process,omitempty"`
+	ProtocolVersion int           `json:"protocol_version,omitempty"`
+	Status          string        `json:"status"`
+	Command         string        `json:"command"`
+	Error           *output.Error `json:"error"`
+	Logs            ScriptLogs    `json:"logs"`
+	Diagnostics     any           `json:"diagnostics,omitempty"`
+	Workbook        any           `json:"workbook,omitempty"`
+	Backup          any           `json:"backup,omitempty"`
+	Source          any           `json:"source,omitempty"`
+	Bridge          any           `json:"bridge,omitempty"`
+	Macro           any           `json:"macro,omitempty"`
+	Macros          any           `json:"macros,omitempty"`
+	Forms           any           `json:"forms,omitempty"`
+	Tests           any           `json:"tests,omitempty"`
+	Trace           any           `json:"trace,omitempty"`
+	Runtime         any           `json:"runtime,omitempty"`
+	GUIBoundaries   any           `json:"gui_boundaries,omitempty"`
+	UI              any           `json:"ui,omitempty"`
+	Session         any           `json:"session,omitempty"`
+	Runner          any           `json:"runner,omitempty"`
+	Analysis        any           `json:"analysis,omitempty"`
+	Check           any           `json:"check,omitempty"`
+	RunDiagnostic   any           `json:"run_diagnostic,omitempty"`
+	Target          any           `json:"target,omitempty"`
+	Output          any           `json:"output,omitempty"`
+	Debug           any           `json:"debug,omitempty"`
+	Spec            any           `json:"spec,omitempty"`
+	Edit            any           `json:"edit,omitempty"`
+	Warnings        any           `json:"warnings,omitempty"`
+	Hints           any           `json:"hints,omitempty"`
+	Inspect         any           `json:"inspect,omitempty"`
+	DefaultEntry    string        `json:"default_entry,omitempty"`
+	Suggestions     any           `json:"suggestions,omitempty"`
+	Process         any           `json:"process,omitempty"`
 }
 
 type ProcessListOptions struct {
@@ -1402,28 +1412,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		}
 		return env, output.ExitConfig, nil
 	}
-	if mode == excelbridge.ModeDotNet {
-		env = output.Failure(commandName, output.Error{
-			Code:    "bridge_not_available",
-			Message: ".NET Excel bridge is not available in this build yet; use --bridge powershell or --bridge auto.",
-			Source:  "xlflow",
-			Phase:   "bridge.resolve",
-		})
-		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
-			env.Debug = mergeDebugResult(nil, debugResult)
-			if debugStreamErr != nil {
-				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
-			}
-		}
-		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
-			env.UI = mergeUIResult(nil, uiEvents)
-			if uiStreamErr != nil {
-				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
-			}
-		}
-		return env, output.ExitEnvironment, nil
-	}
-
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if opts.Timeout > 0 {
@@ -1433,7 +1421,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	}
 	defer cancel()
 
-	provider := excelbridge.PowerShellProvider{RootDir: r.RootDir}
+	provider := bridgeProviderForMode(r.RootDir, mode)
 	response, err := provider.Execute(ctx, excelbridge.Request{Command: commandName, Args: args})
 	debugResult, debugStreamErr := closeDebugStreamSession(debugSession)
 	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
@@ -1460,7 +1448,8 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			return env, output.ExitValidation, nil
 		}
 		code := "script_failed"
-		source := "powershell"
+		source := provider.Name()
+		phase := ""
 		message := err.Error()
 		if len(response.Stderr) > 0 {
 			message = string(response.Stderr)
@@ -1474,9 +1463,13 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			case excelbridge.ErrorScriptNotFound:
 				code = "script_not_found"
 				source = "xlflow"
+			case excelbridge.ErrorDotNetMissing, excelbridge.ErrorDotNetRuntime:
+				code = "bridge_not_available"
+				source = "xlflow"
+				phase = "bridge.resolve"
 			}
 		}
-		env = output.Failure(commandName, output.Error{Code: code, Message: message, Source: source})
+		env = output.Failure(commandName, output.Error{Code: code, Message: message, Source: source, Phase: phase})
 		if debugStreamErr != nil {
 			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
 		}
@@ -1490,8 +1483,25 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 
 	var result ScriptResult
 	if err := json.Unmarshal(response.Stdout, &result); err != nil {
-		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: "powershell"})
+		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: provider.Name()})
 		env.Logs = []string{string(response.Stdout)}
+		if uiStreamErr != nil {
+			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		}
+		env.UI = mergeUIResult(nil, uiEvents)
+		return env, output.ExitEnvironment, nil
+	}
+	if provider.Name() == string(excelbridge.ModeDotNet) && result.ProtocolVersion != excelbridge.ProtocolVersion {
+		env = output.Failure(commandName, output.Error{
+			Code:    "bridge_protocol_mismatch",
+			Message: fmt.Sprintf(".NET bridge protocol version %d is incompatible with xlflow protocol version %d", result.ProtocolVersion, excelbridge.ProtocolVersion),
+			Source:  "xlflow",
+			Phase:   "bridge.resolve",
+		})
+		if debugStreamErr != nil {
+			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+		}
+		env.Debug = mergeDebugResult(nil, debugResult)
 		if uiStreamErr != nil {
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}

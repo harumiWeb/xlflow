@@ -13,6 +13,8 @@ var ErrInvalidMode = errors.New("bridge mode must be one of auto, powershell, do
 type Mode string
 
 const (
+	ProtocolVersion = 1
+
 	ModeAuto       Mode = "auto"
 	ModePowerShell Mode = "powershell"
 	ModeDotNet     Mode = "dotnet"
@@ -47,6 +49,8 @@ const (
 	ErrorUnsupportedHost   ErrorKind = "unsupported_host"
 	ErrorPowerShellMissing ErrorKind = "powershell_missing"
 	ErrorScriptNotFound    ErrorKind = "script_not_found"
+	ErrorDotNetMissing     ErrorKind = "dotnet_missing"
+	ErrorDotNetRuntime     ErrorKind = "dotnet_runtime_missing"
 )
 
 type Error struct {

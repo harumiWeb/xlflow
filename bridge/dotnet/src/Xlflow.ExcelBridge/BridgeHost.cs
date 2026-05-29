@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -7,6 +8,7 @@ namespace Xlflow.ExcelBridge;
 
 public static class BridgeHost
 {
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The bridge host must translate unexpected failures into structured JSON responses on stdout.")]
     public static int Run(string[] args, TextReader stdin, TextWriter stdout, TextWriter stderr)
     {
         try

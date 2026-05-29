@@ -1,6 +1,7 @@
 package excel
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,29 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
+
+type fakeBridgeProvider struct {
+	name     string
+	response excelbridge.Response
+	err      error
+}
+
+func (f fakeBridgeProvider) Name() string {
+	return f.name
+}
+
+func (f fakeBridgeProvider) Supports(string) bool {
+	return true
+}
+
+func (f fakeBridgeProvider) Info(context.Context) (excelbridge.Info, error) {
+	return excelbridge.Info{Name: f.name, Version: "test"}, nil
+}
+
+func (f fakeBridgeProvider) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {
+	_ = req
+	return f.response, f.err
+}
 
 func TestExternalScriptPathFindsRepositoryScripts(t *testing.T) {
 	path, ok := externalScriptPath(t.TempDir(), "run")
@@ -186,12 +210,22 @@ func TestResolveBridgeModePrecedence(t *testing.T) {
 }
 
 func TestRunnerRejectsDotNetBridgeWithoutFallback(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"run","logs":[],"error":{"code":"BRIDGE_COMMAND_UNSUPPORTED","message":"Command 'run' is not supported by the .NET bridge.","source":"xlflow-excel-bridge","phase":"bridge.capability"}}`)},
+		}
+	}
+
 	root := t.TempDir()
 	scriptsDir := filepath.Join(root, "scripts")
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := `@{ status = "ok"; command = "run"; logs = @("unexpected powershell execution") } | ConvertTo-Json -Compress`
+	marker := filepath.Join(root, "powershell-fallback-marker.txt")
+	script := "$null = New-Item -ItemType File -Path \"" + marker + "\" -Force\n@{ status = \"ok\"; command = \"run\"; logs = @(\"unexpected powershell execution\") } | ConvertTo-Json -Compress"
 	if err := os.WriteFile(filepath.Join(scriptsDir, "run.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +237,32 @@ func TestRunnerRejectsDotNetBridgeWithoutFallback(t *testing.T) {
 	if code != output.ExitEnvironment {
 		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
-	if env.Error == nil || env.Error.Code != "bridge_not_available" {
+	if env.Error == nil || env.Error.Code != "BRIDGE_COMMAND_UNSUPPORTED" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("expected no powershell fallback marker, got %v", err)
+	}
+}
+
+func TestRunnerRejectsDotNetProtocolMismatch(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":99,"status":"ok","command":"doctor","logs":[],"error":null,"diagnostics":{"bridge":{"name":"xlflow-excel-bridge"}}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.Doctor(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
+	}
+	if env.Error == nil || env.Error.Code != "bridge_protocol_mismatch" {
 		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
