@@ -5,6 +5,7 @@ tasks:
     desc: Install xlflow to local environment
     cmds:
       - go install ./cmd/xlflow
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-dotnet-bridge.ps1' -InstallToGoBin
 
   run:
     desc: Run xlflow without install
