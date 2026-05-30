@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added native `.NET` bridge support for runner-backed `xlflow inspect workbook|sheets|range --session --bridge dotnet --json` and `xlflow process list|cleanup --bridge dotnet --json`, including `--bridge auto` fallback from unsupported/runtime/protocol `.NET` failures back to PowerShell for supported commands.
 - Added native `.NET` `xlflow doctor --bridge dotnet --json` diagnostics for runtime and Excel COM probing, plus documentation clarifying that top-level `bridge` metadata remains provider-specific between PowerShell and `.NET` bridges.
 - Added structured COM error fields (`h_result`, `details`) to `xlflow doctor --bridge dotnet --json` error output. COM activation failures now include the HRESULT hex code and exception details alongside the error message.
 - Added an Excel bridge provider abstraction in Go, moved PowerShell invocation behind `PowerShellProvider`, and added bridge selection via persistent `--bridge`, `XLFLOW_EXCEL_BRIDGE`, and `[excel].bridge` while keeping `auto` on the existing PowerShell behavior for now.

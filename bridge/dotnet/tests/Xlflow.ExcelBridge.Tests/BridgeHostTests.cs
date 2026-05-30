@@ -22,7 +22,7 @@ public sealed class BridgeHostTests
     }
 
     [Fact]
-    public void CapabilitiesJsonIncludesDoctor()
+    public void CapabilitiesJsonIncludesSupportedCommands()
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -33,6 +33,8 @@ public sealed class BridgeHostTests
         using var json = JsonDocument.Parse(stdout.ToString());
         var commands = json.RootElement.GetProperty("commands").EnumerateArray().Select(item => item.GetString()).ToArray();
         Assert.Contains("doctor", commands);
+        Assert.Contains("inspect", commands);
+        Assert.Contains("process", commands);
     }
 
     [Fact]

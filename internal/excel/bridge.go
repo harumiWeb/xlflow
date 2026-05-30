@@ -36,6 +36,56 @@ var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge
 	}
 }
 
+type providerExecution struct {
+	provider  excelbridge.Provider
+	response  excelbridge.Response
+	execErr   error
+	decodeErr error
+	result    *ScriptResult
+}
+
+func executeBridgeProvider(ctx context.Context, provider excelbridge.Provider, commandName string, args map[string]string) providerExecution {
+	execution := providerExecution{provider: provider}
+	execution.response, execution.execErr = provider.Execute(ctx, excelbridge.Request{Command: commandName, Args: args})
+	if execution.execErr != nil {
+		return execution
+	}
+
+	var result ScriptResult
+	if err := json.Unmarshal(execution.response.Stdout, &result); err != nil {
+		execution.decodeErr = err
+		return execution
+	}
+	execution.result = &result
+	return execution
+}
+
+func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
+	if execution.provider == nil || execution.provider.Name() != string(excelbridge.ModeDotNet) {
+		return false
+	}
+	if execution.execErr != nil {
+		var bridgeErr *excelbridge.Error
+		if errors.As(execution.execErr, &bridgeErr) {
+			switch bridgeErr.Kind {
+			case excelbridge.ErrorDotNetMissing, excelbridge.ErrorDotNetRuntime:
+				return true
+			}
+		}
+		return false
+	}
+	if execution.decodeErr != nil {
+		return true
+	}
+	if execution.result == nil {
+		return false
+	}
+	if execution.result.ProtocolVersion != excelbridge.ProtocolVersion {
+		return true
+	}
+	return execution.result.Error != nil && strings.EqualFold(execution.result.Error.Code, "BRIDGE_COMMAND_UNSUPPORTED")
+}
+
 type WorkbookRef struct {
 	Path string `json:"path"`
 }
@@ -1421,8 +1471,25 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	}
 	defer cancel()
 
-	provider := bridgeProviderForMode(r.RootDir, mode)
-	response, err := provider.Execute(ctx, excelbridge.Request{Command: commandName, Args: args})
+	var execution providerExecution
+	switch mode {
+	case excelbridge.ModeAuto:
+		dotNetProvider := bridgeProviderForMode(r.RootDir, excelbridge.ModeDotNet)
+		if dotNetProvider.Supports(commandName) {
+			execution = executeBridgeProvider(ctx, dotNetProvider, commandName, args)
+			if shouldAutoFallbackToPowerShell(execution) {
+				execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, excelbridge.ModePowerShell), commandName, args)
+			}
+		} else {
+			execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, excelbridge.ModePowerShell), commandName, args)
+		}
+	default:
+		execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, mode), commandName, args)
+	}
+
+	provider := execution.provider
+	response := execution.response
+	err = execution.execErr
 	debugResult, debugStreamErr := closeDebugStreamSession(debugSession)
 	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
 	if err != nil {
@@ -1481,9 +1548,8 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		return env, output.ExitEnvironment, nil
 	}
 
-	var result ScriptResult
-	if err := json.Unmarshal(response.Stdout, &result); err != nil {
-		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: provider.Name()})
+	if execution.decodeErr != nil {
+		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", execution.decodeErr), Source: provider.Name()})
 		env.Logs = []string{string(response.Stdout)}
 		if uiStreamErr != nil {
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
@@ -1491,6 +1557,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		env.UI = mergeUIResult(nil, uiEvents)
 		return env, output.ExitEnvironment, nil
 	}
+	result := *execution.result
 	if provider.Name() == string(excelbridge.ModeDotNet) && result.ProtocolVersion != excelbridge.ProtocolVersion {
 		env = output.Failure(commandName, output.Error{
 			Code:    "bridge_protocol_mismatch",

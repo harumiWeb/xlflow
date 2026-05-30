@@ -67,6 +67,38 @@ Fields:
 - `excel.trust_vba_access` — observed Trust access state; `null` when not determinable.
 - `excel.error` — present only when a non-fatal diagnostic warning occurred.
 
+### `inspect`
+
+The .NET bridge now supports the session-backed read-only inspection targets used by the Excel runner:
+
+- `xlflow inspect workbook --session --bridge dotnet --json`
+- `xlflow inspect sheets --session --bridge dotnet --json`
+- `xlflow inspect range --session --bridge dotnet --json`
+
+These commands preserve the existing top-level envelope fields produced by the Go CLI:
+
+- `target`
+- `session`
+- `workbook`
+- `inspect`
+- `logs`
+
+The `.NET` implementation intentionally stays limited to the live/session-backed runner path for now. Saved-file inspect flows still use the existing non-bridge workbook reader.
+
+### `process`
+
+The .NET bridge now supports:
+
+- `xlflow process list --bridge dotnet --json`
+- `xlflow process cleanup --bridge dotnet --json`
+
+Behavior matches the PowerShell contract:
+
+- `process list` returns `process: [{ pid, has_workbook }]`
+- `process cleanup --auto` targets only workbook-free Excel processes
+- `process cleanup --all` force-stops the selected Excel processes
+- partial cleanup failures return structured `process_termination_failed` errors while preserving the `process` result payload
+
 ## Process Model
 
 The bridge is a separate executable named `xlflow-excel-bridge.exe`.
@@ -96,6 +128,8 @@ xlflow-excel-bridge.exe --capabilities-json
 
 The Go resolver must check capabilities before selecting .NET in `auto` mode.
 
+For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. If `.NET` reports capability/runtime/protocol failures for one of these commands, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
+
 ## Selection
 
 Users will be able to select the bridge through:
@@ -112,14 +146,13 @@ When `--bridge dotnet` is selected explicitly, xlflow must not fallback to Power
 The planned migration order is:
 
 1. `doctor`
-2. `inspect` and `process`
-3. `pull` and `push`
-4. `macros` and `run`
-5. dialog watcher
-6. `test`, `trace`, and runtime injection
-7. `form` and `export-image`
-8. release packaging
-9. default bridge switch
+2. `pull` and `push`
+3. `macros` and `run`
+4. dialog watcher
+5. `test`, `trace`, and runtime injection
+6. `form` and `export-image`
+7. release packaging
+8. default bridge switch
 
 `run` is intentionally not first because it combines macro invocation, runtime injection, compile checks, dialog capture, timeout behavior, and session handling.
 
