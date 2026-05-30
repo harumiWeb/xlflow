@@ -9,11 +9,11 @@ namespace Xlflow.ExcelBridge;
 public static class BridgeHost
 {
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The bridge host must translate unexpected failures into structured JSON responses on stdout.")]
-    public static int Run(string[] args, TextReader stdin, TextWriter stdout, TextWriter stderr)
+    public static int Run(string[] args, TextReader stdin, TextWriter stdout, TextWriter stderr, CommandRegistry? registry = null)
     {
         try
         {
-            var registry = CommandRegistry.CreateDefault();
+            registry ??= CommandRegistry.CreateDefault();
 
             if (args.Contains("--version-json", StringComparer.OrdinalIgnoreCase))
             {

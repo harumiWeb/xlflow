@@ -99,7 +99,7 @@ The Go CLI maps bridge responses into the public xlflow envelope. Bridge provide
     "phase": "macro.run",
     "source": "Microsoft Excel",
     "number": -2146827284,
-    "hresult": "0x800A03EC",
+    "h_result": "0x800A03EC",
     "details": {}
   },
   "suggestions": [
@@ -116,7 +116,7 @@ Error fields:
 - `phase`: Stable phase such as `bridge.resolve`, `workbook.open`, `vbide.import`, or `macro.run`.
 - `source`: Error origin such as `xlflow`, `xlflow-excel-bridge`, `Microsoft Excel`, or `VBIDE`.
 - `number`: Optional COM/VBA error number.
-- `hresult`: Optional HRESULT string.
+- `h_result`: Optional HRESULT hex string (e.g. `"0x800A03EC"`). The .NET bridge serializes this as `h_result` using `JsonNamingPolicy.SnakeCaseLower`, matching the public xlflow envelope.
 - `details`: Optional structured diagnostic object.
 
 ## Version And Capabilities

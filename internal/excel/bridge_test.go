@@ -267,6 +267,133 @@ func TestRunnerRejectsDotNetProtocolMismatch(t *testing.T) {
 	}
 }
 
+func TestRunnerDoctorPreservesDotNetBridgeMetadataAndDiagnostics(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"doctor","logs":[],"error":null,"bridge":{"name":"xlflow-excel-bridge","version":"0.1.0","protocol_version":1,"runtime":".NET 8.0","architecture":"X64"},"diagnostics":{"selected_bridge":"dotnet","protocol_version":1,"runtime":{"os":"Windows 11","process_architecture":"X64","dotnet_runtime":".NET 8.0"},"excel":{"com_activation":true,"version":"16.0","build":"12345","vbide_access":true,"automation_security":1,"trust_vba_access":null}}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.Doctor(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+
+	bridge, ok := env.Bridge.(map[string]any)
+	if !ok {
+		t.Fatalf("Bridge = %T, want map[string]any", env.Bridge)
+	}
+	if bridge["name"] != "xlflow-excel-bridge" {
+		t.Fatalf("Bridge.name = %v, want xlflow-excel-bridge", bridge["name"])
+	}
+	if bridge["protocol_version"] != float64(1) {
+		t.Fatalf("Bridge.protocol_version = %v, want 1", bridge["protocol_version"])
+	}
+
+	diagnostics, ok := env.Diagnostics.(map[string]any)
+	if !ok {
+		t.Fatalf("Diagnostics = %T, want map[string]any", env.Diagnostics)
+	}
+	if diagnostics["selected_bridge"] != "dotnet" {
+		t.Fatalf("Diagnostics.selected_bridge = %v, want dotnet", diagnostics["selected_bridge"])
+	}
+	if diagnostics["protocol_version"] != float64(1) {
+		t.Fatalf("Diagnostics.protocol_version = %v, want 1", diagnostics["protocol_version"])
+	}
+
+	runtime, ok := diagnostics["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("Diagnostics.runtime = %T, want map[string]any", diagnostics["runtime"])
+	}
+	if runtime["process_architecture"] != "X64" {
+		t.Fatalf("Diagnostics.runtime.process_architecture = %v, want X64", runtime["process_architecture"])
+	}
+	if runtime["dotnet_runtime"] != ".NET 8.0" {
+		t.Fatalf("Diagnostics.runtime.dotnet_runtime = %v, want .NET 8.0", runtime["dotnet_runtime"])
+	}
+
+	excel, ok := diagnostics["excel"].(map[string]any)
+	if !ok {
+		t.Fatalf("Diagnostics.excel = %T, want map[string]any", diagnostics["excel"])
+	}
+	if excel["com_activation"] != true {
+		t.Fatalf("Diagnostics.excel.com_activation = %v, want true", excel["com_activation"])
+	}
+	if excel["version"] != "16.0" {
+		t.Fatalf("Diagnostics.excel.version = %v, want 16.0", excel["version"])
+	}
+	if excel["build"] != "12345" {
+		t.Fatalf("Diagnostics.excel.build = %v, want 12345", excel["build"])
+	}
+	if excel["vbide_access"] != true {
+		t.Fatalf("Diagnostics.excel.vbide_access = %v, want true", excel["vbide_access"])
+	}
+	if excel["automation_security"] != float64(1) {
+		t.Fatalf("Diagnostics.excel.automation_security = %v, want 1", excel["automation_security"])
+	}
+	if excel["trust_vba_access"] != nil {
+		t.Fatalf("Diagnostics.excel.trust_vba_access = %v, want nil", excel["trust_vba_access"])
+	}
+}
+
+func TestRunnerDoctorPreservesDotNetBridgeStructuredErrorMetadata(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"doctor","logs":[],"error":{"code":"excel_com_failure","message":"COM activation failed: HRESULT 0x80040154: Class not registered","source":"xlflow-excel-bridge","number":-2147221164,"phase":"doctor","h_result":"0x80040154","details":{"source":"test","stack_trace":"   at Xlflow.ExcelBridge.Diagnostics.ExcelDiagnostics.Probe()"}},"bridge":{"name":"xlflow-excel-bridge","version":"0.1.0","protocol_version":1,"runtime":".NET 8.0","architecture":"X64"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.Doctor(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
+	}
+	if env.Error == nil {
+		t.Fatal("Error is nil, want structured error")
+	}
+	if env.Error.Code != "excel_com_failure" {
+		t.Fatalf("Error.Code = %q, want excel_com_failure", env.Error.Code)
+	}
+	if env.Error.Source != "xlflow-excel-bridge" {
+		t.Fatalf("Error.Source = %q, want xlflow-excel-bridge", env.Error.Source)
+	}
+	if env.Error.Phase != "doctor" {
+		t.Fatalf("Error.Phase = %q, want doctor", env.Error.Phase)
+	}
+	if env.Error.Number != -2147221164 {
+		t.Fatalf("Error.Number = %d, want -2147221164", env.Error.Number)
+	}
+	if env.Error.HResult != "0x80040154" {
+		t.Fatalf("Error.HResult = %q, want 0x80040154", env.Error.HResult)
+	}
+	details, ok := env.Error.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("Error.Details = %T, want map[string]any", env.Error.Details)
+	}
+	if details["source"] != "test" {
+		t.Fatalf("Error.Details.source = %v, want test", details["source"])
+	}
+
+	bridge, ok := env.Bridge.(map[string]any)
+	if !ok {
+		t.Fatalf("Bridge = %T, want map[string]any", env.Bridge)
+	}
+	if bridge["name"] != "xlflow-excel-bridge" {
+		t.Fatalf("Bridge.name = %v, want xlflow-excel-bridge", bridge["name"])
+	}
+}
+
 func TestBuildUIButtonAddScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

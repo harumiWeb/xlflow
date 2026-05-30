@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
+using Xlflow.ExcelBridge.Diagnostics;
 
 namespace Xlflow.ExcelBridge.Tests;
 
@@ -36,6 +38,15 @@ public sealed class BridgeHostTests
     [Fact]
     public void StdinDoctorRequestWritesBridgeResponse()
     {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: true,
+            AutomationSecurity: 1,
+            TrustVbaAccess: null,
+            Error: null);
+
         const string request = """
             {
               "protocol_version": 1,
@@ -48,14 +59,25 @@ public sealed class BridgeHostTests
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
-        var code = BridgeHost.Run([], stdin, stdout, stderr);
+        var registry = CommandRegistry.Create(() => probeResult);
+        var code = BridgeHost.Run([], stdin, stdout, stderr, registry);
 
         Assert.Equal(0, code);
         using var json = JsonDocument.Parse(stdout.ToString());
         Assert.Equal("req-1", json.RootElement.GetProperty("request_id").GetString());
         Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
         Assert.Equal("doctor", json.RootElement.GetProperty("command").GetString());
-        Assert.True(json.RootElement.TryGetProperty("diagnostics", out _));
+        Assert.Equal(ProtocolVersion.Current, json.RootElement.GetProperty("bridge").GetProperty("protocol_version").GetInt32());
+        var diagnostics = json.RootElement.GetProperty("diagnostics");
+        Assert.Equal("dotnet", diagnostics.GetProperty("selected_bridge").GetString());
+        Assert.Equal(ProtocolVersion.Current, diagnostics.GetProperty("protocol_version").GetInt32());
+        var excel = diagnostics.GetProperty("excel");
+        Assert.True(excel.GetProperty("com_activation").GetBoolean());
+        Assert.Equal("16.0", excel.GetProperty("version").GetString());
+        Assert.Equal("17726.20160", excel.GetProperty("build").GetString());
+        Assert.True(excel.GetProperty("vbide_access").GetBoolean());
+        Assert.Equal(1, excel.GetProperty("automation_security").GetInt32());
+        Assert.Equal(JsonValueKind.Null, excel.GetProperty("trust_vba_access").ValueKind);
     }
 
     [Fact]

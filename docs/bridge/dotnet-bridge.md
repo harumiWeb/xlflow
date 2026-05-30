@@ -1,6 +1,6 @@
 # .NET Excel Bridge
 
-The .NET Excel bridge is the planned Windows automation provider for workbook-backed xlflow commands.
+The .NET Excel bridge is the Windows automation provider for workbook-backed xlflow commands.
 
 It is introduced by ADR-0008 and uses the provider/fallback contract from ADR-0009.
 
@@ -19,6 +19,53 @@ The .NET bridge owns Windows automation concerns that are difficult to keep reli
 - Clipboard and image export fallback behavior.
 
 The Go CLI remains responsible for command parsing, config loading, source-tree decisions, static checks, public envelope mapping, and provider selection.
+
+## Implemented Commands
+
+### `doctor`
+
+`xlflow doctor --bridge dotnet --json` runs environment diagnostics through the .NET bridge without launching PowerShell. The response includes a `diagnostics` object at the top level:
+
+```json
+{
+  "status": "ok",
+  "command": "doctor",
+  "diagnostics": {
+    "selected_bridge": "dotnet",
+    "protocol_version": 1,
+    "runtime": {
+      "os": "Windows 11",
+      "process_architecture": "X64",
+      "dotnet_runtime": ".NET 8.0"
+    },
+    "excel": {
+      "com_activation": true,
+      "version": "16.0",
+      "build": "12345",
+      "vbide_access": true,
+      "automation_security": 1,
+      "trust_vba_access": null
+    }
+  }
+}
+```
+
+When Excel COM activation fails, the bridge returns a structured error with `code`, `message`, `phase`, `source`, `number`, `h_result`, and `details` fields. The `h_result` field is a hex HRESULT string (e.g. `"0x80040154"`).
+
+Fields:
+
+- `selected_bridge` — always `"dotnet"` when the .NET bridge handles the command.
+- `protocol_version` — bridge protocol version (currently `1`).
+- `runtime.os` — `Environment.OSVersion` string.
+- `runtime.process_architecture` — process architecture (e.g. `X64`).
+- `runtime.dotnet_runtime` — `.NET` runtime description.
+- `excel.com_activation` — `true` when `Excel.Application` was successfully created on the STA thread established by `[STAThread]` in `Program.cs`. This encompasses both COM object creation and the STA execution context required by Excel.
+- `excel.version` — Excel application version.
+- `excel.build` — Excel application build number.
+- `excel.vbide_access` — `true` when the VBA project object model is accessible.
+- `excel.automation_security` — observed `AutomationSecurity` value.
+- `excel.trust_vba_access` — observed Trust access state; `null` when not determinable.
+- `excel.error` — present only when a non-fatal diagnostic warning occurred.
 
 ## Process Model
 

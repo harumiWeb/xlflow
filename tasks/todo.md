@@ -142,3 +142,37 @@
 - [x] Run focused tests: `go test ./internal/vbafmt ./internal/cli ./internal/output` — all pass
 - [x] `go vet` clean on affected packages
 - [x] Pre-existing write_tests tests (`TestRootCommandIncludesFmtCommand`, `TestWriteWithOptionsRendersFmtSummary`) now pass
+
+---
+
+# .NET doctor implementation
+
+## Status
+
+- [x] .NET `DoctorCommand` implemented: OS, architecture, runtime, Excel COM activation, version/build, VBIDE access, AutomationSecurity, Trust VBA access
+- [x] `ExcelDiagnostics.Probe()` returns structured probe result with COM error mapping
+- [x] `BridgeError` uses `HResult` field; .NET `JsonNamingPolicy.SnakeCaseLower` serializes as `h_result` matching the public envelope
+- [x] Go-side `ScriptResult.Diagnostics` passes through `diagnostics` from .NET bridge response to `output.Envelope.Diagnostics`
+- [x] Protocol version mismatch check preserved: `bridge_protocol_mismatch` error when `.NET` returns wrong version
+- [x] `--bridge dotnet` strict mode: no PowerShell fallback on failure
+- [x] Human-readable `renderDoctor` handles both flat (PowerShell) and nested (.NET) diagnostics shapes via `doctorBool`
+- [x] Regression tests: `TestDotNetProviderExecuteDoctorWithRealBridge`, `TestRunnerDoctorPreservesDotNetBridgeMetadataAndDiagnostics`, `TestRunnerDoctorPreservesDotNetBridgeStructuredErrorMetadata`, `TestRunnerRejectsDotNetProtocolMismatch`
+- [x] .NET bridge tests cover doctor warning passthrough and bridge-host `excel` field serialization
+- [x] Output tests: `TestWriteWithOptionsRendersDoctorChecklist`, `TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge`
+
+## Docs updated
+
+- [x] `docs/bridge/dotnet-bridge.md` — updated from "planned" to implemented, added diagnostics shape and field descriptions
+- [x] `vitepress/commands/doctor.md` — replaced old `checks` example with current `diagnostics` JSON shape
+- [x] `docs/bridge/bridge-protocol.md` — fixed `hresult` to `h_result` in error example to match actual .NET bridge serialization
+- [x] `docs/specs/cli-contract.md` / `vitepress/commands/doctor.md` — clarified provider-specific top-level `bridge` metadata vs nested `diagnostics`
+- [x] `tasks/feature_spec.md` — added .NET doctor success/failure contract section
+- [x] `CHANGELOG.md` — documents native `.NET doctor` diagnostics and structured COM error output
+
+## Verification
+
+- [x] `dotnet test bridge/dotnet/Xlflow.ExcelBridge.sln --no-restore`
+- [x] `go test ./internal/excel/...` 相当の focused run: `internal/excel/bridge_test.go`, `internal/excel/bridge/dotnet_test.go`
+- [x] Windows + Excel 実機: `example/calendar-pick` で `go run ../../cmd/xlflow --json --bridge dotnet doctor`
+- [x] 実機結果: `selected_bridge=dotnet`, `protocol_version=1`, `bridge.name=xlflow-excel-bridge`, `bridge.commit=dev`, `excel.com_activation=true`, `excel.vbide_access=true`, `automation_security=1`
+- [x] 実機観測: `excel.version` / `excel.build` / `trust_vba_access` はこの環境では `null`
