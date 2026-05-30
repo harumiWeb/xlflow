@@ -80,7 +80,7 @@ func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
 	if execution.result == nil {
 		return false
 	}
-	if execution.result.ProtocolVersion != 0 && execution.result.ProtocolVersion != excelbridge.ProtocolVersion {
+	if execution.result.ProtocolVersion != excelbridge.ProtocolVersion {
 		return true
 	}
 	return execution.result.Error != nil && strings.EqualFold(execution.result.Error.Code, "BRIDGE_COMMAND_UNSUPPORTED")

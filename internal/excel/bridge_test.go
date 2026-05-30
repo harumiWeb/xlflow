@@ -728,6 +728,53 @@ func TestRunnerAutoModeFallsBackToPowerShellOnDecodeError(t *testing.T) {
 	}
 }
 
+func TestRunnerAutoModeFallsBackToPowerShellWhenDotNetProtocolVersionMissing(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":7777,"has_workbook":true}]}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1 (fallback expected)", powerShellCalls)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("expected powershell result with one process, got %v", env.Process)
+	}
+	first, ok := processes[0].(map[string]interface{})
+	if !ok || first["pid"] != float64(7777) {
+		t.Fatalf("unexpected process payload: %+v", processes[0])
+	}
+}
+
 func TestBuildUIButtonAddScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -1823,7 +1870,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{Action: "list"})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{Action: "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1853,7 +1900,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1880,7 +1927,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 1234})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 1234})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1922,7 +1969,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{PID: 1234})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{PID: 1234})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1955,7 +2002,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", Auto: true})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", Auto: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1991,7 +2038,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
+	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2034,7 +2081,7 @@ $result | ConvertTo-Json -Compress
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, code, err := Runner{RootDir: root}.ProcessList(ProcessListOptions{Action: "list"})
+	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{Action: "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2078,7 +2125,7 @@ func TestProcessCleanupDecodesCleanupResult(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, code, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 5678})
+	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 5678})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2129,7 +2176,7 @@ func TestProcessCleanupDecodesTerminationFailedResult(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, code, err := Runner{RootDir: root}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
+	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

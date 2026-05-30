@@ -614,6 +614,8 @@ internal static class ExcelBridgeSupport
             {
                 workbooks = Get(candidate!, "Workbooks");
                 _ = ToInt(Get(workbooks!, "Count"));
+                ReleaseComObject(workbooks);
+                workbooks = null;
                 if (!ReferenceEquals(candidate, dispatch))
                 {
                     ReleaseComObject(dispatch);
