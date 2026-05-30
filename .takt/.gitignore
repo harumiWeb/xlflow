@@ -1,5 +1,5 @@
 # Ignore everything by default
-*
+runs/
 
 # This file itself
 !.gitignore

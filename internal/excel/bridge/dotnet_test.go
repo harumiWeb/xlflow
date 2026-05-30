@@ -84,12 +84,19 @@ func TestDotNetProviderExecuteDoctorWithRealBridge(t *testing.T) {
 		ProtocolVersion int    `json:"protocol_version"`
 		Status          string `json:"status"`
 		Command         string `json:"command"`
+		Error           *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(response.Stdout, &payload); err != nil {
 		t.Fatalf("failed to parse bridge response: %v\nstdout=%s", err, string(response.Stdout))
 	}
 	if payload.ProtocolVersion != ProtocolVersion {
 		t.Fatalf("protocol_version = %d, want %d", payload.ProtocolVersion, ProtocolVersion)
+	}
+	if payload.Status == "failed" && payload.Error != nil && payload.Error.Code == "excel_com_failure" {
+		t.Skipf("Excel COM is not available for repo-local .NET bridge execution: %s", payload.Error.Message)
 	}
 	if payload.Status != "ok" {
 		t.Fatalf("status = %q, want ok", payload.Status)

@@ -1,3 +1,5 @@
+using Xlflow.ExcelBridge.Diagnostics;
+
 namespace Xlflow.ExcelBridge.Commands;
 
 public sealed class CommandRegistry
@@ -19,6 +21,14 @@ public sealed class CommandRegistry
         return new CommandRegistry(new ICommandHandler[]
         {
             new DoctorCommand(),
+        });
+    }
+
+    public static CommandRegistry Create(Func<ExcelDiagnosticsResult>? probeExcel)
+    {
+        return new CommandRegistry(new ICommandHandler[]
+        {
+            new DoctorCommand(probeExcel),
         });
     }
 

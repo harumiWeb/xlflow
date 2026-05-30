@@ -419,3 +419,52 @@ Add regression tests ahead of implementation for the new source-only `xlflow fmt
 - `target: { kind: "source", path: "src", description: "source files" }`
 - `output: { mode, changed, unchanged, skipped, total, changed_paths, skipped_paths, skipped_reasons }`
 - `warnings`/`hints` for skipped files and actionable hints
+
+---
+
+# .NET Doctor Contract
+
+## Overview
+
+`xlflow doctor --bridge dotnet --json` runs environment diagnostics through the .NET Excel bridge without launching PowerShell. The .NET bridge reports Excel COM, VBIDE, and runtime state as structured diagnostics.
+
+## Success Contract
+
+On success, `status = "ok"` and the top-level `diagnostics` object contains:
+
+| Field                          | Type         | Description                                               |
+| ------------------------------ | ------------ | --------------------------------------------------------- |
+| `selected_bridge`              | `string`     | Always `"dotnet"`                                         |
+| `protocol_version`             | `int`        | Bridge protocol version (currently `1`)                   |
+| `runtime.os`                   | `string`     | `Environment.OSVersion` string                            |
+| `runtime.process_architecture` | `string`     | Process architecture (e.g. `X64`)                         |
+| `runtime.dotnet_runtime`       | `string`     | .NET runtime description                                  |
+| `excel.com_activation`         | `bool`       | `true` when Excel COM can be created                      |
+| `excel.version`                | `string`     | Excel application version                                 |
+| `excel.build`                  | `string`     | Excel application build number                            |
+| `excel.vbide_access`           | `bool`       | `true` when VBA project object model is accessible        |
+| `excel.automation_security`    | `int`        | Observed `AutomationSecurity` value                       |
+| `excel.trust_vba_access`       | `bool\|null` | Observed Trust access state; `null` when not determinable |
+| `excel.error`                  | `string`     | Present only when a non-fatal diagnostic warning occurred |
+
+The `bridge` top-level metadata object is also present with `name`, `version`, `protocol_version`, `runtime`, and `architecture`.
+
+## Failure Contract
+
+When Excel COM activation fails, `status = "failed"` and the error object contains:
+
+| Field      | Value                                         |
+| ---------- | --------------------------------------------- |
+| `code`     | `"excel_com_failure"`                         |
+| `phase`    | `"doctor"`                                    |
+| `source`   | `"xlflow-excel-bridge"`                       |
+| `number`   | COM error number (when available)             |
+| `h_result` | HRESULT hex string (when available)           |
+| `details`  | Structured exception details (when available) |
+
+## Behavioral Constraints
+
+- `--bridge dotnet` does not fall back to PowerShell on failure.
+- The bridge executable is resolved from repo-local build output, installed binary path, or `dotnet run` on the project.
+- Excel COM operations run in the STA context provided by `[STAThread]` on the bridge entry point.
+- `doctor` does not require a workbook; VBIDE and Trust access are observed from the application-level COM context.

@@ -78,7 +78,9 @@ Excel COM-backed commands report progress on stderr. Interactive stderr terminal
 
 `run` and `test` also enable terminal streaming for explicit `XlflowDebug.Log(...)` calls by default. New scaffolded projects include `src/modules/XlflowDebug.bas`, which mirrors its message to the normal VBA Immediate Window and, during xlflow execution, also writes realtime stderr lines such as `xlflow: debug source=XlflowDebug.Log mode=headless message=starting run` without requiring an extra CLI flag. This stream never writes to stdout, so `--json` stdout remains valid. Final command results may include top-level `debug.events`, plus `debug.count` and `debug.truncated` when xlflow retained only the most recent debug lines.
 
-Excel COM-backed commands also include top-level `bridge` metadata with `host`, `edition`, and `version`. This identifies the xlflow PowerShell bridge process only. If workbook VBA launches its own external PowerShell process, that workbook-side host may differ and must be inspected separately.
+Excel COM-backed commands also include top-level `bridge` metadata identifying the xlflow Excel bridge process. The fields vary by bridge provider. The PowerShell bridge returns `host` (process name, e.g. `pwsh.exe`), `edition` (e.g. `Core` or `Desktop`), and `version` (PowerShell version). The .NET bridge returns `name`, `version`, `protocol_version`, `runtime`, `architecture`, and may also include `commit`. If workbook VBA launches its own external PowerShell process, that workbook-side host may differ and must be inspected separately.
+
+`doctor --json` adds a top-level `diagnostics` object. Provider-specific `bridge` metadata and `diagnostics` serve different purposes: `bridge` identifies the bridge process itself, while `diagnostics` describes the probed Excel/runtime environment. `diagnostics.selected_bridge` always records the resolved provider. With `--bridge dotnet`, successful output includes `diagnostics.protocol_version`, nested `runtime`, and nested `excel` probe fields. With `--bridge powershell` or `--bridge auto` when auto resolves to PowerShell, callers must not assume the same nested shape unless the provider contract explicitly documents it for that bridge.
 
 `new` creates a fresh macro-enabled workbook under `build/`, scaffolds the same project layout as `init`, and then automatically `push`es the scaffolded VBA source into that workbook so the initial workbook and `src/` tree start in sync. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
 
@@ -238,11 +240,11 @@ All JSON output uses a stable top-level envelope.
 }
 ```
 
-`status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure.
+`status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure. Error objects contain `code`, `message`, `source`, `number`, `line`, `phase`, `h_result`, and `details`. `h_result` is a hex string (e.g. `"0x80040154"`) populated for COM-origin failures. `details` is an object with additional context such as `source` and `stack_trace`. All error fields except `message` are optional and omitted when empty or zero.
 
 Command-specific fields are added at the top level:
 
-- `diagnostics` for `doctor`
+- `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread)
 - `workbook` and `backup` for Excel file commands
 - `source` for commands that write project source files
 - `macro` for `run`

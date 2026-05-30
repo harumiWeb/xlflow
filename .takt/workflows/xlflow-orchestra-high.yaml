@@ -9,6 +9,16 @@ workflow_config:
     opencode:
       network_access: true
 
+report_formats:
+  plan: ../facets/output-contracts/plan.md
+  write-tests-report: ../facets/output-contracts/write-tests-report.md
+  implementation-report: ../facets/output-contracts/implementation-report.md
+  verification-report: ../facets/output-contracts/verification-report.md
+  review-report: ../facets/output-contracts/review-report.md
+  audit-triage-report: ../facets/output-contracts/audit-triage-report.md
+  release-gate-report: ../facets/output-contracts/release-gate-report.md
+  audit-report: ../facets/output-contracts/audit-report.md
+
 max_steps: 60
 initial_step: plan
 
@@ -71,6 +81,15 @@ steps:
       report:
         - name: plan.md
           format: plan
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-plan-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/plan.md" -ExpectedHeading "# タスク計画"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # WRITE TESTS
@@ -137,7 +156,16 @@ steps:
     output_contracts:
       report:
         - name: test-report.md
-          format: test-report
+          format: write-tests-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# テスト作成レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-write-tests-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/test-report.md" -ExpectedHeading "# テスト作成レポート"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # IMPLEMENTATION
@@ -203,6 +231,15 @@ steps:
         - name: implementation-report.md
           format: implementation-report
 
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-implementation-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
+        cwd: .
+        timeout_ms: 60000
+
   # =========================================================
   # VERIFICATION
   # =========================================================
@@ -253,7 +290,16 @@ steps:
     output_contracts:
       report:
         - name: verification-report.md
-          format: test-report
+          format: verification-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# 検証レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-verification-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/verification-report.md" -ExpectedHeading "# 検証レポート"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # SELF REVIEW
@@ -308,6 +354,15 @@ steps:
       report:
         - name: self-review.md
           format: review-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Review Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-self-review-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/self-review.md" -ExpectedHeading "# Review Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # FIX
@@ -371,6 +426,15 @@ steps:
       report:
         - name: fix-report.md
           format: implementation-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-fix-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/fix-report.md" -ExpectedHeading "# Implementation Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # AUDIT TRIAGE
@@ -438,7 +502,16 @@ steps:
     output_contracts:
       report:
         - name: audit-triage.md
-          format: plan
+          format: audit-triage-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-audit-triage-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/audit-triage.md" -ExpectedHeading "# タスク計画"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # RELEASE GATE
@@ -504,7 +577,16 @@ steps:
     output_contracts:
       report:
         - name: release-gate-report.md
-          format: test-report
+          format: release-gate-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Release Gate Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-release-gate-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/release-gate-report.md" -ExpectedHeading "# Release Gate Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # FINAL AUDIT
@@ -579,6 +661,15 @@ steps:
         - name: final-audit.md
           format: audit-report
 
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Final Audit Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: validate-final-audit-report
+        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/final-audit.md" -ExpectedHeading "# Final Audit Report"
+        cwd: .
+        timeout_ms: 60000
+
 loop_monitors:
   - cycle: [self_review, fix, verification]
     threshold: 2
@@ -603,10 +694,12 @@ loop_monitors:
       persona: supervisor
       instruction: |
         final_audit から code remediation に戻るループに進捗があるかを評価してください。
-        進捗ありは、以前の audit blocker が実際に解消された、
-        blocker が code/docs/tests と manual release gate に明確に分離された、
-        または新しい検証で blocker severity が明確に下がった場合だけです。
-        同じ release-gate 項目、同じ docs/test 欠落、同じ stale finding が残るなら進捗なしです。
+        進捗ありは、以前の audit blocker のうち少なくとも 1 件が実際に解消された、
+        blocker 集合が縮小した、
+        blocker が code/docs/tests と manual release gate により正確に分離された、
+        または新しい検証で残件の severity や範囲が明確に下がった場合です。
+        release-gate blocker だけ先に解消され、code/docs/tests blocker がより狭い形で残る場合も進捗ありです。
+        同じ blocker 集合が実質不変で、報告文面や言い換えだけが変わった場合は進捗なしです。
       rules:
         - condition: "進捗あり"
           next: audit_triage

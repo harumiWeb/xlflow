@@ -28,6 +28,8 @@ type Error struct {
 	Number  int    `json:"number,omitempty"`
 	Line    int    `json:"line,omitempty"`
 	Phase   string `json:"phase,omitempty"`
+	HResult string `json:"h_result,omitempty"`
+	Details any    `json:"details,omitempty"`
 }
 
 type Envelope struct {
@@ -357,16 +359,17 @@ func (r renderer) renderDoctor(env Envelope) string {
 	if len(diag) == 0 {
 		return r.renderLogs(env)
 	}
+	excel := objectMap(diag["excel"])
 	workbook := objectMap(env.Workbook)
 	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString(r.checkLine(boolValue(diag, "excel_installed"), "Excel automation", "Excel COM can be created"))
+	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "excel_installed", "com_activation"), "Excel automation", "Excel COM can be created"))
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(r.checkLine(boolValue(diag, "workbook_openable"), "Workbook", path))
 	} else {
 		b.WriteString(r.checkLine(false, "Workbook", "No configured workbook was checked"))
 	}
-	b.WriteString(r.checkLine(boolValue(diag, "vbide_access"), "VBIDE access", "VBA project object model is available"))
+	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "vbide_access", ""), "VBIDE access", "VBA project object model is available"))
 	if fix := stringValue(diag, "fix"); fix != "" {
 		b.WriteString("\n")
 		b.WriteString(r.style("Fix:", "214", true))
@@ -375,6 +378,20 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func (r renderer) doctorBool(diag map[string]any, excel map[string]any, flatKey string, nestedKey string) bool {
+	if v, ok := boolValueOK(diag, flatKey); ok {
+		return v
+	}
+	key := nestedKey
+	if key == "" {
+		key = flatKey
+	}
+	if v, ok := boolValueOK(excel, key); ok {
+		return v
+	}
+	return false
 }
 
 func (r renderer) renderVersion(env Envelope) string {

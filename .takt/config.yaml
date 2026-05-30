@@ -1,0 +1,2 @@
+workflow_command_gates:
+  custom_scripts: true
