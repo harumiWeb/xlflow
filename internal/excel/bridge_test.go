@@ -40,6 +40,37 @@ func (f fakeBridgeProvider) Execute(_ context.Context, req excelbridge.Request) 
 	return f.response, f.err
 }
 
+type trackingBridgeProvider struct {
+	name      string
+	supports  bool
+	response  excelbridge.Response
+	err       error
+	callCount *int
+	requests  *[]excelbridge.Request
+}
+
+func (p trackingBridgeProvider) Name() string {
+	return p.name
+}
+
+func (p trackingBridgeProvider) Supports(string) bool {
+	return p.supports
+}
+
+func (p trackingBridgeProvider) Info(context.Context) (excelbridge.Info, error) {
+	return excelbridge.Info{Name: p.name, Version: "test"}, nil
+}
+
+func (p trackingBridgeProvider) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {
+	if p.callCount != nil {
+		*p.callCount = *p.callCount + 1
+	}
+	if p.requests != nil {
+		*p.requests = append(*p.requests, req)
+	}
+	return p.response, p.err
+}
+
 func TestExternalScriptPathFindsRepositoryScripts(t *testing.T) {
 	path, ok := externalScriptPath(t.TempDir(), "run")
 	if !ok {
@@ -245,6 +276,179 @@ func TestRunnerRejectsDotNetBridgeWithoutFallback(t *testing.T) {
 	}
 }
 
+func TestRunnerAutoBridgeUsesDotNetWhenSupported(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls int
+	var powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"process","logs":[],"process":[{"pid":1234,"has_workbook":true}]}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":9999,"has_workbook":false}]}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("Process = %v, want one-element array", env.Process)
+	}
+	first, ok := processes[0].(map[string]interface{})
+	if !ok || first["pid"] != float64(1234) {
+		t.Fatalf("unexpected process payload: %+v", processes[0])
+	}
+}
+
+func TestRunnerAutoBridgeFallsBackToPowerShellForUnsupportedDotNetInspectTarget(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls int
+	var powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	var powerShellRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"inspect","logs":[],"error":{"code":"BRIDGE_COMMAND_UNSUPPORTED","message":"Inspect target 'used-range' is not supported by the .NET bridge.","source":"xlflow-excel-bridge","phase":"bridge.capability"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				requests:  &powerShellRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"inspect","logs":["inspected live used range for Sheet1"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","sheet":"Sheet1","description":"Workbook currently open through xlflow session"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"dirty":false,"needs_save":false},"inspect":{"target":"used-range","source":"excel_com","target_info":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"range":{"sheet":"Sheet1","used_range":"A1","row_count":1,"column_count":1,"values":[["value"]],"truncated":false,"max_rows":100,"max_cols":30,"returned_range":"A1"}}}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Inspect(config.Default(), InspectOptions{
+		Target:    "used-range",
+		Sheet:     "Sheet1",
+		Limits:    map[string]int{"max_rows": 100, "max_cols": 30},
+		Session:   true,
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 || powerShellCalls != 1 {
+		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 each", dotNetCalls, powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 || len(powerShellRequests) != 1 {
+		t.Fatalf("unexpected request counts: dotnet=%d powershell=%d", len(dotNetRequests), len(powerShellRequests))
+	}
+	if got := dotNetRequests[0].Args["Target"]; got != "used-range" {
+		t.Fatalf("dotnet target = %q, want used-range", got)
+	}
+	if got := powerShellRequests[0].Args["Target"]; got != "used-range" {
+		t.Fatalf("powershell target = %q, want used-range", got)
+	}
+	if env.Command != "inspect" {
+		t.Fatalf("Command = %q, want inspect", env.Command)
+	}
+	payload, ok := env.Inspect.(map[string]interface{})
+	if !ok || payload["target"] != "used-range" {
+		t.Fatalf("unexpected inspect payload: %+v", env.Inspect)
+	}
+}
+
+func TestRunnerDotNetInspectResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect","logs":["inspected live workbook C:\\temp\\Book.xlsm"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","description":"Workbook currently open through xlflow session"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"dirty":false,"needs_save":false},"inspect":{"target":"workbook","source":"excel_com","target_info":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","note":"This command inspected the live workbook currently open in Excel through xlflow session."},"workbook":{"path":"C:\\temp\\Book.xlsm","name":"Book.xlsm","sheets":[{"name":"Sheet1","index":1,"visible":true,"used_range":"$A$1","row_count":1,"column_count":1}]}}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.Inspect(config.Default(), InspectOptions{
+		Target:    "workbook",
+		Session:   true,
+		Limits:    map[string]int{"max_rows": 100, "max_cols": 30},
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Inspect == nil {
+		t.Fatalf("expected inspect envelope fields to be populated: %+v", env)
+	}
+	inspectPayload, ok := env.Inspect.(map[string]interface{})
+	if !ok || inspectPayload["target"] != "workbook" {
+		t.Fatalf("unexpected inspect payload: %+v", env.Inspect)
+	}
+}
+
+func TestRunnerDotNetProcessCleanupResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"process","logs":["terminated 1 Excel process(es)"],"process":{"action":"cleanup","mode":"pid","total":1,"results":[{"pid":1234,"terminated":true,"method":"graceful"}]}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.ProcessCleanup(ProcessCleanupOptions{
+		Action: "cleanup",
+		PID:    1234,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	processPayload, ok := env.Process.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected process cleanup payload map, got %#v", env.Process)
+	}
+	if processPayload["action"] != "cleanup" || processPayload["mode"] != "pid" {
+		t.Fatalf("unexpected process cleanup payload: %+v", processPayload)
+	}
+}
+
 func TestRunnerRejectsDotNetProtocolMismatch(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
@@ -391,6 +595,136 @@ func TestRunnerDoctorPreservesDotNetBridgeStructuredErrorMetadata(t *testing.T) 
 	}
 	if bridge["name"] != "xlflow-excel-bridge" {
 		t.Fatalf("Bridge.name = %v, want xlflow-excel-bridge", bridge["name"])
+	}
+}
+
+func TestRunnerDotNetExplicitModeDoesNotFallBackOnDecodeError(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`not valid json {{{`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code == output.ExitSuccess {
+		t.Fatalf("expected error exit, got ExitSuccess")
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell must not be called in explicit --bridge dotnet mode, got %d calls", powerShellCalls)
+	}
+	if env.Error == nil || env.Error.Code != "invalid_script_json" {
+		t.Fatalf("expected invalid_script_json error, got %+v", env.Error)
+	}
+}
+
+func TestRunnerAutoModeDoesNotFallBackForUnsupportedCommand(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  false,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"run","logs":[],"result":{"stdout":"","stderr":"","exit_code":0,"duration_ms":1}}`)},
+			}
+		}
+	}
+
+	_, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Run(config.Default(), RunOptions{
+		Macro: "Module1.Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dotNetCalls != 0 {
+		t.Fatalf(".NET must not be called for commands it does not support, got %d calls", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+}
+
+func TestRunnerAutoModeFallsBackToPowerShellOnDecodeError(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`not valid json {{{`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":9999,"has_workbook":false}]}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1 (fallback expected)", powerShellCalls)
+	}
+	processes, ok := env.Process.([]interface{})
+	if !ok || len(processes) != 1 {
+		t.Fatalf("expected powershell result with one process, got %v", env.Process)
+	}
+	first, ok := processes[0].(map[string]interface{})
+	if !ok || first["pid"] != float64(9999) {
+		t.Fatalf("unexpected process payload: %+v", processes[0])
 	}
 }
 
