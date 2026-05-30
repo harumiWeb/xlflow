@@ -1,5 +1,10 @@
 # Ignore everything by default
 runs/
+tasks.yaml
+persona_sessions.json
+session-state.json
+tasks/
+clone-meta/
 
 # This file itself
 !.gitignore
