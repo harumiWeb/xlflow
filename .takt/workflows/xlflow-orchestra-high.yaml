@@ -507,7 +507,7 @@ steps:
   # =========================================================
   - name: final_audit
 
-    edit: false
+    edit: true
 
     provider: codex
     model: gpt-5.4
