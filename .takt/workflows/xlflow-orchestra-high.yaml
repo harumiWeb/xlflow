@@ -447,9 +447,13 @@ steps:
 
     edit: true
 
-    provider: opencode
-    model: opencode-go/mimo-v2.5-pro
+    provider: codex
+    model: gpt-5.4
     required_permission_mode: full
+
+    provider_options:
+      codex:
+        reasoning_effort: medium
 
     persona: tester
 
