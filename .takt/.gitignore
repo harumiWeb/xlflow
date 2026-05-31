@@ -5,6 +5,7 @@ persona_sessions.json
 session-state.json
 tasks/
 clone-meta/
+worktree-sessions/
 
 # This file itself
 !.gitignore
