@@ -5,6 +5,7 @@ persona_sessions.json
 session-state.json
 tasks/
 clone-meta/
+*.log
 
 # This file itself
 !.gitignore
