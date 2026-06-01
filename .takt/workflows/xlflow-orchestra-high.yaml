@@ -1,5 +1,5 @@
 name: xlflow-orchestra-high
-description: GPT-5.4 planner/auditor + Mimo V2.5 Pro implementer/reviewer workflow
+description: GPT-5.4 planner/auditor + DeepSeek V4 Pro implementer/reviewer workflow
 
 workflow_config:
   provider_options:
@@ -239,6 +239,11 @@ steps:
         command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
         cwd: .
         timeout_ms: 60000
+      - type: command
+        name: implementation-task-lint
+        command: task lint
+        cwd: .
+        timeout_ms: 600000
 
   # =========================================================
   # VERIFICATION
