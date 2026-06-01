@@ -1,9 +1,9 @@
 pre-commit:
   parallel: true
   commands:
+    fmt:
+      run: task fmt
     goimports:
       run: goimports -w cmd internal
     lint:
       run: task lint
-    fmt:
-      run: task fmt
