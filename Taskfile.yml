@@ -28,6 +28,8 @@ tasks:
 
   lint:
     desc: Run repository linters
+    env:
+      GOLANGCI_LINT_CACHE: '{{.TASKFILE_DIR}}/.gocache/golangci-lint'
     cmds:
       - golangci-lint run
       - task ps-lint
