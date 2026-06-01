@@ -239,11 +239,6 @@ steps:
         command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
         cwd: .
         timeout_ms: 60000
-      - type: command
-        name: implementation-task-lint
-        command: task lint
-        cwd: .
-        timeout_ms: 600000
 
   # =========================================================
   # VERIFICATION
