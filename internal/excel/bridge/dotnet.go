@@ -26,6 +26,10 @@ var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
 // bridge's --capabilities-json response (see bridge/dotnet/src/Xlflow.ExcelBridge/Commands/CommandRegistry.cs).
 // When adding a command to the .NET bridge, update this map and the corresponding
 // capabilities test in BridgeHostTests.cs.
+//
+// pull and push are intentionally excluded: auto mode must keep the existing PowerShell
+// behavior for these commands. Use --bridge dotnet explicitly to route pull/push through
+// the .NET bridge.
 var dotNetSupportedCommands = map[string]struct{}{
 	"doctor":  {},
 	"inspect": {},

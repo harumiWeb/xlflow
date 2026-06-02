@@ -108,20 +108,20 @@ internal static class ExcelBridgeSupport
 
         if (useSession)
         {
-            var excel = GetSessionExcel(metadataPath)
+            var excel = RunPhase("get_session_excel", () => GetSessionExcel(metadataPath))
                 ?? throw new InvalidOperationException("xlflow session is not running");
-            var workbook = GetOpenWorkbook(excel, workbookPath);
+            var workbook = RunPhase("get_session_workbook", () => GetOpenWorkbook(excel, workbookPath));
             return new ExcelSessionAttachment(excel, workbook, "explicit");
         }
 
         if (SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
         {
-            var excel = GetExcelFromSessionMetadata(metadataPath);
+            var excel = RunPhase("get_auto_session_excel", () => GetExcelFromSessionMetadata(metadataPath));
             if (excel is not null)
             {
                 try
                 {
-                    var workbook = GetOpenWorkbook(excel, workbookPath);
+                    var workbook = RunPhase("get_auto_session_workbook", () => GetOpenWorkbook(excel, workbookPath));
                     return new ExcelSessionAttachment(excel, workbook, "auto");
                 }
                 catch
@@ -132,6 +132,63 @@ internal static class ExcelBridgeSupport
         }
 
         throw new InvalidOperationException("no matching xlflow session workbook is running; run xlflow session start or use the configured workbook session");
+    }
+
+    public static ExcelSessionAttachment OpenWorkbookDirect(string workbookPath, bool visible)
+    {
+        workbookPath = NormalizePath(workbookPath);
+
+        if (!IsExcelFile(workbookPath))
+        {
+            throw new InvalidOperationException($"bridge_file_not_openable: File does not appear to be an Excel workbook: {workbookPath}");
+        }
+
+        var excelType = Type.GetTypeFromProgID("Excel.Application")
+            ?? throw new InvalidOperationException("Excel.Application COM class is not registered");
+        var excel = Activator.CreateInstance(excelType)
+            ?? throw new InvalidOperationException("Failed to create Excel.Application COM instance");
+
+        try
+        {
+            dynamic app = excel;
+            app.Visible = visible;
+            app.DisplayAlerts = false;
+            app.EnableEvents = false;
+
+            object workbook = app.Workbooks.Open(workbookPath);
+            return new ExcelSessionAttachment(excel, workbook, "none");
+        }
+        catch (InvalidOperationException)
+        {
+            ReleaseComObject(excel);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            ReleaseComObject(excel);
+            var detail = UnwrapComErrorMessage(ex);
+            throw new InvalidOperationException($"bridge_file_not_openable: {detail}", ex);
+        }
+    }
+
+    public static bool IsExcelFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".xlsm" or ".xlsx" or ".xls" or ".xlt" or ".xla" or ".xlam" or ".xltx" or ".xltm";
+    }
+
+    private static string UnwrapComErrorMessage(Exception ex)
+    {
+        if (ex.InnerException is not null)
+        {
+            return $"{ex.Message} ({ex.InnerException.Message})";
+        }
+        return ex.Message;
     }
 
     public static object? GetSessionExcel(string metadataPath)
@@ -175,16 +232,19 @@ internal static class ExcelBridgeSupport
         object? workbooks = null;
         try
         {
-            workbooks = Get(excel, "Workbooks");
-            var count = ToInt(Get(workbooks!, "Count"));
+            dynamic app = excel;
+            workbooks = (object)app.Workbooks;
+            dynamic books = workbooks;
+            var count = ToInt(books.Count);
             for (var index = 1; index <= count; index++)
             {
                 object? candidate = null;
                 var matched = false;
                 try
                 {
-                    candidate = Get(workbooks!, "Item", index);
-                    var fullName = GetString(candidate!, "FullName");
+                    candidate = (object)books.Item(index);
+                    dynamic workbook = candidate;
+                    var fullName = (string?)workbook.FullName;
                     if (!string.IsNullOrWhiteSpace(fullName) && PathsEqual(fullName, workbookPath))
                     {
                         matched = true;
@@ -500,6 +560,72 @@ internal static class ExcelBridgeSupport
             comObject,
             args,
             CultureInfo.InvariantCulture);
+    }
+
+    public static object? InvokeMethod(object comObject, string memberName, params object?[] args)
+    {
+        return comObject.GetType().InvokeMember(
+            memberName,
+            System.Reflection.BindingFlags.InvokeMethod,
+            null,
+            comObject,
+            args,
+            CultureInfo.InvariantCulture);
+    }
+
+    public static object? InvokeViaDynamic(object comObject, string memberName, params object?[] args)
+    {
+        dynamic dyn = comObject;
+        return memberName switch
+        {
+            "Open" => dyn.Open(args[0]),
+            "Save" => dyn.Save(),
+            "SaveCopyAs" => dyn.SaveCopyAs(args[0]),
+            "Import" => dyn.Import(args[0]),
+            "Export" => dyn.Export(args[0]),
+            "Remove" => dyn.Remove(args[0]),
+            "Close" => args.Length > 0 ? dyn.Close(args[0]) : dyn.Close(),
+            "Quit" => dyn.Quit(),
+            "DeleteLines" => dyn.DeleteLines(args[0], args[1]),
+            "InsertLines" => dyn.InsertLines(args[0], args[1]),
+            _ => throw new InvalidOperationException($"Unsupported COM method for dynamic dispatch: {memberName}"),
+        };
+    }
+
+    public static T RunPhase<T>(string phase, Func<T> action)
+    {
+        try
+        {
+            return action();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"{phase} failed: {FormatExceptionDetail(ex)}",
+                ex);
+        }
+    }
+
+    public static void RunPhase(string phase, Action action)
+    {
+        RunPhase(phase, () =>
+        {
+            action();
+            return true;
+        });
+    }
+
+    public static string FormatExceptionDetail(Exception ex)
+    {
+        if (ex.InnerException is not null)
+        {
+            if (ex.Message.Contains(ex.InnerException.Message, StringComparison.Ordinal))
+            {
+                return ex.Message;
+            }
+            return $"{ex.Message} ({ex.InnerException.Message})";
+        }
+        return ex.Message;
     }
 
     public static void Set(object comObject, string memberName, object? value)

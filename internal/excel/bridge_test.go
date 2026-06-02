@@ -41,19 +41,23 @@ func (f fakeBridgeProvider) Execute(_ context.Context, req excelbridge.Request) 
 }
 
 type trackingBridgeProvider struct {
-	name      string
-	supports  bool
-	response  excelbridge.Response
-	err       error
-	callCount *int
-	requests  *[]excelbridge.Request
+	name         string
+	supports     bool
+	supportsFunc func(string) bool
+	response     excelbridge.Response
+	err          error
+	callCount    *int
+	requests     *[]excelbridge.Request
 }
 
 func (p trackingBridgeProvider) Name() string {
 	return p.name
 }
 
-func (p trackingBridgeProvider) Supports(string) bool {
+func (p trackingBridgeProvider) Supports(command string) bool {
+	if p.supportsFunc != nil {
+		return p.supportsFunc(command)
+	}
 	return p.supports
 }
 
@@ -1843,6 +1847,16 @@ func TestProcessNotFoundIsConfigFailure(t *testing.T) {
 	}
 }
 
+func TestPullArgsInvalidIsConfigFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "pull_args_invalid", Message: "invalid pull args"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitConfig {
+		t.Fatalf("exitCodeForScriptResult(pull_args_invalid) = %d, want %d", got, output.ExitConfig)
+	}
+}
+
 func TestProcessEnvironmentFailureCodesAreEnvironmentFailures(t *testing.T) {
 	for _, code := range []string{"process_enumeration_failed", "process_termination_failed", "process_cleanup_failed"} {
 		t.Run(code, func(t *testing.T) {
@@ -2205,5 +2219,550 @@ func TestProcessCleanupDecodesTerminationFailedResult(t *testing.T) {
 	results, ok := p["results"].([]interface{})
 	if !ok || len(results) != 3 {
 		t.Fatalf("results = %v", p["results"])
+	}
+}
+
+func TestRunnerDotNetPullResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 3 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PullWithOptions(config.Default(), SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil {
+		t.Fatal("Target is nil")
+	}
+	if env.Session == nil {
+		t.Fatal("Session is nil")
+	}
+	if env.Workbook == nil {
+		t.Fatal("Workbook is nil")
+	}
+	if env.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	target, ok := env.Target.(map[string]interface{})
+	if !ok || target["kind"] != "live_session" {
+		t.Fatalf("unexpected Target: %+v", env.Target)
+	}
+	session, ok := env.Session.(map[string]interface{})
+	if !ok || session["active"] != true {
+		t.Fatalf("unexpected Session: %+v", env.Session)
+	}
+	source, ok := env.Source.(map[string]interface{})
+	if !ok || source["modules_dir"] == nil {
+		t.Fatalf("unexpected Source: %+v", env.Source)
+	}
+}
+
+func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 3 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PushWithOptions(config.Default(), PushOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil {
+		t.Fatal("Target is nil")
+	}
+	if env.Session == nil {
+		t.Fatal("Session is nil")
+	}
+	if env.Workbook == nil {
+		t.Fatal("Workbook is nil")
+	}
+	if env.Backup == nil {
+		t.Fatal("Backup is nil")
+	}
+	if env.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	target, ok := env.Target.(map[string]interface{})
+	if !ok || target["kind"] != "live_session" {
+		t.Fatalf("unexpected Target: %+v", env.Target)
+	}
+	session, ok := env.Session.(map[string]interface{})
+	if !ok || session["active"] != true {
+		t.Fatalf("unexpected Session: %+v", env.Session)
+	}
+	backup, ok := env.Backup.(map[string]interface{})
+	if !ok || backup["mode"] != "always" {
+		t.Fatalf("unexpected Backup: %+v", env.Backup)
+	}
+	source, ok := env.Source.(map[string]interface{})
+	if !ok || source["changed_only"] != false {
+		t.Fatalf("unexpected Source: %+v", env.Source)
+	}
+}
+
+func TestRunnerAutoBridgeSkipsDotNetForPull(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name: string(excelbridge.ModeDotNet),
+				supportsFunc: func(cmd string) bool {
+					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
+					return ok
+				},
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.PullWithOptions(config.Default(), SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 0 {
+		t.Fatalf("dotnet calls = %d, want 0; pull is excluded from auto mode", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if env.Source == nil {
+		t.Fatal("Source is nil, want powershell pull result")
+	}
+}
+
+func TestRunnerAutoBridgeSkipsDotNetForPush(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name: string(excelbridge.ModeDotNet),
+				supportsFunc: func(cmd string) bool {
+					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
+					return ok
+				},
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 2 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"push","logs":["imported 2 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","save_required":true},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"backup":{"id":"push_20260101","path":"C:\\temp\\.xlflow\\backups\\Book_20260101.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.PushWithOptions(config.Default(), PushOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 0 {
+		t.Fatalf("dotnet calls = %d, want 0; push is excluded from auto mode", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if env.Backup == nil {
+		t.Fatal("Backup is nil, want powershell push result")
+	}
+}
+
+func TestRunnerAutoBridgeFallsBackToPowerShellForBridgeCommandUnsupported(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name: string(excelbridge.ModeDotNet),
+				supportsFunc: func(cmd string) bool {
+					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
+					return ok
+				},
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"pull","logs":[],"error":{"code":"BRIDGE_COMMAND_UNSUPPORTED","message":"Command 'pull' is not supported by the .NET bridge.","source":"xlflow-excel-bridge","phase":"bridge.capability"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"saved_workbook","path":"C:\\temp\\Book.xlsm"},"session":{"active":false},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.PullWithOptions(config.Default(), SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 0 {
+		t.Fatalf("dotnet calls = %d, want 0; pull is excluded from auto mode", dotNetCalls)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if env.Source == nil {
+		t.Fatal("Source is nil, want powershell pull result")
+	}
+}
+
+func TestShouldAutoFallbackToPowerShellForDotNetBridgeFileNotOpenable(t *testing.T) {
+	t.Parallel()
+
+	execution := providerExecution{
+		provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
+		result: &ScriptResult{
+			ProtocolVersion: excelbridge.ProtocolVersion,
+			Status: output.StatusFailed,
+			Error: &output.Error{
+				Code:    "bridge_file_not_openable",
+				Message: "failed to open workbook",
+			},
+		},
+	}
+
+	if !shouldAutoFallbackToPowerShell(execution) {
+		t.Fatal("shouldAutoFallbackToPowerShell() = false, want true")
+	}
+}
+
+func TestShouldAutoFallbackToPowerShellDoesNotTreatOtherBridgeFailuresAsOpenFallback(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		provider  excelbridge.Provider
+		result    *ScriptResult
+		want      bool
+	}{
+		{
+			name:     "powershell bridge file not openable does not trigger auto fallback",
+			provider: fakeBridgeProvider{name: string(excelbridge.ModePowerShell)},
+			result: &ScriptResult{
+				ProtocolVersion: excelbridge.ProtocolVersion,
+				Status: output.StatusFailed,
+				Error: &output.Error{
+					Code:    "bridge_file_not_openable",
+					Message: "failed to open workbook",
+				},
+			},
+			want: false,
+		},
+		{
+			name:     "dotnet other failure stays on dotnet result",
+			provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
+			result: &ScriptResult{
+				ProtocolVersion: excelbridge.ProtocolVersion,
+				Status: output.StatusFailed,
+				Error: &output.Error{
+					Code:    "vbproject_access_denied",
+					Message: "VBIDE access denied",
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			execution := providerExecution{
+				provider: tc.provider,
+				result:   tc.result,
+			}
+
+			if got := shouldAutoFallbackToPowerShell(execution); got != tc.want {
+				t.Fatalf("shouldAutoFallbackToPowerShell() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunnerDotNetPullUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 4 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"dirty":false,"needs_save":false},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook","code_source":"sidecar"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+			}
+		}
+	}
+
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "sidecar"
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PullWithOptions(cfg, SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	if got := dotNetRequests[0].Args["CodeSource"]; got != "sidecar" {
+		t.Fatalf("CodeSource = %q, want sidecar", got)
+	}
+	if got := dotNetRequests[0].Args["UseSession"]; got != "true" {
+		t.Fatalf("UseSession = %q, want true", got)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Source == nil {
+		t.Fatalf("expected pull envelope fields to be populated: %+v", env)
+	}
+	source, ok := env.Source.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected source payload map, got %#v", env.Source)
+	}
+	if source["code_source"] != "sidecar" {
+		t.Fatalf("source.code_source = %v, want sidecar", source["code_source"])
+	}
+}
+
+func TestRunnerDotNetPullSessionRequiredErrorPreserved(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"pull","logs":[],"error":{"code":"session_required","message":"xlflow session is not running","phase":"pull","source":"xlflow"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PullWithOptions(config.Default(), SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "session_required" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerDotNetPushSessionRequiredErrorPreserved(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"push","logs":[],"error":{"code":"session_required","message":"xlflow session is not running","phase":"push","source":"xlflow"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PushWithOptions(config.Default(), PushOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "session_required" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestRunnerDotNetPushUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 4 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"never"},"source":{"changed_only":true,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PushWithOptions(config.Default(), PushOptions{
+		Session:     true,
+		ChangedOnly: true,
+		BackupMode:  "never",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	if got := dotNetRequests[0].Args["ChangedOnly"]; got != "true" {
+		t.Fatalf("ChangedOnly = %q, want true", got)
+	}
+	if got := dotNetRequests[0].Args["BackupMode"]; got != "never" {
+		t.Fatalf("BackupMode = %q, want never", got)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Backup == nil || env.Source == nil {
+		t.Fatalf("expected push envelope fields to be populated: %+v", env)
+	}
+	backup, ok := env.Backup.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected backup payload map, got %#v", env.Backup)
+	}
+	if backup["mode"] != "never" {
+		t.Fatalf("backup.mode = %v, want never", backup["mode"])
+	}
+	source, ok := env.Source.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected source payload map, got %#v", env.Source)
+	}
+	if source["changed_only"] != true || source["changed"] != true {
+		t.Fatalf("unexpected source payload: %+v", source)
+	}
+}
+
+func TestRunnerDotNetPushChangedOnlyNoOpPreservesSessionFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["source state unchanged; skipped workbook import"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"auto","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"auto","session_requested":false,"auto_session":true,"saved":false,"dirty":false,"needs_save":false},"backup":{"path":null,"mode":"never"},"source":{"changed_only":true,"changed":false,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PushWithOptions(config.Default(), PushOptions{ChangedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil {
+		t.Fatal("Target is nil")
+	}
+	target, ok := env.Target.(map[string]interface{})
+	if !ok || target["kind"] != "live_session" {
+		t.Fatalf("unexpected Target kind: %+v", target)
+	}
+	if env.Session == nil {
+		t.Fatal("Session is nil")
+	}
+	session, ok := env.Session.(map[string]interface{})
+	if !ok || session["active"] != true {
+		t.Fatalf("unexpected Session active: %+v", session)
+	}
+	if session["mode"] != "auto" {
+		t.Fatalf("unexpected Session mode: %v, want auto", session["mode"])
+	}
+	if env.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	source, ok := env.Source.(map[string]interface{})
+	if !ok || source["changed_only"] != true {
+		t.Fatalf("unexpected Source changed_only: %+v", source)
+	}
+	if source["changed"] != false {
+		t.Fatalf("unexpected Source changed: %+v", source)
+	}
+}
+
+func TestRunnerDotNetPushChangedOnlySessionRequiredFailsFast(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"push","logs":[],"error":{"code":"session_required","message":"xlflow session is not running","phase":"push","source":"xlflow"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.PushWithOptions(config.Default(), PushOptions{Session: true, ChangedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "session_required" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }

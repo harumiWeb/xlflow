@@ -24,16 +24,25 @@ public sealed class CommandRegistry
             new DoctorCommand(),
             new InspectCommand(),
             new ProcessCommand(),
+            new PullCommand(),
+            new PushCommand(),
         });
     }
 
-    public static CommandRegistry Create(Func<ExcelDiagnosticsResult>? probeExcel, IInspectService? inspectService = null, IProcessService? processService = null)
+    public static CommandRegistry Create(
+        Func<ExcelDiagnosticsResult>? probeExcel,
+        IInspectService? inspectService = null,
+        IProcessService? processService = null,
+        IPullService? pullService = null,
+        IPushService? pushService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
         {
             new DoctorCommand(probeExcel),
             new InspectCommand(inspectService),
             new ProcessCommand(processService),
+            new PullCommand(pullService),
+            new PushCommand(pushService),
         });
     }
 

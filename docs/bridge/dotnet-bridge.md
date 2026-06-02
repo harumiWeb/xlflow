@@ -99,6 +99,41 @@ Behavior matches the PowerShell contract:
 - `process cleanup --all` force-stops the selected Excel processes
 - partial cleanup failures return structured `process_termination_failed` errors while preserving the `process` result payload
 
+### `pull`
+
+`xlflow pull --bridge dotnet --json` exports VBA components from the configured workbook through the .NET bridge:
+
+```powershell
+xlflow pull --bridge dotnet --json
+```
+
+The command opens the workbook (or attaches to an active session), iterates VBComponents, and writes each component to the configured source directory:
+
+| Component Type | Target Dir | Extension |
+|----------------|-----------|-----------|
+| Standard module (type 1) | `src/modules` | `.bas` |
+| Class module (type 2) | `src/classes` | `.cls` |
+| UserForm (type 3) | `src/forms` | `.frm` |
+| Document module (other) | `src/workbook` | `.bas` |
+
+The response includes `target`, `session`, `workbook`, and `source` envelope fields matching the PowerShell pull contract.
+
+### `push`
+
+`xlflow push --bridge dotnet --json` imports source VBA components into the configured workbook through the .NET bridge:
+
+```powershell
+xlflow push --bridge dotnet --json
+xlflow push --bridge dotnet --fast --session --no-save --json
+```
+
+The command:
+1. Attaches to the session workbook (or opens the configured workbook)
+2. Creates a backup when `BackupMode` is not `"never"` (via `SaveCopyAs`)
+3. Discovers source files from `ModulesDir`, `ClassesDir`, `FormsDir`, `WorkbookDir`
+4. Removes existing components by name match, then imports via `VBComponents.Import`
+5. Returns `target`, `session`, `workbook`, `backup`, and `source` envelope fields
+
 ## Process Model
 
 The bridge is a separate executable named `xlflow-excel-bridge.exe`.
@@ -128,7 +163,7 @@ xlflow-excel-bridge.exe --capabilities-json
 
 The Go resolver must check capabilities before selecting .NET in `auto` mode.
 
-For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. If `.NET` reports capability/runtime/protocol failures for one of these commands, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
+For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. `pull` and `push` are intentionally excluded from auto mode to preserve the existing PowerShell behavior; use `--bridge dotnet` explicitly to route these commands through the .NET bridge. If `.NET` reports capability/runtime/protocol failures for a supported command, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
 
 ## Selection
 
@@ -145,8 +180,8 @@ When `--bridge dotnet` is selected explicitly, xlflow must not fallback to Power
 
 The planned migration order is:
 
-1. `doctor`
-2. `pull` and `push`
+1. `doctor` — done
+2. `pull` and `push` — done
 3. `macros` and `run`
 4. dialog watcher
 5. `test`, `trace`, and runtime injection

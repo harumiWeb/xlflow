@@ -15,6 +15,8 @@ coverage.out
 .xlflow/
 build/
 .worktrees/
+xlflow.toml
+src/
 
 # OS / Editor
 .DS_Store
@@ -27,3 +29,6 @@ node_modules/
 .gocache/
 
 .tmp*/
+
+.dotnet*/
+.serena/

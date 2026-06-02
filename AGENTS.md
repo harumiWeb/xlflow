@@ -4,37 +4,21 @@
 
 ```txt
 root: .
+├── bridge/
+│   └── dotnet/ # dotnet bridge のコード
 ├── cmd/
-│   └── xlflow/
-│       └── main.go
-├── vitepress/
-├── docs/
-│   ├── adr/
-│   ├── specs/
-├── internal/
-│   ├── agentskill/
-│   │   ├── templates/
-│   │   │   └── xlflow/
-│   │   │       └── SKILL.md
-│   │   ├── skill.go
-│   │   └── skill_test.go
-│   ├── cli/
-│   ├── command/
-│   ├── config/
-│   ├── diff/
-│   ├── excel/
-│   ├── gui/
-│   ├── lint/
-│   ├── output/
-│   └── project/
-├── scripts/
-├── tasks/
-│   ├── feature_spec.md
-│   ├── lessons.md
-│   └── todo.md
+├── docs/ # ADR、仕様書、その他開発ドキュメント
+├── internal/ # 内部パッケージ
+├── scripts/ # 自動化スクリプト
+├── tasks/ # タスク管理と学習記録
+├── vitepress/ # ユーザードキュメント
+├── .editorconfig
+├── .goreleaser.yaml
 ├── AGENTS.md
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── CONTRIBUTING.md
+├── global.json
 ├── go.mod
 ├── go.sum
 ├── lefthook.yml
@@ -42,6 +26,7 @@ root: .
 ├── package.json
 ├── pnpm-lock.yaml
 ├── pnpm-workspace.yaml
+├── PSScriptAnalyzerSettings.psd1
 ├── README.ja.md
 ├── README.md
 ├── SECURITY.md
@@ -108,11 +93,12 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 2. **設計を検討する**：必要に応じて、機能分解とモデル設計を検討する。
 3. **仕様を定義する**：要件に基づいて、関数の引数と戻り値の型を定義します `tasks/feature_spec.md`。
 4. **タスクの割り当て**：各タスクを明確に定義し、実行順序を決定します `tasks/todo.md`。
-5. **コードの実装**：上記の基準に従ってコードを実装してください。
-6. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
-7. **テストの生成**：必要に応じてテストコードを生成します。
-8. **テストを実行する**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
-9. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
+5. **テストの生成**：必要に応じてテストコードを生成します。
+6. **コードの実装**：上記の基準に従ってコードを実装してください。
+7. **コードの実行と確認**：生成されたコードを実行し、期待どおりに動作することを確認します。
+8. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
+9. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
+10. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
 
 - ADR、仕様書に更新がある場合は次のディレクトリに記録すること
   - ADR: `docs/adr/`
@@ -171,3 +157,51 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 - **まずはシンプルに**: すべての変更は、可能な限りシンプルに保つこと。影響範囲を最小限にすること
 - **手を抜かない**: 根本原因を特定すること。場当たり的な修正は避けること。シニアエンジニア水準を保つこと
 - **影響を最小化する**: 必要な部分だけを変更すること。新たなバグを持ち込まないこと
+
+## 5. 注意事項
+
+- xlflowはメインバイナリとdotnetブリッジバイナリの二つで動くため、E2E動作確認を行う際、`go install ./cmd/xlflow` でインストールしても、dotnet bridgeバイナリをインストールすることができない。必ず`task install`でインストールすること
+
+
+<!-- headroom:rtk-instructions -->
+# RTK (Rust Token Killer) - Token-Optimized Commands
+
+When running shell commands, **always prefix with `rtk`**. This reduces context
+usage by 60-90% with zero behavior change. If rtk has no filter for a command,
+it passes through unchanged — so it is always safe to use.
+
+## Key Commands
+```bash
+# Git (59-80% savings)
+rtk git status          rtk git diff            rtk git log
+
+# Files & Search (60-75% savings)
+rtk ls <path>           rtk read <file>         rtk grep <pattern>
+rtk find <pattern>      rtk diff <file>
+
+# Test (90-99% savings) — shows failures only
+rtk pytest tests/       rtk cargo test          rtk test <cmd>
+
+# Build & Lint (80-90% savings) — shows errors only
+rtk tsc                 rtk lint                rtk cargo build
+rtk prettier --check    rtk mypy                rtk ruff check
+
+# Analysis (70-90% savings)
+rtk err <cmd>           rtk log <file>          rtk json <file>
+rtk summary <cmd>       rtk deps                rtk env
+
+# GitHub (26-87% savings)
+rtk gh pr view <n>      rtk gh run list         rtk gh issue list
+
+# Infrastructure (85% savings)
+rtk docker ps           rtk kubectl get         rtk docker logs <c>
+
+# Package managers (70-90% savings)
+rtk pip list            rtk pnpm install        rtk npm run <script>
+```
+
+## Rules
+- In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
+- For debugging, use raw command without rtk prefix
+- `rtk proxy <cmd>` runs command without filtering but tracks usage
+<!-- /headroom:rtk-instructions -->

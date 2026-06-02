@@ -34,7 +34,9 @@ public sealed class BridgeHostTests
         var commands = json.RootElement.GetProperty("commands").EnumerateArray().Select(item => item.GetString()).ToArray();
         Assert.Contains("doctor", commands);
         Assert.Contains("inspect", commands);
+        Assert.Contains("pull", commands);
         Assert.Contains("process", commands);
+        Assert.Contains("push", commands);
     }
 
     [Fact]

@@ -19,7 +19,7 @@ report_formats:
   release-gate-report: ../facets/output-contracts/release-gate-report.md
   audit-report: ../facets/output-contracts/audit-report.md
 
-max_steps: 60
+max_steps: 40
 initial_step: plan
 
 steps:
@@ -86,8 +86,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-plan-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/plan.md" -ExpectedHeading "# タスク計画"
+        name: sanitize-plan-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/plan.md" -ExpectedHeading "# タスク計画"
         cwd: .
         timeout_ms: 60000
 
@@ -162,8 +162,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# テスト作成レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-write-tests-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/test-report.md" -ExpectedHeading "# テスト作成レポート"
+        name: sanitize-write-tests-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/test-report.md" -ExpectedHeading "# テスト作成レポート"
         cwd: .
         timeout_ms: 60000
 
@@ -175,7 +175,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: opencode-go/mimo-v2.5-pro
+    model: xiaomi/mimo-v2.5-pro
 
     persona: implementer
 
@@ -235,8 +235,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-implementation-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
+        name: sanitize-implementation-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
         cwd: .
         timeout_ms: 60000
 
@@ -248,7 +248,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: opencode-go/mimo-v2.5-pro
+    model: xiaomi/mimo-v2.5-pro
 
     persona: tester
 
@@ -281,8 +281,14 @@ steps:
       - condition: 検証が通過した
         next: self_review
 
-      - condition: 実装修正が必要
+      - condition: コード修正が必要
         next: implementation
+
+      - condition: コード修正は不要だが手動E2Eまたは環境依存の検証が必要
+        next: release_gate
+
+      - condition: 検証証跡の整理のみで再レビュー可能
+        next: self_review
 
       - condition: 検証を継続できない
         next: ABORT
@@ -296,8 +302,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# 検証レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-verification-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/verification-report.md" -ExpectedHeading "# 検証レポート"
+        name: sanitize-verification-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/verification-report.md" -ExpectedHeading "# 検証レポート"
         cwd: .
         timeout_ms: 60000
 
@@ -310,7 +316,7 @@ steps:
     edit: false
 
     provider: opencode
-    model: opencode-go/mimo-v2.5-pro
+    model: xiaomi/mimo-v2.5-pro
 
     knowledge:
       - architecture
@@ -345,7 +351,7 @@ steps:
         next: fix
 
       - condition: 実装品質が十分
-        next: final_audit
+        next: sanitize_reports
 
       - condition: レビュー継続不可
         next: ABORT
@@ -359,8 +365,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# Review Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-self-review-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/self-review.md" -ExpectedHeading "# Review Report"
+        name: sanitize-self-review-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/self-review.md" -ExpectedHeading "# Review Report"
         cwd: .
         timeout_ms: 60000
 
@@ -372,7 +378,7 @@ steps:
     edit: true
 
     provider: opencode
-    model: opencode-go/mimo-v2.5-pro
+    model: xiaomi/mimo-v2.5-pro
 
     persona: implementer
 
@@ -431,8 +437,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-fix-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/fix-report.md" -ExpectedHeading "# Implementation Report"
+        name: sanitize-fix-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/fix-report.md" -ExpectedHeading "# Implementation Report"
         cwd: .
         timeout_ms: 60000
 
@@ -489,7 +495,7 @@ steps:
         next: plan
 
       - condition: 監査所見の整理により再監査で足りる
-        next: final_audit
+        next: sanitize_reports
 
       - condition: ユーザー判断が必要
         next: audit_triage
@@ -508,8 +514,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-audit-triage-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/audit-triage.md" -ExpectedHeading "# タスク計画"
+        name: sanitize-audit-triage-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/audit-triage.md" -ExpectedHeading "# タスク計画"
         cwd: .
         timeout_ms: 60000
 
@@ -555,7 +561,7 @@ steps:
 
     rules:
       - condition: 検証が完了し再監査に進める
-        next: final_audit
+        next: sanitize_reports
 
       - condition: 実装修正が必要と判明した
         next: audit_triage
@@ -583,8 +589,78 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# Release Gate Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-release-gate-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/release-gate-report.md" -ExpectedHeading "# Release Gate Report"
+        name: sanitize-release-gate-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/release-gate-report.md" -ExpectedHeading "# Release Gate Report"
+        cwd: .
+        timeout_ms: 60000
+
+  # =========================================================
+  # SANITIZE REPORTS
+  # =========================================================
+  - name: sanitize_reports
+
+    edit: true
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: edit
+
+    provider_options:
+      codex:
+        reasoning_effort: low
+
+    persona: tester
+
+    instruction: |
+      Normalize workflow report files only.
+
+      Scope:
+      - {report_dir}/plan.md
+      - {report_dir}/test-report.md
+      - {report_dir}/implementation-report.md
+      - {report_dir}/verification-report.md
+      - {report_dir}/self-review.md
+      - {report_dir}/fix-report.md
+      - {report_dir}/audit-triage.md
+      - {report_dir}/release-gate-report.md
+
+      Requirements:
+      - do not edit source code
+      - do not change report meaning
+      - remove conversational preambles, accidental dialogue logs, and stray markdown fences before the required heading
+      - preserve findings, evidence, commands, results, and unresolved items
+      - if a file does not exist, ignore it
+      - if a report is too corrupted to repair confidently, say so in the sanitize report and continue
+
+      Use `pwsh -File ./.takt/sanitize-report.ps1` for each report file.
+
+    rules:
+      - condition: レポート整形が完了した
+        next: final_audit
+
+      - condition: レポート整形を継続できない
+        next: final_audit
+
+    output_contracts:
+      report:
+        - name: report-sanitize.md
+          format: |
+            # Report Sanitize Report
+
+            ## Summary
+
+            ## Files Normalized
+
+            ## Files Skipped
+
+            ## Remaining Concerns
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Report Sanitize Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-sanitize-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/report-sanitize.md" -ExpectedHeading "# Report Sanitize Report"
         cwd: .
         timeout_ms: 60000
 
@@ -614,6 +690,14 @@ steps:
 
     instruction: |
       Perform final architecture and quality audit.
+
+      Important workflow policy:
+      - Do not reject or reopen implementation solely because a prior report contains conversational preamble, markdown fences, heading mismatch, or dialogue-log contamination.
+      - Treat report-format problems as workflow hygiene issues, not implementation defects.
+      - If report contamination makes evidence awkward but the code, diff, tests, or commands remain understandable, record it as a non-blocking hygiene note.
+      - Prefer direct evidence from source files, diffs, tests, and commands over prior report wording.
+      - Only route to audit_triage when concrete code, docs, or tests changes are required.
+      - Only route to release_gate when manual or environment-bound verification is required.
 
       Validate:
       - architecture consistency
@@ -665,8 +749,8 @@ steps:
       - Report body only. Start directly with the required heading and do not include any meta commentary.
       - The generated report must start with `# Final Audit Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
       - type: command
-        name: validate-final-audit-report
-        command: pwsh -File ./.takt/validate-report.ps1 -Path "{report_dir}/final-audit.md" -ExpectedHeading "# Final Audit Report"
+        name: sanitize-final-audit-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/final-audit.md" -ExpectedHeading "# Final Audit Report"
         cwd: .
         timeout_ms: 60000
 
@@ -688,7 +772,7 @@ loop_monitors:
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle: [final_audit, audit_triage, implementation, verification, self_review]
+  - cycle: [final_audit, audit_triage, implementation, verification, self_review, sanitize_reports]
     threshold: 2
     judge:
       persona: supervisor
@@ -706,7 +790,7 @@ loop_monitors:
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle: [final_audit, release_gate]
+  - cycle: [final_audit, release_gate, sanitize_reports]
     threshold: 2
     judge:
       persona: supervisor
