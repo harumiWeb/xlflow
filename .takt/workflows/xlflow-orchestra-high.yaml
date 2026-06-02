@@ -281,8 +281,14 @@ steps:
       - condition: 検証が通過した
         next: self_review
 
-      - condition: 実装修正が必要
+      - condition: コード修正が必要
         next: implementation
+
+      - condition: コード修正は不要だが手動E2Eまたは環境依存の検証が必要
+        next: release_gate
+
+      - condition: 検証証跡の整理のみで再レビュー可能
+        next: self_review
 
       - condition: 検証を継続できない
         next: ABORT
@@ -766,7 +772,15 @@ loop_monitors:
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle: [final_audit, audit_triage, implementation, verification, self_review, sanitize_reports]
+  - cycle:
+      [
+        final_audit,
+        audit_triage,
+        implementation,
+        verification,
+        self_review,
+        sanitize_reports,
+      ]
     threshold: 2
     judge:
       persona: supervisor
