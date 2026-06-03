@@ -55,6 +55,58 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void HandleRejectsTraceUntilDotNetParityIsImplemented()
+    {
+        var command = new RunCommand(new FakeRunService((_, _) => BridgeResponse.Ok(new BridgeRequest())));
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-run-trace-unsupported",
+            Command = "run",
+            Payload = JsonDocument.Parse("""
+                {
+                  "WorkbookPath": "C:\\work\\book.xlsm",
+                  "MacroName": "Module1.Main",
+                  "TraceEnabled": true
+                }
+                """).RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal("run_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains("--trace", json.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void HandleRejectsScriptedUiResponsesUntilDotNetParityIsImplemented()
+    {
+        var command = new RunCommand(new FakeRunService((_, _) => BridgeResponse.Ok(new BridgeRequest())));
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-run-ui-unsupported",
+            Command = "run",
+            Payload = JsonDocument.Parse("""
+                {
+                  "WorkbookPath": "C:\\work\\book.xlsm",
+                  "MacroName": "Module1.Main",
+                  "MsgBoxResponsesJSON": "[]"
+                }
+                """).RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal("run_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains("XlflowUI", json.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
     public void HandleRejectsSaveAsWithMismatchedExtension()
     {
         var service = new FakeRunService((request, args) =>

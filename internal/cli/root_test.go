@@ -317,6 +317,7 @@ func TestRunCommandDiagnosticDefaultsTrue(t *testing.T) {
 	flag := cmd.Flags().Lookup("diagnostic")
 	if flag == nil {
 		t.Fatal("expected --diagnostic flag")
+		return
 	}
 	if flag.DefValue != "true" {
 		t.Fatalf("diagnostic default = %q, want true", flag.DefValue)
