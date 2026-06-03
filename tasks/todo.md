@@ -1,5 +1,14 @@
 # Bug Fix: XlflowDebug ParamArray + run compile watcher
 
+## PR #92 CI/security and .NET bridge review
+
+- [x] Inspect PR #92 review comments and identify actionable unresolved thread
+- [x] Confirm .NET pull/push service implementations exist under `bridge/dotnet/src`
+- [x] Run local .NET bridge tests to verify registered pull/push commands compile
+- [x] Update `go.mod` to Go `1.26.4` for standard-library vulnerability fixes
+- [x] Add .NET bridge tests to the CI test job with `setup-dotnet`
+- [x] Run full Go, .NET, vet, and govulncheck verification after edits
+
 ## Welcome header refresh for new/init
 
 - [ ] Update `internal/cli/welcome.go` to render `Welcome to` above the logo
