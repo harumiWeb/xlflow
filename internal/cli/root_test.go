@@ -3085,6 +3085,22 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	}
 }
 
+func TestRunCommandRejectsNoSaveCombinedWithSaveFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--no-save", "--save"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected run command to reject --no-save with --save")
+	}
+}
+
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
 	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "double:3.5", "bool:true"}, Trace: true, Headless: true})

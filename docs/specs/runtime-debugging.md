@@ -59,6 +59,13 @@ This applies to both the normal temporary-harness path and `run --direct`. Inter
 
 When a suppressed runtime dialog still yields structured VBA error data, xlflow keeps the existing failure codes such as `macro_failed`, `macro_not_found`, and `macro_disabled`, with `error.phase = "invoke_macro"`. If the dialog is the only reliable signal, xlflow may populate `error.message` from the localized dialog text and infer `error.number` from the dialog when possible.
 
+Timeout is intentionally weaker than runtime dialog suppression. xlflow returns
+`macro_timeout` with a valid JSON envelope and actionable suggestions, but it
+does not attempt synchronous COM cleanup while Excel is still busy. Timeout
+diagnostics therefore imply `vba_may_still_be_running`: the workbook and any
+attached session should be treated as dirty until Excel is reset or the workbook
+is reopened.
+
 ## Diagnostic Compile Mode
 
 `xlflow run --diagnostic` adds a VBE compile step before macro verification and invocation. It is intended for agent debugging when source preflight did not catch a compile-time issue but Excel would otherwise surface a modal VBE dialog.

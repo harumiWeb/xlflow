@@ -145,7 +145,11 @@ On timeout, the bridge returns `macro_timeout`, does not save the workbook, and
 includes actionable suggestions plus the dialog and worker state available at
 the timeout boundary. Excel may continue executing user VBA after the child COM
 caller is terminated, so COM-based harness cleanup is not attempted
-synchronously while Excel is busy.
+synchronously while Excel is busy. Callers must treat timeout results as
+`vba_may_still_be_running` until the Excel session is reset or the workbook is
+reopened. When the .NET bridge cannot finish returning its own timeout payload
+before the outer Go deadline, xlflow still returns a valid JSON timeout envelope
+from Go with the same limitation documented explicitly.
 
 ### `process`
 

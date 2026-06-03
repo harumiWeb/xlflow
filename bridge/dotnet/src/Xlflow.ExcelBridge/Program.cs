@@ -7,7 +7,7 @@ public static class Program
     {
         if (args.Contains("--run-worker", StringComparer.OrdinalIgnoreCase))
         {
-            return Workers.MacroRunWorker.Run(Console.In, Console.Out);
+            return Workers.MacroRunWorker.Run();
         }
         return BridgeHost.Run(args, Console.In, Console.Out, Console.Error);
     }

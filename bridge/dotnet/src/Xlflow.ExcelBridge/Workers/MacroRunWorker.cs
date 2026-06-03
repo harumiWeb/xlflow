@@ -28,15 +28,25 @@ public sealed record MacroRunWorkerResult(
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The worker must normalize COM failures into JSON.")]
 public static class MacroRunWorker
 {
-    public static int Run(TextReader stdin, TextWriter stdout)
+    internal const string RequestPathEnv = "XLFLOW_WORKER_REQUEST_PATH";
+    internal const string ResultPathEnv = "XLFLOW_WORKER_RESULT_PATH";
+
+    public static int Run()
     {
-        var request = StdinStdoutTransport.Read<MacroRunWorkerRequest>(stdin);
+        var requestPath = Environment.GetEnvironmentVariable(RequestPathEnv);
+        var resultPath = Environment.GetEnvironmentVariable(ResultPathEnv);
+        if (string.IsNullOrWhiteSpace(requestPath) || string.IsNullOrWhiteSpace(resultPath))
+        {
+            return 2;
+        }
+
+        var request = ReadRequest(requestPath);
         if (request is null ||
             request.ExcelProcessId <= 0 ||
             (string.Equals(request.Operation, "run", StringComparison.OrdinalIgnoreCase) &&
              string.IsNullOrWhiteSpace(request.MacroReference)))
         {
-            StdinStdoutTransport.Write(stdout, new MacroRunWorkerResult(
+            WriteResult(resultPath, new MacroRunWorkerResult(
                 Completed: true,
                 Ok: false,
                 Value: null,
@@ -67,13 +77,13 @@ public static class MacroRunWorker
                 }
                 value = ExcelBridgeSupport.InvokeMethod(excel, "Run", invokeArgs.ToArray());
             }
-            StdinStdoutTransport.Write(stdout, new MacroRunWorkerResult(true, true, NormalizeValue(value), null));
+            WriteResult(resultPath, new MacroRunWorkerResult(true, true, NormalizeValue(value), null));
             return 0;
         }
         catch (Exception ex)
         {
             var detail = ex.InnerException ?? ex;
-            StdinStdoutTransport.Write(stdout, new MacroRunWorkerResult(
+            WriteResult(resultPath, new MacroRunWorkerResult(
                 Completed: true,
                 Ok: false,
                 Value: null,
@@ -87,6 +97,23 @@ public static class MacroRunWorker
         {
             ExcelBridgeSupport.ReleaseComObject(excel);
         }
+    }
+
+    private static MacroRunWorkerRequest? ReadRequest(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var json = File.ReadAllText(path);
+        return JsonSerializer.Deserialize<MacroRunWorkerRequest>(json, JsonOptions.Default);
+    }
+
+    private static void WriteResult(string path, MacroRunWorkerResult result)
+    {
+        var json = JsonSerializer.Serialize(result, JsonOptions.Default);
+        File.WriteAllText(path, json);
     }
 
     private static object ConvertArgument(MacroRunWorkerArgument argument)
@@ -253,15 +280,15 @@ public static class MacroRunWorker
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Worker process state and cleanup are best-effort lifecycle operations.")]
 public sealed class MacroRunWorkerProcess : IDisposable
 {
+    private readonly string _requestPath;
+    private readonly string _resultPath;
     private readonly Process _process;
-    private readonly Task<string> _stdout;
-    private readonly Task<string> _stderr;
 
-    private MacroRunWorkerProcess(Process process)
+    private MacroRunWorkerProcess(Process process, string requestPath, string resultPath)
     {
         _process = process;
-        _stdout = process.StandardOutput.ReadToEndAsync();
-        _stderr = process.StandardError.ReadToEndAsync();
+        _requestPath = requestPath;
+        _resultPath = resultPath;
     }
 
     public int ProcessId => _process.Id;
@@ -283,13 +310,13 @@ public sealed class MacroRunWorkerProcess : IDisposable
 
     public static MacroRunWorkerProcess Start(MacroRunWorkerRequest request)
     {
-        var startInfo = CreateStartInfo();
+        var requestPath = Path.Combine(Path.GetTempPath(), "xlflow-worker-request-" + Guid.NewGuid().ToString("N") + ".json");
+        var resultPath = Path.Combine(Path.GetTempPath(), "xlflow-worker-result-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(requestPath, JsonSerializer.Serialize(request, JsonOptions.Default));
+
+        var startInfo = CreateStartInfo(requestPath, resultPath);
         var process = Process.Start(startInfo) ?? throw new InvalidOperationException("xlflow could not start the .NET macro worker process.");
-        var worker = new MacroRunWorkerProcess(process);
-        var json = JsonSerializer.Serialize(request, JsonOptions.Default);
-        process.StandardInput.Write(json);
-        process.StandardInput.Close();
-        return worker;
+        return new MacroRunWorkerProcess(process, requestPath, resultPath);
     }
 
     public MacroRunWorkerResult? WaitForResult(TimeSpan timeout)
@@ -298,13 +325,19 @@ public sealed class MacroRunWorkerProcess : IDisposable
         {
             return null;
         }
-        var stdout = _stdout.GetAwaiter().GetResult();
-        _ = _stderr.GetAwaiter().GetResult();
-        if (string.IsNullOrWhiteSpace(stdout))
+
+        if (!File.Exists(_resultPath))
         {
             return null;
         }
-        return JsonSerializer.Deserialize<MacroRunWorkerResult>(stdout, JsonOptions.Default);
+
+        var json = File.ReadAllText(_resultPath);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<MacroRunWorkerResult>(json, JsonOptions.Default);
     }
 
     public void Stop()
@@ -326,9 +359,11 @@ public sealed class MacroRunWorkerProcess : IDisposable
     {
         Stop();
         _process.Dispose();
+        TryDelete(_requestPath);
+        TryDelete(_resultPath);
     }
 
-    internal static ProcessStartInfo CreateStartInfo()
+    internal static ProcessStartInfo CreateStartInfo(string requestPath, string resultPath)
     {
         var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("Unable to resolve the bridge executable path.");
         var startInfo = new ProcessStartInfo
@@ -336,15 +371,29 @@ public sealed class MacroRunWorkerProcess : IDisposable
             FileName = processPath,
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
         };
         if (string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase))
         {
             startInfo.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
         }
         startInfo.ArgumentList.Add("--run-worker");
+        startInfo.Environment[MacroRunWorker.RequestPathEnv] = requestPath;
+        startInfo.Environment[MacroRunWorker.ResultPathEnv] = resultPath;
         return startInfo;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // best-effort temp file cleanup
+        }
     }
 }

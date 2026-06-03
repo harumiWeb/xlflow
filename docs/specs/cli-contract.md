@@ -165,6 +165,12 @@ must be finite invariant-culture numbers; empty values, locale decimal commas,
 `NaN`, and infinities are rejected before Excel starts. PowerShell and .NET
 bridges generate equivalent VBA numeric literals for `double` arguments.
 
+`run --no-save` is an explicit alias for the default "leave disk unchanged"
+behavior and cannot be combined with `--save` or `--save-as`. On timeout,
+xlflow still returns a valid JSON envelope and exit code `1`, but the result
+must be treated as `vba_may_still_be_running`; xlflow does not perform
+synchronous COM cleanup on that path.
+
 `run --trace` creates a fresh log under `.xlflow/traces`, calls `XlflowTrace.XlflowSetTraceFile` before the target macro, then reads trace events after execution. User VBA code writes events with `Call XlflowLog("message")`. If `XlflowTrace` is missing, `run --trace` temporarily injects it and reverts the helper before saving successful results. JSON output adds top-level `trace.enabled`, `trace.path`, `trace.events`, lifecycle metadata, and optional `trace.read_error`; each event has `timestamp`, `message`, and `raw`. Plain-text output prints trace events as `[timestamp] message` after the normal run logs and should indicate whether the trace helper was temporary or already present. If the macro fails after writing trace events, those events are still returned. Trace read errors are reported in `trace.read_error` without changing the macro result. If a traced run fails with zero events, output should indicate that execution may have failed before reaching user trace calls.
 
 `test` resolves the runtime execution mode to `test` before user VBA starts and injects the same workbook-scoped runtime markers used by `run`. New scaffolded projects can branch inside tests with `XlflowRuntime.IsTest()` or inspect the string value with `XlflowRuntime.ModeName()`. `test` also accepts the same repeated `--msgbox`, `--inputbox`, and `--filedialog` flags as `run`, plus `--ui-stream` for realtime stderr streaming of resolved `XlflowUI` events while tests are running. As with `run`, the workbook-scoped marker is the primary contract and `Environ$("XLFLOW_MODE")` remains only a secondary fallback for manual helper adoption in older projects.
