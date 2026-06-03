@@ -1,3 +1,54 @@
+# Issue #79 + Issue #78 Follow-up: .NET DialogWatcher and run parity
+
+## Goal
+
+Make `xlflow run --bridge dotnet --json` safe for agent execution and behaviorally
+compatible with the established PowerShell run contract.
+
+## DialogWatcher Contract
+
+- Dialog detection is a reusable Windows automation subsystem, not logic embedded
+  directly in `ExcelRunService`.
+- Watch UI Automation events and Win32 top-level/thread windows in parallel.
+- Correlate candidates using HWND, PID, thread ID, owner chain, title, class name,
+  process image, timing, and optional UIA metadata.
+- Detect VBA runtime errors, VBE compile errors, MsgBox, InputBox, and FileDialog
+  fingerprints.
+- Runtime and compile error dialogs are suppressed by default. Native MsgBox,
+  InputBox, and FileDialog windows are cancelled only when an explicit safe
+  Cancel/Close action is available.
+- Dialog snapshots include text, buttons, handles, process/thread identity,
+  timing, action method, and action result.
+
+## .NET run Contract
+
+- Macro invocation and VBE compile calls that may block on modal UI run in a
+  disposable child bridge process that reconnects to the target Excel PID.
+- The parent bridge manages the child worker, DialogWatcher, and timeout.
+- Runtime errors return structured VBA error data and do not leave a GUI dialog.
+- Diagnostic compile errors return `vba_compile_failed` and dialog diagnostics.
+- Timeout returns `macro_timeout`, actionable suggestions, worker state, and
+  available Excel/dialog diagnostics.
+- Temporary harnesses, runtime markers, trace helpers, and stream helpers are
+  removed or restored before returning. Failed and timed-out runs are not saved.
+- `runtime.injected=true` is returned only after runtime markers were applied.
+
+## Typed Arguments
+
+- Public argument types are `string`, `int`, `double`, and `bool`.
+- `double` uses invariant-culture finite values and is rejected before Excel
+  starts when empty, malformed, NaN, or infinite.
+- Go CLI, PowerShell bridge, and .NET bridge must accept the same type set.
+
+## Verification
+
+- Unit tests cover dialog correlation/fingerprints/actions, child worker
+  lifecycle, timeout cleanup, harness generation, and typed arguments.
+- Windows Excel COM E2E proves runtime and compile dialogs do not block, timeout
+  diagnostics are useful, and save/no-save/save-as behavior remains correct.
+
+---
+
 # Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
 
 ## PR #92 CI/security and .NET bridge review fix

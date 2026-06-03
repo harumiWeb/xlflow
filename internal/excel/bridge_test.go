@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
@@ -2312,6 +2313,183 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	source, ok := env.Source.(map[string]interface{})
 	if !ok || source["changed_only"] != false {
 		t.Fatalf("unexpected Source: %+v", env.Source)
+	}
+}
+
+func TestRunnerDotNetMacrosUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"macros","logs":["discovered 2 macro(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"dirty":true,"needs_save":true},"default_entry":"Module1.Main","macros":[{"module":"Module1","name":"Main","qualified_name":"Module1.Main","kind":"standard","runnable":true},{"module":"Sheet1","name":"Calculate","qualified_name":"Sheet1.Calculate","kind":"document","runnable":false,"reason_not_runnable":"requires workbook event context"}],"suggestions":[{"code":"save_session","message":"Run xlflow save --session to persist workbook changes."}]}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+			}
+		}
+	}
+
+	cfg := config.Default()
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.MacrosWithOptions(cfg, MacrosOptions{
+		Session:      true,
+		Entry:        "Module1.Main",
+		RunnableOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	if got := dotNetRequests[0].Args["UseSession"]; got != "true" {
+		t.Fatalf("UseSession = %q, want true", got)
+	}
+	if got := dotNetRequests[0].Args["Entry"]; got != "Module1.Main" {
+		t.Fatalf("Entry = %q, want Module1.Main", got)
+	}
+	if got := dotNetRequests[0].Args["RunnableOnly"]; got != "true" {
+		t.Fatalf("RunnableOnly = %q, want true", got)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Macros == nil {
+		t.Fatalf("expected macros envelope fields to be populated: %+v", env)
+	}
+	if env.DefaultEntry != "Module1.Main" {
+		t.Fatalf("DefaultEntry = %q, want Module1.Main", env.DefaultEntry)
+	}
+	macros, ok := env.Macros.([]interface{})
+	if !ok || len(macros) != 2 {
+		t.Fatalf("Macros = %#v, want 2 entries", env.Macros)
+	}
+	first, ok := macros[0].(map[string]interface{})
+	if !ok || first["qualified_name"] != "Module1.Main" {
+		t.Fatalf("unexpected first macro payload: %#v", macros[0])
+	}
+}
+
+func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	root := t.TempDir()
+	var dotNetCalls, powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"run","logs":["ran Module1.Main in 42ms","wrote workbook copy to C:\\temp\\out\\Result.xlsm","SAVE REQUIRED: live workbook is newer than disk; run xlflow save before session stop"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true,"save_as":"C:\\temp\\out\\Result.xlsm"},"macro":{"name":"Module1.Main","duration_ms":42,"arguments":[{"type":"string","value":"hello"},{"type":"int","value":"7"},{"type":"bool","value":"true"}]},"runtime":{"mode":"headless","source":"command","injected":true},"run_diagnostic":{"kind":"runtime","location":{"module":"Module1","procedure":"Main","line":12}},"suggestions":[{"code":"save_session","message":"Run xlflow save --session before session stop."}]}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+			}
+		}
+	}
+
+	cfg := config.Default()
+	env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.Run(cfg, RunOptions{
+		Macro:   "Module1.Main",
+		Session: true,
+		SaveAs:  filepath.Join("out", "Result.xlsm"),
+		Args: []RunArgument{
+			{Type: "string", Value: "hello"},
+			{Type: "int", Value: "7"},
+			{Type: "bool", Value: "true"},
+		},
+		RuntimeMode:   RuntimeModeHeadless,
+		RuntimeSource: RuntimeSourceCommand,
+		Timeout:       5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	if got := dotNetRequests[0].Args["MacroName"]; got != "Module1.Main" {
+		t.Fatalf("MacroName = %q, want Module1.Main", got)
+	}
+	if got := dotNetRequests[0].Args["UseSession"]; got != "true" {
+		t.Fatalf("UseSession = %q, want true", got)
+	}
+	if got := dotNetRequests[0].Args["SaveAsPath"]; got != filepath.Join(root, "out", "Result.xlsm") {
+		t.Fatalf("SaveAsPath = %q, want %q", got, filepath.Join(root, "out", "Result.xlsm"))
+	}
+	if got := dotNetRequests[0].Args["RuntimeMode"]; got != RuntimeModeHeadless {
+		t.Fatalf("RuntimeMode = %q, want %q", got, RuntimeModeHeadless)
+	}
+	if got := dotNetRequests[0].Args["RuntimeSource"]; got != RuntimeSourceCommand {
+		t.Fatalf("RuntimeSource = %q, want %q", got, RuntimeSourceCommand)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Macro == nil || env.Runtime == nil || env.RunDiagnostic == nil {
+		t.Fatalf("expected run envelope fields to be populated: %+v", env)
+	}
+	macro, ok := env.Macro.(map[string]interface{})
+	if !ok || macro["name"] != "Module1.Main" {
+		t.Fatalf("unexpected macro payload: %#v", env.Macro)
+	}
+	workbook, ok := env.Workbook.(map[string]interface{})
+	if !ok || workbook["save_as"] != `C:\temp\out\Result.xlsm` {
+		t.Fatalf("unexpected workbook payload: %#v", env.Workbook)
+	}
+	// Verify save-as session contract: live workbook remains dirty after SaveCopyAs.
+	if got := workbook["saved"]; got != false {
+		t.Fatalf("workbook.saved = %v, want false (SaveCopyAs does not save original)", got)
+	}
+	if got := workbook["dirty"]; got != true {
+		t.Fatalf("workbook.dirty = %v, want true (live workbook remains dirty after SaveCopyAs)", got)
+	}
+	if got := workbook["needs_save"]; got != true {
+		t.Fatalf("workbook.needs_save = %v, want true (live workbook needs save after SaveCopyAs)", got)
+	}
+	session, ok := env.Session.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected session payload: %#v", env.Session)
+	}
+	if got := session["dirty"]; got != true {
+		t.Fatalf("session.dirty = %v, want true", got)
+	}
+	if got := session["save_required"]; got != true {
+		t.Fatalf("session.save_required = %v, want true", got)
+	}
+	if got := session["source_of_truth"]; got != "live_workbook" {
+		t.Fatalf("session.source_of_truth = %v, want live_workbook", got)
 	}
 }
 

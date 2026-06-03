@@ -34,9 +34,11 @@ public sealed class BridgeHostTests
         var commands = json.RootElement.GetProperty("commands").EnumerateArray().Select(item => item.GetString()).ToArray();
         Assert.Contains("doctor", commands);
         Assert.Contains("inspect", commands);
+        Assert.Contains("macros", commands);
         Assert.Contains("pull", commands);
         Assert.Contains("process", commands);
         Assert.Contains("push", commands);
+        Assert.Contains("run", commands);
     }
 
     [Fact]
@@ -91,7 +93,7 @@ public sealed class BridgeHostTests
             {
               "protocol_version": 1,
               "request_id": "req-2",
-              "command": "run",
+              "command": "unknown-command",
               "payload": {}
             }
             """;
@@ -105,6 +107,58 @@ public sealed class BridgeHostTests
         using var json = JsonDocument.Parse(stdout.ToString());
         Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
         Assert.Equal("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void RunRequestIsHandledByDefaultRegistryWithoutUnsupportedFallback()
+    {
+        const string request = """
+            {
+              "protocol_version": 1,
+              "request_id": "req-run",
+              "command": "run",
+              "payload": {}
+            }
+            """;
+        using var stdin = new StringReader(request);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.NotEqual(3, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("run", json.RootElement.GetProperty("command").GetString());
+        if (json.RootElement.GetProperty("status").GetString() == "failed")
+        {
+            Assert.NotEqual("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
+    public void MacrosRequestIsHandledByDefaultRegistryWithoutUnsupportedFallback()
+    {
+        const string request = """
+            {
+              "protocol_version": 1,
+              "request_id": "req-macros",
+              "command": "macros",
+              "payload": {}
+            }
+            """;
+        using var stdin = new StringReader(request);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.NotEqual(3, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("macros", json.RootElement.GetProperty("command").GetString());
+        if (json.RootElement.GetProperty("status").GetString() == "failed")
+        {
+            Assert.NotEqual("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
     }
 
     [Fact]

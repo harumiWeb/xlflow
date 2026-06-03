@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2034,7 +2035,7 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		}
 		switch parts[0] {
 		case "string":
-		case "int", "bool":
+		case "int", "double", "bool":
 			if parts[1] == "" {
 				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: %s values cannot be empty", literal, parts[0])
 			}
@@ -2045,6 +2046,12 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 			}
 			if parts[0] == "bool" && parts[1] != "true" && parts[1] != "false" {
 				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: bool values must be true or false", literal)
+			}
+			if parts[0] == "double" {
+				value, err := strconv.ParseFloat(parts[1], 64)
+				if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+					return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: double values must parse as finite invariant-culture numbers", literal)
+				}
 			}
 		default:
 			return excel.RunOptions{}, fmt.Errorf("unsupported --arg type prefix %q", parts[0])
@@ -2405,6 +2412,7 @@ func (a *app) runCommand() *cobra.Command {
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
 	var save bool
+	var noSave bool
 	var saveAs string
 	var trace bool
 	var headless bool
@@ -2425,6 +2433,9 @@ func (a *app) runCommand() *cobra.Command {
 			cfg, err := a.loadConfig("run")
 			if err != nil {
 				return err
+			}
+			if noSave && (save || strings.TrimSpace(saveAs) != "") {
+				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--no-save cannot be combined with --save or --save-as"))
 			}
 			macro := ""
 			if len(args) == 1 {
@@ -2480,12 +2491,13 @@ func (a *app) runCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, or bool:true")
+	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, double:3.5, or bool:true")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave the workbook unchanged on disk after the run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
 	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
 	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")

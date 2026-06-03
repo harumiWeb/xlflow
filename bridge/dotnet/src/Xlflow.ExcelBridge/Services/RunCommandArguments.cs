@@ -1,0 +1,28 @@
+namespace Xlflow.ExcelBridge.Services;
+
+public sealed record RunCommandArguments(
+    string WorkbookPath,
+    string MacroName,
+    string MacroArgsJSON,
+    bool Visible,
+    bool DisplayAlerts,
+    bool SaveWorkbook,
+    bool Direct,
+    bool Diagnostic,
+    bool SuppressModalErrors,
+    bool TraceEnabled,
+    string TraceFile,
+    string MsgBoxResponsesJSON,
+    string InputResponsesJSON,
+    string FileDialogResponsesJSON,
+    bool DebugStreamEnabled,
+    string DebugStreamPipeName,
+    bool UIStreamEnabled,
+    string UIStreamPipeName,
+    bool UIStreamRedactInput,
+    bool UseSession,
+    string MetadataPath,
+    string RuntimeMode,
+    string RuntimeSource,
+    string SaveAsPath,
+    int TimeoutSeconds);

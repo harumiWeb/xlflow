@@ -23,26 +23,32 @@ public sealed class CommandRegistry
         {
             new DoctorCommand(),
             new InspectCommand(),
+            new MacrosCommand(),
             new ProcessCommand(),
             new PullCommand(),
             new PushCommand(),
+            new RunCommand(),
         });
     }
 
     public static CommandRegistry Create(
         Func<ExcelDiagnosticsResult>? probeExcel,
         IInspectService? inspectService = null,
+        IMacrosService? macrosService = null,
         IProcessService? processService = null,
         IPullService? pullService = null,
-        IPushService? pushService = null)
+        IPushService? pushService = null,
+        IRunService? runService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
         {
             new DoctorCommand(probeExcel),
             new InspectCommand(inspectService),
+            new MacrosCommand(macrosService),
             new ProcessCommand(processService),
             new PullCommand(pullService),
             new PushCommand(pushService),
+            new RunCommand(runService),
         });
     }
 

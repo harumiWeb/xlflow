@@ -329,26 +329,55 @@ public sealed class ExcelPushService : IPushService
 
     private static void RemoveNonDocumentComponents(object workbook)
     {
+        object? vbProject = null;
+        object? vbComponents = null;
         try
         {
-            dynamic wb = workbook;
-            dynamic vbProject = wb.VBProject;
-            dynamic vbComponents = vbProject.VBComponents;
-            var count = (int)vbComponents.Count;
+            vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
+            if (vbProject is null)
+            {
+                return;
+            }
+
+            vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
+            if (vbComponents is null)
+            {
+                return;
+            }
+
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
             for (var index = count; index >= 1; index--)
             {
-                dynamic component = vbComponents.Item(index);
-                var type = (int)component.Type;
-                if (type != ComponentTypeDocument)
+                object? component = null;
+                try
                 {
-                    vbComponents.Remove(component);
+                    component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
+                    if (component is null)
+                    {
+                        continue;
+                    }
+
+                    var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
+                    if (type != ComponentTypeDocument)
+                    {
+                        ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Remove", component);
+                    }
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(component);
                 }
             }
         }
         catch
         {
             // best-effort removal; import will replace anyway
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(vbComponents);
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
         }
     }
 
@@ -360,10 +389,17 @@ public sealed class ExcelPushService : IPushService
         object? vbComponents = null;
         try
         {
-            dynamic wb = workbook;
-            vbProject = (object)wb.VBProject;
-            dynamic vbProj = vbProject;
-            vbComponents = (object)vbProj.VBComponents;
+            vbProject = ExcelBridgeSupport.RunPhase("get_vbproject", () => ExcelBridgeSupport.Get(workbook, "VBProject"));
+            if (vbProject is null)
+            {
+                return 0;
+            }
+
+            vbComponents = ExcelBridgeSupport.RunPhase("get_vbcomponents", () => ExcelBridgeSupport.Get(vbProject, "VBComponents"));
+            if (vbComponents is null)
+            {
+                return 0;
+            }
 
             foreach (var file in sourceFiles)
             {
@@ -404,7 +440,7 @@ public sealed class ExcelPushService : IPushService
                     }
                 }
 
-                ExcelBridgeSupport.InvokeViaDynamic(vbComponents!, "Import", importPath);
+                ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Import", importPath);
                 imported++;
 
                 if (VbaSourceHelper.IsSidecarMode(args.CodeSource) && file.Kind == "form" && file.Extension == ".frm")
@@ -436,30 +472,70 @@ public sealed class ExcelPushService : IPushService
             return;
         }
 
+        object? vbProject = null;
+        object? vbComponents = null;
         try
         {
-            dynamic wb = workbook;
-            dynamic vbProject = wb.VBProject;
-            dynamic vbComponents = vbProject.VBComponents;
-            var count = (int)vbComponents.Count;
+            vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
+            if (vbProject is null)
+            {
+                return;
+            }
+
+            vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
+            if (vbComponents is null)
+            {
+                return;
+            }
+
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
             for (var index = 1; index <= count; index++)
             {
-                dynamic component = vbComponents.Item(index);
-                var type = (int)component.Type;
-                var name = (string)component.Name;
-
-                if (type == ComponentTypeForm && string.Equals(name, formName, StringComparison.OrdinalIgnoreCase))
+                object? component = null;
+                try
                 {
-                    dynamic codeModule = component.CodeModule;
-                    VbaSourceHelper.SetCodeModuleText(codeModule, codeText);
-                    return;
+                    component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
+                    if (component is null)
+                    {
+                        continue;
+                    }
+
+                    var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
+                    var name = (string?)ExcelBridgeSupport.Get(component, "Name");
+
+                    if (type == ComponentTypeForm && string.Equals(name, formName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        object? codeModule = null;
+                        try
+                        {
+                            codeModule = ExcelBridgeSupport.Get(component, "CodeModule");
+                            if (codeModule is not null)
+                            {
+                                VbaSourceHelper.SetCodeModuleText(codeModule, codeText);
+                            }
+                        }
+                        finally
+                        {
+                            ExcelBridgeSupport.ReleaseComObject(codeModule);
+                        }
+                        return;
+                    }
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(component);
                 }
             }
         }
         catch
         {
             // best-effort UserForm code-behind sync
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(vbComponents);
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
         }
     }
 
@@ -471,56 +547,103 @@ public sealed class ExcelPushService : IPushService
         }
 
         var updated = 0;
+        object? vbProject = null;
+        object? vbComponents = null;
         try
         {
-            dynamic wb = workbook;
-            dynamic vbProject = wb.VBProject;
-            dynamic vbComponents = vbProject.VBComponents;
-            var count = (int)vbComponents.Count;
+            vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
+            if (vbProject is null)
+            {
+                return 0;
+            }
+
+            vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
+            if (vbComponents is null)
+            {
+                return 0;
+            }
+
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
             for (var index = 1; index <= count; index++)
             {
-                dynamic component = vbComponents.Item(index);
-                var type = (int)component.Type;
-                if (type != ComponentTypeDocument)
+                object? component = null;
+                try
                 {
-                    continue;
-                }
+                    component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
+                    if (component is null)
+                    {
+                        continue;
+                    }
 
-                var name = (string)component.Name;
-                var sourcePath = FindDocumentModuleSource(args.WorkbookDir, name);
-                if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                    var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
+                    if (type != ComponentTypeDocument)
+                    {
+                        continue;
+                    }
+
+                    var name = (string?)ExcelBridgeSupport.Get(component, "Name");
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
+
+                    var sourcePath = FindDocumentModuleSource(args.WorkbookDir, name);
+                    if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                    {
+                        continue;
+                    }
+
+                    var sourceContent = File.ReadAllText(sourcePath, Encoding.UTF8);
+                    sourceContent = VbaSourceHelper.NormalizeDocumentModuleContent(sourceContent);
+
+                    if (!string.IsNullOrWhiteSpace(args.WorkbookDir))
+                    {
+                        var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(args.WorkbookDir, sourcePath);
+                        sourceContent = VbaSourceHelper.UpdateFolderAnnotationText(sourceContent, args.FolderAnnotation, desiredAnnotation);
+                    }
+
+                    object? codeModule = null;
+                    try
+                    {
+                        codeModule = ExcelBridgeSupport.Get(component, "CodeModule");
+                        if (codeModule is null)
+                        {
+                            continue;
+                        }
+
+                        var lineCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(codeModule, "CountOfLines"));
+                        if (lineCount > 0)
+                        {
+                            ExcelBridgeSupport.InvokeViaDynamic(codeModule, "DeleteLines", 1, lineCount);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(sourceContent))
+                        {
+                            ExcelBridgeSupport.InvokeViaDynamic(codeModule, "InsertLines", 1, sourceContent);
+                        }
+                    }
+                    finally
+                    {
+                        ExcelBridgeSupport.ReleaseComObject(codeModule);
+                    }
+
+                    updated++;
+                }
+                finally
                 {
-                    continue;
+                    ExcelBridgeSupport.ReleaseComObject(component);
                 }
-
-                var sourceContent = File.ReadAllText(sourcePath, Encoding.UTF8);
-                sourceContent = VbaSourceHelper.NormalizeDocumentModuleContent(sourceContent);
-
-                if (!string.IsNullOrWhiteSpace(args.WorkbookDir))
-                {
-                    var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(args.WorkbookDir, sourcePath);
-                    sourceContent = VbaSourceHelper.UpdateFolderAnnotationText(sourceContent, args.FolderAnnotation, desiredAnnotation);
-                }
-
-                dynamic codeModule = component.CodeModule;
-                var lineCount = (int)codeModule.CountOfLines;
-                if (lineCount > 0)
-                {
-                    codeModule.DeleteLines(1, lineCount);
-                }
-
-                if (!string.IsNullOrWhiteSpace(sourceContent))
-                {
-                    codeModule.InsertLines(1, sourceContent);
-                }
-
-                updated++;
             }
         }
         catch
         {
             // best-effort document module update
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(vbComponents);
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
         }
 
         return updated;

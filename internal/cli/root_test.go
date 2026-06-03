@@ -299,7 +299,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
@@ -317,6 +317,7 @@ func TestRunCommandDiagnosticDefaultsTrue(t *testing.T) {
 	flag := cmd.Flags().Lookup("diagnostic")
 	if flag == nil {
 		t.Fatal("expected --diagnostic flag")
+		return
 	}
 	if flag.DefValue != "true" {
 		t.Fatalf("diagnostic default = %q, want true", flag.DefValue)
@@ -3085,9 +3086,25 @@ func TestBuildRunOptionsRejectsConflictingSaveFlags(t *testing.T) {
 	}
 }
 
+func TestRunCommandRejectsNoSaveCombinedWithSaveFlags(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--no-save", "--save"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected run command to reject --no-save with --save")
+	}
+}
+
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "bool:true"}, Trace: true, Headless: true})
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "double:3.5", "bool:true"}, Trace: true, Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3095,6 +3112,7 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	want := []excel.RunArgument{
 		{Type: "string", Value: "hello"},
 		{Type: "int", Value: "7"},
+		{Type: "double", Value: "3.5"},
 		{Type: "bool", Value: "true"},
 	}
 	if opts.Macro != "Main.Run" {
@@ -3863,6 +3881,10 @@ func TestBuildRunOptionsRejectsMalformedTypedArguments(t *testing.T) {
 		{"bool:maybe", "bool values must be true or false"},
 		{"hello", "expected type:value"},
 		{"float:3.14", "unsupported --arg type prefix"},
+		{"double:not-a-number", "double values must parse"},
+		{"double:NaN", "double values must parse"},
+		{"double:Inf", "double values must parse"},
+		{"double:", "double values cannot be empty"},
 		{"int:", "int values cannot be empty"},
 		{"bool:", "bool values cannot be empty"},
 	}

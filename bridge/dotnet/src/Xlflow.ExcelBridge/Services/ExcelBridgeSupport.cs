@@ -385,6 +385,29 @@ internal static class ExcelBridgeSupport
         return null;
     }
 
+    public static long GetExcelMainHwnd(object excel)
+    {
+        try
+        {
+            return Convert.ToInt64(Get(excel, "Hwnd"), CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    public static int GetExcelProcessId(object excel)
+    {
+        var hwnd = GetExcelMainHwnd(excel);
+        if (hwnd == 0)
+        {
+            return 0;
+        }
+        _ = NativeMethods.GetWindowThreadProcessId(new IntPtr(hwnd), out var processId);
+        return processId;
+    }
+
     public static string GetRangeAddress(object range)
     {
         try

@@ -1,3 +1,18 @@
+# Issue #79 + Issue #78 follow-up
+
+- [x] Add ADR for hybrid UIA + Win32 dialog correlation and child worker isolation
+- [x] Implement reusable .NET DialogWatcher subsystem
+- [x] Add dialog snapshot schema, fingerprints, and safe action policy
+- [x] Add disposable .NET macro worker and parent-side timeout management
+- [x] Integrate runtime and compile dialog diagnostics into `.NET run`
+- [ ] Restore `.NET run` runtime markers, trace, direct/fast, and stream parity
+- [x] Add `double` typed arguments to Go, PowerShell, and .NET contracts
+- [x] Update public specs, bridge docs, and changelog
+- [x] Run Go and .NET tests
+- [ ] Run Windows Excel COM E2E with fresh `tmp_workspaces`
+
+---
+
 # Bug Fix: XlflowDebug ParamArray + run compile watcher
 
 ## PR #92 CI/security and .NET bridge review

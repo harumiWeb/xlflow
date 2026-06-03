@@ -1518,6 +1518,51 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = []string{
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
+				"vba_may_still_be_running: the .NET worker was terminated, but Excel may still be executing VBA and COM cleanup was skipped.",
+			}
+			env.Macro = map[string]any{
+				"name":        args["MacroName"],
+				"arguments":   []any{},
+				"duration_ms": opts.Timeout.Milliseconds(),
+			}
+			env.RunDiagnostic = map[string]any{
+				"kind": "timeout",
+				"location": map[string]any{
+					"macro": args["MacroName"],
+				},
+				"vba_may_still_be_running": true,
+				"worker": map[string]any{
+					"completed": false,
+					"timed_out": true,
+				},
+			}
+			env.Warnings = []map[string]any{
+				{
+					"code":    "vba_may_still_be_running",
+					"message": "The timed out VBA execution may still be running inside Excel. The workbook/session should be treated as dirty until Excel is reset or the workbook is reopened.",
+				},
+			}
+			sessionRequested, _ := strconv.ParseBool(strings.TrimSpace(args["UseSession"]))
+			workbookPath := args["WorkbookPath"]
+			env.Workbook = map[string]any{
+				"path":       workbookPath,
+				"saved":      false,
+				"dirty":      true,
+				"needs_save": sessionRequested,
+				"session":    sessionRequested,
+			}
+			env.Session = map[string]any{
+				"active":               sessionRequested,
+				"dirty":                sessionRequested,
+				"save_required":        sessionRequested,
+				"live_newer_than_disk": sessionRequested,
+				"source_of_truth":      map[bool]string{true: "live_workbook", false: "saved_workbook"}[sessionRequested],
+				"workbook_path":        workbookPath,
+			}
+			env.Suggestions = []map[string]any{
+				{"code": "check_dialog", "message": "Inspect Excel for an unresolved dialog, form, file picker, or long-running loop."},
+				{"code": "use_interactive", "message": "Use xlflow run --interactive when a human must complete workbook UI."},
+				{"code": "reset_excel_session", "message": "Treat the workbook/session as dirty and reset Excel before trusting workbook state if the macro may still be running."},
 			}
 			if debugStreamErr != nil {
 				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())

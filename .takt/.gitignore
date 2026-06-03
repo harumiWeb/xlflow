@@ -7,6 +7,7 @@ tasks/
 clone-meta/
 worktree-sessions/
 *.log
+worktree-sessions/
 
 # This file itself
 !.gitignore
