@@ -6,6 +6,7 @@ session-state.json
 tasks/
 clone-meta/
 *.log
+worktree-sessions/
 
 # This file itself
 !.gitignore
