@@ -57,6 +57,30 @@ func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	}
 }
 
+func TestDotNetProviderDoesNotAdvertisesPullAndPushForAutoSelection(t *testing.T) {
+	provider := DotNetProvider{}
+
+	for _, command := range []string{"pull", "push"} {
+		if provider.Supports(command) {
+			t.Fatalf("Supports(%q) = true, want false; pull/push must not be auto-selected, use --bridge dotnet explicitly", command)
+		}
+	}
+}
+
+func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {
+	expected := []string{"doctor", "inspect", "process"}
+
+	if len(dotNetSupportedCommands) != len(expected) {
+		t.Fatalf("dotNetSupportedCommands has %d entries, want %d. Got: %v", len(dotNetSupportedCommands), len(expected), dotNetSupportedCommands)
+	}
+
+	for _, cmd := range expected {
+		if _, ok := dotNetSupportedCommands[cmd]; !ok {
+			t.Errorf("dotNetSupportedCommands missing %q; must match auto-mode selection set: %v", cmd, expected)
+		}
+	}
+}
+
 func TestDotNetProviderExecuteDoctorWithRealBridge(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows-only repo-local .NET bridge execution")

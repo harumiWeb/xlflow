@@ -83,7 +83,22 @@ func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
 	if execution.result.ProtocolVersion != excelbridge.ProtocolVersion {
 		return true
 	}
-	return execution.result.Error != nil && strings.EqualFold(execution.result.Error.Code, "BRIDGE_COMMAND_UNSUPPORTED")
+	if execution.result.Error != nil && strings.EqualFold(execution.result.Error.Code, "BRIDGE_COMMAND_UNSUPPORTED") {
+		return true
+	}
+	// Fall back to PowerShell when the .NET bridge cannot open the workbook
+	// (e.g., invalid file format, missing Excel COM). The bridge_file_not_openable
+	// code is returned when the file does not look like a real Excel workbook.
+	// This branch is defense-in-depth: in auto mode, pull/push are never routed
+	// to .NET (dotNetSupportedCommands excludes them), so this path is only
+	// reachable when a future change adds pull/push to the auto-mode set.
+	if execution.result.Status == output.StatusFailed && execution.result.Error != nil {
+		switch execution.result.Error.Code {
+		case "bridge_file_not_openable":
+			return true
+		}
+	}
+	return false
 }
 
 type WorkbookRef struct {
@@ -1795,7 +1810,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitConfig
 	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed":
 		return output.ExitEnvironment
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
+	case "pull_args_invalid", "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment

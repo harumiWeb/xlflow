@@ -10,20 +10,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-function Resolve-TaktReportDirectory {
-    param([string]$ExplicitReportDirectory)
-
-    if (-not [string]::IsNullOrWhiteSpace($ExplicitReportDirectory)) {
-        return $ExplicitReportDirectory
-    }
-
-    foreach ($envName in @('TAKT_REPORT_DIR', 'REPORT_DIR')) {
-        $value = [Environment]::GetEnvironmentVariable($envName)
-        if (-not [string]::IsNullOrWhiteSpace($value)) {
-            return $value
-        }
-    }
-
+function Get-CurrentTaktReportDirectory {
     $runsRoot = Join-Path $PSScriptRoot 'runs'
     if (-not (Test-Path -LiteralPath $runsRoot)) {
         throw "TAKT runs directory not found: $runsRoot"
@@ -56,13 +43,10 @@ function Resolve-TaktReportDirectory {
     return Join-Path (Split-Path -Parent $PSScriptRoot) $runningRun.Meta.reportDirectory
 }
 
-foreach ($prefix in @('{report_dir}/', '｛report_dir｝/')) {
-    if ($Path.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
-        $reportDirectory = Resolve-TaktReportDirectory -ExplicitReportDirectory $ReportDirectory
-        $relativeReportPath = $Path.Substring($prefix.Length)
-        $Path = Join-Path $reportDirectory $relativeReportPath
-        break
-    }
+if ($Path.StartsWith('{report_dir}/', [System.StringComparison]::Ordinal)) {
+    $reportDirectory = Get-CurrentTaktReportDirectory
+    $relativeReportPath = $Path.Substring('{report_dir}/'.Length)
+    $Path = Join-Path $reportDirectory $relativeReportPath
 }
 
 if (-not (Test-Path -LiteralPath $Path)) {

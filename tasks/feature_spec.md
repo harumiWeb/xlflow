@@ -1,5 +1,24 @@
 # Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
 
+## PR #92 CI/security and .NET bridge review fix
+
+**Goal:** Make PR #92 pass CI security checks and ensure registered .NET `pull` / `push` bridge commands are continuously compiled and tested.
+
+**Fix:**
+
+- Bump the Go module directive from `1.26.3` to `1.26.4`, the first patched toolchain for the reported standard-library vulnerabilities.
+- Add `actions/setup-dotnet` using `global.json` to the CI test job.
+- Run `dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj` in CI so `PullCommand`, `PushCommand`, `IPullService`, `IPushService`, `ExcelPullService`, and `ExcelPushService` cannot regress outside the bridge build.
+- Anchor the generated project source ignore rule as `/src/` so repository-owned implementation trees such as `bridge/dotnet/src` are not ignored.
+- Add the missing .NET pull/push bridge implementation files to git tracking.
+
+**Validation:**
+
+- `go test ./...`
+- `dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj`
+- `go vet ./...`
+- `govulncheck ./...`
+
 ## Welcome header refresh for new/init
 
 **Goal:** Improve the interactive scaffold welcome shown by `xlflow new` and `xlflow init`.
