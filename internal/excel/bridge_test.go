@@ -2457,7 +2457,7 @@ func TestShouldAutoFallbackToPowerShellForDotNetBridgeFileNotOpenable(t *testing
 		provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
 		result: &ScriptResult{
 			ProtocolVersion: excelbridge.ProtocolVersion,
-			Status: output.StatusFailed,
+			Status:          output.StatusFailed,
 			Error: &output.Error{
 				Code:    "bridge_file_not_openable",
 				Message: "failed to open workbook",
@@ -2474,17 +2474,17 @@ func TestShouldAutoFallbackToPowerShellDoesNotTreatOtherBridgeFailuresAsOpenFall
 	t.Parallel()
 
 	testCases := []struct {
-		name      string
-		provider  excelbridge.Provider
-		result    *ScriptResult
-		want      bool
+		name     string
+		provider excelbridge.Provider
+		result   *ScriptResult
+		want     bool
 	}{
 		{
 			name:     "powershell bridge file not openable does not trigger auto fallback",
 			provider: fakeBridgeProvider{name: string(excelbridge.ModePowerShell)},
 			result: &ScriptResult{
 				ProtocolVersion: excelbridge.ProtocolVersion,
-				Status: output.StatusFailed,
+				Status:          output.StatusFailed,
 				Error: &output.Error{
 					Code:    "bridge_file_not_openable",
 					Message: "failed to open workbook",
@@ -2497,7 +2497,7 @@ func TestShouldAutoFallbackToPowerShellDoesNotTreatOtherBridgeFailuresAsOpenFall
 			provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
 			result: &ScriptResult{
 				ProtocolVersion: excelbridge.ProtocolVersion,
-				Status: output.StatusFailed,
+				Status:          output.StatusFailed,
 				Error: &output.Error{
 					Code:    "vbproject_access_denied",
 					Message: "VBIDE access denied",

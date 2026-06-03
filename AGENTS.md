@@ -101,12 +101,12 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 8. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
 9. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
 10. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
-5. **テストの生成**：必要に応じてテストコードを生成します。
-6. **コードの実装**：上記の基準に従ってコードを実装してください。
-7. **コードの実行と確認**：生成されたコードを実行し、期待どおりに動作することを確認します。
-8. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
-9. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
-10. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
+11. **テストの生成**：必要に応じてテストコードを生成します。
+12. **コードの実装**：上記の基準に従ってコードを実装してください。
+13. **コードの実行と確認**：生成されたコードを実行し、期待どおりに動作することを確認します。
+14. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
+15. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
+16. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
 
 - ADR、仕様書に更新がある場合は次のディレクトリに記録すること
   - ADR: `docs/adr/`
@@ -170,8 +170,8 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 
 - xlflowはメインバイナリとdotnetブリッジバイナリの二つで動くため、E2E動作確認を行う際、`go install ./cmd/xlflow` でインストールしても、dotnet bridgeバイナリをインストールすることができない。必ず`task install`でインストールすること
 
-
 <!-- headroom:rtk-instructions -->
+
 # RTK (Rust Token Killer) - Token-Optimized Commands
 
 When running shell commands, **always prefix with `rtk`**. This reduces context
@@ -179,6 +179,7 @@ usage by 60-90% with zero behavior change. If rtk has no filter for a command,
 it passes through unchanged — so it is always safe to use.
 
 ## Key Commands
+
 ```bash
 # Git (59-80% savings)
 rtk git status          rtk git diff            rtk git log
@@ -209,6 +210,7 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 ```
 
 ## Rules
+
 - In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
 - For debugging, use raw command without rtk prefix
 - `rtk proxy <cmd>` runs command without filtering but tracks usage

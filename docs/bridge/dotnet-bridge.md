@@ -109,12 +109,12 @@ xlflow pull --bridge dotnet --json
 
 The command opens the workbook (or attaches to an active session), iterates VBComponents, and writes each component to the configured source directory:
 
-| Component Type | Target Dir | Extension |
-|----------------|-----------|-----------|
-| Standard module (type 1) | `src/modules` | `.bas` |
-| Class module (type 2) | `src/classes` | `.cls` |
-| UserForm (type 3) | `src/forms` | `.frm` |
-| Document module (other) | `src/workbook` | `.bas` |
+| Component Type           | Target Dir     | Extension |
+| ------------------------ | -------------- | --------- |
+| Standard module (type 1) | `src/modules`  | `.bas`    |
+| Class module (type 2)    | `src/classes`  | `.cls`    |
+| UserForm (type 3)        | `src/forms`    | `.frm`    |
+| Document module (other)  | `src/workbook` | `.bas`    |
 
 The response includes `target`, `session`, `workbook`, and `source` envelope fields matching the PowerShell pull contract.
 
@@ -128,6 +128,7 @@ xlflow push --bridge dotnet --fast --session --no-save --json
 ```
 
 The command:
+
 1. Attaches to the session workbook (or opens the configured workbook)
 2. Creates a backup when `BackupMode` is not `"never"` (via `SaveCopyAs`)
 3. Discovers source files from `ModulesDir`, `ClassesDir`, `FormsDir`, `WorkbookDir`
