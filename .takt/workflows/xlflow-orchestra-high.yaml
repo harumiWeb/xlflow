@@ -57,6 +57,26 @@ steps:
       - testing strategy
       - risk analysis
 
+      In addition, produce an Implementation Brief for the implementer.
+
+      The Implementation Brief must be concrete enough that a weaker implementation model can follow it without redesigning the solution.
+
+      Include:
+      - exact files to inspect before editing
+      - exact files likely to edit
+      - existing functions, types, commands, or packages that should be reused
+      - proposed control flow
+      - proposed data model or option changes
+      - exact CLI/user-visible behavior
+      - exact JSON/output/error contract changes, if any
+      - test cases to add or update
+      - commands the implementer must run
+      - explicit non-goals
+      - forbidden broad refactors
+      - fallback decision rules if the expected code shape differs from the plan
+
+      The implementer should not be asked to choose architecture. The planner must make the architectural decision unless the repository inspection proves the request is ambiguous.
+
       Important:
       - minimize breaking changes
       - preserve public APIs
@@ -190,25 +210,28 @@ steps:
     required_permission_mode: edit
 
     instruction: |
-      Implement exactly as specified in the plan.
+      Implement the Implementation Brief from plan.md as a constrained patch.
 
-      Constraints:
-      - preserve public APIs
-      - preserve workbook compatibility
-      - keep exports deterministic
-      - avoid unnecessary refactors
-      - avoid unrelated changes
+      Your role is execution, not redesign.
 
       Requirements:
-      - follow existing architecture
-      - maintain naming consistency
-      - write maintainable code
-      - minimize side effects
-      - update docs/specs/changelog when the approved plan makes behavior or contracts user-visible
+      - follow the exact files, order, contracts, and verification commands from the plan
+      - reuse the existing functions, types, packages, and patterns identified by the planner
+      - make the smallest code changes that satisfy the planned behavior
+      - do not introduce new architecture unless the plan explicitly says so
+      - do not broaden scope based on speculation
+      - do not rewrite unrelated code
+      - do not change public APIs, CLI contracts, JSON contracts, workbook compatibility, or deterministic export behavior unless the plan explicitly requires it
+      - update docs/specs/changelog only when the plan says the behavior or contract is user-visible
+
+      If repository evidence contradicts the plan:
+      - do not invent a new design silently
+      - record the contradiction clearly in the implementation report
+      - route to plan if architectural judgment is required
 
       After implementation:
       - run the targeted tests and verification commands from the plan
-      - fix failures
+      - fix failures within the planned scope only
       - ensure lint passes for the touched slice
 
     rules:
