@@ -184,7 +184,10 @@ public sealed class ExcelMacrosService : IMacrosService
                 try
                 {
                     component = ExcelBridgeSupport.Get(components, "Item", i);
-                    if (component is null) continue;
+                    if (component is null)
+                    {
+                        continue;
+                    }
 
                     var name = (string?)ExcelBridgeSupport.Get(component, "Name");
                     if (string.IsNullOrWhiteSpace(name) || name.StartsWith("Xlflow", StringComparison.OrdinalIgnoreCase))

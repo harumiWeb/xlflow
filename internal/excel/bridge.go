@@ -1519,6 +1519,25 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
 			}
+			env.Macro = map[string]any{
+				"name":        args["MacroName"],
+				"arguments":   []any{},
+				"duration_ms": opts.Timeout.Milliseconds(),
+			}
+			env.RunDiagnostic = map[string]any{
+				"kind": "timeout",
+				"location": map[string]any{
+					"macro": args["MacroName"],
+				},
+				"worker": map[string]any{
+					"completed": false,
+					"timed_out": true,
+				},
+			}
+			env.Suggestions = []map[string]any{
+				{"code": "check_dialog", "message": "Inspect Excel for an unresolved dialog, form, file picker, or long-running loop."},
+				{"code": "use_interactive", "message": "Use xlflow run --interactive when a human must complete workbook UI."},
+			}
 			if debugStreamErr != nil {
 				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
 			}

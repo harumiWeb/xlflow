@@ -334,10 +334,16 @@ public sealed class ExcelPushService : IPushService
         try
         {
             vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
-            if (vbProject is null) return;
+            if (vbProject is null)
+            {
+                return;
+            }
 
             vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
-            if (vbComponents is null) return;
+            if (vbComponents is null)
+            {
+                return;
+            }
 
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
@@ -347,7 +353,10 @@ public sealed class ExcelPushService : IPushService
                 try
                 {
                     component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
-                    if (component is null) continue;
+                    if (component is null)
+                    {
+                        continue;
+                    }
 
                     var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
                     if (type != ComponentTypeDocument)
@@ -381,10 +390,16 @@ public sealed class ExcelPushService : IPushService
         try
         {
             vbProject = ExcelBridgeSupport.RunPhase("get_vbproject", () => ExcelBridgeSupport.Get(workbook, "VBProject"));
-            if (vbProject is null) return 0;
+            if (vbProject is null)
+            {
+                return 0;
+            }
 
             vbComponents = ExcelBridgeSupport.RunPhase("get_vbcomponents", () => ExcelBridgeSupport.Get(vbProject, "VBComponents"));
-            if (vbComponents is null) return 0;
+            if (vbComponents is null)
+            {
+                return 0;
+            }
 
             foreach (var file in sourceFiles)
             {
@@ -462,10 +477,16 @@ public sealed class ExcelPushService : IPushService
         try
         {
             vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
-            if (vbProject is null) return;
+            if (vbProject is null)
+            {
+                return;
+            }
 
             vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
-            if (vbComponents is null) return;
+            if (vbComponents is null)
+            {
+                return;
+            }
 
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
@@ -475,7 +496,10 @@ public sealed class ExcelPushService : IPushService
                 try
                 {
                     component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
-                    if (component is null) continue;
+                    if (component is null)
+                    {
+                        continue;
+                    }
 
                     var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
                     var name = (string?)ExcelBridgeSupport.Get(component, "Name");
@@ -528,10 +552,16 @@ public sealed class ExcelPushService : IPushService
         try
         {
             vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
-            if (vbProject is null) return 0;
+            if (vbProject is null)
+            {
+                return 0;
+            }
 
             vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
-            if (vbComponents is null) return 0;
+            if (vbComponents is null)
+            {
+                return 0;
+            }
 
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
 
@@ -541,7 +571,10 @@ public sealed class ExcelPushService : IPushService
                 try
                 {
                     component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
-                    if (component is null) continue;
+                    if (component is null)
+                    {
+                        continue;
+                    }
 
                     var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
                     if (type != ComponentTypeDocument)
@@ -550,7 +583,10 @@ public sealed class ExcelPushService : IPushService
                     }
 
                     var name = (string?)ExcelBridgeSupport.Get(component, "Name");
-                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
 
                     var sourcePath = FindDocumentModuleSource(args.WorkbookDir, name);
                     if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
@@ -571,7 +607,10 @@ public sealed class ExcelPushService : IPushService
                     try
                     {
                         codeModule = ExcelBridgeSupport.Get(component, "CodeModule");
-                        if (codeModule is null) continue;
+                        if (codeModule is null)
+                        {
+                            continue;
+                        }
 
                         var lineCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(codeModule, "CountOfLines"));
                         if (lineCount > 0)

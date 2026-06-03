@@ -128,8 +128,24 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--save`, `--save-as`, and default no-save behavior
 - Supports `--timeout` via bridge request timeout
 - Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
+- Runs modal `Application.Run` and VBE Compile calls in disposable child bridge
+  processes so the parent can watch dialogs and produce diagnostics
+- Detects Excel/VBE dialogs through Win32 owner-chain polling with optional UI
+  Automation metadata and button invocation
+- Captures dialog text, buttons, HWND/PID/thread identity, visibility, action,
+  and worker state in `run_diagnostic`
+- Suppresses runtime error dialogs with the explicit End action by default;
+  Debug is not preferred because it can leave VBE in break mode
+- Does not require a dialog to be visible, because Excel can defer painting a
+  runtime error dialog until it receives focus
 
 The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
+
+On timeout, the bridge returns `macro_timeout`, does not save the workbook, and
+includes actionable suggestions plus the dialog and worker state available at
+the timeout boundary. Excel may continue executing user VBA after the child COM
+caller is terminated, so COM-based harness cleanup is not attempted
+synchronously while Excel is busy.
 
 ### `process`
 
@@ -155,12 +171,12 @@ xlflow pull --bridge dotnet --json
 
 The command opens the workbook (or attaches to an active session), iterates VBComponents, and writes each component to the configured source directory:
 
-| Component Type | Target Dir | Extension |
-|----------------|-----------|-----------|
-| Standard module (type 1) | `src/modules` | `.bas` |
-| Class module (type 2) | `src/classes` | `.cls` |
-| UserForm (type 3) | `src/forms` | `.frm` |
-| Document module (other) | `src/workbook` | `.bas` |
+| Component Type           | Target Dir     | Extension |
+| ------------------------ | -------------- | --------- |
+| Standard module (type 1) | `src/modules`  | `.bas`    |
+| Class module (type 2)    | `src/classes`  | `.cls`    |
+| UserForm (type 3)        | `src/forms`    | `.frm`    |
+| Document module (other)  | `src/workbook` | `.bas`    |
 
 The response includes `target`, `session`, `workbook`, and `source` envelope fields matching the PowerShell pull contract.
 
@@ -174,6 +190,7 @@ xlflow push --bridge dotnet --fast --session --no-save --json
 ```
 
 The command:
+
 1. Attaches to the session workbook (or opens the configured workbook)
 2. Creates a backup when `BackupMode` is not `"never"` (via `SaveCopyAs`)
 3. Discovers source files from `ModulesDir`, `ClassesDir`, `FormsDir`, `WorkbookDir`

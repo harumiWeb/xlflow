@@ -187,6 +187,26 @@ public sealed class RunCommandTests
             ExcelRunService.AssertSaveAsExtension("C:\\work\\Book.xlsm", "C:\\work\\Copy.xlsx"));
     }
 
+    [Fact]
+    public void BuildRunHarnessCodeIncludesTypedArgumentsAndErrorCapture()
+    {
+        var code = ExcelRunService.BuildRunHarnessCode(
+            "Module1.Main",
+            [
+                new ExcelRunService.MacroArg { Type = "string", Value = "hello" },
+                new ExcelRunService.MacroArg { Type = "int", Value = "7" },
+                new ExcelRunService.MacroArg { Type = "double", Value = "3.5" },
+                new ExcelRunService.MacroArg { Type = "bool", Value = "true" },
+            ],
+            traceEnabled: false,
+            traceFile: "");
+
+        Assert.Contains("Application.Run targetMacro, \"hello\", CLng(7), CDbl(3.5), CBool(True)", code);
+        Assert.Contains("Err.Number", code);
+        Assert.Contains("Err.Description", code);
+        Assert.Contains("Erl", code);
+    }
+
     private sealed class FakeRunService(Func<BridgeRequest, RunCommandArguments, BridgeResponse> handler) : IRunService
     {
         public BridgeResponse Execute(BridgeRequest request, RunCommandArguments args, CancellationToken cancellationToken)
