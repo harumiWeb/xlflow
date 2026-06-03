@@ -1,9 +1,11 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$Path,
 
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedHeading
+    [string]$ExpectedHeading,
+
+    [string]$ReportDirectory = ""
 )
 
 $ErrorActionPreference = 'Stop'
