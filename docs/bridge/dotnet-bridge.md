@@ -85,6 +85,52 @@ These commands preserve the existing top-level envelope fields produced by the G
 
 The `.NET` implementation intentionally stays limited to the live/session-backed runner path for now. Saved-file inspect flows still use the existing non-bridge workbook reader.
 
+### `macros`
+
+`xlflow macros --bridge dotnet --json` discovers VBA macro entrypoints from the configured workbook through the .NET bridge:
+
+```powershell
+xlflow macros --bridge dotnet --json
+xlflow macros --bridge dotnet --session --json
+xlflow macros --bridge dotnet --entry Module1.Main --json
+xlflow macros --bridge dotnet --runnable-only --json
+```
+
+The command opens the workbook (or attaches to an active session), iterates VBComponents, and parses each code module for `Sub`/`Function` declarations:
+
+- Skips `Private` and `Friend` procedures
+- Skips `Xlflow*` prefixed modules
+- Skips event procedures (`Workbook_*`, `Worksheet_*`, `Auto_Open`, `Auto_Close`)
+- Skips procedures with parameters
+- Marks procedures in `userform`, `document_module`, or `unknown` component types as not runnable
+
+The response includes `target`, `session`, `workbook`, `macros`, `default_entry`, `suggestions`, `warnings`, and `hints` envelope fields matching the PowerShell macros contract.
+
+Each macro entry contains: `module`, `name`, `qualified_name`, `kind`, `args`, `line`, `component_type`, `visibility`, `has_parameters`, `runnable`, `reason_not_runnable`, and `run_command`.
+
+### `run`
+
+`xlflow run Module1.Main --bridge dotnet --json` executes a VBA macro through the .NET bridge:
+
+```powershell
+xlflow run Module1.Main --bridge dotnet --json
+xlflow run Module1.Main --bridge dotnet --session --json
+xlflow run Module1.Main --bridge dotnet --save --json
+xlflow run Module1.Main --bridge dotnet --save-as Result.xlsm --json
+xlflow run Module1.Main --bridge dotnet --no-save --json
+```
+
+The command opens the workbook (or attaches to an active session), invokes the macro via `Application.Run`, and captures the result:
+
+- Supports typed arguments (`string`, `int`, `double`, `bool`) via base64-encoded JSON
+- Supports fully qualified macro names (`Module1.Main`)
+- Captures `Err.Number`, `Err.Description`, and execution duration
+- Supports `--save`, `--save-as`, and default no-save behavior
+- Supports `--timeout` via bridge request timeout
+- Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
+
+The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
+
 ### `process`
 
 The .NET bridge now supports:
@@ -163,7 +209,7 @@ xlflow-excel-bridge.exe --capabilities-json
 
 The Go resolver must check capabilities before selecting .NET in `auto` mode.
 
-For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. `pull` and `push` are intentionally excluded from auto mode to preserve the existing PowerShell behavior; use `--bridge dotnet` explicitly to route these commands through the .NET bridge. If `.NET` reports capability/runtime/protocol failures for a supported command, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
+For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. `pull`, `push`, `macros`, and `run` are intentionally excluded from auto mode to preserve the existing PowerShell behavior; use `--bridge dotnet` explicitly to route these commands through the .NET bridge. If `.NET` reports capability/runtime/protocol failures for a supported command, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
 
 ## Selection
 
@@ -182,7 +228,7 @@ The planned migration order is:
 
 1. `doctor` — done
 2. `pull` and `push` — done
-3. `macros` and `run`
+3. `macros` and `run` — done
 4. dialog watcher
 5. `test`, `trace`, and runtime injection
 6. `form` and `export-image`
