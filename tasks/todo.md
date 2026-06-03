@@ -8,6 +8,9 @@
 - [x] Update `go.mod` to Go `1.26.4` for standard-library vulnerability fixes
 - [x] Add .NET bridge tests to the CI test job with `setup-dotnet`
 - [x] Run full Go, .NET, vet, and govulncheck verification after edits
+- [x] Fix CI-only .NET bridge failure caused by untracked `bridge/dotnet/src` pull/push files
+- [x] Anchor `.gitignore` project source rule as `/src/`
+- [x] Re-run `go test -count=1 ./internal/excel/bridge`, .NET bridge tests, and `go vet ./...`
 
 ## Welcome header refresh for new/init
 

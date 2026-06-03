@@ -16,7 +16,7 @@ coverage.out
 build/
 .worktrees/
 xlflow.toml
-src/
+/src/
 
 # OS / Editor
 .DS_Store
