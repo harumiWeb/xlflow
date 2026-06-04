@@ -21,6 +21,7 @@ xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=r
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed. | -       |
 | `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.    | false   |
 | `--session`                    | Run tests in the managed live workbook.                               | false   |
+| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`).    | auto    |
 | `--json`                       | Return structured test results.                                       | false   |
 
 ## Test Location
@@ -87,6 +88,10 @@ When tests use `XlflowUI`, pass `--msgbox`, `--inputbox`, and `--filedialog` for
 
 ::: tip
 Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `folder`. Repeat the same `kind:id=value` flag for multi-select dialogs, and use `@cancel` to simulate a user cancellation.
+:::
+
+::: tip
+`test` supports the .NET bridge via explicit `--bridge dotnet`. In `auto` mode, `test` uses the PowerShell bridge. With `--bridge dotnet`, test discovery, lifecycle hooks, runtime injection, UI stream injection, and session-aware workflow all work through the .NET Excel bridge executable.
 :::
 :::
 

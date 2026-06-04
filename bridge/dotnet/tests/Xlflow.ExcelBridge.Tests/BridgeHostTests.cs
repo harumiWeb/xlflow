@@ -39,6 +39,8 @@ public sealed class BridgeHostTests
         Assert.Contains("process", commands);
         Assert.Contains("push", commands);
         Assert.Contains("run", commands);
+        Assert.Contains("test", commands);
+        Assert.Contains("trace", commands);
     }
 
     [Fact]
@@ -155,6 +157,58 @@ public sealed class BridgeHostTests
         Assert.NotEqual(3, code);
         using var json = JsonDocument.Parse(stdout.ToString());
         Assert.Equal("macros", json.RootElement.GetProperty("command").GetString());
+        if (json.RootElement.GetProperty("status").GetString() == "failed")
+        {
+            Assert.NotEqual("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
+    public void TestRequestIsHandledByDefaultRegistryWithoutUnsupportedFallback()
+    {
+        const string request = """
+            {
+              "protocol_version": 1,
+              "request_id": "req-test",
+              "command": "test",
+              "payload": {}
+            }
+            """;
+        using var stdin = new StringReader(request);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.NotEqual(3, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("test", json.RootElement.GetProperty("command").GetString());
+        if (json.RootElement.GetProperty("status").GetString() == "failed")
+        {
+            Assert.NotEqual("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
+    public void TraceRequestIsHandledByDefaultRegistryWithoutUnsupportedFallback()
+    {
+        const string request = """
+            {
+              "protocol_version": 1,
+              "request_id": "req-trace",
+              "command": "trace",
+              "payload": {}
+            }
+            """;
+        using var stdin = new StringReader(request);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr);
+
+        Assert.NotEqual(3, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("trace", json.RootElement.GetProperty("command").GetString());
         if (json.RootElement.GetProperty("status").GetString() == "failed")
         {
             Assert.NotEqual("BRIDGE_COMMAND_UNSUPPORTED", json.RootElement.GetProperty("error").GetProperty("code").GetString());

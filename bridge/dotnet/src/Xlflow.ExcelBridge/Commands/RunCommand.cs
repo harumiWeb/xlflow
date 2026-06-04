@@ -66,27 +66,6 @@ public sealed class RunCommand : ICommandHandler
                 Source: "xlflow"));
         }
 
-        if (args.TraceEnabled)
-        {
-            return BridgeResponse.Failed(request, new BridgeError(
-                Code: "run_args_invalid",
-                Message: "--trace is not supported by xlflow run --bridge dotnet in this partial parity release; use --bridge powershell for trace collection.",
-                Phase: "run",
-                Source: "xlflow"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(args.MsgBoxResponsesJSON) ||
-            !string.IsNullOrWhiteSpace(args.InputResponsesJSON) ||
-            !string.IsNullOrWhiteSpace(args.FileDialogResponsesJSON) ||
-            args.UIStreamEnabled)
-        {
-            return BridgeResponse.Failed(request, new BridgeError(
-                Code: "run_args_invalid",
-                Message: "Scripted XlflowUI responses and UI stream are not supported by xlflow run --bridge dotnet in this partial parity release; use --bridge powershell for those options.",
-                Phase: "run",
-                Source: "xlflow"));
-        }
-
         return _service.Execute(request, args, cancellationToken);
     }
 }

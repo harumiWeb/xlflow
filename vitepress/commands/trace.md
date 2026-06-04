@@ -22,6 +22,7 @@ xlflow trace inject
 | `clean`           | Remove trace logs.                                 | -       |
 | `inject`          | Inject helper into the active/session workbook.    | -       |
 | `--session`       | Operate against the managed live session workbook. | false   |
+| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | auto |
 
 ## Examples
 
@@ -39,6 +40,10 @@ VBA code can call `XlflowLog` after trace support is available.
 
 ::: warning
 `trace disable` refuses unsafe removal when the helper appears modified or in use.
+:::
+
+::: tip
+`trace` supports the .NET bridge via explicit `--bridge dotnet`. In `auto` mode, `trace` uses the PowerShell bridge. With `--bridge dotnet`, `enable`, `disable`, `status`, and `clean` all work through the .NET Excel bridge executable, including source-match safety for `disable` and automation macros force-disable for direct-open paths.
 :::
 
 ## JSON Output Example
