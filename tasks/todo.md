@@ -203,6 +203,7 @@
 - [x] Windows + Excel 実機: `example/calendar-pick` で `go run ../../cmd/xlflow --json --bridge dotnet doctor`
 - [x] 実機結果: `selected_bridge=dotnet`, `protocol_version=1`, `bridge.name=xlflow-excel-bridge`, `bridge.commit=dev`, `excel.com_activation=true`, `excel.vbide_access=true`, `automation_security=1`
 - [x] 実機観測: `excel.version` / `excel.build` / `trust_vba_access` はこの環境では `null`
+
 ---
 
 # Issue 80 independent verification

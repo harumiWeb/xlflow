@@ -13,7 +13,10 @@ public sealed class ExcelTraceService : ITraceService
         cancellationToken.ThrowIfCancellationRequested();
 
         var action = (args.Action ?? "").Trim().ToLowerInvariant();
-        if (action == "inject") action = "enable";
+        if (action == "inject")
+        {
+            action = "enable";
+        }
 
         // clean does not need Excel COM
         if (action == "clean")
@@ -117,7 +120,11 @@ public sealed class ExcelTraceService : ITraceService
 
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
-        if (sessionLog is not null) logs.Add(sessionLog);
+        if (sessionLog is not null)
+        {
+            logs.Add(sessionLog);
+        }
+
         logs.Add($"enabled XlflowTrace in {args.WorkbookPath}");
 
         var extensions = new Dictionary<string, object?>();
@@ -196,7 +203,11 @@ public sealed class ExcelTraceService : ITraceService
 
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
-        if (sessionLog is not null) logs.Add(sessionLog);
+        if (sessionLog is not null)
+        {
+            logs.Add(sessionLog);
+        }
+
         logs.Add($"disabled XlflowTrace in {args.WorkbookPath}");
 
         var extensions = new Dictionary<string, object?>
@@ -247,7 +258,11 @@ public sealed class ExcelTraceService : ITraceService
 
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
-        if (sessionLog is not null) logs.Add(sessionLog);
+        if (sessionLog is not null)
+        {
+            logs.Add(sessionLog);
+        }
+
         logs.Add($"reported XlflowTrace status for {args.WorkbookPath}");
 
         var extensions = new Dictionary<string, object?>

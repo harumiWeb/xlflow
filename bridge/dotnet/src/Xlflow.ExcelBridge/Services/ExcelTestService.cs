@@ -80,9 +80,21 @@ public sealed class ExcelTestService : ITestService
             if (selected.Count == 0)
             {
                 var filterDesc = args.Filter;
-                if (string.IsNullOrWhiteSpace(filterDesc)) filterDesc = args.ModuleFilter;
-                if (string.IsNullOrWhiteSpace(filterDesc)) filterDesc = args.TagFilter;
-                if (string.IsNullOrWhiteSpace(filterDesc)) filterDesc = "(no filter)";
+                if (string.IsNullOrWhiteSpace(filterDesc))
+                {
+                    filterDesc = args.ModuleFilter;
+                }
+
+                if (string.IsNullOrWhiteSpace(filterDesc))
+                {
+                    filterDesc = args.TagFilter;
+                }
+
+                if (string.IsNullOrWhiteSpace(filterDesc))
+                {
+                    filterDesc = "(no filter)";
+                }
+
                 return BuildErrorResponse(request, args, "test_not_found",
                     $"test not found: {filterDesc}",
                     sessionAttached, sessionMode, [], runtimeState, runtimeInjected);
@@ -289,11 +301,7 @@ public sealed class ExcelTestService : ITestService
                                 var resultStatus = (string)resultObj.GetType().GetProperty("status")!.GetValue(resultObj)!;
                                 if (resultModule == moduleName && moduleTestNames.Contains(resultName))
                                 {
-                                    if (resultStatus is "passed" or "inconclusive")
-                                    {
-                                        if (resultStatus == "passed") failed++;
-                                        if (resultStatus == "inconclusive") inconclusiveCount--;
-                                    }
+                                    AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
                                     var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
                                     results[i] = new
                                     {
@@ -320,11 +328,7 @@ public sealed class ExcelTestService : ITestService
                             var resultStatus = (string)resultObj.GetType().GetProperty("status")!.GetValue(resultObj)!;
                             if (resultModule == moduleName && moduleTestNames.Contains(resultName))
                             {
-                                if (resultStatus is "passed" or "inconclusive")
-                                {
-                                    if (resultStatus == "passed") failed++;
-                                    if (resultStatus == "inconclusive") inconclusiveCount--;
-                                }
+                                AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
                                 var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
                                 results[i] = new
                                 {
@@ -490,9 +494,17 @@ public sealed class ExcelTestService : ITestService
             try
             {
                 component = ExcelBridgeSupport.Get(components, "Item", i);
-                if (component is null) continue;
+                if (component is null)
+                {
+                    continue;
+                }
+
                 var name = ExcelBridgeSupport.GetString(component, "Name");
-                if (string.IsNullOrWhiteSpace(name)) continue;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
                 var code = GetCodeModuleText(component);
                 var moduleTests = FindTestProcedures(name, code);
                 tests.AddRange(moduleTests);
@@ -513,12 +525,20 @@ public sealed class ExcelTestService : ITestService
         try
         {
             components = ExcelBridgeSupport.Get(vbProject, "VBComponents");
-            if (components is null) return "";
+            if (components is null)
+            {
+                return "";
+            }
+
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(components, "Count"));
             for (var i = 1; i <= count; i++)
             {
                 component = ExcelBridgeSupport.Get(components, "Item", i);
-                if (component is null) continue;
+                if (component is null)
+                {
+                    continue;
+                }
+
                 var name = ExcelBridgeSupport.GetString(component, "Name");
                 if (string.Equals(name, moduleName, StringComparison.OrdinalIgnoreCase))
                 {
@@ -546,7 +566,11 @@ public sealed class ExcelTestService : ITestService
         try
         {
             codeModule = ExcelBridgeSupport.Get(component, "CodeModule");
-            if (codeModule is null) return "";
+            if (codeModule is null)
+            {
+                return "";
+            }
+
             return VbaSourceHelper.GetCodeModuleText(codeModule);
         }
         catch
@@ -562,7 +586,10 @@ public sealed class ExcelTestService : ITestService
     internal static List<TestCase> FindTestProcedures(string moduleName, string code)
     {
         var tests = new List<TestCase>();
-        if (string.IsNullOrEmpty(code)) return tests;
+        if (string.IsNullOrEmpty(code))
+        {
+            return tests;
+        }
 
         var lines = code.Split(["\r\n", "\n"], StringSplitOptions.None);
         for (var i = 0; i < lines.Length; i++)
@@ -571,7 +598,10 @@ public sealed class ExcelTestService : ITestService
             var match = Regex.Match(line,
                 @"^(?:Public\s+)?Sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(?:'.*)?$",
                 RegexOptions.IgnoreCase);
-            if (!match.Success) continue;
+            if (!match.Success)
+            {
+                continue;
+            }
 
             var name = match.Groups[1].Value;
             if (!name.StartsWith("Test", StringComparison.Ordinal) && !name.EndsWith("_Test", StringComparison.Ordinal))
@@ -583,14 +613,22 @@ public sealed class ExcelTestService : ITestService
             for (var j = i - 1; j >= 0; j--)
             {
                 var prev = lines[j].Trim();
-                if (string.IsNullOrWhiteSpace(prev)) continue;
+                if (string.IsNullOrWhiteSpace(prev))
+                {
+                    continue;
+                }
+
                 var tagMatch = Regex.Match(prev, @"^'\s*@Tag\s*\(""([^""]+)""\)", RegexOptions.IgnoreCase);
                 if (tagMatch.Success)
                 {
                     tags.Add(tagMatch.Groups[1].Value);
                     continue;
                 }
-                if (prev.StartsWith("''", StringComparison.Ordinal)) continue;
+                if (prev.StartsWith("''", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 break;
             }
 
@@ -608,7 +646,10 @@ public sealed class ExcelTestService : ITestService
     internal static ModuleHooks FindModuleHooks(string moduleName, string code)
     {
         var hooks = new ModuleHooks();
-        if (string.IsNullOrEmpty(code)) return hooks;
+        if (string.IsNullOrEmpty(code))
+        {
+            return hooks;
+        }
 
         var lines = code.Split(["\r\n", "\n"], StringSplitOptions.None);
         for (var i = 0; i < lines.Length; i++)
@@ -617,7 +658,10 @@ public sealed class ExcelTestService : ITestService
             var match = Regex.Match(line,
                 @"^(?:Public\s+)?Sub\s+(BeforeAll|AfterAll|BeforeEach|AfterEach)\s*(?:\(\s*\))?\s*(?:'.*)?$",
                 RegexOptions.IgnoreCase);
-            if (!match.Success) continue;
+            if (!match.Success)
+            {
+                continue;
+            }
 
             var name = match.Groups[1].Value;
             switch (name.ToLowerInvariant())
@@ -648,11 +692,30 @@ public sealed class ExcelTestService : ITestService
             if (!string.IsNullOrWhiteSpace(tagFilter))
             {
                 var tagFound = test.Tags.Any(t => string.Equals(t, tagFilter, StringComparison.OrdinalIgnoreCase));
-                if (!tagFound) include = false;
+                if (!tagFound)
+                {
+                    include = false;
+                }
             }
-            if (include) selected.Add(test);
+            if (include)
+            {
+                selected.Add(test);
+            }
         }
         return selected;
+    }
+
+    internal static void AdjustCountsForAfterAllFailure(string resultStatus, ref int failed, ref int inconclusiveCount)
+    {
+        if (resultStatus == "passed")
+        {
+            failed++;
+        }
+        else if (resultStatus == "inconclusive")
+        {
+            failed++;
+            inconclusiveCount--;
+        }
     }
 
     internal static string BuildTestRunnerCode(List<TestCase> tests, Dictionary<string, ModuleHooks> hooksByModule)
@@ -665,7 +728,10 @@ public sealed class ExcelTestService : ITestService
         var moduleNames = tests.Select(t => t.Module).Distinct(StringComparer.OrdinalIgnoreCase);
         foreach (var mod in moduleNames)
         {
-            if (!hooksByModule.TryGetValue(mod, out var hooks)) continue;
+            if (!hooksByModule.TryGetValue(mod, out var hooks))
+            {
+                continue;
+            }
 
             if (hooks.BeforeAll is not null)
             {
@@ -784,7 +850,10 @@ public sealed class ExcelTestService : ITestService
     {
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
-        if (sessionLog is not null) logs.Add(sessionLog);
+        if (sessionLog is not null)
+        {
+            logs.Add(sessionLog);
+        }
 
         var extensions = new Dictionary<string, object?>
         {

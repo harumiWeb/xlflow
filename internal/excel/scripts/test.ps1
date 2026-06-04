@@ -264,7 +264,7 @@ try {
             if ($results[$i].module -eq $moduleName -and $moduleTestNames -contains $results[$i].name) {
               if ($results[$i].status -eq "passed" -or $results[$i].status -eq "inconclusive") {
                 if ($results[$i].status -eq "passed") { $failed++ }
-                if ($results[$i].status -eq "inconclusive") { $inconclusiveCount-- }
+                if ($results[$i].status -eq "inconclusive") { $failed++; $inconclusiveCount-- }
               }
               $results[$i] = [pscustomobject][ordered]@{
                 name = $results[$i].name
@@ -290,7 +290,7 @@ try {
           if ($results[$i].module -eq $moduleName -and $moduleTestNames -contains $results[$i].name) {
             if ($results[$i].status -eq "passed" -or $results[$i].status -eq "inconclusive") {
               if ($results[$i].status -eq "passed") { $failed++ }
-              if ($results[$i].status -eq "inconclusive") { $inconclusiveCount-- }
+              if ($results[$i].status -eq "inconclusive") { $failed++; $inconclusiveCount-- }
             }
             $results[$i] = [pscustomobject][ordered]@{
               name = $results[$i].name

@@ -14,15 +14,15 @@ xlflow trace inject
 
 ## Options and Arguments
 
-| Option / argument | Description                                        | Default |
-| ----------------- | -------------------------------------------------- | ------- |
-| `enable`          | Enable trace helper support.                       | -       |
-| `status`          | Report helper and log state.                       | -       |
-| `disable`         | Remove trace helper support when safe.             | -       |
-| `clean`           | Remove trace logs.                                 | -       |
-| `inject`          | Inject helper into the active/session workbook.    | -       |
-| `--session`       | Operate against the managed live session workbook. | false   |
-| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | auto |
+| Option / argument     | Description                                                        | Default |
+| --------------------- | ------------------------------------------------------------------ | ------- |
+| `enable`              | Enable trace helper support.                                       | -       |
+| `status`              | Report helper and log state.                                       | -       |
+| `disable`             | Remove trace helper support when safe.                             | -       |
+| `clean`               | Remove trace logs.                                                 | -       |
+| `inject`              | Inject helper into the active/session workbook.                    | -       |
+| `--session`           | Operate against the managed live session workbook.                 | false   |
+| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | auto    |
 
 ## Examples
 

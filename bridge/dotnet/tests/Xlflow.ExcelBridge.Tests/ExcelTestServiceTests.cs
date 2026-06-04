@@ -184,4 +184,16 @@ public sealed class ExcelTestServiceTests
         Assert.Single(byAll);
         Assert.Equal("TestC", byAll[0].Name);
     }
+
+    [Fact]
+    public void AdjustCountsForAfterAllFailureConvertsInconclusiveToFailed()
+    {
+        var failed = 0;
+        var inconclusive = 1;
+
+        ExcelTestService.AdjustCountsForAfterAllFailure("inconclusive", ref failed, ref inconclusive);
+
+        Assert.Equal(1, failed);
+        Assert.Equal(0, inconclusive);
+    }
 }
