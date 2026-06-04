@@ -476,13 +476,17 @@ public sealed class ExcelFormInspectionService : IInspectFormService
 
     private static Dictionary<string, object?> SerializeControl(object control)
     {
+        var progId = ExcelBridgeSupport.GetString(control, "ProgId") ?? "";
         var result = new Dictionary<string, object?>
         {
             ["name"] = ExcelBridgeSupport.GetString(control, "Name") ?? "",
-            ["type"] = control.GetType().Name,
+            ["type"] = ResolveDesignerControlType(progId, control.GetType().Name),
         };
 
-        AddStringMember(control, result, "ProgId", "prog_id");
+        if (!string.IsNullOrWhiteSpace(progId))
+        {
+            result["prog_id"] = progId;
+        }
         AddStringMember(control, result, "Caption", "caption");
         AddStringMember(control, result, "Text", "text");
         AddStringMember(control, result, "Value", "value");
@@ -512,6 +516,20 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         }
 
         return result;
+    }
+
+    internal static string ResolveDesignerControlType(string? progId, string? fallbackTypeName)
+    {
+        if (!string.IsNullOrWhiteSpace(progId))
+        {
+            var segments = progId.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length >= 2 && !string.IsNullOrWhiteSpace(segments[1]))
+            {
+                return segments[1];
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(fallbackTypeName) ? "Control" : fallbackTypeName;
     }
 
     private static bool HasExpectedParent(object control, string expectedParentName)

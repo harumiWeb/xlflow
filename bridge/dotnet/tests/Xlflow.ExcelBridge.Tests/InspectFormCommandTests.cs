@@ -8,6 +8,17 @@ namespace Xlflow.ExcelBridge.Tests;
 
 public sealed class InspectFormCommandTests
 {
+    [Theory]
+    [InlineData("Forms.Label.1", "__ComObject", "Label")]
+    [InlineData("Forms.TextBox.1", "__ComObject", "TextBox")]
+    [InlineData("", "__ComObject", "__ComObject")]
+    [InlineData(null, "Frame", "Frame")]
+    public void ResolveDesignerControlType_PrefersProgIdSegment(string? progId, string fallbackTypeName, string expected)
+    {
+        var actual = ExcelFormInspectionService.ResolveDesignerControlType(progId, fallbackTypeName);
+        Assert.Equal(expected, actual);
+    }
+
     [Fact]
     public void HandleParsesPayloadAndReturnsExpectedExtensions()
     {
