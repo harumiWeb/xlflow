@@ -92,6 +92,19 @@ public sealed class ExcelBridgeSupportTests
         Assert.Equal(2, excel.Workbooks.ItemCalls);
     }
 
+    [Fact]
+    public void InvokeViaDynamic_SupportsCopyPictureAndPaste()
+    {
+        var range = new FakeRange();
+        var chart = new FakeChart();
+
+        ExcelBridgeSupport.InvokeViaDynamic(range, "CopyPicture", 2, -4147);
+        ExcelBridgeSupport.InvokeViaDynamic(chart, "Paste");
+
+        Assert.Equal((2, -4147), range.LastCopyPictureArgs);
+        Assert.True(chart.PasteCalled);
+    }
+
     public sealed class FakeExcel(params FakeWorkbook[] workbooks)
     {
         public FakeWorkbookCollection Workbooks { get; } = new(workbooks);
@@ -113,5 +126,25 @@ public sealed class ExcelBridgeSupportTests
     public sealed class FakeWorkbook(string fullName)
     {
         public string FullName { get; } = fullName;
+    }
+
+    public sealed class FakeRange
+    {
+        public (object? Appearance, object? Format)? LastCopyPictureArgs { get; private set; }
+
+        public void CopyPicture(object? appearance, object? format)
+        {
+            LastCopyPictureArgs = (appearance, format);
+        }
+    }
+
+    public sealed class FakeChart
+    {
+        public bool PasteCalled { get; private set; }
+
+        public void Paste()
+        {
+            PasteCalled = true;
+        }
     }
 }

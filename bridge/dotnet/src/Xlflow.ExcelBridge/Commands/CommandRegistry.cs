@@ -22,7 +22,11 @@ public sealed class CommandRegistry
         return new CommandRegistry(new ICommandHandler[]
         {
             new DoctorCommand(),
+            new ExportImageCommand(),
+            new FormExportImageCommand(),
+            new FormWriteCommand(),
             new InspectCommand(),
+            new InspectFormCommand(),
             new MacrosCommand(),
             new ProcessCommand(),
             new PullCommand(),
@@ -35,7 +39,11 @@ public sealed class CommandRegistry
 
     public static CommandRegistry Create(
         Func<ExcelDiagnosticsResult>? probeExcel,
+        IExportImageService? exportImageService = null,
+        IFormExportImageService? formExportImageService = null,
         IInspectService? inspectService = null,
+        IFormWriteService? formWriteService = null,
+        IInspectFormService? inspectFormService = null,
         IMacrosService? macrosService = null,
         IProcessService? processService = null,
         IPullService? pullService = null,
@@ -47,7 +55,11 @@ public sealed class CommandRegistry
         return new CommandRegistry(new ICommandHandler[]
         {
             new DoctorCommand(probeExcel),
+            new ExportImageCommand(exportImageService),
+            new FormExportImageCommand(formExportImageService),
+            new FormWriteCommand(formWriteService),
             new InspectCommand(inspectService),
+            new InspectFormCommand(inspectFormService),
             new MacrosCommand(macrosService),
             new ProcessCommand(processService),
             new PullCommand(pullService),

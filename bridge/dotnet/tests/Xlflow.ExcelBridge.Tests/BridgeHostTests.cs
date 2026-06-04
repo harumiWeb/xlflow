@@ -33,7 +33,11 @@ public sealed class BridgeHostTests
         using var json = JsonDocument.Parse(stdout.ToString());
         var commands = json.RootElement.GetProperty("commands").EnumerateArray().Select(item => item.GetString()).ToArray();
         Assert.Contains("doctor", commands);
+        Assert.Contains("export-image", commands);
+        Assert.Contains("form-export-image", commands);
+        Assert.Contains("form-write", commands);
         Assert.Contains("inspect", commands);
+        Assert.Contains("inspect-form", commands);
         Assert.Contains("macros", commands);
         Assert.Contains("pull", commands);
         Assert.Contains("process", commands);
