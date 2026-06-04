@@ -2493,6 +2493,210 @@ func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.
 	}
 }
 
+func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	root := t.TempDir()
+	var dotNetCalls, powerShellCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				requests:  &dotNetRequests,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"test","logs":["discovered 2 tests","ran 2 tests"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"runtime":{"mode":"test","source":"command","injected":true},"tests":{"summary":{"total":2,"passed":2,"failed":0},"items":[{"module":"SpecTests","name":"AddsNumbers","status":"passed"},{"module":"SpecTests","name":"HandlesTags","status":"passed"}]},"ui":{"events":[{"kind":"msgbox","dialog_id":"confirm-save"}]},"debug":{"count":1,"events":[{"message":"Immediate output"}]}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+			}
+		}
+	}
+
+	cfg := config.Default()
+	env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.TestWithOptions(cfg, "SpecTests", TestOptions{
+		Session:       true,
+		RuntimeMode:   RuntimeModeTest,
+		RuntimeSource: RuntimeSourceCommand,
+		ModuleFilter:  "SpecTests",
+		TagFilter:     "@smoke",
+		UIResponses: UIResponses{
+			MsgBox:     map[string]string{"confirm-save": "yes"},
+			Input:      map[string]string{"customer-name": "Jane"},
+			FileDialog: []FileDialogResponse{{Kind: "folder", DialogID: "target_dir", Cancelled: true}},
+		},
+		UIStream:    UIStreamOptions{Enabled: true, RedactInput: true},
+		DebugStream: DebugStreamOptions{Enabled: true, PipeName: `\\.\pipe\xlflow-debug-test`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	req := dotNetRequests[0]
+	if got := req.Command; got != "test" {
+		t.Fatalf("command = %q, want test", got)
+	}
+	if got := req.Args["Filter"]; got != "SpecTests" {
+		t.Fatalf("Filter = %q, want SpecTests", got)
+	}
+	if got := req.Args["UseSession"]; got != "true" {
+		t.Fatalf("UseSession = %q, want true", got)
+	}
+	if got := req.Args["RuntimeMode"]; got != RuntimeModeTest {
+		t.Fatalf("RuntimeMode = %q, want %q", got, RuntimeModeTest)
+	}
+	if got := req.Args["RuntimeSource"]; got != RuntimeSourceCommand {
+		t.Fatalf("RuntimeSource = %q, want %q", got, RuntimeSourceCommand)
+	}
+	if got := req.Args["ModuleFilter"]; got != "SpecTests" {
+		t.Fatalf("ModuleFilter = %q, want SpecTests", got)
+	}
+	if got := req.Args["TagFilter"]; got != "@smoke" {
+		t.Fatalf("TagFilter = %q, want @smoke", got)
+	}
+	if got, want := req.Args["MsgBoxResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"confirm-save":"yes"}`)); got != want {
+		t.Fatalf("MsgBoxResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := req.Args["InputResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`{"customer-name":"Jane"}`)); got != want {
+		t.Fatalf("InputResponsesJSON = %q, want %q", got, want)
+	}
+	if got, want := req.Args["FileDialogResponsesJSON"], base64.StdEncoding.EncodeToString([]byte(`[{"kind":"folder","dialog_id":"target_dir","cancelled":true}]`)); got != want {
+		t.Fatalf("FileDialogResponsesJSON = %q, want %q", got, want)
+	}
+	if got := req.Args["UIStreamEnabled"]; got != "true" {
+		t.Fatalf("UIStreamEnabled = %q, want true", got)
+	}
+	if got := req.Args["UIStreamRedactInput"]; got != "true" {
+		t.Fatalf("UIStreamRedactInput = %q, want true", got)
+	}
+	if got := req.Args["DebugStreamEnabled"]; got != "true" {
+		t.Fatalf("DebugStreamEnabled = %q, want true", got)
+	}
+	if got := req.Args["DebugStreamPipeName"]; got == "" {
+		t.Fatal("DebugStreamPipeName = empty, want generated pipe name")
+	}
+	if got := req.Args["DebugStreamPipeName"]; got == `\\.\pipe\xlflow-debug-test` {
+		t.Fatalf("DebugStreamPipeName = %q, want generated session pipe name instead of caller placeholder", got)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Runtime == nil || env.Tests == nil || env.UI == nil || env.Debug == nil {
+		t.Fatalf("expected test envelope fields to be populated: %+v", env)
+	}
+	testsPayload, ok := env.Tests.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected tests payload: %#v", env.Tests)
+	}
+	summary, ok := testsPayload["summary"].(map[string]interface{})
+	if !ok || summary["passed"] != float64(2) {
+		t.Fatalf("unexpected tests.summary payload: %#v", testsPayload["summary"])
+	}
+}
+
+func TestRunnerDotNetTraceUsesDotNetProviderForLifecycleActions(t *testing.T) {
+	testCases := []struct {
+		name        string
+		action      string
+		wantAction  string
+		wantModules bool
+	}{
+		{name: "enable", action: "enable", wantAction: "enable", wantModules: true},
+		{name: "status", action: "status", wantAction: "status", wantModules: true},
+		{name: "disable", action: "disable", wantAction: "disable", wantModules: true},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			original := bridgeProviderForMode
+			t.Cleanup(func() { bridgeProviderForMode = original })
+
+			root := t.TempDir()
+			var dotNetCalls, powerShellCalls int
+			var dotNetRequests []excelbridge.Request
+			bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+				switch mode {
+				case excelbridge.ModeDotNet:
+					return trackingBridgeProvider{
+						name:      string(excelbridge.ModeDotNet),
+						supports:  true,
+						callCount: &dotNetCalls,
+						requests:  &dotNetRequests,
+						response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"trace","logs":["trace action completed"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":true,"dirty":false,"needs_save":false},"trace":{"action":"` + tc.wantAction + `","enabled":` + map[bool]string{true: "true", false: "false"}[tc.wantAction != "disable"] + `,"helper_module":"XlflowTrace","trace_dir":"C:\\temp\\.xlflow\\traces"}}`)},
+					}
+				default:
+					return trackingBridgeProvider{
+						name:      string(excelbridge.ModePowerShell),
+						supports:  true,
+						callCount: &powerShellCalls,
+					}
+				}
+			}
+
+			cfg := config.Default()
+			env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.Trace(cfg, TraceOptions{
+				Action:  tc.action,
+				Session: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != output.ExitSuccess {
+				t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+			}
+			if dotNetCalls != 1 {
+				t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+			}
+			if powerShellCalls != 0 {
+				t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+			}
+			if len(dotNetRequests) != 1 {
+				t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+			}
+			req := dotNetRequests[0]
+			if got := req.Command; got != "trace" {
+				t.Fatalf("command = %q, want trace", got)
+			}
+			if got := req.Args["Action"]; got != tc.wantAction {
+				t.Fatalf("Action = %q, want %q", got, tc.wantAction)
+			}
+			if got := req.Args["UseSession"]; got != "true" {
+				t.Fatalf("UseSession = %q, want true", got)
+			}
+			if got := req.Args["MetadataPath"]; got != filepath.Join(root, ".xlflow", "session.json") {
+				t.Fatalf("MetadataPath = %q, want %q", got, filepath.Join(root, ".xlflow", "session.json"))
+			}
+			if tc.wantModules {
+				if got := req.Args["ModulesDir"]; got != filepath.Join(root, "src", "modules") {
+					t.Fatalf("ModulesDir = %q, want %q", got, filepath.Join(root, "src", "modules"))
+				}
+			}
+			if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Trace == nil {
+				t.Fatalf("expected trace envelope fields to be populated: %+v", env)
+			}
+			tracePayload, ok := env.Trace.(map[string]interface{})
+			if !ok || tracePayload["action"] != tc.wantAction {
+				t.Fatalf("unexpected trace payload: %#v", env.Trace)
+			}
+		})
+	}
+}
+
 func TestRunnerAutoBridgeSkipsDotNetForPull(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })

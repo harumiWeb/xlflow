@@ -3295,6 +3295,18 @@ func TestTestScriptRestoresRuntimeMarkersBeforeSavingWorkbook(t *testing.T) {
 	}
 }
 
+func TestTestScriptCountsInconclusiveResultsFailedByAfterAll(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "test.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read test.ps1: %v", err)
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	transition := `if ($results[$i].status -eq "inconclusive") { $failed++; $inconclusiveCount-- }`
+	if count := strings.Count(text, transition); count != 2 {
+		t.Fatalf("expected both AfterAll failure paths to count inconclusive results as failed, found %d", count)
+	}
+}
+
 func TestRunScriptAllowsDirectWhenDiagnosticFalse(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",

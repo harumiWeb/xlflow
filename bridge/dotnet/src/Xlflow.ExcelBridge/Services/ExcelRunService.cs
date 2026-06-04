@@ -24,10 +24,11 @@ public sealed class ExcelRunService : IRunService
         object? workbook = null;
         object? vbProject = null;
         object? runnerComponent = null;
-        RuntimeMarkerState? runtimeState = null;
+        RuntimeInjectionHelper.RuntimeInjectionState? runtimeState = null;
         var sessionAttached = false;
         var sessionMode = "none";
         var skipComCleanup = false;
+        var traceTemporaryInjected = false;
 
         try
         {
@@ -104,11 +105,44 @@ public sealed class ExcelRunService : IRunService
             runtimeState = ApplyRuntimeMarkers(workbook, args);
             var runtimeInjected = runtimeState.Applied;
 
+            // Inject trace helper temporarily if trace is enabled and module doesn't exist
+            var traceLifecycle = "none";
+            if (args.TraceEnabled)
+            {
+                object? vbProjectForTrace = null;
+                try
+                {
+                    vbProjectForTrace = ExcelBridgeSupport.RunPhase("get_vbproject_for_trace", () => ExcelBridgeSupport.Get(workbook, "VBProject"));
+                    if (vbProjectForTrace is not null)
+                    {
+                        if (TraceHelper.HasTraceModule(vbProjectForTrace))
+                        {
+                            traceLifecycle = "existing";
+                        }
+                        else
+                        {
+                            TraceHelper.InstallTraceModule(vbProjectForTrace);
+                            traceLifecycle = "temporary";
+                            traceTemporaryInjected = true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // best-effort trace injection
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(vbProjectForTrace);
+                }
+            }
+
             var macroReference = BuildWorkbookQualifiedMacroReference(workbook, macroName);
             if (!args.Direct)
             {
                 vbProject = ExcelBridgeSupport.RunPhase("prepare_vbide", () => ExcelBridgeSupport.Get(workbook, "VBProject"))
                     ?? throw new InvalidOperationException("prepare_vbide failed: VBProject is unavailable.");
+                RuntimeInjectionHelper.EnableUIStreamInjection(workbook, vbProject, runtimeState);
                 var components = ExcelBridgeSupport.Get(vbProject, "VBComponents")
                     ?? throw new InvalidOperationException("prepare_vbide failed: VBComponents is unavailable.");
                 runnerComponent = ExcelBridgeSupport.InvokeMethod(components, "Add", 1)
@@ -180,6 +214,47 @@ public sealed class ExcelRunService : IRunService
                 runtimeState = null;
             }
 
+            // Read trace events and clean up trace helper
+            var traceEvents = new List<object>();
+            if (args.TraceEnabled && !string.IsNullOrWhiteSpace(args.TraceFile))
+            {
+                try
+                {
+                    var events = TraceHelper.ReadTraceEvents(args.TraceFile);
+                    foreach (var evt in events)
+                    {
+                        traceEvents.Add(new { timestamp = evt.Timestamp, message = evt.Message });
+                        logs.Add(evt.Raw);
+                    }
+                }
+                catch
+                {
+                    // best-effort trace read
+                }
+            }
+
+            // Revert temporary trace helper
+            if (traceTemporaryInjected && !runTimedOut)
+            {
+                object? vbProjectForTraceCleanup = null;
+                try
+                {
+                    vbProjectForTraceCleanup = ExcelBridgeSupport.Get(workbook, "VBProject");
+                    if (vbProjectForTraceCleanup is not null)
+                    {
+                        TraceHelper.RemoveTraceModule(vbProjectForTraceCleanup);
+                    }
+                }
+                catch
+                {
+                    // best-effort
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(vbProjectForTraceCleanup);
+                }
+            }
+
             var targetKind = sessionAttached ? "live_session" : "file";
             var warnings = new List<object>();
             var suggestions = new List<object>();
@@ -231,6 +306,19 @@ public sealed class ExcelRunService : IRunService
                 if (!string.IsNullOrEmpty(args.RuntimeMode))
                 {
                     extensions["runtime"] = new { mode = args.RuntimeMode, source = args.RuntimeSource, injected = runtimeInjected };
+                }
+
+                if (args.TraceEnabled)
+                {
+                    extensions["trace"] = new
+                    {
+                        lifecycle = traceLifecycle,
+                        temporary_injected = traceTemporaryInjected,
+                        temporary_reverted = false,
+                        events = traceEvents.ToArray(),
+                        hint = (string?)null,
+                        read_error = (string?)null,
+                    };
                 }
 
                 if (invocation.Dialog is not null || args.Diagnostic || runTimedOut)
@@ -363,6 +451,19 @@ public sealed class ExcelRunService : IRunService
                 extensions["runtime"] = new { mode = args.RuntimeMode, source = args.RuntimeSource, injected = runtimeInjected };
             }
 
+            if (args.TraceEnabled)
+            {
+                extensions["trace"] = new
+                {
+                    lifecycle = traceLifecycle,
+                    temporary_injected = traceTemporaryInjected,
+                    temporary_reverted = traceTemporaryInjected && !runTimedOut,
+                    events = traceEvents.ToArray(),
+                    hint = traceEvents.Count == 0 && string.IsNullOrWhiteSpace(runError) ? "trace file produced no events; check that the macro calls XlflowTrace.XlflowLog" : null,
+                    read_error = (string?)null,
+                };
+            }
+
             if (args.Diagnostic)
             {
                 extensions["run_diagnostic"] = new
@@ -408,6 +509,32 @@ public sealed class ExcelRunService : IRunService
             {
                 RemoveTemporaryComponent(vbProject, runnerComponent);
                 RestoreRuntimeMarkers(workbook, runtimeState);
+                if (traceTemporaryInjected)
+                {
+                    try
+                    {
+                        object? vbProjectForTraceCleanup = null;
+                        try
+                        {
+                            if (workbook is not null)
+                            {
+                                vbProjectForTraceCleanup = ExcelBridgeSupport.Get(workbook, "VBProject");
+                            }
+                            if (vbProjectForTraceCleanup is not null)
+                            {
+                                TraceHelper.RemoveTraceModule(vbProjectForTraceCleanup);
+                            }
+                        }
+                        finally
+                        {
+                            ExcelBridgeSupport.ReleaseComObject(vbProjectForTraceCleanup);
+                        }
+                    }
+                    catch
+                    {
+                        // best-effort
+                    }
+                }
                 ExcelBridgeSupport.ReleaseComObject(vbProject);
                 if (sessionAttached)
                 {
@@ -664,95 +791,29 @@ public sealed class ExcelRunService : IRunService
         ExcelBridgeSupport.ReleaseComObject(component);
     }
 
-    private static RuntimeMarkerState ApplyRuntimeMarkers(object workbook, RunCommandArguments args)
+    private static RuntimeInjectionHelper.RuntimeInjectionState ApplyRuntimeMarkers(object workbook, RunCommandArguments args)
     {
-        var state = new RuntimeMarkerState();
-        if (string.IsNullOrWhiteSpace(args.RuntimeMode))
-        {
-            return state;
-        }
-        try
-        {
-            state.Applied = true;
-            state.Names.Add(SetDefinedName(workbook, "__XLFLOW_MODE__", args.RuntimeMode));
-            state.Names.Add(SetDefinedName(workbook, "__XLFLOW_RUNTIME_VERSION__", "1"));
-            if (args.DebugStreamEnabled && !string.IsNullOrWhiteSpace(args.DebugStreamPipeName))
-            {
-                state.Names.Add(SetDefinedName(workbook, "__XLFLOW_DEBUG_PIPE__", args.DebugStreamPipeName));
-            }
-        }
-        catch
-        {
-            RestoreRuntimeMarkers(workbook, state);
-            state.Applied = false;
-        }
-        return state;
+        return RuntimeInjectionHelper.ApplyRuntimeInjection(
+            workbook,
+            args.RuntimeMode,
+            args.RuntimeSource,
+            args.MsgBoxResponsesJSON,
+            args.InputResponsesJSON,
+            args.FileDialogResponsesJSON,
+            args.DebugStreamEnabled,
+            args.DebugStreamPipeName,
+            args.UIStreamEnabled,
+            args.UIStreamPipeName,
+            args.UIStreamRedactInput);
     }
 
-    private static DefinedNameState SetDefinedName(object workbook, string name, string value)
+    private static void RestoreRuntimeMarkers(object? workbook, RuntimeInjectionHelper.RuntimeInjectionState? state)
     {
-        var names = ExcelBridgeSupport.Get(workbook, "Names") ?? throw new InvalidOperationException("Workbook names are unavailable.");
-        object? existing = null;
-        try
-        {
-            existing = ExcelBridgeSupport.Get(names, "Item", name);
-        }
-        catch
-        {
-            // missing name
-        }
-        var state = new DefinedNameState(name, existing is not null, existing is null ? "" : Convert.ToString(ExcelBridgeSupport.Get(existing, "RefersTo"), CultureInfo.InvariantCulture) ?? "");
-        if (existing is not null)
-        {
-            ExcelBridgeSupport.InvokeMethod(existing, "Delete");
-            ExcelBridgeSupport.ReleaseComObject(existing);
-        }
-        ExcelBridgeSupport.InvokeMethod(names, "Add", name, "=\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"", false);
-        ExcelBridgeSupport.ReleaseComObject(names);
-        return state;
-    }
-
-    private static void RestoreRuntimeMarkers(object? workbook, RuntimeMarkerState? state)
-    {
-        if (workbook is null || state is null || !state.Applied)
+        if (workbook is null || state is null)
         {
             return;
         }
-        foreach (var item in state.Names.AsEnumerable().Reverse())
-        {
-            try
-            {
-                var names = ExcelBridgeSupport.Get(workbook, "Names");
-                if (names is null)
-                {
-                    continue;
-                }
-                object? existing = null;
-                try
-                {
-                    existing = ExcelBridgeSupport.Get(names, "Item", item.Name);
-                }
-                catch
-                {
-                    // missing name
-                }
-                if (existing is not null)
-                {
-                    ExcelBridgeSupport.InvokeMethod(existing, "Delete");
-                    ExcelBridgeSupport.ReleaseComObject(existing);
-                }
-                if (item.Existed)
-                {
-                    ExcelBridgeSupport.InvokeMethod(names, "Add", item.Name, item.RefersTo, false);
-                }
-                ExcelBridgeSupport.ReleaseComObject(names);
-            }
-            catch
-            {
-                // best-effort runtime marker cleanup
-            }
-        }
-        state.Applied = false;
+        RuntimeInjectionHelper.RestoreRuntimeInjection(workbook, state);
     }
 
     private sealed record WorkerInvocationResult(
@@ -764,37 +825,36 @@ public sealed class ExcelRunService : IRunService
 
     private sealed record HarnessResult(bool Success, string Source, int Number, string Description, int Line, long DurationMs);
 
-    private sealed class RuntimeMarkerState
+    internal sealed class MacroArg
     {
-        public bool Applied { get; set; }
-        public List<DefinedNameState> Names { get; } = [];
+        public string Type { get; set; } = "string";
+        public string Value { get; set; } = "";
     }
 
-    private sealed record DefinedNameState(string Name, bool Existed, string RefersTo);
-
-    private static object? InvokeMacro(object excel, object workbook, string macroName, List<MacroArg> args)
+    private static (object Excel, object Workbook, bool SessionAttached, string SessionMode) OpenWorkbookForRun(
+        string workbookPath, string metadataPath, bool useSession, bool visible)
     {
-        var invokeArgs = new List<object?> { macroName };
-        foreach (var arg in args)
+        if (useSession)
         {
-            invokeArgs.Add(ConvertArg(arg));
+            var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, true);
+            return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
         }
 
-        return ExcelBridgeSupport.RunPhase("invoke_macro", () =>
+        if (ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
         {
-            return ExcelBridgeSupport.InvokeMethod(excel, "Run", invokeArgs.ToArray());
-        });
-    }
+            try
+            {
+                var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, false);
+                return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
+            }
+            catch
+            {
+                // fall through to direct open
+            }
+        }
 
-    private static object? ConvertArg(MacroArg arg)
-    {
-        return arg.Type.ToLowerInvariant() switch
-        {
-            "int" or "integer" or "long" => int.TryParse(arg.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : (object)arg.Value,
-            "double" or "float" or "number" => double.TryParse(arg.Value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var d) ? d : (object)arg.Value,
-            "bool" or "boolean" => bool.TryParse(arg.Value, out var b) ? b : (object)arg.Value,
-            _ => arg.Value,
-        };
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
+        return (direct.Excel, direct.Workbook, false, "none");
     }
 
     private static List<MacroArg> DecodeMacroArgs(string encoded)
@@ -806,83 +866,12 @@ public sealed class ExcelRunService : IRunService
 
         try
         {
-            var json = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            return JsonSerializer.Deserialize<List<MacroArg>>(json, CachedJsonOptions) ?? [];
+            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+            return System.Text.Json.JsonSerializer.Deserialize<List<MacroArg>>(json, CachedJsonOptions) ?? [];
         }
         catch
         {
             return [];
-        }
-    }
-
-    private static int? CaptureErrorLine(object? excel)
-    {
-        if (excel is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var err = ExcelBridgeSupport.Get(excel, "Err");
-            if (err is null)
-            {
-                return null;
-            }
-
-            dynamic errObj = err;
-            var source = errObj.Source as string;
-            if (!string.IsNullOrWhiteSpace(source) && int.TryParse(source, out var line))
-            {
-                return line;
-            }
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static (string Message, int Number)? CaptureExcelError(object? excel)
-    {
-        if (excel is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var err = ExcelBridgeSupport.Get(excel, "Err");
-            if (err is null)
-            {
-                return null;
-            }
-
-            dynamic errObj = err;
-            var number = ExcelBridgeSupport.ToInt(errObj.Number);
-            if (number == 0)
-            {
-                return null;
-            }
-
-            var description = errObj.Description as string;
-            return (description ?? $"Excel error {number}", number);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    internal static void AssertSaveAsExtension(string workbookPath, string saveAsPath)
-    {
-        var workbookExt = Path.GetExtension(workbookPath);
-        var saveAsExt = Path.GetExtension(saveAsPath);
-        if (!string.Equals(workbookExt, saveAsExt, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"save-as extension {saveAsExt} does not match workbook extension {workbookExt}");
         }
     }
 
@@ -946,30 +935,15 @@ public sealed class ExcelRunService : IRunService
         return false;
     }
 
-    private static (object Excel, object Workbook, bool SessionAttached, string SessionMode) OpenWorkbookForRun(
-        string workbookPath, string metadataPath, bool useSession, bool visible)
+    internal static void AssertSaveAsExtension(string workbookPath, string saveAsPath)
     {
-        if (useSession)
+        var workbookExt = Path.GetExtension(workbookPath);
+        var saveAsExt = Path.GetExtension(saveAsPath);
+        if (!string.Equals(workbookExt, saveAsExt, StringComparison.OrdinalIgnoreCase))
         {
-            var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, true);
-            return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
+            throw new InvalidOperationException(
+                $"save-as extension {saveAsExt} does not match workbook extension {workbookExt}");
         }
-
-        if (ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
-        {
-            try
-            {
-                var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, false);
-                return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
-            }
-            catch
-            {
-                // fall through to direct open
-            }
-        }
-
-        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
-        return (direct.Excel, direct.Workbook, false, "none");
     }
 
     private static void CloseWorkbook(object? workbook, object? excel)
@@ -1000,11 +974,5 @@ public sealed class ExcelRunService : IRunService
             }
             ExcelBridgeSupport.ReleaseComObject(excel);
         }
-    }
-
-    internal sealed class MacroArg
-    {
-        public string Type { get; set; } = "string";
-        public string Value { get; set; } = "";
     }
 }

@@ -59,3 +59,4 @@
 
 - Excel/VBE runtime error dialogs can remain hidden until Excel receives focus. A watcher must not require `IsWindowVisible` for owned `#32770` dialog candidates; capture visibility as diagnostics instead.
 - Clicking `Debug` on a runtime error dialog can leave VBE in break mode and make later COM attachment fail. Until selection capture and reset are proven reliable, prefer `End` for unattended suppression.
+- When rewriting test results from `inconclusive` to `failed`, update both counters. Per-item status and top-level command status must not diverge after lifecycle hook failures.

@@ -55,19 +55,40 @@ public sealed class RunCommandTests
     }
 
     [Fact]
-    public void HandleRejectsTraceUntilDotNetParityIsImplemented()
+    public void HandlePassesTraceAndUiOrchestrationOptionsToService()
     {
-        var command = new RunCommand(new FakeRunService((_, _) => BridgeResponse.Ok(new BridgeRequest())));
+        var serviceCalled = false;
+        var command = new RunCommand(new FakeRunService((request, args) =>
+        {
+            serviceCalled = true;
+            Assert.True(args.TraceEnabled);
+            Assert.Equal("[]", args.MsgBoxResponsesJSON);
+            Assert.Equal("{\"customer-name\":\"Jane\"}", args.InputResponsesJSON);
+            Assert.Equal("[{\"kind\":\"file\",\"dialog_id\":\"pick-report\"}]", args.FileDialogResponsesJSON);
+            Assert.True(args.UIStreamEnabled);
+            Assert.True(args.UIStreamRedactInput);
+            Assert.True(args.DebugStreamEnabled);
+            Assert.Equal(@"\\.\pipe\xlflow-debug-test", args.DebugStreamPipeName);
+
+            return BridgeResponse.Ok(request);
+        }));
         var request = new BridgeRequest
         {
             ProtocolVersion = ProtocolVersion.Current,
-            RequestId = "req-run-trace-unsupported",
+            RequestId = "req-run-trace-ui-supported",
             Command = "run",
             Payload = JsonDocument.Parse("""
                 {
                   "WorkbookPath": "C:\\work\\book.xlsm",
                   "MacroName": "Module1.Main",
-                  "TraceEnabled": true
+                  "TraceEnabled": true,
+                  "MsgBoxResponsesJSON": "[]",
+                  "InputResponsesJSON": "{\"customer-name\":\"Jane\"}",
+                  "FileDialogResponsesJSON": "[{\"kind\":\"file\",\"dialog_id\":\"pick-report\"}]",
+                  "UIStreamEnabled": true,
+                  "UIStreamRedactInput": true,
+                  "DebugStreamEnabled": true,
+                  "DebugStreamPipeName": "\\\\.\\pipe\\xlflow-debug-test"
                 }
                 """).RootElement.Clone(),
         };
@@ -75,35 +96,8 @@ public sealed class RunCommandTests
         var response = command.Handle(request, CancellationToken.None);
         var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
 
-        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
-        Assert.Equal("run_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
-        Assert.Contains("--trace", json.RootElement.GetProperty("error").GetProperty("message").GetString());
-    }
-
-    [Fact]
-    public void HandleRejectsScriptedUiResponsesUntilDotNetParityIsImplemented()
-    {
-        var command = new RunCommand(new FakeRunService((_, _) => BridgeResponse.Ok(new BridgeRequest())));
-        var request = new BridgeRequest
-        {
-            ProtocolVersion = ProtocolVersion.Current,
-            RequestId = "req-run-ui-unsupported",
-            Command = "run",
-            Payload = JsonDocument.Parse("""
-                {
-                  "WorkbookPath": "C:\\work\\book.xlsm",
-                  "MacroName": "Module1.Main",
-                  "MsgBoxResponsesJSON": "[]"
-                }
-                """).RootElement.Clone(),
-        };
-
-        var response = command.Handle(request, CancellationToken.None);
-        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
-
-        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
-        Assert.Equal("run_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
-        Assert.Contains("XlflowUI", json.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.True(serviceCalled);
+        Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
     }
 
     [Fact]

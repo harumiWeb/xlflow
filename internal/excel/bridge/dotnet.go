@@ -22,14 +22,13 @@ var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
 
 // dotNetSupportedCommands is the Go-side source of truth for auto-mode provider selection.
 // It controls whether --bridge auto will attempt the .NET bridge before falling back to
-// PowerShell. This list MUST be kept in sync with the commands advertised by the .NET
-// bridge's --capabilities-json response (see bridge/dotnet/src/Xlflow.ExcelBridge/Commands/CommandRegistry.cs).
-// When adding a command to the .NET bridge, update this map and the corresponding
-// capabilities test in BridgeHostTests.cs.
+// PowerShell. It is intentionally narrower than the commands advertised by the .NET
+// bridge's --capabilities-json response: commands can be available for explicit
+// --bridge dotnet use while remaining excluded from auto selection.
 //
-// pull and push are intentionally excluded: auto mode must keep the existing PowerShell
-// behavior for these commands. Use --bridge dotnet explicitly to route pull/push through
-// the .NET bridge.
+// pull, push, macros, run, test, and trace are intentionally excluded: auto mode must
+// keep the existing PowerShell behavior for these commands. Use --bridge dotnet
+// explicitly to route them through the .NET bridge.
 var dotNetSupportedCommands = map[string]struct{}{
 	"doctor":  {},
 	"inspect": {},

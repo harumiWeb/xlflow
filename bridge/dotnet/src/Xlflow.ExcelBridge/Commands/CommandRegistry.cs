@@ -28,6 +28,8 @@ public sealed class CommandRegistry
             new PullCommand(),
             new PushCommand(),
             new RunCommand(),
+            new TestCommand(),
+            new TraceCommand(),
         });
     }
 
@@ -38,7 +40,9 @@ public sealed class CommandRegistry
         IProcessService? processService = null,
         IPullService? pullService = null,
         IPushService? pushService = null,
-        IRunService? runService = null)
+        IRunService? runService = null,
+        ITestService? testService = null,
+        ITraceService? traceService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
         {
@@ -49,6 +53,8 @@ public sealed class CommandRegistry
             new PullCommand(pullService),
             new PushCommand(pushService),
             new RunCommand(runService),
+            new TestCommand(testService),
+            new TraceCommand(traceService),
         });
     }
 

@@ -203,3 +203,33 @@
 - [x] Windows + Excel 実機: `example/calendar-pick` で `go run ../../cmd/xlflow --json --bridge dotnet doctor`
 - [x] 実機結果: `selected_bridge=dotnet`, `protocol_version=1`, `bridge.name=xlflow-excel-bridge`, `bridge.commit=dev`, `excel.com_activation=true`, `excel.vbide_access=true`, `automation_security=1`
 - [x] 実機観測: `excel.version` / `excel.build` / `trust_vba_access` はこの環境では `null`
+
+---
+
+# Issue 80 independent verification
+
+## Correctness fixes
+
+- [x] Roll back partial .NET runtime defined-name injection and abort execution on injection failure.
+- [x] Validate `trace disable` source-match safety before mutating the workbook.
+- [x] Reject unsupported trace actions and missing workbook paths at the .NET command boundary.
+- [x] Add .NET regression tests for trace command validation and source removal decisions.
+
+## Verification
+
+- [x] `task install`
+- [x] `dotnet test bridge/dotnet/Xlflow.ExcelBridge.sln --no-restore` - 157 passed
+- [x] `go test ./... -count=1` - 862 passed
+- [x] `go vet ./...`
+- [x] `git diff --check`
+- [x] Windows + Excel issue 80 E2E workspace: `C:\dev\go\takt-worktrees\20260603T1401-issue-80-tasuku-gooru-issue-80\tmp_workspaces\issue80-independent-e2e`
+- [x] `trace enable/status/disable --bridge dotnet --json`
+- [x] Modified trace source failure preserves `workbook_injected=true`
+- [x] Session-first `push --fast --session --no-save -> test/run --bridge dotnet -> save -> session stop`
+- [x] Runtime mode, MsgBox/InputBox/FileDialog responses, UI events, debug events, save-required state, and Excel COM workbook readback
+- [x] Init workspace: `C:\dev\go\takt-worktrees\20260603T1401-issue-80-tasuku-gooru-issue-80\tmp_workspaces\issue80-independent-init`
+- [x] Class/UserForm round-trip workspace: `C:\dev\go\takt-worktrees\20260603T1401-issue-80-tasuku-gooru-issue-80\tmp_workspaces\issue80-release-gate-roundtrip`
+
+## Notes
+
+- UserForm `.frx` remained present through repeated push/save/pull cycles, but its SHA-256 changed on each Excel export; byte-identical `.frx` output is not asserted.
