@@ -601,18 +601,44 @@ internal static class ExcelBridgeSupport
         dynamic dyn = comObject;
         return memberName switch
         {
+            "CopyPicture" => InvokeCopyPicture(dyn, args),
             "Open" => dyn.Open(args[0]),
             "Save" => dyn.Save(),
             "SaveCopyAs" => dyn.SaveCopyAs(args[0]),
             "Import" => dyn.Import(args[0]),
             "Export" => dyn.Export(args[0]),
             "Remove" => dyn.Remove(args[0]),
+            "Paste" => InvokePaste(dyn),
             "Close" => args.Length > 0 ? dyn.Close(args[0]) : dyn.Close(),
             "Quit" => dyn.Quit(),
             "DeleteLines" => dyn.DeleteLines(args[0], args[1]),
             "InsertLines" => dyn.InsertLines(args[0], args[1]),
             _ => throw new InvalidOperationException($"Unsupported COM method for dynamic dispatch: {memberName}"),
         };
+    }
+
+    private static object? InvokeCopyPicture(dynamic dyn, object?[] args)
+    {
+        switch (args.Length)
+        {
+            case 0:
+                dyn.CopyPicture();
+                return null;
+            case 1:
+                dyn.CopyPicture(args[0]);
+                return null;
+            case 2:
+                dyn.CopyPicture(args[0], args[1]);
+                return null;
+            default:
+                throw new InvalidOperationException("CopyPicture currently supports up to 2 arguments.");
+        }
+    }
+
+    private static object? InvokePaste(dynamic dyn)
+    {
+        dyn.Paste();
+        return null;
     }
 
     public static T RunPhase<T>(string phase, Func<T> action)
@@ -666,6 +692,126 @@ internal static class ExcelBridgeSupport
     {
         var value = Get(comObject, memberName, args);
         return value?.ToString();
+    }
+
+    public static object? TryGetWorkbookVbProject(object? workbook)
+    {
+        if (workbook is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic wb = workbook;
+            return (object?)wb.VBProject;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? TryGetWorkbookName(object? workbook)
+    {
+        if (workbook is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic wb = workbook;
+            return Convert.ToString(wb.Name, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? TryGetWorkbookFullName(object? workbook)
+    {
+        if (workbook is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic wb = workbook;
+            return Convert.ToString(wb.FullName, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static object? TryGetActiveSheet(object? excel)
+    {
+        if (excel is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic app = excel;
+            return (object?)app.ActiveSheet;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static object? TryGetSelection(object? excel)
+    {
+        if (excel is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic app = excel;
+            return (object?)app.Selection;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static bool TryGetVisible(object? excel, out bool visible)
+    {
+        if (excel is null)
+        {
+            visible = false;
+            return false;
+        }
+        try
+        {
+            dynamic app = excel;
+            visible = Convert.ToBoolean(app.Visible, CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch
+        {
+            visible = false;
+            return false;
+        }
+    }
+
+    public static object? RunExcelMacro(object excel, string macroName, params object?[] args)
+    {
+        dynamic app = excel;
+        return args.Length switch
+        {
+            0 => app.Run(macroName),
+            1 => app.Run(macroName, args[0]),
+            2 => app.Run(macroName, args[0], args[1]),
+            3 => app.Run(macroName, args[0], args[1], args[2]),
+            4 => app.Run(macroName, args[0], args[1], args[2], args[3]),
+            5 => app.Run(macroName, args[0], args[1], args[2], args[3], args[4]),
+            _ => throw new InvalidOperationException("RunExcelMacro currently supports up to 5 macro arguments."),
+        };
     }
 
     public static int ToInt(object? value)

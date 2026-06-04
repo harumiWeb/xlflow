@@ -424,6 +424,159 @@ func TestRunnerDotNetInspectResponsePreservesEnvelopeFields(t *testing.T) {
 	}
 }
 
+func TestRunnerDotNetInspectFormResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect-form","logs":["inspected both UserForm UserForm1"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","note":"Runtime inspection used a temporary workbook copy."},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"forms":{"runtime":{"name":"UserForm1","basis":"runtime","controls":[]},"designer":{"name":"UserForm1","basis":"designer","controls":[]}},"warnings":[{"code":"runtime_form_temp_copy","message":"Runtime inspection executed against a temporary workbook copy so the source workbook and live session are not mutated."}]}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.InspectForm(config.Default(), InspectFormOptions{
+		Name:           "UserForm1",
+		Basis:          "both",
+		StrictDesigner: true,
+		Session:        true,
+		Keepalive:      CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Forms == nil || env.Warnings == nil {
+		t.Fatalf("expected inspect-form envelope fields to be populated: %+v", env)
+	}
+	formsPayload, ok := env.Forms.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected forms payload map, got %#v", env.Forms)
+	}
+	runtimeForm, ok := formsPayload["runtime"].(map[string]interface{})
+	if !ok || runtimeForm["basis"] != "runtime" {
+		t.Fatalf("unexpected runtime form payload: %+v", formsPayload["runtime"])
+	}
+	designerForm, ok := formsPayload["designer"].(map[string]interface{})
+	if !ok || designerForm["basis"] != "designer" {
+		t.Fatalf("unexpected designer form payload: %+v", formsPayload["designer"])
+	}
+}
+
+func TestRunnerDotNetFormWriteResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"form-write","logs":["build form UserForm1 from src/forms/specs/UserForm1.yaml"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":true,"dirty":false,"needs_save":false},"forms":{"name":"UserForm1","basis":"designer","action":"build","coordinate_system":"parent-relative","control_count":2,"spec_path":"src/forms/specs/UserForm1.yaml","overwrite":true,"source_synced":true,"source_artifacts":{"form_path":"C:\\temp\\src\\forms\\UserForm1.frm","frx_path":"C:\\temp\\src\\forms\\UserForm1.frx","code_path":"C:\\temp\\src\\forms\\code\\UserForm1.bas"}},"warnings":[],"hints":[{"code":"userform_review_commands","message":"review"}]}`)},
+		}
+	}
+
+	spec := forms.FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form:          forms.FormSpecForm{Name: "UserForm1"},
+		Controls:      []forms.FormSpecControl{{ID: "label1", Name: "Label1", Type: "label"}},
+	}
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.FormWrite(config.Default(), FormWriteOptions{
+		Action:    "build",
+		SpecPath:  "src/forms/specs/UserForm1.yaml",
+		Spec:      spec,
+		Overwrite: true,
+		Session:   true,
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Command != "form build" {
+		t.Fatalf("Command = %q, want form build", env.Command)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Forms == nil {
+		t.Fatalf("expected form-write envelope fields to be populated: %+v", env)
+	}
+	formsPayload, ok := env.Forms.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected forms payload map, got %#v", env.Forms)
+	}
+	if formsPayload["action"] != "build" || formsPayload["name"] != "UserForm1" {
+		t.Fatalf("unexpected forms payload: %+v", formsPayload)
+	}
+}
+
+func TestRunnerDotNetFormExportImageResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"form-export-image","logs":["exported runtime UserForm UserForm1 to C:\\temp\\UserForm1.png"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","form":"UserForm1","capture_state":"temporary_copy","note":"Runtime export used a temporary workbook copy."},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"forms":{"name":"UserForm1","basis":"runtime"},"output":{"path":"C:\\temp\\UserForm1.png","format":"png","width_px":320,"height_px":240},"warnings":[{"code":"runtime_form_temp_copy","message":"Runtime export executed against a temporary workbook copy so the source workbook and live session are not mutated."}]}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.FormExportImage(config.Default(), FormExportImageOptions{
+		Name:      "UserForm1",
+		OutPath:   `C:\temp\UserForm1.png`,
+		Session:   true,
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Forms == nil || env.Output == nil {
+		t.Fatalf("expected form-export-image envelope fields to be populated: %+v", env)
+	}
+	formsPayload, ok := env.Forms.(map[string]interface{})
+	if !ok || formsPayload["basis"] != "runtime" {
+		t.Fatalf("unexpected forms payload: %+v", env.Forms)
+	}
+}
+
+func TestRunnerDotNetExportImageResponsePreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"export-image","logs":["exported Sheet1!A1:C10 to C:\\temp\\sheet.png"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","sheet":"Sheet1","range":"A1:C10"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"dirty":false,"needs_save":false},"output":{"path":"C:\\temp\\sheet.png","format":"png","default":true,"width_px":320,"height_px":240},"warnings":[{"code":"clipboard_retry_succeeded","message":"Clipboard image export succeeded after 2 attempts."}]}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.ExportImage(config.Default(), ExportImageOptions{
+		Sheet:     "Sheet1",
+		Range:     "A1:C10",
+		OutPath:   `C:\temp\sheet.png`,
+		Session:   true,
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Output == nil {
+		t.Fatalf("expected export-image envelope fields to be populated: %+v", env)
+	}
+	outputPayload, ok := env.Output.(map[string]interface{})
+	if !ok || outputPayload["format"] != "png" {
+		t.Fatalf("unexpected output payload: %+v", env.Output)
+	}
+}
+
 func TestRunnerDotNetProcessCleanupResponsePreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
