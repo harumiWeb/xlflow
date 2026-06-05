@@ -24,6 +24,10 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow process cleanup <pid>`, `xlflow process cleanup --auto`, and `xlflow process cleanup --all [--yes]` for safe and forceful Excel process termination. `--auto` targets only workbook-free processes; `--all` is a destructive force-stop of all local Excel instances with mandatory interactive confirmation or `--yes`.
 - Fixed `XlflowDebug.bas` helper module to stop forwarding `Log`'s `ParamArray` into a secondary helper procedure, preventing VBA compile/runtime failures such as "Sub または Function が定義されていません" and "ParamArray の使い方が適切ではありません" in some hosts.
 - Fixed `.NET` `xlflow run` compile-dialog handling so VBE compile errors that surface during macro invocation are suppressed, returned as structured `vba_compile_failed` / `compile_vba` diagnostics, and no longer block unattended workflows.
+- Fixed `.NET` `xlflow push` so imported VBA is VBE-compiled before saving or updating source fingerprints, matching the legacy PowerShell bridge behavior and returning structured `vba_compile_failed` / `compile_vba` diagnostics for broken source.
+
+## v0.10.0
+
 - Fixed `xlflow run --diagnostic` compile watcher to return structured `vba_compile_failed` errors when the VBE compile command control cannot be found, instead of silently reclassifying the failure as `vbide_access_denied`.
 - Improved runtime dialog capture for `xlflow run --diagnostic` so break-mode inspection prefers user-code lines over temporary `XlflowRun_*` helpers, and the runtime macro runner now executes in a disposable child PowerShell process so break-mode resets do not leave the parent CLI hung.
 - Fixed `xlflow run --diagnostic` VBE compile preflight to locate `Compile VBAProject` from the VBE menu bar (`Id = 578`) instead of assuming the Debug toolbar contains it, and to treat a disabled compile command as "already compiled" rather than a hard failure.

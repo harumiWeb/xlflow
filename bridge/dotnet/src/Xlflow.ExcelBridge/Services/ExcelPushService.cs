@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
+using Xlflow.ExcelBridge.Windows;
+using Xlflow.ExcelBridge.Workers;
 
 namespace Xlflow.ExcelBridge.Services;
 
@@ -149,6 +151,39 @@ public sealed class ExcelPushService : IPushService
             var documentModulesUpdated = ExcelBridgeSupport.RunPhase(
                 "update_document_modules",
                 () => UpdateDocumentModules(workbook, args));
+
+            var excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
+            if (excelProcessId <= 0)
+            {
+                throw new InvalidOperationException("compile_vba failed: could not resolve the Excel process id.");
+            }
+
+            var compileInvocation = ExcelWorkerInvocation.InvokeWithWorker(
+                new MacroRunWorkerRequest(
+                    excelProcessId,
+                    excelHwnd,
+                    "",
+                    Operation: "compile",
+                    WorkbookPath: args.WorkbookPath),
+                excelHwnd,
+                DialogKind.Compile,
+                suppressModalErrors: true,
+                ResolveCompileTimeout(request),
+                cancellationToken);
+            if (compileInvocation.Dialog is not null ||
+                compileInvocation.TimedOut ||
+                compileInvocation.Result is null ||
+                !compileInvocation.Result.Ok)
+            {
+                return BuildCompileFailureResponse(
+                    request,
+                    args,
+                    workbookPath,
+                    sessionAttached,
+                    sessionMode,
+                    compileInvocation);
+            }
 
             var saved = false;
             if (!args.NoSave)
@@ -772,6 +807,106 @@ public sealed class ExcelPushService : IPushService
             ["code"] = "userform_planned_commands",
             ["message"] = "UserForm workflow: `xlflow pull --json`, `xlflow inspect form <name> --designer --json`, `xlflow form snapshot <name> --out src/forms/specs/<name>.yaml`, edit spec/code artifacts, then `xlflow form build src/forms/specs/<name>.yaml --overwrite` and verify with `xlflow form export-image <name> --out <path>`.",
         });
+    }
+
+    internal static BridgeResponse BuildCompileFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        string workbookPath,
+        bool sessionAttached,
+        string sessionMode,
+        WorkerInvocationResult invocation)
+    {
+        var message = invocation.Dialog is not null
+            ? DialogMessage(invocation.Dialog)
+            : invocation.TimedOut
+                ? "VBE Compile timed out."
+                : invocation.Result?.Error?.Message ?? "VBE Compile failed.";
+        var dirty = sessionAttached;
+        var extensions = new Dictionary<string, object?>
+        {
+            ["target"] = new Dictionary<string, object?>
+            {
+                ["kind"] = sessionAttached ? "live_session" : "file",
+                ["path"] = workbookPath,
+            },
+            ["session"] = new Dictionary<string, object?>
+            {
+                ["active"] = sessionAttached,
+                ["workbook_path"] = workbookPath,
+                ["dirty"] = dirty,
+                ["save_required"] = dirty,
+                ["live_newer_than_disk"] = dirty,
+                ["mode"] = sessionMode,
+                ["source_of_truth"] = dirty ? "live_workbook" : "saved_workbook",
+            },
+            ["workbook"] = new Dictionary<string, object?>
+            {
+                ["path"] = workbookPath,
+                ["session"] = sessionAttached,
+                ["session_mode"] = sessionMode,
+                ["session_requested"] = sessionAttached && args.UseSession,
+                ["auto_session"] = sessionAttached && !args.UseSession,
+                ["saved"] = false,
+                ["dirty"] = dirty,
+                ["needs_save"] = dirty,
+            },
+            ["push_diagnostic"] = new
+            {
+                kind = invocation.TimedOut ? "timeout" : "compile",
+                dialog = invocation.Dialog,
+                dialogs = invocation.Dialogs,
+                worker = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = invocation.TimedOut },
+            },
+        };
+
+        if (dirty)
+        {
+            extensions["warnings"] = new[]
+            {
+                new
+                {
+                    code = "save_required",
+                    message = "Source files were imported into the live workbook before VBA compile failed. Inspect or revert the session before saving.",
+                },
+            };
+        }
+
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError(
+                Code: "vba_compile_failed",
+                Message: message,
+                Phase: "compile_vba",
+                Source: "xlflow-excel-bridge",
+                Number: invocation.Result?.Error?.Number),
+            Logs = ["VBE Compile failed: " + message],
+            Extensions = extensions,
+        };
+    }
+
+    internal static TimeSpan ResolveCompileTimeout(BridgeRequest request)
+    {
+        if (request.TimeoutMs is > 1000)
+        {
+            return TimeSpan.FromMilliseconds(request.TimeoutMs.Value - 1000);
+        }
+
+        if (request.TimeoutMs is > 0)
+        {
+            return TimeSpan.FromMilliseconds(Math.Max(1, request.TimeoutMs.Value));
+        }
+
+        return TimeSpan.FromMinutes(5);
+    }
+
+    private static string DialogMessage(DialogSnapshot dialog)
+    {
+        var lines = dialog.Text.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
+        return lines.Length > 0 ? string.Join(Environment.NewLine, lines) : dialog.Title;
     }
 
     private static string ResolveSessionMode(bool sessionAttached, bool useSession)
