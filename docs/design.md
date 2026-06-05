@@ -303,8 +303,9 @@ Windows/       Win32, UI Automation, process, clipboard, dialogs
 13. test / trace / runtime injection
 14. form / export-image
 15. .NET bridge packaging / release
-16. .NET bridge default 化
-17. PowerShell bridge legacy 化
+16. remaining PowerShell-only commands
+17. .NET bridge default 化
+18. PowerShell bridge legacy 化
 ```
 
 ## 8. 実装フェーズ
@@ -493,7 +494,39 @@ dotnet publish bridge/dotnet/src/Xlflow.ExcelBridge/Xlflow.ExcelBridge.csproj `
   -p:PublishTrimmed=false
 ```
 
-### Phase 11: .NET default 化
+### Phase 11: remaining PowerShell-only commands
+
+scope:
+
+- `new`
+- `session`
+- `runner`
+- `attach`
+- `list`
+- `ui`
+- `edit`
+
+方針:
+
+- Go 側の既存 command handler と request payload key は原則維持し、C# bridge 側に同じ command key の handler を追加する。
+- `CommandRegistry` と `--capabilities-json` に未移行 command を追加し、`--bridge dotnet` で明示実行できるようにする。
+- `new` は macro-enabled workbook 作成と初期 VBA bootstrap を .NET 側で実装し、PowerShell path と同じ workbook/source envelope を返す。
+- `session` / `attach` は live Excel workbook と `.xlflow/session.json` の対応を .NET 側で管理し、dirty / save_required / active workbook mismatch の意味を既存 JSON contract と揃える。
+- `runner` は runner helper module の install / status / remove を .NET 側に移し、`run` / `test` が使う helper contract と統合する。
+- `list` は UserForm listing を .NET 側で実装し、既存の `list forms` output shape を維持する。
+- `ui` は button add / list / remove を session-aware に実装し、macro verification と workbook save state を既存 behavior と揃える。
+- `edit` は cell / range / rows / columns の mutation と検証を .NET 側で実装し、どの operation が変更されたかを JSON に明確に残す。
+- 明示 `--bridge dotnet` は fallback しない。未対応 action は PowerShell に逃がさず structured error として返す。
+
+完了条件:
+
+- `xlflow <command> --bridge dotnet --json` が上記 command と sub-action で動く。
+- `xlflow <command> --bridge powershell --json` は互換用に維持される。
+- Go unit test が全 bridge command key の .NET routing / strict dotnet / explicit powershell を確認する。
+- C# unit test が argument mapping、unsupported action、envelope shape を確認する。
+- Windows + Excel COM E2E で `new/init`、session start/status/save/stop、attach、list forms、ui button add/list/remove、edit cell/range/rows/columns、既存 pull/push/run/test workflow が通る。
+
+### Phase 12: .NET default 化
 
 条件:
 
@@ -503,7 +536,20 @@ dotnet publish bridge/dotnet/src/Xlflow.ExcelBridge/Xlflow.ExcelBridge.csproj `
 - `push`
 - `run`
 - `macros`
+- `test`
+- `trace`
+- `inspect-form`
+- `form-write`
+- `form-export-image`
+- `export-image`
 - `process`
+- `new`
+- `session`
+- `runner`
+- `attach`
+- `list`
+- `ui`
+- `edit`
 
 上記が C# bridge で安定し、Windows + Excel COM E2E が通っていること。
 
@@ -517,7 +563,7 @@ after:
   auto -> .NET first on Windows, PowerShell fallback for unsupported commands
 ```
 
-### Phase 12: PowerShell legacy 化
+### Phase 13: PowerShell legacy 化
 
 scope:
 
@@ -558,5 +604,6 @@ Windows + Excel self-hosted:
 9. [#80 Migrate test, trace, and runtime injection to .NET bridge](https://github.com/harumiWeb/xlflow/issues/80)
 10. [#81 Migrate form and export-image commands to .NET bridge](https://github.com/harumiWeb/xlflow/issues/81)
 11. [#82 Package .NET bridge in Windows releases](https://github.com/harumiWeb/xlflow/issues/82)
-12. [#83 Make .NET bridge the default Windows bridge](https://github.com/harumiWeb/xlflow/issues/83)
-13. [#84 Mark PowerShell bridge as legacy fallback](https://github.com/harumiWeb/xlflow/issues/84)
+12. [#97 Migrate remaining PowerShell-only commands to .NET bridge](https://github.com/harumiWeb/xlflow/issues/97)
+13. [#83 Make .NET bridge the default Windows bridge](https://github.com/harumiWeb/xlflow/issues/83)
+14. [#84 Mark PowerShell bridge as legacy fallback](https://github.com/harumiWeb/xlflow/issues/84)
