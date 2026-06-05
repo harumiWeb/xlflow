@@ -106,6 +106,42 @@ func TestRootCommandIncludesTestCommand(t *testing.T) {
 	}
 }
 
+func TestTestCommandWritesProgressToStderrForNonInteractiveJSONRuns(t *testing.T) {
+	skipWindowsPowerShellOnlyTest(t)
+
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	writeTestTestScript(t, dir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &stderr,
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs(withPowerShellBridge("--json", "test"))
+	if err := root.Execute(); err != nil {
+		t.Fatalf("test command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	if got := stderr.String(); got != "xlflow: Running VBA tests...\n" {
+		t.Fatalf("stderr progress = %q", got)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	if env["command"] != "test" {
+		t.Fatalf("expected command=test, got %v", env["command"])
+	}
+}
+
 func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -4049,6 +4085,44 @@ Set-Content -LiteralPath $markerPath -Value ($names -join [Environment]::NewLine
 } | ConvertTo-Json -Compress
 `
 	if err := os.WriteFile(filepath.Join(scriptsDir, "push.ps1"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTestTestScript(t *testing.T, root string) {
+	t.Helper()
+	scriptsDir := filepath.Join(root, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `param(
+  [string]$WorkbookPath,
+  [string]$Filter = "",
+  [string]$ModuleFilter = "",
+  [string]$TagFilter = "",
+  [string]$Visible = "false",
+  [string]$RuntimeMode = "test",
+  [string]$RuntimeSource = "command",
+  [string]$MsgBoxResponsesJSON = "",
+  [string]$InputResponsesJSON = "",
+  [string]$FileDialogResponsesJSON = "",
+  [string]$DebugStreamEnabled = "false",
+  [string]$DebugStreamPipeName = "",
+  [string]$UIStreamEnabled = "false",
+  [string]$UIStreamRedactInput = "true",
+  [string]$UIStreamPipeName = "",
+  [string]$UseSession = "false",
+  [string]$MetadataPath = ""
+)
+@{
+  status = 'ok'
+  command = 'test'
+  logs = @('stub test ok')
+  workbook = @{ path = $WorkbookPath }
+  tests = @()
+} | ConvertTo-Json -Compress -Depth 5
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "test.ps1"), []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

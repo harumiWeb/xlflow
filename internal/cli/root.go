@@ -2856,7 +2856,6 @@ func (a *app) testCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts := buildCommandOptions(a.stderrWriter())
-			commandOpts.Progress = false
 			cfg, err := a.loadConfig("test")
 			if err != nil {
 				return err
