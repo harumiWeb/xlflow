@@ -78,6 +78,7 @@ xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json
 
 > [!IMPORTANT]
 > `test` executes VBA. Use a controlled workbook state before running tests that mutate sheets or files.
+> `test` reports progress on stderr. Interactive terminals show a spinner, while non-interactive or `--json` runs emit a single progress line so stdout stays parseable.
 
 ::: tip
 Keep VBA assertions simple and scalar so failures are easy for agents to parse.

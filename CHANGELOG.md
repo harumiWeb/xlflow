@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.11.0
+
 - Added native `.NET` bridge support for the remaining Windows workbook commands: `xlflow new`, `session start|status|save|stop`, `attach --active`, `runner install|status|remove`, `list forms`, `ui button add|list|remove`, and `edit cell|range|rows|columns` with explicit `--bridge dotnet --json`.
 - Packaged the `.NET` Excel bridge into Windows release ZIPs as `xlflow-excel-bridge.exe` beside `xlflow.exe`, while documenting AppLocker, WDAC, AV, and unsigned-executable caveats for managed Windows environments.
 - Added native `.NET` bridge support for `xlflow test --bridge dotnet --json`, enabling VBA test discovery and execution through the .NET bridge. Supports `Test*`/`*_Test` naming, `@Tag("...")` annotations, `BeforeAll`/`AfterAll`/`BeforeEach`/`AfterEach` hooks, inconclusive detection (`vbObjectError + 516`), runtime injection, UI/debug stream helpers, and session-aware workflow. Auto mode keeps the existing PowerShell behavior; use `--bridge dotnet` explicitly to route through the .NET bridge.
