@@ -27,6 +27,17 @@ public sealed class DialogWatcherTests
     }
 
     [Fact]
+    public void ClassifyLocalizedCompileDialogFromSyntaxErrorText()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic for Applications",
+            text: ["コンパイル エラー:", "構文エラー"],
+            buttons: [Button(11, "OK"), Button(12, "ヘルプ")]);
+
+        Assert.Equal(DialogKind.Compile, DialogFingerprint.Classify(candidate, null));
+    }
+
+    [Fact]
     public void ClassifyInputBoxFromEditChild()
     {
         var candidate = Candidate(
@@ -48,6 +59,20 @@ public sealed class DialogWatcherTests
         var action = DialogActionSelector.Select(DialogKind.Compile, candidate, DialogActionPolicy.SuppressVbaError);
 
         Assert.Equal(DialogAction.None, action);
+    }
+
+    [Fact]
+    public void CompileActionClosesLocalizedOkButton()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic for Applications",
+            text: ["コンパイル エラー:", "構文エラー"],
+            buttons: [Button(11, "OK"), Button(12, "ヘルプ")]);
+
+        var action = DialogActionSelector.Select(DialogKind.Compile, candidate, DialogActionPolicy.SuppressVbaError);
+
+        Assert.Equal("compile_close", action.Name);
+        Assert.Equal(11, action.TargetHwnd);
     }
 
     [Fact]

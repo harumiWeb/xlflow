@@ -221,6 +221,22 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void IsLikelyVbaCompileFailureDetectsCompileDialogHResult()
+    {
+        const int vbeCompileDialogHResult = unchecked((int)0x800A9C68);
+
+        Assert.True(ExcelRunService.IsLikelyVbaCompileFailure(
+            "Exception has been thrown by the target of an invocation. (0x800A9C68)",
+            vbeCompileDialogHResult));
+    }
+
+    [Fact]
+    public void IsLikelyVbaCompileFailureDoesNotTreatGenericRuntimeErrorAsCompile()
+    {
+        Assert.False(ExcelRunService.IsLikelyVbaCompileFailure("Division by zero", 11));
+    }
+
+    [Fact]
     public void SaveAsExtensionIsCaseInsensitive()
     {
         ExcelRunService.AssertSaveAsExtension("C:\\work\\Book.XLSM", "C:\\work\\Copy.xlsm");
