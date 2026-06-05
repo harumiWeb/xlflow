@@ -114,7 +114,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
 > [!IMPORTANT]
-> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the PowerShell or `.NET` Excel bridge.
+> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows, with PowerShell retained as an explicit legacy fallback.
 
 ---
 
@@ -124,11 +124,13 @@ pull → fmt → edit → push → lint → test/run → inspect
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows                                      | Excel COM automation                                                                                                                                                                |
 | Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell or `.NET` bridge                  | Excel automation bridge                                                                                                                                                             |
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+
+> [!NOTE]
+> xlflow uses a .NET bridge for COM operations, so PowerShell is generally not required. However, a PowerShell bridge also exists as a legacy implementation, and if you use this, PowerShell 5.1 or later is required.
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.

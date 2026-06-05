@@ -1771,7 +1771,7 @@ func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
 
 func TestSkillInstallCommandInstallsProviderSkill(t *testing.T) {
 	dir := t.TempDir()
-	a := &app{cwd: dir}
+	a := &app{cwd: dir, bridge: "powershell"}
 	root := a.rootCommand()
 	root.SetArgs([]string{"skill", "install", "--agent", "codex"})
 	if err := root.Execute(); err != nil {
@@ -1792,7 +1792,7 @@ func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
 	writeTestPullScript(t, dir, false)
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook, "--with-skill", "--agent", "codex"})
+	root.SetArgs(withPowerShellBridge("init", workbook, "--with-skill", "--agent", "codex"))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1823,7 +1823,7 @@ func TestInitCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		updateChecker:  stubReleaseChecker{},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook})
+	root.SetArgs(withPowerShellBridge("init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1862,7 +1862,7 @@ func TestInitCommandSkipsWelcomeForJSONOutput(t *testing.T) {
 		stderrTerminal: func() bool { return true },
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"--json", "init", workbook})
+	root.SetArgs(withPowerShellBridge("--json", "init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1897,7 +1897,7 @@ func TestInitCommandShowsUpdateNoticeWhenNewReleaseIsAvailable(t *testing.T) {
 		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook})
+	root.SetArgs(withPowerShellBridge("init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1926,7 +1926,7 @@ func TestInitCommandSilentlySkipsFailedUpdateCheck(t *testing.T) {
 		updateChecker:  stubReleaseChecker{err: errors.New("network down")},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook})
+	root.SetArgs(withPowerShellBridge("init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1955,7 +1955,7 @@ func TestInitCommandSkipsUpdateCheckWithFlag(t *testing.T) {
 		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook, "--no-update-check"})
+	root.SetArgs(withPowerShellBridge("init", workbook, "--no-update-check"))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -1985,7 +1985,7 @@ func TestInitCommandSkipsUpdateCheckWithEnv(t *testing.T) {
 		updateChecker:  stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook})
+	root.SetArgs(withPowerShellBridge("init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -2005,7 +2005,7 @@ func TestInitCommandAutoPullsWorkbookSource(t *testing.T) {
 
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook})
+	root.SetArgs(withPowerShellBridge("init", workbook))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -2032,7 +2032,7 @@ func TestInitCommandWithModuleAutoPushesHelperSource(t *testing.T) {
 
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"init", workbook, "--with-module"})
+	root.SetArgs(withPowerShellBridge("init", workbook, "--with-module"))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("init command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -2068,7 +2068,7 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"new", "Book.xlsm"})
+	root.SetArgs([]string{"--bridge", "powershell", "new", "Book.xlsm"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -2102,7 +2102,7 @@ func TestNewCommandRendersWelcomeForInteractiveTerminal(t *testing.T) {
 		updateChecker:  stubReleaseChecker{},
 	}
 	root := a.rootCommand()
-	root.SetArgs([]string{"new", "Book.xlsm"})
+	root.SetArgs(withPowerShellBridge("new", "Book.xlsm"))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -2154,7 +2154,7 @@ func TestModuleInstallCommandWithPushAutoPushesHelperSource(t *testing.T) {
 	writeTestPushScript(t, dir)
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"module", "install", "--push"})
+	root.SetArgs(withPowerShellBridge("module", "install", "--push"))
 	if err := root.Execute(); err != nil {
 		t.Fatalf("module install --push command error = %v, exit = %d", err, output.ExitCode(err))
 	}
@@ -3960,6 +3960,10 @@ func skipWindowsPowerShellOnlyTest(t *testing.T) {
 	if _, err := exec.LookPath("powershell"); err != nil {
 		t.Skip("powershell not available")
 	}
+}
+
+func withPowerShellBridge(args ...string) []string {
+	return append([]string{"--bridge", "powershell"}, args...)
 }
 
 func writeTestPullScript(t *testing.T, root string, createModule bool) {

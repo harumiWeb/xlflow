@@ -90,24 +90,7 @@ public sealed class ExcelExportImageService : IExportImageService
             ActivateWorkbookWindow(excel, worksheet, range, originalVisible, ref restoreVisible);
 
             phase = "create_chart_host";
-            dynamic ws = worksheet;
-            dynamic rg = range;
-            dynamic chartObjectsDynamic = ws.ChartObjects();
-            chartObjects = (object)chartObjectsDynamic;
-            chartObject = (object)chartObjectsDynamic.Add(
-                Convert.ToDouble(rg.Left, CultureInfo.InvariantCulture),
-                Convert.ToDouble(rg.Top, CultureInfo.InvariantCulture),
-                Math.Max(Convert.ToDouble(rg.Width, CultureInfo.InvariantCulture), 1.0),
-                Math.Max(Convert.ToDouble(rg.Height, CultureInfo.InvariantCulture), 1.0));
-            ((dynamic)chartObject).Name = $"xlflow.export.{Guid.NewGuid():N}";
-            chart = (object)((dynamic)chartObject).Chart;
-
-            phase = "copy_picture";
-            var clipboardResult = CopyRangeToChartWithRetry(range, chart!, excel, worksheet, cancellationToken);
-
-            phase = "export_chart";
-            var exportOk = ExcelBridgeSupport.InvokeMethod(chart!, "Export", outputPath, "PNG");
-            if (!(exportOk is bool exported && exported) && !File.Exists(outputPath))
+            if (!TryExportRangeViaChart(range, worksheet, ref chartObjects, ref chartObject, ref chart, outputPath, restoreVisible, originalVisible, excel))
             {
                 throw new InvalidOperationException("export_image_failed: Excel did not create the requested image file.");
             }
@@ -152,10 +135,6 @@ public sealed class ExcelExportImageService : IExportImageService
             };
 
             var warnings = new List<Dictionary<string, object?>>();
-            if (clipboardResult.Warning is not null)
-            {
-                warnings.Add(clipboardResult.Warning);
-            }
             if (needsSave)
             {
                 warnings.Add(new Dictionary<string, object?>
@@ -351,6 +330,14 @@ public sealed class ExcelExportImageService : IExportImageService
             TrySetVisible(excel, true);
             restoreVisible = true;
         }
+        try
+        {
+            ExcelBridgeSupport.Set(excel, "ScreenUpdating", true);
+        }
+        catch
+        {
+            // best-effort repaint enablement
+        }
         if (hwnd != 0)
         {
             _ = WindowCapture.MoveWindowIntoCaptureBounds(WindowCapture.GetWindowInfo(new IntPtr(hwnd)));
@@ -371,101 +358,35 @@ public sealed class ExcelExportImageService : IExportImageService
         {
             // best-effort selection
         }
-        Thread.Sleep(300);
+        Thread.Sleep(700);
     }
 
-    private static ClipboardPasteResult CopyRangeToChartWithRetry(object range, object chart, object excel, object worksheet, CancellationToken cancellationToken)
+    private static bool TryExportRangeViaChart(object range, object worksheet, ref object? chartObjects, ref object? chartObject, ref object? chart, string outputPath, bool restoreVisible, bool originalVisible, object excel)
     {
-        Exception? lastFailure = null;
-        var attempts = new List<Dictionary<string, object?>>();
-        for (var attempt = 1; attempt <= 4; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                ExcelBridgeSupport.InvokeViaDynamic(range, "CopyPicture", 2, -4147);
-                var clipboardReady = WaitForClipboardPicture(TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(100), cancellationToken);
-                attempts.Add(new Dictionary<string, object?>
-                {
-                    ["attempt"] = attempt,
-                    ["clipboard_ready"] = clipboardReady,
-                });
-                if (!clipboardReady)
-                {
-                    lastFailure = new InvalidOperationException("clipboard_timeout: Excel did not publish an image to the clipboard after CopyPicture.");
-                    ReActivate(worksheet, range, excel);
-                    continue;
-                }
+        ExcelBridgeSupport.InvokeViaDynamic(range, "CopyPicture", 2, -4147);
+        Thread.Sleep(200);
 
-                ExcelBridgeSupport.InvokeViaDynamic(chart, "Paste");
-                if (attempt > 1)
-                {
-                    return new ClipboardPasteResult(new Dictionary<string, object?>
-                    {
-                        ["code"] = "clipboard_retry_succeeded",
-                        ["message"] = $"Clipboard image export succeeded after {attempt} attempts.",
-                        ["attempts"] = attempts,
-                    });
-                }
-                return new ClipboardPasteResult(null);
-            }
-            catch (Exception ex)
-            {
-                lastFailure = ex;
-                attempts.Add(new Dictionary<string, object?>
-                {
-                    ["attempt"] = attempt,
-                    ["error"] = ExcelBridgeSupport.FormatExceptionDetail(ex),
-                });
-                ReActivate(worksheet, range, excel);
-                Thread.Sleep(150 * attempt);
-            }
+        dynamic ws = worksheet;
+        dynamic rg = range;
+        dynamic chartObjectsDynamic = ws.ChartObjects();
+        chartObjects = (object)chartObjectsDynamic;
+        chartObject = (object)chartObjectsDynamic.Add(
+            Convert.ToDouble(rg.Left, CultureInfo.InvariantCulture),
+            Convert.ToDouble(rg.Top, CultureInfo.InvariantCulture),
+            Math.Max(Convert.ToDouble(rg.Width, CultureInfo.InvariantCulture), 1.0),
+            Math.Max(Convert.ToDouble(rg.Height, CultureInfo.InvariantCulture), 1.0));
+        ((dynamic)chartObject).Name = $"xlflow.export.{Guid.NewGuid():N}";
+        chart = (object)((dynamic)chartObject).Chart;
+        ExcelBridgeSupport.InvokeViaDynamic(chart, "Paste");
+        Thread.Sleep(200);
+
+        if (restoreVisible)
+        {
+            TrySetVisible(excel, originalVisible);
         }
 
-        var detail = lastFailure is null ? "clipboard_unavailable: clipboard image data was not available." : ExcelBridgeSupport.FormatExceptionDetail(lastFailure);
-        if (!detail.Contains(':'))
-        {
-            detail = $"clipboard_unavailable: {detail}";
-        }
-        throw new InvalidOperationException(detail);
-    }
-
-    private static void ReActivate(object worksheet, object range, object excel)
-    {
-        try
-        {
-            ExcelBridgeSupport.InvokeMethod(worksheet, "Activate");
-        }
-        catch
-        {
-        }
-        try
-        {
-            ExcelBridgeSupport.InvokeMethod(range, "Select");
-        }
-        catch
-        {
-        }
-        var hwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
-        if (hwnd != 0)
-        {
-            _ = WindowCapture.MoveWindowIntoCaptureBounds(WindowCapture.GetWindowInfo(new IntPtr(hwnd)));
-        }
-    }
-
-    private static bool WaitForClipboardPicture(TimeSpan timeout, TimeSpan pollInterval, CancellationToken cancellationToken)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (ClipboardNative.HasPicture())
-            {
-                return true;
-            }
-            Thread.Sleep(pollInterval);
-        }
-        return ClipboardNative.HasPicture();
+        var exportOk = ExcelBridgeSupport.InvokeMethod(chart, "Export", outputPath, "PNG");
+        return (exportOk is bool exported && exported) || File.Exists(outputPath);
     }
 
     private static (int Width, int Height)? TryGetImageDimensions(string path)
@@ -633,39 +554,4 @@ public sealed class ExcelExportImageService : IExportImageService
         }
     }
 
-    private sealed record ClipboardPasteResult(Dictionary<string, object?>? Warning);
-
-    private static class ClipboardNative
-    {
-        private const uint CfBitmap = 2;
-        private const uint CfDib = 8;
-        private const uint CfEnhMetaFile = 14;
-
-        public static bool HasPicture()
-        {
-            if (!OpenClipboard(IntPtr.Zero))
-            {
-                return false;
-            }
-            try
-            {
-                return IsClipboardFormatAvailable(CfEnhMetaFile) ||
-                       IsClipboardFormatAvailable(CfDib) ||
-                       IsClipboardFormatAvailable(CfBitmap);
-            }
-            finally
-            {
-                _ = CloseClipboard();
-            }
-        }
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern bool OpenClipboard(IntPtr hwndNewOwner);
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern bool CloseClipboard();
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern bool IsClipboardFormatAvailable(uint format);
-    }
 }

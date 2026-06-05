@@ -115,7 +115,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AIエージェント連携 | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
 
 > [!IMPORTANT]
-> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と PowerShell または `.NET` Excel bridge を使用します。
+> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と Windows 既定の `.NET` Excel bridge を使用し、PowerShell bridge は明示指定用の legacy fallback として維持されます。
 
 ---
 
@@ -125,11 +125,13 @@ pull → fmt → edit → push → lint → test/run → inspect
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows                                                    | Excel COM automation                                                                                                                                                                |
 | Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell または `.NET` bridge                            | Excel automation bridge                                                                                                                                                             |
 | VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                                                                                          |
 
 > [!NOTE]
 > `lint`、`fmt`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。
+
+> [!NOTE]
+> xlflow はCOM操作を .NET bridgeで行うため、PowerShell は通常不要です。しかしレガシー実装として PowerShell bridge も存在し、こちらを使う場合は PowerShell 5.1 以降が必要です。
 
 > [!WARNING]
 > Excel の設定で **VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** を有効にしてください。これが無効だと、Excel がインストールされていても `pull` / `push` / `run` などが失敗する場合があります。

@@ -363,6 +363,22 @@ func (r renderer) renderDoctor(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	var b strings.Builder
 	b.WriteString("\n")
+	if selected := stringValue(diag, "selected_bridge"); selected != "" {
+		b.WriteString(kv("Selected bridge", selected))
+	}
+	if requested := stringValue(diag, "requested_bridge"); requested != "" {
+		b.WriteString(kv("Requested bridge", requested))
+	}
+	if _, ok := boolValueOK(diag, "fallback"); ok {
+		b.WriteString(kv("Fallback", yesNo(boolValue(diag, "fallback"))))
+	}
+	if _, ok := boolValueOK(diag, "legacy"); ok {
+		role := "primary"
+		if boolValue(diag, "legacy") {
+			role = "legacy fallback"
+		}
+		b.WriteString(kv("Bridge role", role))
+	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "excel_installed", "com_activation"), "Excel automation", "Excel COM can be created"))
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(r.checkLine(boolValue(diag, "workbook_openable"), "Workbook", path))
@@ -2349,11 +2365,20 @@ func (r renderer) renderBridge(env Envelope) string {
 	}
 	summary := stringValue(bridge, "host")
 	details := make([]string, 0, 2)
+	if summary == "" {
+		summary = stringValue(bridge, "name")
+	}
 	if edition := stringValue(bridge, "edition"); edition != "" {
 		details = append(details, edition)
 	}
 	if version := stringValue(bridge, "version"); version != "" {
 		details = append(details, version)
+	}
+	if runtime := stringValue(bridge, "runtime"); runtime != "" {
+		details = append(details, runtime)
+	}
+	if arch := stringValue(bridge, "architecture"); arch != "" {
+		details = append(details, arch)
 	}
 	if summary == "" && len(details) == 0 {
 		return ""

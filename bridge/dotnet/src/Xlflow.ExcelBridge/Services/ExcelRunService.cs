@@ -855,7 +855,7 @@ public sealed class ExcelRunService : IRunService
             }
         }
 
-        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible, disableAutomationMacros: false);
         return (direct.Excel, direct.Workbook, false, "none");
     }
 

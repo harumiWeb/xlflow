@@ -91,7 +91,7 @@ Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `fold
 :::
 
 ::: tip
-`test` supports the .NET bridge via explicit `--bridge dotnet`. In `auto` mode, `test` uses the PowerShell bridge. With `--bridge dotnet`, test discovery, lifecycle hooks, runtime injection, UI stream injection, and session-aware workflow all work through the .NET Excel bridge executable.
+On Windows, `test` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
 :::
 :::
 

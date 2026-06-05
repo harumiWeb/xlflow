@@ -58,7 +58,10 @@ public sealed class DoctorCommand : ICommandHandler
         {
             ["diagnostics"] = new Dictionary<string, object?>
             {
+                ["requested_bridge"] = "dotnet",
                 ["selected_bridge"] = "dotnet",
+                ["fallback"] = false,
+                ["legacy"] = false,
                 ["protocol_version"] = ProtocolVersion.Current,
                 ["runtime"] = new Dictionary<string, object?>
                 {

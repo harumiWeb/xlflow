@@ -20,19 +20,30 @@ var dotNetLookPath = exec.LookPath
 var dotNetBridgeCandidatesFunc = dotNetBridgeCandidates
 var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
 
-// dotNetSupportedCommands is the Go-side source of truth for auto-mode provider selection.
-// It controls whether --bridge auto will attempt the .NET bridge before falling back to
-// PowerShell. It is intentionally narrower than the commands advertised by the .NET
-// bridge's --capabilities-json response: commands can be available for explicit
-// --bridge dotnet use while remaining excluded from auto selection.
-//
-// pull, push, macros, run, test, and trace are intentionally excluded: auto mode must
-// keep the existing PowerShell behavior for these commands. Use --bridge dotnet
-// explicitly to route them through the .NET bridge.
+// dotNetSupportedCommands is the Go-side source of truth for Windows auto-mode provider
+// selection. It lists the command keys that should prefer the .NET bridge before falling
+// back to PowerShell when auto mode is selected.
 var dotNetSupportedCommands = map[string]struct{}{
-	"doctor":  {},
-	"inspect": {},
-	"process": {},
+	"attach":            {},
+	"doctor":            {},
+	"edit":              {},
+	"export-image":      {},
+	"form-export-image": {},
+	"form-write":        {},
+	"inspect":           {},
+	"inspect-form":      {},
+	"list":              {},
+	"macros":            {},
+	"new":               {},
+	"process":           {},
+	"pull":              {},
+	"push":              {},
+	"run":               {},
+	"runner":            {},
+	"session":           {},
+	"test":              {},
+	"trace":             {},
+	"ui":                {},
 }
 
 type DotNetProvider struct {
@@ -164,7 +175,15 @@ func DotNetBridgeCommand() (string, []string, error) {
 	if projectPath, ok := repoLocalDotNetBridgeProjectPathFunc(); ok {
 		dotnetExe, err := dotNetLookPath("dotnet")
 		if err == nil {
-			return dotnetExe, []string{"run", "--project", projectPath, "--configuration", "Release", "--"}, nil
+			return dotnetExe, []string{
+				"run",
+				"--project", projectPath,
+				"--configuration", "Release",
+				"--disable-build-servers",
+				"-p:UseSharedCompilation=false",
+				"-p:BuildInParallel=false",
+				"--",
+			}, nil
 		}
 		if deferredErr == nil {
 			deferredErr = &Error{
@@ -196,6 +215,10 @@ func dotNetBridgeCandidates() []string {
 	if _, file, _, ok := runtime.Caller(0); ok {
 		repoRoot := repoRootFromBridgeFile(file)
 		candidates = append(candidates,
+			filepath.Join(repoRoot, "bridge", "dotnet", "artifacts", "publish", "win-x64", dotNetBridgeBinaryName+".exe"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "artifacts", "publish", "win-x64", dotNetBridgeBinaryName+".dll"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", "win-x64", dotNetBridgeBinaryName+".exe"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", "win-x64", dotNetBridgeBinaryName+".dll"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", dotNetBridgeBinaryName+".exe"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", dotNetBridgeBinaryName+".dll"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Debug", "net8.0", dotNetBridgeBinaryName+".exe"),

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,18 +60,75 @@ func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	}
 }
 
-func TestDotNetProviderDoesNotAdvertisesPullAndPushForAutoSelection(t *testing.T) {
+func TestDotNetBridgeCommandUsesBuildServerSafeArgsForProjectFallback(t *testing.T) {
+	originalLookPath := dotNetLookPath
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetLookPath = originalLookPath
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+
+	dotNetBridgeCandidatesFunc = func() []string { return nil }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) {
+		return `C:\dev\go\xlflow\bridge\dotnet\src\Xlflow.ExcelBridge\Xlflow.ExcelBridge.csproj`, true
+	}
+	dotNetLookPath = func(file string) (string, error) {
+		if file == "dotnet" {
+			return `C:\Program Files\dotnet\dotnet.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+
+	command, args, err := DotNetBridgeCommand()
+	if err != nil {
+		t.Fatalf("DotNetBridgeCommand() error = %v", err)
+	}
+	if command != `C:\Program Files\dotnet\dotnet.exe` {
+		t.Fatalf("command = %q, want dotnet executable", command)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"run", "--disable-build-servers", "-p:UseSharedCompilation=false", "-p:BuildInParallel=false"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("project fallback args missing %q: %v", want, args)
+		}
+	}
+}
+
+func TestDotNetProviderAdvertisesMajorCommandsForAutoSelection(t *testing.T) {
 	provider := DotNetProvider{}
 
-	for _, command := range []string{"pull", "push"} {
-		if provider.Supports(command) {
-			t.Fatalf("Supports(%q) = true, want false; pull/push must not be auto-selected, use --bridge dotnet explicitly", command)
+	for _, command := range []string{"doctor", "pull", "push", "run", "macros", "process", "test", "trace"} {
+		if !provider.Supports(command) {
+			t.Fatalf("Supports(%q) = false, want true; auto mode should prefer .NET for major Windows bridge commands", command)
 		}
 	}
 }
 
 func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {
-	expected := []string{"doctor", "inspect", "process"}
+	expected := []string{
+		"attach",
+		"doctor",
+		"edit",
+		"export-image",
+		"form-export-image",
+		"form-write",
+		"inspect",
+		"inspect-form",
+		"list",
+		"macros",
+		"new",
+		"process",
+		"pull",
+		"push",
+		"run",
+		"runner",
+		"session",
+		"test",
+		"trace",
+		"ui",
+	}
 
 	if len(dotNetSupportedCommands) != len(expected) {
 		t.Fatalf("dotNetSupportedCommands has %d entries, want %d. Got: %v", len(dotNetSupportedCommands), len(expected), dotNetSupportedCommands)
@@ -91,6 +151,39 @@ func TestDotNetProviderExecuteDoctorWithRealBridge(t *testing.T) {
 	if _, ok := repoLocalDotNetBridgeProjectPath(); !ok {
 		t.Skip("repo-local .NET bridge project not found")
 	}
+
+	projectPath, _ := repoLocalDotNetBridgeProjectPath()
+	outDir := filepath.Join(t.TempDir(), "publish")
+	objDir := filepath.Join(t.TempDir(), "obj")
+	buildCmd := exec.Command(
+		"dotnet",
+		"publish",
+		projectPath,
+		"-c", "Release",
+		"-o", outDir,
+		"--disable-build-servers",
+		"-p:UseSharedCompilation=false",
+		"-p:BuildInParallel=false",
+		"-p:BaseIntermediateOutputPath="+objDir+string(os.PathSeparator),
+	)
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		t.Skipf("could not build isolated repo-local .NET bridge for execution test: %v\n%s", buildErr, string(buildOut))
+	}
+
+	bridgeExe := filepath.Join(outDir, dotNetBridgeBinaryName+".exe")
+	if _, err := os.Stat(bridgeExe); err != nil {
+		t.Skipf("isolated repo-local .NET bridge executable was not produced at %s: %v", bridgeExe, err)
+	}
+
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+	dotNetBridgeCandidatesFunc = func() []string { return []string{bridgeExe} }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) { return "", false }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

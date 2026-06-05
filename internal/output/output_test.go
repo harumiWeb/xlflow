@@ -383,7 +383,10 @@ func TestWriteWithOptionsRendersDoctorChecklist(t *testing.T) {
 func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	env := New("doctor")
 	env.Diagnostics = map[string]any{
+		"requested_bridge": "auto",
 		"selected_bridge":  "dotnet",
+		"fallback":         false,
+		"legacy":           false,
 		"protocol_version": float64(1),
 		"runtime":          map[string]any{"os": "Windows 11"},
 		"excel": map[string]any{
@@ -401,7 +404,7 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"xlflow doctor", "Excel automation", "VBIDE access"} {
+	for _, want := range []string{"xlflow doctor", "Selected bridge:", "dotnet", "Requested bridge:", "auto", "Fallback:", "no", "Bridge role:", "primary", "Excel automation", "VBIDE access"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, got)
 		}

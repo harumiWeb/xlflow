@@ -183,57 +183,19 @@ internal static class WindowCapture
 
     public static WindowImageInfo CaptureWindowImage(long hwndValue, string path)
     {
-        var hwnd = new IntPtr(hwndValue);
-        if (!NativeMethods.GetWindowRect(hwnd, out var rect))
-        {
-            throw new InvalidOperationException("window_not_found: failed to resolve window bounds");
-        }
-
-        var width = rect.Right - rect.Left;
-        var height = rect.Bottom - rect.Top;
-        if (width <= 0 || height <= 0)
-        {
-            throw new InvalidOperationException("image_capture_failed: target window has non-positive bounds");
-        }
-
-        var scale = GetWindowCaptureScale(hwnd);
-        var captureWidth = (int)Math.Ceiling(width * scale);
-        var captureHeight = (int)Math.Ceiling(height * scale);
-
-        using var bitmap = new Bitmap(captureWidth, captureHeight);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.White);
-
-        var printOk = false;
-        var hdc = IntPtr.Zero;
-        try
-        {
-            hdc = graphics.GetHdc();
-            printOk = NativeMethods.PrintWindow(hwnd, hdc, 2) || NativeMethods.PrintWindow(hwnd, hdc, 0);
-        }
-        finally
-        {
-            if (hdc != IntPtr.Zero)
-            {
-                graphics.ReleaseHdc(hdc);
-            }
-        }
-
-        if (!printOk)
-        {
-            try
-            {
-                graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(captureWidth, captureHeight));
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"image_capture_failed: failed to capture the target window ({ex.Message})", ex);
-            }
-        }
-
-        using var trimmed = TrimBlackEdges(bitmap);
+        using var capture = CaptureWindowBitmap(hwndValue);
+        using var trimmed = TrimBlackEdges(capture.Bitmap);
         trimmed.Save(path, ImageFormat.Png);
-        return new WindowImageInfo(trimmed.Width, trimmed.Height, scale);
+        return new WindowImageInfo(trimmed.Width, trimmed.Height, capture.Scale);
+    }
+
+    public static WindowImageInfo CaptureWindowRegion(long hwndValue, Rectangle screenRect, string path, bool preferScreenCopy = false)
+    {
+        using var capture = CaptureWindowBitmap(hwndValue, preferScreenCopy);
+        var crop = ToBitmapRectangle(screenRect, capture.WindowRect, capture.Scale);
+        using var cropped = CropBitmap(capture.Bitmap, crop);
+        cropped.Save(path, ImageFormat.Png);
+        return new WindowImageInfo(cropped.Width, cropped.Height, capture.Scale);
     }
 
     private static List<IntPtr> EnumerateTopLevelWindows(int processId)
@@ -284,6 +246,88 @@ internal static class WindowCapture
         {
             return 1.0;
         }
+    }
+
+    private static CapturedWindowBitmap CaptureWindowBitmap(long hwndValue, bool preferScreenCopy = false)
+    {
+        var hwnd = new IntPtr(hwndValue);
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+        {
+            throw new InvalidOperationException("window_not_found: failed to resolve window bounds");
+        }
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0)
+        {
+            throw new InvalidOperationException("image_capture_failed: target window has non-positive bounds");
+        }
+
+        var scale = GetWindowCaptureScale(hwnd);
+        var captureWidth = (int)Math.Ceiling(width * scale);
+        var captureHeight = (int)Math.Ceiling(height * scale);
+
+#pragma warning disable CA2000 // CapturedWindowBitmap owns and disposes the bitmap.
+        var bitmap = new Bitmap(captureWidth, captureHeight);
+#pragma warning restore CA2000
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.White);
+
+        var printOk = false;
+        if (!preferScreenCopy)
+        {
+            var hdc = IntPtr.Zero;
+            try
+            {
+                hdc = graphics.GetHdc();
+                printOk = NativeMethods.PrintWindow(hwnd, hdc, 2) || NativeMethods.PrintWindow(hwnd, hdc, 0);
+            }
+            finally
+            {
+                if (hdc != IntPtr.Zero)
+                {
+                    graphics.ReleaseHdc(hdc);
+                }
+            }
+        }
+
+        if (!printOk)
+        {
+            try
+            {
+                graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(captureWidth, captureHeight));
+            }
+            catch (Exception ex)
+            {
+                bitmap.Dispose();
+                throw new InvalidOperationException($"image_capture_failed: failed to capture the target window ({ex.Message})", ex);
+            }
+        }
+
+        return new CapturedWindowBitmap(bitmap, rect, scale);
+    }
+
+    private static Rectangle ToBitmapRectangle(Rectangle screenRect, NativeMethods.Rect windowRect, double scale)
+    {
+        var left = (int)Math.Floor((screenRect.Left - windowRect.Left) * scale);
+        var top = (int)Math.Floor((screenRect.Top - windowRect.Top) * scale);
+        var right = (int)Math.Ceiling((screenRect.Right - windowRect.Left) * scale);
+        var bottom = (int)Math.Ceiling((screenRect.Bottom - windowRect.Top) * scale);
+        return Rectangle.FromLTRB(left, top, right, bottom);
+    }
+
+    private static Bitmap CropBitmap(Bitmap bitmap, Rectangle crop)
+    {
+        var safeCrop = Rectangle.Intersect(new Rectangle(0, 0, bitmap.Width, bitmap.Height), crop);
+        if (safeCrop.Width <= 0 || safeCrop.Height <= 0)
+        {
+            throw new InvalidOperationException("image_capture_failed: target crop region is outside the captured Excel window.");
+        }
+
+        var cropped = new Bitmap(safeCrop.Width, safeCrop.Height, bitmap.PixelFormat);
+        using var graphics = Graphics.FromImage(cropped);
+        graphics.DrawImage(bitmap, new Rectangle(0, 0, safeCrop.Width, safeCrop.Height), safeCrop, GraphicsUnit.Pixel);
+        return cropped;
     }
 
     private static Bitmap TrimBlackEdges(Bitmap bitmap)
@@ -434,6 +478,14 @@ internal static class WindowCapture
             var text = new StringBuilder(256);
             _ = GetClassNameW(hwnd, text, text.Capacity);
             return text.ToString();
+        }
+    }
+
+    private sealed record CapturedWindowBitmap(Bitmap Bitmap, NativeMethods.Rect WindowRect, double Scale) : IDisposable
+    {
+        public void Dispose()
+        {
+            Bitmap.Dispose();
         }
     }
 }
