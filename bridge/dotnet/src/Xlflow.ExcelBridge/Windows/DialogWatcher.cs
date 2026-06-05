@@ -127,6 +127,34 @@ public sealed class DialogWatcher
         return CaptureCurrentDialogs(request, includeUia: true);
     }
 
+    internal DialogSnapshot? TryCaptureCurrentDialog(DialogWatchRequest request, bool includeUia, bool executeAction)
+    {
+        foreach (var candidate in _windows.Enumerate(request.ExcelProcessId, request.VbeThreadId))
+        {
+            if (!BelongsToTarget(candidate, request))
+            {
+                continue;
+            }
+
+            var uia = includeUia ? _uia.Describe(candidate.Hwnd) : null;
+            var kind = DialogFingerprint.Classify(candidate, uia);
+            if (kind is null || !Matches(request.Kind, kind.Value))
+            {
+                continue;
+            }
+
+            var action = executeAction
+                ? DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy)
+                : DialogAction.None;
+            var actionResult = executeAction
+                ? ExecuteAction(action, candidate, uia)
+                : DialogActionResult.None;
+            return BuildSnapshot(candidate, uia, kind.Value, 0, action, actionResult);
+        }
+
+        return null;
+    }
+
     public IReadOnlyList<DialogSnapshot> CaptureCurrentDialogs(DialogWatchRequest request, bool includeUia)
     {
         var result = new List<DialogSnapshot>();

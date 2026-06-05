@@ -267,8 +267,10 @@ public sealed class ExcelRunService : IRunService
 
             if (runError is not null)
             {
-                var errorCode = runTimedOut ? "macro_timeout" : ClassifyRunError(runError, runErrorNumber);
-                logs.Add($"macro execution failed: {runError}");
+                var compileFailure = !runTimedOut && IsLikelyVbaCompileFailure(runError, runErrorNumber, invocation.Dialog);
+                var errorCode = runTimedOut ? "macro_timeout" : compileFailure ? "vba_compile_failed" : ClassifyRunError(runError, runErrorNumber);
+                var errorPhase = compileFailure ? "compile_vba" : "invoke_macro";
+                logs.Add(compileFailure ? $"VBA compile failed: {runError}" : $"macro execution failed: {runError}");
                 if (sessionAttached)
                 {
                     dirty = true;
@@ -323,11 +325,11 @@ public sealed class ExcelRunService : IRunService
                     };
                 }
 
-                if (invocation.Dialog is not null || args.Diagnostic || runTimedOut)
+                if (invocation.Dialog is not null || args.Diagnostic || runTimedOut || compileFailure)
                 {
                     extensions["run_diagnostic"] = new
                     {
-                        kind = runTimedOut ? "timeout" : "runtime",
+                        kind = runTimedOut ? "timeout" : compileFailure ? "compile" : "runtime",
                         location = new
                         {
                             macro = macroName,
@@ -362,7 +364,7 @@ public sealed class ExcelRunService : IRunService
                     Error = new BridgeError(
                         Code: errorCode,
                         Message: runError,
-                        Phase: "invoke_macro",
+                        Phase: errorPhase,
                         Source: "xlflow-excel-bridge",
                         Number: runErrorNumber),
                     Logs = logs,
@@ -643,8 +645,19 @@ public sealed class ExcelRunService : IRunService
             }
             if (worker.HasExited)
             {
-                linked.Cancel();
                 var result = worker.WaitForResult(TimeSpan.FromSeconds(1));
+                var postDialog = WaitForPostWorkerDialog(
+                    watcher,
+                    watcherTask,
+                    watchRequest,
+                    workerRequest.Operation,
+                    result,
+                    linked.Token);
+                linked.Cancel();
+                if (postDialog is not null)
+                {
+                    return new WorkerInvocationResult(result, postDialog, [postDialog], false, worker.ProcessId);
+                }
                 return new WorkerInvocationResult(result, null, [], false, worker.ProcessId);
             }
             Thread.Sleep(25);
@@ -654,6 +667,47 @@ public sealed class ExcelRunService : IRunService
         linked.Cancel();
         var dialogs = watcher.CaptureCurrentDialogs(watchRequest, includeUia: false).ToArray();
         return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, true, worker.ProcessId);
+    }
+
+    internal static DialogSnapshot? WaitForPostWorkerDialog(
+        DialogWatcher watcher,
+        Task<DialogSnapshot?> watcherTask,
+        DialogWatchRequest watchRequest,
+        string operation,
+        MacroRunWorkerResult? result,
+        CancellationToken cancellationToken)
+    {
+        var shouldWait =
+            string.Equals(operation, "compile", StringComparison.OrdinalIgnoreCase) ||
+            result is null ||
+            !result.Ok ||
+            result.Error is not null;
+        if (!shouldWait)
+        {
+            return null;
+        }
+
+        if (watcherTask.IsCompletedSuccessfully && watcherTask.Result is not null)
+        {
+            return watcherTask.Result;
+        }
+
+        var deadline = DateTime.UtcNow.AddMilliseconds(900);
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (watcherTask.IsCompletedSuccessfully && watcherTask.Result is not null)
+            {
+                return watcherTask.Result;
+            }
+            var dialog = watcher.TryCaptureCurrentDialog(watchRequest, includeUia: true, executeAction: true);
+            if (dialog is not null)
+            {
+                return dialog;
+            }
+            Thread.Sleep(25);
+        }
+        return null;
     }
 
     private static BridgeResponse BuildCompileFailureResponse(
@@ -890,6 +944,27 @@ public sealed class ExcelRunService : IRunService
         }
 
         return "macro_failed";
+    }
+
+    internal static bool IsLikelyVbaCompileFailure(string message, int? number, DialogSnapshot? dialog = null)
+    {
+        if (dialog is not null && string.Equals(dialog.Kind, "compile", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        const int vbeCompileDialogHResult = unchecked((int)0x800A9C68);
+        if (number == vbeCompileDialogHResult)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("0x800A9C68", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsMacroNotFoundError(string message, int? number)
