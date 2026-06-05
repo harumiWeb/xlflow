@@ -6,8 +6,6 @@
 root: .
 ├── bridge/
 │   └── dotnet/ # dotnet bridge のコード
-├── bridge/
-│   └── dotnet/ # dotnet bridge のコード
 ├── cmd/
 ├── docs/ # ADR、仕様書、その他開発ドキュメント
 ├── internal/ # 内部パッケージ
@@ -89,24 +87,20 @@ root: .
 
 ## 2. 必要な作業手順
 
-AIはコードを生成する前に、必ず以下の手順に従わなければなりません。
+コードを生成・変更する前に、作業規模に応じて以下を行うこと。
 
-1. **要件を理解する**：仕様書や設計資料を読み、要件を完全に理解する。
-2. **設計を検討する**：必要に応じて、機能分解とモデル設計を検討する。
-3. **仕様を定義する**：要件に基づいて、関数の引数と戻り値の型を定義します `tasks/feature_spec.md`。
-4. **タスクの割り当て**：各タスクを明確に定義し、実行順序を決定します `tasks/todo.md`。
-5. **テストの生成**：必要に応じてテストコードを生成します。
-6. **コードの実装**：上記の基準に従ってコードを実装してください。
-7. **コードの実行と確認**：生成されたコードを実行し、期待どおりに動作することを確認します。
-8. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
-9. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
-10. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
-11. **テストの生成**：必要に応じてテストコードを生成します。
-12. **コードの実装**：上記の基準に従ってコードを実装してください。
-13. **コードの実行と確認**：生成されたコードを実行し、期待どおりに動作することを確認します。
-14. **テストの実行**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
-15. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
-16. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
+1. 要件を理解する：関連する仕様書、ADR、既存実装を確認する。
+2. 設計を検討する：影響範囲、既存設計との整合性、代替案を確認する。
+3. 必要に応じて作業用メモを作成する：
+   - 複雑な作業: `tasks/feature_spec.md`
+   - 進捗管理: `tasks/todo.md`
+   - 再発防止: `tasks/lessons.md`
+4. テストを追加・更新する。
+5. 実装する。
+6. 動作確認する。
+7. テストを実行する。
+8. 自己レビューする。
+9. 必要に応じてドキュメント、ADR、仕様書、CHANGELOG を更新する。
 
 - ADR、仕様書に更新がある場合は次のディレクトリに記録すること
   - ADR: `docs/adr/`
@@ -169,6 +163,44 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 ## 5. 注意事項
 
 - xlflowはメインバイナリとdotnetブリッジバイナリの二つで動くため、E2E動作確認を行う際、`go install ./cmd/xlflow` でインストールしても、dotnet bridgeバイナリをインストールすることができない。必ず`task install`でインストールすること
+
+## grepai usage
+
+Use `grepai` for semantic code discovery before broad file reads.
+
+Recommended flow:
+
+1. Use `grepai search "<task intent>"` to find candidate files.
+2. Use `grepai trace callers "<symbol>"` or `grepai trace callees "<symbol>"` to identify likely call sites.
+3. Treat trace results as candidates, not ground truth.
+4. Verify important symbols and call sites with exact search:
+   - `rtk rg "<symbol>"`
+   - `rtk rg "new <TypeName>"`
+   - `rtk rg "<methodName>"`
+5. Read only the files confirmed by grepai + exact search.
+
+Branch/index safety:
+
+- Prefer running `grepai watch` in a separate terminal.
+- After `git switch`, validate important grepai hits with `rtk rg` before editing.
+- If grepai returns files or symbols that do not exist in the current branch, treat the index as stale and restart `grepai watch`.
+
+Use grepai for:
+
+- semantic code discovery
+- finding related implementation files
+- locating design/spec documents
+- finding likely callers/callees
+
+Use `rtk rg` for:
+
+- exact symbol names
+- CLI flags
+- error messages
+- config keys
+- test names
+
+Do not rely on grepai trace alone for complete impact analysis.
 
 <!-- headroom:rtk-instructions -->
 
