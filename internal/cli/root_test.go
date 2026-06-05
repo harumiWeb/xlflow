@@ -1771,7 +1771,7 @@ func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
 
 func TestSkillInstallCommandInstallsProviderSkill(t *testing.T) {
 	dir := t.TempDir()
-	a := &app{cwd: dir}
+	a := &app{cwd: dir, bridge: "powershell"}
 	root := a.rootCommand()
 	root.SetArgs([]string{"skill", "install", "--agent", "codex"})
 	if err := root.Execute(); err != nil {
@@ -1790,7 +1790,7 @@ func TestInitWithSkillInstallsProviderSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestPullScript(t, dir, false)
-	a := &app{cwd: dir}
+	a := &app{cwd: dir, bridge: "powershell"}
 	root := a.rootCommand()
 	root.SetArgs([]string{"init", workbook, "--with-skill", "--agent", "codex"})
 	if err := root.Execute(); err != nil {
@@ -2068,7 +2068,7 @@ func TestNewCommandAutoPushesScaffoldSource(t *testing.T) {
 
 	a := &app{cwd: dir}
 	root := a.rootCommand()
-	root.SetArgs([]string{"new", "Book.xlsm"})
+	root.SetArgs([]string{"--bridge", "powershell", "new", "Book.xlsm"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("new command error = %v, exit = %d", err, output.ExitCode(err))
 	}

@@ -913,7 +913,7 @@ public sealed class ExcelTestService : ITestService
                 // fall through to direct open
             }
         }
-        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible, disableAutomationMacros: false);
         return (direct.Excel, direct.Workbook, false, "none");
     }
 

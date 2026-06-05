@@ -36,7 +36,7 @@ public sealed class ExcelSessionService : ISessionService
         {
             CloseExistingSession(args.MetadataPath);
 
-            var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, true);
+            var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, true, disableAutomationMacros: false);
             excel = direct.Excel;
             workbook = direct.Workbook;
             ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath);
