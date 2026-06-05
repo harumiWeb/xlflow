@@ -31,8 +31,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
       - name: Run tests
         run: go test ./...
+
+      - name: Run .NET bridge tests
+        run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
 
       - name: Build
         run: go build ./...

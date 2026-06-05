@@ -302,11 +302,20 @@ The planned migration order is:
 4. dialog watcher — done
 5. `test`, `trace`, and runtime injection — done
 6. `form` and `export-image`
-7. release packaging
-8. default bridge switch
+7. default bridge switch
 
 `run` is intentionally not first because it combines macro invocation, runtime injection, compile checks, dialog capture, timeout behavior, and session handling.
 
 ## Release Notes
 
-The .NET bridge avoids PowerShell execution policy, but it does not bypass all corporate controls. AppLocker, WDAC, Defender, EDR, or code-signing rules may still block an unsigned or unapproved executable. Release packaging and signing decisions must be documented before making .NET the default Windows bridge.
+Windows release archives now bundle `xlflow-excel-bridge.exe` next to `xlflow.exe`. The bridge is published as a self-contained single-file executable for Windows, while non-Windows archives remain Go-only.
+
+After extracting a Windows archive, verify the sidecar bridge path from an xlflow project directory with:
+
+```powershell
+C:\path\to\unzipped\xlflow.exe doctor --bridge dotnet --json
+```
+
+Successful output, or a structured Excel COM environment failure that still reports `.NET` bridge metadata, confirms that `xlflow.exe` found and launched the bundled bridge executable.
+
+The .NET bridge avoids PowerShell execution policy, but it does not bypass all corporate controls. AppLocker, WDAC, Defender, EDR, antivirus reputation, or code-signing rules may still block an unsigned or unapproved executable. The published checksum and GitHub attestation prove artifact integrity and provenance, but they are not Windows Authenticode signing.

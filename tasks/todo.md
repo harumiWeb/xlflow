@@ -1,5 +1,16 @@
 # Issue #79 + Issue #78 follow-up
 
+---
+
+# Issue #82: Windows release packaging for .NET bridge
+
+- [x] Update `scripts/build-dotnet-bridge.ps1` to `dotnet publish` self-contained single-file output
+- [x] Wire GoReleaser to build/package `xlflow-excel-bridge.exe`
+- [x] Add `.NET` setup and bridge tests to release workflow
+- [x] Update README / README.ja / VitePress / bridge docs for Windows sidecar packaging and policy caveats
+- [x] Run release-oriented verification (`goreleaser check`, snapshot build, archive inspection)
+- [x] Verify extracted Windows archive resolves the sidecar bridge with `doctor --bridge dotnet --json`
+
 - [x] Add ADR for hybrid UIA + Win32 dialog correlation and child worker isolation
 - [x] Implement reusable .NET DialogWatcher subsystem
 - [x] Add dialog snapshot schema, fingerprints, and safe action policy

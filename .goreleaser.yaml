@@ -20,6 +20,13 @@ builds:
       - windows
     goarch:
       - amd64
+    hooks:
+      pre:
+        - cmd: >-
+            pwsh -NoProfile -File ./scripts/build-dotnet-bridge.ps1
+            -Runtime win-x64
+            -OutputDir ./bridge/dotnet/artifacts/publish/win-x64
+          output: true
 
 archives:
   - id: xlflow
@@ -34,6 +41,8 @@ archives:
     files:
       - LICENSE
       - README.md
+      - src: bridge/dotnet/artifacts/publish/{{ if eq .Os "windows" }}win-x64{{ else }}missing{{ end }}/xlflow-excel-bridge.exe
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt
