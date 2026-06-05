@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,6 +55,42 @@ func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	}
 	if projectPath == "" {
 		t.Fatal("expected non-empty project path")
+	}
+}
+
+func TestDotNetBridgeCommandUsesBuildServerSafeArgsForProjectFallback(t *testing.T) {
+	originalLookPath := dotNetLookPath
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetLookPath = originalLookPath
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+
+	dotNetBridgeCandidatesFunc = func() []string { return nil }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) {
+		return `C:\dev\go\xlflow\bridge\dotnet\src\Xlflow.ExcelBridge\Xlflow.ExcelBridge.csproj`, true
+	}
+	dotNetLookPath = func(file string) (string, error) {
+		if file == "dotnet" {
+			return `C:\Program Files\dotnet\dotnet.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+
+	command, args, err := DotNetBridgeCommand()
+	if err != nil {
+		t.Fatalf("DotNetBridgeCommand() error = %v", err)
+	}
+	if command != `C:\Program Files\dotnet\dotnet.exe` {
+		t.Fatalf("command = %q, want dotnet executable", command)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"run", "--disable-build-servers", "-p:UseSharedCompilation=false", "-p:BuildInParallel=false"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("project fallback args missing %q: %v", want, args)
+		}
 	}
 }
 

@@ -175,7 +175,15 @@ func DotNetBridgeCommand() (string, []string, error) {
 	if projectPath, ok := repoLocalDotNetBridgeProjectPathFunc(); ok {
 		dotnetExe, err := dotNetLookPath("dotnet")
 		if err == nil {
-			return dotnetExe, []string{"run", "--project", projectPath, "--configuration", "Release", "--"}, nil
+			return dotnetExe, []string{
+				"run",
+				"--project", projectPath,
+				"--configuration", "Release",
+				"--disable-build-servers",
+				"-p:UseSharedCompilation=false",
+				"-p:BuildInParallel=false",
+				"--",
+			}, nil
 		}
 		if deferredErr == nil {
 			deferredErr = &Error{
