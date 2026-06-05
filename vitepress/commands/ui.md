@@ -39,6 +39,8 @@ Give buttons stable ids or anchors so rerunning the command can update the inten
 
 When an xlflow session is active and `.xlflow/session.json` points at the configured workbook, `ui button` commands auto-reuse that matching live session workbook instead of opening a fresh hidden instance. `add` and `remove` save the live session workbook after successful mutation so the session workbook stays open; `list` is read-only and does not save.
 
+`ui button add|list|remove` supports explicit `--bridge dotnet` on Windows.
+
 ::: warning save_failed failure mode
 If the workbook save fails after a successful button mutation, the command sets `"status": "error"` with error code `save_failed`. In this state the live session still holds the mutation, but the workbook file on disk may not reflect it. Run `xlflow save --session` to retry persisting the changes.
 :::

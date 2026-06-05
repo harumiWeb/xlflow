@@ -175,30 +175,41 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 # RTK (Rust Token Killer) - Token-Optimized Commands
 
 When running shell commands, **always prefix with `rtk`**. This reduces context
-usage by 60-90% with zero behavior change. If rtk has no filter for a command,
-it passes through unchanged — so it is always safe to use.
+usage with zero behavior change. If rtk has no filter for a command, it passes
+through unchanged — so it is always safe to use.
+
+This project is developed on **Windows**, so prefer PowerShell-compatible
+commands and paths.
 
 ## Key Commands
 
-```bash
-# Git (59-80% savings)
-rtk git status          rtk git diff            rtk git log
+```powershell
+# Git
+rtk git status
+rtk git diff
+rtk git log --oneline -20
 
-# Files & Search (60-75% savings)
-rtk ls <path>           rtk read <file>         rtk rg <pattern>
-rtk find <pattern>      rtk diff <file>
+# Files & Search
+rtk dir
+rtk dir .\src
+rtk read .\path\to\file.txt
+rtk rg "pattern"
+rtk rg "pattern" .\src
+rtk find "pattern"
+rtk diff .\path\to\file.txt
 
-# Analysis (70-90% savings)
-rtk err <cmd>           rtk log <file>          rtk json <file>
-rtk summary <cmd>       rtk deps                rtk env
+# Analysis
+rtk err <command>
+rtk log .\path\to\log.txt
+rtk json .\path\to\file.json
+rtk summary <command>
+rtk deps
+rtk env
 
-# GitHub (26-87% savings)
-rtk gh pr view <n>      rtk gh run list         rtk gh issue list
+# GitHub
+rtk gh pr view <number>
+rtk gh run list
+rtk gh issue list
 ```
 
-## Rules
-
-- In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
-- For debugging, use raw command without rtk prefix
-- `rtk proxy <cmd>` runs command without filtering but tracks usage
 <!-- /headroom:rtk-instructions -->

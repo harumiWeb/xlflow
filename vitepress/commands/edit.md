@@ -46,6 +46,8 @@ xlflow edit range --sheet QR --range A1:AE31 --fill "#FFFFFF" --session --json
 > [!IMPORTANT]
 > `edit` is session-oriented. Save explicitly when the mutation should persist to disk.
 
+`edit cell|range|rows|columns` supports explicit `--bridge dotnet` on Windows.
+
 ::: warning
 Treat edit payloads as workbook mutations. Use disposable sessions or backups for destructive experiments.
 :::

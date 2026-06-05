@@ -105,7 +105,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AIエージェント連携 | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
 
 > [!IMPORTANT]
-> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM + PowerShell** を使用します。
+> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と PowerShell または `.NET` Excel bridge を使用します。
 
 ---
 
@@ -115,7 +115,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows                                                    | Excel COM automation                                                                                                                                                                |
 | Microsoft Excel                                            | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                                 | Excel automation bridge                                                                                                                                                             |
+| PowerShell または `.NET` bridge                            | Excel automation bridge                                                                                                                                                             |
 | VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA プロジェクトの読み書き                                                                                                                                                          |
 
 > [!NOTE]
@@ -256,7 +256,7 @@ xlflow doctor --json
 ```
 
 > [!TIP]
-> `pull` / `push` / `run` / `test` が Excel、COM、PowerShell、VBIDE 設定の問題で失敗する場合は、まず `doctor` を実行してください。
+> `pull` / `push` / `run` / `test` が Excel、COM、bridge、VBIDE 設定の問題で失敗する場合は、まず `doctor` を実行してください。
 
 ### 3. VBA をソースファイルとして取り出す
 
@@ -368,6 +368,8 @@ xlflow attach --active --json
 
 > [!NOTE]
 > `attach` は安全確認用です。active workbook が `xlflow.toml` の `excel.path` と一致するかを検証します。`pull` / `push` / `run` の対象を切り替えるコマンドではありません。
+
+Windows では `attach`、`session`、`runner`、`list forms`、`ui button`、`edit`、`new` も明示 `--bridge dotnet` に対応しています。
 
 ### GUI を含むマクロを扱う
 

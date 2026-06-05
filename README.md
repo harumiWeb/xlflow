@@ -104,7 +104,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
 > [!IMPORTANT]
-> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM + PowerShell**.
+> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the PowerShell or `.NET` Excel bridge.
 
 ---
 
@@ -114,7 +114,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows                                      | Excel COM automation                                                                                                                                                                |
 | Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                                                                                                                             |
+| PowerShell or `.NET` bridge                  | Excel automation bridge                                                                                                                                                             |
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
 
 > [!NOTE]
@@ -255,7 +255,7 @@ xlflow doctor --json
 ```
 
 > [!TIP]
-> If `pull`, `push`, `run`, or `test` fails because of Excel, COM, PowerShell, or VBIDE settings, run `doctor` first.
+> If `pull`, `push`, `run`, or `test` fails because of Excel, COM, bridge, or VBIDE settings, run `doctor` first.
 
 ### 3. Export VBA into source files
 
@@ -365,6 +365,8 @@ xlflow attach --active --json
 
 > [!NOTE]
 > `attach` is a safety check. It confirms that the active Excel workbook matches the configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
+
+`attach`, `session`, `runner`, `list forms`, `ui button`, `edit`, and `new` also support explicit `--bridge dotnet` on Windows.
 
 ### GUI-heavy macros
 

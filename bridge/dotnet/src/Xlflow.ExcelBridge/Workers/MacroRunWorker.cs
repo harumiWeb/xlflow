@@ -10,6 +10,7 @@ namespace Xlflow.ExcelBridge.Workers;
 
 public sealed record MacroRunWorkerRequest(
     int ExcelProcessId,
+    long ExcelHwnd,
     string MacroReference,
     IReadOnlyList<MacroRunWorkerArgument>? Arguments = null,
     string Operation = "run",
@@ -57,7 +58,13 @@ public static class MacroRunWorker
         object? excel = null;
         try
         {
-            excel = ExcelBridgeSupport.TryGetExcelByProcessId(request.ExcelProcessId);
+            excel = request.ExcelHwnd != 0
+                ? ExcelBridgeSupport.TryGetExcelByHwnd(request.ExcelHwnd)
+                : null;
+            if (excel is null)
+            {
+                excel = ExcelBridgeSupport.TryGetExcelByProcessId(request.ExcelProcessId);
+            }
             if (excel is null)
             {
                 throw new InvalidOperationException("xlflow could not reconnect to the target Excel instance.");

@@ -32,6 +32,8 @@ Use `list forms` before `form snapshot`, `form build`, or `form export-image` to
 > [!IMPORTANT]
 > Listing forms is metadata-oriented; it does not execute UserForm runtime code.
 
+`list forms` supports explicit `--bridge dotnet` on Windows.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.
