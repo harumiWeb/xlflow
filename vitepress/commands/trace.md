@@ -43,7 +43,7 @@ VBA code can call `XlflowLog` after trace support is available.
 :::
 
 ::: tip
-`trace` supports the .NET bridge via explicit `--bridge dotnet`. In `auto` mode, `trace` uses the PowerShell bridge. With `--bridge dotnet`, `enable`, `disable`, `status`, and `clean` all work through the .NET Excel bridge executable, including source-match safety for `disable` and automation macros force-disable for direct-open paths.
+On Windows, `trace` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
 :::
 
 ## JSON Output Example

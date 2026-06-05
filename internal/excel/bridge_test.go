@@ -889,7 +889,7 @@ func TestRunnerDoctorPreservesDotNetBridgeMetadataAndDiagnostics(t *testing.T) {
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return fakeBridgeProvider{
 			name:     string(excelbridge.ModeDotNet),
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"doctor","logs":[],"error":null,"bridge":{"name":"xlflow-excel-bridge","version":"0.1.0","protocol_version":1,"runtime":".NET 8.0","architecture":"X64"},"diagnostics":{"selected_bridge":"dotnet","protocol_version":1,"runtime":{"os":"Windows 11","process_architecture":"X64","dotnet_runtime":".NET 8.0"},"excel":{"com_activation":true,"version":"16.0","build":"12345","vbide_access":true,"automation_security":1,"trust_vba_access":null}}}`)},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"doctor","logs":[],"error":null,"bridge":{"name":"xlflow-excel-bridge","version":"0.1.0","protocol_version":1,"runtime":".NET 8.0","architecture":"X64"},"diagnostics":{"requested_bridge":"dotnet","selected_bridge":"dotnet","fallback":false,"legacy":false,"protocol_version":1,"runtime":{"os":"Windows 11","process_architecture":"X64","dotnet_runtime":".NET 8.0"},"excel":{"com_activation":true,"version":"16.0","build":"12345","vbide_access":true,"automation_security":1,"trust_vba_access":null}}}`)},
 		}
 	}
 
@@ -918,6 +918,15 @@ func TestRunnerDoctorPreservesDotNetBridgeMetadataAndDiagnostics(t *testing.T) {
 	}
 	if diagnostics["selected_bridge"] != "dotnet" {
 		t.Fatalf("Diagnostics.selected_bridge = %v, want dotnet", diagnostics["selected_bridge"])
+	}
+	if diagnostics["requested_bridge"] != "dotnet" {
+		t.Fatalf("Diagnostics.requested_bridge = %v, want dotnet", diagnostics["requested_bridge"])
+	}
+	if diagnostics["fallback"] != false {
+		t.Fatalf("Diagnostics.fallback = %v, want false", diagnostics["fallback"])
+	}
+	if diagnostics["legacy"] != false {
+		t.Fatalf("Diagnostics.legacy = %v, want false", diagnostics["legacy"])
 	}
 	if diagnostics["protocol_version"] != float64(1) {
 		t.Fatalf("Diagnostics.protocol_version = %v, want 1", diagnostics["protocol_version"])
@@ -1007,6 +1016,103 @@ func TestRunnerDoctorPreservesDotNetBridgeStructuredErrorMetadata(t *testing.T) 
 	}
 	if bridge["name"] != "xlflow-excel-bridge" {
 		t.Fatalf("Bridge.name = %v, want xlflow-excel-bridge", bridge["name"])
+	}
+}
+
+func TestRunnerDoctorAddsFallbackAndLegacyDiagnosticsForPowerShellAutoFallback(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				err: &excelbridge.Error{
+					Kind:    excelbridge.ErrorDotNetMissing,
+					Message: ".NET bridge missing",
+				},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"doctor","logs":[],"bridge":{"host":"powershell.exe","edition":"Desktop","version":"5.1.22621.2506"}}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Doctor(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 || powerShellCalls != 1 {
+		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 each", dotNetCalls, powerShellCalls)
+	}
+	diagnostics, ok := env.Diagnostics.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected diagnostics map, got %#v", env.Diagnostics)
+	}
+	if diagnostics["requested_bridge"] != "auto" {
+		t.Fatalf("Diagnostics.requested_bridge = %v, want auto", diagnostics["requested_bridge"])
+	}
+	if diagnostics["selected_bridge"] != "powershell" {
+		t.Fatalf("Diagnostics.selected_bridge = %v, want powershell", diagnostics["selected_bridge"])
+	}
+	if diagnostics["fallback"] != true {
+		t.Fatalf("Diagnostics.fallback = %v, want true", diagnostics["fallback"])
+	}
+	if diagnostics["legacy"] != true {
+		t.Fatalf("Diagnostics.legacy = %v, want true", diagnostics["legacy"])
+	}
+}
+
+func TestRunnerDoctorAddsLegacyDiagnosticsForExplicitPowerShell(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:      string(excelbridge.ModePowerShell),
+			supports:  true,
+			callCount: &powerShellCalls,
+			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"doctor","logs":[],"bridge":{"host":"powershell.exe","edition":"Desktop","version":"5.1.22621.2506"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "powershell"}.Doctor(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	diagnostics, ok := env.Diagnostics.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected diagnostics map, got %#v", env.Diagnostics)
+	}
+	if diagnostics["requested_bridge"] != "powershell" {
+		t.Fatalf("Diagnostics.requested_bridge = %v, want powershell", diagnostics["requested_bridge"])
+	}
+	if diagnostics["selected_bridge"] != "powershell" {
+		t.Fatalf("Diagnostics.selected_bridge = %v, want powershell", diagnostics["selected_bridge"])
+	}
+	if diagnostics["fallback"] != false {
+		t.Fatalf("Diagnostics.fallback = %v, want false", diagnostics["fallback"])
+	}
+	if diagnostics["legacy"] != true {
+		t.Fatalf("Diagnostics.legacy = %v, want true", diagnostics["legacy"])
 	}
 }
 
@@ -3104,7 +3210,7 @@ func TestRunnerDotNetTraceUsesDotNetProviderForLifecycleActions(t *testing.T) {
 	}
 }
 
-func TestRunnerAutoBridgeSkipsDotNetForPull(t *testing.T) {
+func TestRunnerAutoBridgeUsesDotNetForPull(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -3113,11 +3219,8 @@ func TestRunnerAutoBridgeSkipsDotNetForPull(t *testing.T) {
 		switch mode {
 		case excelbridge.ModeDotNet:
 			return trackingBridgeProvider{
-				name: string(excelbridge.ModeDotNet),
-				supportsFunc: func(cmd string) bool {
-					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
-					return ok
-				},
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
 				callCount: &dotNetCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
 			}
@@ -3138,18 +3241,18 @@ func TestRunnerAutoBridgeSkipsDotNetForPull(t *testing.T) {
 	if code != output.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
 	}
-	if dotNetCalls != 0 {
-		t.Fatalf("dotnet calls = %d, want 0; pull is excluded from auto mode", dotNetCalls)
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
 	if env.Source == nil {
-		t.Fatal("Source is nil, want powershell pull result")
+		t.Fatal("Source is nil, want dotnet pull result")
 	}
 }
 
-func TestRunnerAutoBridgeSkipsDotNetForPush(t *testing.T) {
+func TestRunnerAutoBridgeUsesDotNetForPush(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -3158,11 +3261,8 @@ func TestRunnerAutoBridgeSkipsDotNetForPush(t *testing.T) {
 		switch mode {
 		case excelbridge.ModeDotNet:
 			return trackingBridgeProvider{
-				name: string(excelbridge.ModeDotNet),
-				supportsFunc: func(cmd string) bool {
-					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
-					return ok
-				},
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
 				callCount: &dotNetCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 2 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
 			}
@@ -3183,14 +3283,57 @@ func TestRunnerAutoBridgeSkipsDotNetForPush(t *testing.T) {
 	if code != output.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
 	}
-	if dotNetCalls != 0 {
-		t.Fatalf("dotnet calls = %d, want 0; push is excluded from auto mode", dotNetCalls)
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
 	if env.Backup == nil {
-		t.Fatal("Backup is nil, want powershell push result")
+		t.Fatal("Backup is nil, want dotnet push result")
+	}
+}
+
+func TestRunnerAutoBridgeUsesDotNetForRun(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"run","logs":[],"target":{"kind":"saved_workbook","path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false,"saved":false,"dirty":false,"needs_save":false},"macro":{"name":"Main.Run","duration_ms":42,"arguments":[]},"runtime":{"mode":"interactive","source":"default","injected":true}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"run","logs":["unexpected powershell execution"]}`)},
+			}
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Run(config.Default(), RunOptions{Macro: "Main.Run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	macro, ok := env.Macro.(map[string]interface{})
+	if !ok || macro["name"] != "Main.Run" {
+		t.Fatalf("unexpected macro payload: %#v", env.Macro)
 	}
 }
 
@@ -3203,11 +3346,8 @@ func TestRunnerAutoBridgeFallsBackToPowerShellForBridgeCommandUnsupported(t *tes
 		switch mode {
 		case excelbridge.ModeDotNet:
 			return trackingBridgeProvider{
-				name: string(excelbridge.ModeDotNet),
-				supportsFunc: func(cmd string) bool {
-					_, ok := map[string]struct{}{"doctor": {}, "inspect": {}, "process": {}}[cmd]
-					return ok
-				},
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
 				callCount: &dotNetCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"pull","logs":[],"error":{"code":"BRIDGE_COMMAND_UNSUPPORTED","message":"Command 'pull' is not supported by the .NET bridge.","source":"xlflow-excel-bridge","phase":"bridge.capability"}}`)},
 			}
@@ -3228,8 +3368,8 @@ func TestRunnerAutoBridgeFallsBackToPowerShellForBridgeCommandUnsupported(t *tes
 	if code != output.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
 	}
-	if dotNetCalls != 0 {
-		t.Fatalf("dotnet calls = %d, want 0; pull is excluded from auto mode", dotNetCalls)
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
 	if powerShellCalls != 1 {
 		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)

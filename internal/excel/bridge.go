@@ -87,11 +87,7 @@ func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
 		return true
 	}
 	// Fall back to PowerShell when the .NET bridge cannot open the workbook
-	// (e.g., invalid file format, missing Excel COM). The bridge_file_not_openable
-	// code is returned when the file does not look like a real Excel workbook.
-	// This branch is defense-in-depth: in auto mode, pull/push are never routed
-	// to .NET (dotNetSupportedCommands excludes them), so this path is only
-	// reachable when a future change adds pull/push to the auto-mode set.
+	// (e.g., invalid file format, missing Excel COM).
 	if execution.result.Status == output.StatusFailed && execution.result.Error != nil {
 		switch execution.result.Error.Code {
 		case "bridge_file_not_openable":
@@ -99,6 +95,48 @@ func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
 		}
 	}
 	return false
+}
+
+func enrichDoctorDiagnostics(commandName string, requestedMode excelbridge.Mode, provider excelbridge.Provider, diagnostics any) any {
+	if commandName != "doctor" || provider == nil {
+		return diagnostics
+	}
+
+	diag := diagnosticsObjectMap(diagnostics)
+	if len(diag) == 0 {
+		diag = map[string]any{}
+	}
+
+	selected := provider.Name()
+	legacy := selected == string(excelbridge.ModePowerShell)
+	fallback := requestedMode == excelbridge.ModeAuto && legacy
+
+	diag["requested_bridge"] = string(requestedMode)
+	diag["selected_bridge"] = selected
+	diag["fallback"] = fallback
+	diag["legacy"] = legacy
+	return diag
+}
+
+func diagnosticsObjectMap(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return map[string]any{}
+	}
+	if decoded == nil {
+		return map[string]any{}
+	}
+	return decoded
 }
 
 type WorkbookRef struct {
@@ -1645,7 +1683,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if env.Logs == nil {
 		env.Logs = []string{}
 	}
-	env.Diagnostics = result.Diagnostics
+	env.Diagnostics = enrichDoctorDiagnostics(commandName, mode, provider, result.Diagnostics)
 	env.Workbook = result.Workbook
 	env.Backup = result.Backup
 	env.Source = result.Source

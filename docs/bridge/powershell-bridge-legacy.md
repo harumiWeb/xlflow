@@ -1,12 +1,10 @@
 # PowerShell Bridge Legacy Fallback
 
-The PowerShell bridge is xlflow's current Excel automation implementation and remains the active runtime until .NET provider work is implemented command by command.
-
-This document defines its planned role after the .NET bridge migration begins.
+The PowerShell bridge is xlflow's supported legacy Excel automation fallback on Windows.
 
 ## Role
 
-PowerShell remains a supported legacy fallback while .NET reaches command parity.
+PowerShell remains usable, but it is no longer the default Windows bridge. Windows `auto` mode now prefers `.NET`, and PowerShell is used only when selected explicitly or when `auto` must fall back.
 
 It should continue to support existing workbook-backed behavior, including:
 
@@ -38,7 +36,6 @@ In `auto` mode, PowerShell can be used when:
 - The .NET bridge executable is missing.
 - The .NET bridge protocol is incompatible.
 - The .NET bridge does not support the requested command.
-- The project is still in a migration phase where PowerShell is the preferred default.
 
 In explicit `--bridge dotnet` mode, xlflow must not fallback to PowerShell. That strictness is required so users can verify that PowerShell is not involved in locked-down environments.
 
@@ -57,7 +54,7 @@ During migration:
 - Avoid expanding large shared PowerShell helpers for new .NET-first features.
 - Keep tests for legacy fallback and explicit `--bridge powershell` paths.
 
-After .NET becomes the default bridge on Windows, PowerShell documentation should describe it as legacy fallback rather than the primary automation path.
+New feature work should not expand the PowerShell bridge unless it is required for fallback parity, safety, or bug fixes.
 
 ## Known Limitations
 

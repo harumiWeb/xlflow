@@ -64,7 +64,7 @@ Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `fold
 > For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
 
 ::: tip
-`run` supports the .NET bridge via explicit `--bridge dotnet`. In `auto` mode, `run` uses the PowerShell bridge. With `--bridge dotnet`, macro invocation, argument passing, `--trace` temporary injection/revert, `--msgbox`/`--inputbox`/`--filedialog` response injection, `--ui-stream` module injection, and session-aware workflow all work through the .NET Excel bridge executable.
+On Windows, `run` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
 :::
 
 ## JSON Output Example

@@ -36,14 +36,17 @@ VBIDE access must be enabled in Excel Trust Center before xlflow can import, exp
 
 Successful `--json` output uses the xlflow envelope plus the `diagnostics` object.
 
-When `--bridge dotnet` is selected explicitly, the top-level `bridge` metadata identifies the .NET bridge process and the nested `diagnostics` object contains the .NET-specific runtime and Excel probe results shown below.
+On Windows, `doctor` prefers the `.NET` bridge in `auto` mode. The nested `diagnostics` object always reports the requested bridge mode, the selected provider, and whether `auto` fell back to the legacy PowerShell bridge.
 
 ```json
 {
   "status": "ok",
   "command": "doctor",
   "diagnostics": {
+    "requested_bridge": "auto",
     "selected_bridge": "dotnet",
+    "fallback": false,
+    "legacy": false,
     "protocol_version": 1,
     "runtime": {
       "os": "Windows 11",
@@ -62,12 +65,18 @@ When `--bridge dotnet` is selected explicitly, the top-level `bridge` metadata i
 }
 ```
 
-When `--bridge powershell` is selected, or when `--bridge auto` resolves to PowerShell, the top-level `bridge` metadata uses the PowerShell provider shape instead:
+When `--bridge powershell` is selected, or when `--bridge auto` falls back to PowerShell, the top-level `bridge` metadata uses the PowerShell provider shape and `diagnostics.legacy=true`:
 
 ```json
 {
   "status": "ok",
   "command": "doctor",
+  "diagnostics": {
+    "requested_bridge": "auto",
+    "selected_bridge": "powershell",
+    "fallback": true,
+    "legacy": true
+  },
   "bridge": {
     "host": "pwsh.exe",
     "edition": "Core",

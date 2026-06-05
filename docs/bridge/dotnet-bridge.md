@@ -31,7 +31,10 @@ The Go CLI remains responsible for command parsing, config loading, source-tree 
   "status": "ok",
   "command": "doctor",
   "diagnostics": {
+    "requested_bridge": "dotnet",
     "selected_bridge": "dotnet",
+    "fallback": false,
+    "legacy": false,
     "protocol_version": 1,
     "runtime": {
       "os": "Windows 11",
@@ -54,7 +57,10 @@ When Excel COM activation fails, the bridge returns a structured error with `cod
 
 Fields:
 
+- `requested_bridge` — requested bridge mode for this invocation.
 - `selected_bridge` — always `"dotnet"` when the .NET bridge handles the command.
+- `fallback` — always `false` when the .NET bridge handles the command.
+- `legacy` — always `false` when the .NET bridge handles the command.
 - `protocol_version` — bridge protocol version (currently `1`).
 - `runtime.os` — `Environment.OSVersion` string.
 - `runtime.process_architecture` — process architecture (e.g. `X64`).
@@ -277,20 +283,18 @@ The bridge advertises supported command keys through:
 xlflow-excel-bridge.exe --capabilities-json
 ```
 
-The Go resolver must check capabilities before selecting .NET in `auto` mode.
-
-For issue #76, `auto` may select `.NET` for `doctor`, `inspect`, and `process`. `pull`, `push`, `macros`, and `run` are intentionally excluded from auto mode to preserve the existing PowerShell behavior; use `--bridge dotnet` explicitly to route these commands through the .NET bridge. If `.NET` reports capability/runtime/protocol failures for a supported command, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
+The Go resolver uses the supported command set to prefer `.NET` first in Windows `auto` mode. If `.NET` reports capability, runtime, protocol, or transport failures that make the command unavailable, the Go side may fall back to PowerShell only in `auto` mode. Explicit `--bridge dotnet` remains strict.
 
 ## Selection
 
-Users will be able to select the bridge through:
+Users can select the bridge through:
 
 ```powershell
 xlflow doctor --bridge dotnet --json
 xlflow run Main.Run --bridge dotnet --json
 ```
 
-When `--bridge dotnet` is selected explicitly, xlflow must not fallback to PowerShell. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors.
+Windows `auto` mode now prefers the `.NET` bridge for major workbook-backed commands including `doctor`, `inspect`, `pull`, `push`, `run`, `macros`, `process`, `test`, and `trace`. `--bridge powershell` remains the explicit legacy override. When `--bridge dotnet` is selected explicitly, xlflow must not fallback to PowerShell. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors.
 
 ## Initial Migration Order
 
@@ -302,7 +306,7 @@ The planned migration order is:
 4. dialog watcher — done
 5. `test`, `trace`, and runtime injection — done
 6. `form` and `export-image`
-7. default bridge switch
+7. default bridge switch - done
 
 `run` is intentionally not first because it combines macro invocation, runtime injection, compile checks, dialog capture, timeout behavior, and session handling.
 

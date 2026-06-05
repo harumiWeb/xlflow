@@ -35,7 +35,10 @@ public sealed class DoctorCommandTests
         Assert.Equal("doctor", json.RootElement.GetProperty("command").GetString());
 
         var diagnostics = json.RootElement.GetProperty("diagnostics");
+        Assert.Equal("dotnet", diagnostics.GetProperty("requested_bridge").GetString());
         Assert.Equal("dotnet", diagnostics.GetProperty("selected_bridge").GetString());
+        Assert.False(diagnostics.GetProperty("fallback").GetBoolean());
+        Assert.False(diagnostics.GetProperty("legacy").GetBoolean());
         Assert.Equal(ProtocolVersion.Current, diagnostics.GetProperty("protocol_version").GetInt32());
 
         var runtime = diagnostics.GetProperty("runtime");

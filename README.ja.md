@@ -115,7 +115,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AIエージェント連携 | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
 
 > [!IMPORTANT]
-> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と PowerShell または `.NET` Excel bridge を使用します。
+> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と Windows 既定の `.NET` Excel bridge を使用し、PowerShell bridge は明示指定用の legacy fallback として維持されます。
 
 ---
 

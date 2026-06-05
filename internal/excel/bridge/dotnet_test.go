@@ -57,18 +57,39 @@ func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	}
 }
 
-func TestDotNetProviderDoesNotAdvertisesPullAndPushForAutoSelection(t *testing.T) {
+func TestDotNetProviderAdvertisesMajorCommandsForAutoSelection(t *testing.T) {
 	provider := DotNetProvider{}
 
-	for _, command := range []string{"pull", "push"} {
-		if provider.Supports(command) {
-			t.Fatalf("Supports(%q) = true, want false; pull/push must not be auto-selected, use --bridge dotnet explicitly", command)
+	for _, command := range []string{"doctor", "pull", "push", "run", "macros", "process", "test", "trace"} {
+		if !provider.Supports(command) {
+			t.Fatalf("Supports(%q) = false, want true; auto mode should prefer .NET for major Windows bridge commands", command)
 		}
 	}
 }
 
 func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {
-	expected := []string{"doctor", "inspect", "process"}
+	expected := []string{
+		"attach",
+		"doctor",
+		"edit",
+		"export-image",
+		"form-export-image",
+		"form-write",
+		"inspect",
+		"inspect-form",
+		"list",
+		"macros",
+		"new",
+		"process",
+		"pull",
+		"push",
+		"run",
+		"runner",
+		"session",
+		"test",
+		"trace",
+		"ui",
+	}
 
 	if len(dotNetSupportedCommands) != len(expected) {
 		t.Fatalf("dotNetSupportedCommands has %d entries, want %d. Got: %v", len(dotNetSupportedCommands), len(expected), dotNetSupportedCommands)

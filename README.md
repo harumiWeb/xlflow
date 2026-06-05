@@ -114,7 +114,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
 > [!IMPORTANT]
-> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the PowerShell or `.NET` Excel bridge.
+> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows, with PowerShell retained as an explicit legacy fallback.
 
 ---
 
