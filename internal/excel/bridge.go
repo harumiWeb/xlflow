@@ -738,6 +738,7 @@ func (r Runner) RunnerModule(cfg config.Config, action string, opts ...CommandOp
 	return r.run("runner", map[string]string{
 		"Action":       action,
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 	}, cmdOpts)
 }

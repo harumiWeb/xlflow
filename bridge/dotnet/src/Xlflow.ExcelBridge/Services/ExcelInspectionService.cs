@@ -117,6 +117,102 @@ public sealed class ExcelInspectionService : IInspectService
 
                         break;
                     }
+                case "used-range":
+                    {
+                        object? worksheet = null;
+                        try
+                        {
+                            worksheet = GetWorksheetByName(workbook, args.Sheet);
+                            var usedInfo = GetUsedRangeInfo(worksheet!);
+                            target["sheet"] = args.Sheet;
+                            if (!string.IsNullOrWhiteSpace(usedInfo.Address))
+                            {
+                                target["range"] = usedInfo.Address;
+                            }
+
+                            Dictionary<string, object?> rangeSnapshot;
+                            if (usedInfo.Range is null)
+                            {
+                                rangeSnapshot = new Dictionary<string, object?>
+                                {
+                                    ["sheet"] = ExcelBridgeSupport.GetString(worksheet!, "Name") ?? args.Sheet,
+                                    ["used_range"] = "",
+                                    ["row_count"] = 0,
+                                    ["column_count"] = 0,
+                                    ["values"] = Array.Empty<object>(),
+                                };
+                                if (args.IncludeStyle)
+                                {
+                                    rangeSnapshot["style_included"] = true;
+                                    rangeSnapshot["cells"] = Array.Empty<object>();
+                                    rangeSnapshot["columns"] = Array.Empty<object>();
+                                    rangeSnapshot["rows"] = Array.Empty<object>();
+                                    rangeSnapshot["merged_ranges"] = Array.Empty<object>();
+                                }
+                            }
+                            else
+                            {
+                                rangeSnapshot = ReadRangeSnapshot(worksheet!, usedInfo.Range, "", usedInfo.Address, args.MaxRows, args.MaxCols, args.IncludeStyle);
+                            }
+
+                            inspect = new Dictionary<string, object?>
+                            {
+                                ["target"] = "used-range",
+                                ["source"] = "excel_com",
+                                ["target_info"] = NewLiveInspectTargetInfo(workbookPath),
+                                ["range"] = rangeSnapshot,
+                            };
+                            logs = [$"inspected live used range for {args.Sheet}"];
+                        }
+                        finally
+                        {
+                            ExcelBridgeSupport.ReleaseComObject(worksheet);
+                        }
+
+                        break;
+                    }
+                case "cell":
+                    {
+                        object? worksheet = null;
+                        object? cell = null;
+                        try
+                        {
+                            worksheet = GetWorksheetByName(workbook, args.Sheet);
+                            cell = ExcelBridgeSupport.Get(worksheet!, "Range", args.Address)
+                                ?? throw new InvalidOperationException($"failed to resolve cell {args.Sheet}!{args.Address}");
+                            var normalizedAddress = ExcelBridgeSupport.GetRangeAddress(cell);
+                            target["sheet"] = args.Sheet;
+                            target["range"] = normalizedAddress;
+
+                            var rowCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(ExcelBridgeSupport.Get(cell, "Rows")!, "Count"));
+                            var columnCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(ExcelBridgeSupport.Get(cell, "Columns")!, "Count"));
+                            if (rowCount * columnCount != 1)
+                            {
+                                throw new InvalidOperationException($"cell inspect requires a single-cell address, got {normalizedAddress}");
+                            }
+
+                            inspect = new Dictionary<string, object?>
+                            {
+                                ["target"] = "cell",
+                                ["source"] = "excel_com",
+                                ["target_info"] = NewLiveInspectTargetInfo(workbookPath),
+                                ["cell"] = new Dictionary<string, object?>
+                                {
+                                    ["sheet"] = ExcelBridgeSupport.GetString(worksheet!, "Name") ?? args.Sheet,
+                                    ["address"] = normalizedAddress,
+                                    ["value"] = ReadCellValue(cell),
+                                },
+                            };
+                            logs = [$"inspected live cell {args.Sheet}!{normalizedAddress}"];
+                        }
+                        finally
+                        {
+                            ExcelBridgeSupport.ReleaseComObject(cell);
+                            ExcelBridgeSupport.ReleaseComObject(worksheet);
+                        }
+
+                        break;
+                    }
                 default:
                     return BridgeResponse.Failed(
                         request,
@@ -148,6 +244,10 @@ public sealed class ExcelInspectionService : IInspectService
         catch (COMException ex)
         {
             return Failure(request, "inspect_failed", ex.Message, "xlflow-excel-bridge", ex.ErrorCode);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("cell inspect requires a single-cell address", StringComparison.OrdinalIgnoreCase))
+        {
+            return Failure(request, "inspect_args_invalid", ex.Message, "xlflow");
         }
         catch (Exception ex)
         {
@@ -222,28 +322,20 @@ public sealed class ExcelInspectionService : IInspectService
     private static List<Dictionary<string, object?>> ReadSheetSummaries(object workbook)
     {
         var sheets = new List<Dictionary<string, object?>>();
-        object? worksheets = null;
-        try
+        dynamic worksheets = workbook;
+        var count = Convert.ToInt32(worksheets.Worksheets.Count, CultureInfo.InvariantCulture);
+        for (var index = 1; index <= count; index++)
         {
-            worksheets = ExcelBridgeSupport.Get(workbook, "Worksheets");
-            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(worksheets!, "Count"));
-            for (var index = 1; index <= count; index++)
+            object? worksheet = null;
+            try
             {
-                object? worksheet = null;
-                try
-                {
-                    worksheet = ExcelBridgeSupport.Get(worksheets!, "Item", index);
-                    sheets.Add(NewSheetSummary(worksheet!));
-                }
-                finally
-                {
-                    ExcelBridgeSupport.ReleaseComObject(worksheet);
-                }
+                worksheet = (object?)worksheets.Worksheets.Item(index);
+                sheets.Add(NewSheetSummary(worksheet!));
             }
-        }
-        finally
-        {
-            ExcelBridgeSupport.ReleaseComObject(worksheets);
+            finally
+            {
+                ExcelBridgeSupport.ReleaseComObject(worksheet);
+            }
         }
 
         return sheets;
@@ -251,14 +343,23 @@ public sealed class ExcelInspectionService : IInspectService
 
     private static Dictionary<string, object?> NewSheetSummary(object worksheet)
     {
-        var usedInfo = GetUsedRangeInfo(worksheet);
+        UsedRangeInfo usedInfo;
         try
         {
+            usedInfo = GetUsedRangeInfo(worksheet);
+        }
+        catch
+        {
+            usedInfo = new UsedRangeInfo(null, "", 0, 0);
+        }
+        try
+        {
+            dynamic sheet = worksheet;
             return new Dictionary<string, object?>
             {
-                ["name"] = ExcelBridgeSupport.GetString(worksheet, "Name") ?? "",
-                ["index"] = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(worksheet, "Index")),
-                ["visible"] = ExcelBridgeSupport.VisibleToBool(ExcelBridgeSupport.Get(worksheet, "Visible")),
+                ["name"] = Convert.ToString(sheet.Name, CultureInfo.InvariantCulture) ?? "",
+                ["index"] = Convert.ToInt32(sheet.Index, CultureInfo.InvariantCulture),
+                ["visible"] = ExcelBridgeSupport.VisibleToBool(sheet.Visible),
                 ["used_range"] = usedInfo.Address,
                 ["row_count"] = usedInfo.RowCount,
                 ["column_count"] = usedInfo.ColumnCount,
@@ -311,47 +412,30 @@ public sealed class ExcelInspectionService : IInspectService
     private static UsedRangeInfo GetUsedRangeInfo(object worksheet)
     {
         object? usedRange = null;
+        object? probe = null;
         try
         {
-            usedRange = ExcelBridgeSupport.Get(worksheet, "UsedRange");
+            dynamic ws = worksheet;
+            usedRange = (object?)ws.UsedRange;
             if (usedRange is null)
             {
                 return new UsedRangeInfo(null, "", 0, 0);
             }
 
-            object? rows = null;
-            object? columns = null;
+            dynamic usedRangeDynamic = usedRange;
             try
             {
-                rows = ExcelBridgeSupport.Get(usedRange, "Rows");
-                columns = ExcelBridgeSupport.Get(usedRange, "Columns");
                 var address = ExcelBridgeSupport.GetRangeAddress(usedRange);
-                var rowCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(rows!, "Count"));
-                var columnCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(columns!, "Count"));
+                var rowCount = Convert.ToInt32(usedRangeDynamic.Rows.Count, CultureInfo.InvariantCulture);
+                var columnCount = Convert.ToInt32(usedRangeDynamic.Columns.Count, CultureInfo.InvariantCulture);
                 if (rowCount == 1 && columnCount == 1)
                 {
-                    object? probe = null;
-                    try
+                    probe = (object?)usedRangeDynamic.Cells.Item(1, 1);
+                    if (ReadCellValue(probe) is null && ExcelBridgeSupport.TryGetFormula(probe) is null)
                     {
-                        var cells = ExcelBridgeSupport.Get(usedRange, "Cells");
-                        try
-                        {
-                            probe = ExcelBridgeSupport.Get(cells!, "Item", 1, 1);
-                        }
-                        finally
-                        {
-                            ExcelBridgeSupport.ReleaseComObject(cells);
-                        }
-
-                        if (ExcelBridgeSupport.TryGetCellText(probe) is null && ExcelBridgeSupport.TryGetFormula(probe) is null)
-                        {
-                            ExcelBridgeSupport.ReleaseComObject(usedRange);
-                            return new UsedRangeInfo(null, "", 0, 0);
-                        }
-                    }
-                    finally
-                    {
-                        ExcelBridgeSupport.ReleaseComObject(probe);
+                        ExcelBridgeSupport.ReleaseComObject(usedRange);
+                        usedRange = null;
+                        return new UsedRangeInfo(null, "", 0, 0);
                     }
                 }
 
@@ -359,8 +443,7 @@ public sealed class ExcelInspectionService : IInspectService
             }
             finally
             {
-                ExcelBridgeSupport.ReleaseComObject(rows);
-                ExcelBridgeSupport.ReleaseComObject(columns);
+                ExcelBridgeSupport.ReleaseComObject(probe);
             }
         }
         catch (Exception ex)
@@ -418,8 +501,8 @@ public sealed class ExcelInspectionService : IInspectService
                     try
                     {
                         cell = ExcelBridgeSupport.Get(worksheetCells!, "Item", startRow + rowOffset, startCol + colOffset);
-                        var cellText = ExcelBridgeSupport.TryGetCellText(cell);
-                        line.Add(cellText);
+                        var cellValue = ReadCellValue(cell);
+                        line.Add(cellValue);
                         if (withStyle)
                         {
                             var cellAddress = ExcelBridgeSupport.GetRangeAddress(cell!);
@@ -454,7 +537,7 @@ public sealed class ExcelInspectionService : IInspectService
                                 ["address"] = cellAddress,
                                 ["row"] = startRow + rowOffset,
                                 ["column"] = startCol + colOffset,
-                                ["value"] = cellText,
+                                ["value"] = cellValue,
                                 ["formula"] = ExcelBridgeSupport.TryGetFormula(cell),
                                 ["fill"] = style["fill"],
                                 ["font"] = style["font"],
@@ -704,6 +787,17 @@ public sealed class ExcelInspectionService : IInspectService
     }
 
     private sealed record UsedRangeInfo(object? Range, string Address, int RowCount, int ColumnCount);
+
+    internal static object? ReadCellValue(object? cell)
+    {
+        var text = ExcelBridgeSupport.TryGetCellText(cell);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        return ExcelBridgeSupport.TryGetCellValue(cell);
+    }
 
     private static string ColumnIndexToLetter(int colIndex)
     {

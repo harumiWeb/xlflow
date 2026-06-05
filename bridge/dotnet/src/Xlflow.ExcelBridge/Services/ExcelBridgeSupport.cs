@@ -183,7 +183,7 @@ internal static class ExcelBridgeSupport
         throw new InvalidOperationException("no matching xlflow session workbook is running; run xlflow session start or use the configured workbook session");
     }
 
-    public static ExcelSessionAttachment OpenWorkbookDirect(string workbookPath, bool visible)
+    public static ExcelSessionAttachment OpenWorkbookDirect(string workbookPath, bool visible, bool disableAutomationMacros = true)
     {
         workbookPath = NormalizePath(workbookPath);
 
@@ -203,6 +203,14 @@ internal static class ExcelBridgeSupport
             app.Visible = visible;
             app.DisplayAlerts = false;
             app.EnableEvents = false;
+            try
+            {
+                app.AutomationSecurity = disableAutomationMacros ? 3 : 1;
+            }
+            catch
+            {
+                // best-effort: some hosts may not expose AutomationSecurity
+            }
 
             object workbook = app.Workbooks.Open(workbookPath);
             return new ExcelSessionAttachment(excel, workbook, "none");
@@ -476,7 +484,8 @@ internal static class ExcelBridgeSupport
     {
         try
         {
-            return GetString(range, "Address", false, false, 1, false) ?? "";
+            dynamic dyn = range;
+            return Convert.ToString(dyn.Address(false, false, 1, false), CultureInfo.InvariantCulture) ?? "";
         }
         catch
         {
@@ -493,8 +502,27 @@ internal static class ExcelBridgeSupport
 
         try
         {
-            var text = GetString(cell, "Text");
+            dynamic dyn = cell;
+            var text = Convert.ToString(dyn.Text, CultureInfo.InvariantCulture);
             return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static object? TryGetCellValue(object? cell)
+    {
+        if (cell is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            dynamic dyn = cell;
+            return NormalizeCellValue(dyn.Value2);
         }
         catch
         {
@@ -511,7 +539,8 @@ internal static class ExcelBridgeSupport
 
         try
         {
-            var formula = GetString(cell, "Formula");
+            dynamic dyn = cell;
+            var formula = Convert.ToString(dyn.Formula, CultureInfo.InvariantCulture);
             if (string.IsNullOrWhiteSpace(formula) || !formula.StartsWith('='))
             {
                 return null;
@@ -523,6 +552,26 @@ internal static class ExcelBridgeSupport
         {
             return null;
         }
+    }
+
+    public static object? NormalizeCellValue(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            DBNull => null,
+            string text => text,
+            bool boolean => boolean,
+            byte number => number,
+            short number => number,
+            int number => number,
+            long number => number,
+            float number => number,
+            double number => number,
+            decimal number => number,
+            DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+            _ => value is Array ? value.ToString() : value,
+        };
     }
 
     public static bool VisibleToBool(object? value)

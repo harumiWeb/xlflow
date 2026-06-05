@@ -16,6 +16,7 @@ public sealed class RunnerCommandTests
             Assert.Equal("install", args.Action);
             Assert.Equal(@"C:\work\Book.xlsm", args.WorkbookPath);
             Assert.False(args.Visible);
+            Assert.Equal(@"C:\work\.xlflow\session.json", args.MetadataPath);
             return BridgeResponse.Ok(request);
         });
 
@@ -25,11 +26,21 @@ public sealed class RunnerCommandTests
             ProtocolVersion = ProtocolVersion.Current,
             RequestId = "req-runner",
             Command = "runner",
-            Payload = JsonDocument.Parse("""{"Action":"install","WorkbookPath":"C:\\work\\Book.xlsm","Visible":"false"}""").RootElement.Clone(),
+            Payload = JsonDocument.Parse("""{"Action":"install","WorkbookPath":"C:\\work\\Book.xlsm","Visible":"false","MetadataPath":"C:\\work\\.xlflow\\session.json"}""").RootElement.Clone(),
         };
 
         var response = command.Handle(request, CancellationToken.None);
         Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void BuildRunnerModuleCodeOmitsAttributeLines()
+    {
+        var code = ExcelRunnerService.BuildRunnerModuleCode();
+
+        Assert.DoesNotContain("Attribute VB_Name", code, StringComparison.Ordinal);
+        Assert.Contains("Option Explicit", code, StringComparison.Ordinal);
+        Assert.Contains("XlflowRunnerVersion = \"1\"", code, StringComparison.Ordinal);
     }
 
     private sealed class FakeRunnerService(Func<BridgeRequest, RunnerCommandArguments, BridgeResponse> handler) : IRunnerService

@@ -207,6 +207,10 @@ func dotNetBridgeCandidates() []string {
 	if _, file, _, ok := runtime.Caller(0); ok {
 		repoRoot := repoRootFromBridgeFile(file)
 		candidates = append(candidates,
+			filepath.Join(repoRoot, "bridge", "dotnet", "artifacts", "publish", "win-x64", dotNetBridgeBinaryName+".exe"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "artifacts", "publish", "win-x64", dotNetBridgeBinaryName+".dll"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", "win-x64", dotNetBridgeBinaryName+".exe"),
+			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", "win-x64", dotNetBridgeBinaryName+".dll"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", dotNetBridgeBinaryName+".exe"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Release", "net8.0", dotNetBridgeBinaryName+".dll"),
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Debug", "net8.0", dotNetBridgeBinaryName+".exe"),

@@ -69,7 +69,8 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                 runtimeVBProject = ExcelBridgeSupport.TryGetWorkbookVbProject(runtimeWorkbook)
                     ?? throw new InvalidOperationException("runtime VBProject is unavailable");
                 helperComponent = InstallInspectHelper(runtimeVBProject);
-                formsPayload = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, args.FormName, "runtime", args.Initializer);
+                var helperModuleName = ExcelBridgeSupport.GetString(helperComponent, "Name") ?? "";
+                formsPayload = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, "runtime", args.Initializer);
             }
             else if (basis == "both")
             {
@@ -80,9 +81,10 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                 runtimeVBProject = ExcelBridgeSupport.TryGetWorkbookVbProject(runtimeWorkbook)
                     ?? throw new InvalidOperationException("runtime VBProject is unavailable");
                 helperComponent = InstallInspectHelper(runtimeVBProject);
-                var runtimeForm = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, args.FormName, "runtime", args.Initializer);
+                var helperModuleName = ExcelBridgeSupport.GetString(helperComponent, "Name") ?? "";
+                var runtimeForm = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, "runtime", args.Initializer);
                 var designerForm = args.StrictDesigner
-                    ? InvokeInspectHelper(runtimeExcel, runtimeWorkbook, args.FormName, "designer", "")
+                    ? InvokeInspectHelper(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, "designer", "")
                     : ReadDesignerFormSnapshot(vbProject, args.FormName);
                 formsPayload = new Dictionary<string, object?>
                 {
@@ -101,7 +103,8 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                     runtimeVBProject = ExcelBridgeSupport.TryGetWorkbookVbProject(runtimeWorkbook)
                         ?? throw new InvalidOperationException("runtime VBProject is unavailable");
                     helperComponent = InstallInspectHelper(runtimeVBProject);
-                    formsPayload = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, args.FormName, "designer", "");
+                    var helperModuleName = ExcelBridgeSupport.GetString(helperComponent, "Name") ?? "";
+                    formsPayload = InvokeInspectHelper(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, "designer", "");
                 }
                 else
                 {
@@ -319,7 +322,7 @@ public sealed class ExcelFormInspectionService : IInspectFormService
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"xlflow-inspect-form-{Guid.NewGuid():N}{extension}");
         ExcelBridgeSupport.InvokeViaDynamic(sourceWorkbook, "SaveCopyAs", tempPath);
-        var direct = ExcelBridgeSupport.OpenWorkbookDirect(tempPath, visible);
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(tempPath, visible, disableAutomationMacros: false);
         return (direct.Excel, direct.Workbook, tempPath);
     }
 
@@ -414,10 +417,11 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         }
     }
 
-    private static object InvokeInspectHelper(object runtimeExcel, object runtimeWorkbook, string formName, string basis, string initializer)
+    private static object InvokeInspectHelper(object runtimeExcel, object runtimeWorkbook, string helperModuleName, string formName, string basis, string initializer)
     {
         var workbookName = (ExcelBridgeSupport.TryGetWorkbookName(runtimeWorkbook) ?? "").Replace("'", "''", StringComparison.Ordinal);
-        var macroName = $"'{workbookName}'!XlflowInspectFormJson";
+        var moduleName = string.IsNullOrWhiteSpace(helperModuleName) ? "XlflowForm" : helperModuleName;
+        var macroName = $"'{workbookName}'!{moduleName}.XlflowInspectFormJson";
         try
         {
             var json = Convert.ToString(ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName, formName, basis, initializer), CultureInfo.InvariantCulture);
@@ -476,10 +480,10 @@ public sealed class ExcelFormInspectionService : IInspectFormService
 
     private static Dictionary<string, object?> SerializeControl(object control)
     {
-        var progId = ExcelBridgeSupport.GetString(control, "ProgId") ?? "";
+        var progId = TryGetStringMember(control, "ProgId") ?? "";
         var result = new Dictionary<string, object?>
         {
-            ["name"] = ExcelBridgeSupport.GetString(control, "Name") ?? "",
+            ["name"] = TryGetStringMember(control, "Name") ?? "",
             ["type"] = ResolveDesignerControlType(progId, control.GetType().Name),
         };
 
@@ -587,18 +591,27 @@ public sealed class ExcelFormInspectionService : IInspectFormService
 
     private static void AddStringMember(object source, Dictionary<string, object?> target, string memberName, string jsonKey)
     {
+        var value = TryGetStringMember(source, memberName);
+        if (value is not null)
+        {
+            target[jsonKey] = value;
+        }
+    }
+
+    private static string? TryGetStringMember(object source, string memberName)
+    {
         try
         {
             var value = ExcelBridgeSupport.Get(source, memberName);
             if (value is null)
             {
-                return;
+                return null;
             }
-            target[jsonKey] = Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
         }
         catch
         {
-            // best-effort read
+            return null;
         }
     }
 
@@ -875,7 +888,7 @@ Private Function SerializeControl(ByVal control As Object) As String
   JsonAddString json, "type", typeNameValue, hasFields
   JsonAddStringFromMember json, control, "ProgId", "prog_id", hasFields
   JsonAddStringFromMember json, control, "Caption", "caption", hasFields
-  JsonAddStringFromMember json, control, "Text", "text", hasFields
+  JsonAddFocusSafeText json, control, typeNameValue, hasFields
   JsonAddStringFromMember json, control, "Value", "value", hasFields
   JsonAddNumberFromMember json, control, "Left", "left", hasFields
   JsonAddNumberFromMember json, control, "Top", "top", hasFields
@@ -994,6 +1007,18 @@ Private Sub JsonAddStringFromMember(ByRef json As String, ByVal target As Object
   If TryGetStringMember(target, memberName, value) Then
     JsonAddString json, jsonKey, value, hasFields
   End If
+End Sub
+
+Private Sub JsonAddFocusSafeText(ByRef json As String, ByVal target As Object, ByVal controlType As String, ByRef hasFields As Boolean)
+  Dim value As String
+  Select Case LCase$(Trim$(controlType))
+    Case "textbox", "combobox"
+      If TryGetStringMember(target, "Value", value) Then
+        JsonAddString json, "text", value, hasFields
+      ElseIf TryGetStringMember(target, "Text", value) Then
+        JsonAddString json, "text", value, hasFields
+      End If
+  End Select
 End Sub
 
 Private Sub JsonAddNumberFromMember(ByRef json As String, ByVal target As Object, ByVal memberName As String, ByVal jsonKey As String, ByRef hasFields As Boolean)

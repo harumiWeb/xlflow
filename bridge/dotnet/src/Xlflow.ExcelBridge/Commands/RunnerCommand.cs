@@ -34,7 +34,8 @@ public sealed class RunnerCommand : ICommandHandler
         var args = new RunnerCommandArguments(
             Action: BridgePayload.GetString(request.Payload, "Action") ?? "",
             WorkbookPath: workbookPath,
-            Visible: BridgePayload.GetBool(request.Payload, "Visible"));
+            Visible: BridgePayload.GetBool(request.Payload, "Visible"),
+            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
         return _service.Execute(request, args, cancellationToken);
     }
 }

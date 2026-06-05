@@ -24,12 +24,16 @@ public sealed class ExcelRunnerService : IRunnerService
         object? excel = null;
         object? workbook = null;
         object? vbProject = null;
+        var sessionAttached = false;
+        var sessionMode = "none";
 
         try
         {
-            var attachment = ExcelBridgeSupport.OpenWorkbookDirect(args.WorkbookPath, args.Visible);
+            var attachment = OpenWorkbook(args);
             excel = attachment.Excel;
             workbook = attachment.Workbook;
+            sessionAttached = attachment.SessionAttached;
+            sessionMode = attachment.SessionMode;
             vbProject = ExcelBridgeSupport.TryGetWorkbookVbProject(workbook)
                 ?? throw new InvalidOperationException("VBProject access is denied. Enable 'Trust access to the VBA project object model' in Excel Trust Center.");
 
@@ -71,7 +75,13 @@ public sealed class ExcelRunnerService : IRunnerService
                 Extensions = new Dictionary<string, object?>
                 {
                     ["runner"] = runner,
-                    ["workbook"] = new Dictionary<string, object?> { ["path"] = ExcelBridgeSupport.NormalizePath(args.WorkbookPath), ["saved"] = saved },
+                    ["workbook"] = new Dictionary<string, object?>
+                    {
+                        ["path"] = ExcelBridgeSupport.NormalizePath(args.WorkbookPath),
+                        ["saved"] = saved,
+                        ["session"] = sessionAttached,
+                        ["session_mode"] = sessionMode,
+                    },
                 },
             };
         }
@@ -85,18 +95,45 @@ public sealed class ExcelRunnerService : IRunnerService
         }
         finally
         {
-            if (workbook is not null)
-            {
-                try { ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false); } catch { }
-            }
-            if (excel is not null)
-            {
-                try { ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit"); } catch { }
-            }
             ExcelBridgeSupport.ReleaseComObject(vbProject);
-            ExcelBridgeSupport.ReleaseComObject(workbook);
-            ExcelBridgeSupport.ReleaseComObject(excel);
+            if (sessionAttached)
+            {
+                ExcelBridgeSupport.ReleaseComObject(workbook);
+                ExcelBridgeSupport.ReleaseComObject(excel);
+            }
+            else
+            {
+                if (workbook is not null)
+                {
+                    try { ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false); } catch { }
+                }
+                if (excel is not null)
+                {
+                    try { ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit"); } catch { }
+                }
+                ExcelBridgeSupport.ReleaseComObject(workbook);
+                ExcelBridgeSupport.ReleaseComObject(excel);
+            }
         }
+    }
+
+    private static (object Excel, object Workbook, bool SessionAttached, string SessionMode) OpenWorkbook(RunnerCommandArguments args)
+    {
+        if (ExcelBridgeSupport.SessionMetadataMatchesWorkbook(args.MetadataPath, args.WorkbookPath))
+        {
+            try
+            {
+                var attached = ExcelBridgeSupport.AttachToSessionWorkbook(args.WorkbookPath, args.MetadataPath, false);
+                return (attached.Excel, attached.Workbook, true, attached.SessionMode);
+            }
+            catch
+            {
+                // fall through to direct open
+            }
+        }
+
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(args.WorkbookPath, args.Visible);
+        return (direct.Excel, direct.Workbook, false, direct.SessionMode);
     }
 
     private static bool IsSupportedAction(string action)
@@ -169,10 +206,9 @@ public sealed class ExcelRunnerService : IRunnerService
         }
     }
 
-    private static string BuildRunnerModuleCode()
+    internal static string BuildRunnerModuleCode()
     {
         var builder = new StringBuilder();
-        builder.AppendLine("Attribute VB_Name = \"XlflowRunner\"");
         builder.AppendLine("Option Explicit");
         builder.AppendLine();
         builder.AppendLine("Public Function XlflowRunnerVersion() As String");

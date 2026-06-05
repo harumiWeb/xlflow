@@ -102,9 +102,11 @@ public sealed class ExcelEditService : IEditService
                 var interior = ExcelBridgeSupport.Get(range!, "Interior");
                 try
                 {
-                    var beforeFill = ExcelBridgeSupport.ColorToHex(GetMember(interior!, "Color"));
-                    SetMember(interior!, "Pattern", 1);
-                    SetMember(interior!, "Color", ToOleColor(normalizedFill));
+                    dynamic rangeDynamic = range!;
+                    dynamic interiorDynamic = rangeDynamic.Interior;
+                    var beforeFill = ExcelBridgeSupport.ColorToHex(interiorDynamic.Color);
+                    interiorDynamic.Pattern = 1;
+                    interiorDynamic.Color = ToOleColor(normalizedFill);
                     UpdateSaveState(workbook, ref dirty, ref needsSave);
                     extensions["edit"] = MergeMutation(
                         (Dictionary<string, object?>)extensions["edit"]!,
@@ -252,12 +254,15 @@ public sealed class ExcelEditService : IEditService
                 {
                     return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_color", ex.Message, "xlflow");
                 }
-                var interior = ExcelBridgeSupport.Get(range!, "Interior");
+                object? interior = null;
                 try
                 {
-                    var beforeFill = ExcelBridgeSupport.ColorToHex(GetMember(interior!, "Color"));
-                    SetMember(interior!, "Pattern", 1);
-                    SetMember(interior!, "Color", ToOleColor(normalizedFill));
+                    dynamic rangeDynamic = range!;
+                    interior = (object?)rangeDynamic.Interior;
+                    dynamic interiorDynamic = interior!;
+                    var beforeFill = ExcelBridgeSupport.ColorToHex(interiorDynamic.Color);
+                    interiorDynamic.Pattern = 1;
+                    interiorDynamic.Color = ToOleColor(normalizedFill);
                     UpdateSaveState(workbook, ref dirty, ref needsSave);
                     extensions["edit"] = MergeMutation(
                         (Dictionary<string, object?>)extensions["edit"]!,

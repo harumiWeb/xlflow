@@ -25,6 +25,7 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         var runtimeWorkbookPath = "";
         var outputPath = "";
         var temporaryOutputPath = "";
+        var helperModuleName = "";
         var createdParentDirs = false;
         var sessionAttached = false;
         var sessionMode = "none";
@@ -66,16 +67,17 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
             runtimeVbProject = ExcelBridgeSupport.TryGetWorkbookVbProject(runtimeWorkbook)
                 ?? throw new InvalidOperationException("vbproject_access_denied: runtime VBProject is unavailable");
             helperComponent = InstallHelper(runtimeVbProject);
+            helperModuleName = ExcelBridgeSupport.GetString(helperComponent, "Name") ?? "";
 
             var processId = ExcelBridgeSupport.GetExcelProcessId(runtimeExcel);
             var sourceCaption = GetDesignerCaption(workbook, args.FormName);
             var token = $"xlflow-capture-{Guid.NewGuid():N}";
 
             phase = "schedule_form_capture";
-            InvokePrepareCapture(runtimeExcel, runtimeWorkbook, args.FormName, token, args.Initializer, sourceCaption);
+            InvokePrepareCapture(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, token, args.Initializer, sourceCaption);
 
             phase = "find_form_window";
-            var capture = WaitForCaptureWindow(runtimeExcel, runtimeWorkbook, processId, token, cancellationToken);
+            var capture = WaitForCaptureWindow(runtimeExcel, runtimeWorkbook, helperModuleName, processId, token, cancellationToken);
             var window = WindowCapture.MoveWindowIntoCaptureBounds(capture)
                 ?? throw new InvalidOperationException($"window_not_found: could not find a visible UserForm window for capture token {token}");
 
@@ -190,7 +192,7 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         }
         finally
         {
-            CleanupCapture(runtimeExcel, runtimeWorkbook);
+            CleanupCapture(runtimeExcel, runtimeWorkbook, helperModuleName);
             RemoveTemporaryComponent(runtimeVbProject, helperComponent);
             CloseWorkbook(runtimeExcel, runtimeWorkbook, false);
             if (!string.IsNullOrWhiteSpace(runtimeWorkbookPath) && File.Exists(runtimeWorkbookPath))
@@ -316,7 +318,7 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         }
         var tempPath = Path.Combine(Path.GetTempPath(), $"xlflow-form-export-image-{Guid.NewGuid():N}{extension}");
         ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", tempPath);
-        var direct = ExcelBridgeSupport.OpenWorkbookDirect(tempPath, true);
+        var direct = ExcelBridgeSupport.OpenWorkbookDirect(tempPath, true, disableAutomationMacros: false);
         return (direct.Excel, direct.Workbook, tempPath);
     }
 
@@ -367,20 +369,21 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         }
     }
 
-    private static void InvokePrepareCapture(object runtimeExcel, object runtimeWorkbook, string formName, string token, string initializer, string expectedCaption)
+    private static void InvokePrepareCapture(object runtimeExcel, object runtimeWorkbook, string helperModuleName, string formName, string token, string initializer, string expectedCaption)
     {
         var workbookName = (ExcelBridgeSupport.TryGetWorkbookName(runtimeWorkbook) ?? "").Replace("'", "''", StringComparison.Ordinal);
-        var macroName = $"'{workbookName}'!XlflowPrepareFormImageCapture";
+        var moduleName = string.IsNullOrWhiteSpace(helperModuleName) ? "XlflowCap" : helperModuleName;
+        var macroName = $"'{workbookName}'!{moduleName}.XlflowPrepareFormImageCapture";
         ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName, formName, token, initializer, expectedCaption);
     }
 
-    private static WindowInfo WaitForCaptureWindow(object runtimeExcel, object runtimeWorkbook, int processId, string token, CancellationToken cancellationToken)
+    private static WindowInfo WaitForCaptureWindow(object runtimeExcel, object runtimeWorkbook, string helperModuleName, int processId, string token, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(7);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var status = ReadCaptureStatus(runtimeExcel, runtimeWorkbook);
+            var status = ReadCaptureStatus(runtimeExcel, runtimeWorkbook, helperModuleName);
             if (!string.IsNullOrWhiteSpace(status.Source) || !string.IsNullOrWhiteSpace(status.Message))
             {
                 var source = string.IsNullOrWhiteSpace(status.Source) ? "XlflowFormImageCapture.capture_prepare" : status.Source;
@@ -414,10 +417,11 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         throw new InvalidOperationException($"window_not_found: could not find a visible UserForm window for capture token {token}");
     }
 
-    private static CaptureStatus ReadCaptureStatus(object runtimeExcel, object runtimeWorkbook)
+    private static CaptureStatus ReadCaptureStatus(object runtimeExcel, object runtimeWorkbook, string helperModuleName)
     {
         var workbookName = (ExcelBridgeSupport.TryGetWorkbookName(runtimeWorkbook) ?? "").Replace("'", "''", StringComparison.Ordinal);
-        var macroName = $"'{workbookName}'!XlflowReadFormImageCaptureStatus";
+        var moduleName = string.IsNullOrWhiteSpace(helperModuleName) ? "XlflowCap" : helperModuleName;
+        var macroName = $"'{workbookName}'!{moduleName}.XlflowReadFormImageCaptureStatus";
         var value = Convert.ToString(ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName), CultureInfo.InvariantCulture) ?? "";
         var parts = value.Split('\t');
         long hwnd = 0;
@@ -430,7 +434,7 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
             hwnd);
     }
 
-    private static void CleanupCapture(object? runtimeExcel, object? runtimeWorkbook)
+    private static void CleanupCapture(object? runtimeExcel, object? runtimeWorkbook, string helperModuleName)
     {
         if (runtimeExcel is null || runtimeWorkbook is null)
         {
@@ -439,7 +443,8 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         try
         {
             var workbookName = (ExcelBridgeSupport.TryGetWorkbookName(runtimeWorkbook) ?? "").Replace("'", "''", StringComparison.Ordinal);
-            var macroName = $"'{workbookName}'!XlflowCleanupFormImageCapture";
+            var moduleName = string.IsNullOrWhiteSpace(helperModuleName) ? "XlflowCap" : helperModuleName;
+            var macroName = $"'{workbookName}'!{moduleName}.XlflowCleanupFormImageCapture";
             ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName);
         }
         catch
@@ -692,6 +697,7 @@ Public Sub XlflowExecuteFormImageCapture()
     caption = xlflowCaptureFormName
   End If
 
+  PrimeFocusableControl xlflowCapturedForm
   xlflowCapturedForm.Caption = caption & " [xlflow-capture-" & xlflowCaptureToken & "]"
   xlflowCapturedForm.Show vbModeless
   DoEvents
@@ -710,6 +716,88 @@ ErrHandler:
   End If
   xlflowLastErrorMessage = Err.Description
 End Sub
+
+Private Sub PrimeFocusableControl(ByVal formObject As Object)
+  On Error Resume Next
+
+  Dim focusTarget As Object
+  Set focusTarget = FindFirstFocusableControl(GetObjectControls(formObject))
+  If Not focusTarget Is Nothing Then
+    CallByName focusTarget, "SetFocus", VbMethod
+  End If
+End Sub
+
+Private Function FindFirstFocusableControl(ByVal controls As Object) As Object
+  On Error GoTo Missing
+
+  Dim control As Object
+  Dim childControls As Object
+  Dim nested As Object
+
+  If controls Is Nothing Then
+    Exit Function
+  End If
+
+  For Each control In controls
+    If ControlCanReceiveFocus(control) Then
+      Set FindFirstFocusableControl = control
+      Exit Function
+    End If
+
+    Set childControls = GetObjectControls(control)
+    If Not childControls Is Nothing Then
+      Set nested = FindFirstFocusableControl(childControls)
+      If Not nested Is Nothing Then
+        Set FindFirstFocusableControl = nested
+        Exit Function
+      End If
+    End If
+  Next control
+
+  Exit Function
+
+Missing:
+  Set FindFirstFocusableControl = Nothing
+End Function
+
+Private Function ControlCanReceiveFocus(ByVal control As Object) As Boolean
+  On Error GoTo Missing
+
+  Dim visibleValue As Variant
+  Dim enabledValue As Variant
+  Dim tabStopValue As Variant
+
+  visibleValue = CallByName(control, "Visible", VbGet)
+  enabledValue = CallByName(control, "Enabled", VbGet)
+  If Not CBool(visibleValue) Or Not CBool(enabledValue) Then
+    GoTo Missing
+  End If
+
+  On Error Resume Next
+  tabStopValue = CallByName(control, "TabStop", VbGet)
+  If Err.Number = 0 Then
+    If Not CBool(tabStopValue) Then
+      GoTo Missing
+    End If
+  End If
+  Err.Clear
+  On Error GoTo Missing
+
+  Select Case LCase$(TypeName(control))
+    Case "textbox", "combobox", "listbox", "optionbutton", "togglebutton", "checkbox", "commandbutton", "spinbutton", "scrollbar", "tabstrip", "multipage"
+      ControlCanReceiveFocus = True
+      Exit Function
+  End Select
+
+Missing:
+  ControlCanReceiveFocus = False
+End Function
+
+Private Function GetObjectControls(ByVal target As Object) As Object
+  On Error Resume Next
+  Set GetObjectControls = target.Controls
+  On Error GoTo 0
+End Function
 
 Public Sub XlflowCleanupFormImageCapture()
   On Error Resume Next
