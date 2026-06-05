@@ -66,6 +66,16 @@ These [samples](example) were created by an AI agent using xlflow with only mini
       <sub>Rich calendar picker</sub>
     </td>
   </tr>
+    <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/weather-news.png" alt="weather news" width="100%">
+      <sub>Macro that displays real-time weather news</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/maze-big.gif" alt="maze chase" width="100%">
+      <sub>Pac-Man style game</sub>
+    </td>
+  </tr>
 </table>
 
 ---
