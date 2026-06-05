@@ -164,7 +164,10 @@ Windows 向けの事前ビルド済みバイナリは次のページから取得
 > [!IMPORTANT]
 > 現在の事前ビルド配布は **Windows 向けのみ** です。
 > Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
-> Release binary には runtime PowerShell bridge script が埋め込まれているため、`xlflow.exe` 単体で workbook command を実行できます。
+> Windows 向け release ZIP には `xlflow.exe` と `xlflow-excel-bridge.exe` の両方が含まれます。Go CLI には runtime PowerShell bridge script も埋め込まれているため、workbook command のために sidecar `*.ps1` file を別配布する必要はありません。
+
+> [!WARNING]
+> `xlflow-excel-bridge.exe` は PowerShell execution policy の影響を受けませんが、AppLocker、WDAC、Defender / EDR policy、antivirus reputation、unsigned executable rule などでブロックされる可能性はあります。公開している checksum と GitHub attestation で確認できるのは artifact の integrity と provenance であり、Windows の Authenticode signing ではありません。
 
 ダウンロードした ZIP は、公開されている `checksums.txt` と照合して SHA256 を確認できます。
 
@@ -192,6 +195,10 @@ go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
 `go install` は Go 環境に設定された module mirror や checksum database へアクセスすることがあります。source checkout からの開発や CI では、`go.mod` に書かれた Go version を正式サポート toolchain の source of truth としてください。リポジトリの CI / release workflow もその値から Go を解決します。
+
+> [!WARNING]
+> `go install` で入るのは `xlflow` 本体だけです。Windows の release ZIP に含まれる `.NET` bridge sidecar `xlflow-excel-bridge.exe` はインストールされません。
+> `--bridge dotnet` を使いたい場合は Windows release archive から導入するか、source checkout で `task install` などを使って bridge を別途 build / install してください。
 
 インストール後、次のコマンドで確認できます。
 

@@ -374,7 +374,12 @@ public sealed class MacroRunWorkerProcess : IDisposable
         };
         if (string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            startInfo.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+            var assemblyPath = Path.Combine(AppContext.BaseDirectory, $"{Assembly.GetExecutingAssembly().GetName().Name}.dll");
+            if (!File.Exists(assemblyPath))
+            {
+                throw new InvalidOperationException("Unable to resolve the bridge assembly path for dotnet worker startup.");
+            }
+            startInfo.ArgumentList.Add(assemblyPath);
         }
         startInfo.ArgumentList.Add("--run-worker");
         startInfo.Environment[MacroRunWorker.RequestPathEnv] = requestPath;

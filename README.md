@@ -163,7 +163,10 @@ Download prebuilt Windows binaries from:
 > [!IMPORTANT]
 > Current prebuilt distribution targets **Windows** only.
 > Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
-> The release binary already embeds the runtime PowerShell bridge scripts, so `xlflow.exe` can run workbook commands without sidecar `*.ps1` files.
+> The Windows release ZIP includes both `xlflow.exe` and `xlflow-excel-bridge.exe`. The Go CLI still embeds the runtime PowerShell bridge scripts, so workbook commands do not require sidecar `*.ps1` files.
+
+> [!WARNING]
+> `xlflow-excel-bridge.exe` avoids PowerShell execution policy, but it can still be blocked by AppLocker, WDAC, Defender or EDR policy, antivirus reputation, or unsigned-executable rules. The published checksum and GitHub attestation verify artifact integrity and provenance; they do not provide Windows Authenticode signing.
 
 Verify the downloaded ZIP against the published `checksums.txt` file:
 
@@ -191,6 +194,10 @@ go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
 `go install` may contact the Go module mirror and checksum database configured in your Go environment. For direct source checkout development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth; the repository CI and release workflows resolve Go from that file.
+
+> [!WARNING]
+> `go install` installs `xlflow` only. It does not install the packaged `.NET` bridge sidecar `xlflow-excel-bridge.exe` used by Windows release ZIPs.
+> If you want to use `--bridge dotnet`, install from the Windows release archive or build/install the bridge separately from a source checkout, for example with `task install`.
 
 Verify the installation:
 

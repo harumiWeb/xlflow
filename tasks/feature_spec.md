@@ -1,5 +1,30 @@
 # Issue #79 + Issue #78 Follow-up: .NET DialogWatcher and run parity
 
+---
+
+# Issue #82: Windows release packaging for .NET bridge
+
+## Goal
+
+Ship `xlflow-excel-bridge.exe` inside Windows release archives while keeping the
+release contract Go-only on non-Windows platforms.
+
+## Required Changes
+
+- Publish the bridge as self-contained single-file for `win-x64`.
+- Keep trimming disabled for the initial packaged bridge.
+- Make release automation build the bridge before archive assembly.
+- Include `xlflow-excel-bridge.exe` next to `xlflow.exe` in Windows ZIPs.
+- Update installation/release docs with AppLocker, WDAC, AV, and signing caveats.
+
+## Acceptance
+
+- Windows ZIP contains `xlflow.exe` and `xlflow-excel-bridge.exe`.
+- Extracted Windows ZIP can run `xlflow doctor --bridge dotnet --json` and find
+  the sidecar bridge executable.
+- Published docs explain that `.NET` avoids PowerShell execution policy but may
+  still be blocked by executable control policy.
+
 ## Goal
 
 Make `xlflow run --bridge dotnet --json` safe for agent execution and behaviorally

@@ -1,4 +1,6 @@
 param(
+	[string]$Runtime = 'win-x64',
+	[string]$OutputDir,
 	[switch]$InstallToGoBin
 )
 
@@ -7,9 +9,26 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'bridge/dotnet/src/Xlflow.ExcelBridge/Xlflow.ExcelBridge.csproj'
-$bridgeExe = Join-Path $root 'bridge/dotnet/src/Xlflow.ExcelBridge/bin/Release/net8.0/xlflow-excel-bridge.exe'
+$publishDir = if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+	Join-Path $root "bridge/dotnet/artifacts/publish/$Runtime"
+} else {
+	if ([System.IO.Path]::IsPathRooted($OutputDir)) {
+		$OutputDir
+	} else {
+		Join-Path $root $OutputDir
+	}
+}
+$bridgeExe = Join-Path $publishDir 'xlflow-excel-bridge.exe'
 
-dotnet build $project --configuration Release
+New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
+
+dotnet publish $project `
+	--configuration Release `
+	--runtime $Runtime `
+	--self-contained true `
+	-p:PublishSingleFile=true `
+	-p:PublishTrimmed=false `
+	--output $publishDir
 
 if (-not $InstallToGoBin) {
 	return
