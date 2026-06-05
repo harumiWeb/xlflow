@@ -127,8 +127,8 @@ public sealed class ExcelEditService : IEditService
                 }
             }
 
-            var valueRequested = !string.IsNullOrEmpty(args.Value);
-            var formulaRequested = !string.IsNullOrEmpty(args.Formula);
+            var valueRequested = args.ValueSpecified;
+            var formulaRequested = args.FormulaSpecified;
             if (valueRequested == formulaRequested)
             {
                 return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_args_invalid", "One of -Value, -Formula, or -Fill is required.", "xlflow");

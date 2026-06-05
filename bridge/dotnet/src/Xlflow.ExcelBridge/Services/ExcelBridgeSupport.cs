@@ -8,6 +8,24 @@ namespace Xlflow.ExcelBridge.Services;
 
 internal static class BridgePayload
 {
+    public static bool HasProperty(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static string? GetString(JsonElement payload, string name)
     {
         if (payload.ValueKind != JsonValueKind.Object)

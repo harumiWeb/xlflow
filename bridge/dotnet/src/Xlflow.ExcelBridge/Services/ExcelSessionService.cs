@@ -34,7 +34,7 @@ public sealed class ExcelSessionService : ISessionService
 
         try
         {
-            ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
+            CloseExistingSession(args.MetadataPath);
 
             var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, true);
             excel = direct.Excel;
@@ -316,6 +316,51 @@ public sealed class ExcelSessionService : ISessionService
             Logs = logs,
             Extensions = extensions,
         };
+    }
+
+    private static void CloseExistingSession(string metadataPath)
+    {
+        var metadata = ExcelBridgeSupport.ReadSessionMetadata(metadataPath);
+        if (metadata is null)
+        {
+            return;
+        }
+
+        object? excel = null;
+        object? workbook = null;
+        try
+        {
+            excel = ExcelBridgeSupport.GetSessionExcel(metadataPath);
+            if (excel is null)
+            {
+                ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
+                return;
+            }
+
+            try
+            {
+                workbook = ExcelBridgeSupport.GetOpenWorkbook(excel, metadata.WorkbookPath);
+            }
+            catch (InvalidOperationException)
+            {
+                ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
+                return;
+            }
+
+            if (ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var wasDirty) && wasDirty)
+            {
+                ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+            }
+
+            ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
+            ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit");
+            ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
     }
 
 }

@@ -23,6 +23,8 @@ public sealed class ExcelAttachService : IAttachService
         object? excel = null;
         object? workbook = null;
         var matchedConfiguredWorkbook = false;
+        bool? dirty = false;
+        var needsSave = false;
 
         try
         {
@@ -179,6 +181,17 @@ public sealed class ExcelAttachService : IAttachService
             }
 
             ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, configuredPath);
+            var attachedWorkbook = workbook!;
+            if (!ExcelBridgeSupport.TryGetWorkbookDirtyState(attachedWorkbook, out var workbookDirty))
+            {
+                dirty = null;
+                needsSave = true;
+            }
+            else
+            {
+                dirty = workbookDirty;
+                needsSave = workbookDirty;
+            }
 
             return new BridgeResponse
             {
@@ -188,8 +201,8 @@ public sealed class ExcelAttachService : IAttachService
                 Extensions = new Dictionary<string, object?>
                 {
                     ["target"] = ExcelBridgeSupport.BuildTargetPayload("live_session", configuredPath),
-                    ["session"] = ExcelBridgeSupport.BuildSessionPayload(configuredPath, true, "explicit", false, false),
-                    ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(configuredPath, true, "explicit", true, false, false, false),
+                    ["session"] = ExcelBridgeSupport.BuildSessionPayload(configuredPath, true, "explicit", dirty, needsSave),
+                    ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(configuredPath, true, "explicit", true, false, dirty, needsSave),
                 },
             };
         }
