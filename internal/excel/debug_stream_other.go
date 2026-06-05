@@ -2,16 +2,28 @@
 
 package excel
 
-import "io"
+import (
+	"fmt"
+	"io"
+	"os"
+	"time"
+)
 
-type debugStreamSession struct{}
+type debugStreamSession struct {
+	pipePath string
+}
 
 func newDebugStreamSession(io.Writer) (*debugStreamSession, error) {
-	return nil, nil
+	return &debugStreamSession{
+		pipePath: fmt.Sprintf(`\\.\pipe\xlflow-debug-%d-%d`, os.Getpid(), time.Now().UnixNano()),
+	}, nil
 }
 
 func (s *debugStreamSession) PipePath() string {
-	return ""
+	if s == nil {
+		return ""
+	}
+	return s.pipePath
 }
 
 func (s *debugStreamSession) Close() error {
