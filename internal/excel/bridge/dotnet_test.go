@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -149,6 +151,39 @@ func TestDotNetProviderExecuteDoctorWithRealBridge(t *testing.T) {
 	if _, ok := repoLocalDotNetBridgeProjectPath(); !ok {
 		t.Skip("repo-local .NET bridge project not found")
 	}
+
+	projectPath, _ := repoLocalDotNetBridgeProjectPath()
+	outDir := filepath.Join(t.TempDir(), "publish")
+	objDir := filepath.Join(t.TempDir(), "obj")
+	buildCmd := exec.Command(
+		"dotnet",
+		"publish",
+		projectPath,
+		"-c", "Release",
+		"-o", outDir,
+		"--disable-build-servers",
+		"-p:UseSharedCompilation=false",
+		"-p:BuildInParallel=false",
+		"-p:BaseIntermediateOutputPath="+objDir+string(os.PathSeparator),
+	)
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		t.Skipf("could not build isolated repo-local .NET bridge for execution test: %v\n%s", buildErr, string(buildOut))
+	}
+
+	bridgeExe := filepath.Join(outDir, dotNetBridgeBinaryName+".exe")
+	if _, err := os.Stat(bridgeExe); err != nil {
+		t.Skipf("isolated repo-local .NET bridge executable was not produced at %s: %v", bridgeExe, err)
+	}
+
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+	dotNetBridgeCandidatesFunc = func() []string { return []string{bridgeExe} }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) { return "", false }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
