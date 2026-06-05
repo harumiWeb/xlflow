@@ -2,16 +2,28 @@
 
 package excel
 
-import "io"
+import (
+	"fmt"
+	"io"
+	"os"
+	"time"
+)
 
-type uiStreamSession struct{}
+type uiStreamSession struct {
+	pipePath string
+}
 
 func newUIStreamSession(io.Writer) (*uiStreamSession, error) {
-	return nil, nil
+	return &uiStreamSession{
+		pipePath: fmt.Sprintf(`\\.\pipe\xlflow-ui-%d-%d`, os.Getpid(), time.Now().UnixNano()),
+	}, nil
 }
 
 func (s *uiStreamSession) PipePath() string {
-	return ""
+	if s == nil {
+		return ""
+	}
+	return s.pipePath
 }
 
 func (s *uiStreamSession) Close() error {
