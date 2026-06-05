@@ -5,7 +5,7 @@ Format VBA source files with a conservative, non-destructive formatter.
 ## Usage
 
 ```bash
-xlflow fmt [--write | --check | --diff] [--json] [--stdin] [<path>...]
+xlflow fmt [--write | --check | --diff] [--line-numbers preserve|add|remove|renumber] [--json] [--stdin] [<path>...]
 ```
 
 ## Options and Arguments
@@ -16,6 +16,7 @@ xlflow fmt [--write | --check | --diff] [--json] [--stdin] [<path>...]
 | `--write`         | Write formatted source back to files.                    | false       |
 | `--check`         | Check formatting without modifying files.                | false       |
 | `--diff`          | Show unified diff of formatting changes.                 | false       |
+| `--line-numbers`  | Line-number policy for VBA statements.                   | `preserve`  |
 | `--stdin`         | Read VBA source from stdin, write formatted to stdout.   | false       |
 | `--json`          | Return structured machine-readable output.               | false       |
 
@@ -35,6 +36,18 @@ xlflow fmt --check
 
 # Show unified diff of changes
 xlflow fmt --diff
+
+# Preview diagnostic VBA line numbers without writing
+xlflow fmt --line-numbers add
+
+# Apply diagnostic VBA line numbers
+xlflow fmt --line-numbers add --write
+
+# Remove diagnostic VBA line numbers
+xlflow fmt --line-numbers remove --write
+
+# Normalize existing line numbers
+xlflow fmt --line-numbers renumber --write
 
 # Format a specific file or directory
 xlflow fmt --write src/modules/Main.bas
@@ -60,7 +73,13 @@ cat MyModule.bas | xlflow fmt --stdin --json
 > `.frm` files are skipped by default. The formatter preserves class module metadata (`Attribute VB_*`, `VERSION`, `BEGIN`/`END` blocks) verbatim.
 
 > [!NOTE]
-> `--stdin --json` writes the JSON envelope to stdout instead of formatted text. The envelope includes `output.changed` / `output.unchanged` summary fields but does not include the formatted source body.
+> Plain `xlflow fmt` uses `--line-numbers preserve`. It does not add line numbers automatically, but it preserves existing ones where possible.
+
+> [!NOTE]
+> `--stdin --json` writes the JSON envelope to stdout instead of formatted text. The envelope includes `output.changed` / `output.unchanged` summary fields but does not include the formatted source body. `--stdin` cannot be combined with `--line-numbers`.
+
+> [!NOTE]
+> `fmt --line-numbers ...` still follows the normal `fmt` contract. Without `--write`, it only reports what would change. Use `--write` to persist the numbered or de-numbered source.
 
 ## JSON Output
 
@@ -81,6 +100,15 @@ Successful `--json` output uses the xlflow envelope with command-specific fields
     "unchanged": 5,
     "skipped": 1,
     "total": 8,
+    "line_numbers": {
+      "mode": "add",
+      "applied": false,
+      "files_to_change": 2,
+      "lines_to_add": 24,
+      "lines_to_remove": 0,
+      "lines_to_renumber": 0,
+      "warnings": []
+    },
     "changed_paths": ["src/modules/Main.bas", "src/modules/Utils.bas"],
     "skipped_paths": ["src/forms/UserForm1.frm"],
     "skipped_reasons": [

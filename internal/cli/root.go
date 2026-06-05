@@ -4008,6 +4008,7 @@ func (a *app) fmtCommand() *cobra.Command {
 	var check bool
 	var diff bool
 	var stdin bool
+	var lineNumbers string
 
 	cmd := &cobra.Command{
 		Use:   "fmt [path...]",
@@ -4020,6 +4021,9 @@ func (a *app) fmtCommand() *cobra.Command {
 				}
 				if write || check || diff {
 					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with --write, --check, or --diff"))
+				}
+				if cmd.Flags().Changed("line-numbers") {
+					return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--stdin cannot be combined with --line-numbers"))
 				}
 				return a.runFmtStdin()
 			}
@@ -4036,17 +4040,24 @@ func (a *app) fmtCommand() *cobra.Command {
 			if modeCount > 1 {
 				return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("--write, --check, and --diff cannot be combined"))
 			}
+			lineNumberMode := vbafmt.LineNumberMode(lineNumbers)
+			switch lineNumberMode {
+			case vbafmt.LineNumberModePreserve, vbafmt.LineNumberModeAdd, vbafmt.LineNumberModeRemove, vbafmt.LineNumberModeRenumber:
+			default:
+				return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("invalid --line-numbers %q: expected preserve, add, remove, or renumber", lineNumbers))
+			}
 			cfg, err := a.loadConfig("fmt")
 			if err != nil {
 				return err
 			}
 			opts := vbafmt.FmtOptions{
-				Write: write,
-				Check: check,
-				Diff:  diff,
-				Paths: args,
-				Root:  a.cwd,
-				Cfg:   cfg,
+				Write:       write,
+				Check:       check,
+				Diff:        diff,
+				Paths:       args,
+				Root:        a.cwd,
+				Cfg:         cfg,
+				LineNumbers: lineNumberMode,
 			}
 			result, err := vbafmt.Run(opts)
 			if err != nil {
@@ -4069,11 +4080,28 @@ func (a *app) fmtCommand() *cobra.Command {
 				mode = "diff"
 			}
 			outputPayload := map[string]any{
-				"mode":      mode,
-				"changed":   result.Changed,
-				"unchanged": result.Unchanged,
-				"skipped":   result.Skipped,
-				"total":     result.Total,
+				"mode":         mode,
+				"changed":      result.Changed,
+				"unchanged":    result.Unchanged,
+				"skipped":      result.Skipped,
+				"total":        result.Total,
+				"line_numbers": buildFmtLineNumbersPayload(mode, result.LineNumbers),
+			}
+			if len(result.LineNumbers.Warnings) > 0 {
+				lineWarnings := make([]map[string]any, 0, len(result.LineNumbers.Warnings))
+				for _, warning := range result.LineNumbers.Warnings {
+					item := map[string]any{
+						"message": warning.Message,
+					}
+					if warning.Path != "" {
+						item["file"] = warning.Path
+					}
+					if warning.Line > 0 {
+						item["line"] = warning.Line
+					}
+					lineWarnings = append(lineWarnings, item)
+				}
+				outputPayload["line_numbers"].(map[string]any)["warnings"] = lineWarnings
 			}
 			if len(result.ChangedPaths) > 0 {
 				outputPayload["changed_paths"] = pathsToAny(result.ChangedPaths)
@@ -4105,6 +4133,22 @@ func (a *app) fmtCommand() *cobra.Command {
 				})
 			}
 			if len(warnings) > 0 {
+				env.Warnings = warnings
+			}
+			if len(result.LineNumbers.Warnings) > 0 {
+				for _, warning := range result.LineNumbers.Warnings {
+					item := map[string]any{
+						"code":    "fmt_line_numbers_warning",
+						"message": warning.Message,
+					}
+					if warning.Path != "" {
+						item["file"] = warning.Path
+					}
+					if warning.Line > 0 {
+						item["line"] = warning.Line
+					}
+					warnings = append(warnings, item)
+				}
 				env.Warnings = warnings
 			}
 
@@ -4140,6 +4184,7 @@ func (a *app) fmtCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&check, "check", false, "check whether source files are formatted without modifying them")
 	cmd.Flags().BoolVar(&diff, "diff", false, "show unified diff of formatting changes without modifying files")
 	cmd.Flags().BoolVar(&stdin, "stdin", false, "read VBA source from stdin and write formatted output to stdout")
+	cmd.Flags().StringVar(&lineNumbers, "line-numbers", string(vbafmt.LineNumberModePreserve), "line-number policy: preserve, add, remove, or renumber")
 	return cmd
 }
 
@@ -4190,7 +4235,7 @@ func (a *app) runFmtStdin() error {
 			"skipped":   0,
 			"total":     1,
 		}
-		env.Logs = []string{fmt.Sprintf("%d file(s) formatted", changed)}
+		env.Logs = []string{fmt.Sprintf("%d file(s) would be formatted", changed)}
 		return a.write(env, output.ExitSuccess)
 	}
 	_, err = fmt.Fprint(a.stdoutWriter(), formatted)
@@ -4226,12 +4271,35 @@ func (a *app) buildFmtWriteLogs(wasWritten bool, result *vbafmt.Result) []string
 		logs = append(logs, fmt.Sprintf("%d file(s) would be formatted", result.Changed))
 	}
 	for _, path := range result.ChangedPaths {
-		logs = append(logs, fmt.Sprintf("formatted %s", displayPath(a.cwd, path)))
+		if wasWritten {
+			logs = append(logs, fmt.Sprintf("formatted %s", displayPath(a.cwd, path)))
+		} else {
+			logs = append(logs, fmt.Sprintf("would format %s", displayPath(a.cwd, path)))
+		}
 	}
 	for _, path := range result.SkippedPaths {
 		logs = append(logs, fmt.Sprintf("skipped %s", displayPath(a.cwd, path)))
 	}
 	return logs
+}
+
+func buildFmtLineNumbersPayload(mode string, summary vbafmt.LineNumberSummary) map[string]any {
+	payload := map[string]any{
+		"mode":    string(summary.Mode),
+		"applied": mode == "write",
+	}
+	if mode == "write" {
+		payload["files_changed"] = summary.FilesChanged
+		payload["lines_added"] = summary.LinesAdded
+		payload["lines_removed"] = summary.LinesRemoved
+		payload["lines_renumbered"] = summary.LinesRenumbered
+		return payload
+	}
+	payload["files_to_change"] = summary.FilesChanged
+	payload["lines_to_add"] = summary.LinesAdded
+	payload["lines_to_remove"] = summary.LinesRemoved
+	payload["lines_to_renumber"] = summary.LinesRenumbered
+	return payload
 }
 
 func (a *app) buildFmtDiffLogs(result *vbafmt.Result) []string {

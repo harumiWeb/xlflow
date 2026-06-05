@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added explicit VBA line-number operations to `xlflow fmt` via `--line-numbers preserve|add|remove|renumber`, including conservative ambiguity warnings for numeric-label control flow and structured JSON summary fields under `output.line_numbers`.
+- Added a dedicated xlflow agent debugging reference at `internal/agentskill/templates/xlflow/references/debugging.md`, documenting the preferred workflow: inspect `run` diagnostics first, then use `fmt --line-numbers add` plus targeted `XlflowDebug.Log` only when the default error metadata is not enough.
+
 ## v0.11.0
 
 - Added native `.NET` bridge support for the remaining Windows workbook commands: `xlflow new`, `session start|status|save|stop`, `attach --active`, `runner install|status|remove`, `list forms`, `ui button add|list|remove`, and `edit cell|range|rows|columns` with explicit `--bridge dotnet --json`.
