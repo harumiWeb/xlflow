@@ -254,7 +254,12 @@ The command:
 2. Creates a backup when `BackupMode` is not `"never"` (via `SaveCopyAs`)
 3. Discovers source files from `ModulesDir`, `ClassesDir`, `FormsDir`, `WorkbookDir`
 4. Removes existing components by name match, then imports via `VBComponents.Import`
-5. Returns `target`, `session`, `workbook`, `backup`, and `source` envelope fields
+5. Updates workbook document modules from `WorkbookDir`
+6. Runs VBE Compile in a disposable child bridge process before saving
+7. Saves the workbook unless `--no-save` was requested, then writes source fingerprints
+8. Returns `target`, `session`, `workbook`, `backup`, and `source` envelope fields
+
+If VBE Compile fails, the command returns `vba_compile_failed` with `error.phase = "compile_vba"` and `push_diagnostic.kind = "compile"` or `"timeout"`. The workbook is not saved and source fingerprints are not updated. Session-backed pushes report the live workbook as dirty because source was already imported before the compile failure.
 
 ## Process Model
 

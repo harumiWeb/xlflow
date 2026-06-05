@@ -1,6 +1,7 @@
 using System.Reflection;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Services;
+using Xlflow.ExcelBridge.Windows;
 
 namespace Xlflow.ExcelBridge.Tests;
 
@@ -151,6 +152,74 @@ public sealed class ExcelPushServiceTests
                 Directory.Delete(root, true);
             }
         }
+    }
+
+    [Fact]
+    public void BuildCompileFailureResponseMarksPushCompileFailureBeforeSave()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-compile-failed",
+            Command = "push",
+        };
+        var args = new PushCommandArguments(
+            WorkbookPath: @"C:\work\Book.xlsm",
+            ModulesDir: @"C:\work\src\modules",
+            ClassesDir: @"C:\work\src\classes",
+            FormsDir: @"C:\work\src\forms",
+            WorkbookDir: @"C:\work\src\workbook",
+            CodeSource: "",
+            BackupRoot: @"C:\work\.xlflow\backups",
+            Folders: false,
+            FolderAnnotation: "ignore",
+            DefaultComponentFolders: false,
+            StatePath: @"C:\work\.xlflow\state\push.json",
+            Visible: false,
+            BackupMode: "never",
+            ChangedOnly: false,
+            UseSession: true,
+            NoSave: true,
+            MetadataPath: @"C:\work\.xlflow\session.json");
+        var dialog = new DialogSnapshot
+        {
+            Kind = "compile",
+            Title = "Microsoft Visual Basic for Applications",
+            Text = ["Compile error:", "Expected: expression"],
+            Action = "compile_close",
+            ActionSucceeded = true,
+        };
+        var invocation = new WorkerInvocationResult(
+            Result: null,
+            Dialog: dialog,
+            Dialogs: [dialog],
+            TimedOut: false,
+            WorkerProcessId: 1234);
+
+        var response = ExcelPushService.BuildCompileFailureResponse(
+            request,
+            args,
+            @"C:\work\Book.xlsm",
+            sessionAttached: true,
+            sessionMode: "explicit",
+            invocation);
+
+        Assert.Equal("failed", response.Status);
+        Assert.NotNull(response.Error);
+        Assert.Equal("vba_compile_failed", response.Error.Code);
+        Assert.Equal("compile_vba", response.Error.Phase);
+        Assert.Contains("Expected: expression", response.Error.Message);
+
+        var session = Assert.IsType<Dictionary<string, object?>>(response.Extensions["session"]);
+        Assert.Equal(true, session["active"]);
+        Assert.Equal(true, session["dirty"]);
+        Assert.Equal(true, session["save_required"]);
+
+        var workbook = Assert.IsType<Dictionary<string, object?>>(response.Extensions["workbook"]);
+        Assert.Equal(false, workbook["saved"]);
+        Assert.Equal(true, workbook["needs_save"]);
+
+        Assert.True(response.Extensions.ContainsKey("push_diagnostic"));
     }
 
     public sealed class FakeWorkbook
