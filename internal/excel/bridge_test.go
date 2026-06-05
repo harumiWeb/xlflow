@@ -3628,13 +3628,13 @@ func TestRunnerDotNetPushUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 	}
 }
 
-func TestRunnerDotNetPushChangedOnlyNoOpPreservesSessionFields(t *testing.T) {
+func TestRunnerDotNetPushChangedOnlyNoOpKeepsWorkbookFileBacked(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return fakeBridgeProvider{
 			name:     string(excelbridge.ModeDotNet),
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["source state unchanged; skipped workbook import"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"auto","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"auto","session_requested":false,"auto_session":true,"saved":false,"dirty":false,"needs_save":false},"backup":{"path":null,"mode":"never"},"source":{"changed_only":true,"changed":false,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["source state unchanged; skipped workbook import"],"target":{"kind":"file","path":"C:\\temp\\Book.xlsm"},"session":{"active":false,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"none","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false,"session_mode":"none","session_requested":false,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"backup":{"path":null,"mode":"never"},"source":{"changed_only":true,"changed":false,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
 		}
 	}
 
@@ -3649,18 +3649,18 @@ func TestRunnerDotNetPushChangedOnlyNoOpPreservesSessionFields(t *testing.T) {
 		t.Fatal("Target is nil")
 	}
 	target, ok := env.Target.(map[string]interface{})
-	if !ok || target["kind"] != "live_session" {
+	if !ok || target["kind"] != "file" {
 		t.Fatalf("unexpected Target kind: %+v", target)
 	}
 	if env.Session == nil {
 		t.Fatal("Session is nil")
 	}
 	session, ok := env.Session.(map[string]interface{})
-	if !ok || session["active"] != true {
+	if !ok || session["active"] != false {
 		t.Fatalf("unexpected Session active: %+v", session)
 	}
-	if session["mode"] != "auto" {
-		t.Fatalf("unexpected Session mode: %v, want auto", session["mode"])
+	if session["mode"] != "none" {
+		t.Fatalf("unexpected Session mode: %v, want none", session["mode"])
 	}
 	if env.Source == nil {
 		t.Fatal("Source is nil")

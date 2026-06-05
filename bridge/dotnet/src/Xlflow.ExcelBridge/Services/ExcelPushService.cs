@@ -30,6 +30,9 @@ public sealed class ExcelPushService : IPushService
         {
             var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
                 args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
+            var fingerprint = VbaSourceHelper.ComputeFingerprint(
+                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
 
             var duplicates = VbaSourceHelper.FindDuplicateModuleNames(sourceFiles);
             if (duplicates.Count > 0)
@@ -46,22 +49,8 @@ public sealed class ExcelPushService : IPushService
                     Source: "xlflow"));
             }
 
-            var (attachment, attached) = ExcelBridgeSupport.RunPhase(
-                "attach_or_open_workbook",
-                () => AttachOrOpenWorkbook(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
-            excel = attachment.Excel;
-            workbook = attachment.Workbook;
-            sessionAttached = attached;
-
-            var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
-            var sessionMode = ResolveSessionMode(attached, args.UseSession);
-
-            var fingerprint = VbaSourceHelper.ComputeFingerprint(
-                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
-
             if (args.ChangedOnly && VbaSourceHelper.FingerprintMatchesState(fingerprint, args.StatePath))
             {
-                var needsSaveNoop = sessionAttached && !args.NoSave;
                 var noopSourceUserFormNames = GetSourceUserFormNames(sourceFiles);
                 var noopWarnings = new List<Dictionary<string, string>>();
                 var noopHints = new List<Dictionary<string, string>>();
@@ -71,29 +60,29 @@ public sealed class ExcelPushService : IPushService
                 {
                     ["target"] = new Dictionary<string, object?>
                     {
-                        ["kind"] = sessionAttached ? "live_session" : "file",
+                        ["kind"] = "file",
                         ["path"] = workbookPath,
                     },
                     ["session"] = new Dictionary<string, object?>
                     {
-                        ["active"] = sessionAttached,
+                        ["active"] = false,
                         ["workbook_path"] = workbookPath,
-                        ["dirty"] = needsSaveNoop,
-                        ["save_required"] = needsSaveNoop,
-                        ["live_newer_than_disk"] = needsSaveNoop,
-                        ["mode"] = sessionMode,
-                        ["source_of_truth"] = needsSaveNoop ? "live_workbook" : "saved_workbook",
+                        ["dirty"] = false,
+                        ["save_required"] = false,
+                        ["live_newer_than_disk"] = false,
+                        ["mode"] = "none",
+                        ["source_of_truth"] = "saved_workbook",
                     },
                     ["workbook"] = new Dictionary<string, object?>
                     {
                         ["path"] = workbookPath,
-                        ["session"] = sessionAttached,
-                        ["session_mode"] = sessionMode,
-                        ["session_requested"] = sessionAttached && args.UseSession,
-                        ["auto_session"] = sessionAttached && !args.UseSession,
+                        ["session"] = false,
+                        ["session_mode"] = "none",
+                        ["session_requested"] = false,
+                        ["auto_session"] = false,
                         ["saved"] = false,
-                        ["dirty"] = needsSaveNoop,
-                        ["needs_save"] = needsSaveNoop,
+                        ["dirty"] = false,
+                        ["needs_save"] = false,
                     },
                     ["backup"] = new Dictionary<string, object?>
                     {
@@ -125,6 +114,15 @@ public sealed class ExcelPushService : IPushService
                     Extensions = noopExtensions,
                 };
             }
+
+            var (attachment, attached) = ExcelBridgeSupport.RunPhase(
+                "attach_or_open_workbook",
+                () => AttachOrOpenWorkbook(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
+            excel = attachment.Excel;
+            workbook = attachment.Workbook;
+            sessionAttached = attached;
+
+            var sessionMode = ResolveSessionMode(attached, args.UseSession);
 
             string? backupId = null;
             string? backupPath = null;

@@ -222,6 +222,78 @@ public sealed class RunCommandTests
         Assert.Equal("macro_failed", ExcelRunService.ClassifyRunError("", null));
     }
 
+    [Theory]
+    [InlineData(true, false, true, true)]
+    [InlineData(false, false, false, false)]
+    [InlineData(false, true, false, false)]
+    public void ComputePostRunSaveStateMatchesSessionPersistenceRules(bool sessionAttached, bool saved, bool expectedDirty, bool expectedNeedsSave)
+    {
+        var result = ExcelRunService.ComputePostRunSaveState(sessionAttached, saved);
+
+        Assert.Equal(expectedDirty, result.Dirty);
+        Assert.Equal(expectedNeedsSave, result.NeedsSave);
+    }
+
+    [Fact]
+    public void Execute_ReturnsBridgeFileNotOpenableForNonExcelFile()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "xlflow-run-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(tmpDir);
+            var filePath = Path.Combine(tmpDir, "test.txt");
+            File.WriteAllBytes(filePath, [0]);
+
+            var service = new ExcelRunService();
+            var request = new BridgeRequest
+            {
+                ProtocolVersion = ProtocolVersion.Current,
+                RequestId = "req-run-open-fail",
+                Command = "run",
+            };
+            var args = new RunCommandArguments(
+                WorkbookPath: filePath,
+                MacroName: "Module1.Main",
+                MacroArgsJSON: "",
+                Visible: false,
+                DisplayAlerts: false,
+                SaveWorkbook: false,
+                Direct: false,
+                Diagnostic: false,
+                SuppressModalErrors: true,
+                TraceEnabled: false,
+                TraceFile: "",
+                MsgBoxResponsesJSON: "",
+                InputResponsesJSON: "",
+                FileDialogResponsesJSON: "",
+                DebugStreamEnabled: false,
+                DebugStreamPipeName: "",
+                UIStreamEnabled: false,
+                UIStreamPipeName: "",
+                UIStreamRedactInput: false,
+                UseSession: false,
+                MetadataPath: "",
+                RuntimeMode: "",
+                RuntimeSource: "",
+                SaveAsPath: "",
+                TimeoutSeconds: 0);
+
+            var response = service.Execute(request, args, CancellationToken.None);
+
+            Assert.Equal("failed", response.Status);
+            Assert.NotNull(response.Error);
+            Assert.Equal("bridge_file_not_openable", response.Error.Code);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir))
+            {
+                try { Directory.Delete(tmpDir, true); }
+                catch (IOException) { /* best-effort */ }
+            }
+        }
+    }
+
     [Fact]
     public void IsLikelyVbaCompileFailureDetectsCompileDialogHResult()
     {

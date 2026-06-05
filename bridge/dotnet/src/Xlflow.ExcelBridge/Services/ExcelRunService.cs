@@ -387,21 +387,7 @@ public sealed class ExcelRunService : IRunService
                 saved = true;
             }
 
-            if (saved)
-            {
-                needsSave = false;
-                dirty = false;
-            }
-            else if (sessionAttached)
-            {
-                dirty = true;
-                needsSave = true;
-            }
-            else if (ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var postDirty))
-            {
-                dirty = postDirty;
-                needsSave = postDirty;
-            }
+            (dirty, needsSave) = ComputePostRunSaveState(sessionAttached, saved);
 
             if (needsSave)
             {
@@ -497,6 +483,14 @@ public sealed class ExcelRunService : IRunService
                 Logs = logs,
                 Extensions = extensions,
             };
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("bridge_file_not_openable", StringComparison.OrdinalIgnoreCase))
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "bridge_file_not_openable",
+                Message: ex.Message.Replace("bridge_file_not_openable: ", "", StringComparison.OrdinalIgnoreCase),
+                Phase: "run",
+                Source: "xlflow-excel-bridge"));
         }
         catch (Exception ex)
         {
@@ -885,6 +879,21 @@ public sealed class ExcelRunService : IRunService
     {
         public string Type { get; set; } = "string";
         public string Value { get; set; } = "";
+    }
+
+    internal static (bool Dirty, bool NeedsSave) ComputePostRunSaveState(bool sessionAttached, bool saved)
+    {
+        if (saved)
+        {
+            return (false, false);
+        }
+
+        if (sessionAttached)
+        {
+            return (true, true);
+        }
+
+        return (false, false);
     }
 
     private static (object Excel, object Workbook, bool SessionAttached, string SessionMode) OpenWorkbookForRun(
