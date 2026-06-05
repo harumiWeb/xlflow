@@ -18,6 +18,7 @@ public sealed class ExcelExportImageService : IExportImageService
         object? workbook = null;
         object? worksheet = null;
         object? range = null;
+        object? activeWindow = null;
         object? chartObjects = null;
         object? chartObject = null;
         object? chart = null;
@@ -89,27 +90,67 @@ public sealed class ExcelExportImageService : IExportImageService
             phase = "activate_window";
             ActivateWorkbookWindow(excel, worksheet, range, originalVisible, ref restoreVisible);
 
-            phase = "create_chart_host";
-            dynamic ws = worksheet;
-            dynamic rg = range;
-            dynamic chartObjectsDynamic = ws.ChartObjects();
-            chartObjects = (object)chartObjectsDynamic;
-            chartObject = (object)chartObjectsDynamic.Add(
-                Convert.ToDouble(rg.Left, CultureInfo.InvariantCulture),
-                Convert.ToDouble(rg.Top, CultureInfo.InvariantCulture),
-                Math.Max(Convert.ToDouble(rg.Width, CultureInfo.InvariantCulture), 1.0),
-                Math.Max(Convert.ToDouble(rg.Height, CultureInfo.InvariantCulture), 1.0));
-            ((dynamic)chartObject).Name = $"xlflow.export.{Guid.NewGuid():N}";
-            chart = (object)((dynamic)chartObject).Chart;
-
             phase = "copy_picture";
-            var clipboardResult = CopyRangeToChartWithRetry(range, chart!, excel, worksheet, cancellationToken);
-
-            phase = "export_chart";
-            var exportOk = ExcelBridgeSupport.InvokeMethod(chart!, "Export", outputPath, "PNG");
-            if (!(exportOk is bool exported && exported) && !File.Exists(outputPath))
+            Dictionary<string, object?>? clipboardWarning = null;
+            var captured = false;
+            try
             {
-                throw new InvalidOperationException("export_image_failed: Excel did not create the requested image file.");
+                var clipboardResult = CopyRangeImageToClipboardWithRetry(range, outputPath, excel, worksheet, cancellationToken);
+                clipboardWarning = clipboardResult.Warning;
+                captured = clipboardResult.Captured;
+            }
+            catch
+            {
+                // fall through to secondary capture strategies
+            }
+
+            phase = "capture_range";
+            var hwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
+            var captureWarning = clipboardWarning;
+            if (hwnd != 0)
+            {
+                try
+                {
+                    activeWindow = ExcelBridgeSupport.Get(excel, "ActiveWindow");
+                    var screenRect = ResolveRangeScreenRect(activeWindow!, range);
+                    _ = WindowCapture.CaptureWindowRegion(hwnd, screenRect, outputPath, preferScreenCopy: true);
+                    captured = true;
+                }
+                catch (Exception ex)
+                {
+                    captureWarning = new Dictionary<string, object?>
+                    {
+                        ["code"] = "window_capture_fallback",
+                        ["message"] = $"Window crop capture failed, falling back to clipboard export: {ExcelBridgeSupport.FormatExceptionDetail(ex)}",
+                    };
+                }
+            }
+
+            clipboardWarning = captureWarning;
+            if (!captured)
+            {
+                phase = "create_chart_host";
+                dynamic ws = worksheet;
+                dynamic rg = range;
+                dynamic chartObjectsDynamic = ws.ChartObjects();
+                chartObjects = (object)chartObjectsDynamic;
+                chartObject = (object)chartObjectsDynamic.Add(
+                    Convert.ToDouble(rg.Left, CultureInfo.InvariantCulture),
+                    Convert.ToDouble(rg.Top, CultureInfo.InvariantCulture),
+                    Math.Max(Convert.ToDouble(rg.Width, CultureInfo.InvariantCulture), 1.0),
+                    Math.Max(Convert.ToDouble(rg.Height, CultureInfo.InvariantCulture), 1.0));
+                ((dynamic)chartObject).Name = $"xlflow.export.{Guid.NewGuid():N}";
+                chart = (object)((dynamic)chartObject).Chart;
+
+                phase = "copy_picture";
+                clipboardWarning = CopyRangeToChartWithRetry(range, chart!, excel, worksheet, cancellationToken).Warning;
+
+                phase = "export_chart";
+                var exportOk = ExcelBridgeSupport.InvokeMethod(chart!, "Export", outputPath, "PNG");
+                if (!(exportOk is bool exported && exported) && !File.Exists(outputPath))
+                {
+                    throw new InvalidOperationException("export_image_failed: Excel did not create the requested image file.");
+                }
             }
             if (!string.IsNullOrWhiteSpace(temporaryExportPath))
             {
@@ -152,9 +193,9 @@ public sealed class ExcelExportImageService : IExportImageService
             };
 
             var warnings = new List<Dictionary<string, object?>>();
-            if (clipboardResult.Warning is not null)
+            if (clipboardWarning is not null)
             {
-                warnings.Add(clipboardResult.Warning);
+                warnings.Add(clipboardWarning);
             }
             if (needsSave)
             {
@@ -216,6 +257,7 @@ public sealed class ExcelExportImageService : IExportImageService
             ExcelBridgeSupport.ReleaseComObject(chart);
             ExcelBridgeSupport.ReleaseComObject(chartObject);
             ExcelBridgeSupport.ReleaseComObject(chartObjects);
+            ExcelBridgeSupport.ReleaseComObject(activeWindow);
             ExcelBridgeSupport.ReleaseComObject(range);
             ExcelBridgeSupport.ReleaseComObject(worksheet);
             ExcelBridgeSupport.ReleaseComObject(selection);
@@ -351,6 +393,14 @@ public sealed class ExcelExportImageService : IExportImageService
             TrySetVisible(excel, true);
             restoreVisible = true;
         }
+        try
+        {
+            ExcelBridgeSupport.Set(excel, "ScreenUpdating", true);
+        }
+        catch
+        {
+            // best-effort repaint enablement
+        }
         if (hwnd != 0)
         {
             _ = WindowCapture.MoveWindowIntoCaptureBounds(WindowCapture.GetWindowInfo(new IntPtr(hwnd)));
@@ -371,7 +421,34 @@ public sealed class ExcelExportImageService : IExportImageService
         {
             // best-effort selection
         }
-        Thread.Sleep(300);
+        Thread.Sleep(700);
+    }
+
+    private static Rectangle ResolveRangeScreenRect(object activeWindow, object range)
+    {
+        dynamic win = activeWindow;
+        dynamic rg = range;
+
+        var left = Convert.ToDouble(rg.Left, CultureInfo.InvariantCulture);
+        var top = Convert.ToDouble(rg.Top, CultureInfo.InvariantCulture);
+        var width = Convert.ToDouble(rg.Width, CultureInfo.InvariantCulture);
+        var height = Convert.ToDouble(rg.Height, CultureInfo.InvariantCulture);
+
+        var screenLeft = Convert.ToInt32(win.PointsToScreenPixelsX(left), CultureInfo.InvariantCulture);
+        var screenTop = Convert.ToInt32(win.PointsToScreenPixelsY(top), CultureInfo.InvariantCulture);
+        var screenRight = Convert.ToInt32(win.PointsToScreenPixelsX(left + width), CultureInfo.InvariantCulture);
+        var screenBottom = Convert.ToInt32(win.PointsToScreenPixelsY(top + height), CultureInfo.InvariantCulture);
+
+        if (screenRight <= screenLeft)
+        {
+            screenRight = screenLeft + Math.Max((int)Math.Ceiling(width), 1);
+        }
+        if (screenBottom <= screenTop)
+        {
+            screenBottom = screenTop + Math.Max((int)Math.Ceiling(height), 1);
+        }
+
+        return Rectangle.FromLTRB(screenLeft, screenTop, screenRight, screenBottom);
     }
 
     private static ClipboardPasteResult CopyRangeToChartWithRetry(object range, object chart, object excel, object worksheet, CancellationToken cancellationToken)
@@ -428,6 +505,68 @@ public sealed class ExcelExportImageService : IExportImageService
             detail = $"clipboard_unavailable: {detail}";
         }
         throw new InvalidOperationException(detail);
+    }
+
+    private static ClipboardCaptureResult CopyRangeImageToClipboardWithRetry(object range, string outputPath, object excel, object worksheet, CancellationToken cancellationToken)
+    {
+        Exception? lastFailure = null;
+        var attempts = new List<Dictionary<string, object?>>();
+        for (var attempt = 1; attempt <= 4; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                ExcelBridgeSupport.InvokeViaDynamic(range, "CopyPicture", 2, -4147);
+                var clipboardReady = WaitForClipboardPicture(TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(100), cancellationToken);
+                attempts.Add(new Dictionary<string, object?>
+                {
+                    ["attempt"] = attempt,
+                    ["clipboard_ready"] = clipboardReady,
+                });
+                if (!clipboardReady)
+                {
+                    lastFailure = new InvalidOperationException("clipboard_timeout: Excel did not publish an image to the clipboard after CopyPicture.");
+                    ReActivate(worksheet, range, excel);
+                    continue;
+                }
+
+                if (ClipboardNative.TrySaveBitmap(outputPath))
+                {
+                    if (attempt > 1)
+                    {
+                        return new ClipboardCaptureResult(true, new Dictionary<string, object?>
+                        {
+                            ["code"] = "clipboard_retry_succeeded",
+                            ["message"] = $"Clipboard image export succeeded after {attempt} attempts.",
+                            ["attempts"] = attempts,
+                        });
+                    }
+
+                    return new ClipboardCaptureResult(true, null);
+                }
+
+                lastFailure = new InvalidOperationException("clipboard_unavailable: clipboard image data was not available in a bitmap-compatible format.");
+                ReActivate(worksheet, range, excel);
+            }
+            catch (Exception ex)
+            {
+                lastFailure = ex;
+                attempts.Add(new Dictionary<string, object?>
+                {
+                    ["attempt"] = attempt,
+                    ["error"] = ExcelBridgeSupport.FormatExceptionDetail(ex),
+                });
+                ReActivate(worksheet, range, excel);
+                Thread.Sleep(150 * attempt);
+            }
+        }
+
+        if (lastFailure is not null)
+        {
+            throw new InvalidOperationException(ExcelBridgeSupport.FormatExceptionDetail(lastFailure), lastFailure);
+        }
+
+        return new ClipboardCaptureResult(false, null);
     }
 
     private static void ReActivate(object worksheet, object range, object excel)
@@ -634,6 +773,7 @@ public sealed class ExcelExportImageService : IExportImageService
     }
 
     private sealed record ClipboardPasteResult(Dictionary<string, object?>? Warning);
+    private sealed record ClipboardCaptureResult(bool Captured, Dictionary<string, object?>? Warning);
 
     private static class ClipboardNative
     {
@@ -659,6 +799,35 @@ public sealed class ExcelExportImageService : IExportImageService
             }
         }
 
+        public static bool TrySaveBitmap(string path)
+        {
+            if (!OpenClipboard(IntPtr.Zero))
+            {
+                return false;
+            }
+
+            try
+            {
+                var handle = GetClipboardData(CfBitmap);
+                if (handle == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                using var image = Image.FromHbitmap(handle);
+                image.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _ = CloseClipboard();
+            }
+        }
+
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool OpenClipboard(IntPtr hwndNewOwner);
 
@@ -667,5 +836,8 @@ public sealed class ExcelExportImageService : IExportImageService
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool IsClipboardFormatAvailable(uint format);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetClipboardData(uint format);
     }
 }
