@@ -34,6 +34,8 @@ Use `--with-skill --agent codex` when the project will be maintained primarily b
 The generated workbook is macro-enabled. Keep the `.xlsm` extension so Excel can preserve VBA components.
 :::
 
+`new` supports explicit `--bridge dotnet` on Windows.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.

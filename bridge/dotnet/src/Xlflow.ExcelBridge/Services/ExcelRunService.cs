@@ -76,6 +76,7 @@ public sealed class ExcelRunService : IRunService
                 var compileInvocation = InvokeWithWorker(
                     new MacroRunWorkerRequest(
                         excelProcessId,
+                        excelHwnd,
                         "",
                         Operation: "compile",
                         WorkbookPath: args.WorkbookPath),
@@ -159,6 +160,7 @@ public sealed class ExcelRunService : IRunService
             var invocation = InvokeWithWorker(
                 new MacroRunWorkerRequest(
                     excelProcessId,
+                    excelHwnd,
                     macroReference,
                     (args.Direct ? macroArgs : [])
                         .Select(argument => new MacroRunWorkerArgument(argument.Type, argument.Value))

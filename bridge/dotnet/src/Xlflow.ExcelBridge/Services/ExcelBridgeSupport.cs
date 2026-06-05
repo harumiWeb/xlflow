@@ -8,6 +8,24 @@ namespace Xlflow.ExcelBridge.Services;
 
 internal static class BridgePayload
 {
+    public static bool HasProperty(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static string? GetString(JsonElement payload, string name)
     {
         if (payload.ValueKind != JsonValueKind.Object)
@@ -89,6 +107,37 @@ internal static class ExcelBridgeSupport
         var pid = TryGetInt32(root, "pid");
         var workbookPath = BridgePayload.GetString(root, "workbook_path") ?? "";
         return new SessionMetadata(hwnd, pid, workbookPath);
+    }
+
+    public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath)
+    {
+        if (string.IsNullOrWhiteSpace(metadataPath))
+        {
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(metadataPath);
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            Directory.CreateDirectory(parent);
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["hwnd"] = GetExcelMainHwnd(excel),
+            ["pid"] = GetExcelProcessId(excel),
+            ["workbook_path"] = NormalizePath(workbookPath),
+        };
+
+        File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
+    }
+
+    public static void DeleteSessionMetadata(string metadataPath)
+    {
+        if (!string.IsNullOrWhiteSpace(metadataPath) && File.Exists(metadataPath))
+        {
+            File.Delete(metadataPath);
+        }
     }
 
     public static bool SessionMetadataMatchesWorkbook(string metadataPath, string workbookPath)
@@ -209,6 +258,20 @@ internal static class ExcelBridgeSupport
             return null;
         }
 
+        var running = TryGetRunningExcelApplication();
+        if (running is not null)
+        {
+            try
+            {
+                _ = GetOpenWorkbook(running, metadata.WorkbookPath);
+                return running;
+            }
+            catch
+            {
+                ReleaseComObject(running);
+            }
+        }
+
         if (metadata.Hwnd != 0)
         {
             var excel = TryGetExcelByHwnd(metadata.Hwnd);
@@ -272,7 +335,8 @@ internal static class ExcelBridgeSupport
     {
         try
         {
-            dirty = !ToBool(Get(workbook, "Saved"));
+            dynamic wb = workbook;
+            dirty = !Convert.ToBoolean(wb.Saved, CultureInfo.InvariantCulture);
             return true;
         }
         catch
@@ -601,9 +665,11 @@ internal static class ExcelBridgeSupport
         dynamic dyn = comObject;
         return memberName switch
         {
+            "Buttons" => dyn.Buttons(),
             "CopyPicture" => InvokeCopyPicture(dyn, args),
             "Open" => dyn.Open(args[0]),
             "Save" => dyn.Save(),
+            "SaveAs" => InvokeSaveAs(dyn, args),
             "SaveCopyAs" => dyn.SaveCopyAs(args[0]),
             "Import" => dyn.Import(args[0]),
             "Export" => dyn.Export(args[0]),
@@ -615,6 +681,21 @@ internal static class ExcelBridgeSupport
             "InsertLines" => dyn.InsertLines(args[0], args[1]),
             _ => throw new InvalidOperationException($"Unsupported COM method for dynamic dispatch: {memberName}"),
         };
+    }
+
+    private static object? InvokeSaveAs(dynamic dyn, object?[] args)
+    {
+        switch (args.Length)
+        {
+            case 1:
+                dyn.SaveAs(args[0]);
+                return null;
+            case 2:
+                dyn.SaveAs(args[0], args[1]);
+                return null;
+            default:
+                throw new InvalidOperationException("SaveAs currently supports 1 or 2 arguments.");
+        }
     }
 
     private static object? InvokeCopyPicture(dynamic dyn, object?[] args)
@@ -762,6 +843,64 @@ internal static class ExcelBridgeSupport
         }
     }
 
+    public static object? TryGetForegroundExcel()
+    {
+        var hwnd = NativeMethods.GetForegroundWindow();
+        if (hwnd == IntPtr.Zero)
+        {
+            return TryGetRunningExcelApplication();
+        }
+        return TryGetExcelByHwnd(hwnd.ToInt64()) ?? TryGetRunningExcelApplication();
+    }
+
+    public static Dictionary<string, object?> BuildSessionPayload(string workbookPath, bool active, string mode, bool? dirty, bool saveRequired)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["active"] = active,
+            ["workbook_path"] = NormalizePath(workbookPath),
+            ["dirty"] = dirty,
+            ["save_required"] = saveRequired,
+            ["live_newer_than_disk"] = saveRequired,
+            ["mode"] = mode,
+            ["source_of_truth"] = saveRequired ? "live_workbook" : "saved_workbook",
+        };
+    }
+
+    public static Dictionary<string, object?> BuildWorkbookPayload(string workbookPath, bool sessionAttached, string sessionMode, bool sessionRequested, bool saved, bool? dirty, bool needsSave)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["path"] = NormalizePath(workbookPath),
+            ["session"] = sessionAttached,
+            ["session_mode"] = sessionMode,
+            ["session_requested"] = sessionRequested,
+            ["auto_session"] = sessionAttached && !sessionRequested,
+            ["saved"] = saved,
+            ["dirty"] = dirty,
+            ["needs_save"] = needsSave,
+        };
+    }
+
+    public static Dictionary<string, object?> BuildTargetPayload(string kind, string workbookPath)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["kind"] = kind,
+            ["path"] = NormalizePath(workbookPath),
+        };
+    }
+
+    public static string? GetSessionUsageLog(string sessionMode)
+    {
+        return sessionMode switch
+        {
+            "explicit" => "attached to explicit xlflow session workbook",
+            "auto" => "attached to matching xlflow session workbook",
+            _ => null,
+        };
+    }
+
     public static object? TryGetSelection(object? excel)
     {
         if (excel is null)
@@ -822,6 +961,49 @@ internal static class ExcelBridgeSupport
     public static bool ToBool(object? value)
     {
         return Convert.ToBoolean(value, CultureInfo.InvariantCulture);
+    }
+
+    public static double ToDouble(object? value)
+    {
+        return Convert.ToDouble(value, CultureInfo.InvariantCulture);
+    }
+
+    public static object? TryGetRunningExcelApplication()
+    {
+        try
+        {
+            if (NativeMethods.CLSIDFromProgID("Excel.Application", out var clsid) != 0)
+            {
+                return null;
+            }
+            var hr = NativeMethods.GetActiveObject(ref clsid, IntPtr.Zero, out var app);
+            if (hr != 0)
+            {
+                return null;
+            }
+            return app;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static object? TryGetActiveWorkbook(object? excel)
+    {
+        if (excel is null)
+        {
+            return null;
+        }
+        try
+        {
+            dynamic app = excel;
+            return (object?)app.ActiveWorkbook;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static void ReleaseComObject(object? value)
@@ -961,6 +1143,18 @@ internal static class ExcelBridgeSupport
 
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int processId);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
+        public static extern int CLSIDFromProgID(string lpszProgID, out Guid lpclsid);
+
+        [DllImport("oleaut32.dll")]
+        public static extern int GetActiveObject(
+            ref Guid rclsid,
+            IntPtr reserved,
+            [MarshalAs(UnmanagedType.IUnknown)] out object? ppunk);
 
         [DllImport("oleacc.dll")]
         public static extern int AccessibleObjectFromWindow(

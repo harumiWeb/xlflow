@@ -32,19 +32,26 @@ public sealed class BridgeHostTests
         Assert.Equal(0, code);
         using var json = JsonDocument.Parse(stdout.ToString());
         var commands = json.RootElement.GetProperty("commands").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Contains("attach", commands);
         Assert.Contains("doctor", commands);
+        Assert.Contains("edit", commands);
         Assert.Contains("export-image", commands);
         Assert.Contains("form-export-image", commands);
         Assert.Contains("form-write", commands);
         Assert.Contains("inspect", commands);
         Assert.Contains("inspect-form", commands);
+        Assert.Contains("list", commands);
         Assert.Contains("macros", commands);
+        Assert.Contains("new", commands);
         Assert.Contains("pull", commands);
         Assert.Contains("process", commands);
         Assert.Contains("push", commands);
         Assert.Contains("run", commands);
+        Assert.Contains("runner", commands);
+        Assert.Contains("session", commands);
         Assert.Contains("test", commands);
         Assert.Contains("trace", commands);
+        Assert.Contains("ui", commands);
     }
 
     [Fact]

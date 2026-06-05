@@ -21,52 +21,73 @@ public sealed class CommandRegistry
     {
         return new CommandRegistry(new ICommandHandler[]
         {
+            new AttachCommand(),
             new DoctorCommand(),
+            new EditCommand(),
             new ExportImageCommand(),
             new FormExportImageCommand(),
             new FormWriteCommand(),
             new InspectCommand(),
             new InspectFormCommand(),
+            new ListCommand(),
             new MacrosCommand(),
+            new NewCommand(),
             new ProcessCommand(),
             new PullCommand(),
             new PushCommand(),
             new RunCommand(),
+            new RunnerCommand(),
+            new SessionCommand(),
             new TestCommand(),
             new TraceCommand(),
+            new UICommand(),
         });
     }
 
     public static CommandRegistry Create(
         Func<ExcelDiagnosticsResult>? probeExcel,
+        IAttachService? attachService = null,
+        IEditService? editService = null,
         IExportImageService? exportImageService = null,
         IFormExportImageService? formExportImageService = null,
         IInspectService? inspectService = null,
         IFormWriteService? formWriteService = null,
         IInspectFormService? inspectFormService = null,
+        IListService? listService = null,
         IMacrosService? macrosService = null,
+        INewService? newService = null,
         IProcessService? processService = null,
         IPullService? pullService = null,
         IPushService? pushService = null,
         IRunService? runService = null,
+        IRunnerService? runnerService = null,
+        ISessionService? sessionService = null,
         ITestService? testService = null,
-        ITraceService? traceService = null)
+        ITraceService? traceService = null,
+        IUIService? uiService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
         {
+            new AttachCommand(attachService),
             new DoctorCommand(probeExcel),
+            new EditCommand(editService),
             new ExportImageCommand(exportImageService),
             new FormExportImageCommand(formExportImageService),
             new FormWriteCommand(formWriteService),
             new InspectCommand(inspectService),
             new InspectFormCommand(inspectFormService),
+            new ListCommand(listService),
             new MacrosCommand(macrosService),
+            new NewCommand(newService),
             new ProcessCommand(processService),
             new PullCommand(pullService),
             new PushCommand(pushService),
             new RunCommand(runService),
+            new RunnerCommand(runnerService),
+            new SessionCommand(sessionService),
             new TestCommand(testService),
             new TraceCommand(traceService),
+            new UICommand(uiService),
         });
     }
 
