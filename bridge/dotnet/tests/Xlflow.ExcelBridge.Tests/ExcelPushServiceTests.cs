@@ -222,6 +222,41 @@ public sealed class ExcelPushServiceTests
         Assert.True(response.Extensions.ContainsKey("push_diagnostic"));
     }
 
+    [Theory]
+    [InlineData(2500, 1500)]
+    [InlineData(1000, 1000)]
+    [InlineData(500, 500)]
+    [InlineData(1, 1)]
+    public void ResolveCompileTimeoutHonorsProvidedRequestTimeout(int requestTimeoutMs, int expectedTimeoutMs)
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-timeout",
+            Command = "push",
+            TimeoutMs = requestTimeoutMs,
+        };
+
+        var timeout = ExcelPushService.ResolveCompileTimeout(request);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedTimeoutMs), timeout);
+    }
+
+    [Fact]
+    public void ResolveCompileTimeoutFallsBackToDefaultWhenUnset()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-timeout-default",
+            Command = "push",
+        };
+
+        var timeout = ExcelPushService.ResolveCompileTimeout(request);
+
+        Assert.Equal(TimeSpan.FromMinutes(5), timeout);
+    }
+
     public sealed class FakeWorkbook
     {
         public FakeVBProject VBProject { get; } = new();

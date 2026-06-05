@@ -134,7 +134,7 @@ public static class MacroRunWorker
         };
     }
 
-    private static object CompileWorkbook(object excel, string workbookPath)
+    internal static object CompileWorkbook(object excel, string workbookPath)
     {
         object? workbook = null;
         object? vbProject = null;
@@ -152,6 +152,8 @@ public static class MacroRunWorker
             stage = "get_vbe";
             dynamic vbProjectObject = vbProject;
             vbe = vbProjectObject.VBE;
+            stage = "activate_target_project";
+            ActivateTargetProject(workbook, vbProject, vbe);
             stage = "get_command_bars";
             dynamic vbeObject = vbe;
             commandBars = vbeObject.CommandBars;
@@ -180,6 +182,23 @@ public static class MacroRunWorker
             ExcelBridgeSupport.ReleaseComObject(vbe);
             ExcelBridgeSupport.ReleaseComObject(vbProject);
             ExcelBridgeSupport.ReleaseComObject(workbook);
+        }
+    }
+
+    internal static void ActivateTargetProject(object workbook, object vbProject, object vbe)
+    {
+        dynamic workbookObject = workbook;
+        workbookObject.Activate();
+
+        try
+        {
+            dynamic vbeObject = vbe;
+            vbeObject.ActiveVBProject = vbProject;
+        }
+        catch
+        {
+            // Workbook activation usually selects the right project; setting
+            // ActiveVBProject is best-effort because some hosts reject it.
         }
     }
 

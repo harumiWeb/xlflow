@@ -888,11 +888,19 @@ public sealed class ExcelPushService : IPushService
         };
     }
 
-    private static TimeSpan ResolveCompileTimeout(BridgeRequest request)
+    internal static TimeSpan ResolveCompileTimeout(BridgeRequest request)
     {
-        return request.TimeoutMs is > 1000
-            ? TimeSpan.FromMilliseconds(request.TimeoutMs.Value - 1000)
-            : TimeSpan.FromMinutes(5);
+        if (request.TimeoutMs is > 1000)
+        {
+            return TimeSpan.FromMilliseconds(request.TimeoutMs.Value - 1000);
+        }
+
+        if (request.TimeoutMs is > 0)
+        {
+            return TimeSpan.FromMilliseconds(Math.Max(1, request.TimeoutMs.Value));
+        }
+
+        return TimeSpan.FromMinutes(5);
     }
 
     private static string DialogMessage(DialogSnapshot dialog)
