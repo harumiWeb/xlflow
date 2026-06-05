@@ -32,6 +32,8 @@ xlflow runner install --json
 Most users can rely on `xlflow run`; use `runner` directly when debugging persistent runner state.
 :::
 
+`runner` supports explicit `--bridge dotnet` on Windows for `install`, `status`, and `remove`.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.

@@ -1,13 +1,9 @@
 pre-commit:
   parallel: true
   commands:
+    fmt:
+      run: task fmt
     goimports:
       run: goimports -w cmd internal
     lint:
-      run: golangci-lint run
-    ps-lint:
-      run: task ps-lint
-    fmt:
-      run: go fmt ./...
-    pnpm-format:
-      run: pnpm run format
+      run: task lint

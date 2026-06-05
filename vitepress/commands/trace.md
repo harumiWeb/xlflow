@@ -14,14 +14,15 @@ xlflow trace inject
 
 ## Options and Arguments
 
-| Option / argument | Description                                        | Default |
-| ----------------- | -------------------------------------------------- | ------- |
-| `enable`          | Enable trace helper support.                       | -       |
-| `status`          | Report helper and log state.                       | -       |
-| `disable`         | Remove trace helper support when safe.             | -       |
-| `clean`           | Remove trace logs.                                 | -       |
-| `inject`          | Inject helper into the active/session workbook.    | -       |
-| `--session`       | Operate against the managed live session workbook. | false   |
+| Option / argument     | Description                                                        | Default |
+| --------------------- | ------------------------------------------------------------------ | ------- |
+| `enable`              | Enable trace helper support.                                       | -       |
+| `status`              | Report helper and log state.                                       | -       |
+| `disable`             | Remove trace helper support when safe.                             | -       |
+| `clean`               | Remove trace logs.                                                 | -       |
+| `inject`              | Inject helper into the active/session workbook.                    | -       |
+| `--session`           | Operate against the managed live session workbook.                 | false   |
+| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | auto    |
 
 ## Examples
 
@@ -39,6 +40,10 @@ VBA code can call `XlflowLog` after trace support is available.
 
 ::: warning
 `trace disable` refuses unsafe removal when the helper appears modified or in use.
+:::
+
+::: tip
+On Windows, `trace` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
 :::
 
 ## JSON Output Example

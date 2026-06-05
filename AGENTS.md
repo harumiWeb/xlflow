@@ -4,37 +4,21 @@
 
 ```txt
 root: .
+├── bridge/
+│   └── dotnet/ # dotnet bridge のコード
 ├── cmd/
-│   └── xlflow/
-│       └── main.go
-├── vitepress/
-├── docs/
-│   ├── adr/
-│   ├── specs/
-├── internal/
-│   ├── agentskill/
-│   │   ├── templates/
-│   │   │   └── xlflow/
-│   │   │       └── SKILL.md
-│   │   ├── skill.go
-│   │   └── skill_test.go
-│   ├── cli/
-│   ├── command/
-│   ├── config/
-│   ├── diff/
-│   ├── excel/
-│   ├── gui/
-│   ├── lint/
-│   ├── output/
-│   └── project/
-├── scripts/
-├── tasks/
-│   ├── feature_spec.md
-│   ├── lessons.md
-│   └── todo.md
+├── docs/ # ADR、仕様書、その他開発ドキュメント
+├── internal/ # 内部パッケージ
+├── scripts/ # 自動化スクリプト
+├── tasks/ # タスク管理と学習記録
+├── vitepress/ # ユーザードキュメント
+├── .editorconfig
+├── .goreleaser.yaml
 ├── AGENTS.md
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── CONTRIBUTING.md
+├── global.json
 ├── go.mod
 ├── go.sum
 ├── lefthook.yml
@@ -42,6 +26,7 @@ root: .
 ├── package.json
 ├── pnpm-lock.yaml
 ├── pnpm-workspace.yaml
+├── PSScriptAnalyzerSettings.psd1
 ├── README.ja.md
 ├── README.md
 ├── SECURITY.md
@@ -102,17 +87,20 @@ root: .
 
 ## 2. 必要な作業手順
 
-AIはコードを生成する前に、必ず以下の手順に従わなければなりません。
+コードを生成・変更する前に、作業規模に応じて以下を行うこと。
 
-1. **要件を理解する**：仕様書や設計資料を読み、要件を完全に理解する。
-2. **設計を検討する**：必要に応じて、機能分解とモデル設計を検討する。
-3. **仕様を定義する**：要件に基づいて、関数の引数と戻り値の型を定義します `tasks/feature_spec.md`。
-4. **タスクの割り当て**：各タスクを明確に定義し、実行順序を決定します `tasks/todo.md`。
-5. **コードの実装**：上記の基準に従ってコードを実装してください。
-6. **コードのレビュー**：生成されたコードを自己レビューし、品質基準を満たしていることを確認します。
-7. **テストの生成**：必要に応じてテストコードを生成します。
-8. **テストを実行する**：生成されたテストコードを実行し、期待どおりに動作することを確認します。
-9. **ドキュメントの更新**：変更があった場合は、関連するドキュメントも更新してください。
+1. 要件を理解する：関連する仕様書、ADR、既存実装を確認する。
+2. 設計を検討する：影響範囲、既存設計との整合性、代替案を確認する。
+3. 必要に応じて作業用メモを作成する：
+   - 複雑な作業: `tasks/feature_spec.md`
+   - 進捗管理: `tasks/todo.md`
+   - 再発防止: `tasks/lessons.md`
+4. テストを追加・更新する。
+5. 実装する。
+6. 動作確認する。
+7. テストを実行する。
+8. 自己レビューする。
+9. 必要に応じてドキュメント、ADR、仕様書、CHANGELOG を更新する。
 
 - ADR、仕様書に更新がある場合は次のディレクトリに記録すること
   - ADR: `docs/adr/`
@@ -171,3 +159,89 @@ AIはコードを生成する前に、必ず以下の手順に従わなければ
 - **まずはシンプルに**: すべての変更は、可能な限りシンプルに保つこと。影響範囲を最小限にすること
 - **手を抜かない**: 根本原因を特定すること。場当たり的な修正は避けること。シニアエンジニア水準を保つこと
 - **影響を最小化する**: 必要な部分だけを変更すること。新たなバグを持ち込まないこと
+
+## 5. 注意事項
+
+- xlflowはメインバイナリとdotnetブリッジバイナリの二つで動くため、E2E動作確認を行う際、`go install ./cmd/xlflow` でインストールしても、dotnet bridgeバイナリをインストールすることができない。必ず`task install`でインストールすること
+
+## grepai usage
+
+Use `grepai` for semantic code discovery before broad file reads.
+
+Recommended flow:
+
+1. Use `grepai search "<task intent>"` to find candidate files.
+2. Use `grepai trace callers "<symbol>"` or `grepai trace callees "<symbol>"` to identify likely call sites.
+3. Treat trace results as candidates, not ground truth.
+4. Verify important symbols and call sites with exact search:
+   - `rtk rg "<symbol>"`
+   - `rtk rg "new <TypeName>"`
+   - `rtk rg "<methodName>"`
+5. Read only the files confirmed by grepai + exact search.
+
+Branch/index safety:
+
+- Prefer running `grepai watch` in a separate terminal.
+- After `git switch`, validate important grepai hits with `rtk rg` before editing.
+- If grepai returns files or symbols that do not exist in the current branch, treat the index as stale and restart `grepai watch`.
+
+Use grepai for:
+
+- semantic code discovery
+- finding related implementation files
+- locating design/spec documents
+- finding likely callers/callees
+
+Use `rtk rg` for:
+
+- exact symbol names
+- CLI flags
+- error messages
+- config keys
+- test names
+
+Do not rely on grepai trace alone for complete impact analysis.
+
+<!-- headroom:rtk-instructions -->
+
+# RTK (Rust Token Killer) - Token-Optimized Commands
+
+When running shell commands, **always prefix with `rtk`**. This reduces context
+usage with zero behavior change. If rtk has no filter for a command, it passes
+through unchanged — so it is always safe to use.
+
+This project is developed on **Windows**, so prefer PowerShell-compatible
+commands and paths.
+
+## Key Commands
+
+```powershell
+# Git
+rtk git status
+rtk git diff
+rtk git log --oneline -20
+
+# Files & Search
+rtk dir
+rtk dir .\src
+rtk read .\path\to\file.txt
+rtk rg "pattern"
+rtk rg "pattern" .\src
+rtk find "pattern"
+rtk diff .\path\to\file.txt
+
+# Analysis
+rtk err <command>
+rtk log .\path\to\log.txt
+rtk json .\path\to\file.json
+rtk summary <command>
+rtk deps
+rtk env
+
+# GitHub
+rtk gh pr view <number>
+rtk gh run list
+rtk gh issue list
+```
+
+<!-- /headroom:rtk-instructions -->

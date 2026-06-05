@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 )
 
 const FileName = "xlflow.toml"
+
+var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, powershell, dotnet")
 
 type Config struct {
 	Project  ProjectConfig  `toml:"project"`
@@ -29,6 +32,7 @@ type ExcelConfig struct {
 	Path          string `toml:"path"`
 	Visible       bool   `toml:"visible"`
 	DisplayAlerts bool   `toml:"display_alerts"`
+	Bridge        string `toml:"bridge"`
 }
 
 type SourceConfig struct {
@@ -68,6 +72,7 @@ func Default() Config {
 			Path:          filepath.ToSlash(filepath.Join("build", "Book.xlsm")),
 			Visible:       false,
 			DisplayAlerts: false,
+			Bridge:        "auto",
 		},
 		Src: SourceConfig{
 			Modules:  filepath.ToSlash(filepath.Join("src", "modules")),
@@ -96,6 +101,14 @@ func Default() Config {
 }
 
 func Load(cwd string) (Config, error) {
+	return load(cwd, false)
+}
+
+func LoadAllowInvalidExcelBridge(cwd string) (Config, error) {
+	return load(cwd, true)
+}
+
+func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	cfg := Default()
 	path := filepath.Join(cwd, FileName)
 	if _, err := os.Stat(path); err != nil {
@@ -108,6 +121,9 @@ func Load(cwd string) (Config, error) {
 		return cfg, err
 	}
 	applyDefaults(&cfg)
+	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
+		return cfg, err
+	}
 	return cfg, validate(cfg)
 }
 
@@ -118,6 +134,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Excel.Path == "" {
 		cfg.Excel.Path = defaults.Excel.Path
+	}
+	if cfg.Excel.Bridge == "" {
+		cfg.Excel.Bridge = defaults.Excel.Bridge
 	}
 	if cfg.Src.Modules == "" {
 		cfg.Src.Modules = defaults.Src.Modules
@@ -159,6 +178,21 @@ func validate(cfg Config) error {
 	return nil
 }
 
+func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
+	mode, err := excelbridge.ParseMode(cfg.Excel.Bridge)
+	if err != nil {
+		if allowInvalid {
+			return nil
+		}
+		if errors.Is(err, excelbridge.ErrInvalidMode) {
+			return ErrInvalidExcelBridge
+		}
+		return err
+	}
+	cfg.Excel.Bridge = string(mode)
+	return nil
+}
+
 func Write(path string, cfg Config) (err error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -185,6 +219,8 @@ path = %q
 visible = %t
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = %t
+# Excel bridge mode. Valid values: "auto", "powershell", "dotnet".
+bridge = %q
 
 # Source tree directories.
 [src]
@@ -237,7 +273,7 @@ forbid_interactive_input = %t
 `
 	_, err = fmt.Fprintf(f, tmpl,
 		cfg.Project.Name, cfg.Project.Entry,
-		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts,
+		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts, cfg.Excel.Bridge,
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,

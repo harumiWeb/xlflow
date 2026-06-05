@@ -36,7 +36,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
       - run: go test ./...
+      - run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
       - run: go vet ./...
 
   security:

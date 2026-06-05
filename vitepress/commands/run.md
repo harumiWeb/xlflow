@@ -30,6 +30,7 @@ xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--i
 | `--gui-compile-errors`         | Let Excel/VBE compile dialogs surface instead of structured diagnostics.                   | false               |
 | `--input <path>`               | Override workbook path for this run.                                                       | configured workbook |
 | `--timeout <duration>`         | Maximum macro runtime before timeout.                                                      | 5m0s                |
+| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`).                         | auto                |
 
 ## Examples
 
@@ -61,6 +62,10 @@ Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `fold
 
 > [!IMPORTANT]
 > For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
+
+::: tip
+On Windows, `run` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
+:::
 
 ## JSON Output Example
 

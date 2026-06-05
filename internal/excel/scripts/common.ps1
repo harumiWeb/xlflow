@@ -4035,6 +4035,7 @@ function ConvertTo-XlflowVBALiteral {
   switch ($Type) {
     "string" { return '"' + $Value.Replace('"', '""') + '"' }
     "int" { return "CLng(" + $Value + ")" }
+    "double" { return "CDbl(" + $Value + ")" }
     "bool" {
       if ($Value -eq "true") {
         return "CBool(True)"

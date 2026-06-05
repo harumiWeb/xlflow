@@ -34,6 +34,7 @@
 - Temporary VBIDE helper components must never reuse a fixed user-visible module name or silently replace existing code. Generate collision-resistant helper names, and only restore `Workbook.Saved` after proving the persistent workbook state still matches the pre-helper baseline.
 - Temp workbook copies that rely on an injected VBA helper must keep automation macros executable after open. `DisableAutomationMacros = $true` prevents `Excel.Run` from invoking the helper module even when events are already disabled.
 - Persisted review artifacts must keep a stable contract. Do not merge transient operational warnings such as `save_required` or helper cleanup issues into saved spec files; keep those warnings in the command result only.
+- Root `.gitignore` rules for generated project `src` must be anchored as `/src/`. An unanchored `src/` also ignores repository-owned implementation directories such as `bridge/dotnet/src`, causing local-only files to pass tests but disappear from CI checkouts.
 - Do not treat UserForm Designer contract changes as stable until Excel COM E2E covers overwrite, nested container controls, and snapshot round-trip shape. Unit tests alone will miss VBIDE collection quirks and overwrite/save constraints.
 - For destructive UserForm overwrite flows, test an intentional post-delete failure on real Excel COM and prove the original form is restored. A successful overwrite path alone is not enough to claim safety.
 - File-based inspect session awareness must not rely on a metadata-file precheck alone. Query session status and match the returned workbook path so live-session dirty/save-required state still surfaces when the metadata file exists but the cheap gate would miss it.
@@ -53,3 +54,9 @@
 - When spawning nested `powershell.exe -Command` helpers from PowerShell, escape every child-scope `$variable` reference with backticks in the command string. Otherwise the parent shell expands them before launch and the child helper can silently do nothing while UI state remains stuck.
 - Excel VBE compile automation should not assume the `CommandBars("Debug")` toolbar contains the compile command. In real Excel, `Compile VBAProject` can live only under `CommandBars("Menu Bar") -> Debug` (`Id = 578`), and `Enabled = false` should be treated as "no compile needed" rather than executed as a failure path.
 - `go test ./internal/excel/scripts` can take 2-3 minutes even when healthy. Do not infer success or failure from a short silent interval; use a generous timeout and wait for completion before treating the package as hung.
+
+# DialogWatcher
+
+- Excel/VBE runtime error dialogs can remain hidden until Excel receives focus. A watcher must not require `IsWindowVisible` for owned `#32770` dialog candidates; capture visibility as diagnostics instead.
+- Clicking `Debug` on a runtime error dialog can leave VBE in break mode and make later COM attachment fail. Until selection capture and reset are proven reliable, prefer `End` for unattended suppression.
+- When rewriting test results from `inconclusive` to `failed`, update both counters. Per-item status and top-level command status must not diverge after lifecycle hook failures.

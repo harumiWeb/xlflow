@@ -380,6 +380,40 @@ func TestWriteWithOptionsRendersDoctorChecklist(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
+	env := New("doctor")
+	env.Diagnostics = map[string]any{
+		"requested_bridge": "auto",
+		"selected_bridge":  "dotnet",
+		"fallback":         false,
+		"legacy":           false,
+		"protocol_version": float64(1),
+		"runtime":          map[string]any{"os": "Windows 11"},
+		"excel": map[string]any{
+			"com_activation":      true,
+			"version":             "16.0",
+			"build":               "12345",
+			"vbide_access":        true,
+			"automation_security": float64(1),
+			"trust_vba_access":    nil,
+		},
+	}
+	env.Status = StatusOK
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"xlflow doctor", "Selected bridge:", "dotnet", "Requested bridge:", "auto", "Fallback:", "no", "Bridge role:", "primary", "Excel automation", "VBIDE access"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "FAILED") {
+		t.Fatalf("doctor output should not contain FAILED for dotnet bridge:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}

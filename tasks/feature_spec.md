@@ -1,4 +1,99 @@
+# Issue #79 + Issue #78 Follow-up: .NET DialogWatcher and run parity
+
+---
+
+# Issue #82: Windows release packaging for .NET bridge
+
+## Goal
+
+Ship `xlflow-excel-bridge.exe` inside Windows release archives while keeping the
+release contract Go-only on non-Windows platforms.
+
+## Required Changes
+
+- Publish the bridge as self-contained single-file for `win-x64`.
+- Keep trimming disabled for the initial packaged bridge.
+- Make release automation build the bridge before archive assembly.
+- Include `xlflow-excel-bridge.exe` next to `xlflow.exe` in Windows ZIPs.
+- Update installation/release docs with AppLocker, WDAC, AV, and signing caveats.
+
+## Acceptance
+
+- Windows ZIP contains `xlflow.exe` and `xlflow-excel-bridge.exe`.
+- Extracted Windows ZIP can run `xlflow doctor --bridge dotnet --json` and find
+  the sidecar bridge executable.
+- Published docs explain that `.NET` avoids PowerShell execution policy but may
+  still be blocked by executable control policy.
+
+## Goal
+
+Make `xlflow run --bridge dotnet --json` safe for agent execution and behaviorally
+compatible with the established PowerShell run contract.
+
+## DialogWatcher Contract
+
+- Dialog detection is a reusable Windows automation subsystem, not logic embedded
+  directly in `ExcelRunService`.
+- Watch UI Automation events and Win32 top-level/thread windows in parallel.
+- Correlate candidates using HWND, PID, thread ID, owner chain, title, class name,
+  process image, timing, and optional UIA metadata.
+- Detect VBA runtime errors, VBE compile errors, MsgBox, InputBox, and FileDialog
+  fingerprints.
+- Runtime and compile error dialogs are suppressed by default. Native MsgBox,
+  InputBox, and FileDialog windows are cancelled only when an explicit safe
+  Cancel/Close action is available.
+- Dialog snapshots include text, buttons, handles, process/thread identity,
+  timing, action method, and action result.
+
+## .NET run Contract
+
+- Macro invocation and VBE compile calls that may block on modal UI run in a
+  disposable child bridge process that reconnects to the target Excel PID.
+- The parent bridge manages the child worker, DialogWatcher, and timeout.
+- Runtime errors return structured VBA error data and do not leave a GUI dialog.
+- Diagnostic compile errors return `vba_compile_failed` and dialog diagnostics.
+- Timeout returns `macro_timeout`, actionable suggestions, worker state, and
+  available Excel/dialog diagnostics.
+- Temporary harnesses, runtime markers, trace helpers, and stream helpers are
+  removed or restored before returning. Failed and timed-out runs are not saved.
+- `runtime.injected=true` is returned only after runtime markers were applied.
+
+## Typed Arguments
+
+- Public argument types are `string`, `int`, `double`, and `bool`.
+- `double` uses invariant-culture finite values and is rejected before Excel
+  starts when empty, malformed, NaN, or infinite.
+- Go CLI, PowerShell bridge, and .NET bridge must accept the same type set.
+
+## Verification
+
+- Unit tests cover dialog correlation/fingerprints/actions, child worker
+  lifecycle, timeout cleanup, harness generation, and typed arguments.
+- Windows Excel COM E2E proves runtime and compile dialogs do not block, timeout
+  diagnostics are useful, and save/no-save/save-as behavior remains correct.
+
+---
+
 # Bug Fix Spec: XlflowDebug ParamArray + run compile watcher failure
+
+## PR #92 CI/security and .NET bridge review fix
+
+**Goal:** Make PR #92 pass CI security checks and ensure registered .NET `pull` / `push` bridge commands are continuously compiled and tested.
+
+**Fix:**
+
+- Bump the Go module directive from `1.26.3` to `1.26.4`, the first patched toolchain for the reported standard-library vulnerabilities.
+- Add `actions/setup-dotnet` using `global.json` to the CI test job.
+- Run `dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj` in CI so `PullCommand`, `PushCommand`, `IPullService`, `IPushService`, `ExcelPullService`, and `ExcelPushService` cannot regress outside the bridge build.
+- Anchor the generated project source ignore rule as `/src/` so repository-owned implementation trees such as `bridge/dotnet/src` are not ignored.
+- Add the missing .NET pull/push bridge implementation files to git tracking.
+
+**Validation:**
+
+- `go test ./...`
+- `dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj`
+- `go vet ./...`
+- `govulncheck ./...`
 
 ## Welcome header refresh for new/init
 
@@ -419,3 +514,52 @@ Add regression tests ahead of implementation for the new source-only `xlflow fmt
 - `target: { kind: "source", path: "src", description: "source files" }`
 - `output: { mode, changed, unchanged, skipped, total, changed_paths, skipped_paths, skipped_reasons }`
 - `warnings`/`hints` for skipped files and actionable hints
+
+---
+
+# .NET Doctor Contract
+
+## Overview
+
+`xlflow doctor --bridge dotnet --json` runs environment diagnostics through the .NET Excel bridge without launching PowerShell. The .NET bridge reports Excel COM, VBIDE, and runtime state as structured diagnostics.
+
+## Success Contract
+
+On success, `status = "ok"` and the top-level `diagnostics` object contains:
+
+| Field                          | Type         | Description                                               |
+| ------------------------------ | ------------ | --------------------------------------------------------- |
+| `selected_bridge`              | `string`     | Always `"dotnet"`                                         |
+| `protocol_version`             | `int`        | Bridge protocol version (currently `1`)                   |
+| `runtime.os`                   | `string`     | `Environment.OSVersion` string                            |
+| `runtime.process_architecture` | `string`     | Process architecture (e.g. `X64`)                         |
+| `runtime.dotnet_runtime`       | `string`     | .NET runtime description                                  |
+| `excel.com_activation`         | `bool`       | `true` when Excel COM can be created                      |
+| `excel.version`                | `string`     | Excel application version                                 |
+| `excel.build`                  | `string`     | Excel application build number                            |
+| `excel.vbide_access`           | `bool`       | `true` when VBA project object model is accessible        |
+| `excel.automation_security`    | `int`        | Observed `AutomationSecurity` value                       |
+| `excel.trust_vba_access`       | `bool\|null` | Observed Trust access state; `null` when not determinable |
+| `excel.error`                  | `string`     | Present only when a non-fatal diagnostic warning occurred |
+
+The `bridge` top-level metadata object is also present with `name`, `version`, `protocol_version`, `runtime`, and `architecture`.
+
+## Failure Contract
+
+When Excel COM activation fails, `status = "failed"` and the error object contains:
+
+| Field      | Value                                         |
+| ---------- | --------------------------------------------- |
+| `code`     | `"excel_com_failure"`                         |
+| `phase`    | `"doctor"`                                    |
+| `source`   | `"xlflow-excel-bridge"`                       |
+| `number`   | COM error number (when available)             |
+| `h_result` | HRESULT hex string (when available)           |
+| `details`  | Structured exception details (when available) |
+
+## Behavioral Constraints
+
+- `--bridge dotnet` does not fall back to PowerShell on failure.
+- The bridge executable is resolved from repo-local build output, installed binary path, or `dotnet run` on the project.
+- Excel COM operations run in the STA context provided by `[STAThread]` on the bridge entry point.
+- `doctor` does not require a workbook; VBIDE and Trust access are observed from the application-level COM context.

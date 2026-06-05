@@ -66,6 +66,16 @@ These [samples](example) were created by an AI agent using xlflow with only mini
       <sub>Rich calendar picker</sub>
     </td>
   </tr>
+    <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/weather-news.png" alt="weather news" width="100%">
+      <sub>Macro that displays real-time weather news</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/maze-big.gif" alt="maze chase" width="100%">
+      <sub>Pac-Man style game</sub>
+    </td>
+  </tr>
 </table>
 
 ---
@@ -104,7 +114,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
 > [!IMPORTANT]
-> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM + PowerShell**.
+> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows, with PowerShell retained as an explicit legacy fallback.
 
 ---
 
@@ -114,11 +124,13 @@ pull → fmt → edit → push → lint → test/run → inspect
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows                                      | Excel COM automation                                                                                                                                                                |
 | Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| PowerShell                                   | Excel automation bridge                                                                                                                                                             |
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+
+> [!NOTE]
+> xlflow uses a .NET bridge for COM operations, so PowerShell is generally not required. However, a PowerShell bridge also exists as a legacy implementation, and if you use this, PowerShell 5.1 or later is required.
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
@@ -163,7 +175,10 @@ Download prebuilt Windows binaries from:
 > [!IMPORTANT]
 > Current prebuilt distribution targets **Windows** only.
 > Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
-> The release binary already embeds the runtime PowerShell bridge scripts, so `xlflow.exe` can run workbook commands without sidecar `*.ps1` files.
+> The Windows release ZIP includes both `xlflow.exe` and `xlflow-excel-bridge.exe`. The Go CLI still embeds the runtime PowerShell bridge scripts, so workbook commands do not require sidecar `*.ps1` files.
+
+> [!WARNING]
+> `xlflow-excel-bridge.exe` avoids PowerShell execution policy, but it can still be blocked by AppLocker, WDAC, Defender or EDR policy, antivirus reputation, or unsigned-executable rules. The published checksum and GitHub attestation verify artifact integrity and provenance; they do not provide Windows Authenticode signing.
 
 Verify the downloaded ZIP against the published `checksums.txt` file:
 
@@ -191,6 +206,10 @@ go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 ```
 
 `go install` may contact the Go module mirror and checksum database configured in your Go environment. For direct source checkout development and CI, treat the Go version declared in `go.mod` as the supported toolchain source of truth; the repository CI and release workflows resolve Go from that file.
+
+> [!WARNING]
+> `go install` installs `xlflow` only. It does not install the packaged `.NET` bridge sidecar `xlflow-excel-bridge.exe` used by Windows release ZIPs.
+> If you want to use `--bridge dotnet`, install from the Windows release archive or build/install the bridge separately from a source checkout, for example with `task install`.
 
 Verify the installation:
 
@@ -248,7 +267,7 @@ xlflow doctor --json
 ```
 
 > [!TIP]
-> If `pull`, `push`, `run`, or `test` fails because of Excel, COM, PowerShell, or VBIDE settings, run `doctor` first.
+> If `pull`, `push`, `run`, or `test` fails because of Excel, COM, bridge, or VBIDE settings, run `doctor` first.
 
 ### 3. Export VBA into source files
 
@@ -358,6 +377,8 @@ xlflow attach --active --json
 
 > [!NOTE]
 > `attach` is a safety check. It confirms that the active Excel workbook matches the configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
+
+`attach`, `session`, `runner`, `list forms`, `ui button`, `edit`, and `new` also support explicit `--bridge dotnet` on Windows.
 
 ### GUI-heavy macros
 

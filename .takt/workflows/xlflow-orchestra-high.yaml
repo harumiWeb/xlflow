@@ -9,7 +9,17 @@ workflow_config:
     opencode:
       network_access: true
 
-max_steps: 30
+report_formats:
+  plan: ../facets/output-contracts/plan.md
+  write-tests-report: ../facets/output-contracts/write-tests-report.md
+  implementation-report: ../facets/output-contracts/implementation-report.md
+  verification-report: ../facets/output-contracts/verification-report.md
+  review-report: ../facets/output-contracts/review-report.md
+  audit-triage-report: ../facets/output-contracts/audit-triage-report.md
+  release-gate-report: ../facets/output-contracts/release-gate-report.md
+  audit-report: ../facets/output-contracts/audit-report.md
+
+max_steps: 40
 initial_step: plan
 
 steps:
@@ -47,6 +57,26 @@ steps:
       - testing strategy
       - risk analysis
 
+      In addition, produce an Implementation Brief for the implementer.
+
+      The Implementation Brief must be concrete enough that a weaker implementation model can follow it without redesigning the solution.
+
+      Include:
+      - exact files to inspect before editing
+      - exact files likely to edit
+      - existing functions, types, commands, or packages that should be reused
+      - proposed control flow
+      - proposed data model or option changes
+      - exact CLI/user-visible behavior
+      - exact JSON/output/error contract changes, if any
+      - test cases to add or update
+      - commands the implementer must run
+      - explicit non-goals
+      - forbidden broad refactors
+      - fallback decision rules if the expected code shape differs from the plan
+
+      The implementer should not be asked to choose architecture. The planner must make the architectural decision unless the repository inspection proves the request is ambiguous.
+
       Important:
       - minimize breaking changes
       - preserve public APIs
@@ -71,6 +101,15 @@ steps:
       report:
         - name: plan.md
           format: plan
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-plan-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/plan.md" -ExpectedHeading "# タスク計画"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # WRITE TESTS
@@ -137,7 +176,16 @@ steps:
     output_contracts:
       report:
         - name: test-report.md
-          format: test-report
+          format: write-tests-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# テスト作成レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-write-tests-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/test-report.md" -ExpectedHeading "# テスト作成レポート"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # IMPLEMENTATION
@@ -162,25 +210,28 @@ steps:
     required_permission_mode: edit
 
     instruction: |
-      Implement exactly as specified in the plan.
+      Implement the Implementation Brief from plan.md as a constrained patch.
 
-      Constraints:
-      - preserve public APIs
-      - preserve workbook compatibility
-      - keep exports deterministic
-      - avoid unnecessary refactors
-      - avoid unrelated changes
+      Your role is execution, not redesign.
 
       Requirements:
-      - follow existing architecture
-      - maintain naming consistency
-      - write maintainable code
-      - minimize side effects
-      - update docs/specs/changelog when the approved plan makes behavior or contracts user-visible
+      - follow the exact files, order, contracts, and verification commands from the plan
+      - reuse the existing functions, types, packages, and patterns identified by the planner
+      - make the smallest code changes that satisfy the planned behavior
+      - do not introduce new architecture unless the plan explicitly says so
+      - do not broaden scope based on speculation
+      - do not rewrite unrelated code
+      - do not change public APIs, CLI contracts, JSON contracts, workbook compatibility, or deterministic export behavior unless the plan explicitly requires it
+      - update docs/specs/changelog only when the plan says the behavior or contract is user-visible
+
+      If repository evidence contradicts the plan:
+      - do not invent a new design silently
+      - record the contradiction clearly in the implementation report
+      - route to plan if architectural judgment is required
 
       After implementation:
       - run the targeted tests and verification commands from the plan
-      - fix failures
+      - fix failures within the planned scope only
       - ensure lint passes for the touched slice
 
     rules:
@@ -202,6 +253,15 @@ steps:
       report:
         - name: implementation-report.md
           format: implementation-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-implementation-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/implementation-report.md" -ExpectedHeading "# Implementation Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # VERIFICATION
@@ -244,8 +304,14 @@ steps:
       - condition: 検証が通過した
         next: self_review
 
-      - condition: 実装修正が必要
+      - condition: コード修正が必要
         next: implementation
+
+      - condition: コード修正は不要だが手動E2Eまたは環境依存の検証が必要
+        next: release_gate
+
+      - condition: 検証証跡の整理のみで再レビュー可能
+        next: self_review
 
       - condition: 検証を継続できない
         next: ABORT
@@ -253,7 +319,16 @@ steps:
     output_contracts:
       report:
         - name: verification-report.md
-          format: test-report
+          format: verification-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# 検証レポート` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-verification-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/verification-report.md" -ExpectedHeading "# 検証レポート"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # SELF REVIEW
@@ -299,7 +374,7 @@ steps:
         next: fix
 
       - condition: 実装品質が十分
-        next: final_audit
+        next: sanitize_reports
 
       - condition: レビュー継続不可
         next: ABORT
@@ -308,6 +383,15 @@ steps:
       report:
         - name: self-review.md
           format: review-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Review Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-self-review-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/self-review.md" -ExpectedHeading "# Review Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # FIX
@@ -372,6 +456,15 @@ steps:
         - name: fix-report.md
           format: implementation-report
 
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Implementation Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-fix-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/fix-report.md" -ExpectedHeading "# Implementation Report"
+        cwd: .
+        timeout_ms: 60000
+
   # =========================================================
   # AUDIT TRIAGE
   # =========================================================
@@ -425,7 +518,7 @@ steps:
         next: plan
 
       - condition: 監査所見の整理により再監査で足りる
-        next: final_audit
+        next: sanitize_reports
 
       - condition: ユーザー判断が必要
         next: audit_triage
@@ -438,14 +531,23 @@ steps:
     output_contracts:
       report:
         - name: audit-triage.md
-          format: plan
+          format: audit-triage-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# タスク計画` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-audit-triage-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/audit-triage.md" -ExpectedHeading "# タスク計画"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # RELEASE GATE
   # =========================================================
   - name: release_gate
 
-    edit: false
+    edit: true
 
     provider: codex
     model: gpt-5.4
@@ -482,7 +584,7 @@ steps:
 
     rules:
       - condition: 検証が完了し再監査に進める
-        next: final_audit
+        next: sanitize_reports
 
       - condition: 実装修正が必要と判明した
         next: audit_triage
@@ -504,14 +606,93 @@ steps:
     output_contracts:
       report:
         - name: release-gate-report.md
-          format: test-report
+          format: release-gate-report
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Release Gate Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-release-gate-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/release-gate-report.md" -ExpectedHeading "# Release Gate Report"
+        cwd: .
+        timeout_ms: 60000
+
+  # =========================================================
+  # SANITIZE REPORTS
+  # =========================================================
+  - name: sanitize_reports
+
+    edit: true
+
+    provider: codex
+    model: gpt-5.4
+    required_permission_mode: edit
+
+    provider_options:
+      codex:
+        reasoning_effort: low
+
+    persona: tester
+
+    instruction: |
+      Normalize workflow report files only.
+
+      Scope:
+      - {report_dir}/plan.md
+      - {report_dir}/test-report.md
+      - {report_dir}/implementation-report.md
+      - {report_dir}/verification-report.md
+      - {report_dir}/self-review.md
+      - {report_dir}/fix-report.md
+      - {report_dir}/audit-triage.md
+      - {report_dir}/release-gate-report.md
+
+      Requirements:
+      - do not edit source code
+      - do not change report meaning
+      - remove conversational preambles, accidental dialogue logs, and stray markdown fences before the required heading
+      - preserve findings, evidence, commands, results, and unresolved items
+      - if a file does not exist, ignore it
+      - if a report is too corrupted to repair confidently, say so in the sanitize report and continue
+
+      Use `pwsh -File ./.takt/sanitize-report.ps1` for each report file.
+
+    rules:
+      - condition: レポート整形が完了した
+        next: final_audit
+
+      - condition: レポート整形を継続できない
+        next: final_audit
+
+    output_contracts:
+      report:
+        - name: report-sanitize.md
+          format: |
+            # Report Sanitize Report
+
+            ## Summary
+
+            ## Files Normalized
+
+            ## Files Skipped
+
+            ## Remaining Concerns
+
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Report Sanitize Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-sanitize-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/report-sanitize.md" -ExpectedHeading "# Report Sanitize Report"
+        cwd: .
+        timeout_ms: 60000
 
   # =========================================================
   # FINAL AUDIT
   # =========================================================
   - name: final_audit
 
-    edit: false
+    edit: true
 
     provider: codex
     model: gpt-5.4
@@ -532,6 +713,14 @@ steps:
 
     instruction: |
       Perform final architecture and quality audit.
+
+      Important workflow policy:
+      - Do not reject or reopen implementation solely because a prior report contains conversational preamble, markdown fences, heading mismatch, or dialogue-log contamination.
+      - Treat report-format problems as workflow hygiene issues, not implementation defects.
+      - If report contamination makes evidence awkward but the code, diff, tests, or commands remain understandable, record it as a non-blocking hygiene note.
+      - Prefer direct evidence from source files, diffs, tests, and commands over prior report wording.
+      - Only route to audit_triage when concrete code, docs, or tests changes are required.
+      - Only route to release_gate when manual or environment-bound verification is required.
 
       Validate:
       - architecture consistency
@@ -579,6 +768,15 @@ steps:
         - name: final-audit.md
           format: audit-report
 
+    quality_gates:
+      - Report body only. Start directly with the required heading and do not include any meta commentary.
+      - The generated report must start with `# Final Audit Report` and must not include preambles such as `The user wants me`, `Let me`, or `I need to`.
+      - type: command
+        name: sanitize-final-audit-report
+        command: pwsh -File ./.takt/sanitize-report.ps1 -Path "{report_dir}/final-audit.md" -ExpectedHeading "# Final Audit Report"
+        cwd: .
+        timeout_ms: 60000
+
 loop_monitors:
   - cycle: [self_review, fix, verification]
     threshold: 2
@@ -597,23 +795,25 @@ loop_monitors:
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle: [final_audit, audit_triage, implementation, verification, self_review]
+  - cycle: [final_audit, audit_triage, implementation, verification, self_review, sanitize_reports]
     threshold: 2
     judge:
       persona: supervisor
       instruction: |
         final_audit から code remediation に戻るループに進捗があるかを評価してください。
-        進捗ありは、以前の audit blocker が実際に解消された、
-        blocker が code/docs/tests と manual release gate に明確に分離された、
-        または新しい検証で blocker severity が明確に下がった場合だけです。
-        同じ release-gate 項目、同じ docs/test 欠落、同じ stale finding が残るなら進捗なしです。
+        進捗ありは、以前の audit blocker のうち少なくとも 1 件が実際に解消された、
+        blocker 集合が縮小した、
+        blocker が code/docs/tests と manual release gate により正確に分離された、
+        または新しい検証で残件の severity や範囲が明確に下がった場合です。
+        release-gate blocker だけ先に解消され、code/docs/tests blocker がより狭い形で残る場合も進捗ありです。
+        同じ blocker 集合が実質不変で、報告文面や言い換えだけが変わった場合は進捗なしです。
       rules:
         - condition: "進捗あり"
           next: audit_triage
         - condition: "進捗なし"
           next: ABORT
 
-  - cycle: [final_audit, release_gate]
+  - cycle: [final_audit, release_gate, sanitize_reports]
     threshold: 2
     judge:
       persona: supervisor

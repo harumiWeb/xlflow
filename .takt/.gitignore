@@ -1,5 +1,13 @@
 # Ignore everything by default
-*
+runs/
+tasks.yaml
+persona_sessions.json
+session-state.json
+tasks/
+clone-meta/
+worktree-sessions/
+*.log
+worktree-sessions/
 
 # This file itself
 !.gitignore

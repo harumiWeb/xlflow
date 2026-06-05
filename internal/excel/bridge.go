@@ -9,22 +9,134 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
-	bundledscripts "github.com/harumiWeb/xlflow/internal/excel/scripts"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
 type Runner struct {
-	RootDir string
+	RootDir          string
+	BridgeMode       string
+	ConfigBridgeMode string
+}
+
+var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+	switch mode {
+	case excelbridge.ModeDotNet:
+		return excelbridge.DotNetProvider{RootDir: root}
+	default:
+		return excelbridge.PowerShellProvider{RootDir: root}
+	}
+}
+
+type providerExecution struct {
+	provider  excelbridge.Provider
+	response  excelbridge.Response
+	execErr   error
+	decodeErr error
+	result    *ScriptResult
+}
+
+func executeBridgeProvider(ctx context.Context, provider excelbridge.Provider, commandName string, args map[string]string) providerExecution {
+	execution := providerExecution{provider: provider}
+	execution.response, execution.execErr = provider.Execute(ctx, excelbridge.Request{Command: commandName, Args: args})
+	if execution.execErr != nil {
+		return execution
+	}
+
+	var result ScriptResult
+	if err := json.Unmarshal(execution.response.Stdout, &result); err != nil {
+		execution.decodeErr = err
+		return execution
+	}
+	execution.result = &result
+	return execution
+}
+
+func shouldAutoFallbackToPowerShell(execution providerExecution) bool {
+	if execution.provider == nil || execution.provider.Name() != string(excelbridge.ModeDotNet) {
+		return false
+	}
+	if execution.execErr != nil {
+		var bridgeErr *excelbridge.Error
+		if errors.As(execution.execErr, &bridgeErr) {
+			switch bridgeErr.Kind {
+			case excelbridge.ErrorDotNetMissing, excelbridge.ErrorDotNetRuntime:
+				return true
+			}
+		}
+		return false
+	}
+	if execution.decodeErr != nil {
+		return true
+	}
+	if execution.result == nil {
+		return false
+	}
+	if execution.result.ProtocolVersion != excelbridge.ProtocolVersion {
+		return true
+	}
+	if execution.result.Error != nil && strings.EqualFold(execution.result.Error.Code, "BRIDGE_COMMAND_UNSUPPORTED") {
+		return true
+	}
+	// Fall back to PowerShell when the .NET bridge cannot open the workbook
+	// (e.g., invalid file format, missing Excel COM).
+	if execution.result.Status == output.StatusFailed && execution.result.Error != nil {
+		switch execution.result.Error.Code {
+		case "bridge_file_not_openable":
+			return true
+		}
+	}
+	return false
+}
+
+func enrichDoctorDiagnostics(commandName string, requestedMode excelbridge.Mode, provider excelbridge.Provider, diagnostics any) any {
+	if commandName != "doctor" || provider == nil {
+		return diagnostics
+	}
+
+	diag := diagnosticsObjectMap(diagnostics)
+	if len(diag) == 0 {
+		diag = map[string]any{}
+	}
+
+	selected := provider.Name()
+	legacy := selected == string(excelbridge.ModePowerShell)
+	fallback := requestedMode == excelbridge.ModeAuto && legacy
+
+	diag["requested_bridge"] = string(requestedMode)
+	diag["selected_bridge"] = selected
+	diag["fallback"] = fallback
+	diag["legacy"] = legacy
+	return diag
+}
+
+func diagnosticsObjectMap(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return map[string]any{}
+	}
+	if decoded == nil {
+		return map[string]any{}
+	}
+	return decoded
 }
 
 type WorkbookRef struct {
@@ -300,39 +412,40 @@ func (l *ScriptLogs) UnmarshalJSON(data []byte) error {
 }
 
 type ScriptResult struct {
-	Status        string        `json:"status"`
-	Command       string        `json:"command"`
-	Error         *output.Error `json:"error"`
-	Logs          ScriptLogs    `json:"logs"`
-	Diagnostics   any           `json:"diagnostics,omitempty"`
-	Workbook      any           `json:"workbook,omitempty"`
-	Backup        any           `json:"backup,omitempty"`
-	Source        any           `json:"source,omitempty"`
-	Bridge        any           `json:"bridge,omitempty"`
-	Macro         any           `json:"macro,omitempty"`
-	Macros        any           `json:"macros,omitempty"`
-	Forms         any           `json:"forms,omitempty"`
-	Tests         any           `json:"tests,omitempty"`
-	Trace         any           `json:"trace,omitempty"`
-	Runtime       any           `json:"runtime,omitempty"`
-	GUIBoundaries any           `json:"gui_boundaries,omitempty"`
-	UI            any           `json:"ui,omitempty"`
-	Session       any           `json:"session,omitempty"`
-	Runner        any           `json:"runner,omitempty"`
-	Analysis      any           `json:"analysis,omitempty"`
-	Check         any           `json:"check,omitempty"`
-	RunDiagnostic any           `json:"run_diagnostic,omitempty"`
-	Target        any           `json:"target,omitempty"`
-	Output        any           `json:"output,omitempty"`
-	Debug         any           `json:"debug,omitempty"`
-	Spec          any           `json:"spec,omitempty"`
-	Edit          any           `json:"edit,omitempty"`
-	Warnings      any           `json:"warnings,omitempty"`
-	Hints         any           `json:"hints,omitempty"`
-	Inspect       any           `json:"inspect,omitempty"`
-	DefaultEntry  string        `json:"default_entry,omitempty"`
-	Suggestions   any           `json:"suggestions,omitempty"`
-	Process       any           `json:"process,omitempty"`
+	ProtocolVersion int           `json:"protocol_version,omitempty"`
+	Status          string        `json:"status"`
+	Command         string        `json:"command"`
+	Error           *output.Error `json:"error"`
+	Logs            ScriptLogs    `json:"logs"`
+	Diagnostics     any           `json:"diagnostics,omitempty"`
+	Workbook        any           `json:"workbook,omitempty"`
+	Backup          any           `json:"backup,omitempty"`
+	Source          any           `json:"source,omitempty"`
+	Bridge          any           `json:"bridge,omitempty"`
+	Macro           any           `json:"macro,omitempty"`
+	Macros          any           `json:"macros,omitempty"`
+	Forms           any           `json:"forms,omitempty"`
+	Tests           any           `json:"tests,omitempty"`
+	Trace           any           `json:"trace,omitempty"`
+	Runtime         any           `json:"runtime,omitempty"`
+	GUIBoundaries   any           `json:"gui_boundaries,omitempty"`
+	UI              any           `json:"ui,omitempty"`
+	Session         any           `json:"session,omitempty"`
+	Runner          any           `json:"runner,omitempty"`
+	Analysis        any           `json:"analysis,omitempty"`
+	Check           any           `json:"check,omitempty"`
+	RunDiagnostic   any           `json:"run_diagnostic,omitempty"`
+	Target          any           `json:"target,omitempty"`
+	Output          any           `json:"output,omitempty"`
+	Debug           any           `json:"debug,omitempty"`
+	Spec            any           `json:"spec,omitempty"`
+	Edit            any           `json:"edit,omitempty"`
+	Warnings        any           `json:"warnings,omitempty"`
+	Hints           any           `json:"hints,omitempty"`
+	Inspect         any           `json:"inspect,omitempty"`
+	DefaultEntry    string        `json:"default_entry,omitempty"`
+	Suggestions     any           `json:"suggestions,omitempty"`
+	Process         any           `json:"process,omitempty"`
 }
 
 type ProcessListOptions struct {
@@ -625,6 +738,7 @@ func (r Runner) RunnerModule(cfg config.Config, action string, opts ...CommandOp
 	return r.run("runner", map[string]string{
 		"Action":       action,
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
 	}, cmdOpts)
 }
@@ -1355,10 +1469,6 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
-	if !scriptExecutionSupported(r.RootDir, commandName) {
-		env = output.Failure(commandName, output.Error{Code: "environment", Message: fmt.Sprintf("Excel automation is only supported on Windows in the MVP unless a script override is provided at scripts/%s.ps1", commandName)})
-		return env, output.ExitEnvironment, nil
-	}
 
 	var uiSession *uiStreamSession
 	var debugSession *debugStreamSession
@@ -1389,9 +1499,9 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		args["DebugStreamPipeName"] = debugSession.PipePath()
 	}
 
-	script, cleanup, err := scriptPath(r.RootDir, commandName)
+	mode, _, err := excelbridge.ResolveMode(r.BridgeMode, os.Getenv(excelbridge.EnvBridge), r.ConfigBridgeMode)
 	if err != nil {
-		env = output.Failure(commandName, output.Error{Code: "script_not_found", Message: err.Error(), Source: "xlflow"})
+		env = output.Failure(commandName, output.Error{Code: "bridge_mode_invalid", Message: err.Error(), Source: "xlflow", Phase: "bridge.resolve"})
 		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
 			env.Debug = mergeDebugResult(nil, debugResult)
 			if debugStreamErr != nil {
@@ -1404,14 +1514,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
 		}
-		return env, output.ExitEnvironment, nil
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	cmdArgs := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}
-	for k, v := range args {
-		cmdArgs = append(cmdArgs, "-"+k, v)
+		return env, output.ExitConfig, nil
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -1421,35 +1524,30 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		ctx, cancel = context.WithCancel(context.Background())
 	}
 	defer cancel()
-	powershellExe, err := powerShellExecutable()
-	if err != nil {
-		env = output.Failure(commandName, output.Error{Code: "environment", Message: err.Error(), Source: "xlflow"})
-		if debugResult, debugStreamErr := closeDebugStreamSession(debugSession); debugResult != nil || debugStreamErr != nil {
-			env.Debug = mergeDebugResult(nil, debugResult)
-			if debugStreamErr != nil {
-				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+
+	var execution providerExecution
+	switch mode {
+	case excelbridge.ModeAuto:
+		dotNetProvider := bridgeProviderForMode(r.RootDir, excelbridge.ModeDotNet)
+		if dotNetProvider.Supports(commandName) {
+			execution = executeBridgeProvider(ctx, dotNetProvider, commandName, args)
+			if shouldAutoFallbackToPowerShell(execution) {
+				execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, excelbridge.ModePowerShell), commandName, args)
 			}
+		} else {
+			execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, excelbridge.ModePowerShell), commandName, args)
 		}
-		if uiEvents, uiStreamErr := closeUIStreamSession(uiSession); len(uiEvents) > 0 || uiStreamErr != nil {
-			env.UI = mergeUIResult(nil, uiEvents)
-			if uiStreamErr != nil {
-				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
-			}
-		}
-		return env, output.ExitEnvironment, nil
+	default:
+		execution = executeBridgeProvider(ctx, bridgeProviderForMode(r.RootDir, mode), commandName, args)
 	}
-	cmd := exec.CommandContext(ctx, powershellExe, cmdArgs...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Start()
-	if err == nil {
-		err = cmd.Wait()
-	}
+
+	provider := execution.provider
+	response := execution.response
+	err = execution.execErr
 	debugResult, debugStreamErr := closeDebugStreamSession(debugSession)
 	uiEvents, uiStreamErr := closeUIStreamSession(uiSession)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded && commandName == "run" {
+		if response.TimedOut && commandName == "run" {
 			env = output.Failure(commandName, output.Error{
 				Code:    "macro_timeout",
 				Message: fmt.Sprintf("Macro did not complete within %s. Possible causes: a file picker, MsgBox, UserForm, or long-running loop is still waiting.", opts.Timeout.String()),
@@ -1459,6 +1557,51 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = []string{
 				"Excel automation timed out while running the macro.",
 				"Use xlflow run --interactive when a human can complete dialogs, or refactor GUI calls behind a headless entrypoint.",
+				"vba_may_still_be_running: the .NET worker was terminated, but Excel may still be executing VBA and COM cleanup was skipped.",
+			}
+			env.Macro = map[string]any{
+				"name":        args["MacroName"],
+				"arguments":   []any{},
+				"duration_ms": opts.Timeout.Milliseconds(),
+			}
+			env.RunDiagnostic = map[string]any{
+				"kind": "timeout",
+				"location": map[string]any{
+					"macro": args["MacroName"],
+				},
+				"vba_may_still_be_running": true,
+				"worker": map[string]any{
+					"completed": false,
+					"timed_out": true,
+				},
+			}
+			env.Warnings = []map[string]any{
+				{
+					"code":    "vba_may_still_be_running",
+					"message": "The timed out VBA execution may still be running inside Excel. The workbook/session should be treated as dirty until Excel is reset or the workbook is reopened.",
+				},
+			}
+			sessionRequested, _ := strconv.ParseBool(strings.TrimSpace(args["UseSession"]))
+			workbookPath := args["WorkbookPath"]
+			env.Workbook = map[string]any{
+				"path":       workbookPath,
+				"saved":      false,
+				"dirty":      true,
+				"needs_save": sessionRequested,
+				"session":    sessionRequested,
+			}
+			env.Session = map[string]any{
+				"active":               sessionRequested,
+				"dirty":                sessionRequested,
+				"save_required":        sessionRequested,
+				"live_newer_than_disk": sessionRequested,
+				"source_of_truth":      map[bool]string{true: "live_workbook", false: "saved_workbook"}[sessionRequested],
+				"workbook_path":        workbookPath,
+			}
+			env.Suggestions = []map[string]any{
+				{"code": "check_dialog", "message": "Inspect Excel for an unresolved dialog, form, file picker, or long-running loop."},
+				{"code": "use_interactive", "message": "Use xlflow run --interactive when a human must complete workbook UI."},
+				{"code": "reset_excel_session", "message": "Treat the workbook/session as dirty and reset Excel before trusting workbook state if the macro may still be running."},
 			}
 			if debugStreamErr != nil {
 				env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
@@ -1470,11 +1613,29 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.UI = mergeUIResult(nil, uiEvents)
 			return env, output.ExitValidation, nil
 		}
+		code := "script_failed"
+		source := provider.Name()
+		phase := ""
 		message := err.Error()
-		if stderr.Len() > 0 {
-			message = stderr.String()
+		if len(response.Stderr) > 0 {
+			message = string(response.Stderr)
 		}
-		env = output.Failure(commandName, output.Error{Code: "script_failed", Message: message, Source: "powershell"})
+		var bridgeErr *excelbridge.Error
+		if errors.As(err, &bridgeErr) {
+			switch bridgeErr.Kind {
+			case excelbridge.ErrorUnsupportedHost, excelbridge.ErrorPowerShellMissing:
+				code = "environment"
+				source = "xlflow"
+			case excelbridge.ErrorScriptNotFound:
+				code = "script_not_found"
+				source = "xlflow"
+			case excelbridge.ErrorDotNetMissing, excelbridge.ErrorDotNetRuntime:
+				code = "bridge_not_available"
+				source = "xlflow"
+				phase = "bridge.resolve"
+			}
+		}
+		env = output.Failure(commandName, output.Error{Code: code, Message: message, Source: source, Phase: phase})
 		if debugStreamErr != nil {
 			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
 		}
@@ -1486,10 +1647,27 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		return env, output.ExitEnvironment, nil
 	}
 
-	var result ScriptResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", err), Source: "powershell"})
-		env.Logs = []string{stdout.String()}
+	if execution.decodeErr != nil {
+		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", execution.decodeErr), Source: provider.Name()})
+		env.Logs = []string{string(response.Stdout)}
+		if uiStreamErr != nil {
+			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+		}
+		env.UI = mergeUIResult(nil, uiEvents)
+		return env, output.ExitEnvironment, nil
+	}
+	result := *execution.result
+	if provider.Name() == string(excelbridge.ModeDotNet) && result.ProtocolVersion != excelbridge.ProtocolVersion {
+		env = output.Failure(commandName, output.Error{
+			Code:    "bridge_protocol_mismatch",
+			Message: fmt.Sprintf(".NET bridge protocol version %d is incompatible with xlflow protocol version %d", result.ProtocolVersion, excelbridge.ProtocolVersion),
+			Source:  "xlflow",
+			Phase:   "bridge.resolve",
+		})
+		if debugStreamErr != nil {
+			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
+		}
+		env.Debug = mergeDebugResult(nil, debugResult)
 		if uiStreamErr != nil {
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
@@ -1506,7 +1684,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if env.Logs == nil {
 		env.Logs = []string{}
 	}
-	env.Diagnostics = result.Diagnostics
+	env.Diagnostics = enrichDoctorDiagnostics(commandName, mode, provider, result.Diagnostics)
 	env.Workbook = result.Workbook
 	env.Backup = result.Backup
 	env.Source = result.Source
@@ -1716,7 +1894,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitConfig
 	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed":
 		return output.ExitEnvironment
-	case "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid":
+	case "pull_args_invalid", "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid", "test_args_invalid":
 		return output.ExitConfig
 	default:
 		return output.ExitEnvironment
@@ -1731,77 +1909,21 @@ func workbookPath(root, path string) string {
 }
 
 func scriptPath(root, commandName string) (string, func(), error) {
-	if path, ok := externalScriptPath(root, commandName); ok {
-		return path, nil, nil
-	}
-	return materializeBundledScript(commandName)
+	return excelbridge.ScriptPath(root, commandName)
 }
 
 func materializeBundledScript(commandName string) (string, func(), error) {
-	name := commandName + ".ps1"
-	path, cleanup, err := bundledscripts.Materialize(commandName)
-	if err != nil {
-		return "", nil, fmt.Errorf("script %s was not available from on-disk script locations or embedded runtime assets: %w", name, err)
-	}
-	return path, cleanup, nil
+	return excelbridge.MaterializeBundledScript(commandName)
 }
 
 func externalScriptPath(root, commandName string) (string, bool) {
-	name := commandName + ".ps1"
-	candidates := []string{}
-	if path, ok := rootScriptOverridePath(root, commandName); ok {
-		candidates = append(candidates, path)
-	}
-	if _, file, _, ok := runtime.Caller(0); ok {
-		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "scripts", name))
-	}
-	for _, candidate := range candidates {
-		clean := filepath.Clean(candidate)
-		if _, err := os.Stat(clean); err == nil {
-			return clean, true
-		}
-	}
-	return "", false
+	return excelbridge.ExternalScriptPath(root, commandName)
 }
 
 func hasExternalScriptOverride(root, commandName string) bool {
-	_, ok := rootScriptOverridePath(root, commandName)
-	return ok
-}
-
-func scriptExecutionSupported(root, commandName string) bool {
-	return runtime.GOOS == "windows" || hasExternalScriptOverride(root, commandName)
-}
-
-func powerShellExecutable() (string, error) {
-	return powerShellExecutableFor(runtime.GOOS, exec.LookPath)
+	return excelbridge.HasExternalScriptOverride(root, commandName)
 }
 
 func powerShellExecutableFor(goos string, lookPath func(file string) (string, error)) (string, error) {
-	var candidates []string
-	if goos == "windows" {
-		candidates = []string{"powershell"}
-	} else {
-		candidates = []string{"pwsh", "powershell"}
-	}
-	for _, candidate := range candidates {
-		if _, err := lookPath(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("PowerShell executable not found on %s (searched: %s)", goos, strings.Join(candidates, ", "))
-}
-
-func rootScriptOverridePath(root, commandName string) (string, bool) {
-	if root == "" {
-		return "", false
-	}
-	candidate := filepath.Clean(filepath.Join(root, "scripts", commandName+".ps1"))
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate, true
-	}
-	return "", false
+	return excelbridge.PowerShellExecutableFor(goos, lookPath)
 }

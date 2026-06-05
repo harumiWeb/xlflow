@@ -3295,6 +3295,18 @@ func TestTestScriptRestoresRuntimeMarkersBeforeSavingWorkbook(t *testing.T) {
 	}
 }
 
+func TestTestScriptCountsInconclusiveResultsFailedByAfterAll(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "test.ps1"))
+	if err != nil {
+		t.Fatalf("failed to read test.ps1: %v", err)
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	transition := `if ($results[$i].status -eq "inconclusive") { $failed++; $inconclusiveCount-- }`
+	if count := strings.Count(text, transition); count != 2 {
+		t.Fatalf("expected both AfterAll failure paths to count inconclusive results as failed, found %d", count)
+	}
+}
+
 func TestRunScriptAllowsDirectWhenDiagnosticFalse(t *testing.T) {
 	cmd := exec.Command(
 		"pwsh",
@@ -4385,7 +4397,7 @@ func TestRunHarnessCodeIncludesMacroInvocationAndErrorLine(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $args = @([pscustomobject]@{ type = 'string'; value = 'fixtures\\sample.xlsx' }, [pscustomobject]@{ type = 'int'; value = '3' }, [pscustomobject]@{ type = 'bool'; value = 'true' }); New-XlflowRunHarnessCode -MacroName 'Report.Generate' -Arguments $args",
+		". ./common.ps1; $args = @([pscustomobject]@{ type = 'string'; value = 'fixtures\\sample.xlsx' }, [pscustomobject]@{ type = 'int'; value = '3' }, [pscustomobject]@{ type = 'double'; value = '3.5' }, [pscustomobject]@{ type = 'bool'; value = 'true' }); New-XlflowRunHarnessCode -MacroName 'Report.Generate' -Arguments $args",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -4393,7 +4405,7 @@ func TestRunHarnessCodeIncludesMacroInvocationAndErrorLine(t *testing.T) {
 		t.Fatalf("run harness code generation failed: %v\n%s", err, out)
 	}
 	got := string(out)
-	for _, want := range []string{"Dim targetMacro As String", `targetMacro = "'" & ThisWorkbook.Name & "'!" & "Report.Generate"`, "Application.Run targetMacro, \"fixtures\\sample.xlsx\", CLng(3), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CBool(True)", "Err.Description", "Erl"} {
+	for _, want := range []string{"Dim targetMacro As String", `targetMacro = "'" & ThisWorkbook.Name & "'!" & "Report.Generate"`, "Application.Run targetMacro, \"fixtures\\sample.xlsx\", CLng(3), CDbl(3.5), CBool(True)", "\"fixtures\\sample.xlsx\"", "CLng(3)", "CDbl(3.5)", "CBool(True)", "Err.Description", "Erl"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected run harness code to contain %q:\n%s", want, got)
 		}

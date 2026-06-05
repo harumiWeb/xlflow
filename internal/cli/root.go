@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
+	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
@@ -39,6 +41,7 @@ import (
 
 type app struct {
 	json           bool
+	bridge         string
 	cwd            string
 	stdout         io.Writer
 	stderr         io.Writer
@@ -139,6 +142,7 @@ func (a *app) rootCommand() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
+	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, powershell, dotnet")
 	root.AddCommand(
 		a.newCommand(),
 		a.initCommand(),
@@ -325,7 +329,7 @@ func (a *app) macrosCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Reading VBA project", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.MacrosWithOptions(cfg, excel.MacrosOptions{Session: session, Entry: cfg.Project.Entry, RunnableOnly: runnable, Keepalive: commandOpts})
+				env, code, runErr = a.excelRunnerForConfig(cfg).MacrosWithOptions(cfg, excel.MacrosOptions{Session: session, Entry: cfg.Project.Entry, RunnableOnly: runnable, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -490,7 +494,7 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Snapshotting workbook form", opts.Inspect.Keepalive, func() error {
 				var runErr error
-				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts.Inspect)
+				scriptEnv, code, runErr = a.excelRunnerForConfig(cfg).InspectForm(cfg, opts.Inspect)
 				return runErr
 			})
 			if err != nil {
@@ -570,7 +574,7 @@ func (a *app) formBuildCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Building workbook form", opts.Keepalive, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormWrite(cfg, excel.FormWriteOptions{
+				env, code, runErr = a.excelRunnerForConfig(cfg).FormWrite(cfg, excel.FormWriteOptions{
 					Action:    opts.Action,
 					SpecPath:  opts.SpecInput.DisplayPath,
 					Spec:      opts.Spec,
@@ -621,7 +625,7 @@ func (a *app) formApplyCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Applying workbook form spec", opts.Keepalive, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormWrite(cfg, excel.FormWriteOptions{
+				env, code, runErr = a.excelRunnerForConfig(cfg).FormWrite(cfg, excel.FormWriteOptions{
 					Action:    opts.Action,
 					SpecPath:  opts.SpecInput.DisplayPath,
 					Spec:      opts.Spec,
@@ -665,7 +669,7 @@ func (a *app) formExportImageCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Exporting workbook form image", opts.Keepalive, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.FormExportImage(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).FormExportImage(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -697,7 +701,7 @@ func (a *app) listFormsCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Listing workbook forms", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
+				env, code, runErr = a.excelRunnerForConfig(cfg).ListForms(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -752,7 +756,7 @@ func (a *app) uiButtonAddCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Adding workbook button", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonAdd(cfg, built, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).UIButtonAdd(cfg, built, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -790,7 +794,7 @@ func (a *app) uiButtonListCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Listing workbook buttons", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonList(cfg, opts, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).UIButtonList(cfg, opts, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -824,7 +828,7 @@ func (a *app) uiButtonRemoveCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Removing workbook button", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.UIButtonRemove(cfg, built, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).UIButtonRemove(cfg, built, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -932,7 +936,7 @@ func (a *app) newCommand() *cobra.Command {
 				var excelCode int
 				result, err := project.New(a.cwd, workbook, func(path string) error {
 					env, code, err := a.runExcelWithProgress("Creating workbook", runOpts, func() (output.Envelope, int, error) {
-						return excel.Runner{RootDir: a.cwd}.New(path, runOpts)
+						return a.excelRunner().New(path, runOpts)
 					})
 					excelEnv = env
 					excelCode = code
@@ -1086,7 +1090,7 @@ func (a *app) bootstrapScaffoldPush(keepaliveOpts excel.CommandOptions) (output.
 		return output.Envelope{}, 0, a.writeFailure("new", output.ExitConfig, "config_error", err)
 	}
 	return a.runExcelWithProgress("Importing scaffolded VBA source", keepaliveOpts, func() (output.Envelope, int, error) {
-		return excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, excel.PushOptions{
+		return a.excelRunnerForConfig(cfg).PushWithOptions(cfg, excel.PushOptions{
 			BackupMode: "never",
 			Keepalive:  keepaliveOpts,
 		})
@@ -1099,7 +1103,7 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 		return output.Envelope{}, 0, a.writeFailure("init", output.ExitConfig, "config_error", err)
 	}
 	return a.runExcelWithProgress("Exporting workbook VBA source", keepaliveOpts, func() (output.Envelope, int, error) {
-		return excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{
+		return a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{
 			Keepalive: keepaliveOpts,
 		})
 	})
@@ -1120,7 +1124,7 @@ func (a *app) doctorCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).Doctor(cfg, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -1154,7 +1158,7 @@ func (a *app) attachCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Inspecting active workbook", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Attach(cfg, active, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).Attach(cfg, active, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -1183,7 +1187,7 @@ func (a *app) pullCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
+				env, code, runErr = a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
 				return runErr
 			})
 			if err != nil {
@@ -1353,7 +1357,7 @@ func (a *app) pushSource(command string, cfg config.Config, pushOpts excel.PushO
 	var code int
 	run := func() error {
 		var runErr error
-		env, code, runErr = excel.Runner{RootDir: a.cwd}.PushWithOptions(cfg, pushOpts)
+		env, code, runErr = a.excelRunnerForConfig(cfg).PushWithOptions(cfg, pushOpts)
 		return runErr
 	}
 	err := a.withExcelProgress(progressLabel, pushOpts.Keepalive, run)
@@ -2031,7 +2035,7 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		}
 		switch parts[0] {
 		case "string":
-		case "int", "bool":
+		case "int", "double", "bool":
 			if parts[1] == "" {
 				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: %s values cannot be empty", literal, parts[0])
 			}
@@ -2042,6 +2046,12 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 			}
 			if parts[0] == "bool" && parts[1] != "true" && parts[1] != "false" {
 				return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: bool values must be true or false", literal)
+			}
+			if parts[0] == "double" {
+				value, err := strconv.ParseFloat(parts[1], 64)
+				if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+					return excel.RunOptions{}, fmt.Errorf("invalid --arg %q: double values must parse as finite invariant-culture numbers", literal)
+				}
 			}
 		default:
 			return excel.RunOptions{}, fmt.Errorf("unsupported --arg type prefix %q", parts[0])
@@ -2113,7 +2123,7 @@ func (a *app) sessionCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				env, code, err := excel.Runner{RootDir: a.cwd}.Session(cfg, action)
+				env, code, err := a.excelRunnerForConfig(cfg).Session(cfg, action)
 				if err != nil {
 					return err
 				}
@@ -2136,7 +2146,7 @@ func (a *app) saveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.SaveSession(cfg, excel.SessionCommandOptions{Session: session})
+			env, code, err := a.excelRunnerForConfig(cfg).SaveSession(cfg, excel.SessionCommandOptions{Session: session})
 			if err != nil {
 				return err
 			}
@@ -2370,7 +2380,7 @@ func (a *app) runnerCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				env, code, err := excel.Runner{RootDir: a.cwd}.RunnerModule(cfg, action)
+				env, code, err := a.excelRunnerForConfig(cfg).RunnerModule(cfg, action)
 				if err != nil {
 					return err
 				}
@@ -2402,6 +2412,7 @@ func (a *app) runCommand() *cobra.Command {
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
 	var save bool
+	var noSave bool
 	var saveAs string
 	var trace bool
 	var headless bool
@@ -2422,6 +2433,9 @@ func (a *app) runCommand() *cobra.Command {
 			cfg, err := a.loadConfig("run")
 			if err != nil {
 				return err
+			}
+			if noSave && (save || strings.TrimSpace(saveAs) != "") {
+				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--no-save cannot be combined with --save or --save-as"))
 			}
 			macro := ""
 			if len(args) == 1 {
@@ -2464,7 +2478,7 @@ func (a *app) runCommand() *cobra.Command {
 			var code int
 			run := func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Run(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).Run(cfg, opts)
 				return runErr
 			}
 			err = a.withSpinner("Running macro", run)
@@ -2477,12 +2491,13 @@ func (a *app) runCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, or bool:true")
+	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, double:3.5, or bool:true")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().StringVar(&input, "input", "", "override workbook path for this run")
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave the workbook unchanged on disk after the run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
 	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
 	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")
@@ -2529,7 +2544,7 @@ func (a *app) exportImageCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Exporting worksheet range image", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.ExportImage(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).ExportImage(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -2602,7 +2617,7 @@ func (a *app) editCellCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Editing workbook cell", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditCell(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditCell(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -2650,7 +2665,7 @@ func (a *app) editRangeCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Editing workbook range", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRange(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditRange(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -2695,7 +2710,7 @@ func (a *app) editRowsCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Editing workbook row heights", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditRows(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditRows(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -2739,7 +2754,7 @@ func (a *app) editColumnsCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Editing workbook column widths", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.EditColumns(cfg, opts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditColumns(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -2808,7 +2823,7 @@ func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
 			}
 			err = a.withExcelProgress(label, commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -2863,7 +2878,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = excel.Runner{RootDir: a.cwd}.TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
+				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -2898,7 +2913,7 @@ func (a *app) processListCommand() *cobra.Command {
 		Short: "List all local Excel processes",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			env, code, err := excel.Runner{RootDir: a.cwd}.ProcessList(excel.ProcessListOptions{Action: "list"})
+			env, code, err := a.excelRunner().ProcessList(excel.ProcessListOptions{Action: "list"})
 			if err != nil {
 				return err
 			}
@@ -2948,7 +2963,7 @@ unsaved workbooks or active work. Use with extreme caution.`,
 				}
 				opts.PID = pidInt
 			}
-			env, code, err := excel.Runner{RootDir: a.cwd}.ProcessCleanup(opts)
+			env, code, err := a.excelRunner().ProcessCleanup(opts)
 			if err != nil {
 				return err
 			}
@@ -3205,7 +3220,7 @@ func (a *app) inspectFormCommand(flags *inspectSharedFlags) *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Inspecting workbook form", opts.Keepalive, func() error {
 				var runErr error
-				scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.InspectForm(cfg, opts)
+				scriptEnv, code, runErr = a.excelRunnerForConfig(cfg).InspectForm(cfg, opts)
 				return runErr
 			})
 			if err != nil {
@@ -3635,7 +3650,7 @@ func (a *app) runSessionInspect(cfg config.Config, opts excel.InspectOptions, fo
 	var code int
 	err := a.withExcelProgress("Inspecting live workbook", opts.Keepalive, func() error {
 		var runErr error
-		scriptEnv, code, runErr = excel.Runner{RootDir: a.cwd}.Inspect(cfg, opts)
+		scriptEnv, code, runErr = a.excelRunnerForConfig(cfg).Inspect(cfg, opts)
 		return runErr
 	})
 	if err != nil {
@@ -3734,7 +3749,7 @@ func (a *app) inspectStateForWorkbook(cfg config.Config, workbookPath string) (m
 }
 
 func (a *app) inspectSessionStatus(cfg config.Config) (map[string]any, bool) {
-	env, _, err := excel.Runner{RootDir: a.cwd}.Session(cfg, "status")
+	env, _, err := a.excelRunnerForConfig(cfg).Session(cfg, "status")
 	if err == nil {
 		if status := cliObjectMap(env.Session); len(status) > 0 {
 			return status, true
@@ -4350,7 +4365,7 @@ func (a *app) checkCommand() *cobra.Command {
 			var doctorCode int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				doctor, doctorCode, runErr = excel.Runner{RootDir: a.cwd}.Doctor(cfg, commandOpts)
+				doctor, doctorCode, runErr = a.excelRunnerForConfig(cfg).Doctor(cfg, commandOpts)
 				return runErr
 			})
 			if err != nil {
@@ -4873,10 +4888,32 @@ func (a *app) stderrIsInteractive() bool {
 
 func (a *app) loadConfig(command string) (config.Config, error) {
 	cfg, err := config.Load(a.cwd)
+	if err != nil && errors.Is(err, config.ErrInvalidExcelBridge) && a.hasValidBridgeOverride() {
+		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
+	}
 	if err != nil {
 		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
 	}
 	return cfg, nil
+}
+
+func (a *app) hasValidBridgeOverride() bool {
+	for _, candidate := range []string{a.bridge, os.Getenv(excelbridge.EnvBridge)} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		_, err := excelbridge.ParseMode(candidate)
+		return err == nil
+	}
+	return false
+}
+
+func (a *app) excelRunner() excel.Runner {
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge}
+}
+
+func (a *app) excelRunnerForConfig(cfg config.Config) excel.Runner {
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge}
 }
 
 func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
