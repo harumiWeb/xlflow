@@ -3,6 +3,8 @@ using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Serialization;
 using Xlflow.ExcelBridge.Services;
+using Xlflow.ExcelBridge.Windows;
+using Xlflow.ExcelBridge.Workers;
 
 namespace Xlflow.ExcelBridge.Tests;
 
@@ -237,6 +239,47 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void IsLikelyVbaCompileFailureDoesNotTreatRuntimeSyntaxMessageAsCompile()
+    {
+        Assert.False(ExcelRunService.IsLikelyVbaCompileFailure("SQL syntax error near FROM clause", 5));
+    }
+
+    [Fact]
+    public void WaitForPostWorkerDialogPollsCurrentDialogsWhenWatcherTaskAlreadyCompleted()
+    {
+        var enumerator = new SequencedWindowEnumerator(
+            [],
+            [CompileDialogCandidate()]);
+        var watcher = new DialogWatcher(enumerator, new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 123,
+            ExcelMainHwnd: 456,
+            Kind: DialogKind.Compile,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromSeconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(10));
+        var result = new MacroRunWorkerResult(
+            Completed: true,
+            Ok: false,
+            Value: null,
+            Error: new MacroRunWorkerError("Exception has been thrown by the target of an invocation. (0x800A9C68)", "xlflow-excel-bridge", unchecked((int)0x800A9C68)));
+
+        var dialog = ExcelRunService.WaitForPostWorkerDialog(
+            watcher,
+            Task.FromResult<DialogSnapshot?>(null),
+            request,
+            operation: "run",
+            result,
+            CancellationToken.None);
+
+        Assert.NotNull(dialog);
+        Assert.Equal("compile", dialog!.Kind);
+        Assert.Equal("compile_close", dialog.Action);
+        Assert.True(dialog.ActionSucceeded);
+        Assert.Equal([11], enumerator.ClickedButtons);
+    }
+
+    [Fact]
     public void SaveAsExtensionIsCaseInsensitive()
     {
         ExcelRunService.AssertSaveAsExtension("C:\\work\\Book.XLSM", "C:\\work\\Copy.xlsm");
@@ -276,5 +319,63 @@ public sealed class RunCommandTests
             cancellationToken.ThrowIfCancellationRequested();
             return handler(request, args);
         }
+    }
+
+    private sealed class SequencedWindowEnumerator(params IReadOnlyList<WindowCandidate>[] sequences) : IWindowEnumerator
+    {
+        private int _index;
+
+        public List<long> ClickedButtons { get; } = [];
+
+        public IReadOnlyList<WindowCandidate> Enumerate(int processId, int vbeThreadId)
+        {
+            var current = _index < sequences.Length ? sequences[_index] : sequences[^1];
+            if (_index < sequences.Length - 1)
+            {
+                _index++;
+            }
+            return current;
+        }
+
+        public bool ClickButton(long hwnd)
+        {
+            ClickedButtons.Add(hwnd);
+            return true;
+        }
+
+        public bool CloseWindow(long hwnd)
+        {
+            return false;
+        }
+    }
+
+    private sealed class NullUiaDialogAdapter : IUiaDialogAdapter
+    {
+        public UiaDialogDescription? Describe(long hwnd) => null;
+        public bool TryInvoke(long hwnd) => false;
+    }
+
+    private static WindowCandidate CompileDialogCandidate()
+    {
+        return new WindowCandidate(
+            Hwnd: 1,
+            Pid: 123,
+            ThreadId: 321,
+            OwnerHwnd: 456,
+            RootOwnerHwnd: 456,
+            Title: "Microsoft Visual Basic for Applications",
+            ClassName: "#32770",
+            Visible: true,
+            ProcessImage: "EXCEL.EXE",
+            OwnerChain: [456],
+            Text: ["コンパイル エラー:", "構文エラー"],
+            Buttons: [new WindowElement(11, "Button", "OK"), new WindowElement(12, "Button", "ヘルプ")],
+            Children:
+            [
+                new WindowElement(11, "Button", "OK"),
+                new WindowElement(12, "Button", "ヘルプ"),
+                new WindowElement(13, "Static", "コンパイル エラー:"),
+                new WindowElement(14, "Static", "構文エラー"),
+            ]);
     }
 }

@@ -647,7 +647,9 @@ public sealed class ExcelRunService : IRunService
             {
                 var result = worker.WaitForResult(TimeSpan.FromSeconds(1));
                 var postDialog = WaitForPostWorkerDialog(
+                    watcher,
                     watcherTask,
+                    watchRequest,
                     workerRequest.Operation,
                     result,
                     linked.Token);
@@ -667,8 +669,10 @@ public sealed class ExcelRunService : IRunService
         return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, true, worker.ProcessId);
     }
 
-    private static DialogSnapshot? WaitForPostWorkerDialog(
+    internal static DialogSnapshot? WaitForPostWorkerDialog(
+        DialogWatcher watcher,
         Task<DialogSnapshot?> watcherTask,
+        DialogWatchRequest watchRequest,
         string operation,
         MacroRunWorkerResult? result,
         CancellationToken cancellationToken)
@@ -695,6 +699,11 @@ public sealed class ExcelRunService : IRunService
             if (watcherTask.IsCompletedSuccessfully && watcherTask.Result is not null)
             {
                 return watcherTask.Result;
+            }
+            var dialog = watcher.TryCaptureCurrentDialog(watchRequest, includeUia: true, executeAction: true);
+            if (dialog is not null)
+            {
+                return dialog;
             }
             Thread.Sleep(25);
         }
@@ -955,11 +964,7 @@ public sealed class ExcelRunService : IRunService
             return false;
         }
 
-        return message.Contains("0x800A9C68", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("compile error", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("syntax error", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("コンパイル エラー", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("構文エラー", StringComparison.OrdinalIgnoreCase);
+        return message.Contains("0x800A9C68", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsMacroNotFoundError(string message, int? number)
