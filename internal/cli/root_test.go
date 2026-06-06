@@ -853,6 +853,46 @@ func TestFmtLineNumbersWriteJSONViaCLI(t *testing.T) {
 	}
 }
 
+func TestFmtLineNumbersWarningsUsePathInJSONViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "src", "modules", "Sample.bas")
+	input := "10  ' legacy comment\nPublic Sub Sample()\n    x = 1\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--line-numbers", "add", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --line-numbers warning --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	outputMap := env["output"].(map[string]any)
+	lineNumbers := outputMap["line_numbers"].(map[string]any)
+	warnings, ok := lineNumbers["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("expected line_numbers warnings, got %#v", lineNumbers["warnings"])
+	}
+	warning := warnings[0].(map[string]any)
+	if warning["path"] == nil || warning["path"] == "" {
+		t.Fatalf("expected warning.path, got %#v", warning)
+	}
+	if _, exists := warning["file"]; exists {
+		t.Fatalf("did not expect warning.file key, got %#v", warning)
+	}
+}
+
 func TestFmtJSONTargetContractDefaultScope(t *testing.T) {
 	dir := t.TempDir()
 	setupFmtProjectDir(t, dir)

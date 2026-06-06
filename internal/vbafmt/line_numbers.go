@@ -91,7 +91,7 @@ func collectNumericLabelReferences(lines []string) []numericLabelReference {
 	for i, line := range lines {
 		directive := parseLineNumberDirective(line)
 		content := directive.Content
-		stripped := stripTrailingComment(content)
+		stripped := stripStringLiterals(stripTrailingComment(content))
 		matches := numericLabelTargetRe.FindAllStringSubmatch(stripped, -1)
 		for _, match := range matches {
 			if len(match) != 2 {
@@ -108,6 +108,27 @@ func collectNumericLabelReferences(lines []string) []numericLabelReference {
 		}
 	}
 	return refs
+}
+
+func stripStringLiterals(line string) string {
+	var b strings.Builder
+	inString := false
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if ch == '"' {
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
 }
 
 func normalizeFormattedLines(lines []formattedLine) []formattedLine {
@@ -283,7 +304,11 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 
 	eligibleCount := 0
 	numberedEligibleCount := 0
+	numberedNonEligibleCount := 0
 	for _, line := range lines {
+		if line.HadLineNumber && !line.Eligible {
+			numberedNonEligibleCount++
+		}
 		if !line.Eligible {
 			continue
 		}
@@ -304,9 +329,9 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 
 	switch mode {
 	case LineNumberModeAdd:
-		if numberedEligibleCount > 0 && numberedEligibleCount < eligibleCount {
+		if numberedNonEligibleCount > 0 || (numberedEligibleCount > 0 && numberedEligibleCount < eligibleCount) {
 			result.Warnings = append(result.Warnings, LineNumberWarning{
-				Message: "Skipped line-number add because the file mixes numbered and unnumbered executable statements; use renumber to normalize first.",
+				Message: "Skipped line-number add because the file already contains legacy line numbers outside the supported executable-statement set or mixes numbered and unnumbered executable statements; use renumber to normalize first.",
 			})
 			return renderFormattedLines(lines, nil), result
 		}
@@ -334,13 +359,13 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 		result.Changed = result.LinesRemoved > 0
 		return renderFormattedLinesWithoutLineNumbers(lines), result
 	case LineNumberModeRenumber:
-		if eligibleCount == 0 {
+		if eligibleCount == 0 && numberedNonEligibleCount == 0 {
 			return renderFormattedLines(lines, nil), result
 		}
 		assignments := make(map[int]int)
 		next := 10
 		for i, line := range lines {
-			if !line.Eligible {
+			if !line.Eligible && !line.HadLineNumber {
 				continue
 			}
 			assignments[i] = next
