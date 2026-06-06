@@ -1413,6 +1413,62 @@ func TestFormatTextWithLineNumbersSkipsAmbiguousNumericLabels(t *testing.T) {
 	}
 }
 
+func TestFormatTextWithLineNumbersIgnoresGoToInsideStringLiteral(t *testing.T) {
+	input := "Public Sub Sample()\n    MsgBox \"GoTo 10\"\n    x = 1\nEnd Sub\n"
+	got, detail, err := formatTextDetailed(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Warnings) != 0 {
+		t.Fatalf("did not expect numeric-label warning for string literal: %#v", detail.Warnings)
+	}
+	for _, want := range []string{
+		"10      MsgBox \"GoTo 10\"",
+		"20      x = 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected numbered output %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatTextWithLineNumbersAddSkipsLegacyNumberedComment(t *testing.T) {
+	input := "10  ' legacy comment\nPublic Sub Sample()\n    x = 1\nEnd Sub\n"
+	got, detail, err := formatTextDetailed(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Warnings) == 0 {
+		t.Fatal("expected warning for legacy numbered non-executable line")
+	}
+	if got != FormatMust(t, input) {
+		t.Fatalf("legacy numbered comment should prevent add rewrite:\n%s", got)
+	}
+}
+
+func TestFormatTextWithLineNumbersRenumberIncludesLegacyNumberedComment(t *testing.T) {
+	input := "10  ' legacy comment\n20  Public Sub Sample()\n30      x = 1\nEnd Sub\n"
+	got, detail, err := formatTextDetailed(input, false, FormatConfig{LineNumbers: LineNumberModeRenumber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Warnings) != 0 {
+		t.Fatalf("did not expect warning: %#v", detail.Warnings)
+	}
+	for _, want := range []string{
+		"10  ' legacy comment",
+		"20  Public Sub Sample()",
+		"30      x = 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected renumbered output %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "\n10  ") > 1 {
+		t.Fatalf("renumber should not produce duplicate labels:\n%s", got)
+	}
+}
+
 func TestRunLineNumberSummary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Sample.bas")

@@ -74,10 +74,8 @@ cat MyModule.bas | xlflow fmt --stdin --json
 
 > [!NOTE]
 > Plain `xlflow fmt` uses `--line-numbers preserve`. It does not add line numbers automatically, but it preserves existing ones where possible.
-
 > [!NOTE]
 > `--stdin --json` writes the JSON envelope to stdout instead of formatted text. The envelope includes `output.changed` / `output.unchanged` summary fields but does not include the formatted source body. `--stdin` cannot be combined with `--line-numbers`.
-
 > [!NOTE]
 > `fmt --line-numbers ...` still follows the normal `fmt` contract. Without `--write`, it only reports what would change. Use `--write` to persist the numbered or de-numbered source.
 

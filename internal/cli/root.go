@@ -4094,7 +4094,7 @@ func (a *app) fmtCommand() *cobra.Command {
 						"message": warning.Message,
 					}
 					if warning.Path != "" {
-						item["file"] = warning.Path
+						item["path"] = warning.Path
 					}
 					if warning.Line > 0 {
 						item["line"] = warning.Line
