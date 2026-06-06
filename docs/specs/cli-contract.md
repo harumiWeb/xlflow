@@ -285,7 +285,6 @@ Command-specific fields are added at the top level:
 - `version` for `version`
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
 - `ui` for `run --ui-stream` / `test --ui-stream` dialog events and `ui button` commands
-- `debug` for `run` / `test` `XlflowDebug.Log` events
 - `output` for `fmt` result summaries, `export-image`, `form export-image`, and `form snapshot` paths
 
 `fmt` result objects contain `mode` (`"inspect"`, `"write"`, `"check"`, or `"diff"`), `changed`, `unchanged`, `skipped`, `total`, optional `changed_paths`, optional `skipped_paths`, and optional `skipped_reasons`. Each skipped reason contains `path` and `reason` (e.g. `"unsupported extension: .frm"`).

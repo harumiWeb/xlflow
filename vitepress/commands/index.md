@@ -24,7 +24,6 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [session](./session)           | Keep Excel and the configured workbook open across repeated commands.            |
 | [save](./save)                 | Save the workbook held by the managed xlflow session.                            |
 | [runner](./runner)             | Manage the persistent xlflow runner marker module.                               |
-| [trace](./trace)               | Manage VBA trace logging support and trace log cleanup.                          |
 | [run](./run)                   | Run a workbook macro from the CLI.                                               |
 | [export-image](./export-image) | Export a worksheet range as a PNG image through Excel COM.                       |
 | [edit](./edit)                 | Mutate a live session workbook for setup and visual tuning.                      |
