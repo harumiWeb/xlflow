@@ -7,8 +7,8 @@ This document describes the default debugging workflow for unclear VBA runtime a
 Start with the stable path:
 
 1. Run the macro normally with JSON output.
-2. Read the returned error metadata and any captured dialog/diagnostic location.
-3. Only add line numbers and extra logging when the default diagnostics are not enough.
+2. Read the returned error metadata, captured dialog text, and any diagnostic location.
+3. Only add diagnostic instrumentation when the default diagnostics are not enough.
 
 Do not switch to VBE `Debug` mode as the first step. xlflow's default `run` behavior is intentionally biased toward stable unattended execution and structured failure reporting.
 
@@ -27,14 +27,29 @@ Read:
 
 - `error.code`
 - `error.phase`
-- VBA error number, description, and line when present
+- `error.message`
+- `error.location` when available
 - `debug.events` when `XlflowDebug.Log` already exists in the code path
 
-If those fields already identify the failing statement or bad API call, fix the source directly and rerun. Do not add extra instrumentation just because a command failed.
+If those fields already identify the failing statement or bad API call, fix the source directly and rerun.
+
+## Runtime Error Location Strategy: Line Numbers + Erl + XlflowDebug.Log
+
+For unclear VBA runtime errors, the preferred diagnostic pattern is:
+
+1. Add line numbers.
+2. Add or use an error handler.
+3. Log `Err.Number`, `Err.Description`, and especially `Erl` with `XlflowDebug.Log`.
+4. Use the reported `Erl` value to locate the failing numbered statement.
+5. Add targeted state logs only if the line is known but the root cause is still unclear.
+
+Do not treat line numbers and `XlflowDebug.Log` as separate debugging tools. For runtime errors, line numbers are mainly useful because they make `Erl` meaningful.
+
+`Erl` returns the last executed VBA line number before the runtime error. Without line numbers, `Erl` usually returns `0`, which is not useful for locating the failure.
 
 ## When To Add Line Numbers
 
-Use line numbers only when the default diagnostics still leave the failing location unclear.
+Use line numbers when the default diagnostics do not identify the failing runtime statement.
 
 Recommended sequence:
 
@@ -46,70 +61,182 @@ xlflow run <QualifiedMacro> --headless --session --json
 
 Rules:
 
-- Inspect the diff after `fmt --line-numbers add` before `--write`, or review the git diff immediately after writing.
+- Inspect the diff after adding line numbers, or review the git diff immediately after writing.
 - Treat added line numbers as diagnostic instrumentation unless the project intentionally keeps them.
 - Do not remove pre-existing line numbers that look intentional unless the user asks for that change.
 - If `fmt --line-numbers remove` or `renumber` reports ambiguity around numeric labels, stop and report it instead of forcing a rewrite.
 
+## Required Runtime Error Handler Pattern
+
+When a runtime error location is unclear, add a temporary error handler that logs `Erl`.
+
+Use this pattern:
+
+```vb
+Public Sub GenerateReport()
+10  On Error GoTo ErrHandler
+
+20  Dim total As Double
+30  total = 1 / 0
+
+40  Exit Sub
+
+ErrHandler:
+50  XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
+60  XlflowDebug.Log "Err.Description=" & Err.Description
+70  XlflowDebug.Log "Erl=" & CStr(Erl)
+80  Err.Raise Err.Number, Err.Source, Err.Description
+End Sub
+```
+
+After running this with xlflow, inspect `debug.events` or stderr.
+
+Example result:
+
+```text
+Err.Number=11
+Err.Description=Division by zero
+Erl=30
+```
+
+Then map `Erl=30` back to the numbered source:
+
+```vb
+30  total = 1 / 0
+```
+
+This is the failing statement.
+
+## Existing Error Handlers
+
+If the procedure already has an error handler, do not blindly replace it.
+
+Instead, add `XlflowDebug.Log` lines inside the existing handler before any `Resume`, `Resume Next`, `Exit Sub`, `Exit Function`, or custom error handling logic.
+
+Example:
+
+```vb
+Public Sub GenerateReport()
+10  On Error GoTo ErrHandler
+
+20  Call BuildReport
+30  Exit Sub
+
+ErrHandler:
+40  XlflowDebug.Log "GenerateReport failed"
+50  XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
+60  XlflowDebug.Log "Err.Description=" & Err.Description
+70  XlflowDebug.Log "Erl=" & CStr(Erl)
+
+80  MsgBox Err.Description
+End Sub
+```
+
+If the existing handler uses `Resume Next`, preserve that behavior unless the task explicitly requires changing error handling semantics.
+
+Bad:
+
+```vb
+ErrHandler:
+    XlflowDebug.Log "Erl=" & CStr(Erl)
+    Err.Raise Err.Number, Err.Source, Err.Description
+```
+
+Do not add `Err.Raise` to an existing handler if doing so changes the macro's intended control flow.
+
+Good:
+
+```vb
+ErrHandler:
+    XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
+    XlflowDebug.Log "Err.Description=" & Err.Description
+    XlflowDebug.Log "Erl=" & CStr(Erl)
+    Resume Next
+```
+
 ## `XlflowDebug.Log`
 
-When line numbers still are not enough, add targeted `XlflowDebug.Log` calls around the suspected path.
+Use `XlflowDebug.Log` for two different purposes:
 
-Use it for:
+1. Error location reporting from handlers.
+2. Targeted state logging around suspected code paths.
 
-- procedure entry
-- branch selection
-- variable state
-- loop progress
-- file paths or worksheet names
-- code immediately before destructive workbook changes
-- error handlers
+For runtime error location, always prefer this minimum set:
 
-Examples:
+```vb
+XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
+XlflowDebug.Log "Err.Description=" & Err.Description
+XlflowDebug.Log "Erl=" & CStr(Erl)
+```
+
+For root-cause analysis after the failing line is known, add targeted logs such as:
 
 ```vb
 XlflowDebug.Log "entered GenerateReport"
 XlflowDebug.Log "rowCount=" & CStr(rowCount)
 XlflowDebug.Log "targetPath=" & targetPath
+XlflowDebug.Log "worksheet=" & ws.Name
 XlflowDebug.Log "before SaveAs"
 ```
 
-When the failure is runtime-error-driven, log the VBA error state from the handler:
+Use targeted logs for:
 
-```vb
-Public Sub GenerateReport()
-    On Error GoTo ErrHandler
+- procedure entry
+- branch selection
+- variable state
+- loop progress
+- file paths
+- worksheet names
+- workbook names
+- code immediately before destructive workbook changes
+- existing error handlers
 
-    Dim total As Double
-    total = 1 / 0
-    Exit Sub
+`XlflowDebug.Log` is preferred over raw `Debug.Print` for agent workflows because `xlflow run` and `xlflow test` stream it to stderr and return recent lines in top-level `debug`.
 
-ErrHandler:
-    XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
-    XlflowDebug.Log "Err.Description=" & Err.Description
-    XlflowDebug.Log "Erl=" & CStr(Erl)
-    Err.Raise Err.Number, Err.Source, Err.Description
-End Sub
-```
-
-`XlflowDebug.Log` is preferred over raw `Debug.Print` for agent workflows because `run` and `test` stream it to stderr and return the recent lines in top-level `debug`.
-
-## Recommended Loop
+## Recommended Runtime Debugging Loop
 
 ```bash
 xlflow run <QualifiedMacro> --headless --session --json
+```
+
+If the runtime error location is still unclear:
+
+```bash
 xlflow fmt --line-numbers add --write
 xlflow push --fast --session --no-save --json
+```
+
+Then add temporary `Erl` logging to the relevant error handler:
+
+```vb
+XlflowDebug.Log "Err.Number=" & CStr(Err.Number)
+XlflowDebug.Log "Err.Description=" & Err.Description
+XlflowDebug.Log "Erl=" & CStr(Erl)
+```
+
+Rerun:
+
+```bash
 xlflow run <QualifiedMacro> --headless --session --json
 ```
 
 Then:
 
-1. Use the numbered source and `Erl` to find the failing statement.
-2. Add targeted `XlflowDebug.Log` calls if the root cause is still unclear.
-3. Push and rerun.
-4. Fix the source.
-5. Remove temporary `XlflowDebug.Log` calls before finalizing.
+1. Read `debug.events` or stderr.
+2. Find `Erl=<number>`.
+3. Locate that numbered line in the source.
+4. Fix the failing statement if the cause is obvious.
+5. If the line is known but the cause is unclear, add targeted `XlflowDebug.Log` state logs around that line.
+6. Push and rerun.
+7. Remove temporary diagnostic logs before finalizing.
+
+## Compile Errors
+
+For compile errors, `Erl` is not useful because the code did not run.
+
+Use the structured compile diagnostics first. If xlflow reports a VBE-selected source location, patch that location directly.
+
+If compile diagnostics do not include a location, inspect the compile error message and recently changed modules. Line numbers are usually less useful for compile errors than for runtime errors.
 
 ## Cleanup
 
@@ -117,7 +244,7 @@ After the cause is fixed:
 
 - remove temporary `XlflowDebug.Log` calls
 - decide whether line numbers stay in the project
-- if they were diagnostic-only, remove them:
+- if line numbers were diagnostic-only, remove them:
 
 ```bash
 xlflow fmt --line-numbers remove --write
@@ -129,12 +256,21 @@ xlflow fmt --line-numbers remove --write
 xlflow fmt --line-numbers renumber --write
 ```
 
+Then push and rerun the final validation:
+
+```bash
+xlflow push --fast --session --no-save --json
+xlflow run <QualifiedMacro> --headless --session --json
+```
+
 ## Summary
 
 Use this order:
 
-1. `run`
-2. inspect structured diagnostics
-3. `fmt --line-numbers add --write` only when location is still unclear
-4. targeted `XlflowDebug.Log`
-5. rerun, fix, and remove temporary instrumentation
+1. Run normally and inspect structured diagnostics.
+2. For unclear runtime errors, add line numbers.
+3. Add or reuse an error handler that logs `Err.Number`, `Err.Description`, and `Erl` with `XlflowDebug.Log`.
+4. Use `Erl` to identify the failing numbered statement.
+5. Add targeted `XlflowDebug.Log` state logs only when the failing line is known but the cause is still unclear.
+6. Fix the source.
+7. Remove temporary instrumentation unless the project intentionally keeps it.

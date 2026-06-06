@@ -39,7 +39,6 @@ public sealed class CommandRegistry
             new RunnerCommand(),
             new SessionCommand(),
             new TestCommand(),
-            new TraceCommand(),
             new UICommand(),
         });
     }
@@ -63,7 +62,6 @@ public sealed class CommandRegistry
         IRunnerService? runnerService = null,
         ISessionService? sessionService = null,
         ITestService? testService = null,
-        ITraceService? traceService = null,
         IUIService? uiService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
@@ -86,7 +84,6 @@ public sealed class CommandRegistry
             new RunnerCommand(runnerService),
             new SessionCommand(sessionService),
             new TestCommand(testService),
-            new TraceCommand(traceService),
             new UICommand(uiService),
         });
     }

@@ -74,13 +74,13 @@ var invalidObjectMembers = map[string]map[string]invalidMemberRule{
 var traceHelperDependencies = map[string]helperDependencyRule{
 	"xlflowlog": {
 		Code:       "VBA105",
-		Reason:     "XlflowLog compiles only when a Public standard-module trace helper exists in source or xlflow injects the helper temporarily for a traced run.",
-		Suggestion: "If you want source-controlled tracing, run `xlflow trace enable` to write XlflowTrace.bas. If you only need trace during execution, rerun with `xlflow run --trace`.",
+		Reason:     "XlflowLog belongs to the removed xlflow trace workflow and is no longer a supported debugging API.",
+		Suggestion: "Replace `XlflowLog` with `XlflowDebug.Log`, then inspect debug output through `xlflow run --json` or `xlflow test --json`.",
 	},
 	"xlflowsettracefile": {
 		Code:       "VBA106",
-		Reason:     "XlflowSetTraceFile is an xlflow trace-helper entrypoint. It compiles only when the bundled Public standard-module helper is present in source or workbook state.",
-		Suggestion: "Prefer `xlflow run --trace` instead of calling XlflowSetTraceFile directly. If your source needs the helper, run `xlflow trace enable` to write XlflowTrace.bas first.",
+		Reason:     "XlflowSetTraceFile belongs to the removed xlflow trace workflow and should not be called from project VBA.",
+		Suggestion: "Delete `XlflowSetTraceFile` calls and emit runtime diagnostics with `XlflowDebug.Log` instead. `xlflow run --json` is the supported machine-readable execution surface.",
 	},
 }
 
@@ -247,7 +247,7 @@ func (a Analyzer) analyzeFile(path string, ctx analysisContext) ([]Finding, erro
 		if !isProcDecl {
 			for _, helper := range referencedTraceHelpers(code) {
 				lower := strings.ToLower(helper)
-				if reportedMissingHelpers[lower] || ctx.standardModulePublicProcs[lower] {
+				if reportedMissingHelpers[lower] {
 					continue
 				}
 				if rule, ok := traceHelperDependencies[lower]; ok {
@@ -366,7 +366,7 @@ func (a Analyzer) helperFinding(path, module, procedure string, line int, lines 
 		Module:     module,
 		Procedure:  procedure,
 		Line:       line,
-		Message:    helper + " is called but no Public standard-module definition was found in source.",
+		Message:    helper + " is a removed legacy trace API and should not appear in project VBA.",
 		Reason:     rule.Reason,
 		Suggestion: rule.Suggestion,
 		NearbyCode: nearby(lines, line, 2),

@@ -49,11 +49,10 @@ xlflow lint --json
 xlflow macros --json
 ```
 
-For runtime failures, trace output is often useful:
+For runtime failures, structured debug output is often useful:
 
 ```bash
-xlflow trace inject --json
-xlflow run <MacroName> --trace --json
+xlflow run <MacroName> --json
 ```
 
 When opening an issue, please include:

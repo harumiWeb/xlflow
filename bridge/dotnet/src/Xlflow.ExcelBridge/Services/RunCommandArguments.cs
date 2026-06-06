@@ -10,8 +10,6 @@ public sealed record RunCommandArguments(
     bool Direct,
     bool Diagnostic,
     bool SuppressModalErrors,
-    bool TraceEnabled,
-    string TraceFile,
     string MsgBoxResponsesJSON,
     string InputResponsesJSON,
     string FileDialogResponsesJSON,

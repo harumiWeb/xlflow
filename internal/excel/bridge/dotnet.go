@@ -42,7 +42,6 @@ var dotNetSupportedCommands = map[string]struct{}{
 	"runner":            {},
 	"session":           {},
 	"test":              {},
-	"trace":             {},
 	"ui":                {},
 }
 

@@ -61,7 +61,6 @@ function commandSidebar() {
         { text: "session", link: "/commands/session" },
         { text: "save", link: "/commands/save" },
         { text: "runner", link: "/commands/runner" },
-        { text: "trace", link: "/commands/trace" },
         { text: "run", link: "/commands/run" },
         { text: "export-image", link: "/commands/export-image" },
         { text: "edit", link: "/commands/edit" },

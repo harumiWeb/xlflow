@@ -28,7 +28,6 @@ public sealed class ExcelRunService : IRunService
         var sessionAttached = false;
         var sessionMode = "none";
         var skipComCleanup = false;
-        var traceTemporaryInjected = false;
 
         try
         {
@@ -106,38 +105,6 @@ public sealed class ExcelRunService : IRunService
             runtimeState = ApplyRuntimeMarkers(workbook, args);
             var runtimeInjected = runtimeState.Applied;
 
-            // Inject trace helper temporarily if trace is enabled and module doesn't exist
-            var traceLifecycle = "none";
-            if (args.TraceEnabled)
-            {
-                object? vbProjectForTrace = null;
-                try
-                {
-                    vbProjectForTrace = ExcelBridgeSupport.RunPhase("get_vbproject_for_trace", () => ExcelBridgeSupport.Get(workbook, "VBProject"));
-                    if (vbProjectForTrace is not null)
-                    {
-                        if (TraceHelper.HasTraceModule(vbProjectForTrace))
-                        {
-                            traceLifecycle = "existing";
-                        }
-                        else
-                        {
-                            TraceHelper.InstallTraceModule(vbProjectForTrace);
-                            traceLifecycle = "temporary";
-                            traceTemporaryInjected = true;
-                        }
-                    }
-                }
-                catch
-                {
-                    // best-effort trace injection
-                }
-                finally
-                {
-                    ExcelBridgeSupport.ReleaseComObject(vbProjectForTrace);
-                }
-            }
-
             var macroReference = BuildWorkbookQualifiedMacroReference(workbook, macroName);
             if (!args.Direct)
             {
@@ -152,7 +119,7 @@ public sealed class ExcelRunService : IRunService
                 SetProperty(runnerComponent, "Name", runnerName);
                 var codeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                     ?? throw new InvalidOperationException("inject_harness failed: CodeModule is unavailable.");
-                ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs, args.TraceEnabled, args.TraceFile));
+                ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs));
                 macroReference = runnerName + ".RunMacro";
             }
 
@@ -216,47 +183,6 @@ public sealed class ExcelRunService : IRunService
                 runtimeState = null;
             }
 
-            // Read trace events and clean up trace helper
-            var traceEvents = new List<object>();
-            if (args.TraceEnabled && !string.IsNullOrWhiteSpace(args.TraceFile))
-            {
-                try
-                {
-                    var events = TraceHelper.ReadTraceEvents(args.TraceFile);
-                    foreach (var evt in events)
-                    {
-                        traceEvents.Add(new { timestamp = evt.Timestamp, message = evt.Message });
-                        logs.Add(evt.Raw);
-                    }
-                }
-                catch
-                {
-                    // best-effort trace read
-                }
-            }
-
-            // Revert temporary trace helper
-            if (traceTemporaryInjected && !runTimedOut)
-            {
-                object? vbProjectForTraceCleanup = null;
-                try
-                {
-                    vbProjectForTraceCleanup = ExcelBridgeSupport.Get(workbook, "VBProject");
-                    if (vbProjectForTraceCleanup is not null)
-                    {
-                        TraceHelper.RemoveTraceModule(vbProjectForTraceCleanup);
-                    }
-                }
-                catch
-                {
-                    // best-effort
-                }
-                finally
-                {
-                    ExcelBridgeSupport.ReleaseComObject(vbProjectForTraceCleanup);
-                }
-            }
-
             var targetKind = sessionAttached ? "live_session" : "file";
             var warnings = new List<object>();
             var suggestions = new List<object>();
@@ -310,19 +236,6 @@ public sealed class ExcelRunService : IRunService
                 if (!string.IsNullOrEmpty(args.RuntimeMode))
                 {
                     extensions["runtime"] = new { mode = args.RuntimeMode, source = args.RuntimeSource, injected = runtimeInjected };
-                }
-
-                if (args.TraceEnabled)
-                {
-                    extensions["trace"] = new
-                    {
-                        lifecycle = traceLifecycle,
-                        temporary_injected = traceTemporaryInjected,
-                        temporary_reverted = false,
-                        events = traceEvents.ToArray(),
-                        hint = (string?)null,
-                        read_error = (string?)null,
-                    };
                 }
 
                 if (invocation.Dialog is not null || args.Diagnostic || runTimedOut || compileFailure)
@@ -441,19 +354,6 @@ public sealed class ExcelRunService : IRunService
                 extensions["runtime"] = new { mode = args.RuntimeMode, source = args.RuntimeSource, injected = runtimeInjected };
             }
 
-            if (args.TraceEnabled)
-            {
-                extensions["trace"] = new
-                {
-                    lifecycle = traceLifecycle,
-                    temporary_injected = traceTemporaryInjected,
-                    temporary_reverted = traceTemporaryInjected && !runTimedOut,
-                    events = traceEvents.ToArray(),
-                    hint = traceEvents.Count == 0 && string.IsNullOrWhiteSpace(runError) ? "trace file produced no events; check that the macro calls XlflowTrace.XlflowLog" : null,
-                    read_error = (string?)null,
-                };
-            }
-
             if (args.Diagnostic)
             {
                 extensions["run_diagnostic"] = new
@@ -507,32 +407,6 @@ public sealed class ExcelRunService : IRunService
             {
                 RemoveTemporaryComponent(vbProject, runnerComponent);
                 RestoreRuntimeMarkers(workbook, runtimeState);
-                if (traceTemporaryInjected)
-                {
-                    try
-                    {
-                        object? vbProjectForTraceCleanup = null;
-                        try
-                        {
-                            if (workbook is not null)
-                            {
-                                vbProjectForTraceCleanup = ExcelBridgeSupport.Get(workbook, "VBProject");
-                            }
-                            if (vbProjectForTraceCleanup is not null)
-                            {
-                                TraceHelper.RemoveTraceModule(vbProjectForTraceCleanup);
-                            }
-                        }
-                        finally
-                        {
-                            ExcelBridgeSupport.ReleaseComObject(vbProjectForTraceCleanup);
-                        }
-                    }
-                    catch
-                    {
-                        // best-effort
-                    }
-                }
                 ExcelBridgeSupport.ReleaseComObject(vbProject);
                 if (sessionAttached)
                 {
@@ -546,7 +420,7 @@ public sealed class ExcelRunService : IRunService
         }
     }
 
-    internal static string BuildRunHarnessCode(string macroName, IReadOnlyList<MacroArg> args, bool traceEnabled, string traceFile)
+    internal static string BuildRunHarnessCode(string macroName, IReadOnlyList<MacroArg> args)
     {
         var moduleName = MacroModuleName(macroName);
         var invocation = new StringBuilder("  Application.Run targetMacro");
@@ -565,10 +439,6 @@ public sealed class ExcelRunService : IRunService
         builder.AppendLine("  startedAt = Timer");
         builder.AppendLine("  targetMacro = \"'\" & ThisWorkbook.Name & \"'!\" & " + ToVbaString(macroName));
         builder.AppendLine("  On Error GoTo Handler");
-        if (traceEnabled)
-        {
-            builder.AppendLine("  XlflowTrace.XlflowSetTraceFile " + ToVbaString(traceFile));
-        }
         builder.AppendLine(invocation.ToString());
         builder.AppendLine("  RunMacro = Array(True, " + ToVbaString(moduleName) + ", CLng(0), \"\", CLng(0), CLng((Timer - startedAt) * 1000))");
         builder.AppendLine("  Exit Function");

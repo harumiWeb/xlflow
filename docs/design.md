@@ -279,7 +279,7 @@ Contract/      request/response/error/capability models
 Serialization/ JSON options and stdin/stdout transport
 Diagnostics/   environment, Office, VBIDE probes
 Excel/         Excel.Application, Workbook, VBProject wrappers
-Runtime/       runtime injection, trace, UI/debug stream
+Runtime/       runtime injection, debug, UI/debug stream
 Windows/       Win32, UI Automation, process, clipboard, dialogs
 ```
 
@@ -300,7 +300,7 @@ Windows/       Win32, UI Automation, process, clipboard, dialogs
 10. macros
 11. run
 12. dialog watcher
-13. test / trace / runtime injection
+13. test / debug / runtime injection
 14. form / export-image
 15. .NET bridge packaging / release
 16. remaining PowerShell-only commands
@@ -441,12 +441,12 @@ scope:
 - modal dialog が agent 実行をブロックしない。
 - dialog snapshot が JSON diagnostics に残る。
 
-### Phase 8: .NET test / trace / runtime injection
+### Phase 8: .NET test / debug / runtime injection
 
 scope:
 
 - test runner
-- trace helper injection
+- debug pipe injection
 - defined name runtime mode
 - MsgBox/InputBox/FileDialog response injection
 - debug stream
@@ -455,7 +455,7 @@ scope:
 完了条件:
 
 - `xlflow test --bridge dotnet --json`
-- `xlflow trace enable --bridge dotnet --json`
+- `xlflow run Module1.Main --bridge dotnet --json`
 - stream output が envelope に統合される。
 
 ### Phase 9: .NET form / export-image
@@ -537,7 +537,7 @@ scope:
 - `run`
 - `macros`
 - `test`
-- `trace`
+- removed trace command surface
 - `inspect-form`
 - `form-write`
 - `form-export-image`
@@ -601,7 +601,7 @@ Windows + Excel self-hosted:
 6. [#77 Implement .NET pull and push commands](https://github.com/harumiWeb/xlflow/issues/77)
 7. [#78 Implement .NET macro listing and run command](https://github.com/harumiWeb/xlflow/issues/78)
 8. [#79 Implement .NET dialog watcher and modal error handling](https://github.com/harumiWeb/xlflow/issues/79)
-9. [#80 Migrate test, trace, and runtime injection to .NET bridge](https://github.com/harumiWeb/xlflow/issues/80)
+9. [#80 Migrate test, debug, and runtime injection to .NET bridge](https://github.com/harumiWeb/xlflow/issues/80)
 10. [#81 Migrate form and export-image commands to .NET bridge](https://github.com/harumiWeb/xlflow/issues/81)
 11. [#82 Package .NET bridge in Windows releases](https://github.com/harumiWeb/xlflow/issues/82)
 12. [#97 Migrate remaining PowerShell-only commands to .NET bridge](https://github.com/harumiWeb/xlflow/issues/97)
