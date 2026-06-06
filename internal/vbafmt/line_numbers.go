@@ -43,12 +43,13 @@ type lineNumberFileResult struct {
 }
 
 type formattedLine struct {
-	Text          string
-	Content       string
-	HadLineNumber bool
-	LineNumber    int
-	Eligible      bool
-	InputLine     int
+	Text                        string
+	Content                     string
+	HadLineNumber               bool
+	LineNumber                  int
+	Eligible                    bool
+	RecoverableLegacyLineNumber bool
+	InputLine                   int
 }
 
 type lineNumberDirective struct {
@@ -193,6 +194,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 	headerEnded := false
 	inBeginBlock := false
 	inProcedure := false
+	inLineContinuationTail := false
 
 	for i, line := range lines {
 		if !headerEnded && isClass {
@@ -266,13 +268,15 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 
 		indent := strings.Repeat(" ", ind.level*indentWidth)
 		outLine := indent + content
+		recoverableLegacyLineNumber := inProcedure && (inLineContinuationTail || isRecoverableLegacyNonEligibleLine(content))
 		formatted = append(formatted, formattedLine{
-			Text:          outLine,
-			Content:       content,
-			HadLineNumber: directive.Has,
-			LineNumber:    directive.Number,
-			Eligible:      inProcedure && isLineNumberEligibleContent(content),
-			InputLine:     i + 1,
+			Text:                        outLine,
+			Content:                     content,
+			HadLineNumber:               directive.Has,
+			LineNumber:                  directive.Number,
+			Eligible:                    inProcedure && !inLineContinuationTail && isLineNumberEligibleContent(content),
+			RecoverableLegacyLineNumber: recoverableLegacyLineNumber,
+			InputLine:                   i + 1,
 		})
 
 		if isProcedureStartKeyword(keyword) {
@@ -284,6 +288,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 		if isProcedureEndKeyword(keyword) {
 			inProcedure = false
 		}
+		inLineContinuationTail = hasExplicitLineContinuation(content)
 	}
 
 	formatted = normalizeFormattedLines(formatted)
@@ -305,9 +310,14 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 	eligibleCount := 0
 	numberedEligibleCount := 0
 	numberedNonEligibleCount := 0
+	recoverableLegacyNumberedCount := 0
 	for _, line := range lines {
 		if line.HadLineNumber && !line.Eligible {
-			numberedNonEligibleCount++
+			if line.RecoverableLegacyLineNumber {
+				recoverableLegacyNumberedCount++
+			} else {
+				numberedNonEligibleCount++
+			}
 		}
 		if !line.Eligible {
 			continue
@@ -324,7 +334,7 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 			Line:    ref.Line,
 			Message: fmt.Sprintf("Skipped line-number %s because numeric label reference %d was found; GoTo/Gosub/Resume targets are not rewritten automatically.", mode, ref.Target),
 		})
-		return renderFormattedLines(lines, nil), result
+		return renderFormattedLines(lines, nil, false), result
 	}
 
 	switch mode {
@@ -333,10 +343,10 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 			result.Warnings = append(result.Warnings, LineNumberWarning{
 				Message: "Skipped line-number add because the file already contains legacy line numbers outside the supported executable-statement set or mixes numbered and unnumbered executable statements; use renumber to normalize first.",
 			})
-			return renderFormattedLines(lines, nil), result
+			return renderFormattedLines(lines, nil, false), result
 		}
-		if eligibleCount == 0 || numberedEligibleCount == eligibleCount {
-			return renderFormattedLines(lines, nil), result
+		if eligibleCount == 0 || (numberedEligibleCount == eligibleCount && recoverableLegacyNumberedCount == 0) {
+			return renderFormattedLines(lines, nil, false), result
 		}
 		assignments := make(map[int]int)
 		next := 10
@@ -348,8 +358,8 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 			next += 10
 			result.LinesAdded++
 		}
-		result.Changed = result.LinesAdded > 0
-		return renderFormattedLines(lines, assignments), result
+		result.Changed = result.LinesAdded > 0 || recoverableLegacyNumberedCount > 0
+		return renderFormattedLines(lines, assignments, true), result
 	case LineNumberModeRemove:
 		for _, line := range lines {
 			if line.HadLineNumber {
@@ -360,7 +370,7 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 		return renderFormattedLinesWithoutLineNumbers(lines), result
 	case LineNumberModeRenumber:
 		if eligibleCount == 0 && numberedNonEligibleCount == 0 {
-			return renderFormattedLines(lines, nil), result
+			return renderFormattedLines(lines, nil, false), result
 		}
 		assignments := make(map[int]int)
 		next := 10
@@ -375,39 +385,57 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 			next += 10
 		}
 		result.Changed = result.LinesRenumbered > 0
-		return renderFormattedLines(lines, assignments), result
+		return renderFormattedLines(lines, assignments, false), result
 	default:
-		return renderFormattedLines(lines, nil), result
+		return renderFormattedLines(lines, nil, false), result
 	}
 }
 
-func renderFormattedLines(lines []formattedLine, assignments map[int]int) string {
+func renderFormattedLines(lines []formattedLine, assignments map[int]int, dropRecoverableLegacyLineNumbers bool) string {
 	var b strings.Builder
+	continuationPadding := ""
 	for i, line := range lines {
+		text := line.Text
+		if continuationPadding != "" && text != "" {
+			text = continuationPadding + text
+		}
+
 		switch {
 		case line.Text == "":
 			b.WriteByte('\n')
+			continuationPadding = ""
 		case assignments != nil:
 			if n, ok := assignments[i]; ok {
 				b.WriteString(formatLineNumberedLine(n, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(n))
+				continue
+			}
+			if dropRecoverableLegacyLineNumbers && line.HadLineNumber && line.RecoverableLegacyLineNumber {
+				b.WriteString(text)
+				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, continuationPadding)
 				continue
 			}
 			if line.HadLineNumber && !line.Eligible {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
-			b.WriteString(line.Text)
+			b.WriteString(text)
 			b.WriteByte('\n')
+			continuationPadding = nextContinuationPadding(line.Text, continuationPadding)
 		default:
 			if line.HadLineNumber {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
-			b.WriteString(line.Text)
+			b.WriteString(text)
 			b.WriteByte('\n')
+			continuationPadding = nextContinuationPadding(line.Text, continuationPadding)
 		}
 	}
 	return b.String()
@@ -429,6 +457,17 @@ func formatLineNumberedLine(number int, text string) string {
 	return fmt.Sprintf("%d  %s", number, text)
 }
 
+func lineNumberPadding(number int) string {
+	return strings.Repeat(" ", len(fmt.Sprintf("%d  ", number)))
+}
+
+func nextContinuationPadding(text, currentPadding string) string {
+	if hasExplicitLineContinuation(text) {
+		return currentPadding
+	}
+	return ""
+}
+
 func isLineNumberEligibleContent(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" || isVBACommentLine(trimmed) {
@@ -447,10 +486,36 @@ func isLineNumberEligibleContent(content string) bool {
 	if strings.HasPrefix(upper, "ATTRIBUTE ") {
 		return false
 	}
-	if keyword, ok := classifyLine(trimmed); ok && (isProcedureStartKeyword(keyword) || isProcedureEndKeyword(keyword)) {
-		return false
+	if keyword, ok := classifyLine(trimmed); ok {
+		if isProcedureStartKeyword(keyword) || isProcedureEndKeyword(keyword) {
+			return false
+		}
+		if isExcludedLineNumberStructuralKeyword(keyword) {
+			return false
+		}
 	}
 	return true
+}
+
+func isExcludedLineNumberStructuralKeyword(keyword string) bool {
+	switch keyword {
+	case "SELECT CASE", "CASE", "CASE ELSE", "END SELECT":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRecoverableLegacyNonEligibleLine(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	keyword, ok := classifyLine(trimmed)
+	return ok && isExcludedLineNumberStructuralKeyword(keyword)
+}
+
+func hasExplicitLineContinuation(content string) bool {
+	stripped := stripStringLiterals(stripTrailingComment(content))
+	stripped = strings.TrimRight(stripped, " \t")
+	return strings.HasSuffix(stripped, " _")
 }
 
 func isLabelLine(trimmed string) bool {
