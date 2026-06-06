@@ -1269,7 +1269,7 @@ func TestWriteWithOptionsRendersFmtSummary(t *testing.T) {
 		"Target:",
 		"source files",
 		"Summary:",
-		"1 changed",
+		"1 not formatted",
 		"3 total",
 		"src/modules/Main.bas",
 		"src/forms/UserForm1.frm",
@@ -1281,6 +1281,76 @@ func TestWriteWithOptionsRendersFmtSummary(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fmt output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestWriteWithOptionsRendersFmtInspectSummary(t *testing.T) {
+	env := New("fmt")
+	env.Target = map[string]any{
+		"kind":        "source",
+		"path":        "src",
+		"description": "source files",
+	}
+	env.Output = map[string]any{
+		"mode":      "inspect",
+		"changed":   1,
+		"unchanged": 0,
+		"skipped":   0,
+		"total":     1,
+	}
+	env.Logs = []string{"1 file(s) would be formatted"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Summary:",
+		"1 would be formatted",
+		"1 total",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fmt inspect output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "1 changed") {
+		t.Fatalf("fmt inspect output should not say changed:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersFmtWriteSummary(t *testing.T) {
+	env := New("fmt")
+	env.Target = map[string]any{
+		"kind":        "source",
+		"path":        "src",
+		"description": "source files",
+	}
+	env.Output = map[string]any{
+		"mode":      "write",
+		"changed":   1,
+		"unchanged": 0,
+		"skipped":   0,
+		"total":     1,
+	}
+	env.Logs = []string{"1 file(s) formatted"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Summary:",
+		"1 formatted",
+		"1 total",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fmt write output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "1 changed") {
+		t.Fatalf("fmt write output should not say changed:\n%s", got)
 	}
 }
 

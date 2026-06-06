@@ -1454,10 +1454,11 @@ func (r renderer) renderFmt(env Envelope) string {
 	unchanged, _ := numberValue(output, "unchanged")
 	skipped, _ := numberValue(output, "skipped")
 	total, _ := numberValue(output, "total")
+	mode := stringValue(output, "mode")
 
 	summaryParts := []string{}
 	if changed > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%d changed", int(changed)))
+		summaryParts = append(summaryParts, fmt.Sprintf("%d %s", int(changed), fmtSummaryLabel(mode, int(changed))))
 	}
 	if unchanged > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d unchanged", int(unchanged)))
@@ -1488,6 +1489,25 @@ func (r renderer) renderFmt(env Envelope) string {
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
+}
+
+func fmtSummaryLabel(mode string, count int) string {
+	switch mode {
+	case "write":
+		return pluralize(count, "formatted")
+	case "check":
+		return pluralize(count, "not formatted")
+	case "diff":
+		return pluralize(count, "would be reformatted")
+	case "inspect", "":
+		return pluralize(count, "would be formatted")
+	default:
+		return pluralize(count, "changed")
+	}
+}
+
+func pluralize(count int, label string) string {
+	return label
 }
 
 func (r renderer) renderDiff(env Envelope) string {

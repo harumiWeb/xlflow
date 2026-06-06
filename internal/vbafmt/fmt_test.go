@@ -585,7 +585,7 @@ func TestFileResultDetectsChange(t *testing.T) {
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path)
+	fr, err := formatFile(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +604,7 @@ func TestFileResultNoChangeWhenFormatted(t *testing.T) {
 	if err := os.WriteFile(path, []byte(formatted), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path)
+	fr, err := formatFile(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +848,7 @@ func TestFormatFileSkipsUnsupportedExtension(t *testing.T) {
 	if err := os.WriteFile(path, []byte("VERSION 5.00\nBegin Form\nEnd\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path)
+	fr, err := formatFile(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1296,4 +1296,172 @@ End Sub
 	if second != got {
 		t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
 	}
+}
+
+func TestFormatTextPreservesExistingLineNumbers(t *testing.T) {
+	input := "Sub Main()\n10 x=1\n20 If x = 1 Then\n30 y = 2\n40 End If\nEnd Sub\n"
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"10      x=1",
+		"20      If x = 1 Then",
+		"30          y = 2",
+		"40      End If",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected preserved line number %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatTextWithLineNumbersAdd(t *testing.T) {
+	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"10      Dim x As Integer",
+		"20      x = 1 / 0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected numbered line %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "10  Public Sub Sample()") || strings.Contains(got, "30  End Sub") {
+		t.Fatalf("procedure boundary should not be numbered:\n%s", got)
+	}
+}
+
+func TestFormatTextWithLineNumbersAddIsIdempotent(t *testing.T) {
+	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
+	first, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatTextWithOptions(first, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("line-number add should be idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestFormatTextWithLineNumbersRemove(t *testing.T) {
+	input := "Public Sub Sample()\n10      Dim x As Integer\n20      x = 1 / 0\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeRemove})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "10      ") || strings.Contains(got, "20      ") {
+		t.Fatalf("line numbers should be removed:\n%s", got)
+	}
+	for _, want := range []string{"Dim x As Integer", "x = 1 / 0"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected preserved body line %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatTextWithLineNumbersRenumber(t *testing.T) {
+	input := "Public Sub Sample()\n100     Dim x As Integer\n700     x = 1 / 0\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeRenumber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"10      Dim x As Integer",
+		"20      x = 1 / 0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected renumbered line %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatTextWithLineNumbersAddPreservesCommentsAndAttributes(t *testing.T) {
+	input := "Attribute VB_Name = \"Main\"\nOption Explicit\n\nPublic Sub Sample()\n    ' comment\n    Dim x As Integer\n\n    x = 1 / 0\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Attribute VB_Name = \"Main\"") {
+		t.Fatalf("expected Attribute line preserved:\n%s", got)
+	}
+	if !strings.Contains(got, "    ' comment") {
+		t.Fatalf("expected comment preserved without numbering:\n%s", got)
+	}
+	if strings.Contains(got, "10      ' comment") {
+		t.Fatalf("comment line should not be numbered:\n%s", got)
+	}
+}
+
+func TestFormatTextWithLineNumbersSkipsAmbiguousNumericLabels(t *testing.T) {
+	input := "Public Sub Sample()\n10      Dim x As Integer\n20      GoTo 10\nEnd Sub\n"
+	got, detail, err := formatTextDetailed(input, false, FormatConfig{LineNumbers: LineNumberModeRemove})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Warnings) == 0 {
+		t.Fatal("expected warning for ambiguous numeric labels")
+	}
+	if got != FormatMust(t, input) {
+		t.Fatalf("ambiguous numeric labels should be left unchanged except normal formatting:\n%s", got)
+	}
+}
+
+func TestRunLineNumberSummary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Sample.bas")
+	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(FmtOptions{Paths: []string{path}, Root: dir, LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LineNumbers.Mode != LineNumberModeAdd {
+		t.Fatalf("mode = %q, want %q", result.LineNumbers.Mode, LineNumberModeAdd)
+	}
+	if result.LineNumbers.FilesChanged != 1 {
+		t.Fatalf("files_changed = %d, want 1", result.LineNumbers.FilesChanged)
+	}
+	if result.LineNumbers.LinesAdded != 2 {
+		t.Fatalf("lines_added = %d, want 2", result.LineNumbers.LinesAdded)
+	}
+}
+
+func TestFormatBasLabelLineIsNotIndented(t *testing.T) {
+	input := "Public Sub Sample()\n    On Error GoTo ErrorHandler\n    x = 1\n    Exit Sub\n    ErrorHandler:\n    x = 2\nEnd Sub\n"
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	for _, line := range lines {
+		switch strings.TrimSpace(line) {
+		case "ErrorHandler:":
+			if line != "ErrorHandler:" {
+				t.Fatalf("label should not be indented:\n%s", got)
+			}
+		case "x = 2":
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent != 4 {
+				t.Fatalf("statement after label should remain in procedure indent:\n%s", got)
+			}
+		}
+	}
+}
+
+func FormatMust(t *testing.T, input string) string {
+	t.Helper()
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
 }

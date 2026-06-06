@@ -22,6 +22,7 @@ type FileResult struct {
 	Original   string
 	Skipped    bool
 	SkipReason string
+	LineNums   lineNumberFileResult
 }
 
 type Result struct {
@@ -33,6 +34,7 @@ type Result struct {
 	SkippedPaths    []string
 	SkippedReasons  []SkippedReason
 	FormattedByPath map[string]string
+	LineNumbers     LineNumberSummary
 }
 
 type SkippedReason struct {
@@ -42,12 +44,13 @@ type SkippedReason struct {
 
 // FmtOptions controls the format operation.
 type FmtOptions struct {
-	Write bool
-	Check bool
-	Diff  bool
-	Paths []string
-	Root  string
-	Cfg   config.Config
+	Write       bool
+	Check       bool
+	Diff        bool
+	Paths       []string
+	Root        string
+	Cfg         config.Config
+	LineNumbers LineNumberMode
 }
 
 type indenter struct {
@@ -58,7 +61,6 @@ type indenter struct {
 type fileContext struct {
 	isClass bool
 	lines   []string
-	result  bytes.Buffer
 }
 
 func Run(opts FmtOptions) (*Result, error) {
@@ -69,7 +71,7 @@ func Run(opts FmtOptions) (*Result, error) {
 
 	results := make([]FileResult, 0, len(files))
 	for _, path := range files {
-		fr, err := formatFile(path)
+		fr, err := formatFile(path, opts.LineNumbers)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -219,7 +221,7 @@ func collectFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-func formatFile(path string) (FileResult, error) {
+func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".bas" && ext != ".cls" {
 		return FileResult{
@@ -234,7 +236,7 @@ func formatFile(path string) (FileResult, error) {
 	}
 	isClass := ext == ".cls"
 	original := string(data)
-	formatted, err := FormatText(original, isClass)
+	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers})
 	if err != nil {
 		return FileResult{}, err
 	}
@@ -243,97 +245,17 @@ func formatFile(path string) (FileResult, error) {
 		Changed:   formatted != original,
 		Formatted: formatted,
 		Original:  original,
+		LineNums:  lineNumResult,
 	}, nil
 }
 
 func FormatText(text string, isClass bool) (string, error) {
-	lines := splitLines(text)
-	if len(lines) == 0 {
-		return "", nil
-	}
+	return FormatTextWithOptions(text, isClass, FormatConfig{})
+}
 
-	ctx := &fileContext{
-		lines:   lines,
-		isClass: isClass,
-	}
-
-	ind := &indenter{
-		level:   0,
-		fileCtx: ctx,
-	}
-
-	headerEnded := false
-	inBeginBlock := false
-	for _, line := range lines {
-		if !headerEnded && isClass {
-			trimmedForHeader := strings.TrimLeft(line, " \t")
-			upperForHeader := strings.ToUpper(trimmedForHeader)
-			if inBeginBlock {
-				ind.fileCtx.result.WriteString(line)
-				ind.fileCtx.result.WriteByte('\n')
-				if upperForHeader == "END" {
-					inBeginBlock = false
-				}
-				continue
-			}
-			if isClassHeaderLine(line) || isBlankLine(line) {
-				ind.fileCtx.result.WriteString(line)
-				ind.fileCtx.result.WriteByte('\n')
-				if upperForHeader == "BEGIN" {
-					inBeginBlock = true
-				}
-				continue
-			}
-			headerEnded = true
-		}
-
-		current := line
-
-		trimmed := strings.TrimRight(current, " \t")
-		isEmpty := isBlankLine(trimmed)
-		isCommentLine := isVBACommentLine(trimmed)
-
-		if isEmpty || isCommentLine {
-			indent := strings.Repeat(" ", ind.level*indentWidth)
-			outLine := indent
-			if !isEmpty {
-				outLine = indent + strings.TrimLeft(trimmed, " \t")
-			}
-			ind.fileCtx.result.WriteString(outLine)
-			ind.fileCtx.result.WriteByte('\n')
-			continue
-		}
-
-		keyword, isStructural := classifyLine(strings.TrimLeft(trimmed, " \t"))
-
-		if isStructural {
-			if isDedentKeyword(keyword) {
-				ind.level--
-				if ind.level < 0 {
-					ind.level = 0
-				}
-			}
-		}
-
-		indent := strings.Repeat(" ", ind.level*indentWidth)
-		outLine := indent + strings.TrimLeft(trimmed, " \t")
-		ind.fileCtx.result.WriteString(outLine)
-		ind.fileCtx.result.WriteByte('\n')
-
-		if isStructural && isIndentKeyword(keyword) {
-			ind.level++
-		}
-	}
-
-	result := ind.fileCtx.result.String()
-	result = normalizeBlankLines(result)
-	if !strings.HasSuffix(result, "\n") {
-		result += "\n"
-	}
-	if result == "\n" {
-		result = ""
-	}
-	return result, nil
+func FormatTextWithOptions(text string, isClass bool, cfg FormatConfig) (string, error) {
+	formatted, _, err := formatTextDetailed(text, isClass, cfg)
+	return formatted, err
 }
 
 func splitLines(text string) []string {
@@ -573,53 +495,6 @@ func isDedentKeyword(kw string) bool {
 	return false
 }
 
-func normalizeBlankLines(text string) string {
-	lines := strings.Split(text, "\n")
-	if len(lines) == 0 {
-		return text
-	}
-
-	var buf bytes.Buffer
-	consecutiveBlanks := 0
-
-	for i, line := range lines {
-		isEmpty := strings.TrimSpace(line) == ""
-
-		if isEmpty {
-			consecutiveBlanks++
-			if i == len(lines)-1 {
-				continue
-			}
-			if consecutiveBlanks == 1 {
-				buf.WriteByte('\n')
-			}
-			continue
-		}
-
-		if consecutiveBlanks == 0 && i > 0 {
-			prevLine := getLastNonBlank(lines, i-1)
-			if isOptionExplicitGap(prevLine) || isProcedureGap(prevLine, line) {
-				buf.WriteByte('\n')
-			}
-		}
-
-		consecutiveBlanks = 0
-		buf.WriteString(line)
-		buf.WriteByte('\n')
-	}
-
-	return buf.String()
-}
-
-func getLastNonBlank(lines []string, end int) string {
-	for i := end; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
-			return lines[i]
-		}
-	}
-	return ""
-}
-
 func isOptionExplicitGap(prev string) bool {
 	prevTrim := strings.TrimSpace(prev)
 	return strings.EqualFold(prevTrim, "Option Explicit")
@@ -646,6 +521,9 @@ func summarizeResults(results []FileResult, opts FmtOptions) (*Result, error) {
 	r := &Result{
 		Total:           len(results),
 		FormattedByPath: make(map[string]string),
+		LineNumbers: LineNumberSummary{
+			Mode: normalizeLineNumberMode(opts.LineNumbers),
+		},
 	}
 	for _, fr := range results {
 		if fr.Skipped {
@@ -668,6 +546,16 @@ func summarizeResults(results []FileResult, opts FmtOptions) (*Result, error) {
 			}
 		} else {
 			r.Unchanged++
+		}
+		if fr.LineNums.Changed {
+			r.LineNumbers.FilesChanged++
+		}
+		r.LineNumbers.LinesAdded += fr.LineNums.LinesAdded
+		r.LineNumbers.LinesRemoved += fr.LineNums.LinesRemoved
+		r.LineNumbers.LinesRenumbered += fr.LineNums.LinesRenumbered
+		for _, warning := range fr.LineNums.Warnings {
+			warning.Path = fr.Path
+			r.LineNumbers.Warnings = append(r.LineNumbers.Warnings, warning)
 		}
 	}
 	return r, nil

@@ -23,6 +23,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -519,7 +520,7 @@ func TestRootCommandIncludesFmtCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "fmt" {
 		t.Fatalf("expected fmt command, got %#v", cmd)
 	}
-	for _, name := range []string{"write", "check", "diff", "stdin"} {
+	for _, name := range []string{"write", "check", "diff", "stdin", "line-numbers"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected fmt command to define --%s", name)
 		}
@@ -561,6 +562,25 @@ func TestFmtCommandModeConflict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestFmtCommandStdinConflictsWithLineNumbers(t *testing.T) {
+	a := &app{
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	cmd := a.fmtCommand()
+	cmd.SetArgs([]string{"--stdin", "--line-numbers", "add"})
+	_, err := cmd.ExecuteC()
+	if err == nil {
+		t.Fatal("expected error for --stdin combined with --line-numbers")
+	}
+	if !strings.Contains(err.Error(), "--line-numbers") {
+		t.Fatalf("expected --line-numbers conflict error, got %v", err)
 	}
 }
 
@@ -724,8 +744,112 @@ func TestFmtJSONEnvelopeViaCLI(t *testing.T) {
 			t.Fatalf("expected output.%s in JSON envelope", key)
 		}
 	}
+	lineNumbers, ok := outputMap["line_numbers"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output.line_numbers map in JSON envelope")
+	}
+	if lineNumbers["mode"] != string(vbafmt.LineNumberModePreserve) {
+		t.Fatalf("expected default line-number mode preserve, got %v", lineNumbers["mode"])
+	}
+	if applied, _ := lineNumbers["applied"].(bool); applied {
+		t.Fatalf("expected default inspect line-number payload to report applied=false, got %v", lineNumbers["applied"])
+	}
 	if changed := outputMap["changed"].(float64); changed != 0 {
 		t.Fatalf("expected changed=0 for already formatted file, got %v", changed)
+	}
+}
+
+func TestFmtLineNumbersJSONViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "src", "modules", "Sample.bas")
+	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--line-numbers", "add", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --line-numbers add --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	outputMap, ok := env["output"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output map in envelope")
+	}
+	lineNumbers, ok := outputMap["line_numbers"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output.line_numbers map in envelope")
+	}
+	if lineNumbers["mode"] != string(vbafmt.LineNumberModeAdd) {
+		t.Fatalf("expected mode add, got %v", lineNumbers["mode"])
+	}
+	if applied, _ := lineNumbers["applied"].(bool); applied {
+		t.Fatalf("expected inspect line-number payload to report applied=false, got %v", lineNumbers["applied"])
+	}
+	if got := lineNumbers["files_to_change"].(float64); got != 1 {
+		t.Fatalf("expected files_to_change=1, got %v", got)
+	}
+	if got := lineNumbers["lines_to_add"].(float64); got != 2 {
+		t.Fatalf("expected lines_to_add=2, got %v", got)
+	}
+}
+
+func TestFmtLineNumbersWriteJSONViaCLI(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	path := filepath.Join(dir, "src", "modules", "Sample.bas")
+	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--line-numbers", "add", "--write", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --line-numbers add --write --json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	outputMap, ok := env["output"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output map in envelope")
+	}
+	lineNumbers, ok := outputMap["line_numbers"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output.line_numbers map in envelope")
+	}
+	if applied, _ := lineNumbers["applied"].(bool); !applied {
+		t.Fatalf("expected write line-number payload to report applied=true, got %v", lineNumbers["applied"])
+	}
+	if got := lineNumbers["files_changed"].(float64); got != 1 {
+		t.Fatalf("expected files_changed=1, got %v", got)
+	}
+	if got := lineNumbers["lines_added"].(float64); got != 2 {
+		t.Fatalf("expected lines_added=2, got %v", got)
+	}
+	if _, ok := lineNumbers["lines_to_add"]; ok {
+		t.Fatalf("did not expect prospective inspect key lines_to_add in write mode: %#v", lineNumbers)
 	}
 }
 
