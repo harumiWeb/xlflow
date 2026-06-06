@@ -385,31 +385,43 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 
 func renderFormattedLines(lines []formattedLine, assignments map[int]int) string {
 	var b strings.Builder
+	continuationPadding := ""
 	for i, line := range lines {
+		text := line.Text
+		if continuationPadding != "" && text != "" {
+			text = continuationPadding + text
+		}
+
 		switch {
 		case line.Text == "":
 			b.WriteByte('\n')
+			continuationPadding = ""
 		case assignments != nil:
 			if n, ok := assignments[i]; ok {
 				b.WriteString(formatLineNumberedLine(n, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(n))
 				continue
 			}
 			if line.HadLineNumber && !line.Eligible {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
-			b.WriteString(line.Text)
+			b.WriteString(text)
 			b.WriteByte('\n')
+			continuationPadding = nextContinuationPadding(line.Text, continuationPadding)
 		default:
 			if line.HadLineNumber {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
+				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
-			b.WriteString(line.Text)
+			b.WriteString(text)
 			b.WriteByte('\n')
+			continuationPadding = nextContinuationPadding(line.Text, continuationPadding)
 		}
 	}
 	return b.String()
@@ -429,6 +441,17 @@ func formatLineNumberedLine(number int, text string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d  %s", number, text)
+}
+
+func lineNumberPadding(number int) string {
+	return strings.Repeat(" ", len(fmt.Sprintf("%d  ", number)))
+}
+
+func nextContinuationPadding(text, currentPadding string) string {
+	if hasExplicitLineContinuation(text) {
+		return currentPadding
+	}
+	return ""
 }
 
 func isLineNumberEligibleContent(content string) bool {

@@ -180,6 +180,30 @@ func assertTrimmedLineIndent(t *testing.T, text, trimmed string, want int) {
 	t.Fatalf("line %q not found:\n%s", trimmed, text)
 }
 
+func assertLineStartsAtSameColumn(t *testing.T, text, anchor, aligned string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	anchorCol := -1
+	alignedCol := -1
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, anchor):
+			anchorCol = strings.Index(line, anchor)
+		case strings.Contains(line, aligned):
+			alignedCol = strings.Index(line, aligned)
+		}
+	}
+	if anchorCol < 0 {
+		t.Fatalf("anchor %q not found:\n%s", anchor, text)
+	}
+	if alignedCol < 0 {
+		t.Fatalf("aligned %q not found:\n%s", aligned, text)
+	}
+	if alignedCol != anchorCol {
+		t.Fatalf("expected %q to start at column %d like %q, got %d:\n%s", aligned, anchorCol, anchor, alignedCol, text)
+	}
+}
+
 func TestFormatBasRemoveTrailingWhitespace(t *testing.T) {
 	input := "Sub Main()   \t  \n    x = 1   \nEnd Sub\n"
 	got, err := FormatText(input, false)
@@ -1403,14 +1427,22 @@ func TestFormatTextWithLineNumbersAddNumbersOnlyFirstLineOfContinuation(t *testi
 	}
 	for _, want := range []string{
 		"10      payload = \"{\" & _",
-		"    JsonProperty(\"event\", \"debug_log\") & \",\" & _",
-		"    JsonProperty(\"message\", Message) & \",\" & _",
-		"    JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
-		"    JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected continued output %q:\n%s", want, got)
 		}
+	}
+	for _, tail := range []string{
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		assertLineStartsAtSameColumn(t, got, "payload = \"{\" & _", tail)
 	}
 	for _, unwanted := range []string{
 		"20      JsonProperty(\"event\", \"debug_log\") & \",\" & _",
@@ -1436,6 +1468,33 @@ func TestFormatTextWithLineNumbersAddContinuationIsIdempotent(t *testing.T) {
 	}
 	if second != first {
 		t.Fatalf("continuation line-number add should be idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestFormatTextWithLineNumbersAddAlignsContinuationTailWithNumberedHead(t *testing.T) {
+	input := "Public Sub LogMessage(ByVal Message As String)\n390      payload = \"{\" & _\n    JsonProperty(\"event\", \"debug_log\") & \",\" & _\n    JsonProperty(\"message\", Message) & \",\" & _\n    JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _\n    JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModePreserve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"390      payload = \"{\" & _",
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected aligned continuation output %q:\n%s", want, got)
+		}
+	}
+	for _, tail := range []string{
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		assertLineStartsAtSameColumn(t, got, "payload = \"{\" & _", tail)
 	}
 }
 
