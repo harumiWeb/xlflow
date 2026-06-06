@@ -193,6 +193,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 	headerEnded := false
 	inBeginBlock := false
 	inProcedure := false
+	inLineContinuationTail := false
 
 	for i, line := range lines {
 		if !headerEnded && isClass {
@@ -271,7 +272,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 			Content:       content,
 			HadLineNumber: directive.Has,
 			LineNumber:    directive.Number,
-			Eligible:      inProcedure && isLineNumberEligibleContent(content),
+			Eligible:      inProcedure && !inLineContinuationTail && isLineNumberEligibleContent(content),
 			InputLine:     i + 1,
 		})
 
@@ -284,6 +285,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 		if isProcedureEndKeyword(keyword) {
 			inProcedure = false
 		}
+		inLineContinuationTail = hasExplicitLineContinuation(content)
 	}
 
 	formatted = normalizeFormattedLines(formatted)
@@ -447,10 +449,30 @@ func isLineNumberEligibleContent(content string) bool {
 	if strings.HasPrefix(upper, "ATTRIBUTE ") {
 		return false
 	}
-	if keyword, ok := classifyLine(trimmed); ok && (isProcedureStartKeyword(keyword) || isProcedureEndKeyword(keyword)) {
-		return false
+	if keyword, ok := classifyLine(trimmed); ok {
+		if isProcedureStartKeyword(keyword) || isProcedureEndKeyword(keyword) {
+			return false
+		}
+		if isExcludedLineNumberStructuralKeyword(keyword) {
+			return false
+		}
 	}
 	return true
+}
+
+func isExcludedLineNumberStructuralKeyword(keyword string) bool {
+	switch keyword {
+	case "SELECT CASE", "CASE", "CASE ELSE", "END SELECT":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasExplicitLineContinuation(content string) bool {
+	stripped := stripStringLiterals(stripTrailingComment(content))
+	stripped = strings.TrimRight(stripped, " \t")
+	return strings.HasSuffix(stripped, " _")
 }
 
 func isLabelLine(trimmed string) bool {

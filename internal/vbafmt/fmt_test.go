@@ -1335,6 +1335,36 @@ func TestFormatTextWithLineNumbersAdd(t *testing.T) {
 	}
 }
 
+func TestFormatTextWithLineNumbersAddSkipsSelectCaseStructuralLines(t *testing.T) {
+	input := "Private Function IsUnreservedUrlByte(ByVal byteValue As Long) As Boolean\n    Select Case byteValue\n    Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126\n        IsUnreservedUrlByte = True\n    Case Else\n        IsUnreservedUrlByte = False\n    End Select\nEnd Function\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"    Select Case byteValue",
+		"    Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126",
+		"    Case Else",
+		"    End Select",
+		"10          IsUnreservedUrlByte = True",
+		"20          IsUnreservedUrlByte = False",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected output %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"10      Select Case byteValue",
+		"10      Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126",
+		"20      Case Else",
+		"30      End Select",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("select/case structural line should not be numbered %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 func TestFormatTextWithLineNumbersAddIsIdempotent(t *testing.T) {
 	input := "Public Sub Sample()\n    Dim x As Integer\n    x = 1 / 0\nEnd Sub\n"
 	first, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
@@ -1347,6 +1377,65 @@ func TestFormatTextWithLineNumbersAddIsIdempotent(t *testing.T) {
 	}
 	if second != first {
 		t.Fatalf("line-number add should be idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestFormatTextWithLineNumbersAddSelectCaseIsIdempotent(t *testing.T) {
+	input := "Private Function IsUnreservedUrlByte(ByVal byteValue As Long) As Boolean\n    Select Case byteValue\n    Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126\n        IsUnreservedUrlByte = True\n    End Select\nEnd Function\n"
+	first, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatTextWithOptions(first, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("select case line-number add should be idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestFormatTextWithLineNumbersAddNumbersOnlyFirstLineOfContinuation(t *testing.T) {
+	input := "Public Sub LogMessage(ByVal Message As String)\n    payload = \"{\" & _\n        JsonProperty(\"event\", \"debug_log\") & \",\" & _\n        JsonProperty(\"message\", Message) & \",\" & _\n        JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _\n        JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"10      payload = \"{\" & _",
+		"    JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"    JsonProperty(\"message\", Message) & \",\" & _",
+		"    JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"    JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected continued output %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"20      JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"30      JsonProperty(\"message\", Message) & \",\" & _",
+		"40      JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"50      JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("continuation tail should not be numbered %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestFormatTextWithLineNumbersAddContinuationIsIdempotent(t *testing.T) {
+	input := "Public Sub LogMessage(ByVal Message As String)\n    payload = \"{\" & _\n        JsonProperty(\"event\", \"debug_log\") & \",\" & _\n        JsonProperty(\"message\", Message) & \",\" & _\n        JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _\n        JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"\nEnd Sub\n"
+	first, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatTextWithOptions(first, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("continuation line-number add should be idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
 }
 

@@ -5,6 +5,8 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added explicit VBA line-number operations to `xlflow fmt` via `--line-numbers preserve|add|remove|renumber`, including conservative ambiguity warnings for numeric-label control flow and structured JSON summary fields under `output.line_numbers`.
+- Fixed `xlflow fmt --line-numbers add` so it no longer numbers `Select Case`, `Case` / `Case Else`, or `End Select` control lines, avoiding VBA compile failures when the first `Case` in a select block is numbered.
+- Fixed `xlflow fmt --line-numbers add` so explicit VBA line-continuation statements only number their first physical line; continuation tail lines now stay unnumbered to avoid compile failures.
 - Added a dedicated xlflow agent debugging reference at `internal/agentskill/templates/xlflow/references/debugging.md`, documenting the preferred workflow: inspect `run` diagnostics first, then use `fmt --line-numbers add` plus targeted `XlflowDebug.Log` only when the default error metadata is not enough.
 
 ## v0.11.0
