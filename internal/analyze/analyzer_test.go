@@ -159,7 +159,7 @@ End Sub
 	}
 	assertFinding(t, findings, "VBA105", 3)
 	finding := findFinding(t, findings, "VBA105", 3)
-	if !containsAll(finding.Suggestion, "xlflow trace enable", "xlflow run --trace") {
+	if !containsAll(finding.Suggestion, "XlflowDebug.Log", "xlflow run --json") {
 		t.Fatalf("unexpected VBA105 suggestion: %q", finding.Suggestion)
 	}
 }
@@ -178,12 +178,12 @@ End Sub
 	}
 	assertFinding(t, findings, "VBA106", 3)
 	finding := findFinding(t, findings, "VBA106", 3)
-	if !containsAll(finding.Suggestion, "xlflow run --trace", "xlflow trace enable") {
+	if !containsAll(finding.Suggestion, "XlflowDebug.Log", "xlflow run --json") {
 		t.Fatalf("unexpected VBA106 suggestion: %q", finding.Suggestion)
 	}
 }
 
-func TestAnalyzerDoesNotFlagTraceHelperCallsWhenHelperSourceExists(t *testing.T) {
+func TestAnalyzerStillFlagsLegacyTraceHelpersWhenHelperSourceExists(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -202,11 +202,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, finding := range findings {
-		if finding.Code == "VBA105" || finding.Code == "VBA106" {
-			t.Fatalf("unexpected missing trace helper finding: %+v", findings)
-		}
-	}
+	assertFinding(t, findings, "VBA105", 3)
+	assertFinding(t, findings, "VBA106", 4)
 }
 
 func TestAnalyzerSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {

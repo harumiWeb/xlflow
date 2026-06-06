@@ -73,25 +73,6 @@ func TestWriteJSONEnvelopeIncludesDiff(t *testing.T) {
 	}
 }
 
-func TestWriteJSONEnvelopeIncludesTrace(t *testing.T) {
-	env := New("run")
-	env.Trace = map[string]any{
-		"enabled": true,
-		"events":  []map[string]string{{"message": "start"}},
-	}
-	var buf bytes.Buffer
-	if err := Write(&buf, env, true); err != nil {
-		t.Fatal(err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := decoded["trace"].(map[string]any); !ok {
-		t.Fatalf("expected trace result in JSON envelope: %s", buf.String())
-	}
-}
-
 func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 	env := New("check")
 	env.Analysis = []map[string]any{{"code": "VBA101"}}
@@ -414,13 +395,12 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	}
 }
 
-func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
+func TestWriteWithOptionsRendersRunSummaryAndDebug(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
 	env.Target = map[string]any{"kind": "file", "path": "build/Book.xlsm", "description": "Saved workbook file on disk"}
 	env.Session = map[string]any{"active": false, "workbook_path": "build/Book.xlsm", "dirty": false, "save_required": false}
-	env.Trace = map[string]any{"events": []map[string]any{{"timestamp": "2026-04-30 10:00:00", "message": "start"}}}
 	env.Debug = map[string]any{"events": []map[string]any{{"message": "starting run", "runtime_mode": "headless"}}, "count": 1}
 	env.UI = map[string]any{"events": []map[string]any{{"kind": "msgbox", "dialog_id": "confirm-save", "response_source": "default", "resolved_result": "yes"}, {"kind": "inputbox", "dialog_id": "customer-name", "response_source": "default", "resolved_value": "[redacted]"}}}
 	var buf bytes.Buffer
@@ -428,7 +408,7 @@ func TestWriteWithOptionsRendersRunSummaryAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Target:", "Saved workbook file on disk", "Session state:", "inactive", "Main.Run", "42ms", "left unchanged", "Trace", "start", "Debug", "log message=starting run mode=headless", "UI", "Events:", "msgbox id=confirm-save source=default result=yes", "inputbox id=customer-name source=default value=[redacted]"} {
+	for _, want := range []string{"Target:", "Saved workbook file on disk", "Session state:", "inactive", "Main.Run", "42ms", "left unchanged", "Debug", "log message=starting run mode=headless", "UI", "Events:", "msgbox id=confirm-save source=default result=yes", "inputbox id=customer-name source=default value=[redacted]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run output missing %q:\n%s", want, got)
 		}
@@ -568,48 +548,6 @@ func TestWriteWithOptionsDoesNotRenderZeroFormsWhenListFailed(t *testing.T) {
 	}
 }
 
-func TestWriteWithOptionsRendersRunTraceHelperLifecycle(t *testing.T) {
-	tests := []struct {
-		name  string
-		trace map[string]any
-		want  string
-	}{
-		{
-			name: "temporary reverted",
-			trace: map[string]any{
-				"enabled":            true,
-				"lifecycle":          "temporary",
-				"temporary_reverted": true,
-			},
-			want: "temporary helper injected for this run and reverted afterward",
-		},
-		{
-			name: "existing helper",
-			trace: map[string]any{
-				"enabled":   true,
-				"lifecycle": "existing",
-			},
-			want: "using an existing workbook trace helper",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := New("run")
-			env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
-			env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
-			env.Trace = tt.trace
-			var buf bytes.Buffer
-			if err := WriteWithOptions(&buf, env, Options{}); err != nil {
-				t.Fatal(err)
-			}
-			if got := buf.String(); !strings.Contains(got, tt.want) {
-				t.Fatalf("run trace lifecycle output missing %q:\n%s", tt.want, got)
-			}
-		})
-	}
-}
-
 func TestWriteWithOptionsRendersRunPreflightAnalysis(t *testing.T) {
 	env := Failure("run", Error{Code: "analyze_failed", Message: "1 source issue(s) must be fixed before run", Source: "xlflow", Phase: "preflight"})
 	env.Analysis = []map[string]any{{
@@ -618,14 +556,14 @@ func TestWriteWithOptionsRendersRunPreflightAnalysis(t *testing.T) {
 		"file":       "src/modules/Main.bas",
 		"line":       3,
 		"message":    "XlflowLog is called but no Public standard-module definition was found in source.",
-		"suggestion": "If you want source-controlled tracing, run `xlflow trace enable`.",
+		"suggestion": "Replace the legacy helper with `XlflowDebug.Log` and inspect output via `xlflow run --json`.",
 	}}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"VBA105", "src/modules/Main.bas:3", "Suggestion:", "xlflow trace enable"} {
+	for _, want := range []string{"VBA105", "src/modules/Main.bas:3", "Suggestion:", "XlflowDebug.Log", "xlflow run --json"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("run preflight output missing %q:\n%s", want, got)
 		}
@@ -943,23 +881,6 @@ func TestWriteWithOptionsRendersTargetNoteStateNote(t *testing.T) {
 	}
 }
 
-func TestWriteWithOptionsRendersTraceCommandSummary(t *testing.T) {
-	env := New("trace")
-	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": true, "session": true}
-	env.Source = map[string]any{"path": "src/modules/XlflowTrace.bas", "updated": true}
-	env.Trace = map[string]any{"lifecycle": "enabled", "log_dir": ".xlflow/traces"}
-	var buf bytes.Buffer
-	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	got := buf.String()
-	for _, want := range []string{"saved live session workbook with trace helper", "persisted in workbook and source", "Trace dir"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("trace output missing %q:\n%s", want, got)
-		}
-	}
-}
-
 func TestWriteWithOptionsRendersExportImageSummary(t *testing.T) {
 	env := New("export-image")
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "auto", "needs_save": true}
@@ -1120,25 +1041,6 @@ func TestWriteWithOptionsRendersBridgeHost(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("bridge output missing %q:\n%s", want, got)
 		}
-	}
-}
-
-func TestWriteWithOptionsDoesNotDuplicateTraceEventsFromLogs(t *testing.T) {
-	env := New("run")
-	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
-	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
-	env.Logs = []string{"ran Main.Run in 42ms", "[2026-04-30 10:00:00] start"}
-	env.Trace = map[string]any{"events": []map[string]any{{"timestamp": "2026-04-30 10:00:00", "message": "start"}}}
-	var buf bytes.Buffer
-	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	got := buf.String()
-	if strings.Count(got, "start") != 1 {
-		t.Fatalf("expected trace event once:\n%s", got)
-	}
-	if !strings.Contains(got, "ran Main.Run in 42ms") {
-		t.Fatalf("expected non-trace log to remain:\n%s", got)
 	}
 }
 

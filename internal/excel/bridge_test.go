@@ -1841,27 +1841,6 @@ func TestBuildRunScriptArgsNormalizesNilArgsToEmptyArray(t *testing.T) {
 	}
 }
 
-func TestBuildRunScriptArgsEnablesTrace(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.Default()
-	args, err := buildRunScriptArgs(root, cfg, RunOptions{
-		Macro: "Main.Run",
-		Trace: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if args["TraceEnabled"] != "true" {
-		t.Fatalf("trace enabled = %q, want true", args["TraceEnabled"])
-	}
-	if args["TraceFile"] == "" {
-		t.Fatal("expected trace file path")
-	}
-	if filepath.Base(filepath.Dir(args["TraceFile"])) != "traces" || filepath.Base(filepath.Dir(filepath.Dir(args["TraceFile"]))) != ".xlflow" {
-		t.Fatalf("trace file path = %q, expected .xlflow traces directory", args["TraceFile"])
-	}
-}
-
 func TestBuildRunScriptArgsPassesRuntimeMode(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -2047,16 +2026,6 @@ func TestMergeDebugResultPreservesExistingEvents(t *testing.T) {
 	}
 }
 
-func TestTraceNotInjectedIsValidationFailure(t *testing.T) {
-	result := ScriptResult{
-		Status: output.StatusFailed,
-		Error:  &output.Error{Code: "trace_not_injected", Message: "trace missing"},
-	}
-	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
-		t.Fatalf("exitCodeForScriptResult(trace_not_injected) = %d, want %d", got, output.ExitValidation)
-	}
-}
-
 func TestVBACompileFailedIsValidationFailure(t *testing.T) {
 	result := ScriptResult{
 		Status: output.StatusFailed,
@@ -2199,36 +2168,6 @@ func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
 	}
 	if args["SpecJson64"] == "" {
 		t.Fatalf("SpecJson64 should be set: %+v", args)
-	}
-}
-
-func TestTraceInjectScriptArgsIncludeModulesDirForConfiguredWorkbook(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.Default()
-	args := buildTraceInjectScriptArgs(root, cfg, "")
-	if args["ModulesDir"] != filepath.Join(root, "src", "modules") {
-		t.Fatalf("modules dir = %q", args["ModulesDir"])
-	}
-}
-
-func TestTraceScriptArgsPassSessionFlag(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.Default()
-	args := buildTraceScriptArgs(root, cfg, TraceOptions{Action: "status", Session: true})
-	if args["UseSession"] != "true" {
-		t.Fatalf("UseSession = %q, want true", args["UseSession"])
-	}
-	if args["MetadataPath"] != filepath.Join(root, ".xlflow", "session.json") {
-		t.Fatalf("metadata path = %q", args["MetadataPath"])
-	}
-}
-
-func TestTraceInjectScriptArgsOmitModulesDirForStandaloneWorkbook(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.Default()
-	args := buildTraceInjectScriptArgs(root, cfg, "other.xlsm")
-	if _, ok := args["ModulesDir"]; ok {
-		t.Fatalf("standalone workbook should not receive ModulesDir: %+v", args)
 	}
 }
 
@@ -3118,95 +3057,6 @@ func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 	summary, ok := testsPayload["summary"].(map[string]interface{})
 	if !ok || summary["passed"] != float64(2) {
 		t.Fatalf("unexpected tests.summary payload: %#v", testsPayload["summary"])
-	}
-}
-
-func TestRunnerDotNetTraceUsesDotNetProviderForLifecycleActions(t *testing.T) {
-	testCases := []struct {
-		name        string
-		action      string
-		wantAction  string
-		wantModules bool
-	}{
-		{name: "enable", action: "enable", wantAction: "enable", wantModules: true},
-		{name: "status", action: "status", wantAction: "status", wantModules: true},
-		{name: "disable", action: "disable", wantAction: "disable", wantModules: true},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			original := bridgeProviderForMode
-			t.Cleanup(func() { bridgeProviderForMode = original })
-
-			root := t.TempDir()
-			var dotNetCalls, powerShellCalls int
-			var dotNetRequests []excelbridge.Request
-			bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
-				switch mode {
-				case excelbridge.ModeDotNet:
-					return trackingBridgeProvider{
-						name:      string(excelbridge.ModeDotNet),
-						supports:  true,
-						callCount: &dotNetCalls,
-						requests:  &dotNetRequests,
-						response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"trace","logs":["trace action completed"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":true,"dirty":false,"needs_save":false},"trace":{"action":"` + tc.wantAction + `","enabled":` + map[bool]string{true: "true", false: "false"}[tc.wantAction != "disable"] + `,"helper_module":"XlflowTrace","trace_dir":"C:\\temp\\.xlflow\\traces"}}`)},
-					}
-				default:
-					return trackingBridgeProvider{
-						name:      string(excelbridge.ModePowerShell),
-						supports:  true,
-						callCount: &powerShellCalls,
-					}
-				}
-			}
-
-			cfg := config.Default()
-			env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.Trace(cfg, TraceOptions{
-				Action:  tc.action,
-				Session: true,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if code != output.ExitSuccess {
-				t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
-			}
-			if dotNetCalls != 1 {
-				t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
-			}
-			if powerShellCalls != 0 {
-				t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
-			}
-			if len(dotNetRequests) != 1 {
-				t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
-			}
-			req := dotNetRequests[0]
-			if got := req.Command; got != "trace" {
-				t.Fatalf("command = %q, want trace", got)
-			}
-			if got := req.Args["Action"]; got != tc.wantAction {
-				t.Fatalf("Action = %q, want %q", got, tc.wantAction)
-			}
-			if got := req.Args["UseSession"]; got != "true" {
-				t.Fatalf("UseSession = %q, want true", got)
-			}
-			if got := req.Args["MetadataPath"]; got != filepath.Join(root, ".xlflow", "session.json") {
-				t.Fatalf("MetadataPath = %q, want %q", got, filepath.Join(root, ".xlflow", "session.json"))
-			}
-			if tc.wantModules {
-				if got := req.Args["ModulesDir"]; got != filepath.Join(root, "src", "modules") {
-					t.Fatalf("ModulesDir = %q, want %q", got, filepath.Join(root, "src", "modules"))
-				}
-			}
-			if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Trace == nil {
-				t.Fatalf("expected trace envelope fields to be populated: %+v", env)
-			}
-			tracePayload, ok := env.Trace.(map[string]interface{})
-			if !ok || tracePayload["action"] != tc.wantAction {
-				t.Fatalf("unexpected trace payload: %#v", env.Trace)
-			}
-		})
 	}
 }
 

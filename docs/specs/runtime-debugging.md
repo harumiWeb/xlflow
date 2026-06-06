@@ -4,28 +4,19 @@
 
 This spec defines the xlflow behavior that helps AI agents debug VBA runtime failures without relying on workbook-only state or implicit macro naming assumptions.
 
-## Trace Lifecycle
+## Recommended Workflow
 
-`xlflow trace enable` is source-aware in configured projects. When the command uses `excel.path` from `xlflow.toml`, it injects or replaces the workbook module `XlflowTrace` and writes the same bundled module source to `<src.modules>/XlflowTrace.bas` as UTF-8 without BOM. `xlflow trace inject` remains a compatibility alias for `trace enable`.
+The legacy trace command and the removed trace run flag are gone. The supported workbook-side debugging surface is `XlflowDebug.Log`, and the supported machine-readable execution surface is `xlflow run --json`.
 
-This keeps `push` from deleting the trace module on the next source-to-workbook sync. The generated source file is owned by xlflow and may be replaced by a later `trace enable` run.
+Use `XlflowDebug.Log` inside VBA for execution-state visibility:
 
-If `.xlflow/session.json` already points at the same workbook, trace lifecycle commands should reuse that live session workbook by default instead of opening a second hidden copy. This prevents false-success trace injection where the visible session workbook still lacks `XlflowTrace`.
-
-When an explicit workbook argument is provided and xlflow cannot load project configuration, `trace enable <workbook>` may operate on the workbook only. That standalone mode exists for one-off workbook inspection and does not promise source persistence.
-
-JSON output for configured project injection includes source metadata:
-
-```json
-{
-  "source": {
-    "path": "src/modules/XlflowTrace.bas",
-    "updated": true
-  }
-}
+```vb
+XlflowDebug.Log "message"
+XlflowDebug.Log "row count", rowCount
+XlflowDebug.Log "current sheet", ws.Name
 ```
 
-`xlflow trace disable` removes the workbook helper and removes the generated source helper only when it still matches xlflow's bundled trace module. If the source helper has been modified, disable refuses with `trace_source_modified` unless `--force` is set. `xlflow trace status` reports workbook helper presence, source helper presence, whether source matches the bundled helper, and the trace log directory. `xlflow trace clean` removes `.xlflow/traces`.
+During `run` and `test`, xlflow injects the temporary debug pipe marker used by `XlflowDebug.Log` and returns those lines through stderr streaming and the final JSON envelope.
 
 ## Run Failure Phases
 
@@ -38,13 +29,12 @@ JSON output for configured project injection includes source metadata:
 - `inject_harness`
 - `invoke_macro`
 - `save_result`
-- `read_trace`
 
 The phase is included in JSON error metadata. Plain-text output remains short, but failures should include enough context for a user or agent to decide whether to inspect configuration, VBIDE access, macro names, source code, or trace output.
 
 When Excel exposes enough information to distinguish a missing or invalid macro target from user-code failure, xlflow reports a target-specific error code instead of generic `macro_failed`.
 
-For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, trace context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern.
+For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, debug context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern.
 
 ## Runtime Modal Suppression
 
@@ -76,7 +66,7 @@ Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` 
 
 ## Runtime Source Analysis
 
-`xlflow analyze` scans configured source directories without Excel COM. The v1 analyzer is deliberately pattern-based and detects likely missing `Set` assignments for object variables and object-returning functions, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and missing xlflow trace-helper dependencies when source-controlled VBA calls `XlflowLog` or `XlflowSetTraceFile` without a Public standard-module definition. Stable analyzer codes are `VBA101`, `VBA102`, `VBA103`, `VBA104`, `VBA105`, and `VBA106`.
+`xlflow analyze` scans configured source directories without Excel COM. The v1 analyzer is deliberately pattern-based and detects likely missing `Set` assignments for object variables and object-returning functions, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and removed legacy trace-helper APIs when source-controlled VBA still calls `XlflowLog` or `XlflowSetTraceFile`. Stable analyzer codes are `VBA101`, `VBA102`, `VBA103`, `VBA104`, `VBA105`, and `VBA106`.
 
 `xlflow check` aggregates `lint`, `analyze`, and `doctor`. It continues after lint/analyze findings and returns all cheap source feedback before reporting Excel COM doctor status.
 
@@ -126,11 +116,11 @@ New scaffolded projects also include `XlflowDebug.bas`. `XlflowDebug.Log` is the
 
 For runtime debugging sessions that need more than one workbook-backed command, keep the workbook attached through `session start` and reuse that session for `push --fast --session --no-save`, `run --session`, `test --session`, inspect, and save steps. Reopening the workbook separately for each step is intentionally not the preferred path because it slows down debugging and makes the live workbook state harder to reason about. Use a fresh non-session open only when the reopen boundary itself is the thing you are investigating.
 
-## Empty Trace Guidance
+## Debug Logging Guidance
 
-`xlflow run --trace` returns all trace events written before failure. Trace logs are written under `.xlflow/traces`. If the workbook does not already contain `XlflowTrace`, xlflow may inject it temporarily and revert it before saving successful results. Source preflight for configured `run --trace` may ignore missing-helper findings that are satisfied by this temporary injection path, while `push` and non-trace configured runs keep treating those findings as blocking. If a traced run fails with zero events, output indicates that execution may have failed before reaching user trace calls.
+`xlflow run --json` returns debug events emitted through `XlflowDebug.Log`. If a failed run has insufficient context, add `XlflowDebug.Log` calls at procedure entry, important branches, external file access, destructive operations, and error handlers, then rerun with `--json`.
 
-The bundled AI agent skill instructs agents to add trace logs at procedure entry, important branches, external file access, destructive operations, and error handlers.
+The bundled AI agent skill instructs agents to prefer `XlflowDebug.Log` plus structured `run` output for runtime debugging.
 
 ## PowerShell Host Diagnostics
 

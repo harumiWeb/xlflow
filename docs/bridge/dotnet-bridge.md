@@ -124,7 +124,6 @@ xlflow run Module1.Main --bridge dotnet --session --json
 xlflow run Module1.Main --bridge dotnet --save --json
 xlflow run Module1.Main --bridge dotnet --save-as Result.xlsm --json
 xlflow run Module1.Main --bridge dotnet --no-save --json
-xlflow run Module1.Main --bridge dotnet --trace --json
 xlflow run Module1.Main --bridge dotnet --msgbox '{"prompt":"ok"}' --inputbox '{"name":"Jane"}' --ui-stream --json
 ```
 
@@ -146,11 +145,10 @@ The command opens the workbook (or attaches to an active session), invokes the m
   Debug is not preferred because it can leave VBE in break mode
 - Does not require a dialog to be visible, because Excel can defer painting a
   runtime error dialog until it receives focus
-- Supports `--trace` for VBA trace collection: temporarily injects `XlflowTrace` module if not present, reads trace events after execution, and reverts temporary injection
 - Supports `--msgbox`, `--inputbox`, `--filedialog` response injection via defined names
 - Supports `--ui-stream` pipe integration and `__XLFLOW_DEBUG_PIPE__` injection for `XlflowDebug.Log` transport
 
-The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `trace`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
+The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `debug`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
 
 ### `test`
 
@@ -176,25 +174,6 @@ The command:
 8. Restores runtime markers and saves the workbook
 
 Test results use `vbObjectError + 516` as the inconclusive sentinel. The response includes `workbook` and `tests` envelope fields.
-
-### `trace`
-
-`xlflow trace enable|status|disable|clean --bridge dotnet --json` manages the `XlflowTrace` VBA helper module:
-
-```powershell
-xlflow trace enable --bridge dotnet --json
-xlflow trace status --bridge dotnet --json
-xlflow trace disable --bridge dotnet --json
-xlflow trace disable --bridge dotnet --force --json
-xlflow trace clean --bridge dotnet --json
-```
-
-- `enable` installs the `XlflowTrace` module and saves the workbook; optionally writes `XlflowTrace.bas` to `ModulesDir`
-- `disable` validates source-match safety before changing the workbook, then removes the module and saves; removes source file only if it matches the bundled helper or `--force` is used
-- `status` reports `workbook_injected`, `source_exists`, and `source_matches_bundled`
-- `clean` removes the trace log directory without opening Excel
-
-The trace direct-open path disables automation macros for safety.
 
 On timeout, the bridge returns `macro_timeout`, does not save the workbook, and
 includes actionable suggestions plus the dialog and worker state available at
@@ -299,7 +278,7 @@ xlflow doctor --bridge dotnet --json
 xlflow run Main.Run --bridge dotnet --json
 ```
 
-Windows `auto` mode now prefers the `.NET` bridge for major workbook-backed commands including `doctor`, `inspect`, `pull`, `push`, `run`, `macros`, `process`, `test`, and `trace`. `--bridge powershell` remains the explicit legacy override. When `--bridge dotnet` is selected explicitly, xlflow must not fallback to PowerShell. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors.
+Windows `auto` mode now prefers the `.NET` bridge for major workbook-backed commands including `doctor`, `inspect`, `pull`, `push`, `run`, `macros`, `process`, and `test`. `--bridge powershell` remains the explicit legacy override. When `--bridge dotnet` is selected explicitly, xlflow must not fallback to PowerShell. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors.
 
 ## Initial Migration Order
 
@@ -309,7 +288,7 @@ The planned migration order is:
 2. `pull` and `push` — done
 3. `macros` and `run` — done
 4. dialog watcher — done
-5. `test`, `trace`, and runtime injection — done
+5. `test` and runtime injection — done
 6. `form` and `export-image`
 7. default bridge switch - done
 

@@ -31,8 +31,6 @@ public sealed class RunCommand : ICommandHandler
             Direct: BridgePayload.GetBool(request.Payload, "Direct"),
             Diagnostic: BridgePayload.GetBool(request.Payload, "Diagnostic"),
             SuppressModalErrors: BridgePayload.GetBool(request.Payload, "SuppressModalErrors"),
-            TraceEnabled: BridgePayload.GetBool(request.Payload, "TraceEnabled"),
-            TraceFile: BridgePayload.GetString(request.Payload, "TraceFile") ?? "",
             MsgBoxResponsesJSON: BridgePayload.GetString(request.Payload, "MsgBoxResponsesJSON") ?? "",
             InputResponsesJSON: BridgePayload.GetString(request.Payload, "InputResponsesJSON") ?? "",
             FileDialogResponsesJSON: BridgePayload.GetString(request.Payload, "FileDialogResponsesJSON") ?? "",

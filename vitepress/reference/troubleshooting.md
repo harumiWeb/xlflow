@@ -22,10 +22,10 @@ Use a discovered `qualified_name`.
 
 ## Runtime failure is unclear
 
-Run with trace:
+Run with structured debug output:
 
 ```bash
-xlflow run Main.Run --trace --json
+xlflow run Main.Run --json
 ```
 
 ## Workbook output depends on formatting

@@ -6,8 +6,6 @@ param(
   [string]$DisplayAlerts = "false",
   [string]$SaveWorkbook = "false",
   [string]$SaveAsPath = "",
-  [string]$TraceEnabled = "false",
-  [string]$TraceFile = "",
   [string]$Direct = "false",
   [string]$Diagnostic = "false",
   [string]$SuppressModalErrors = "true",
@@ -33,8 +31,6 @@ $excel = $null
 $workbook = $null
 $vbProject = $null
 $runnerComponent = $null
-$traceRequested = ConvertTo-XlflowBool $TraceEnabled
-$traceTempInjected = $false
 $currentPhase = "initialize"
 $sessionAttached = $false
 $sessionMode = "none"
@@ -142,23 +138,6 @@ try {
     Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-Direct cannot be used with diagnostic mode." -Source "xlflow" -Phase $currentPhase
     throw "invalid direct run"
   }
-  if ($traceRequested) {
-    if ([string]::IsNullOrWhiteSpace($TraceFile)) {
-      $TraceFile = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "xlflow") ("trace-" + [guid]::NewGuid().ToString("N") + ".log")
-    }
-    $traceDir = Split-Path -Parent $TraceFile
-    if (-not [string]::IsNullOrWhiteSpace($traceDir)) {
-      New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
-    }
-    Set-Content -LiteralPath $TraceFile -Value "" -NoNewline
-    $result.trace = [ordered]@{
-      enabled = $true
-      path = $TraceFile
-      events = @()
-      read_error = $null
-    }
-  }
-
   $currentPhase = "open_workbook"
   $openResult = Open-XlflowWorkbookForCommand -WorkbookPath $WorkbookPath -Visible $Visible -DisplayAlerts $DisplayAlerts -DisableAutomationMacros "false" -CaptureOpenVBADialogs $SuppressModalErrors -UseSession $UseSession -MetadataPath $MetadataPath
   $excel = $openResult.excel
@@ -185,10 +164,6 @@ try {
   }
 
   if (ConvertTo-XlflowBool $Direct) {
-    if ($traceRequested) {
-      Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-Direct cannot be used with trace." -Source "xlflow" -Phase $currentPhase
-      throw "invalid direct run"
-    }
     if ($typedValues.Count -gt 0) {
       Set-XlflowError -Result $result -Code "run_args_invalid" -Message "-Direct cannot be used with macro arguments." -Source "xlflow" -Phase $currentPhase
       throw "invalid direct run"
@@ -311,16 +286,6 @@ try {
     $currentPhase = "prepare_vbide"
     $vbProject = $workbook.VBProject
     [void](Enable-XlflowUIStreamRuntimeInjection -Workbook $workbook -State $runtimeState -VBProject $vbProject)
-    if ($traceRequested -and -not (Test-XlflowTraceModuleInjected -VBProject $vbProject)) {
-      $traceComponent = $vbProject.VBComponents.Add(1)
-      $traceComponent.Name = "XlflowTrace"
-      $traceComponent.CodeModule.AddFromString((New-XlflowTraceModuleCode))
-      $traceTempInjected = $true
-      $result.trace.lifecycle = "temporary"
-      $result.trace.temporary_injected = $true
-    } elseif ($traceRequested) {
-      $result.trace.lifecycle = "existing"
-    }
     if (ConvertTo-XlflowBool $Diagnostic) {
       $currentPhase = "compile_vba"
       $compileResult = Invoke-XlflowVBECompile -Excel $excel -Workbook $workbook
@@ -365,7 +330,7 @@ try {
 
   $runnerName = New-XlflowRunHarnessModuleName
   $runnerComponent.Name = $runnerName
-  $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs -TraceEnabled $traceRequested -TraceFile $TraceFile))
+  $runnerComponent.CodeModule.AddFromString((New-XlflowRunHarnessCode -MacroName $MacroName -Arguments $argumentSpecs))
 
   $currentPhase = "invoke_macro"
   $startedAt = Get-Date
@@ -424,13 +389,6 @@ try {
   if ($null -ne $runnerComponent) {
     $vbProject.VBComponents.Remove($runnerComponent)
     $runnerComponent = $null
-  }
-  if ($traceTempInjected -and $null -ne $vbProject) {
-    [void](Remove-XlflowTraceModule -VBProject $vbProject)
-    $traceTempInjected = $false
-    if ($null -ne $result.trace) {
-      $result.trace.temporary_reverted = $true
-    }
   }
   $result.macro = [ordered]@{
     name = $MacroName
@@ -534,16 +492,6 @@ try {
   if ($null -ne $runnerComponent -and $null -ne $vbProject) {
     try { $vbProject.VBComponents.Remove($runnerComponent) } catch { Write-Verbose ("failed to remove run harness module: " + $_.Exception.Message) }
   }
-  if ($traceTempInjected -and $null -ne $vbProject) {
-    try {
-      [void](Remove-XlflowTraceModule -VBProject $vbProject)
-      if ($null -ne $result.trace) {
-        $result.trace.temporary_reverted = $true
-      }
-    } catch {
-      Write-Verbose ("failed to remove temporary trace module: " + $_.Exception.Message)
-    }
-  }
 	if ($null -ne $runtimeState) {
 		try {
 			Restore-XlflowRuntimeInjection -Workbook $workbook -State $runtimeState
@@ -555,30 +503,6 @@ try {
     Release-XlflowComReferences -Workbook $workbook -Excel $excel
   } else {
     Close-XlflowCom -Workbook $workbook -Excel $excel -Save $false
-  }
-  if ($traceRequested) {
-    $currentPhase = "read_trace"
-    if ($null -eq $result.trace) {
-      $result.trace = [ordered]@{
-        enabled = $true
-        path = $TraceFile
-        events = @()
-        read_error = $null
-      }
-    }
-    try {
-      $events = @(Read-XlflowTraceEvents -Path $TraceFile)
-      $result.trace.events = @($events)
-      if ($result.status -eq "failed" -and $events.Count -eq 0) {
-        $result.trace.hint = "no trace events were written; execution may have failed before reaching user XlflowLog calls"
-        $result.logs += $result.trace.hint
-      }
-      foreach ($traceEvent in $events) {
-        $result.logs += ("[" + $traceEvent.timestamp + "] " + $traceEvent.message)
-      }
-    } catch {
-      $result.trace.read_error = $_.Exception.Message
-    }
   }
 }
 

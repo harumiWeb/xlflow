@@ -70,7 +70,8 @@ if ($LASTEXITCODE -ne 0) {
 $files = @(
   $trackedFiles |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    ForEach-Object { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $_)) }
+    ForEach-Object { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $_)) } |
+    Where-Object { Test-Path -LiteralPath $_ }
 )
 
 if ($files.Count -eq 0) {

@@ -158,7 +158,6 @@ func (a *app) rootCommand() *cobra.Command {
 		a.saveCommand(),
 		a.statusCommand(),
 		a.runnerCommand(),
-		a.traceCommand(),
 		a.runCommand(),
 		a.exportImageCommand(),
 		a.editCommand(),
@@ -252,7 +251,6 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "push-save-default", Description: "Save workbook changes by default after push unless --no-save opts out during a session."},
 		{Name: "run-entry-fallback", Description: "Use project.entry from xlflow.toml when xlflow run is invoked without a macro argument."},
 		{Name: "diagnostic-run", Description: "Compile before run and return structured VBA compile diagnostics by default."},
-		{Name: "trace-lifecycle", Description: "Enable, disable, inspect, or temporarily inject XlflowTrace support."},
 		{Name: "range-image-export", Description: "Export a worksheet range to a PNG image for visual verification."},
 		{Name: "form-image-export", Description: "Export a runtime UserForm to a PNG image for visual verification."},
 		{Name: "form-build-overwrite", Description: "Create or replace Designer-backed UserForms from persisted xlflow.userform specs."},
@@ -261,7 +259,7 @@ func supportedVersionFeatures() []versionFeature {
 }
 
 func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "trace", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit", "process"}
+	commands := []string{"run", "push", "pull", "macros", "test", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit", "process"}
 	scripts := make([]versionScriptInfo, 0, len(commands))
 	for _, command := range commands {
 		info := versionScriptInfo{Command: command, Source: "embedded"}
@@ -1989,11 +1987,11 @@ func parseFileDialogResponseLiterals(literals []string) ([]excel.FileDialogRespo
 	return parsed, nil
 }
 
-func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions) (excel.RunOptions, error) {
-	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, commandOpts, false)
+func buildRunOptions(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions) (excel.RunOptions, error) {
+	return buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, headless, interactive, direct, fast, diagnostic, diagnosticExplicit, guiCompileErrors, session, timeout, commandOpts, false)
 }
 
-func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, trace bool, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions, uiStream bool) (excel.RunOptions, error) {
+func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLiterals []string, msgBoxLiterals []string, inputBoxLiterals []string, fileDialogLiterals []string, save bool, saveAs string, headless bool, interactive bool, direct bool, fast bool, diagnostic bool, diagnosticExplicit bool, guiCompileErrors bool, session bool, timeout time.Duration, commandOpts excel.CommandOptions, uiStream bool) (excel.RunOptions, error) {
 	if save && saveAs != "" {
 		return excel.RunOptions{}, fmt.Errorf("--save and --save-as cannot be combined")
 	}
@@ -2005,9 +2003,6 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 	}
 	if guiCompileErrors {
 		diagnostic = false
-	}
-	if direct && trace {
-		return excel.RunOptions{}, fmt.Errorf("--direct cannot be combined with --trace")
 	}
 	if fast && uiStream {
 		return excel.RunOptions{}, fmt.Errorf("--fast cannot be combined with --ui-stream")
@@ -2093,7 +2088,6 @@ func buildRunOptionsWithUIStream(cfg config.Config, macro, input string, argLite
 		UIStream:            excel.UIStreamOptions{Enabled: uiStream, RedactInput: true},
 		Save:                save,
 		SaveAs:              saveAs,
-		Trace:               trace,
 		Mode:                mode,
 		RuntimeMode:         runtime.Mode,
 		RuntimeSource:       runtime.Source,
@@ -2414,7 +2408,6 @@ func (a *app) runCommand() *cobra.Command {
 	var save bool
 	var noSave bool
 	var saveAs string
-	var trace bool
 	var headless bool
 	var interactive bool
 	var direct bool
@@ -2445,15 +2438,15 @@ func (a *app) runCommand() *cobra.Command {
 			commandOpts := buildCommandOptions(a.stderrWriter())
 			commandOpts.Progress = false
 			if uiStream {
-				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts, true)
+				opts, err = buildRunOptionsWithUIStream(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts, true)
 			} else {
-				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, trace, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts)
+				opts, err = buildRunOptions(cfg, macro, input, argLiterals, msgBoxLiterals, inputBoxLiterals, fileDialogLiterals, save, saveAs, headless, interactive, direct, fast, diagnostic, cmd.Flags().Changed("diagnostic"), guiCompileErrors, session, timeout, commandOpts)
 			}
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
 			if a.shouldRunSourcePreflight(cfg, opts) {
-				if err := a.runSourcePreflight("run", cfg, "running macros", ignoredRunPreflightAnalysisCodes(opts), nil); err != nil {
+				if err := a.runSourcePreflight("run", cfg, "running macros", nil, nil); err != nil {
 					return err
 				}
 			}
@@ -2499,7 +2492,6 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&save, "save", false, "save the opened workbook after a successful run")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "leave the workbook unchanged on disk after the run")
 	cmd.Flags().StringVar(&saveAs, "save-as", "", "write the successful workbook result to a new path")
-	cmd.Flags().BoolVar(&trace, "trace", false, "collect XlflowTrace log events during the run")
 	cmd.Flags().BoolVar(&headless, "headless", false, "reject GUI interaction boundaries before running the macro")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
 	cmd.Flags().BoolVar(&direct, "direct", false, "run an argument-free macro without injecting a temporary harness")
@@ -2767,77 +2759,6 @@ func (a *app) editColumnsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&columns, "columns", "", "column selector such as A or A:AE")
 	cmd.Flags().Float64Var(&width, "width", 0, "column width in Excel character units")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
-	return cmd
-}
-
-func (a *app) traceCommand() *cobra.Command {
-	trace := &cobra.Command{
-		Use:   "trace",
-		Short: "Manage workbook trace logging support",
-	}
-	trace.AddCommand(
-		a.traceLifecycleCommand("enable", "Enable the XlflowTrace VBA module"),
-		a.traceLifecycleCommand("disable", "Disable the XlflowTrace VBA module"),
-		a.traceLifecycleCommand("status", "Report XlflowTrace status"),
-		a.traceLifecycleCommand("clean", "Remove xlflow trace log files"),
-		a.traceInjectCommand(),
-	)
-	return trace
-}
-
-func (a *app) traceInjectCommand() *cobra.Command {
-	cmd := a.traceLifecycleCommand("inject", "Deprecated alias for trace enable")
-	cmd.Use = "inject [workbook]"
-	return cmd
-}
-
-func (a *app) traceLifecycleCommand(action, short string) *cobra.Command {
-	var force bool
-	var session bool
-	cmd := &cobra.Command{
-		Use:   action + " [workbook]",
-		Short: short,
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			commandOpts := buildCommandOptions(a.stderrWriter())
-			cfg, err := config.Load(a.cwd)
-			workbook := ""
-			if len(args) == 1 {
-				workbook = args[0]
-			}
-			if err != nil {
-				if workbook == "" && action != "clean" {
-					return a.writeFailure("trace", output.ExitConfig, "config_error", err)
-				}
-				cfg = config.Default()
-			}
-			traceAction := action
-			if traceAction == "inject" {
-				traceAction = "enable"
-			}
-			var env output.Envelope
-			var code int
-			label := "Managing trace module"
-			if traceAction == "clean" {
-				label = "Cleaning trace logs"
-			}
-			err = a.withExcelProgress(label, commandOpts, func() error {
-				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).Trace(cfg, excel.TraceOptions{Action: traceAction, Workbook: workbook, Force: force, Session: session}, commandOpts)
-				return runErr
-			})
-			if err != nil {
-				return err
-			}
-			return a.write(env, code)
-		},
-	}
-	if action == "disable" {
-		cmd.Flags().BoolVar(&force, "force", false, "remove modified trace helper source")
-	}
-	if action != "clean" {
-		cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
-	}
 	return cmd
 }
 
@@ -4525,7 +4446,7 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 		diag["likely_cause"] = "The macro failed while running user VBA code."
 	}
 	if _, ok := diag["suggestion"]; !ok {
-		diag["suggestion"] = "Inspect the failing procedure and rerun with --trace if the last successful step is unclear."
+		diag["suggestion"] = "Inspect the failing procedure, add targeted XlflowDebug.Log calls around the suspected block, and rerun with --json."
 	}
 	if env.Error != nil {
 		if !cliLocationHasMeaningfulData(diag["location"]) {
@@ -4558,16 +4479,6 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 			diag["likely_cause"] = finding.Reason
 			diag["suggestion"] = finding.Suggestion
 			break
-		}
-	}
-	if trace := cliObjectMap(env.Trace); len(trace) > 0 {
-		events := cliListOfObjects(trace["events"])
-		if len(events) > 0 {
-			last := events[len(events)-1]
-			diag["trace_context"] = map[string]any{
-				"last_event": stringValueForCLI(last, "message"),
-				"timestamp":  stringValueForCLI(last, "timestamp"),
-			}
 		}
 	}
 	return diag
@@ -4711,16 +4622,6 @@ func (a *app) runFormWritePreflight(command string, cfg config.Config, opts form
 	return nil
 }
 
-func ignoredRunPreflightAnalysisCodes(opts excel.RunOptions) map[string]bool {
-	if !opts.Trace {
-		return nil
-	}
-	return map[string]bool{
-		"VBA105": true,
-		"VBA106": true,
-	}
-}
-
 func filterAnalysisFindings(findings []analyze.Finding, ignoredCodes map[string]bool) []analyze.Finding {
 	if len(ignoredCodes) == 0 {
 		return findings
@@ -4794,29 +4695,6 @@ func cliObjectMap(value any) map[string]any {
 		}
 		if out == nil {
 			return map[string]any{}
-		}
-		return out
-	}
-}
-
-func cliListOfObjects(value any) []map[string]any {
-	switch v := value.(type) {
-	case []map[string]any:
-		return v
-	case []any:
-		out := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			out = append(out, cliObjectMap(item))
-		}
-		return out
-	default:
-		data, err := json.Marshal(value)
-		if err != nil {
-			return nil
-		}
-		var out []map[string]any
-		if err := json.Unmarshal(data, &out); err != nil {
-			return nil
 		}
 		return out
 	}

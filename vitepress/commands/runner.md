@@ -49,4 +49,3 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 ## Related
 
 - [run](./run)
-- [trace](./trace)

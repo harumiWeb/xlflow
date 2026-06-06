@@ -41,7 +41,6 @@ type runOptionsInput struct {
 	FileDialog         []string
 	Save               bool
 	SaveAs             string
-	Trace              bool
 	Headless           bool
 	Interactive        bool
 	Direct             bool
@@ -69,7 +68,6 @@ func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOpt
 		in.FileDialog,
 		in.Save,
 		in.SaveAs,
-		in.Trace,
 		in.Headless,
 		in.Interactive,
 		in.Direct,
@@ -336,7 +334,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "trace", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
@@ -480,18 +478,19 @@ func TestRootCommandIncludesAttachActiveCommand(t *testing.T) {
 	}
 }
 
-func TestRootCommandIncludesTraceInjectCommand(t *testing.T) {
-	a := &app{}
+func TestRootCommandRejectsRemovedTraceCommand(t *testing.T) {
+	a := &app{
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
 	root := a.rootCommand()
-
-	for _, name := range []string{"enable", "disable", "status", "clean", "inject"} {
-		cmd, _, err := root.Find([]string{"trace", name})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cmd == nil || cmd.Name() != name {
-			t.Fatalf("expected trace %s command, got %#v", name, cmd)
-		}
+	root.SetArgs([]string{"trace"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("expected unknown command error, got %v", err)
 	}
 }
 
@@ -1237,10 +1236,6 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		{"inspect", "used-range"},
 		{"inspect", "cell"},
 		{"test"},
-		{"trace", "enable"},
-		{"trace", "disable"},
-		{"trace", "status"},
-		{"trace", "inject"},
 	} {
 		cmd, _, err := root.Find(args)
 		if err != nil {
@@ -3304,7 +3299,7 @@ func TestRunCommandRejectsNoSaveCombinedWithSaveFlags(t *testing.T) {
 
 func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	cfg := config.Default()
-	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "double:3.5", "bool:true"}, Trace: true, Headless: true})
+	opts, err := buildRunOptionsForTest(cfg, runOptionsInput{Workbook: "fixtures\\Book.xlsm", Args: []string{"string:hello", "int:7", "double:3.5", "bool:true"}, Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3320,9 +3315,6 @@ func TestBuildRunOptionsParsesTypedArguments(t *testing.T) {
 	}
 	if opts.WorkbookPath != "fixtures\\Book.xlsm" {
 		t.Fatalf("workbook path = %q", opts.WorkbookPath)
-	}
-	if !opts.Trace {
-		t.Fatal("expected trace flag to be enabled")
 	}
 	if opts.Mode != "headless" {
 		t.Fatalf("mode = %q, want headless", opts.Mode)
@@ -3517,15 +3509,27 @@ func TestBuildRunOptionsRejectsConflictingRunModes(t *testing.T) {
 	}
 }
 
-func TestBuildRunOptionsRejectsDirectWithTraceOrArgs(t *testing.T) {
+func TestBuildRunOptionsRejectsDirectWithArgs(t *testing.T) {
 	cfg := config.Default()
-	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Trace: true, Direct: true})
-	if err == nil || !strings.Contains(err.Error(), "--direct cannot be combined with --trace") {
-		t.Fatalf("expected direct trace conflict, got %v", err)
-	}
-	_, err = buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{"string:hello"}, Direct: true})
+	_, err := buildRunOptionsForTest(cfg, runOptionsInput{Macro: "Main.Run", Args: []string{"string:hello"}, Direct: true})
 	if err == nil || !strings.Contains(err.Error(), "--direct cannot be used with --arg") {
 		t.Fatalf("expected direct arg conflict, got %v", err)
+	}
+}
+
+func TestRunCommandRejectsRemovedTraceFlag(t *testing.T) {
+	a := &app{
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"run", "--trace"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --trace") {
+		t.Fatalf("expected unknown flag error, got %v", err)
 	}
 }
 
@@ -4133,22 +4137,16 @@ func TestBuildRunOptionsPreservesCommandStderr(t *testing.T) {
 	}
 }
 
-func TestFilterAnalysisFindingsIgnoresTraceHelperCodesForTraceRun(t *testing.T) {
+func TestFilterAnalysisFindingsKeepsLegacyTraceFindings(t *testing.T) {
 	findings := []analyze.Finding{
 		{Code: "VBA104", Severity: "error"},
 		{Code: "VBA105", Severity: "error"},
 		{Code: "VBA106", Severity: "error"},
 	}
 
-	filtered := filterAnalysisFindings(findings, ignoredRunPreflightAnalysisCodes(excel.RunOptions{Trace: true}))
-	if len(filtered) != 1 || filtered[0].Code != "VBA104" {
-		t.Fatalf("unexpected filtered findings: %+v", filtered)
-	}
-}
-
-func TestIgnoredRunPreflightAnalysisCodesEmptyWithoutTrace(t *testing.T) {
-	if got := ignoredRunPreflightAnalysisCodes(excel.RunOptions{}); got != nil {
-		t.Fatalf("expected nil ignored codes without trace, got %+v", got)
+	filtered := filterAnalysisFindings(findings, nil)
+	if len(filtered) != len(findings) {
+		t.Fatalf("expected findings to remain unchanged, got %+v", filtered)
 	}
 }
 

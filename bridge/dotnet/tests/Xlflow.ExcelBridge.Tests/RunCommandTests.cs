@@ -57,13 +57,12 @@ public sealed class RunCommandTests
     }
 
     [Fact]
-    public void HandlePassesTraceAndUiOrchestrationOptionsToService()
+    public void HandlePassesUiOrchestrationOptionsToService()
     {
         var serviceCalled = false;
         var command = new RunCommand(new FakeRunService((request, args) =>
         {
             serviceCalled = true;
-            Assert.True(args.TraceEnabled);
             Assert.Equal("[]", args.MsgBoxResponsesJSON);
             Assert.Equal("{\"customer-name\":\"Jane\"}", args.InputResponsesJSON);
             Assert.Equal("[{\"kind\":\"file\",\"dialog_id\":\"pick-report\"}]", args.FileDialogResponsesJSON);
@@ -77,13 +76,12 @@ public sealed class RunCommandTests
         var request = new BridgeRequest
         {
             ProtocolVersion = ProtocolVersion.Current,
-            RequestId = "req-run-trace-ui-supported",
+            RequestId = "req-run-ui-supported",
             Command = "run",
             Payload = JsonDocument.Parse("""
                 {
                   "WorkbookPath": "C:\\work\\book.xlsm",
                   "MacroName": "Module1.Main",
-                  "TraceEnabled": true,
                   "MsgBoxResponsesJSON": "[]",
                   "InputResponsesJSON": "{\"customer-name\":\"Jane\"}",
                   "FileDialogResponsesJSON": "[{\"kind\":\"file\",\"dialog_id\":\"pick-report\"}]",
@@ -261,8 +259,6 @@ public sealed class RunCommandTests
                 Direct: false,
                 Diagnostic: false,
                 SuppressModalErrors: true,
-                TraceEnabled: false,
-                TraceFile: "",
                 MsgBoxResponsesJSON: "",
                 InputResponsesJSON: "",
                 FileDialogResponsesJSON: "",
@@ -374,9 +370,7 @@ public sealed class RunCommandTests
                 new ExcelRunService.MacroArg { Type = "int", Value = "7" },
                 new ExcelRunService.MacroArg { Type = "double", Value = "3.5" },
                 new ExcelRunService.MacroArg { Type = "bool", Value = "true" },
-            ],
-            traceEnabled: false,
-            traceFile: "");
+            ]);
 
         Assert.Contains("Application.Run targetMacro, \"hello\", CLng(7), CDbl(3.5), CBool(True)", code);
         Assert.Contains("Err.Number", code);

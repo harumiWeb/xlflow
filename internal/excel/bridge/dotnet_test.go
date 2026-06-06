@@ -99,7 +99,7 @@ func TestDotNetBridgeCommandUsesBuildServerSafeArgsForProjectFallback(t *testing
 func TestDotNetProviderAdvertisesMajorCommandsForAutoSelection(t *testing.T) {
 	provider := DotNetProvider{}
 
-	for _, command := range []string{"doctor", "pull", "push", "run", "macros", "process", "test", "trace"} {
+	for _, command := range []string{"doctor", "pull", "push", "run", "macros", "process", "test"} {
 		if !provider.Supports(command) {
 			t.Fatalf("Supports(%q) = false, want true; auto mode should prefer .NET for major Windows bridge commands", command)
 		}
@@ -126,7 +126,6 @@ func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {
 		"runner",
 		"session",
 		"test",
-		"trace",
 		"ui",
 	}
 

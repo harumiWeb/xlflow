@@ -9,5 +9,5 @@ Use xlflow for this Excel VBA project. Read xlflow.toml first. Prefer --json. If
 For debugging:
 
 ```text
-Do not guess the macro name. Run xlflow macros --json, use the discovered qualified_name, and use xlflow run --trace --json if the runtime failure is unclear.
+Do not guess the macro name. Run xlflow macros --json, use the discovered qualified_name, and use XlflowDebug.Log plus xlflow run --json if the runtime failure is unclear.
 ```
