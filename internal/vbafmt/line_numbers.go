@@ -359,7 +359,7 @@ func applyLineNumberMode(lines []formattedLine, mode LineNumberMode, refs []nume
 		result.Changed = result.LinesRemoved > 0
 		return renderFormattedLinesWithoutLineNumbers(lines), result
 	case LineNumberModeRenumber:
-		if eligibleCount == 0 {
+		if eligibleCount == 0 && numberedNonEligibleCount == 0 {
 			return renderFormattedLines(lines, nil), result
 		}
 		assignments := make(map[int]int)

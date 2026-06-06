@@ -1469,6 +1469,31 @@ func TestFormatTextWithLineNumbersRenumberIncludesLegacyNumberedComment(t *testi
 	}
 }
 
+func TestFormatTextWithLineNumbersRenumberLegacyOnlyNumberedLines(t *testing.T) {
+	input := "30  ' legacy comment a\n90  ' legacy comment b\n"
+	got, detail, err := formatTextDetailed(input, false, FormatConfig{LineNumbers: LineNumberModeRenumber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Warnings) != 0 {
+		t.Fatalf("did not expect warning: %#v", detail.Warnings)
+	}
+	for _, want := range []string{
+		"10  ' legacy comment a",
+		"20  ' legacy comment b",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected renumbered legacy-only line %q:\n%s", want, got)
+		}
+	}
+	if !detail.Changed {
+		t.Fatalf("expected renumber legacy-only lines to report changed")
+	}
+	if detail.LinesRenumbered != 2 {
+		t.Fatalf("expected 2 renumbered lines, got %d", detail.LinesRenumbered)
+	}
+}
+
 func TestRunLineNumberSummary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Sample.bas")
