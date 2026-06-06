@@ -1471,6 +1471,43 @@ func TestFormatTextWithLineNumbersAddContinuationIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatTextWithLineNumbersAddRecoversLegacyNumberedContinuationTail(t *testing.T) {
+	input := "Public Sub LogMessage(ByVal Message As String)\n10      payload = \"{\" & _\n20      JsonProperty(\"event\", \"debug_log\") & \",\" & _\n30      JsonProperty(\"message\", Message) & \",\" & _\n40      JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _\n50      JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"10      payload = \"{\" & _",
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected recovered continuation output %q:\n%s", want, got)
+		}
+	}
+	for _, tail := range []string{
+		"JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"JsonProperty(\"message\", Message) & \",\" & _",
+		"JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		assertLineStartsAtSameColumn(t, got, "payload = \"{\" & _", tail)
+	}
+	for _, unwanted := range []string{
+		"20      JsonProperty(\"event\", \"debug_log\") & \",\" & _",
+		"30      JsonProperty(\"message\", Message) & \",\" & _",
+		"40      JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _",
+		"50      JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("legacy continuation tail number should be removed %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 func TestFormatTextWithLineNumbersAddAlignsContinuationTailWithNumberedHead(t *testing.T) {
 	input := "Public Sub LogMessage(ByVal Message As String)\n390      payload = \"{\" & _\n    JsonProperty(\"event\", \"debug_log\") & \",\" & _\n    JsonProperty(\"message\", Message) & \",\" & _\n    JsonProperty(\"runtime_mode\", XlflowRuntime.ModeName()) & \",\" & _\n    JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"\nEnd Sub\n"
 	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModePreserve})
@@ -1495,6 +1532,36 @@ func TestFormatTextWithLineNumbersAddAlignsContinuationTailWithNumberedHead(t *t
 		"JsonProperty(\"source\", \"XlflowDebug.Log\") & \"}\"",
 	} {
 		assertLineStartsAtSameColumn(t, got, "payload = \"{\" & _", tail)
+	}
+}
+
+func TestFormatTextWithLineNumbersAddRecoversLegacyNumberedSelectCaseStructuralLines(t *testing.T) {
+	input := "Private Function IsUnreservedUrlByte(ByVal byteValue As Long) As Boolean\n10      Select Case byteValue\n20      Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126\n30          IsUnreservedUrlByte = True\n40      Case Else\n50          IsUnreservedUrlByte = False\n60      End Select\nEnd Function\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{LineNumbers: LineNumberModeAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"    Select Case byteValue",
+		"    Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126",
+		"10          IsUnreservedUrlByte = True",
+		"    Case Else",
+		"20          IsUnreservedUrlByte = False",
+		"    End Select",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected recovered select-case output %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"10      Select Case byteValue",
+		"20      Case 48 To 57, 65 To 90, 97 To 122, 45, 46, 95, 126",
+		"40      Case Else",
+		"60      End Select",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("legacy select/case structural number should be removed %q:\n%s", unwanted, got)
+		}
 	}
 }
 
