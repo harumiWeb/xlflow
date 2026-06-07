@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Xlflow.ExcelBridge.Windows;
 
@@ -19,6 +20,7 @@ public enum DialogActionPolicy
 {
     ObserveOnly,
     SuppressVbaError,
+    SuppressVbaErrorWithRuntimeDebug,
     CancelSupportedNativeUi,
 }
 
@@ -36,6 +38,9 @@ public sealed record DialogElementSnapshot(
     long Hwnd,
     string ClassName,
     string Text,
+    string? AccessKey = null,
+    int? ControlId = null,
+    bool? Enabled = null,
     string? AutomationId = null,
     string? Name = null,
     string? ControlType = null);
@@ -83,7 +88,11 @@ public sealed class DialogWatcher
         _uia = uia;
     }
 
-    public DialogSnapshot? WaitForDialog(DialogWatchRequest request, CancellationToken cancellationToken = default)
+    public DialogSnapshot? WaitForDialog(
+        DialogWatchRequest request,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null,
+        CancellationToken cancellationToken = default)
     {
         if (request.ExcelProcessId <= 0)
         {
@@ -112,7 +121,15 @@ public sealed class DialogWatcher
                 }
 
                 var action = DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy);
+                if (action != DialogAction.None)
+                {
+                    beforeAction?.Invoke(kind.Value);
+                }
                 var actionResult = ExecuteAction(action, candidate, uia);
+                if (action != DialogAction.None && actionResult.Succeeded)
+                {
+                    afterAction?.Invoke(kind.Value);
+                }
                 return BuildSnapshot(candidate, uia, kind.Value, stopwatch.ElapsedMilliseconds, action, actionResult);
             }
 
@@ -127,7 +144,12 @@ public sealed class DialogWatcher
         return CaptureCurrentDialogs(request, includeUia: true);
     }
 
-    internal DialogSnapshot? TryCaptureCurrentDialog(DialogWatchRequest request, bool includeUia, bool executeAction)
+    internal DialogSnapshot? TryCaptureCurrentDialog(
+        DialogWatchRequest request,
+        bool includeUia,
+        bool executeAction,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null)
     {
         foreach (var candidate in _windows.Enumerate(request.ExcelProcessId, request.VbeThreadId))
         {
@@ -146,9 +168,17 @@ public sealed class DialogWatcher
             var action = executeAction
                 ? DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy)
                 : DialogAction.None;
+            if (executeAction && action != DialogAction.None)
+            {
+                beforeAction?.Invoke(kind.Value);
+            }
             var actionResult = executeAction
                 ? ExecuteAction(action, candidate, uia)
                 : DialogActionResult.None;
+            if (executeAction && action != DialogAction.None && actionResult.Succeeded)
+            {
+                afterAction?.Invoke(kind.Value);
+            }
             return BuildSnapshot(candidate, uia, kind.Value, 0, action, actionResult);
         }
 
@@ -238,7 +268,13 @@ public sealed class DialogWatcher
 
     private static DialogElementSnapshot ToElementSnapshot(WindowElement candidate)
     {
-        return new DialogElementSnapshot(candidate.Hwnd, candidate.ClassName, candidate.Text);
+        return new DialogElementSnapshot(
+            candidate.Hwnd,
+            candidate.ClassName,
+            candidate.Text,
+            candidate.AccessKey,
+            candidate.ControlId > 0 ? candidate.ControlId : null,
+            candidate.Enabled);
     }
 
     private static bool BelongsToTarget(WindowCandidate candidate, DialogWatchRequest request)
@@ -279,12 +315,14 @@ internal static class DialogFingerprint
             return null;
         }
 
-        if (ContainsAny(combined, "run-time error", "runtime error", "実行時エラー") ||
+        if (LooksLikeRuntimeByAccessKeys(candidate) ||
+            ContainsAny(combined, "run-time error", "runtime error", "実行時エラー") ||
             ContainsAny(buttons, "Debug", "End", "Continue", "デバッグ", "終了", "継続"))
         {
             return DialogKind.Runtime;
         }
-        if (ContainsAny(combined, "compile", "syntax error", "expected", "コンパイル", "構文エラー", "必要です"))
+        if (LooksLikeVbeCompileDialog(candidate) ||
+            ContainsAny(combined, "compile", "syntax error", "expected", "コンパイル", "構文エラー", "必要です"))
         {
             return DialogKind.Compile;
         }
@@ -308,6 +346,72 @@ internal static class DialogFingerprint
     {
         return tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static bool LooksLikeRuntimeByAccessKeys(WindowCandidate candidate)
+    {
+        if (!candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (candidate.Buttons.Count is < 3 or > 4)
+        {
+            return false;
+        }
+
+        var keys = candidate.Buttons
+            .Select(button => button.AccessKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return keys.Contains("C") &&
+               keys.Contains("E") &&
+               keys.Contains("D") &&
+               keys.Contains("H");
+    }
+
+    private static bool LooksLikeVbeCompileDialog(WindowCandidate candidate)
+    {
+        if (!candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
+            !candidate.Title.Contains("Microsoft Visual Basic", StringComparison.OrdinalIgnoreCase) ||
+            candidate.Children.Any(child => child.ClassName.Equals("Edit", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var buttons = candidate.Buttons;
+        if (buttons.Count is < 1 or > 2)
+        {
+            return false;
+        }
+
+        if (buttons.Any(button => button.ControlId == NativeMethods.IdOk ||
+                                  string.Equals(button.AccessKey, "O", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(NormalizeButtonText(button.Text), "OK", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return candidate.Text.Count > 0 &&
+               buttons.Count(button => button.Enabled && !IsHelpButton(button)) == 1;
+    }
+
+    private static bool IsHelpButton(WindowElement button)
+    {
+        return button.ControlId == NativeMethods.IdHelp ||
+               string.Equals(button.AccessKey, "H", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(NormalizeButtonText(button.Text), "Help", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(NormalizeButtonText(button.Text), "ヘルプ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeButtonText(string value)
+    {
+        var text = value.Trim().Replace("&", "", StringComparison.Ordinal);
+        var accelerator = text.LastIndexOf('(');
+        if (accelerator > 0 && text.EndsWith(')') && text.Length - accelerator <= 4)
+        {
+            text = text[..accelerator].TrimEnd();
+        }
+        return text;
+    }
 }
 
 internal static class DialogActionSelector
@@ -319,24 +423,39 @@ internal static class DialogActionSelector
             return DialogAction.None;
         }
 
+        if (kind == DialogKind.Runtime && policy == DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug)
+        {
+            return FindButtonByAccessKey(candidate, "runtime_debug", "D") ??
+                   FindButton(candidate, "runtime_debug", "Debug", "デバッグ") ??
+                   FindButtonByAccessKey(candidate, "runtime_end", "E") ??
+                   FindButton(candidate, "runtime_end", "End", "終了") ??
+                   FindButton(candidate, "runtime_close", "OK", "Close", "閉じる") ??
+                   new DialogAction("runtime_close", 0, "", true);
+        }
+
         if (kind == DialogKind.Runtime && policy == DialogActionPolicy.SuppressVbaError)
         {
-            return FindButton(candidate, "runtime_end", "End", "終了") ??
+            return FindButtonByAccessKey(candidate, "runtime_end", "E") ??
+                   FindButton(candidate, "runtime_end", "End", "終了") ??
+                   FindButtonByAccessKey(candidate, "runtime_debug", "D") ??
                    FindButton(candidate, "runtime_debug", "Debug", "デバッグ") ??
                    FindButton(candidate, "runtime_close", "OK", "Close", "閉じる") ??
                    new DialogAction("runtime_close", 0, "", true);
         }
 
-        if (kind == DialogKind.Compile && policy == DialogActionPolicy.SuppressVbaError)
+        if (kind == DialogKind.Compile && policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug)
         {
-            return FindButton(candidate, "compile_close", "OK", "Close", "閉じる") ??
+            return FindButtonByControlId(candidate, "compile_close", NativeMethods.IdOk, NativeMethods.IdClose) ??
+                   FindButton(candidate, "compile_close", "OK", "Close", "閉じる") ??
+                   FindVbeCompilePrimaryButton(candidate) ??
                    DialogAction.None;
         }
 
-        if (policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.CancelSupportedNativeUi &&
+        if (policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug or DialogActionPolicy.CancelSupportedNativeUi &&
             kind is DialogKind.MsgBox or DialogKind.InputBox or DialogKind.FileDialog)
         {
-            return FindButton(candidate, "native_cancel", "Cancel", "Close", "キャンセル", "閉じる") ??
+            return FindButtonByControlId(candidate, "native_cancel", NativeMethods.IdCancel, NativeMethods.IdClose) ??
+                   FindButton(candidate, "native_cancel", "Cancel", "Close", "キャンセル", "閉じる") ??
                    DialogAction.None;
         }
 
@@ -354,6 +473,63 @@ internal static class DialogActionSelector
             }
         }
         return null;
+    }
+
+    private static DialogAction? FindButtonByAccessKey(WindowCandidate candidate, string action, string accessKey)
+    {
+        foreach (var button in candidate.Buttons)
+        {
+            if (!button.Enabled)
+            {
+                continue;
+            }
+            if (string.Equals(button.AccessKey, accessKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return new DialogAction(action, button.Hwnd, button.Text, false);
+            }
+        }
+        return null;
+    }
+
+    private static DialogAction? FindButtonByControlId(WindowCandidate candidate, string action, params int[] controlIds)
+    {
+        foreach (var button in candidate.Buttons)
+        {
+            if (!button.Enabled)
+            {
+                continue;
+            }
+            if (controlIds.Contains(button.ControlId))
+            {
+                return new DialogAction(action, button.Hwnd, button.Text, false);
+            }
+        }
+        return null;
+    }
+
+    private static DialogAction? FindVbeCompilePrimaryButton(WindowCandidate candidate)
+    {
+        if (!candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
+            !candidate.Title.Contains("Microsoft Visual Basic", StringComparison.OrdinalIgnoreCase) ||
+            candidate.Buttons.Count is < 1 or > 2)
+        {
+            return null;
+        }
+
+        var primaryButtons = candidate.Buttons
+            .Where(button => button.Enabled && !IsHelpButton(button))
+            .ToArray();
+        return primaryButtons.Length == 1
+            ? new DialogAction("compile_close", primaryButtons[0].Hwnd, primaryButtons[0].Text, false)
+            : null;
+    }
+
+    private static bool IsHelpButton(WindowElement button)
+    {
+        return button.ControlId == NativeMethods.IdHelp ||
+               string.Equals(button.AccessKey, "H", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(NormalizeButtonText(button.Text), "Help", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(NormalizeButtonText(button.Text), "ヘルプ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeButtonText(string value)
@@ -378,7 +554,39 @@ internal sealed record DialogActionResult(bool Succeeded, string Method)
     public static DialogActionResult None { get; } = new(false, "");
 }
 
-internal sealed record WindowElement(long Hwnd, string ClassName, string Text);
+internal sealed record WindowElement(
+    long Hwnd,
+    string ClassName,
+    string Text,
+    string? AccessKey = null,
+    int ControlId = 0,
+    bool Enabled = true)
+{
+    public WindowElement(long hwnd, string className, string text)
+        : this(hwnd, className, text, DialogAccessKey.Extract(text), 0, true)
+    {
+    }
+}
+
+internal static class DialogAccessKey
+{
+    public static string? Extract(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var ampersand = Regex.Match(text, @"&([A-Za-z0-9])");
+        if (ampersand.Success)
+        {
+            return ampersand.Groups[1].Value.ToUpperInvariant();
+        }
+
+        var paren = Regex.Match(text, @"[\(\（]([A-Za-z0-9])[\)\）]");
+        return paren.Success ? paren.Groups[1].Value.ToUpperInvariant() : null;
+    }
+}
 
 internal sealed record WindowCandidate(
     long Hwnd,
@@ -492,7 +700,14 @@ internal sealed class Win32WindowEnumerator : IWindowEnumerator
         var children = new List<WindowElement>();
         NativeMethods.EnumChildWindows(hwnd, (child, _) =>
         {
-            children.Add(new WindowElement(child.ToInt64(), NativeMethods.GetClassName(child), NativeMethods.GetWindowText(child)));
+            var text = NativeMethods.GetWindowText(child);
+            children.Add(new WindowElement(
+                child.ToInt64(),
+                NativeMethods.GetClassName(child),
+                text,
+                DialogAccessKey.Extract(text),
+                NativeMethods.GetDlgCtrlID(child),
+                NativeMethods.IsWindowEnabled(child)));
             return true;
         }, IntPtr.Zero);
         return children;
@@ -580,6 +795,10 @@ internal static class NativeMethods
     public const uint GwOwner = 4;
     public const uint BmClick = 0x00F5;
     public const uint WmClose = 0x0010;
+    public const int IdOk = 1;
+    public const int IdCancel = 2;
+    public const int IdClose = 8;
+    public const int IdHelp = 9;
 
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
@@ -602,6 +821,13 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern int GetDlgCtrlID(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int processId);

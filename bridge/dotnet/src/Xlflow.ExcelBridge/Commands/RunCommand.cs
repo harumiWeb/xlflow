@@ -44,7 +44,15 @@ public sealed class RunCommand : ICommandHandler
             RuntimeMode: BridgePayload.GetString(request.Payload, "RuntimeMode") ?? "",
             RuntimeSource: BridgePayload.GetString(request.Payload, "RuntimeSource") ?? "",
             SaveAsPath: BridgePayload.GetString(request.Payload, "SaveAsPath") ?? "",
-            TimeoutSeconds: BridgePayload.GetInt(request.Payload, "TimeoutSeconds"));
+            TimeoutSeconds: BridgePayload.GetInt(request.Payload, "TimeoutSeconds"),
+            ModulesDir: BridgePayload.GetString(request.Payload, "ModulesDir") ?? "",
+            ClassesDir: BridgePayload.GetString(request.Payload, "ClassesDir") ?? "",
+            FormsDir: BridgePayload.GetString(request.Payload, "FormsDir") ?? "",
+            WorkbookDir: BridgePayload.GetString(request.Payload, "WorkbookDir") ?? "",
+            CodeSource: BridgePayload.GetString(request.Payload, "CodeSource") ?? "",
+            Folders: BridgePayload.GetBool(request.Payload, "Folders"),
+            FolderAnnotation: BridgePayload.GetString(request.Payload, "FolderAnnotation") ?? "update",
+            DefaultComponentFolders: BridgePayload.GetBool(request.Payload, "DefaultComponentFolders"));
 
         if (string.IsNullOrWhiteSpace(args.WorkbookPath))
         {

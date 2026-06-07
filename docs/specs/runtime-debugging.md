@@ -40,6 +40,8 @@ For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnost
 
 Default `xlflow run` suppresses VBA runtime error dialogs owned by the Excel process during macro invocation. xlflow closes the dialog, returns a structured CLI failure, and adds `run_diagnostic.kind = "runtime"` with dialog metadata and VBE selection context when Excel exposes it.
 
+For `.NET` bridge runs, VBE selection capture is best-effort and timeout-bounded. When Excel exposes the active VBE code pane, `run_diagnostic.location` may include `confidence`, `method`, `source_path`, `component`, `component_type`, `procedure`, `line`, `column`, `end_line`, `end_column`, and `text`. Field names follow xlflow's `snake_case` JSON convention. Verified line values are source-file line numbers, adjusted for exported metadata that VBE hides such as `Attribute VB_*`; column values are omitted when VBE only exposes an unreliable whole-line selection. Capture failures do not change the command failure code; they are reported under `run_diagnostic.location_capture.attempts` with timings such as `before_dialog_action` or `after_dialog_action`.
+
 The .NET bridge does not require a runtime dialog to be visible. Excel can defer
 painting an owned dialog until the Excel window receives focus. Unattended
 suppression prefers the explicit End action because Debug can leave VBE in break
@@ -62,7 +64,7 @@ is reopened.
 
 Diagnostic mode starts a Win32 watcher for top-level windows owned by the Excel process, executes VBE Compile through the VBE command bars, and closes the compile dialog after collecting its child control text. Dialog text is returned as localized opaque text; xlflow does not parse or translate Japanese or English compile messages.
 
-Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`. `run_diagnostic.kind = "compile"` includes the dialog message, VBE selection location, nearby code, and dialog metadata when available. `--diagnostic --direct` is invalid. `--diagnostic --fast` remains valid but disables the direct fast path so the run can keep structured diagnostics. `--gui-compile-errors` disables this compile watcher and the default runtime modal suppression path so VBA errors remain in the GUI intentionally.
+Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`. `run_diagnostic.kind = "compile"` includes the dialog message, VBE selection location, nearby code, and dialog metadata when available. `push` compile failures use the same `.NET` selection capture under `push_diagnostic.kind = "compile"` after source import and before the workbook is saved. In the `.NET` bridge, the selection capture runs before the dialog is dismissed and retries once immediately after dismissal only if no meaningful location was captured. `--diagnostic --direct` is invalid. `--diagnostic --fast` remains valid but disables the direct fast path so the run can keep structured diagnostics. `--gui-compile-errors` disables this compile watcher and the default runtime modal suppression path so VBA errors remain in the GUI intentionally.
 
 ## Runtime Source Analysis
 

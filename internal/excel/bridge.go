@@ -432,6 +432,7 @@ type ScriptResult struct {
 	Analysis        any           `json:"analysis,omitempty"`
 	Check           any           `json:"check,omitempty"`
 	RunDiagnostic   any           `json:"run_diagnostic,omitempty"`
+	PushDiagnostic  any           `json:"push_diagnostic,omitempty"`
 	Target          any           `json:"target,omitempty"`
 	Output          any           `json:"output,omitempty"`
 	Debug           any           `json:"debug,omitempty"`
@@ -587,17 +588,25 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	// Base64-encode the JSON to avoid PowerShell command-line parsing issues
 	argsJSON64 := base64.StdEncoding.EncodeToString(argsJSON)
 	scriptArgs := map[string]string{
-		"WorkbookPath":        workbookPath(root, workbook),
-		"MacroName":           opts.Macro,
-		"MacroArgsJSON":       string(argsJSON64),
-		"Visible":             strconv.FormatBool(cfg.Excel.Visible),
-		"DisplayAlerts":       strconv.FormatBool(cfg.Excel.DisplayAlerts),
-		"SaveWorkbook":        strconv.FormatBool(opts.Save),
-		"Direct":              strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Diagnostic)),
-		"Diagnostic":          strconv.FormatBool(opts.Diagnostic),
-		"SuppressModalErrors": strconv.FormatBool(opts.SuppressModalErrors),
-		"UseSession":          strconv.FormatBool(opts.Session),
-		"MetadataPath":        filepath.Join(root, ".xlflow", "session.json"),
+		"WorkbookPath":            workbookPath(root, workbook),
+		"MacroName":               opts.Macro,
+		"MacroArgsJSON":           string(argsJSON64),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"DisplayAlerts":           strconv.FormatBool(cfg.Excel.DisplayAlerts),
+		"SaveWorkbook":            strconv.FormatBool(opts.Save),
+		"Direct":                  strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Diagnostic)),
+		"Diagnostic":              strconv.FormatBool(opts.Diagnostic),
+		"SuppressModalErrors":     strconv.FormatBool(opts.SuppressModalErrors),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+		"ModulesDir":              filepath.Join(root, cfg.Src.Modules),
+		"ClassesDir":              filepath.Join(root, cfg.Src.Classes),
+		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
+		"WorkbookDir":             filepath.Join(root, cfg.Src.Workbook),
+		"CodeSource":              cfg.UserForm.CodeSource,
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
 	}
 	if strings.TrimSpace(opts.RuntimeMode) != "" {
 		scriptArgs["RuntimeMode"] = strings.TrimSpace(opts.RuntimeMode)
@@ -1648,6 +1657,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Analysis = result.Analysis
 	env.Check = result.Check
 	env.RunDiagnostic = result.RunDiagnostic
+	env.PushDiagnostic = result.PushDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
 	if debugStreamErr != nil {

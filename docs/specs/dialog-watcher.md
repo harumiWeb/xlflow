@@ -27,11 +27,36 @@ JSON diagnostics may include:
 - `text`, `buttons`, `children`
 - `action`, `action_method`, `action_target`, `action_succeeded`
 
+Button and child snapshots may include language-neutral Win32 metadata:
+`access_key`, `control_id`, and `enabled`. `access_key` is extracted from
+native accelerator markers such as `&D` or localized suffixes such as `(D)`.
+
+## VBE Selection Diagnostics
+
+For `.NET` `run` compile/runtime dialog suppression and `push` compile dialog
+suppression, the bridge attempts to capture VBE source selection before
+dismissing the dialog and retries once after dismissal if no meaningful location
+was found. This capture is best-effort and timeout-bounded; failure to read VBE
+state must not prevent dialog suppression or change the command failure
+classification.
+
+When available, `run_diagnostic.location` or `push_diagnostic.location` may
+include `confidence`, `method`, `source_path`, `component`, `component_type`,
+`procedure`, `line`, `column`, `end_line`, `end_column`, and selected line
+`text`. Verified line values are source-file line numbers, adjusted for VBE
+hidden export metadata such as `Attribute VB_*`; unreliable column values are
+omitted. Capture failure metadata is reported under `*.location_capture.attempts`
+with timing labels such as `before_dialog_action` and `after_dialog_action`.
+
 ## Action Policy
 
-- Runtime error: prefer explicit End, then Debug, then explicit OK/Close. End is
-  preferred because Debug can leave VBE in break mode.
-- Compile error: operate only an explicit OK/Close button. Do not use a
+- Runtime error: prefer accelerator-key selection for Debug (`D`) or End (`E`)
+  according to the active policy, then localized text fallback, then explicit
+  OK/Close. End is preferred for unattended suppression because Debug can leave
+  VBE in break mode.
+- Compile error: prefer standard OK/Close control IDs and localized OK/Close
+  text. For VBE compile dialogs only, a single enabled non-Help primary button
+  may be used as a language-neutral fallback. Do not use an arbitrary
   first-button or window-close fallback.
 - Native MsgBox/InputBox/FileDialog: cancel only when an explicit Cancel/Close
   action is identifiable.

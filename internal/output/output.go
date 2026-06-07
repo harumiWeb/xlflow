@@ -38,41 +38,42 @@ type Envelope struct {
 	Error   *Error   `json:"error"`
 	Logs    []string `json:"logs"`
 
-	Diagnostics   any `json:"diagnostics,omitempty"`
-	Workbook      any `json:"workbook,omitempty"`
-	Backup        any `json:"backup,omitempty"`
-	Source        any `json:"source,omitempty"`
-	Bridge        any `json:"bridge,omitempty"`
-	Macro         any `json:"macro,omitempty"`
-	Macros        any `json:"macros,omitempty"`
-	Forms         any `json:"forms,omitempty"`
-	Issues        any `json:"issues,omitempty"`
-	Tests         any `json:"tests,omitempty"`
-	Diff          any `json:"diff,omitempty"`
-	Inspect       any `json:"inspect,omitempty"`
-	Runtime       any `json:"runtime,omitempty"`
-	GUIBoundaries any `json:"gui_boundaries,omitempty"`
-	Debug         any `json:"debug,omitempty"`
-	UI            any `json:"ui,omitempty"`
-	Session       any `json:"session,omitempty"`
-	Runner        any `json:"runner,omitempty"`
-	Analysis      any `json:"analysis,omitempty"`
-	Check         any `json:"check,omitempty"`
-	Version       any `json:"version,omitempty"`
-	RunDiagnostic any `json:"run_diagnostic,omitempty"`
-	Backups       any `json:"backups,omitempty"`
-	Rollback      any `json:"rollback,omitempty"`
-	Target        any `json:"target,omitempty"`
-	Output        any `json:"output,omitempty"`
-	Spec          any `json:"spec,omitempty"`
-	Edit          any `json:"edit,omitempty"`
-	Project       any `json:"project,omitempty"`
-	State         any `json:"state,omitempty"`
-	Warnings      any `json:"warnings,omitempty"`
-	Hints         any `json:"hints,omitempty"`
-	DefaultEntry  any `json:"default_entry,omitempty"`
-	Suggestions   any `json:"suggestions,omitempty"`
-	Process       any `json:"process,omitempty"`
+	Diagnostics    any `json:"diagnostics,omitempty"`
+	Workbook       any `json:"workbook,omitempty"`
+	Backup         any `json:"backup,omitempty"`
+	Source         any `json:"source,omitempty"`
+	Bridge         any `json:"bridge,omitempty"`
+	Macro          any `json:"macro,omitempty"`
+	Macros         any `json:"macros,omitempty"`
+	Forms          any `json:"forms,omitempty"`
+	Issues         any `json:"issues,omitempty"`
+	Tests          any `json:"tests,omitempty"`
+	Diff           any `json:"diff,omitempty"`
+	Inspect        any `json:"inspect,omitempty"`
+	Runtime        any `json:"runtime,omitempty"`
+	GUIBoundaries  any `json:"gui_boundaries,omitempty"`
+	Debug          any `json:"debug,omitempty"`
+	UI             any `json:"ui,omitempty"`
+	Session        any `json:"session,omitempty"`
+	Runner         any `json:"runner,omitempty"`
+	Analysis       any `json:"analysis,omitempty"`
+	Check          any `json:"check,omitempty"`
+	Version        any `json:"version,omitempty"`
+	RunDiagnostic  any `json:"run_diagnostic,omitempty"`
+	PushDiagnostic any `json:"push_diagnostic,omitempty"`
+	Backups        any `json:"backups,omitempty"`
+	Rollback       any `json:"rollback,omitempty"`
+	Target         any `json:"target,omitempty"`
+	Output         any `json:"output,omitempty"`
+	Spec           any `json:"spec,omitempty"`
+	Edit           any `json:"edit,omitempty"`
+	Project        any `json:"project,omitempty"`
+	State          any `json:"state,omitempty"`
+	Warnings       any `json:"warnings,omitempty"`
+	Hints          any `json:"hints,omitempty"`
+	DefaultEntry   any `json:"default_entry,omitempty"`
+	Suggestions    any `json:"suggestions,omitempty"`
+	Process        any `json:"process,omitempty"`
 }
 
 type Options struct {
@@ -552,7 +553,7 @@ func (r renderer) renderRun(env Envelope) string {
 		}
 		if loc := objectMap(diag["location"]); len(loc) > 0 {
 			parts := []string{}
-			for _, key := range []string{"module", "procedure", "file"} {
+			for _, key := range []string{"module", "procedure", "file", "source_path"} {
 				if v := stringValue(loc, key); v != "" {
 					parts = append(parts, v)
 				}
@@ -565,6 +566,8 @@ func (r renderer) renderRun(env Envelope) string {
 			}
 			if token := stringValue(loc, "token"); token != "" {
 				parts = append(parts, token)
+			} else if text := stringValue(loc, "text"); text != "" {
+				parts = append(parts, text)
 			}
 			if len(parts) > 0 {
 				b.WriteString(kv("Location", strings.Join(parts, " ")))
@@ -667,6 +670,41 @@ func (r renderer) renderTest(env Envelope) string {
 	b.WriteString(r.renderUI(env))
 	b.WriteString(r.renderDebug(env))
 	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
+func (r renderer) renderDiagnostic(title string, value any) string {
+	diag := objectMap(value)
+	if len(diag) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.style(title, "", true))
+	b.WriteString("\n")
+	if kind := stringValue(diag, "kind"); kind != "" {
+		b.WriteString(kv("Kind", kind))
+	}
+	if loc := objectMap(diag["location"]); len(loc) > 0 {
+		parts := []string{}
+		for _, key := range []string{"module", "component", "procedure", "file", "source_path"} {
+			if v := stringValue(loc, key); v != "" {
+				parts = append(parts, v)
+			}
+		}
+		if n, ok := numberValue(loc, "line"); ok && n > 0 {
+			parts = append(parts, fmt.Sprintf("line %d", int(n)))
+		}
+		if n, ok := numberValue(loc, "column"); ok && n > 0 {
+			parts = append(parts, fmt.Sprintf("column %d", int(n)))
+		}
+		if text := stringValue(loc, "text"); text != "" {
+			parts = append(parts, text)
+		}
+		if len(parts) > 0 {
+			b.WriteString(kv("Location", strings.Join(parts, " ")))
+		}
+	}
 	return b.String()
 }
 
@@ -1016,7 +1054,7 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	backup := objectMap(env.Backup)
 	source := objectMap(env.Source)
-	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 {
+	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && env.PushDiagnostic == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -1042,6 +1080,7 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	if updated, ok := boolValueOK(source, "updated"); ok {
 		b.WriteString(kv("Source updated", fmt.Sprintf("%t", updated)))
 	}
+	b.WriteString(r.renderDiagnostic("Diagnostic", env.PushDiagnostic))
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()

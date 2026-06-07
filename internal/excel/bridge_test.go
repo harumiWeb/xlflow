@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1742,6 +1743,18 @@ func TestBuildRunScriptArgsSerializesArgumentsAndSaveAs(t *testing.T) {
 	if args["SaveAsPath"] != filepath.Join(root, "build", "Result.xlsm") {
 		t.Fatalf("save-as path = %q", args["SaveAsPath"])
 	}
+	if args["ModulesDir"] != filepath.Join(root, cfg.Src.Modules) ||
+		args["ClassesDir"] != filepath.Join(root, cfg.Src.Classes) ||
+		args["FormsDir"] != filepath.Join(root, cfg.Src.Forms) ||
+		args["WorkbookDir"] != filepath.Join(root, cfg.Src.Workbook) {
+		t.Fatalf("source mapping args were not populated: %+v", args)
+	}
+	if args["CodeSource"] != cfg.UserForm.CodeSource ||
+		args["Folders"] != strconv.FormatBool(cfg.VBA.Folders) ||
+		args["FolderAnnotation"] != cfg.VBA.FolderAnnotation ||
+		args["DefaultComponentFolders"] != strconv.FormatBool(cfg.VBA.DefaultComponentFolders) {
+		t.Fatalf("VBA source mapping settings were not populated: %+v", args)
+	}
 	wantJSON := `[{"type":"string","value":"fixtures\\sample.xlsx"},{"type":"int","value":"3"},{"type":"bool","value":"true"}]`
 	wantJSON64 := base64.StdEncoding.EncodeToString([]byte(wantJSON))
 	if args["MacroArgsJSON"] != wantJSON64 {
@@ -2724,7 +2737,7 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return fakeBridgeProvider{
 			name:     string(excelbridge.ModeDotNet),
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 3 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 3 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"},"push_diagnostic":{"kind":"compile","location":{"source_path":"src/modules/Main.bas","line":6,"text":"  x ="}}}`)},
 		}
 	}
 
@@ -2750,6 +2763,9 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	if env.Source == nil {
 		t.Fatal("Source is nil")
 	}
+	if env.PushDiagnostic == nil {
+		t.Fatal("PushDiagnostic is nil")
+	}
 	target, ok := env.Target.(map[string]interface{})
 	if !ok || target["kind"] != "live_session" {
 		t.Fatalf("unexpected Target: %+v", env.Target)
@@ -2765,6 +2781,10 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	source, ok := env.Source.(map[string]interface{})
 	if !ok || source["changed_only"] != false {
 		t.Fatalf("unexpected Source: %+v", env.Source)
+	}
+	diag, ok := env.PushDiagnostic.(map[string]interface{})
+	if !ok || diag["kind"] != "compile" {
+		t.Fatalf("unexpected PushDiagnostic: %+v", env.PushDiagnostic)
 	}
 }
 

@@ -193,6 +193,20 @@ public sealed class ExcelPushServiceTests
             Result: null,
             Dialog: dialog,
             Dialogs: [dialog],
+            LocationCapture: new VbeSelectionCapture(
+                new ErrorLocation(
+                    "high",
+                    "vbe.selection",
+                    "src/modules/Main.bas",
+                    "Main",
+                    "module",
+                    "CompileError",
+                    4,
+                    3,
+                    4,
+                    6,
+                    "  x ="),
+                [new VbeSelectionCaptureAttempt("before_dialog_action", true)]),
             TimedOut: false,
             WorkerProcessId: 1234);
 
@@ -219,7 +233,12 @@ public sealed class ExcelPushServiceTests
         Assert.Equal(false, workbook["saved"]);
         Assert.Equal(true, workbook["needs_save"]);
 
-        Assert.True(response.Extensions.ContainsKey("push_diagnostic"));
+        var diagnostic = Assert.IsType<Dictionary<string, object?>>(response.Extensions["push_diagnostic"]);
+        var location = Assert.IsType<ErrorLocation>(diagnostic["location"]);
+        Assert.Equal("src/modules/Main.bas", location.SourcePath);
+        Assert.Equal(4, location.Line);
+        Assert.Equal("  x =", location.Text);
+        Assert.True(diagnostic.ContainsKey("location_capture"));
     }
 
     [Theory]

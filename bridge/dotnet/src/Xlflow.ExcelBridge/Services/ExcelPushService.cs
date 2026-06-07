@@ -170,7 +170,8 @@ public sealed class ExcelPushService : IPushService
                 DialogKind.Compile,
                 suppressModalErrors: true,
                 ResolveCompileTimeout(request),
-                cancellationToken);
+                cancellationToken,
+                CreateSelectionLocator(excelProcessId, excelHwnd, args));
             if (compileInvocation.Dialog is not null ||
                 compileInvocation.TimedOut ||
                 compileInvocation.Result is null ||
@@ -851,13 +852,7 @@ public sealed class ExcelPushService : IPushService
                 ["dirty"] = dirty,
                 ["needs_save"] = dirty,
             },
-            ["push_diagnostic"] = new
-            {
-                kind = invocation.TimedOut ? "timeout" : "compile",
-                dialog = invocation.Dialog,
-                dialogs = invocation.Dialogs,
-                worker = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = invocation.TimedOut },
-            },
+            ["push_diagnostic"] = BuildPushDiagnostic(invocation),
         };
 
         if (dirty)
@@ -886,6 +881,41 @@ public sealed class ExcelPushService : IPushService
             Logs = ["VBE Compile failed: " + message],
             Extensions = extensions,
         };
+    }
+
+    private static VbeSelectionLocator CreateSelectionLocator(int excelProcessId, long excelHwnd, PushCommandArguments args)
+    {
+        return new VbeSelectionLocator(excelProcessId, excelHwnd, new VbeSourceMappingOptions(
+            args.ModulesDir,
+            args.ClassesDir,
+            args.FormsDir,
+            args.WorkbookDir,
+            args.CodeSource,
+            args.Folders,
+            args.FolderAnnotation,
+            args.DefaultComponentFolders));
+    }
+
+    private static Dictionary<string, object?> BuildPushDiagnostic(WorkerInvocationResult invocation)
+    {
+        var diagnostic = new Dictionary<string, object?>
+        {
+            ["kind"] = invocation.TimedOut ? "timeout" : "compile",
+            ["dialog"] = invocation.Dialog,
+            ["dialogs"] = invocation.Dialogs,
+            ["worker"] = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = invocation.TimedOut },
+        };
+
+        if (invocation.LocationCapture.Location is not null && invocation.LocationCapture.HasMeaningfulLocation)
+        {
+            diagnostic["location"] = invocation.LocationCapture.Location;
+        }
+        if (ExcelRunService.DiagnosticLocationCapture(invocation.LocationCapture) is { } capture)
+        {
+            diagnostic["location_capture"] = capture;
+        }
+
+        return diagnostic;
     }
 
     internal static TimeSpan ResolveCompileTimeout(BridgeRequest request)

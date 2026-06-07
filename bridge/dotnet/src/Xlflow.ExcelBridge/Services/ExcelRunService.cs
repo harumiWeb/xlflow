@@ -83,7 +83,8 @@ public sealed class ExcelRunService : IRunService
                     DialogKind.Compile,
                     args.SuppressModalErrors,
                     ResolveTimeout(request, args, commandStopwatch.Elapsed),
-                    cancellationToken);
+                    cancellationToken,
+                    CreateSelectionLocator(excelProcessId, excelHwnd, args));
                 if (compileInvocation.Dialog is not null ||
                     compileInvocation.TimedOut ||
                     compileInvocation.Result is null ||
@@ -137,7 +138,8 @@ public sealed class ExcelRunService : IRunService
                 DialogKind.Any,
                 args.SuppressModalErrors,
                 ResolveTimeout(request, args, commandStopwatch.Elapsed),
-                cancellationToken);
+                cancellationToken,
+                CreateSelectionLocator(excelProcessId, excelHwnd, args));
             sw.Stop();
 
             var durationMs = sw.ElapsedMilliseconds;
@@ -240,18 +242,15 @@ public sealed class ExcelRunService : IRunService
 
                 if (invocation.Dialog is not null || args.Diagnostic || runTimedOut || compileFailure)
                 {
-                    extensions["run_diagnostic"] = new
-                    {
-                        kind = runTimedOut ? "timeout" : compileFailure ? "compile" : "runtime",
-                        location = new
+                    extensions["run_diagnostic"] = BuildRunDiagnostic(
+                        runTimedOut ? "timeout" : compileFailure ? "compile" : "runtime",
+                        invocation,
+                        new
                         {
                             macro = macroName,
                             line = runErrorLine,
                         },
-                        dialog = invocation.Dialog,
-                        dialogs = invocation.Dialogs,
-                        worker = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = runTimedOut },
-                    };
+                        runTimedOut);
                 }
 
                 if (runTimedOut)
@@ -483,7 +482,8 @@ public sealed class ExcelRunService : IRunService
         DialogKind dialogKind,
         bool suppressModalErrors,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IVbeSelectionLocator? selectionLocator = null)
     {
         return ExcelWorkerInvocation.InvokeWithWorker(
             workerRequest,
@@ -491,7 +491,8 @@ public sealed class ExcelRunService : IRunService
             dialogKind,
             suppressModalErrors,
             timeout,
-            cancellationToken);
+            cancellationToken,
+            selectionLocator);
     }
 
     internal static DialogSnapshot? WaitForPostWorkerDialog(
@@ -549,14 +550,7 @@ public sealed class ExcelRunService : IRunService
                 duration_ms = 0,
                 arguments = macroArgs.Select(argument => new { type = argument.Type, value = argument.Value }).ToArray(),
             },
-            ["run_diagnostic"] = new
-            {
-                kind = "compile",
-                location = new { macro = args.MacroName },
-                dialog = invocation.Dialog,
-                dialogs = invocation.Dialogs,
-                worker = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = invocation.TimedOut },
-            },
+            ["run_diagnostic"] = BuildRunDiagnostic("compile", invocation, new { macro = args.MacroName }, invocation.TimedOut),
         };
         return new BridgeResponse
         {
@@ -614,6 +608,58 @@ public sealed class ExcelRunService : IRunService
         var message = DialogMessage(dialog);
         var match = Regex.Match(message, "(?i)(?:run-?time error|runtime error|実行時エラー)\\s*'?(?<number>-?\\d+)'?");
         return match.Success && int.TryParse(match.Groups["number"].Value, CultureInfo.InvariantCulture, out var number) ? number : null;
+    }
+
+    private static VbeSelectionLocator CreateSelectionLocator(int excelProcessId, long excelHwnd, RunCommandArguments args)
+    {
+        return new VbeSelectionLocator(excelProcessId, excelHwnd, new VbeSourceMappingOptions(
+            args.ModulesDir,
+            args.ClassesDir,
+            args.FormsDir,
+            args.WorkbookDir,
+            args.CodeSource,
+            args.Folders,
+            args.FolderAnnotation,
+            args.DefaultComponentFolders));
+    }
+
+    internal static object DiagnosticLocation(VbeSelectionCapture capture, object fallback)
+    {
+        if (capture.Location is null || !capture.HasMeaningfulLocation)
+        {
+            return fallback;
+        }
+        return capture.Location;
+    }
+
+    internal static object? DiagnosticLocationCapture(VbeSelectionCapture capture)
+    {
+        if (capture.Attempts.Count == 0)
+        {
+            return null;
+        }
+        return new { attempts = capture.Attempts };
+    }
+
+    private static Dictionary<string, object?> BuildRunDiagnostic(
+        string kind,
+        WorkerInvocationResult invocation,
+        object fallbackLocation,
+        bool timedOut)
+    {
+        var diagnostic = new Dictionary<string, object?>
+        {
+            ["kind"] = kind,
+            ["location"] = DiagnosticLocation(invocation.LocationCapture, fallbackLocation),
+            ["dialog"] = invocation.Dialog,
+            ["dialogs"] = invocation.Dialogs,
+            ["worker"] = new { pid = invocation.WorkerProcessId, completed = invocation.Result?.Completed ?? false, timed_out = timedOut },
+        };
+        if (DiagnosticLocationCapture(invocation.LocationCapture) is { } capture)
+        {
+            diagnostic["location_capture"] = capture;
+        }
+        return diagnostic;
     }
 
     private static void SetProperty(object comObject, string name, object value)

@@ -93,6 +93,83 @@ func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesPushDiagnostic(t *testing.T) {
+	env := New("push")
+	env.PushDiagnostic = map[string]any{
+		"kind": "compile",
+		"location": map[string]any{
+			"source_path": "src/modules/Main.bas",
+			"line":        6,
+			"text":        "  x =",
+		},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["push_diagnostic"]; !ok {
+		t.Fatalf("expected push_diagnostic in JSON envelope: %s", buf.String())
+	}
+}
+
+func TestPushHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
+	env := Failure("push", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
+	env.Workbook = map[string]any{"path": "build/Book.xlsm"}
+	env.PushDiagnostic = map[string]any{
+		"kind": "compile",
+		"location": map[string]any{
+			"component":   "Main",
+			"procedure":   "CompileError",
+			"source_path": "src/modules/Main.bas",
+			"line":        6,
+			"column":      3,
+			"text":        "  x =",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, want := range []string{"Diagnostic", "src/modules/Main.bas", "line 6", "column 3", "x ="} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("human output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestRunHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
+	env := Failure("run", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 0}
+	env.RunDiagnostic = map[string]any{
+		"kind": "compile",
+		"location": map[string]any{
+			"component":   "Main",
+			"procedure":   "Run",
+			"source_path": "src/modules/Main.bas",
+			"line":        12,
+			"column":      5,
+			"text":        "    Debug.Print foo",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, want := range []string{"src/modules/Main.bas", "line 12", "column 5", "Debug.Print foo"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("human output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	env := New("export-image")
 	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "sheet": "QR", "range": "A1:AE31"}
