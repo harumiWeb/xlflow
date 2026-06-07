@@ -193,6 +193,7 @@ public sealed class ExcelPushServiceTests
             Result: null,
             Dialog: dialog,
             Dialogs: [dialog],
+            LocationCapture: VbeSelectionCapture.Empty,
             TimedOut: false,
             WorkerProcessId: 1234);
 

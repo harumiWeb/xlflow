@@ -552,7 +552,7 @@ func (r renderer) renderRun(env Envelope) string {
 		}
 		if loc := objectMap(diag["location"]); len(loc) > 0 {
 			parts := []string{}
-			for _, key := range []string{"module", "procedure", "file"} {
+			for _, key := range []string{"module", "procedure", "file", "source_path"} {
 				if v := stringValue(loc, key); v != "" {
 					parts = append(parts, v)
 				}
@@ -565,6 +565,8 @@ func (r renderer) renderRun(env Envelope) string {
 			}
 			if token := stringValue(loc, "token"); token != "" {
 				parts = append(parts, token)
+			} else if text := stringValue(loc, "text"); text != "" {
+				parts = append(parts, text)
 			}
 			if len(parts) > 0 {
 				b.WriteString(kv("Location", strings.Join(parts, " ")))

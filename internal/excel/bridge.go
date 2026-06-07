@@ -587,17 +587,25 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	// Base64-encode the JSON to avoid PowerShell command-line parsing issues
 	argsJSON64 := base64.StdEncoding.EncodeToString(argsJSON)
 	scriptArgs := map[string]string{
-		"WorkbookPath":        workbookPath(root, workbook),
-		"MacroName":           opts.Macro,
-		"MacroArgsJSON":       string(argsJSON64),
-		"Visible":             strconv.FormatBool(cfg.Excel.Visible),
-		"DisplayAlerts":       strconv.FormatBool(cfg.Excel.DisplayAlerts),
-		"SaveWorkbook":        strconv.FormatBool(opts.Save),
-		"Direct":              strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Diagnostic)),
-		"Diagnostic":          strconv.FormatBool(opts.Diagnostic),
-		"SuppressModalErrors": strconv.FormatBool(opts.SuppressModalErrors),
-		"UseSession":          strconv.FormatBool(opts.Session),
-		"MetadataPath":        filepath.Join(root, ".xlflow", "session.json"),
+		"WorkbookPath":            workbookPath(root, workbook),
+		"MacroName":               opts.Macro,
+		"MacroArgsJSON":           string(argsJSON64),
+		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
+		"DisplayAlerts":           strconv.FormatBool(cfg.Excel.DisplayAlerts),
+		"SaveWorkbook":            strconv.FormatBool(opts.Save),
+		"Direct":                  strconv.FormatBool(opts.Direct || (opts.Fast && len(args) == 0 && !opts.Diagnostic)),
+		"Diagnostic":              strconv.FormatBool(opts.Diagnostic),
+		"SuppressModalErrors":     strconv.FormatBool(opts.SuppressModalErrors),
+		"UseSession":              strconv.FormatBool(opts.Session),
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+		"ModulesDir":              filepath.Join(root, cfg.Src.Modules),
+		"ClassesDir":              filepath.Join(root, cfg.Src.Classes),
+		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
+		"WorkbookDir":             filepath.Join(root, cfg.Src.Workbook),
+		"CodeSource":              cfg.UserForm.CodeSource,
+		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
+		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
+		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
 	}
 	if strings.TrimSpace(opts.RuntimeMode) != "" {
 		scriptArgs["RuntimeMode"] = strings.TrimSpace(opts.RuntimeMode)

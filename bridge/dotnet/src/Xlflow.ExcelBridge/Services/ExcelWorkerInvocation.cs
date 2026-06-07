@@ -8,6 +8,7 @@ internal sealed record WorkerInvocationResult(
     MacroRunWorkerResult? Result,
     DialogSnapshot? Dialog,
     DialogSnapshot[] Dialogs,
+    VbeSelectionCapture LocationCapture,
     bool TimedOut,
     int WorkerProcessId);
 
@@ -19,19 +20,48 @@ internal static class ExcelWorkerInvocation
         DialogKind dialogKind,
         bool suppressModalErrors,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IVbeSelectionLocator? selectionLocator = null)
     {
         using var worker = MacroRunWorkerProcess.Start(workerRequest);
         var watcher = new DialogWatcher();
+        var actionPolicy = suppressModalErrors
+            ? selectionLocator is not null
+                ? DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug
+                : DialogActionPolicy.SuppressVbaError
+            : DialogActionPolicy.ObserveOnly;
         var watchRequest = new DialogWatchRequest(
             workerRequest.ExcelProcessId,
             excelHwnd,
             dialogKind,
-            suppressModalErrors ? DialogActionPolicy.SuppressVbaError : DialogActionPolicy.ObserveOnly,
+            actionPolicy,
             timeout,
             TimeSpan.FromMilliseconds(50));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var watcherTask = Task.Run(() => watcher.WaitForDialog(watchRequest, linked.Token), linked.Token);
+        var locationCaptures = new List<VbeSelectionCapture>();
+        void CaptureBefore(DialogKind kind)
+        {
+            if ((kind is DialogKind.Compile or DialogKind.Runtime) && selectionLocator is not null)
+            {
+                locationCaptures.Add(selectionLocator.Capture("before_dialog_action"));
+            }
+        }
+
+        void CaptureAfter(DialogKind kind)
+        {
+            if ((kind is DialogKind.Compile or DialogKind.Runtime) &&
+                selectionLocator is not null &&
+                !locationCaptures.Any(capture => capture.HasReliableLocation))
+            {
+                locationCaptures.Add(selectionLocator.Capture("after_dialog_action"));
+            }
+            if (kind == DialogKind.Runtime)
+            {
+                selectionLocator?.ResetBreakMode();
+            }
+        }
+
+        var watcherTask = Task.Run(() => watcher.WaitForDialog(watchRequest, CaptureBefore, CaptureAfter, linked.Token), linked.Token);
         var stopwatch = Stopwatch.StartNew();
 
         while (stopwatch.Elapsed < timeout)
@@ -41,7 +71,7 @@ internal static class ExcelWorkerInvocation
             {
                 worker.Stop();
                 linked.Cancel();
-                return new WorkerInvocationResult(null, watcherTask.Result, [watcherTask.Result], false, worker.ProcessId);
+                return new WorkerInvocationResult(null, watcherTask.Result, [watcherTask.Result], MergeCaptures(locationCaptures), false, worker.ProcessId);
             }
             if (worker.HasExited)
             {
@@ -52,13 +82,15 @@ internal static class ExcelWorkerInvocation
                     watchRequest,
                     workerRequest.Operation,
                     result,
-                    linked.Token);
+                    linked.Token,
+                    CaptureBefore,
+                    CaptureAfter);
                 linked.Cancel();
                 if (postDialog is not null)
                 {
-                    return new WorkerInvocationResult(result, postDialog, [postDialog], false, worker.ProcessId);
+                    return new WorkerInvocationResult(result, postDialog, [postDialog], MergeCaptures(locationCaptures), false, worker.ProcessId);
                 }
-                return new WorkerInvocationResult(result, null, [], false, worker.ProcessId);
+                return new WorkerInvocationResult(result, null, [], MergeCaptures(locationCaptures), false, worker.ProcessId);
             }
             Thread.Sleep(25);
         }
@@ -66,7 +98,7 @@ internal static class ExcelWorkerInvocation
         worker.Stop();
         linked.Cancel();
         var dialogs = watcher.CaptureCurrentDialogs(watchRequest, includeUia: false).ToArray();
-        return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, true, worker.ProcessId);
+        return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, MergeCaptures(locationCaptures), true, worker.ProcessId);
     }
 
     internal static DialogSnapshot? WaitForPostWorkerDialog(
@@ -75,7 +107,9 @@ internal static class ExcelWorkerInvocation
         DialogWatchRequest watchRequest,
         string operation,
         MacroRunWorkerResult? result,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null)
     {
         var shouldWait =
             string.Equals(operation, "compile", StringComparison.OrdinalIgnoreCase) ||
@@ -100,7 +134,7 @@ internal static class ExcelWorkerInvocation
             {
                 return watcherTask.Result;
             }
-            var dialog = watcher.TryCaptureCurrentDialog(watchRequest, includeUia: true, executeAction: true);
+            var dialog = watcher.TryCaptureCurrentDialog(watchRequest, includeUia: true, executeAction: true, beforeAction, afterAction);
             if (dialog is not null)
             {
                 return dialog;
@@ -108,5 +142,20 @@ internal static class ExcelWorkerInvocation
             Thread.Sleep(25);
         }
         return null;
+    }
+
+    private static VbeSelectionCapture MergeCaptures(List<VbeSelectionCapture> captures)
+    {
+        if (captures.Count == 0)
+        {
+            return VbeSelectionCapture.Empty;
+        }
+
+        var location = captures
+            .Select(capture => capture.Location)
+            .Where(location => location is not null)
+            .OrderByDescending(location => VbeSelectionScorer.Score(location!))
+            .FirstOrDefault();
+        return new VbeSelectionCapture(location, captures.SelectMany(capture => capture.Attempts).ToArray());
     }
 }

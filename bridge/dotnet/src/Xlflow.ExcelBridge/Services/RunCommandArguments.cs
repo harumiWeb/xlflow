@@ -23,4 +23,12 @@ public sealed record RunCommandArguments(
     string RuntimeMode,
     string RuntimeSource,
     string SaveAsPath,
-    int TimeoutSeconds);
+    int TimeoutSeconds,
+    string ModulesDir,
+    string ClassesDir,
+    string FormsDir,
+    string WorkbookDir,
+    string CodeSource,
+    bool Folders,
+    string FolderAnnotation,
+    bool DefaultComponentFolders);

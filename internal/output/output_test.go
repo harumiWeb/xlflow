@@ -93,6 +93,33 @@ func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestRunHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
+	env := Failure("run", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 0}
+	env.RunDiagnostic = map[string]any{
+		"kind": "compile",
+		"location": map[string]any{
+			"component":   "Main",
+			"procedure":   "Run",
+			"source_path": "src/modules/Main.bas",
+			"line":        12,
+			"column":      5,
+			"text":        "    Debug.Print foo",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, want := range []string{"src/modules/Main.bas", "line 12", "column 5", "Debug.Print foo"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("human output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesExportImageFields(t *testing.T) {
 	env := New("export-image")
 	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm", "sheet": "QR", "range": "A1:AE31"}

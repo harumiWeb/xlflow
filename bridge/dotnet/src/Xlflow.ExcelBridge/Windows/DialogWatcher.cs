@@ -19,6 +19,7 @@ public enum DialogActionPolicy
 {
     ObserveOnly,
     SuppressVbaError,
+    SuppressVbaErrorWithRuntimeDebug,
     CancelSupportedNativeUi,
 }
 
@@ -83,7 +84,11 @@ public sealed class DialogWatcher
         _uia = uia;
     }
 
-    public DialogSnapshot? WaitForDialog(DialogWatchRequest request, CancellationToken cancellationToken = default)
+    public DialogSnapshot? WaitForDialog(
+        DialogWatchRequest request,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null,
+        CancellationToken cancellationToken = default)
     {
         if (request.ExcelProcessId <= 0)
         {
@@ -112,7 +117,9 @@ public sealed class DialogWatcher
                 }
 
                 var action = DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy);
+                beforeAction?.Invoke(kind.Value);
                 var actionResult = ExecuteAction(action, candidate, uia);
+                afterAction?.Invoke(kind.Value);
                 return BuildSnapshot(candidate, uia, kind.Value, stopwatch.ElapsedMilliseconds, action, actionResult);
             }
 
@@ -127,7 +134,12 @@ public sealed class DialogWatcher
         return CaptureCurrentDialogs(request, includeUia: true);
     }
 
-    internal DialogSnapshot? TryCaptureCurrentDialog(DialogWatchRequest request, bool includeUia, bool executeAction)
+    internal DialogSnapshot? TryCaptureCurrentDialog(
+        DialogWatchRequest request,
+        bool includeUia,
+        bool executeAction,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null)
     {
         foreach (var candidate in _windows.Enumerate(request.ExcelProcessId, request.VbeThreadId))
         {
@@ -146,9 +158,17 @@ public sealed class DialogWatcher
             var action = executeAction
                 ? DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy)
                 : DialogAction.None;
+            if (executeAction)
+            {
+                beforeAction?.Invoke(kind.Value);
+            }
             var actionResult = executeAction
                 ? ExecuteAction(action, candidate, uia)
                 : DialogActionResult.None;
+            if (executeAction)
+            {
+                afterAction?.Invoke(kind.Value);
+            }
             return BuildSnapshot(candidate, uia, kind.Value, 0, action, actionResult);
         }
 
@@ -319,6 +339,14 @@ internal static class DialogActionSelector
             return DialogAction.None;
         }
 
+        if (kind == DialogKind.Runtime && policy == DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug)
+        {
+            return FindButton(candidate, "runtime_debug", "Debug", "デバッグ") ??
+                   FindButton(candidate, "runtime_end", "End", "終了") ??
+                   FindButton(candidate, "runtime_close", "OK", "Close", "閉じる") ??
+                   new DialogAction("runtime_close", 0, "", true);
+        }
+
         if (kind == DialogKind.Runtime && policy == DialogActionPolicy.SuppressVbaError)
         {
             return FindButton(candidate, "runtime_end", "End", "終了") ??
@@ -327,13 +355,13 @@ internal static class DialogActionSelector
                    new DialogAction("runtime_close", 0, "", true);
         }
 
-        if (kind == DialogKind.Compile && policy == DialogActionPolicy.SuppressVbaError)
+        if (kind == DialogKind.Compile && policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug)
         {
             return FindButton(candidate, "compile_close", "OK", "Close", "閉じる") ??
                    DialogAction.None;
         }
 
-        if (policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.CancelSupportedNativeUi &&
+        if (policy is DialogActionPolicy.SuppressVbaError or DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug or DialogActionPolicy.CancelSupportedNativeUi &&
             kind is DialogKind.MsgBox or DialogKind.InputBox or DialogKind.FileDialog)
         {
             return FindButton(candidate, "native_cancel", "Cancel", "Close", "キャンセル", "閉じる") ??

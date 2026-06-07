@@ -70,6 +70,14 @@ public sealed class RunCommandTests
             Assert.True(args.UIStreamRedactInput);
             Assert.True(args.DebugStreamEnabled);
             Assert.Equal(@"\\.\pipe\xlflow-debug-test", args.DebugStreamPipeName);
+            Assert.Equal(@"C:\work\src\modules", args.ModulesDir);
+            Assert.Equal(@"C:\work\src\classes", args.ClassesDir);
+            Assert.Equal(@"C:\work\src\forms", args.FormsDir);
+            Assert.Equal(@"C:\work\src\workbook", args.WorkbookDir);
+            Assert.Equal("sidecar", args.CodeSource);
+            Assert.True(args.Folders);
+            Assert.Equal("update", args.FolderAnnotation);
+            Assert.True(args.DefaultComponentFolders);
 
             return BridgeResponse.Ok(request);
         }));
@@ -88,7 +96,15 @@ public sealed class RunCommandTests
                   "UIStreamEnabled": true,
                   "UIStreamRedactInput": true,
                   "DebugStreamEnabled": true,
-                  "DebugStreamPipeName": "\\\\.\\pipe\\xlflow-debug-test"
+                  "DebugStreamPipeName": "\\\\.\\pipe\\xlflow-debug-test",
+                  "ModulesDir": "C:\\work\\src\\modules",
+                  "ClassesDir": "C:\\work\\src\\classes",
+                  "FormsDir": "C:\\work\\src\\forms",
+                  "WorkbookDir": "C:\\work\\src\\workbook",
+                  "CodeSource": "sidecar",
+                  "Folders": true,
+                  "FolderAnnotation": "update",
+                  "DefaultComponentFolders": true
                 }
                 """).RootElement.Clone(),
         };
@@ -272,7 +288,15 @@ public sealed class RunCommandTests
                 RuntimeMode: "",
                 RuntimeSource: "",
                 SaveAsPath: "",
-                TimeoutSeconds: 0);
+                TimeoutSeconds: 0,
+                ModulesDir: "",
+                ClassesDir: "",
+                FormsDir: "",
+                WorkbookDir: "",
+                CodeSource: "",
+                Folders: false,
+                FolderAnnotation: "update",
+                DefaultComponentFolders: false);
 
             var response = service.Execute(request, args, CancellationToken.None);
 
@@ -316,7 +340,7 @@ public sealed class RunCommandTests
     public void WaitForPostWorkerDialogPollsCurrentDialogsWhenWatcherTaskAlreadyCompleted()
     {
         var enumerator = new SequencedWindowEnumerator(
-            [],
+            Array.Empty<WindowCandidate>(),
             [CompileDialogCandidate()]);
         var watcher = new DialogWatcher(enumerator, new NullUiaDialogAdapter());
         var request = new DialogWatchRequest(
@@ -345,6 +369,167 @@ public sealed class RunCommandTests
         Assert.Equal("compile_close", dialog.Action);
         Assert.True(dialog.ActionSucceeded);
         Assert.Equal([11], enumerator.ClickedButtons);
+    }
+
+    [Fact]
+    public void DiagnosticLocationPrefersCapturedVbeSelection()
+    {
+        var capture = new VbeSelectionCapture(
+            new ErrorLocation(
+                "high",
+                "vbe.selection",
+                "src/modules/Main.bas",
+                "Main",
+                "module",
+                "Run",
+                12,
+                5,
+                12,
+                8,
+                "    Debug.Print foo"),
+            [new VbeSelectionCaptureAttempt("before_dialog_action", true)]);
+
+        var location = Assert.IsType<ErrorLocation>(ExcelRunService.DiagnosticLocation(capture, new { macro = "Main.Run" }));
+
+        Assert.Equal("src/modules/Main.bas", location.SourcePath);
+        Assert.Equal("Main", location.Component);
+        Assert.Equal(12, location.Line);
+        Assert.Equal("vbe.selection", location.Method);
+    }
+
+    [Fact]
+    public void DiagnosticLocationCapturePreservesFailedAttempts()
+    {
+        var capture = new VbeSelectionCapture(
+            null,
+            [new VbeSelectionCaptureAttempt("before_dialog_action", false, "VBE selection was not available")]);
+
+        var metadata = ExcelRunService.DiagnosticLocationCapture(capture);
+        var json = JsonSerializer.SerializeToDocument(metadata, JsonOptions.Default);
+
+        var attempt = json.RootElement.GetProperty("attempts")[0];
+        Assert.Equal("before_dialog_action", attempt.GetProperty("timing").GetString());
+        Assert.False(attempt.GetProperty("success").GetBoolean());
+        Assert.Contains("not available", attempt.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void VbeSelectionScorerPenalizesTemporaryHarness()
+    {
+        var userLocation = new ErrorLocation(
+            "high",
+            "vbe.selection",
+            "src/modules/Main.bas",
+            "Main",
+            "module",
+            "Run",
+            6,
+            3,
+            6,
+            8,
+            "  values(1) = 2");
+        var harnessLocation = userLocation with
+        {
+            SourcePath = "src/modules/XlflowRun_deadbeef.bas",
+            Component = "XlflowRun_deadbeef",
+            Procedure = "RunMacro",
+        };
+
+        Assert.True(VbeSelectionScorer.Score(userLocation) > VbeSelectionScorer.Score(harnessLocation));
+        Assert.True(VbeSelectionScorer.Score(userLocation) >= VbeSelectionScorer.ReliableThreshold);
+        Assert.True(VbeSelectionScorer.Score(harnessLocation) < VbeSelectionScorer.ReliableThreshold);
+    }
+
+    [Fact]
+    public void VbeSelectionScorerTreatsAttributeSelectionAsUnreliable()
+    {
+        var location = new ErrorLocation(
+            "high",
+            "vbe.selection",
+            "src/modules/Main.bas",
+            "Main",
+            "module",
+            null,
+            1,
+            1,
+            1,
+            10,
+            "Attribute VB_Name = \"Main\"");
+
+        Assert.True(VbeSelectionScorer.Score(location) < VbeSelectionScorer.ReliableThreshold);
+    }
+
+    [Fact]
+    public void VbeSelectionScorerDetectsIncompleteCompileStatement()
+    {
+        Assert.True(VbeSelectionScorer.IsLikelyCompileErrorLine("  x ="));
+        Assert.False(VbeSelectionScorer.IsLikelyCompileErrorLine("Attribute VB_Name = \"Main\""));
+        Assert.False(VbeSelectionScorer.IsLikelyCompileErrorLine("Public Sub Run()"));
+        Assert.False(VbeSelectionScorer.IsLikelyCompileErrorLine("  Dim x As String"));
+    }
+
+    [Fact]
+    public void VbeSourcePathMapperReturnsProjectRelativePath()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-source-map-" + Guid.NewGuid().ToString("N"));
+        var options = new VbeSourceMappingOptions(
+            Path.Combine(root, "src", "modules"),
+            Path.Combine(root, "src", "classes"),
+            Path.Combine(root, "src", "forms"),
+            Path.Combine(root, "src", "workbook"),
+            "sidecar",
+            true,
+            "update",
+            true);
+        var path = Path.Combine(root, "src", "forms", "code", "CustomerForm.bas");
+
+        Assert.Equal("src/forms/code/CustomerForm.bas", VbeSourcePathMapper.ToProjectRelativePath(path, options));
+    }
+
+    [Fact]
+    public void DialogWatcherRunsPreActionCallbackBeforeClick()
+    {
+        var events = new List<string>();
+        var enumerator = new SequencedWindowEnumerator(events, [CompileDialogCandidate()]);
+        var watcher = new DialogWatcher(enumerator, new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 123,
+            ExcelMainHwnd: 456,
+            Kind: DialogKind.Compile,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromSeconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(10));
+
+        _ = watcher.WaitForDialog(
+            request,
+            beforeAction: _ => events.Add("before"),
+            afterAction: _ => events.Add("after"));
+
+        Assert.Equal(["before", "click", "after"], events);
+    }
+
+    [Fact]
+    public void RuntimeDebugPolicyPrefersDebugButton()
+    {
+        var candidate = new WindowCandidate(
+            Hwnd: 1,
+            Pid: 123,
+            ThreadId: 321,
+            OwnerHwnd: 456,
+            RootOwnerHwnd: 456,
+            Title: "Microsoft Visual Basic",
+            ClassName: "#32770",
+            Visible: true,
+            ProcessImage: "EXCEL.EXE",
+            OwnerChain: [456],
+            Text: ["Run-time error '9':", "Subscript out of range"],
+            Buttons: [new WindowElement(11, "Button", "End"), new WindowElement(12, "Button", "Debug")],
+            Children: []);
+
+        var action = DialogActionSelector.Select(DialogKind.Runtime, candidate, DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug);
+
+        Assert.Equal("runtime_debug", action.Name);
+        Assert.Equal(12, action.TargetHwnd);
     }
 
     [Fact]
@@ -387,16 +572,29 @@ public sealed class RunCommandTests
         }
     }
 
-    private sealed class SequencedWindowEnumerator(params IReadOnlyList<WindowCandidate>[] sequences) : IWindowEnumerator
+    private sealed class SequencedWindowEnumerator : IWindowEnumerator
     {
+        private readonly IReadOnlyList<WindowCandidate>[] _sequences;
+        private readonly List<string>? _events;
         private int _index;
+
+        public SequencedWindowEnumerator(params IReadOnlyList<WindowCandidate>[] sequences)
+            : this(null, sequences)
+        {
+        }
+
+        public SequencedWindowEnumerator(List<string>? events, params IReadOnlyList<WindowCandidate>[] sequences)
+        {
+            _events = events;
+            _sequences = sequences;
+        }
 
         public List<long> ClickedButtons { get; } = [];
 
         public IReadOnlyList<WindowCandidate> Enumerate(int processId, int vbeThreadId)
         {
-            var current = _index < sequences.Length ? sequences[_index] : sequences[^1];
-            if (_index < sequences.Length - 1)
+            var current = _index < _sequences.Length ? _sequences[_index] : _sequences[^1];
+            if (_index < _sequences.Length - 1)
             {
                 _index++;
             }
@@ -405,6 +603,7 @@ public sealed class RunCommandTests
 
         public bool ClickButton(long hwnd)
         {
+            _events?.Add("click");
             ClickedButtons.Add(hwnd);
             return true;
         }

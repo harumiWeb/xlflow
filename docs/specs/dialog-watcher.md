@@ -27,6 +27,20 @@ JSON diagnostics may include:
 - `text`, `buttons`, `children`
 - `action`, `action_method`, `action_target`, `action_succeeded`
 
+## VBE Selection Diagnostics
+
+For `.NET` `run` compile/runtime dialog suppression, the bridge attempts to
+capture VBE source selection before dismissing the dialog and retries once after
+dismissal if no meaningful location was found. This capture is best-effort and
+timeout-bounded; failure to read VBE state must not prevent dialog suppression or
+change the command failure classification.
+
+When available, `run_diagnostic.location` may include `confidence`, `method`,
+`source_path`, `component`, `component_type`, `procedure`, `line`, `column`,
+`end_line`, `end_column`, and selected line `text`. Capture failure metadata is
+reported under `run_diagnostic.location_capture.attempts` with timing labels such
+as `before_dialog_action` and `after_dialog_action`.
+
 ## Action Policy
 
 - Runtime error: prefer explicit End, then Debug, then explicit OK/Close. End is

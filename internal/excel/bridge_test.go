@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1741,6 +1742,18 @@ func TestBuildRunScriptArgsSerializesArgumentsAndSaveAs(t *testing.T) {
 	}
 	if args["SaveAsPath"] != filepath.Join(root, "build", "Result.xlsm") {
 		t.Fatalf("save-as path = %q", args["SaveAsPath"])
+	}
+	if args["ModulesDir"] != filepath.Join(root, cfg.Src.Modules) ||
+		args["ClassesDir"] != filepath.Join(root, cfg.Src.Classes) ||
+		args["FormsDir"] != filepath.Join(root, cfg.Src.Forms) ||
+		args["WorkbookDir"] != filepath.Join(root, cfg.Src.Workbook) {
+		t.Fatalf("source mapping args were not populated: %+v", args)
+	}
+	if args["CodeSource"] != cfg.UserForm.CodeSource ||
+		args["Folders"] != strconv.FormatBool(cfg.VBA.Folders) ||
+		args["FolderAnnotation"] != cfg.VBA.FolderAnnotation ||
+		args["DefaultComponentFolders"] != strconv.FormatBool(cfg.VBA.DefaultComponentFolders) {
+		t.Fatalf("VBA source mapping settings were not populated: %+v", args)
 	}
 	wantJSON := `[{"type":"string","value":"fixtures\\sample.xlsx"},{"type":"int","value":"3"},{"type":"bool","value":"true"}]`
 	wantJSON64 := base64.StdEncoding.EncodeToString([]byte(wantJSON))
