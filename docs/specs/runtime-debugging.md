@@ -6,7 +6,7 @@ This spec defines the xlflow behavior that helps AI agents debug VBA runtime fai
 
 ## Recommended Workflow
 
-The legacy trace command and the removed trace run flag are gone. The supported workbook-side debugging surface is `XlflowDebug.Log`, and the supported machine-readable execution surface is `xlflow run --json`.
+The legacy debugging command and removed run flag are gone. The supported workbook-side debugging surface is `XlflowDebug.Log`, and the supported machine-readable execution surface is `xlflow run --json`.
 
 Use `XlflowDebug.Log` inside VBA for execution-state visibility:
 
@@ -30,7 +30,7 @@ During `run` and `test`, xlflow injects the temporary debug pipe marker used by 
 - `invoke_macro`
 - `save_result`
 
-The phase is included in JSON error metadata. Plain-text output remains short, but failures should include enough context for a user or agent to decide whether to inspect configuration, VBIDE access, macro names, source code, or trace output.
+The phase is included in JSON error metadata. Plain-text output remains short, but failures should include enough context for a user or agent to decide whether to inspect configuration, VBIDE access, macro names, source code, or debug output.
 
 When Excel exposes enough information to distinguish a missing or invalid macro target from user-code failure, xlflow reports a target-specific error code instead of generic `macro_failed`.
 
@@ -66,7 +66,7 @@ Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` 
 
 ## Runtime Source Analysis
 
-`xlflow analyze` scans configured source directories without Excel COM. The v1 analyzer is deliberately pattern-based and detects likely missing `Set` assignments for object variables and object-returning functions, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and removed legacy trace-helper APIs when source-controlled VBA still calls `XlflowLog` or `XlflowSetTraceFile`. Stable analyzer codes are `VBA101`, `VBA102`, `VBA103`, `VBA104`, `VBA105`, and `VBA106`.
+`xlflow analyze` scans configured source directories without Excel COM. The v1 analyzer is deliberately pattern-based and detects likely missing `Set` assignments for object variables and object-returning functions, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and removed legacy helper APIs when source-controlled VBA still calls `XlflowLog` or `XlflowSetTraceFile`. Stable analyzer codes are `VBA101`, `VBA102`, `VBA103`, `VBA104`, `VBA105`, and `VBA106`.
 
 `xlflow check` aggregates `lint`, `analyze`, and `doctor`. It continues after lint/analyze findings and returns all cheap source feedback before reporting Excel COM doctor status.
 
@@ -146,4 +146,4 @@ The bundled AI agent skill must make xlflow's source-first workflow explicit. In
 
 The skill must tell agents to use `xlflow macros --json` and a discovered `qualified_name` before running a macro when the entrypoint is unclear. Agents should not assume default names such as `Main.Run` unless discovery, tests, docs, or prior command output prove that entrypoint.
 
-The skill must distinguish environment/setup failures from user-code failures. For setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness`, agents should run `xlflow doctor --json` before changing VBA source. For `invoke_macro` failures, agents should inspect VBA error metadata and trace events before patching source.
+The skill must distinguish environment/setup failures from user-code failures. For setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness`, agents should run `xlflow doctor --json` before changing VBA source. For `invoke_macro` failures, agents should inspect VBA error metadata and debug events before patching source.

@@ -26,7 +26,7 @@
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
 
-It turns `.xlsm` workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, traced, and executed from the command line.
+It turns `.xlsm` workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
 
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
@@ -89,7 +89,7 @@ That works for small manual edits, but it becomes painful when you want repeatab
 | ---------------------------------------------------- | ----------------------------------------------------------------- |
 | VBA code is trapped inside `.xlsm` files             | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
 | UserForms cannot be handled declaratively            | Generate UserForms from YAML definitions with `xlflow form build` |
-| Runtime failures are hard to locate                  | Return structured errors, diagnostics, and trace logs             |
+| Runtime failures are hard to locate                  | Return structured errors, diagnostics, and terminal logs          |
 | Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source         |
 | AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                       |
 
@@ -109,7 +109,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                   |
 | Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
 | GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                    |
-| Debugging      | Collect trace events and return runtime diagnostics                                                                                               |
+| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                              |
 | Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                  |
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
@@ -120,11 +120,11 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## Requirements
 
-| Requirement                                  | Needed for                                                                                                                                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows                                      | Excel COM automation                                                                                                                                                                |
-| Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `trace`, `doctor` |
-| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                                    |
+| Requirement                                  | Needed for                                                                                                                                                                 |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows                                      | Excel COM automation                                                                                                                                                       |
+| Microsoft Excel                              | `new`, `init`, `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `run`, `export-image`, `edit`, `test`, `macros`, `doctor` |
+| Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                           |
 
 > [!NOTE]
 > Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.

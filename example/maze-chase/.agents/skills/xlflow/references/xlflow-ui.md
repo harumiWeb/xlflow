@@ -133,7 +133,7 @@ Prefer ids that express the business decision, not UI wording.
 
 ## Debugging Rule
 
-If headless `XlflowUI` behavior is suspicious, rerun with the same `--msgbox` / `--inputbox` / `--filedialog` values plus `--ui-stream` before adding extra trace or VBA logging. Compare:
+If headless `XlflowUI` behavior is suspicious, rerun with the same `--msgbox` / `--inputbox` / `--filedialog` values plus `--ui-stream` before adding extra `XlflowDebug.Log` or other VBA logging. Compare:
 
 - realtime stderr lines for the order of dialog resolution
 - final `ui.events` for structured post-run inspection

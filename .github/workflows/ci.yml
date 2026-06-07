@@ -9,10 +9,61 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_ci: ${{ steps.detect.outputs.run_ci }}
+      changed_files: ${{ steps.detect.outputs.changed_files }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect markdown-only changes
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            changed_files="$(git diff --name-only "$base_ref...HEAD")"
+          else
+            before_sha="${{ github.event.before }}"
+            if [[ -z "$before_sha" || "$before_sha" == "0000000000000000000000000000000000000000" ]]; then
+              echo "run_ci=true" >> "$GITHUB_OUTPUT"
+              echo "changed_files=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            changed_files="$(git diff --name-only "$before_sha...${{ github.sha }}")"
+          fi
+
+          {
+            echo "changed_files<<EOF"
+            printf '%s\n' "$changed_files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          run_ci=false
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            if [[ "$path" != *.md ]]; then
+              run_ci=true
+              break
+            fi
+          done <<< "$changed_files"
+
+          echo "run_ci=$run_ci" >> "$GITHUB_OUTPUT"
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -29,9 +80,13 @@ jobs:
         run: .\scripts\dev\lint-powershell.ps1
 
   test:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -44,9 +99,13 @@ jobs:
       - run: go vet ./...
 
   security:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

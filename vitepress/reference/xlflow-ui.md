@@ -170,7 +170,7 @@ When an AI agent edits VBA that includes simple dialogs:
 
 ## Debugging Headless Dialogs
 
-If headless `XlflowUI` behavior is unclear, rerun with the same `--msgbox` / `--inputbox` / `--filedialog` values plus `--ui-stream` before adding extra trace or VBA logging.
+If headless `XlflowUI` behavior is unclear, rerun with the same `--msgbox` / `--inputbox` / `--filedialog` values plus `--ui-stream` before adding extra `XlflowDebug.Log` or other VBA logging.
 
 - Use realtime stderr lines to confirm dialog order and response source.
 - Use final `ui.events` for structured post-run inspection.

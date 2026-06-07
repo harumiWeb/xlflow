@@ -1,6 +1,6 @@
 ---
 name: xlflow
-description: Use when Codex or another AI agent needs to edit, test, debug, or validate Excel VBA workbooks with xlflow. Provides the safe VBA development workflow for xlflow projects, including pull/push, lint, run, trace, test, diff, XlflowUI dialog and file dialog wrapper guidance, headless dialog responses, failure handling, and final reporting rules.
+description: Use when Codex or another AI agent needs to edit, test, debug, or validate Excel VBA workbooks with xlflow. Provides the safe VBA development workflow for xlflow projects, including pull/push, lint, run, test, diff, XlflowUI dialog and file dialog wrapper guidance, headless dialog responses, failure handling, and final reporting rules.
 ---
 
 # xlflow Skill
@@ -39,7 +39,7 @@ Default safety rules for AI-agent work:
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
 1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
-2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, `save`, `ui button add`, `ui button list`, and `ui button remove` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
+2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --json` while iterating, and use `xlflow run --session --json` or `xlflow run --headless --session --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
 5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
@@ -79,7 +79,6 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - When a macro or test uses `XlflowUI.MsgBox`, `XlflowUI.InputBox`, or `XlflowUI` file dialog wrappers, keep unattended validation headless by passing repeated `--msgbox <dialog-id=result>`, `--inputbox <dialog-id=value>`, and `--filedialog <kind>:<dialog-id>=<value>` flags to `xlflow run` or `xlflow test`.
    - Add `--ui-stream` when the agent or user needs realtime confirmation of which headless dialog path was taken. Expect stderr lines such as `xlflow: ui kind=msgbox id=confirm-save source=default result=yes` and `xlflow: ui kind=file-open id=source-files source=scripted value=C:\temp\a.txt | C:\temp\b.txt`, plus final `ui.events` in JSON or a UI section in human output.
    - Use `xlflow run <MacroName> --interactive --json` only when a human can operate Excel dialogs or forms.
-   - Use `xlflow run <MacroName> --trace --session --json` when debugging runtime behavior or workbook mutation.
 
 5. Inspect workbook results.
    - Use `xlflow list forms --session --json` when the workbook contains UserForms and you need the authoritative form names before planning `inspect form`, snapshot, or source review work.
@@ -118,7 +117,6 @@ Before editing, decide what is authoritative:
 - If `xlflow.toml` exists and source files are present, start a session, edit the configured source tree, and use `xlflow push --fast --session --json` during normal development.
 - If the user says the workbook has the latest VBA, or source files are missing or stale, run `xlflow pull --session --json` after starting the session, then edit source files.
 - Do not mix direct workbook edits with source edits in the same task unless the requested change is workbook-state only and no VBA source change is needed.
-- After `xlflow trace inject --json`, remember that `XlflowTrace.bas` is generated xlflow support code. Do not rewrite it by hand unless the user is changing xlflow itself.
 - Treat `xlflow inspect` without `--session` as a disk snapshot reader. If the task depends on unsaved session changes, either inspect with `--session` or save first.
 
 Before running a macro, decide the runnable entrypoint:
@@ -151,17 +149,17 @@ When the user asks to create or change VBA behavior:
    - Use `xlflow test --module <ModuleName> --session --json` to run one suite.
    - Use `xlflow test --tag <tag> --session --json` for tag-based subsets.
    - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, or debugging test failures.
-8. If tests do not cover the behavior, run `xlflow macros --session --json`, then `xlflow run --headless --session --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --json` / `xlflow run <qualified_name> --trace --session --json` for non-default entrypoints.
+8. If tests do not cover the behavior, run `xlflow macros --session --json`, then `xlflow run --headless --session --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --json` for non-default entrypoints. Add `XlflowDebug.Log` before rerunning if internal runtime state is still unclear.
 9. When workbook output matters, run `xlflow save --json` if needed, then inspect the result with `xlflow inspect workbook|sheets|range|used-range|cell --json`, or use `xlflow inspect form <FormName> --session --json` for live UserForm state.
 10. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
 11. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
 
-1. Start `xlflow session start`, then reproduce with `xlflow test --session --json` or `xlflow run <qualified_name> --trace --session --json`.
-2. Inspect `error.code`, `error.phase`, VBA error metadata, and trace events before changing source.
+1. Start `xlflow session start`, then reproduce with `xlflow test --session --json` or `xlflow run <qualified_name> --session --json`.
+2. Inspect `error.code`, `error.phase`, VBA error metadata, `run_diagnostic`, and any returned `debug.events` before changing source.
 3. Run `xlflow doctor --json` for setup phases such as `open_workbook`, `prepare_vbide`, or `inject_harness`.
-4. Add targeted `XlflowLog` calls only around the suspected path, rerun, and keep the final trace noise low.
+4. If the failure location is still unclear, load [references/debugging.md](references/debugging.md) and follow the line-number plus `XlflowDebug.Log` workflow there.
 5. Patch the smallest relevant source area, then rerun the reproduction and broader verification.
 
 ## Command Usage
@@ -203,9 +201,9 @@ When the user reports a runtime failure:
 - Plain `xlflow run --session --json` already compiles first, uses `project.entry` when the macro argument is omitted, and returns structured compile diagnostics by default.
 - Use `xlflow run --fast --session --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
-- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `trace`, `save`, `ui button add`, `ui button list`, and `ui button remove`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
+- Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow attach --active --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
-- Use `xlflow run --trace --session` when tests are absent, the macro mutates workbook state, or a runtime failure needs trace events during a session.
+- Use `xlflow run --session --json` when tests are absent or the macro mutates workbook state. If more internal state is needed, add `XlflowDebug.Log` and rerun.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
 
 ## VBA Coding Rules
@@ -241,20 +239,18 @@ Use normal Excel COM-backed commands with or without --json; xlflow reports prog
 
 After starting a workbook-dependent command, wait for the process to exit before beginning the next step. Do not synchronize on transient stderr frames or assume silence means the command is stalled.
 
-## Trace Rules
+## Debug Rules
 
-Use `xlflow run --trace --session --json` when you need trace events during normal development; xlflow can temporarily inject and revert the helper if it is missing. Use `xlflow trace enable --session --json` when you want the helper persisted in the configured workbook and source tree. Use `xlflow trace status --session --json`, `xlflow trace disable --session --json`, and `xlflow trace clean --json` to inspect or remove trace state. `xlflow trace inject` is an older alias for `trace enable`.
+Use `XlflowDebug.Log` for VBA-internal execution-state logging and `xlflow run --session --json` or `xlflow test --session --json` for machine-readable execution results.
 
-Read the human output or top-level `trace.lifecycle` to tell whether the helper was temporary for one run or already persisted. If a traced run reports temporary helper injection but you want source-controlled tracing, follow with `xlflow trace enable --session --json`.
+When debugging, add `XlflowDebug.Log` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
 
-When debugging, add `XlflowLog` calls at procedure entry, important branches, row or column counts, external paths, before and after destructive operations, and error handlers.
-
-Keep high-level progress trace logs if they help future diagnosis. Remove noisy temporary logs before finalizing.
+Keep high-level progress debug logs if they help future diagnosis. Remove noisy temporary logs before finalizing.
 
 ```vb
-Call XlflowLog("start GenerateReport")
-Call XlflowLog("lastRow=" & lastRow)
-Call XlflowLog("finished GenerateReport")
+XlflowDebug.Log "start GenerateReport"
+XlflowDebug.Log "lastRow", lastRow
+XlflowDebug.Log "finished GenerateReport"
 ```
 
 ## Windows PowerShell Checklist
@@ -282,7 +278,7 @@ If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, 
 
 If `xlflow run --diagnostic --session --json` fails with `vba_compile_failed`, inspect `run_diagnostic.kind`, `run_diagnostic.message`, `run_diagnostic.location`, and `run_diagnostic.nearby_code` before changing source. Treat dialog text as localized opaque text and fix the selected source location when available.
 
-If `xlflow run --trace --session` fails, read trace events from top to bottom, identify the last successful event, add targeted trace logs around the suspected block, and rerun. If the traced run fails with zero events, execution may have failed before reaching user `XlflowLog` calls; add an entry trace at the macro start or verify the macro target with `xlflow macros --session --json`.
+If `xlflow run --session --json` fails, read `debug.events`, identify the last successful log line, add targeted `XlflowDebug.Log` calls around the suspected block, and rerun. If the failed run has no useful debug events, add an entry log at the macro start or verify the macro target with `xlflow macros --session --json`. For normal `run` debugging, prefer [references/debugging.md](references/debugging.md) and `XlflowDebug.Log`.
 
 If a headless `XlflowUI` run behaves differently than expected, reproduce with the same `--msgbox` / `--inputbox` values plus `--ui-stream`. Compare the streamed stderr lines against the final `ui.events` payload to confirm which dialog ids resolved from scripted responses versus workbook defaults.
 

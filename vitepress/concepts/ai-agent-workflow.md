@@ -25,6 +25,6 @@ Rules for agents:
 - Use `macros` before guessing a `run` target.
 - Replace raw `MsgBox` / `InputBox` with `XlflowUI` and pass `--msgbox` / `--inputbox` during unattended `run` or `test` flows.
 - Use `inspect` and `export-image` to verify workbook output.
-- Use `trace` when runtime failures are unclear.
+- Use `XlflowDebug.Log` plus `xlflow run --json` or `xlflow test --json` when runtime failures are unclear.
 - Use `backup list` and `rollback` when a `push` or workbook mutation leaves the workbook in a bad state.
 - Avoid headless workflows only for truly human-operated raw dialogs or UserForms; simple confirmation and scalar-input flows should move to `XlflowUI` first.

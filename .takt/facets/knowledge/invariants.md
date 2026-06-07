@@ -25,7 +25,6 @@
 ## Preflight and Error Safety
 
 - Predictable source problems should fail with structured CLI issues before Excel opens.
-- Missing xlflow trace helpers are compile-time source problems except where configured `run --trace` can inject helpers temporarily.
 - Known Excel object/member mismatches and invalid VBA quote escapes should be caught before VBE modal dialogs.
 - Unsupported CLI/script action enums should fail before Excel COM starts.
 

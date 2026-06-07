@@ -13,7 +13,6 @@ It should continue to support existing workbook-backed behavior, including:
 - `push`
 - `run`
 - `test`
-- `trace`
 - `session`
 - `macros`
 - `inspect`
