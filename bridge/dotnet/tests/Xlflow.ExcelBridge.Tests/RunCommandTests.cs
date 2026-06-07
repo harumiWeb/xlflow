@@ -312,6 +312,33 @@ public sealed class RunCommandTests
         Assert.Equal(expectedNeedsSave, result.NeedsSave);
     }
 
+    [Fact]
+    public void DefaultRuntimeSkipRequiresNoDebugOrUiInjection()
+    {
+        var args = RunArgs(@"C:\work\Book.xlsm", "Main.Run") with
+        {
+            RuntimeSource = "default",
+        };
+
+        Assert.True(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+
+        args = args with
+        {
+            DebugStreamEnabled = true,
+            DebugStreamPipeName = @"\\.\pipe\xlflow-debug",
+        };
+        Assert.False(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+
+        args = args with
+        {
+            DebugStreamEnabled = false,
+            DebugStreamPipeName = "",
+            UIStreamEnabled = true,
+            UIStreamPipeName = @"\\.\pipe\xlflow-ui",
+        };
+        Assert.False(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+    }
+
     private static RunCommandArguments RunArgs(string workbookPath, string macroName)
     {
         return new RunCommandArguments(

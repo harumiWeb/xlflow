@@ -127,12 +127,17 @@ public sealed class ExcelRunService : IRunService
             }
 
             var sw = Stopwatch.StartNew();
-            var invocation = InvokeInProcess(
-                excel,
-                macroReference,
-                args.Direct ? macroArgs : [],
-                excelProcessId,
+            var invocation = InvokeWithWorker(
+                new MacroRunWorkerRequest(
+                    excelProcessId,
+                    excelHwnd,
+                    macroReference,
+                    (args.Direct ? macroArgs : [])
+                        .Select(argument => new MacroRunWorkerArgument(argument.Type, argument.Value))
+                        .ToArray(),
+                    WorkbookPath: args.WorkbookPath),
                 excelHwnd,
+                DialogKind.Any,
                 args.SuppressModalErrors,
                 ResolveTimeout(request, args, commandStopwatch.Elapsed),
                 cancellationToken,
@@ -549,151 +554,6 @@ public sealed class ExcelRunService : IRunService
             selectionLocator);
     }
 
-    private static WorkerInvocationResult InvokeInProcess(
-        object excel,
-        string macroReference,
-        IReadOnlyList<MacroArg> macroArgs,
-        int excelProcessId,
-        long excelHwnd,
-        bool suppressModalErrors,
-        TimeSpan timeout,
-        CancellationToken cancellationToken,
-        VbeSelectionLocator? selectionLocator = null)
-    {
-        var watcher = new DialogWatcher();
-        var actionPolicy = suppressModalErrors
-            ? selectionLocator is not null
-                ? DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug
-                : DialogActionPolicy.SuppressVbaError
-            : DialogActionPolicy.ObserveOnly;
-        var watchRequest = new DialogWatchRequest(
-            excelProcessId,
-            excelHwnd,
-            DialogKind.Any,
-            actionPolicy,
-            timeout,
-            TimeSpan.FromMilliseconds(50));
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var locationCaptures = new List<VbeSelectionCapture>();
-        var locationCaptureGate = new object();
-
-        void CaptureBefore(DialogKind kind)
-        {
-            if ((kind is DialogKind.Compile or DialogKind.Runtime) && selectionLocator is not null)
-            {
-                lock (locationCaptureGate)
-                {
-                    locationCaptures.Add(selectionLocator.Capture("before_dialog_action"));
-                }
-            }
-        }
-
-        void CaptureAfter(DialogKind kind)
-        {
-            lock (locationCaptureGate)
-            {
-                if ((kind is DialogKind.Compile or DialogKind.Runtime) &&
-                    selectionLocator is not null &&
-                    !locationCaptures.Any(capture => capture.HasReliableLocation))
-                {
-                    locationCaptures.Add(selectionLocator.Capture("after_dialog_action"));
-                }
-                if (kind == DialogKind.Runtime)
-                {
-                    selectionLocator?.ResetBreakMode();
-                }
-            }
-        }
-
-        VbeSelectionCapture MergeCurrentCaptures()
-        {
-            lock (locationCaptureGate)
-            {
-                if (locationCaptures.Count == 0)
-                {
-                    return VbeSelectionCapture.Empty;
-                }
-                var location = locationCaptures
-                    .Select(capture => capture.Location)
-                    .Where(location => location is not null)
-                    .OrderByDescending(location => VbeSelectionScorer.Score(location!))
-                    .FirstOrDefault();
-                return new VbeSelectionCapture(location, locationCaptures.SelectMany(capture => capture.Attempts).ToArray());
-            }
-        }
-
-        var watcherTask = Task.Run(() => watcher.WaitForDialog(watchRequest, CaptureBefore, CaptureAfter, linked.Token), linked.Token);
-        MacroRunWorkerResult? result;
-        var stage = "application_run";
-        try
-        {
-            var invokeArgs = new List<object?> { macroReference };
-            foreach (var argument in macroArgs)
-            {
-                invokeArgs.Add(ConvertArgument(argument));
-            }
-
-            var value = ExcelBridgeSupport.InvokeMethod(excel, "Run", invokeArgs.ToArray());
-            stage = "post_run_pump";
-            ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(100));
-            result = new MacroRunWorkerResult(true, true, NormalizeMacroValue(value), null);
-        }
-        catch (Exception ex)
-        {
-            var detail = ex.InnerException ?? ex;
-            result = new MacroRunWorkerResult(
-                Completed: true,
-                Ok: false,
-                Value: null,
-                Error: new MacroRunWorkerError(
-                    ExcelBridgeSupport.FormatExceptionDetail(ex),
-                    detail.Source ?? "xlflow-excel-bridge",
-                    detail.HResult,
-                    stage));
-        }
-
-        var postDialog = WaitForPostWorkerDialog(
-            watcher,
-            watcherTask,
-            watchRequest,
-            operation: "run",
-            result,
-            linked.Token,
-            CaptureBefore,
-            CaptureAfter);
-        linked.Cancel();
-        if (postDialog is not null)
-        {
-            return new WorkerInvocationResult(result, postDialog, [postDialog], MergeCurrentCaptures(), false, Environment.ProcessId);
-        }
-        return new WorkerInvocationResult(result, null, [], MergeCurrentCaptures(), false, Environment.ProcessId);
-    }
-
-    private static object ConvertArgument(MacroArg argument)
-    {
-        return argument.Type.ToLowerInvariant() switch
-        {
-            "int" => int.Parse(argument.Value, NumberStyles.Integer, CultureInfo.InvariantCulture),
-            "double" => double.Parse(argument.Value, NumberStyles.Float, CultureInfo.InvariantCulture),
-            "bool" => bool.Parse(argument.Value),
-            _ => argument.Value,
-        };
-    }
-
-    private static object? NormalizeMacroValue(object? value)
-    {
-        if (value is Array array)
-        {
-            var items = new object?[array.Length];
-            for (var i = 0; i < array.Length; i++)
-            {
-                items[i] = array.GetValue(i);
-            }
-            return items;
-        }
-        return value;
-    }
-
     internal static DialogSnapshot? WaitForPostWorkerDialog(
         DialogWatcher watcher,
         Task<DialogSnapshot?> watcherTask,
@@ -1011,12 +871,13 @@ public sealed class ExcelRunService : IRunService
             args.UIStreamRedactInput);
     }
 
-    private static bool IsDefaultRuntimeWithoutInjectedFeatures(RunCommandArguments args)
+    internal static bool IsDefaultRuntimeWithoutInjectedFeatures(RunCommandArguments args)
     {
         return string.Equals(args.RuntimeSource, "default", StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(args.MsgBoxResponsesJSON) &&
             string.IsNullOrWhiteSpace(args.InputResponsesJSON) &&
             string.IsNullOrWhiteSpace(args.FileDialogResponsesJSON) &&
+            (!args.DebugStreamEnabled || string.IsNullOrWhiteSpace(args.DebugStreamPipeName)) &&
             (!args.UIStreamEnabled || string.IsNullOrWhiteSpace(args.UIStreamPipeName));
     }
 
