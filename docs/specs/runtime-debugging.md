@@ -18,6 +18,14 @@ XlflowDebug.Log "current sheet", ws.Name
 
 During `run` and `test`, xlflow injects the temporary debug pipe marker used by `XlflowDebug.Log` and returns those lines through stderr streaming and the final JSON envelope.
 
+## Run JSON Verbosity
+
+`xlflow run --json` keeps diagnostic behavior enabled by default but uses a compact failure payload optimized for AI-agent and normal development loops. The default run JSON keeps the high-signal fields needed to answer what failed, where it failed, what workbook/session state matters next, and what action is suggested next.
+
+For failed macro runs, the default JSON contract keeps top-level `status`, `command`, `error`, `macro.name`, `macro.duration_ms`, `location`, `session`, `target`, `warnings`, and `suggestion`. The failure `location` is promoted to a top-level field so callers do not need to parse xlflow's internal diagnostic namespace just to find the relevant source file and line.
+
+`xlflow run --json --verbose` preserves the broader diagnostic payload used for xlflow internals, dialog-watcher debugging, and bug reports. `--verbose` controls output verbosity only; it does not change compile/runtime diagnostic collection, modal dialog suppression, or location capture behavior.
+
 ## Run Failure Phases
 
 `xlflow run` reports the phase that failed so callers can distinguish environment setup failures from user-code failures. Stable phase names are:
@@ -34,13 +42,15 @@ The phase is included in JSON error metadata. Plain-text output remains short, b
 
 When Excel exposes enough information to distinguish a missing or invalid macro target from user-code failure, xlflow reports a target-specific error code instead of generic `macro_failed`.
 
-For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, debug context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern.
+For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, debug context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern. In the default JSON contract, `suggestion` and the best available `location` are promoted to top-level fields; `run_diagnostic` remains a verbose/debug-oriented namespace.
 
 ## Runtime Modal Suppression
 
 Default `xlflow run` suppresses VBA runtime error dialogs owned by the Excel process during macro invocation. xlflow closes the dialog, returns a structured CLI failure, and adds `run_diagnostic.kind = "runtime"` with dialog metadata and VBE selection context when Excel exposes it.
 
-For `.NET` bridge runs, VBE selection capture is best-effort and timeout-bounded. When Excel exposes the active VBE code pane, `run_diagnostic.location` may include `confidence`, `method`, `source_path`, `component`, `component_type`, `procedure`, `line`, `column`, `end_line`, `end_column`, and `text`. Field names follow xlflow's `snake_case` JSON convention. Verified line values are source-file line numbers, adjusted for exported metadata that VBE hides such as `Attribute VB_*`; column values are omitted when VBE only exposes an unreliable whole-line selection. Capture failures do not change the command failure code; they are reported under `run_diagnostic.location_capture.attempts` with timings such as `before_dialog_action` or `after_dialog_action`.
+For `.NET` bridge runs, VBE selection capture is best-effort and timeout-bounded. When Excel exposes the active VBE code pane, `run_diagnostic.location` may include `confidence`, `method`, `source_path`, `component`, `component_type`, `procedure`, `line`, `column`, `end_line`, `end_column`, and `text`. Field names follow xlflow's `snake_case` JSON convention. Verified line values are source-file line numbers, adjusted for exported metadata that VBE hides such as `Attribute VB_*`; column values are omitted when VBE only exposes an unreliable whole-line selection. Capture failures do not change the command failure code; they are reported under `run_diagnostic.location_capture.attempts` with timings such as `before_dialog_action` or `after_dialog_action` when verbose output is requested.
+
+Default `run --json` does not emit full dialog/window/control snapshots, duplicate `dialog` and `dialogs` payloads, low-level dialog-watcher metadata, workbook/bridge/runtime debug metadata, or location-capture attempt details. Verbose run JSON keeps those details for troubleshooting and bug reports. When verbose dialog snapshots are emitted, `dialogs` is the preferred full snapshot field; callers should not depend on duplicated single-dialog payloads.
 
 The .NET bridge does not require a runtime dialog to be visible. Excel can defer
 painting an owned dialog until the Excel window receives focus. Unattended
@@ -64,7 +74,7 @@ is reopened.
 
 Diagnostic mode starts a Win32 watcher for top-level windows owned by the Excel process, executes VBE Compile through the VBE command bars, and closes the compile dialog after collecting its child control text. Dialog text is returned as localized opaque text; xlflow does not parse or translate Japanese or English compile messages.
 
-Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`. `run_diagnostic.kind = "compile"` includes the dialog message, VBE selection location, nearby code, and dialog metadata when available. `push` compile failures use the same `.NET` selection capture under `push_diagnostic.kind = "compile"` after source import and before the workbook is saved. In the `.NET` bridge, the selection capture runs before the dialog is dismissed and retries once immediately after dismissal only if no meaningful location was captured. `--diagnostic --direct` is invalid. `--diagnostic --fast` remains valid but disables the direct fast path so the run can keep structured diagnostics. `--gui-compile-errors` disables this compile watcher and the default runtime modal suppression path so VBA errors remain in the GUI intentionally.
+Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`. `run_diagnostic.kind = "compile"` includes the dialog message, VBE selection location, nearby code, and dialog metadata when available. Default `run --json` still promotes the best available `location` to the top level and keeps the rest of the compile diagnostic detail behind `--verbose`. `push` compile failures use the same `.NET` selection capture under `push_diagnostic.kind = "compile"` after source import and before the workbook is saved. In the `.NET` bridge, the selection capture runs before the dialog is dismissed and retries once immediately after dismissal only if no meaningful location was captured. `--diagnostic --direct` is invalid. `--diagnostic --fast` remains valid but disables the direct fast path so the run can keep structured diagnostics. `--gui-compile-errors` disables this compile watcher and the default runtime modal suppression path so VBA errors remain in the GUI intentionally.
 
 ## Runtime Source Analysis
 
