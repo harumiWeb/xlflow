@@ -41,6 +41,8 @@ var (
 	dimWithoutAs      = regexp.MustCompile(`(?i)^\s*(dim|private|public|static)\s+([^']+)$`)
 	publicVarRe       = regexp.MustCompile(`(?i)^\s*public\s+\w+`)
 	publicProcRe      = regexp.MustCompile(`(?i)^\s*public\s+(sub|function|property|type|enum|declare)\b`)
+	typeStartRe       = regexp.MustCompile(`(?i)^\s*(private|public)?\s*type\b`)
+	typeEndRe         = regexp.MustCompile(`(?i)^\s*end\s+type\b`)
 )
 
 const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
@@ -132,6 +134,7 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 
 	var issues []Issue
 	hasOptionExplicit := false
+	inTypeBlock := false
 	procedures := make([]procedureFrame, 0)
 	var logicalLine strings.Builder
 	logicalStartLine := 0
@@ -158,8 +161,13 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 		if l.Config.Lint.ForbidOnErrorResumeNext && onErrorResumeNext.MatchString(code) {
 			issues = append(issues, l.issue(path, lineNo, "VB004", "warning", "Avoid On Error Resume Next without a narrow recovery block."))
 		}
-		if l.Config.Lint.DetectImplicitVariant && looksImplicitVariant(trimmed) {
+		if l.Config.Lint.DetectImplicitVariant && looksImplicitVariant(trimmed, inTypeBlock) {
 			issues = append(issues, l.issue(path, lineNo, "VB005", "warning", "Declare an explicit type with As <Type>."))
+		}
+		if typeStartRe.MatchString(trimmed) {
+			inTypeBlock = true
+		} else if typeEndRe.MatchString(trimmed) {
+			inTypeBlock = false
 		}
 		if l.Config.Lint.ForbidPublicModuleFields && looksPublicVariable(trimmed) {
 			issues = append(issues, l.issue(path, lineNo, "VB006", "warning", "Avoid Public module variables; pass state explicitly."))
@@ -256,19 +264,33 @@ func (l Linter) issue(path string, line int, code, severity, message string) Iss
 	}
 }
 
-func looksImplicitVariant(line string) bool {
-	if line == "" || strings.Contains(strings.ToLower(line), " as ") {
+func looksImplicitVariant(line string, inTypeBlock bool) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if lower == "" || strings.Contains(lower, " as ") {
 		return false
+	}
+	if inTypeBlock {
+		return !typeEndRe.MatchString(line)
 	}
 	matches := dimWithoutAs.FindStringSubmatch(line)
 	if len(matches) == 0 {
 		return false
 	}
-	lower := strings.ToLower(strings.TrimSpace(line))
 	return !strings.HasPrefix(lower, "public sub ") &&
 		!strings.HasPrefix(lower, "public function ") &&
+		!strings.HasPrefix(lower, "public property ") &&
+		!strings.HasPrefix(lower, "public type ") &&
+		!strings.HasPrefix(lower, "public enum ") &&
+		!strings.HasPrefix(lower, "public declare ") &&
 		!strings.HasPrefix(lower, "private sub ") &&
-		!strings.HasPrefix(lower, "private function ")
+		!strings.HasPrefix(lower, "private function ") &&
+		!strings.HasPrefix(lower, "private property ") &&
+		!strings.HasPrefix(lower, "private type ") &&
+		!strings.HasPrefix(lower, "private enum ") &&
+		!strings.HasPrefix(lower, "private declare ") &&
+		!strings.HasPrefix(lower, "friend sub ") &&
+		!strings.HasPrefix(lower, "friend function ") &&
+		!strings.HasPrefix(lower, "friend property ")
 }
 
 func containsTypographicQuote(line string) bool {

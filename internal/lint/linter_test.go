@@ -132,6 +132,56 @@ End Sub
 	}
 }
 
+func TestLinterHandlesImplicitVariantsInsideUDTs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Private Type TypedConfig
+  Version As Long
+  Label As String
+End Type
+
+Private Type UntypedConfig
+  MissingField
+End Type
+
+Sub Main()
+  Dim outsideValue
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Types.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb005Lines := make(map[int]bool)
+	for _, issue := range issues {
+		if issue.Code == "VB005" {
+			vb005Lines[issue.Line] = true
+		}
+	}
+	if vb005Lines[2] {
+		t.Fatalf("typed UDT declaration should not trigger VB005: %+v", issues)
+	}
+	if vb005Lines[3] || vb005Lines[4] {
+		t.Fatalf("typed UDT fields should not trigger VB005: %+v", issues)
+	}
+	if !vb005Lines[8] {
+		t.Fatalf("untyped UDT field should trigger VB005: %+v", issues)
+	}
+	if !vb005Lines[12] {
+		t.Fatalf("normal implicit variant outside UDT should still trigger VB005: %+v", issues)
+	}
+	if len(vb005Lines) != 2 {
+		t.Fatalf("expected exactly two VB005 findings, got %+v", issues)
+	}
+}
+
 func TestLinterAllowsInteractiveInputWhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
