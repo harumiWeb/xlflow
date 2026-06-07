@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added best-effort `.NET` VBE selection diagnostics for suppressed compile/runtime dialogs in `xlflow run --bridge dotnet --json` and compile failures in `xlflow push`, including selected component, procedure, source path, source-file line range, selected line text, and non-fatal capture-attempt metadata when Excel exposes it.
+- Improved `.NET` dialog watcher button diagnostics and action selection by capturing Win32 button `access_key`, `control_id`, and `enabled` metadata. VBA runtime suppression now prefers accelerator keys such as `D` for Debug and `E` for End before localized text fallback, improving tolerance for non-English Excel/VBE UI.
 - Removed the legacy runtime-debug command surface completely. VBA-internal debugging is now documented around `XlflowDebug.Log`, `xlflow run --json`, structured diagnostics, and `Erl`/line-number workflows. Legacy `XlflowLog` / `XlflowSetTraceFile` usage is now treated as removed API surface in source analysis and preflight guidance.
 - Added explicit VBA line-number operations to `xlflow fmt` via `--line-numbers preserve|add|remove|renumber`, including conservative ambiguity warnings for numeric-label control flow and structured JSON summary fields under `output.line_numbers`.
 - Fixed `xlflow fmt --line-numbers add` so it no longer numbers `Select Case`, `Case` / `Case Else`, or `End Select` control lines, avoiding VBA compile failures when the first `Case` in a select block is numbered.

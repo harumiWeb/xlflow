@@ -16,6 +16,23 @@ public sealed class DialogWatcherTests
     }
 
     [Fact]
+    public void ClassifyRuntimeDialogFromAcceleratorFingerprint()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic",
+            text: ["localized runtime message"],
+            buttons:
+            [
+                Button(11, "Localized continue(&C)"),
+                Button(12, "Localized end(&E)"),
+                Button(13, "Localized debug(&D)"),
+                Button(14, "Localized help(&H)"),
+            ]);
+
+        Assert.Equal(DialogKind.Runtime, DialogFingerprint.Classify(candidate, null));
+    }
+
+    [Fact]
     public void ClassifyCompileDialogFromCompileMessage()
     {
         var candidate = Candidate(
@@ -33,6 +50,21 @@ public sealed class DialogWatcherTests
             title: "Microsoft Visual Basic for Applications",
             text: ["コンパイル エラー:", "構文エラー"],
             buttons: [Button(11, "OK"), Button(12, "ヘルプ")]);
+
+        Assert.Equal(DialogKind.Compile, DialogFingerprint.Classify(candidate, null));
+    }
+
+    [Fact]
+    public void ClassifyCompileDialogFromVbeButtonStructure()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic for Applications",
+            text: ["localized compile message"],
+            buttons:
+            [
+                new WindowElement(11, "Button", "localized primary", null, 2, true),
+                new WindowElement(12, "Button", "localized help", null, 9, true),
+            ]);
 
         Assert.Equal(DialogKind.Compile, DialogFingerprint.Classify(candidate, null));
     }
@@ -76,6 +108,38 @@ public sealed class DialogWatcherTests
     }
 
     [Fact]
+    public void CompileActionPrefersOkControlId()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic for Applications",
+            text: ["localized compile message"],
+            buttons: [new WindowElement(11, "Button", "localized ok", null, 1, true)]);
+
+        var action = DialogActionSelector.Select(DialogKind.Compile, candidate, DialogActionPolicy.SuppressVbaError);
+
+        Assert.Equal("compile_close", action.Name);
+        Assert.Equal(11, action.TargetHwnd);
+    }
+
+    [Fact]
+    public void CompileActionCanCloseVbeDialogByPrimaryButtonStructure()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic for Applications",
+            text: ["localized compile message"],
+            buttons:
+            [
+                new WindowElement(11, "Button", "localized primary", null, 2, true),
+                new WindowElement(12, "Button", "localized help", null, 9, true),
+            ]);
+
+        var action = DialogActionSelector.Select(DialogKind.Compile, candidate, DialogActionPolicy.SuppressVbaError);
+
+        Assert.Equal("compile_close", action.Name);
+        Assert.Equal(11, action.TargetHwnd);
+    }
+
+    [Fact]
     public void RuntimeActionPrefersEndToAvoidLeavingVbeInBreakMode()
     {
         var candidate = Candidate(
@@ -101,6 +165,28 @@ public sealed class DialogWatcherTests
 
         Assert.Equal("runtime_end", action.Name);
         Assert.Equal(11, action.TargetHwnd);
+    }
+
+    [Fact]
+    public void RuntimeActionCanUseAcceleratorWithoutKnownLabel()
+    {
+        var candidate = Candidate(
+            title: "Microsoft Visual Basic",
+            text: ["localized runtime message"],
+            buttons: [Button(11, "localized end(&E)"), Button(12, "localized debug(&D)")]);
+
+        var action = DialogActionSelector.Select(DialogKind.Runtime, candidate, DialogActionPolicy.SuppressVbaErrorWithRuntimeDebug);
+
+        Assert.Equal("runtime_debug", action.Name);
+        Assert.Equal(12, action.TargetHwnd);
+    }
+
+    [Fact]
+    public void AccessKeyExtractorReadsAmpersandAndParenthesizedKeys()
+    {
+        Assert.Equal("D", DialogAccessKey.Extract("&Debug"));
+        Assert.Equal("E", DialogAccessKey.Extract("終了(&E)"));
+        Assert.Equal("H", DialogAccessKey.Extract("ヘルプ（H）"));
     }
 
     [Fact]
