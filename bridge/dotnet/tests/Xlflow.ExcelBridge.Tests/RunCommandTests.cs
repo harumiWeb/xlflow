@@ -469,6 +469,40 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void SourceLineMapperMapsVbeLineToRawSourceLine()
+    {
+        const string source = """
+            Attribute VB_Name = "Main"
+            Option Explicit
+
+            Public Sub Run()
+              Dim values(0 To 0) As Integer
+              values(0) = 1
+              values(1) = 2
+            End Sub
+            """;
+
+        var line = SourceLineMapper.MapVbeLineToSourceLine(source, 6, "  values(1) = 2");
+
+        Assert.Equal(7, line);
+    }
+
+    [Fact]
+    public void SourceLineMapperReturnsNullWhenVbeLineCannotBeVerified()
+    {
+        const string source = """
+            Attribute VB_Name = "Main"
+            Option Explicit
+            Public Sub Run()
+            End Sub
+            """;
+
+        var line = SourceLineMapper.MapVbeLineToSourceLine(source, 6, "  values(1) = 2");
+
+        Assert.Null(line);
+    }
+
+    [Fact]
     public void VbeSourcePathMapperReturnsProjectRelativePath()
     {
         var root = Path.Combine(Path.GetTempPath(), "xlflow-source-map-" + Guid.NewGuid().ToString("N"));

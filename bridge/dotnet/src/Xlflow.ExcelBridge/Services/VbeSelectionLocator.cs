@@ -1,20 +1,21 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text.Json.Serialization;
 
 namespace Xlflow.ExcelBridge.Services;
 
 internal sealed record ErrorLocation(
     string Confidence,
     string Method,
-    string? SourcePath,
-    string? Component,
-    string? ComponentType,
-    string? Procedure,
-    int? Line,
-    int? Column,
-    int? EndLine,
-    int? EndColumn,
-    string? Text);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourcePath,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Component,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ComponentType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Procedure,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Line,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Column,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndLine,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndColumn,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text);
 
 internal sealed record VbeSelectionCaptureAttempt(
     string Timing,
@@ -201,7 +202,8 @@ internal sealed class VbeSelectionLocator(
             var componentName = TryGetString(component, "Name");
             var componentType = TryGetInt(component, "Type");
             var componentTypeName = ComponentTypeName(componentType);
-            var sourcePath = VbeSourcePathMapper.ResolveSourcePath(component, sourceOptions);
+            var sourcePathInfo = VbeSourcePathMapper.ResolveSourcePathInfo(component, sourceOptions);
+            var sourcePath = sourcePathInfo?.JsonPath;
             var selection = TryGetSelection(pane);
             if (selection is not null && !string.IsNullOrWhiteSpace(componentName))
             {
@@ -219,7 +221,7 @@ internal sealed class VbeSelectionLocator(
                     selection.Value.EndLine,
                     selection.Value.EndColumn,
                     text);
-                return RefineLowValueSelection(codeModule, location);
+                return MapLocationToSourceFile(RefineLowValueSelection(codeModule, location), sourcePathInfo?.FullPath);
             }
 
             if (!string.IsNullOrWhiteSpace(componentName))
@@ -354,6 +356,67 @@ internal sealed class VbeSelectionLocator(
             EndColumn = Math.Max(column, text.Length + 1),
             Text = text,
         };
+    }
+
+    private static ErrorLocation MapLocationToSourceFile(ErrorLocation location, string? sourceFullPath)
+    {
+        if (location.Line is not > 0 || string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
+        {
+            return location;
+        }
+
+        try
+        {
+            var mappedLine = SourceLineMapper.MapVbeLineToSourceLine(
+                File.ReadAllText(sourceFullPath),
+                location.Line.Value,
+                location.Text);
+            if (mappedLine is null)
+            {
+                return location with
+                {
+                    Line = null,
+                    Column = null,
+                    EndLine = null,
+                    EndColumn = null,
+                };
+            }
+
+            var lineDelta = mappedLine.Value - location.Line.Value;
+            return location with
+            {
+                Line = mappedLine,
+                Column = ReliableSourceColumn(location),
+                EndLine = location.EndLine is > 0 ? location.EndLine + lineDelta : mappedLine,
+                EndColumn = ReliableSourceColumn(location) is not null ? location.EndColumn : null,
+            };
+        }
+        catch
+        {
+            return location with
+            {
+                Line = null,
+                Column = null,
+                EndLine = null,
+                EndColumn = null,
+            };
+        }
+
+    }
+
+    private static int? ReliableSourceColumn(ErrorLocation location)
+    {
+        if (location.Column is not > 0)
+        {
+            return null;
+        }
+
+        if (location.Column == 1 && !string.IsNullOrEmpty(location.Text) && char.IsWhiteSpace(location.Text[0]))
+        {
+            return null;
+        }
+
+        return location.Column;
     }
 
     private static int? FindLikelyCompileErrorLine(object codeModule)
@@ -615,6 +678,84 @@ internal static class VbeSelectionScorer
     }
 }
 
+internal static class SourceLineMapper
+{
+    public static int? MapVbeLineToSourceLine(string sourceText, int vbeLine, string? vbeText)
+    {
+        if (vbeLine <= 0)
+        {
+            return null;
+        }
+
+        var visibleLines = SplitLines(sourceText)
+            .Select((text, index) => new SourceVisibleLine(index + 1, text))
+            .Where(line => !IsHiddenExportMetadata(line.Text))
+            .ToArray();
+        if (vbeLine > visibleLines.Length)
+        {
+            return null;
+        }
+
+        var mapped = visibleLines[vbeLine - 1];
+        if (IsSameCodeLine(mapped.Text, vbeText))
+        {
+            return mapped.SourceLine;
+        }
+
+        if (!string.IsNullOrWhiteSpace(vbeText))
+        {
+            var normalizedVbeText = NormalizeCodeLine(vbeText);
+            var matchingLines = visibleLines
+                .Where(line => string.Equals(NormalizeCodeLine(line.Text), normalizedVbeText, StringComparison.Ordinal))
+                .Select(line => line.SourceLine)
+                .ToArray();
+            if (matchingLines.Length == 1)
+            {
+                return matchingLines[0];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsHiddenExportMetadata(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.StartsWith("Attribute VB_", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, "VERSION 1.0 CLASS", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, "VERSION 5.00", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, "BEGIN", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, "END", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MultiUse ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSameCodeLine(string sourceText, string? vbeText)
+    {
+        if (string.IsNullOrWhiteSpace(vbeText))
+        {
+            return true;
+        }
+
+        return string.Equals(NormalizeCodeLine(sourceText), NormalizeCodeLine(vbeText), StringComparison.Ordinal);
+    }
+
+    private static string NormalizeCodeLine(string? text)
+    {
+        return (text ?? "").Trim();
+    }
+
+    private static string[] SplitLines(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return [];
+        }
+        return text.Split(["\r\n", "\n", "\r"], StringSplitOptions.None);
+    }
+
+    private sealed record SourceVisibleLine(int SourceLine, string Text);
+}
+
 internal sealed record VbeSourceMappingOptions(
     string ModulesDir,
     string ClassesDir,
@@ -625,10 +766,17 @@ internal sealed record VbeSourceMappingOptions(
     string FolderAnnotation,
     bool DefaultComponentFolders);
 
+internal sealed record VbeSourcePathInfo(string JsonPath, string FullPath);
+
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Source path mapping is best-effort diagnostic enrichment.")]
 internal static class VbeSourcePathMapper
 {
     public static string? ResolveSourcePath(object? component, VbeSourceMappingOptions options)
+    {
+        return ResolveSourcePathInfo(component, options)?.JsonPath;
+    }
+
+    public static VbeSourcePathInfo? ResolveSourcePathInfo(object? component, VbeSourceMappingOptions options)
     {
         if (component is null)
         {
@@ -664,7 +812,11 @@ internal static class VbeSourcePathMapper
                 string.IsNullOrWhiteSpace(options.FolderAnnotation) ? "update" : options.FolderAnnotation,
                 options.DefaultComponentFolders);
 
-            return ToProjectRelativePath(path, options);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+            return new VbeSourcePathInfo(ToProjectRelativePath(path, options) ?? path, path);
         }
         catch
         {

@@ -2737,7 +2737,7 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return fakeBridgeProvider{
 			name:     string(excelbridge.ModeDotNet),
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 3 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 3 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"},"push_diagnostic":{"kind":"compile","location":{"source_path":"src/modules/Main.bas","line":6,"text":"  x ="}}}`)},
 		}
 	}
 
@@ -2763,6 +2763,9 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	if env.Source == nil {
 		t.Fatal("Source is nil")
 	}
+	if env.PushDiagnostic == nil {
+		t.Fatal("PushDiagnostic is nil")
+	}
 	target, ok := env.Target.(map[string]interface{})
 	if !ok || target["kind"] != "live_session" {
 		t.Fatalf("unexpected Target: %+v", env.Target)
@@ -2778,6 +2781,10 @@ func TestRunnerDotNetPushResponsePreservesEnvelopeFields(t *testing.T) {
 	source, ok := env.Source.(map[string]interface{})
 	if !ok || source["changed_only"] != false {
 		t.Fatalf("unexpected Source: %+v", env.Source)
+	}
+	diag, ok := env.PushDiagnostic.(map[string]interface{})
+	if !ok || diag["kind"] != "compile" {
+		t.Fatalf("unexpected PushDiagnostic: %+v", env.PushDiagnostic)
 	}
 }
 

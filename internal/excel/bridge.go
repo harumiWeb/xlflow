@@ -432,6 +432,7 @@ type ScriptResult struct {
 	Analysis        any           `json:"analysis,omitempty"`
 	Check           any           `json:"check,omitempty"`
 	RunDiagnostic   any           `json:"run_diagnostic,omitempty"`
+	PushDiagnostic  any           `json:"push_diagnostic,omitempty"`
 	Target          any           `json:"target,omitempty"`
 	Output          any           `json:"output,omitempty"`
 	Debug           any           `json:"debug,omitempty"`
@@ -1656,6 +1657,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Analysis = result.Analysis
 	env.Check = result.Check
 	env.RunDiagnostic = result.RunDiagnostic
+	env.PushDiagnostic = result.PushDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
 	if debugStreamErr != nil {
