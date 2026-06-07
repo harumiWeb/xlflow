@@ -135,8 +135,18 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--save`, `--save-as`, and default no-save behavior
 - Supports `--timeout` via bridge request timeout
 - Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
-- Runs modal `Application.Run` and VBE Compile calls in disposable child bridge
-  processes so the parent can watch dialogs and produce diagnostics
+- Stabilizes Excel before `Application.Run` by activating the target workbook,
+  waiting for the STA/COM caller to settle, and pumping messages around macro
+  invocation; generated harness runs also call `DoEvents` before and after the
+  target macro.
+- Returns `excel_com_rpc_failure` with `h_result` and structured diagnostics for
+  fatal COM/RPC disconnects such as `0x800706BE`
+- Runs VBE Compile in a disposable child bridge process, while `Application.Run`
+  executes on the parent STA with a dialog watcher and COM message pumping.
+- May use an isolated PowerShell COM helper to retry no-argument macro runs after
+  Office type-library failures observed from the .NET COM caller; explicit
+  `--bridge dotnet` still remains a .NET bridge command and does not fall back
+  through the Go bridge resolver.
 - Detects Excel/VBE dialogs through Win32 owner-chain polling with optional UI
   Automation metadata and button invocation
 - Captures dialog text, buttons, HWND/PID/thread identity, visibility, action,
@@ -149,6 +159,12 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--ui-stream` pipe integration and `__XLFLOW_DEBUG_PIPE__` injection for `XlflowDebug.Log` transport
 
 The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `debug`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
+
+If a fatal COM/RPC failure occurs while using a live session, the bridge marks
+`.xlflow/session.json` as poisoned instead of killing Excel. Subsequent auto or
+explicit session reuse fails with `session_poisoned`; `xlflow session status`
+surfaces the poisoned metadata and `xlflow session stop` remains available to
+clear the session before starting a fresh one.
 
 ### `test`
 
@@ -306,4 +322,4 @@ C:\path\to\unzipped\xlflow.exe doctor --bridge dotnet --json
 
 Successful output, or a structured Excel COM environment failure that still reports `.NET` bridge metadata, confirms that `xlflow.exe` found and launched the bundled bridge executable.
 
-The .NET bridge avoids PowerShell execution policy, but it does not bypass all corporate controls. AppLocker, WDAC, Defender, EDR, antivirus reputation, or code-signing rules may still block an unsigned or unapproved executable. The published checksum and GitHub attestation prove artifact integrity and provenance, but they are not Windows Authenticode signing.
+The .NET bridge does not depend on xlflow's bundled PowerShell scripts for its protocol implementation, but some Excel COM stabilization paths may invoke `powershell.exe` as an isolated helper. It does not bypass corporate controls. AppLocker, WDAC, Defender, EDR, antivirus reputation, execution policy, or code-signing rules may still block an unsigned or unapproved executable or helper process. The published checksum and GitHub attestation prove artifact integrity and provenance, but they are not Windows Authenticode signing.

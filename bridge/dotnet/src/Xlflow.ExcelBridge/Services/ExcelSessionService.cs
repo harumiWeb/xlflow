@@ -56,6 +56,24 @@ public sealed class ExcelSessionService : ISessionService
         }
         catch (Exception ex)
         {
+            if (ex is SessionPoisonedException poisoned)
+            {
+                return BridgeResponse.Failed(request, new BridgeError(
+                    Code: "session_poisoned",
+                    Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Phase: "session",
+                    Source: "xlflow-excel-bridge",
+                    HResult: poisoned.Metadata.HResult,
+                    Details: new Dictionary<string, object?>
+                    {
+                        ["workbook_path"] = poisoned.Metadata.WorkbookPath,
+                        ["excel_pid"] = poisoned.Metadata.Pid,
+                        ["excel_hwnd"] = poisoned.Metadata.Hwnd,
+                        ["poisoned_at"] = poisoned.Metadata.PoisonedAt,
+                        ["poison_reason"] = poisoned.Metadata.PoisonReason,
+                        ["last_command"] = poisoned.Metadata.LastCommand,
+                    }));
+            }
             return BridgeResponse.Failed(request, new BridgeError(
                 Code: "session_failed",
                 Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
@@ -82,6 +100,7 @@ public sealed class ExcelSessionService : ISessionService
             var open = false;
             bool? dirty = false;
             var mode = "none";
+            var poisoned = metadata?.Poisoned ?? false;
 
             if (metadata is not null)
             {
@@ -115,22 +134,65 @@ public sealed class ExcelSessionService : ISessionService
 
             var needsSave = running && open && (dirty is null || dirty == true);
             var logs = new[] { running && open ? "xlflow session is running" : "xlflow session is not running" };
+            var sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, running && open, mode, dirty, needsSave);
+            if (metadata is not null)
+            {
+                sessionPayload["metadata"] = new Dictionary<string, object?>
+                {
+                    ["hwnd"] = metadata.Hwnd,
+                    ["pid"] = metadata.Pid,
+                    ["workbook_path"] = metadata.WorkbookPath,
+                    ["poisoned"] = poisoned,
+                    ["poisoned_at"] = metadata.PoisonedAt,
+                    ["poison_reason"] = metadata.PoisonReason,
+                    ["h_result"] = metadata.HResult,
+                    ["last_command"] = metadata.LastCommand,
+                };
+            }
+            if (poisoned && metadata is not null)
+            {
+                sessionPayload["poisoned"] = true;
+                sessionPayload["poisoned_at"] = metadata.PoisonedAt;
+                sessionPayload["poison_reason"] = metadata.PoisonReason;
+                sessionPayload["h_result"] = metadata.HResult;
+                sessionPayload["last_command"] = metadata.LastCommand;
+            }
             var extensions = new Dictionary<string, object?>
             {
                 ["target"] = ExcelBridgeSupport.BuildTargetPayload(running && open ? "live_session" : "file", workbookPath),
-                ["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, running && open, mode, dirty, needsSave),
+                ["session"] = sessionPayload,
                 ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, running && open, mode, false, false, dirty, needsSave),
             };
-            if (needsSave)
+            if (needsSave || poisoned)
             {
-                extensions["warnings"] = new[]
+                var warnings = new List<Dictionary<string, object?>>();
+                var hints = new List<Dictionary<string, object?>>();
+                if (needsSave)
                 {
-                    new Dictionary<string, object?>
+                    warnings.Add(new Dictionary<string, object?>
                     {
                         ["code"] = "save_required",
                         ["message"] = "The live workbook is newer than disk. Run `xlflow save --session` to persist workbook changes.",
-                    },
-                };
+                    });
+                }
+                if (poisoned)
+                {
+                    warnings.Add(new Dictionary<string, object?>
+                    {
+                        ["code"] = "session_poisoned",
+                        ["message"] = "The live Excel session was marked poisoned after a fatal COM/RPC failure.",
+                    });
+                    hints.Add(new Dictionary<string, object?>
+                    {
+                        ["code"] = "restart_session",
+                        ["message"] = "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
+                    });
+                }
+                extensions["warnings"] = warnings;
+                if (hints.Count > 0)
+                {
+                    extensions["hints"] = hints;
+                }
             }
 
             return new BridgeResponse
@@ -143,6 +205,24 @@ public sealed class ExcelSessionService : ISessionService
         }
         catch (Exception ex)
         {
+            if (ex is SessionPoisonedException poisoned)
+            {
+                return BridgeResponse.Failed(request, new BridgeError(
+                    Code: "session_poisoned",
+                    Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Phase: "session",
+                    Source: "xlflow-excel-bridge",
+                    HResult: poisoned.Metadata.HResult,
+                    Details: new Dictionary<string, object?>
+                    {
+                        ["workbook_path"] = poisoned.Metadata.WorkbookPath,
+                        ["excel_pid"] = poisoned.Metadata.Pid,
+                        ["excel_hwnd"] = poisoned.Metadata.Hwnd,
+                        ["poisoned_at"] = poisoned.Metadata.PoisonedAt,
+                        ["poison_reason"] = poisoned.Metadata.PoisonReason,
+                        ["last_command"] = poisoned.Metadata.LastCommand,
+                    }));
+            }
             return BridgeResponse.Failed(request, new BridgeError(
                 Code: "session_failed",
                 Message: ExcelBridgeSupport.FormatExceptionDetail(ex),

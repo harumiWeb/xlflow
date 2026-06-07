@@ -119,6 +119,12 @@ Error fields:
 - `h_result`: Optional HRESULT hex string (e.g. `"0x800A03EC"`). The .NET bridge serializes this as `h_result` using `JsonNamingPolicy.SnakeCaseLower`, matching the public xlflow envelope.
 - `details`: Optional structured diagnostic object.
 
+Fatal Excel COM/RPC failures use `code = "excel_com_rpc_failure"` and include
+`h_result` plus structured `details`. For `run`, details include the failing
+macro, stage, Excel PID/HWND, worker PID, session mode/id, visibility/headless
+mode, and whether the workbook was reused from a live session. The `.NET`
+bridge treats disconnect-class HRESULTs such as `0x800706BE` as fatal.
+
 ## Version And Capabilities
 
 The .NET bridge exposes metadata commands outside stdin request mode:

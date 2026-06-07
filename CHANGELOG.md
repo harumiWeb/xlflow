@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `.NET` bridge macro runs so Excel is stabilized and the STA message loop is pumped around `Application.Run`, improving reliability for formatting/layout operations such as `Range.Interior.Color`, `Range.Clear`, row height updates, and protection state reads. Fatal COM/RPC failures such as `0x800706BE` now return `excel_com_rpc_failure` with `h_result` and run diagnostics, and live sessions are marked poisoned instead of being silently reused.
 - Added best-effort `.NET` VBE selection diagnostics for suppressed compile/runtime dialogs in `xlflow run --bridge dotnet --json` and compile failures in `xlflow push`, including selected component, procedure, source path, source-file line range, selected line text, and non-fatal capture-attempt metadata when Excel exposes it.
 - Improved `.NET` dialog watcher button diagnostics and action selection by capturing Win32 button `access_key`, `control_id`, and `enabled` metadata. VBA runtime suppression now prefers accelerator keys such as `D` for Debug and `E` for End before localized text fallback, improving tolerance for non-English Excel/VBE UI.
 - Fixed `.NET` VBE runtime location capture after `xlflow session start` so the first failing `run` no longer reports stale module header lines such as `Option Explicit` before VBE has moved the selection to the actual error line.

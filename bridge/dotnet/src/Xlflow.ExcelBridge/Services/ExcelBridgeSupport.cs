@@ -70,11 +70,27 @@ internal static class BridgePayload
     }
 }
 
-internal sealed record SessionMetadata(long Hwnd, int Pid, string WorkbookPath);
+internal sealed record SessionMetadata(
+    long Hwnd,
+    int Pid,
+    string WorkbookPath,
+    bool Poisoned = false,
+    string PoisonedAt = "",
+    string PoisonReason = "",
+    string HResult = "",
+    string LastCommand = "");
 
 internal sealed record ExcelSessionAttachment(object Excel, object Workbook, string SessionMode);
 
 internal sealed record ExcelProcessInfo(int ProcessId, bool? HasWorkbook);
+
+internal sealed class SessionPoisonedException(SessionMetadata metadata)
+    : InvalidOperationException("xlflow session is poisoned after a fatal Excel COM/RPC failure")
+{
+    public SessionMetadata Metadata { get; } = metadata;
+}
+
+internal sealed record ComFailureInfo(bool Fatal, string HResult, int Number, string Message);
 
 [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "The .NET bridge only runs on Windows with Excel COM automation.")]
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Bridge support intentionally treats COM inspection as best-effort and normalizes failures to null/false or structured bridge errors.")]
@@ -106,7 +122,12 @@ internal static class ExcelBridgeSupport
         var hwnd = TryGetInt64(root, "hwnd");
         var pid = TryGetInt32(root, "pid");
         var workbookPath = BridgePayload.GetString(root, "workbook_path") ?? "";
-        return new SessionMetadata(hwnd, pid, workbookPath);
+        var poisoned = TryGetBool(root, "poisoned");
+        var poisonedAt = BridgePayload.GetString(root, "poisoned_at") ?? "";
+        var poisonReason = BridgePayload.GetString(root, "poison_reason") ?? "";
+        var hResult = BridgePayload.GetString(root, "h_result") ?? "";
+        var lastCommand = BridgePayload.GetString(root, "last_command") ?? "";
+        return new SessionMetadata(hwnd, pid, workbookPath, poisoned, poisonedAt, poisonReason, hResult, lastCommand);
     }
 
     public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath)
@@ -127,6 +148,46 @@ internal static class ExcelBridgeSupport
             ["hwnd"] = GetExcelMainHwnd(excel),
             ["pid"] = GetExcelProcessId(excel),
             ["workbook_path"] = NormalizePath(workbookPath),
+        };
+
+        File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
+    }
+
+    public static void MarkSessionPoisoned(string metadataPath, string workbookPath, string reason, string hResult, string lastCommand)
+    {
+        if (string.IsNullOrWhiteSpace(metadataPath))
+        {
+            return;
+        }
+
+        var metadata = ReadSessionMetadata(metadataPath);
+        if (metadata is null)
+        {
+            return;
+        }
+
+        workbookPath = NormalizePath(workbookPath);
+        if (!string.IsNullOrWhiteSpace(metadata.WorkbookPath) && !PathsEqual(metadata.WorkbookPath, workbookPath))
+        {
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(metadataPath);
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            Directory.CreateDirectory(parent);
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["hwnd"] = metadata.Hwnd,
+            ["pid"] = metadata.Pid,
+            ["workbook_path"] = string.IsNullOrWhiteSpace(metadata.WorkbookPath) ? workbookPath : NormalizePath(metadata.WorkbookPath),
+            ["poisoned"] = true,
+            ["poisoned_at"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            ["poison_reason"] = reason,
+            ["h_result"] = hResult,
+            ["last_command"] = lastCommand,
         };
 
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
@@ -157,6 +218,7 @@ internal static class ExcelBridgeSupport
 
         if (useSession)
         {
+            ThrowIfSessionPoisoned(metadataPath, workbookPath);
             var excel = RunPhase("get_session_excel", () => GetSessionExcel(metadataPath))
                 ?? throw new InvalidOperationException("xlflow session is not running");
             var workbook = RunPhase("get_session_workbook", () => GetOpenWorkbook(excel, workbookPath));
@@ -165,6 +227,7 @@ internal static class ExcelBridgeSupport
 
         if (SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
         {
+            ThrowIfSessionPoisoned(metadataPath, workbookPath);
             var excel = RunPhase("get_auto_session_excel", () => GetExcelFromSessionMetadata(metadataPath));
             if (excel is not null)
             {
@@ -183,6 +246,22 @@ internal static class ExcelBridgeSupport
         throw new InvalidOperationException("no matching xlflow session workbook is running; run xlflow session start or use the configured workbook session");
     }
 
+    public static void ThrowIfSessionPoisoned(string metadataPath, string workbookPath)
+    {
+        var metadata = ReadSessionMetadata(metadataPath);
+        if (metadata is null || !metadata.Poisoned)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.WorkbookPath) && !PathsEqual(metadata.WorkbookPath, workbookPath))
+        {
+            return;
+        }
+
+        throw new SessionPoisonedException(metadata);
+    }
+
     public static ExcelSessionAttachment OpenWorkbookDirect(string workbookPath, bool visible, bool disableAutomationMacros = true)
     {
         workbookPath = NormalizePath(workbookPath);
@@ -192,39 +271,139 @@ internal static class ExcelBridgeSupport
             throw new InvalidOperationException($"bridge_file_not_openable: File does not appear to be an Excel workbook: {workbookPath}");
         }
 
-        var excelType = Type.GetTypeFromProgID("Excel.Application")
-            ?? throw new InvalidOperationException("Excel.Application COM class is not registered");
-        var excel = Activator.CreateInstance(excelType)
-            ?? throw new InvalidOperationException("Failed to create Excel.Application COM instance");
-
+        var excel = CreateExcelApplicationWithPowerShell(workbookPath, visible, disableAutomationMacros);
+        object? workbook = null;
         try
         {
-            dynamic app = excel;
-            app.Visible = visible;
-            app.DisplayAlerts = false;
-            app.EnableEvents = false;
-            try
-            {
-                app.AutomationSecurity = disableAutomationMacros ? 3 : 1;
-            }
-            catch
-            {
-                // best-effort: some hosts may not expose AutomationSecurity
-            }
-
-            object workbook = app.Workbooks.Open(workbookPath);
+            workbook = GetOpenWorkbook(excel, workbookPath);
             return new ExcelSessionAttachment(excel, workbook, "none");
         }
         catch (InvalidOperationException)
         {
+            ReleaseComObject(workbook);
             ReleaseComObject(excel);
             throw;
         }
         catch (Exception ex)
         {
+            ReleaseComObject(workbook);
             ReleaseComObject(excel);
             var detail = UnwrapComErrorMessage(ex);
             throw new InvalidOperationException($"bridge_file_not_openable: {detail}", ex);
+        }
+    }
+
+    private static object CreateExcelApplicationWithPowerShell(string workbookPath, bool visible, bool disableAutomationMacros)
+    {
+        var scriptPath = Path.Combine(Path.GetTempPath(), "xlflow-open-excel-" + Guid.NewGuid().ToString("N") + ".ps1");
+        var outputPath = Path.Combine(Path.GetTempPath(), "xlflow-open-excel-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(scriptPath, PowerShellOpenWorkbookScript());
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add("-WorkbookPath");
+            startInfo.ArgumentList.Add(workbookPath);
+            startInfo.ArgumentList.Add("-OutputPath");
+            startInfo.ArgumentList.Add(outputPath);
+            startInfo.ArgumentList.Add("-Visible");
+            startInfo.ArgumentList.Add(visible ? "true" : "false");
+            startInfo.ArgumentList.Add("-DisableAutomationMacros");
+            startInfo.ArgumentList.Add(disableAutomationMacros ? "true" : "false");
+
+            using var process = Process.Start(startInfo);
+            if (process is null || !process.WaitForExit(120_000) || !File.Exists(outputPath))
+            {
+                throw new InvalidOperationException("PowerShell Excel launcher did not return a result.");
+            }
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(outputPath));
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
+            {
+                var message = root.TryGetProperty("message", out var messageElement)
+                    ? messageElement.GetString()
+                    : "PowerShell Excel launcher failed.";
+                throw new InvalidOperationException(message);
+            }
+
+            var hwnd = root.TryGetProperty("hwnd", out var hwndElement) ? hwndElement.GetInt64() : 0;
+            var pid = root.TryGetProperty("pid", out var pidElement) ? pidElement.GetInt32() : 0;
+            var excel = hwnd != 0 ? TryGetExcelByHwnd(hwnd) : null;
+            excel ??= pid > 0 ? TryGetExcelByProcessId(pid) : null;
+            return excel ?? throw new InvalidOperationException("PowerShell created Excel, but xlflow could not attach to it.");
+        }
+        finally
+        {
+            TryDelete(scriptPath);
+            TryDelete(outputPath);
+        }
+    }
+
+    private static string PowerShellOpenWorkbookScript()
+    {
+        return """
+            param(
+              [string]$WorkbookPath,
+              [string]$OutputPath,
+              [string]$Visible = "false",
+              [string]$DisableAutomationMacros = "true"
+            )
+            $ErrorActionPreference = 'Stop'
+            function Write-Result($payload) {
+              $payload | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+            }
+            Add-Type -TypeDefinition @"
+            using System;
+            using System.Runtime.InteropServices;
+            public static class XlflowWindowPid {
+              [DllImport("user32.dll")]
+              public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int processId);
+            }
+            "@
+            try {
+              $excel = New-Object -ComObject Excel.Application
+              $excel.Visible = [bool]::Parse($Visible)
+              $excel.DisplayAlerts = $false
+              $excel.EnableEvents = $false
+              try {
+                if ([bool]::Parse($DisableAutomationMacros)) {
+                  $excel.AutomationSecurity = 3
+                } else {
+                  $excel.AutomationSecurity = 1
+                }
+              } catch {}
+              $workbook = $excel.Workbooks.Open($WorkbookPath)
+              $excelPid = 0
+              [void][XlflowWindowPid]::GetWindowThreadProcessId([intptr]$excel.Hwnd, [ref]$excelPid)
+              Write-Result @{ ok = $true; hwnd = [int64]$excel.Hwnd; pid = [int]$excelPid }
+            } catch {
+              Write-Result @{ ok = $false; message = [string]$_.Exception.Message; hresult = [int]$_.Exception.HResult }
+            }
+            """;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // best-effort temp cleanup
         }
     }
 
@@ -777,7 +956,7 @@ internal static class ExcelBridgeSupport
         {
             return action();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SessionPoisonedException)
         {
             throw new InvalidOperationException(
                 $"{phase} failed: {FormatExceptionDetail(ex)}",
@@ -805,6 +984,138 @@ internal static class ExcelBridgeSupport
             return $"{ex.Message} ({ex.InnerException.Message})";
         }
         return ex.Message;
+    }
+
+    public static ComFailureInfo ClassifyComFailure(Exception ex)
+    {
+        var detail = ex.InnerException ?? ex;
+        var number = detail.HResult;
+        var hResult = FormatHResult(number);
+        return new ComFailureInfo(IsFatalComFailure(number), hResult, number, FormatExceptionDetail(ex));
+    }
+
+    public static bool IsFatalComFailure(int number)
+    {
+        return unchecked((uint)number) switch
+        {
+            0x800706BE => true, // RPC_S_CALL_FAILED
+            0x800706BA => true, // RPC_S_SERVER_UNAVAILABLE
+            0x80010108 => true, // RPC_E_DISCONNECTED
+            0x80010105 => true, // RPC_E_SERVERFAULT
+            0x80010001 => true, // RPC_E_CALL_REJECTED
+            _ => false,
+        };
+    }
+
+    public static string FormatHResult(int number)
+    {
+        return "0x" + unchecked((uint)number).ToString("X8", CultureInfo.InvariantCulture);
+    }
+
+    public static void StabilizeExcelForMacroRun(object excel, string workbookPath, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        Exception? lastError = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var workbook = GetOpenWorkbook(excel, workbookPath);
+                try
+                {
+                    dynamic wb = workbook;
+                    wb.Activate();
+                }
+                finally
+                {
+                    ReleaseComObject(workbook);
+                }
+
+                dynamic app = excel;
+                try
+                {
+                    _ = app.Ready;
+                }
+                catch
+                {
+                    // Some Excel hosts reject Ready during startup; DoEvents and retry below.
+                }
+                TryDoEvents(excel);
+                PumpWaitingMessages();
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (ClassifyComFailure(ex).Fatal)
+                {
+                    throw;
+                }
+                SleepAndPump(TimeSpan.FromMilliseconds(100));
+            }
+        }
+
+        if (lastError is not null)
+        {
+            throw new InvalidOperationException("Excel did not become ready for macro execution.", lastError);
+        }
+    }
+
+    public static void TryDoEvents(object? excel)
+    {
+        if (excel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            dynamic app = excel;
+            app.Run("DoEvents");
+        }
+        catch
+        {
+            // DoEvents is best-effort only.
+        }
+    }
+
+    public static void SleepAndPump(TimeSpan duration)
+    {
+        var deadline = DateTime.UtcNow.Add(duration);
+        while (DateTime.UtcNow < deadline)
+        {
+            PumpWaitingMessages();
+            Thread.Sleep(Math.Min(25, Math.Max(1, (int)(deadline - DateTime.UtcNow).TotalMilliseconds)));
+        }
+        PumpWaitingMessages();
+    }
+
+    public static void PumpWaitingMessages()
+    {
+        while (NativeMethods.PeekMessage(out var message, IntPtr.Zero, 0, 0, NativeMethods.PmRemove))
+        {
+            NativeMethods.TranslateMessage(ref message);
+            NativeMethods.DispatchMessage(ref message);
+        }
+    }
+
+    public static IDisposable RegisterOleMessageFilter()
+    {
+        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+        {
+            return NullDisposable.Instance;
+        }
+
+        try
+        {
+            var filter = new OleMessageFilter();
+            var hr = NativeMethods.CoRegisterMessageFilter(filter, out var previous);
+            return hr == 0 ? new OleMessageFilterRegistration(filter, previous) : NullDisposable.Instance;
+        }
+        catch
+        {
+            return NullDisposable.Instance;
+        }
     }
 
     public static void Set(object comObject, string memberName, object? value)
@@ -1180,9 +1491,95 @@ internal static class ExcelBridgeSupport
         return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0L;
     }
 
+    private static bool TryGetBool(JsonElement element, string name)
+    {
+        var value = BridgePayload.GetString(element, name);
+        return bool.TryParse(value, out var parsed) && parsed;
+    }
+
+    private sealed class NullDisposable : IDisposable
+    {
+        public static readonly NullDisposable Instance = new();
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class OleMessageFilterRegistration(IOleMessageFilter current, IOleMessageFilter? previous) : IDisposable
+    {
+        private bool _disposed;
+        private IOleMessageFilter? _current = current;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+            try
+            {
+                _ = NativeMethods.CoRegisterMessageFilter(previous, out _);
+            }
+            catch
+            {
+                // best-effort restoration
+            }
+            _current = null;
+        }
+    }
+
+    [ComImport]
+    [Guid("00000016-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IOleMessageFilter
+    {
+        [PreserveSig]
+        int HandleInComingCall(int dwCallType, IntPtr htaskCaller, int dwTickCount, IntPtr lpInterfaceInfo);
+
+        [PreserveSig]
+        int RetryRejectedCall(IntPtr htaskCallee, int dwTickCount, int dwRejectType);
+
+        [PreserveSig]
+        int MessagePending(IntPtr htaskCallee, int dwTickCount, int dwPendingType);
+    }
+
+    private sealed class OleMessageFilter : IOleMessageFilter
+    {
+        public int HandleInComingCall(int dwCallType, IntPtr htaskCaller, int dwTickCount, IntPtr lpInterfaceInfo)
+        {
+            return 0;
+        }
+
+        public int RetryRejectedCall(IntPtr htaskCallee, int dwTickCount, int dwRejectType)
+        {
+            const int serverCallRetryLater = 2;
+            return dwRejectType == serverCallRetryLater && dwTickCount < 10_000 ? 99 : -1;
+        }
+
+        public int MessagePending(IntPtr htaskCallee, int dwTickCount, int dwPendingType)
+        {
+            return 2;
+        }
+    }
+
     private static class NativeMethods
     {
+        public const uint PmRemove = 0x0001;
+
         public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Message
+        {
+            public IntPtr Hwnd;
+            public uint Msg;
+            public IntPtr WParam;
+            public IntPtr LParam;
+            public uint Time;
+            public int PtX;
+            public int PtY;
+        }
 
         [DllImport("user32.dll")]
         public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
@@ -1211,5 +1608,19 @@ internal static class ExcelBridgeSupport
             int dwId,
             ref Guid riid,
             [MarshalAs(UnmanagedType.Interface)] out object? ppvObject);
+
+        [DllImport("ole32.dll")]
+        public static extern int CoRegisterMessageFilter(
+            [MarshalAs(UnmanagedType.Interface)] IOleMessageFilter? newFilter,
+            [MarshalAs(UnmanagedType.Interface)] out IOleMessageFilter? oldFilter);
+
+        [DllImport("user32.dll")]
+        public static extern bool PeekMessage(out Message lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+        [DllImport("user32.dll")]
+        public static extern bool TranslateMessage(ref Message lpMsg);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr DispatchMessage(ref Message lpMsg);
     }
 }
