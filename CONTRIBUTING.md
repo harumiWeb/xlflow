@@ -11,7 +11,7 @@ xlflow aims to make Excel VBA development more CLI-first and agent-friendly.
 The core idea is to provide a safe proof loop for Excel VBA work:
 
 ```text
-pull → edit → push → lint → test/run → trace → diff
+pull → edit → push → lint → test/run → save
 ```
 
 When contributing, please keep the following goals in mind:
@@ -175,7 +175,7 @@ AI agents and scripts rely on xlflow's JSON output. When changing command behavi
 - `command`
 - `error.code`
 - `error.message`
-- command-specific fields such as `macro`, `macros`, `tests`, `diff`, `trace`, or `issues`
+- command-specific fields such as `macro`, `macros`, `tests`, `diff`, `debug`, or `issues`
 - exit codes
 
 Human-readable output can evolve more freely, but machine-readable JSON should remain stable whenever possible.

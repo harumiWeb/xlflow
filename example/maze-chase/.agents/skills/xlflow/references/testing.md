@@ -197,10 +197,11 @@ When `status` is `failed`, inspect `error.code` and `error.message` first. The m
    xlflow test --filter <TestName> --session --json
    ```
    Read the `debug` array in JSON output.
-3. If the error originates in workbook code (not the test itself), run the relevant macro with trace:
+3. If the error originates in workbook code (not the test itself), add targeted `XlflowDebug.Log` calls if needed and run the relevant macro as normal:
    ```bash
-   xlflow run <MacroName> --trace --session --json
+   xlflow run <MacroName> --session --json
    ```
+   Use [debugging.md](debugging.md) when the failing location is still unclear.
 4. If the test uses `XlflowUI` dialogs, ensure the matching `--msgbox`, `--inputbox`, or `--filedialog` responses are passed to `xlflow test`.
 
 ## Best Practices for AI Agents

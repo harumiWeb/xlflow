@@ -4,7 +4,7 @@ layout: home
 hero:
   name: xlflow
   text: AI-agent-ready Excel VBA development CLI
-  tagline: Export, edit, lint, push, run, inspect, trace, test, and review Excel VBA projects from the command line.
+  tagline: Export, edit, lint, push, run, inspect, test, and review Excel VBA projects from the command line.
   image:
     src: /images/icon.png
     alt: xlflow
@@ -25,7 +25,7 @@ features:
   - title: Built for AI agents
     details: Stable JSON envelopes, explicit exit codes, session-aware commands, diagnostics, and bundled agent skills make automated VBA changes practical.
   - title: Safer Excel automation
-    details: Doctor, lint, analyze, inspect, trace, backup, and diff workflows make workbook state and runtime failures easier to reason about.
+    details: Doctor, lint, analyze, inspect, backup, diff, and structured debug workflows make workbook state and runtime failures easier to reason about.
 ---
 
 ## Demos
