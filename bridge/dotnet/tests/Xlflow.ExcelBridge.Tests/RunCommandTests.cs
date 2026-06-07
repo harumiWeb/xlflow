@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -114,6 +115,25 @@ public sealed class RunCommandTests
 
         Assert.True(serviceCalled);
         Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void InvokeMethodUsesCurrentCultureForComLateBinding()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+
+            Assert.Equal("fr-FR", ExcelBridgeSupport.ComInvokeCulture.Name);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]
@@ -236,6 +256,50 @@ public sealed class RunCommandTests
         Assert.Equal("macro_failed", ExcelRunService.ClassifyRunError("", null));
     }
 
+    [Fact]
+    public void FatalComFailureClassifierDetectsRpcFailureAndFormatsHResult()
+    {
+        const int rpcFailed = unchecked((int)0x800706BE);
+
+        Assert.True(ExcelBridgeSupport.IsFatalComFailure(rpcFailed));
+        Assert.Equal("0x800706BE", ExcelBridgeSupport.FormatHResult(rpcFailed));
+    }
+
+    [Fact]
+    public void BuildRunHarnessCodePumpsDoEventsAroundMacroInvocation()
+    {
+        var code = ExcelRunService.BuildRunHarnessCode("Main.ReproFormatOps", []);
+
+        Assert.Contains("  DoEvents" + Environment.NewLine + "  Application.Run targetMacro", code);
+        Assert.Contains("  Application.Run targetMacro" + Environment.NewLine + "  DoEvents", code);
+    }
+
+    [Fact]
+    public void ComFailureDetailsIncludeRunContext()
+    {
+        var args = RunArgs("C:\\work\\Book.xlsm", "Main.ReproFormatOps");
+
+        var details = ExcelRunService.BuildComFailureDetails(
+            args,
+            "application_run",
+            excelProcessId: 1234,
+            excelHwnd: 5678,
+            workerProcessId: 9012,
+            sessionAttached: true,
+            sessionMode: "explicit");
+
+        Assert.Equal("Main.ReproFormatOps", details["macro"]);
+        Assert.Equal("application_run", details["stage"]);
+        Assert.Equal(1234, details["excel_pid"]);
+        Assert.Equal(5678L, details["excel_hwnd"]);
+        Assert.Equal(9012, details["worker_pid"]);
+        Assert.Equal("explicit", details["session_mode"]);
+        Assert.Equal(false, details["visible"]);
+        Assert.Equal(true, details["headless"]);
+        Assert.Equal(true, details["workbook_reused"]);
+        Assert.Equal("explicit", details["workbook_reuse_mode"]);
+    }
+
     [Theory]
     [InlineData(true, false, true, true)]
     [InlineData(false, false, false, false)]
@@ -246,6 +310,69 @@ public sealed class RunCommandTests
 
         Assert.Equal(expectedDirty, result.Dirty);
         Assert.Equal(expectedNeedsSave, result.NeedsSave);
+    }
+
+    [Fact]
+    public void DefaultRuntimeSkipRequiresNoDebugOrUiInjection()
+    {
+        var args = RunArgs(@"C:\work\Book.xlsm", "Main.Run") with
+        {
+            RuntimeSource = "default",
+        };
+
+        Assert.True(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+
+        args = args with
+        {
+            DebugStreamEnabled = true,
+            DebugStreamPipeName = @"\\.\pipe\xlflow-debug",
+        };
+        Assert.False(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+
+        args = args with
+        {
+            DebugStreamEnabled = false,
+            DebugStreamPipeName = "",
+            UIStreamEnabled = true,
+            UIStreamPipeName = @"\\.\pipe\xlflow-ui",
+        };
+        Assert.False(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
+    }
+
+    private static RunCommandArguments RunArgs(string workbookPath, string macroName)
+    {
+        return new RunCommandArguments(
+            WorkbookPath: workbookPath,
+            MacroName: macroName,
+            MacroArgsJSON: "",
+            Visible: false,
+            DisplayAlerts: false,
+            SaveWorkbook: false,
+            Direct: false,
+            Diagnostic: false,
+            SuppressModalErrors: true,
+            MsgBoxResponsesJSON: "",
+            InputResponsesJSON: "",
+            FileDialogResponsesJSON: "",
+            DebugStreamEnabled: false,
+            DebugStreamPipeName: "",
+            UIStreamEnabled: false,
+            UIStreamPipeName: "",
+            UIStreamRedactInput: false,
+            UseSession: true,
+            MetadataPath: "C:\\work\\.xlflow\\session.json",
+            RuntimeMode: "",
+            RuntimeSource: "",
+            SaveAsPath: "",
+            TimeoutSeconds: 0,
+            ModulesDir: "",
+            ClassesDir: "",
+            FormsDir: "",
+            WorkbookDir: "",
+            CodeSource: "",
+            Folders: false,
+            FolderAnnotation: "update",
+            DefaultComponentFolders: false);
     }
 
     [Fact]

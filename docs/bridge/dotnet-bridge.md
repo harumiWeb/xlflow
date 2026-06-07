@@ -135,8 +135,14 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--save`, `--save-as`, and default no-save behavior
 - Supports `--timeout` via bridge request timeout
 - Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
-- Runs modal `Application.Run` and VBE Compile calls in disposable child bridge
-  processes so the parent can watch dialogs and produce diagnostics
+- Stabilizes Excel before `Application.Run` by activating the target workbook,
+  waiting for the STA/COM caller to settle, and pumping messages around macro
+  invocation; generated harness runs also call `DoEvents` before and after the
+  target macro.
+- Returns `excel_com_rpc_failure` with `h_result` and structured diagnostics for
+  fatal COM/RPC disconnects such as `0x800706BE`
+- Runs VBE Compile in a disposable child bridge process, while `Application.Run`
+  executes on the parent STA with a dialog watcher and COM message pumping.
 - Detects Excel/VBE dialogs through Win32 owner-chain polling with optional UI
   Automation metadata and button invocation
 - Captures dialog text, buttons, HWND/PID/thread identity, visibility, action,
@@ -149,6 +155,12 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--ui-stream` pipe integration and `__XLFLOW_DEBUG_PIPE__` injection for `XlflowDebug.Log` transport
 
 The response includes `target`, `session`, `workbook`, `macro`, `runtime`, `debug`, `run_diagnostic`, `suggestions`, and `warnings` envelope fields.
+
+If a fatal COM/RPC failure occurs while using a live session, the bridge marks
+`.xlflow/session.json` as poisoned instead of killing Excel. Subsequent auto or
+explicit session reuse fails with `session_poisoned`; `xlflow session status`
+surfaces the poisoned metadata and `xlflow session stop` remains available to
+clear the session before starting a fresh one.
 
 ### `test`
 
@@ -256,6 +268,10 @@ Implementation rules:
 - Do not resume Excel COM work on arbitrary ThreadPool threads after `await`.
 - Keep initial COM command handlers synchronous unless a dedicated STA dispatcher exists.
 - Release COM references deliberately and keep workbook/session ownership explicit.
+- Invoke Excel COM late-bound members with the current user culture, not
+  invariant or forced `en-US` culture. Localized Office installations can fail
+  formatting/layout VBA calls with type-library errors such as `0x80028018` when
+  the automation caller uses the wrong LCID.
 
 This rule is part of the public implementation contract because violating it can produce intermittent Excel/VBIDE failures that unit tests may not catch.
 

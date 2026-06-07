@@ -37,6 +37,7 @@ public sealed class ExcelRunService : IRunService
             workbook = openResult.Workbook;
             sessionAttached = openResult.SessionAttached;
             sessionMode = openResult.SessionMode;
+            ExcelBridgeSupport.StabilizeExcelForMacroRun(excel, args.WorkbookPath, TimeSpan.FromSeconds(3));
 
             var dirtyKnown = ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var dirtyState);
             var dirty = sessionAttached ? dirtyKnown ? dirtyState : true : false;
@@ -105,6 +106,7 @@ public sealed class ExcelRunService : IRunService
 
             runtimeState = ApplyRuntimeMarkers(workbook, args);
             var runtimeInjected = runtimeState.Applied;
+            ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(150));
 
             var macroReference = BuildWorkbookQualifiedMacroReference(workbook, macroName);
             if (!args.Direct)
@@ -195,10 +197,25 @@ public sealed class ExcelRunService : IRunService
 
             if (runError is not null)
             {
+                var fatalComFailure = invocation.Result?.Error is not null &&
+                    ExcelBridgeSupport.IsFatalComFailure(invocation.Result.Error.Number);
+                var fatalHResult = fatalComFailure
+                    ? ExcelBridgeSupport.FormatHResult(invocation.Result!.Error!.Number)
+                    : null;
+                var fatalStage = invocation.Result?.Error?.Stage ?? "invoke_macro";
                 var compileFailure = !runTimedOut && IsLikelyVbaCompileFailure(runError, runErrorNumber, invocation.Dialog);
-                var errorCode = runTimedOut ? "macro_timeout" : compileFailure ? "vba_compile_failed" : ClassifyRunError(runError, runErrorNumber);
-                var errorPhase = compileFailure ? "compile_vba" : "invoke_macro";
+                var errorCode = fatalComFailure ? "excel_com_rpc_failure" : runTimedOut ? "macro_timeout" : compileFailure ? "vba_compile_failed" : ClassifyRunError(runError, runErrorNumber);
+                var errorPhase = fatalComFailure ? fatalStage : compileFailure ? "compile_vba" : "invoke_macro";
                 logs.Add(compileFailure ? $"VBA compile failed: {runError}" : $"macro execution failed: {runError}");
+                if (fatalComFailure && sessionAttached)
+                {
+                    ExcelBridgeSupport.MarkSessionPoisoned(
+                        args.MetadataPath,
+                        args.WorkbookPath,
+                        runError,
+                        fatalHResult ?? "",
+                        "run");
+                }
                 if (sessionAttached)
                 {
                     dirty = true;
@@ -217,6 +234,7 @@ public sealed class ExcelRunService : IRunService
                     session_mode = sessionMode,
                     session_requested = args.UseSession,
                     auto_session = sessionAttached && !args.UseSession,
+                    reused = sessionAttached,
                     saved = false,
                     dirty,
                     needs_save = needsSave,
@@ -234,6 +252,20 @@ public sealed class ExcelRunService : IRunService
                         line = runErrorLine,
                     },
                 };
+
+                if (fatalComFailure)
+                {
+                    extensions["com"] = BuildComFailureDiagnostics(
+                        args,
+                        runError,
+                        fatalHResult ?? "",
+                        fatalStage,
+                        excelProcessId,
+                        excelHwnd,
+                        invocation.WorkerProcessId,
+                        sessionAttached,
+                        sessionMode);
+                }
 
                 if (!string.IsNullOrEmpty(args.RuntimeMode))
                 {
@@ -278,7 +310,11 @@ public sealed class ExcelRunService : IRunService
                         Message: runError,
                         Phase: errorPhase,
                         Source: "xlflow-excel-bridge",
-                        Number: runErrorNumber),
+                        Number: runErrorNumber,
+                        HResult: fatalHResult,
+                        Details: fatalComFailure
+                            ? BuildComFailureDetails(args, fatalStage, excelProcessId, excelHwnd, invocation.WorkerProcessId, sessionAttached, sessionMode)
+                            : null),
                     Logs = logs,
                     Extensions = extensions,
                 };
@@ -391,14 +427,35 @@ public sealed class ExcelRunService : IRunService
                 Phase: "run",
                 Source: "xlflow-excel-bridge"));
         }
+        catch (SessionPoisonedException ex)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "session_poisoned",
+                Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                Phase: "run",
+                Source: "xlflow-excel-bridge",
+                HResult: ex.Metadata.HResult,
+                Details: new Dictionary<string, object?>
+                {
+                    ["workbook_path"] = ex.Metadata.WorkbookPath,
+                    ["excel_pid"] = ex.Metadata.Pid,
+                    ["excel_hwnd"] = ex.Metadata.Hwnd,
+                    ["poisoned_at"] = ex.Metadata.PoisonedAt,
+                    ["poison_reason"] = ex.Metadata.PoisonReason,
+                    ["last_command"] = ex.Metadata.LastCommand,
+                }));
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
+            var comFailure = ExcelBridgeSupport.ClassifyComFailure(ex);
             return BridgeResponse.Failed(request, new BridgeError(
-                Code: "macro_failed",
+                Code: comFailure.Fatal ? "excel_com_rpc_failure" : "macro_failed",
                 Message: detail,
                 Phase: "run",
-                Source: "xlflow-excel-bridge"));
+                Source: "xlflow-excel-bridge",
+                Number: comFailure.Fatal ? comFailure.Number : null,
+                HResult: comFailure.Fatal ? comFailure.HResult : null));
         }
         finally
         {
@@ -438,7 +495,9 @@ public sealed class ExcelRunService : IRunService
         builder.AppendLine("  startedAt = Timer");
         builder.AppendLine("  targetMacro = \"'\" & ThisWorkbook.Name & \"'!\" & " + ToVbaString(macroName));
         builder.AppendLine("  On Error GoTo Handler");
+        builder.AppendLine("  DoEvents");
         builder.AppendLine(invocation.ToString());
+        builder.AppendLine("  DoEvents");
         builder.AppendLine("  RunMacro = Array(True, " + ToVbaString(moduleName) + ", CLng(0), \"\", CLng(0), CLng((Timer - startedAt) * 1000))");
         builder.AppendLine("  Exit Function");
         builder.AppendLine("Handler:");
@@ -483,7 +542,7 @@ public sealed class ExcelRunService : IRunService
         bool suppressModalErrors,
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        IVbeSelectionLocator? selectionLocator = null)
+        VbeSelectionLocator? selectionLocator = null)
     {
         return ExcelWorkerInvocation.InvokeWithWorker(
             workerRequest,
@@ -501,7 +560,9 @@ public sealed class ExcelRunService : IRunService
         DialogWatchRequest watchRequest,
         string operation,
         MacroRunWorkerResult? result,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<DialogKind>? beforeAction = null,
+        Action<DialogKind>? afterAction = null)
     {
         return ExcelWorkerInvocation.WaitForPostWorkerDialog(
             watcher,
@@ -509,7 +570,9 @@ public sealed class ExcelRunService : IRunService
             watchRequest,
             operation,
             result,
-            cancellationToken);
+            cancellationToken,
+            beforeAction,
+            afterAction);
     }
 
     private static BridgeResponse BuildCompileFailureResponse(
@@ -528,6 +591,21 @@ public sealed class ExcelRunService : IRunService
             : invocation.TimedOut
                 ? "VBE Compile timed out."
                 : invocation.Result?.Error?.Message ?? "VBE Compile failed.";
+        var fatalComFailure = invocation.Result?.Error is not null &&
+            ExcelBridgeSupport.IsFatalComFailure(invocation.Result.Error.Number);
+        var fatalHResult = fatalComFailure
+            ? ExcelBridgeSupport.FormatHResult(invocation.Result!.Error!.Number)
+            : null;
+        var fatalStage = invocation.Result?.Error?.Stage ?? "compile_vba";
+        if (fatalComFailure && sessionAttached)
+        {
+            ExcelBridgeSupport.MarkSessionPoisoned(
+                args.MetadataPath,
+                args.WorkbookPath,
+                message,
+                fatalHResult ?? "",
+                "run");
+        }
         logs.Add($"VBE Compile failed: {message}");
         var extensions = new Dictionary<string, object?>
         {
@@ -552,17 +630,34 @@ public sealed class ExcelRunService : IRunService
             },
             ["run_diagnostic"] = BuildRunDiagnostic("compile", invocation, new { macro = args.MacroName }, invocation.TimedOut),
         };
+        if (fatalComFailure)
+        {
+            extensions["com"] = BuildComFailureDiagnostics(
+                args,
+                message,
+                fatalHResult ?? "",
+                fatalStage,
+                0,
+                0,
+                invocation.WorkerProcessId,
+                sessionAttached,
+                sessionMode);
+        }
         return new BridgeResponse
         {
             RequestId = request.RequestId,
             Command = request.Command,
             Status = BridgeStatus.Failed,
             Error = new BridgeError(
-                Code: "vba_compile_failed",
+                Code: fatalComFailure ? "excel_com_rpc_failure" : "vba_compile_failed",
                 Message: message,
-                Phase: "compile_vba",
+                Phase: fatalComFailure ? fatalStage : "compile_vba",
                 Source: "xlflow-excel-bridge",
-                Number: invocation.Result?.Error?.Number),
+                Number: invocation.Result?.Error?.Number,
+                HResult: fatalHResult,
+                Details: fatalComFailure
+                    ? BuildComFailureDetails(args, fatalStage, 0, 0, invocation.WorkerProcessId, sessionAttached, sessionMode)
+                    : null),
             Logs = logs,
             Extensions = extensions,
         };
@@ -662,6 +757,62 @@ public sealed class ExcelRunService : IRunService
         return diagnostic;
     }
 
+    internal static Dictionary<string, object?> BuildComFailureDiagnostics(
+        RunCommandArguments args,
+        string message,
+        string hResult,
+        string stage,
+        int excelProcessId,
+        long excelHwnd,
+        int workerProcessId,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["fatal"] = true,
+            ["message"] = message,
+            ["h_result"] = hResult,
+            ["stage"] = stage,
+            ["macro"] = args.MacroName,
+            ["excel_pid"] = excelProcessId,
+            ["excel_hwnd"] = excelHwnd,
+            ["worker_pid"] = workerProcessId,
+            ["session_id"] = string.IsNullOrWhiteSpace(args.MetadataPath) ? null : args.MetadataPath,
+            ["session_mode"] = sessionMode,
+            ["visible"] = args.Visible,
+            ["headless"] = !args.Visible,
+            ["workbook_reused"] = sessionAttached,
+            ["workbook_reuse_mode"] = sessionAttached ? sessionMode : "direct",
+            ["poisoned"] = sessionAttached,
+        };
+    }
+
+    internal static IReadOnlyDictionary<string, object?> BuildComFailureDetails(
+        RunCommandArguments args,
+        string stage,
+        int excelProcessId,
+        long excelHwnd,
+        int workerProcessId,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["macro"] = args.MacroName,
+            ["stage"] = stage,
+            ["excel_pid"] = excelProcessId,
+            ["excel_hwnd"] = excelHwnd,
+            ["worker_pid"] = workerProcessId,
+            ["session_id"] = string.IsNullOrWhiteSpace(args.MetadataPath) ? null : args.MetadataPath,
+            ["session_mode"] = sessionMode,
+            ["visible"] = args.Visible,
+            ["headless"] = !args.Visible,
+            ["workbook_reused"] = sessionAttached,
+            ["workbook_reuse_mode"] = sessionAttached ? sessionMode : "direct",
+        };
+    }
+
     private static void SetProperty(object comObject, string name, object value)
     {
         comObject.GetType().InvokeMember(
@@ -696,6 +847,16 @@ public sealed class ExcelRunService : IRunService
 
     private static RuntimeInjectionHelper.RuntimeInjectionState ApplyRuntimeMarkers(object workbook, RunCommandArguments args)
     {
+        if (IsDefaultRuntimeWithoutInjectedFeatures(args))
+        {
+            return new RuntimeInjectionHelper.RuntimeInjectionState
+            {
+                Mode = args.RuntimeMode,
+                Source = args.RuntimeSource,
+                Applied = false,
+            };
+        }
+
         return RuntimeInjectionHelper.ApplyRuntimeInjection(
             workbook,
             args.RuntimeMode,
@@ -708,6 +869,16 @@ public sealed class ExcelRunService : IRunService
             args.UIStreamEnabled,
             args.UIStreamPipeName,
             args.UIStreamRedactInput);
+    }
+
+    internal static bool IsDefaultRuntimeWithoutInjectedFeatures(RunCommandArguments args)
+    {
+        return string.Equals(args.RuntimeSource, "default", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(args.MsgBoxResponsesJSON) &&
+            string.IsNullOrWhiteSpace(args.InputResponsesJSON) &&
+            string.IsNullOrWhiteSpace(args.FileDialogResponsesJSON) &&
+            (!args.DebugStreamEnabled || string.IsNullOrWhiteSpace(args.DebugStreamPipeName)) &&
+            (!args.UIStreamEnabled || string.IsNullOrWhiteSpace(args.UIStreamPipeName));
     }
 
     private static void RestoreRuntimeMarkers(object? workbook, RuntimeInjectionHelper.RuntimeInjectionState? state)
@@ -757,6 +928,10 @@ public sealed class ExcelRunService : IRunService
             {
                 var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, false);
                 return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
+            }
+            catch (SessionPoisonedException)
+            {
+                throw;
             }
             catch
             {

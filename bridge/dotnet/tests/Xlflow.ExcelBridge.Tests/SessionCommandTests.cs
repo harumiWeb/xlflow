@@ -34,6 +34,82 @@ public sealed class SessionCommandTests
         Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public void ReadSessionMetadataKeepsCompatibilityWithLegacyShape()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            File.WriteAllText(path, """{"hwnd":123,"pid":456,"workbook_path":"C:\\work\\Book.xlsm"}""");
+
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.Equal(123, metadata!.Hwnd);
+            Assert.Equal(456, metadata.Pid);
+            Assert.False(metadata.Poisoned);
+            Assert.Equal("", metadata.HResult);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MarkSessionPoisonedBlocksSessionReuse()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            var workbook = Path.Combine(dir, "Book.xlsm");
+            File.WriteAllText(path, $$"""{"hwnd":123,"pid":456,"workbook_path":"{{workbook.Replace("\\", "\\\\", StringComparison.Ordinal)}}"}""");
+
+            ExcelBridgeSupport.MarkSessionPoisoned(path, workbook, "RPC failed", "0x800706BE", "run");
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.True(metadata!.Poisoned);
+            Assert.Equal("0x800706BE", metadata.HResult);
+            var ex = Assert.Throws<SessionPoisonedException>(() =>
+                ExcelBridgeSupport.ThrowIfSessionPoisoned(path, workbook));
+            Assert.Equal("run", ex.Metadata.LastCommand);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void RunPhaseDoesNotWrapSessionPoisonedException()
+    {
+        var metadata = new SessionMetadata(
+            Hwnd: 123,
+            Pid: 456,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Poisoned: true,
+            PoisonedAt: "2026-06-07T00:00:00.0000000Z",
+            PoisonReason: "RPC failed",
+            HResult: "0x800706BE",
+            LastCommand: "run");
+
+        var ex = Assert.Throws<SessionPoisonedException>(() =>
+            ExcelBridgeSupport.RunPhase("open_workbook", () => throw new SessionPoisonedException(metadata)));
+
+        Assert.Equal("0x800706BE", ex.Metadata.HResult);
+    }
+
     private sealed class FakeSessionService(Func<BridgeRequest, SessionCommandArguments, BridgeResponse> handler) : ISessionService
     {
         public BridgeResponse Execute(BridgeRequest request, SessionCommandArguments args, CancellationToken cancellationToken) => handler(request, args);

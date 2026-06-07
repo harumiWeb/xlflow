@@ -18,7 +18,7 @@ public sealed record MacroRunWorkerRequest(
 
 public sealed record MacroRunWorkerArgument(string Type, string Value);
 
-public sealed record MacroRunWorkerError(string Message, string Source, int Number);
+public sealed record MacroRunWorkerError(string Message, string Source, int Number, string Stage = "");
 
 public sealed record MacroRunWorkerResult(
     bool Completed,
@@ -56,6 +56,7 @@ public static class MacroRunWorker
         }
 
         object? excel = null;
+        var stage = "connect_excel";
         try
         {
             excel = request.ExcelHwnd != 0
@@ -73,16 +74,22 @@ public static class MacroRunWorker
             object? value;
             if (string.Equals(request.Operation, "compile", StringComparison.OrdinalIgnoreCase))
             {
+                stage = "compile_vba";
                 value = CompileWorkbook(excel, request.WorkbookPath);
             }
             else
             {
+                stage = "stabilize_excel";
+                ExcelBridgeSupport.StabilizeExcelForMacroRun(excel, request.WorkbookPath, TimeSpan.FromSeconds(3));
                 var invokeArgs = new List<object?> { request.MacroReference };
                 foreach (var argument in request.Arguments ?? [])
                 {
                     invokeArgs.Add(ConvertArgument(argument));
                 }
+                stage = "application_run";
                 value = ExcelBridgeSupport.InvokeMethod(excel, "Run", invokeArgs.ToArray());
+                stage = "post_run_pump";
+                ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(100));
             }
             WriteResult(resultPath, new MacroRunWorkerResult(true, true, NormalizeValue(value), null));
             return 0;
@@ -97,7 +104,8 @@ public static class MacroRunWorker
                 Error: new MacroRunWorkerError(
                     ExcelBridgeSupport.FormatExceptionDetail(ex),
                     detail.Source ?? "xlflow-excel-bridge",
-                    detail.HResult)));
+                    detail.HResult,
+                    stage)));
             return 1;
         }
         finally
