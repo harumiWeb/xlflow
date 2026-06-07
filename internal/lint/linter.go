@@ -270,7 +270,7 @@ func looksImplicitVariant(line string, inTypeBlock bool) bool {
 		return false
 	}
 	if inTypeBlock {
-		return !typeEndRe.MatchString(line)
+		return !typeEndRe.MatchString(line) && !isConditionalCompilationDirective(lower)
 	}
 	matches := dimWithoutAs.FindStringSubmatch(line)
 	if len(matches) == 0 {
@@ -291,6 +291,13 @@ func looksImplicitVariant(line string, inTypeBlock bool) bool {
 		!strings.HasPrefix(lower, "friend sub ") &&
 		!strings.HasPrefix(lower, "friend function ") &&
 		!strings.HasPrefix(lower, "friend property ")
+}
+
+func isConditionalCompilationDirective(line string) bool {
+	return strings.HasPrefix(line, "#if ") ||
+		strings.HasPrefix(line, "#elseif ") ||
+		line == "#else" ||
+		line == "#end if"
 }
 
 func containsTypographicQuote(line string) bool {
