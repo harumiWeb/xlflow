@@ -460,6 +460,25 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void VbeSelectionScorerTreatsOptionSelectionAsUnreliable()
+    {
+        var location = new ErrorLocation(
+            "high",
+            "vbe.selection",
+            "src/modules/Main.bas",
+            "Main",
+            "module",
+            null,
+            2,
+            1,
+            2,
+            1,
+            "Option Explicit");
+
+        Assert.True(VbeSelectionScorer.Score(location) < VbeSelectionScorer.ReliableThreshold);
+    }
+
+    [Fact]
     public void VbeSelectionScorerDetectsIncompleteCompileStatement()
     {
         Assert.True(VbeSelectionScorer.IsLikelyCompileErrorLine("  x ="));

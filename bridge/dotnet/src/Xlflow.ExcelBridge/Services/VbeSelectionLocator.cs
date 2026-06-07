@@ -649,7 +649,8 @@ internal static class VbeSelectionScorer
     {
         var trimmed = text?.Trim() ?? "";
         return string.IsNullOrWhiteSpace(trimmed) ||
-               trimmed.StartsWith("Attribute VB_", StringComparison.OrdinalIgnoreCase);
+               trimmed.StartsWith("Attribute VB_", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Option ", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static bool IsLikelyCompileErrorLine(string? text)
