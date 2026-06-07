@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -114,6 +115,25 @@ public sealed class RunCommandTests
 
         Assert.True(serviceCalled);
         Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void InvokeMethodUsesCurrentCultureForComLateBinding()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+
+            Assert.Equal("fr-FR", ExcelBridgeSupport.ComInvokeCulture.Name);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]

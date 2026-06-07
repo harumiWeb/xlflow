@@ -28,7 +28,6 @@ public sealed class ExcelRunService : IRunService
         var sessionAttached = false;
         var sessionMode = "none";
         var skipComCleanup = false;
-        var retriedWithPowerShell = false;
 
         try
         {
@@ -175,36 +174,6 @@ public sealed class ExcelRunService : IRunService
                 }
             }
 
-            string? retryError = null;
-            int? retryErrorNumber = null;
-            if (runError is not null &&
-                IsOfficeTypeLibraryFailure(runErrorNumber) &&
-                macroArgs.Count == 0 &&
-                string.IsNullOrWhiteSpace(args.SaveAsPath))
-            {
-                var retryHwnd = excelHwnd;
-                if (!sessionAttached)
-                {
-                    CloseWorkbook(workbook, excel);
-                    workbook = null;
-                    excel = null;
-                    retryHwnd = 0;
-                }
-                if (TryRetryMacroWithPowerShell(args, sessionAttached, retryHwnd, out retryError, out retryErrorNumber))
-                {
-                    retriedWithPowerShell = true;
-                    runError = null;
-                    runErrorNumber = null;
-                    runErrorLine = null;
-                    logs.Add("retried macro through PowerShell COM after Office type-library failure");
-                }
-            }
-            if (runError is not null && IsOfficeTypeLibraryFailure(runErrorNumber) && retryError is not null)
-            {
-                runError = retryError;
-                runErrorNumber = retryErrorNumber;
-            }
-
             if (!runTimedOut)
             {
                 RemoveTemporaryComponent(vbProject, runnerComponent);
@@ -348,17 +317,8 @@ public sealed class ExcelRunService : IRunService
 
             var saved = false;
             var saveAsCopy = false;
-            if (retriedWithPowerShell)
+            if (!string.IsNullOrWhiteSpace(args.SaveAsPath))
             {
-                saved = args.SaveWorkbook;
-            }
-            else if (!string.IsNullOrWhiteSpace(args.SaveAsPath))
-            {
-                if (workbook is null)
-                {
-                    throw new InvalidOperationException("Workbook is not available for SaveCopyAs after macro retry.");
-                }
-
                 var saveAsPath = ExcelBridgeSupport.NormalizePath(args.SaveAsPath);
                 AssertSaveAsExtension(args.WorkbookPath, saveAsPath);
                 ExcelBridgeSupport.RunPhase("save_as", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", saveAsPath));
@@ -366,11 +326,6 @@ public sealed class ExcelRunService : IRunService
             }
             else if (args.SaveWorkbook)
             {
-                if (workbook is null)
-                {
-                    throw new InvalidOperationException("Workbook is not available for Save after macro retry.");
-                }
-
                 ExcelBridgeSupport.RunPhase("save_workbook", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
                 saved = true;
             }
@@ -1179,217 +1134,6 @@ public sealed class ExcelRunService : IRunService
         }
 
         return message.Contains("0x800A9C68", StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal static bool IsOfficeTypeLibraryFailure(int? number)
-    {
-        return number == unchecked((int)0x80028018);
-    }
-
-    private static bool TryRetryMacroWithPowerShell(
-        RunCommandArguments args,
-        bool sessionAttached,
-        long excelHwnd,
-        out string? error,
-        out int? errorNumber)
-    {
-        error = null;
-        errorNumber = null;
-
-        var scriptPath = Path.Combine(Path.GetTempPath(), "xlflow-run-retry-" + Guid.NewGuid().ToString("N") + ".ps1");
-        var outputPath = Path.Combine(Path.GetTempPath(), "xlflow-run-retry-" + Guid.NewGuid().ToString("N") + ".json");
-        try
-        {
-            File.WriteAllText(scriptPath, PowerShellRetryScript());
-            var macroReference = "'" + Path.GetFileName(args.WorkbookPath).Replace("'", "''", StringComparison.Ordinal) + "'!" + args.MacroName;
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            startInfo.ArgumentList.Add("-NoProfile");
-            startInfo.ArgumentList.Add("-ExecutionPolicy");
-            startInfo.ArgumentList.Add("Bypass");
-            startInfo.ArgumentList.Add("-File");
-            startInfo.ArgumentList.Add(scriptPath);
-            startInfo.ArgumentList.Add("-WorkbookPath");
-            startInfo.ArgumentList.Add(args.WorkbookPath);
-            startInfo.ArgumentList.Add("-MacroReference");
-            startInfo.ArgumentList.Add(macroReference);
-            startInfo.ArgumentList.Add("-OutputPath");
-            startInfo.ArgumentList.Add(outputPath);
-            startInfo.ArgumentList.Add("-Visible");
-            startInfo.ArgumentList.Add(args.Visible ? "true" : "false");
-            startInfo.ArgumentList.Add("-UseSession");
-            startInfo.ArgumentList.Add(sessionAttached ? "true" : "false");
-            startInfo.ArgumentList.Add("-SaveWorkbook");
-            startInfo.ArgumentList.Add(args.SaveWorkbook ? "true" : "false");
-            startInfo.ArgumentList.Add("-ExcelHwnd");
-            startInfo.ArgumentList.Add(excelHwnd.ToString(CultureInfo.InvariantCulture));
-
-            using var process = Process.Start(startInfo);
-            if (process is null || !process.WaitForExit(120_000) || !File.Exists(outputPath))
-            {
-                error = "PowerShell COM retry did not return a result.";
-                return false;
-            }
-
-            using var doc = JsonDocument.Parse(File.ReadAllText(outputPath));
-            var root = doc.RootElement;
-            if (root.TryGetProperty("ok", out var ok) && ok.GetBoolean())
-            {
-                return true;
-            }
-
-            error = root.TryGetProperty("message", out var messageElement)
-                ? messageElement.GetString()
-                : "PowerShell COM retry failed.";
-            if (root.TryGetProperty("hresult", out var hResultElement) && hResultElement.TryGetInt32(out var hResult))
-            {
-                errorNumber = hResult;
-            }
-            return false;
-        }
-        catch (Exception ex)
-        {
-            error = ExcelBridgeSupport.FormatExceptionDetail(ex);
-            errorNumber = (ex.InnerException ?? ex).HResult;
-            return false;
-        }
-        finally
-        {
-            TryDelete(scriptPath);
-            TryDelete(outputPath);
-        }
-    }
-
-    private static string PowerShellRetryScript()
-    {
-        return """
-            param(
-              [string]$WorkbookPath,
-              [string]$MacroReference,
-              [string]$OutputPath,
-              [string]$Visible = "false",
-              [string]$UseSession = "false",
-              [string]$SaveWorkbook = "false",
-              [string]$ExcelHwnd = "0"
-            )
-            $ErrorActionPreference = 'Stop'
-            $excel = $null
-            $workbook = $null
-            $opened = $false
-            Add-Type -TypeDefinition @"
-            using System;
-            using System.Collections.Generic;
-            using System.Reflection;
-            using System.Runtime.InteropServices;
-            public static class XlflowNativeOm {
-              private const int OBJID_NATIVEOM = unchecked((int)0xFFFFFFF0);
-              private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
-              [DllImport("oleacc.dll")]
-              private static extern int AccessibleObjectFromWindow(IntPtr hwnd, int dwId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object ppvObject);
-              [DllImport("user32.dll")]
-              private static extern bool EnumChildWindows(IntPtr hwndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
-              public static object GetExcelApplication(IntPtr hwnd) {
-                var candidates = new List<IntPtr> { hwnd };
-                EnumChildWindows(hwnd, (child, _) => { candidates.Add(child); return true; }, IntPtr.Zero);
-                foreach (var candidate in candidates) {
-                  object value = null;
-                  try {
-                    Guid dispatch = new Guid("00020400-0000-0000-C000-000000000046");
-                    int hr = AccessibleObjectFromWindow(candidate, OBJID_NATIVEOM, ref dispatch, out value);
-                    if (hr != 0 || value == null) { continue; }
-                    object app = value;
-                    try {
-                      var maybeApp = value.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, value, null);
-                      if (maybeApp != null) { app = maybeApp; }
-                    } catch {}
-                    var workbooks = app.GetType().InvokeMember("Workbooks", BindingFlags.GetProperty, null, app, null);
-                    workbooks.GetType().InvokeMember("Count", BindingFlags.GetProperty, null, workbooks, null);
-                    return app;
-                  } catch {}
-                }
-                return null;
-              }
-            }
-            "@
-            function Write-Result($payload) {
-              $payload | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-            }
-            function Find-Workbook($app, $path) {
-              foreach ($book in @($app.Workbooks)) {
-                if ([string]::Equals([System.IO.Path]::GetFullPath([string]$book.FullName), [System.IO.Path]::GetFullPath($path), [System.StringComparison]::OrdinalIgnoreCase)) {
-                  return $book
-                }
-              }
-              return $null
-            }
-            try {
-              $useSessionBool = [bool]::Parse($UseSession)
-              $hwndValue = [int64]$ExcelHwnd
-              if ($hwndValue -ne 0) {
-                $excel = [XlflowNativeOm]::GetExcelApplication([intptr]$hwndValue)
-                if ($null -ne $excel) {
-                  $workbook = Find-Workbook $excel $WorkbookPath
-                }
-              }
-              try {
-                if ($null -eq $workbook) {
-                  $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-                  $workbook = Find-Workbook $excel $WorkbookPath
-                }
-              } catch {
-                $excel = $null
-              }
-              if ($useSessionBool -and $null -eq $workbook) {
-                throw "Could not attach PowerShell COM retry to the requested xlflow session workbook."
-              }
-              if ($null -eq $workbook) {
-                $excel = New-Object -ComObject Excel.Application
-                $excel.Visible = [bool]::Parse($Visible)
-                $excel.DisplayAlerts = $false
-                $excel.EnableEvents = $false
-                try { $excel.AutomationSecurity = 1 } catch {}
-                $workbook = $excel.Workbooks.Open($WorkbookPath)
-                $opened = $true
-              }
-              $null = $excel.Run($MacroReference)
-              if ([bool]::Parse($SaveWorkbook)) {
-                $workbook.Save()
-              }
-              Write-Result @{ ok = $true }
-            } catch {
-              Write-Result @{ ok = $false; message = [string]$_.Exception.Message; hresult = [int]$_.Exception.HResult }
-            } finally {
-              if ($opened -and $null -ne $workbook) {
-                $workbook.Close($false)
-              }
-              if ($opened -and $null -ne $excel) {
-                $excel.Quit()
-              }
-              if ($null -ne $workbook) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) }
-              if ($opened -and $null -ne $excel) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($excel) }
-              [gc]::Collect()
-              [gc]::WaitForPendingFinalizers()
-            }
-            """;
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-            // best-effort temp cleanup
-        }
     }
 
     private static bool IsMacroNotFoundError(string message, int? number)

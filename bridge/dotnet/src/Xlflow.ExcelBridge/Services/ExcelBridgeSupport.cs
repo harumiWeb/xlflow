@@ -99,6 +99,7 @@ internal static class ExcelBridgeSupport
 {
     private const int ObjIdNativeOm = unchecked((int)0xFFFFFFF0);
     private static readonly Guid DispatchGuid = new("00020400-0000-0000-C000-000000000046");
+    internal static CultureInfo ComInvokeCulture => CultureInfo.CurrentCulture;
 
     public static string NormalizePath(string path)
     {
@@ -271,139 +272,44 @@ internal static class ExcelBridgeSupport
             throw new InvalidOperationException($"bridge_file_not_openable: File does not appear to be an Excel workbook: {workbookPath}");
         }
 
-        var excel = CreateExcelApplicationWithPowerShell(workbookPath, visible, disableAutomationMacros);
-        object? workbook = null;
+        var excelType = Type.GetTypeFromProgID("Excel.Application")
+            ?? throw new InvalidOperationException("Excel.Application COM class is not registered");
+        var excel = Activator.CreateInstance(excelType)
+            ?? throw new InvalidOperationException("Failed to create Excel.Application COM instance");
+
         try
         {
-            workbook = GetOpenWorkbook(excel, workbookPath);
+            ConfigureExcelForAutomation(excel, visible, disableAutomationMacros);
+            dynamic app = excel;
+            object workbook = app.Workbooks.Open(workbookPath);
             return new ExcelSessionAttachment(excel, workbook, "none");
         }
         catch (InvalidOperationException)
         {
-            ReleaseComObject(workbook);
             ReleaseComObject(excel);
             throw;
         }
         catch (Exception ex)
         {
-            ReleaseComObject(workbook);
             ReleaseComObject(excel);
             var detail = UnwrapComErrorMessage(ex);
             throw new InvalidOperationException($"bridge_file_not_openable: {detail}", ex);
         }
     }
 
-    private static object CreateExcelApplicationWithPowerShell(string workbookPath, bool visible, bool disableAutomationMacros)
+    private static void ConfigureExcelForAutomation(object excel, bool visible, bool disableAutomationMacros)
     {
-        var scriptPath = Path.Combine(Path.GetTempPath(), "xlflow-open-excel-" + Guid.NewGuid().ToString("N") + ".ps1");
-        var outputPath = Path.Combine(Path.GetTempPath(), "xlflow-open-excel-" + Guid.NewGuid().ToString("N") + ".json");
+        dynamic app = excel;
+        app.Visible = visible;
+        app.DisplayAlerts = false;
+        app.EnableEvents = false;
         try
         {
-            File.WriteAllText(scriptPath, PowerShellOpenWorkbookScript());
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            startInfo.ArgumentList.Add("-NoProfile");
-            startInfo.ArgumentList.Add("-ExecutionPolicy");
-            startInfo.ArgumentList.Add("Bypass");
-            startInfo.ArgumentList.Add("-File");
-            startInfo.ArgumentList.Add(scriptPath);
-            startInfo.ArgumentList.Add("-WorkbookPath");
-            startInfo.ArgumentList.Add(workbookPath);
-            startInfo.ArgumentList.Add("-OutputPath");
-            startInfo.ArgumentList.Add(outputPath);
-            startInfo.ArgumentList.Add("-Visible");
-            startInfo.ArgumentList.Add(visible ? "true" : "false");
-            startInfo.ArgumentList.Add("-DisableAutomationMacros");
-            startInfo.ArgumentList.Add(disableAutomationMacros ? "true" : "false");
-
-            using var process = Process.Start(startInfo);
-            if (process is null || !process.WaitForExit(120_000) || !File.Exists(outputPath))
-            {
-                throw new InvalidOperationException("PowerShell Excel launcher did not return a result.");
-            }
-
-            using var doc = JsonDocument.Parse(File.ReadAllText(outputPath));
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
-            {
-                var message = root.TryGetProperty("message", out var messageElement)
-                    ? messageElement.GetString()
-                    : "PowerShell Excel launcher failed.";
-                throw new InvalidOperationException(message);
-            }
-
-            var hwnd = root.TryGetProperty("hwnd", out var hwndElement) ? hwndElement.GetInt64() : 0;
-            var pid = root.TryGetProperty("pid", out var pidElement) ? pidElement.GetInt32() : 0;
-            var excel = hwnd != 0 ? TryGetExcelByHwnd(hwnd) : null;
-            excel ??= pid > 0 ? TryGetExcelByProcessId(pid) : null;
-            return excel ?? throw new InvalidOperationException("PowerShell created Excel, but xlflow could not attach to it.");
-        }
-        finally
-        {
-            TryDelete(scriptPath);
-            TryDelete(outputPath);
-        }
-    }
-
-    private static string PowerShellOpenWorkbookScript()
-    {
-        return """
-            param(
-              [string]$WorkbookPath,
-              [string]$OutputPath,
-              [string]$Visible = "false",
-              [string]$DisableAutomationMacros = "true"
-            )
-            $ErrorActionPreference = 'Stop'
-            function Write-Result($payload) {
-              $payload | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-            }
-            Add-Type -TypeDefinition @"
-            using System;
-            using System.Runtime.InteropServices;
-            public static class XlflowWindowPid {
-              [DllImport("user32.dll")]
-              public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int processId);
-            }
-            "@
-            try {
-              $excel = New-Object -ComObject Excel.Application
-              $excel.Visible = [bool]::Parse($Visible)
-              $excel.DisplayAlerts = $false
-              $excel.EnableEvents = $false
-              try {
-                if ([bool]::Parse($DisableAutomationMacros)) {
-                  $excel.AutomationSecurity = 3
-                } else {
-                  $excel.AutomationSecurity = 1
-                }
-              } catch {}
-              $workbook = $excel.Workbooks.Open($WorkbookPath)
-              $excelPid = 0
-              [void][XlflowWindowPid]::GetWindowThreadProcessId([intptr]$excel.Hwnd, [ref]$excelPid)
-              Write-Result @{ ok = $true; hwnd = [int64]$excel.Hwnd; pid = [int]$excelPid }
-            } catch {
-              Write-Result @{ ok = $false; message = [string]$_.Exception.Message; hresult = [int]$_.Exception.HResult }
-            }
-            """;
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            app.AutomationSecurity = disableAutomationMacros ? 3 : 1;
         }
         catch
         {
-            // best-effort temp cleanup
+            // best-effort: some hosts may not expose AutomationSecurity
         }
     }
 
@@ -874,7 +780,7 @@ internal static class ExcelBridgeSupport
             null,
             comObject,
             args,
-            CultureInfo.InvariantCulture);
+            ComInvokeCulture);
     }
 
     public static object? InvokeMethod(object comObject, string memberName, params object?[] args)
@@ -885,7 +791,7 @@ internal static class ExcelBridgeSupport
             null,
             comObject,
             args,
-            CultureInfo.InvariantCulture);
+            ComInvokeCulture);
     }
 
     public static object? InvokeViaDynamic(object comObject, string memberName, params object?[] args)

@@ -143,10 +143,6 @@ The command opens the workbook (or attaches to an active session), invokes the m
   fatal COM/RPC disconnects such as `0x800706BE`
 - Runs VBE Compile in a disposable child bridge process, while `Application.Run`
   executes on the parent STA with a dialog watcher and COM message pumping.
-- May use an isolated PowerShell COM helper to retry no-argument macro runs after
-  Office type-library failures observed from the .NET COM caller; explicit
-  `--bridge dotnet` still remains a .NET bridge command and does not fall back
-  through the Go bridge resolver.
 - Detects Excel/VBE dialogs through Win32 owner-chain polling with optional UI
   Automation metadata and button invocation
 - Captures dialog text, buttons, HWND/PID/thread identity, visibility, action,
@@ -272,6 +268,10 @@ Implementation rules:
 - Do not resume Excel COM work on arbitrary ThreadPool threads after `await`.
 - Keep initial COM command handlers synchronous unless a dedicated STA dispatcher exists.
 - Release COM references deliberately and keep workbook/session ownership explicit.
+- Invoke Excel COM late-bound members with the current user culture, not
+  invariant or forced `en-US` culture. Localized Office installations can fail
+  formatting/layout VBA calls with type-library errors such as `0x80028018` when
+  the automation caller uses the wrong LCID.
 
 This rule is part of the public implementation contract because violating it can produce intermittent Excel/VBIDE failures that unit tests may not catch.
 
@@ -322,4 +322,4 @@ C:\path\to\unzipped\xlflow.exe doctor --bridge dotnet --json
 
 Successful output, or a structured Excel COM environment failure that still reports `.NET` bridge metadata, confirms that `xlflow.exe` found and launched the bundled bridge executable.
 
-The .NET bridge does not depend on xlflow's bundled PowerShell scripts for its protocol implementation, but some Excel COM stabilization paths may invoke `powershell.exe` as an isolated helper. It does not bypass corporate controls. AppLocker, WDAC, Defender, EDR, antivirus reputation, execution policy, or code-signing rules may still block an unsigned or unapproved executable or helper process. The published checksum and GitHub attestation prove artifact integrity and provenance, but they are not Windows Authenticode signing.
+The .NET bridge avoids PowerShell execution policy, but it does not bypass all corporate controls. AppLocker, WDAC, Defender, EDR, antivirus reputation, or code-signing rules may still block an unsigned or unapproved executable. The published checksum and GitHub attestation prove artifact integrity and provenance, but they are not Windows Authenticode signing.
