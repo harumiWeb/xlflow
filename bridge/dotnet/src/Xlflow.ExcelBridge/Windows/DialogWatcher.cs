@@ -121,9 +121,15 @@ public sealed class DialogWatcher
                 }
 
                 var action = DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy);
-                beforeAction?.Invoke(kind.Value);
+                if (action != DialogAction.None)
+                {
+                    beforeAction?.Invoke(kind.Value);
+                }
                 var actionResult = ExecuteAction(action, candidate, uia);
-                afterAction?.Invoke(kind.Value);
+                if (action != DialogAction.None && actionResult.Succeeded)
+                {
+                    afterAction?.Invoke(kind.Value);
+                }
                 return BuildSnapshot(candidate, uia, kind.Value, stopwatch.ElapsedMilliseconds, action, actionResult);
             }
 
@@ -162,14 +168,14 @@ public sealed class DialogWatcher
             var action = executeAction
                 ? DialogActionSelector.Select(kind.Value, candidate, request.ActionPolicy)
                 : DialogAction.None;
-            if (executeAction)
+            if (executeAction && action != DialogAction.None)
             {
                 beforeAction?.Invoke(kind.Value);
             }
             var actionResult = executeAction
                 ? ExecuteAction(action, candidate, uia)
                 : DialogActionResult.None;
-            if (executeAction)
+            if (executeAction && action != DialogAction.None && actionResult.Succeeded)
             {
                 afterAction?.Invoke(kind.Value);
             }

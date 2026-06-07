@@ -39,25 +39,40 @@ internal static class ExcelWorkerInvocation
             TimeSpan.FromMilliseconds(50));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var locationCaptures = new List<VbeSelectionCapture>();
+        var locationCaptureGate = new object();
         void CaptureBefore(DialogKind kind)
         {
             if ((kind is DialogKind.Compile or DialogKind.Runtime) && selectionLocator is not null)
             {
-                locationCaptures.Add(selectionLocator.Capture("before_dialog_action"));
+                lock (locationCaptureGate)
+                {
+                    locationCaptures.Add(selectionLocator.Capture("before_dialog_action"));
+                }
             }
         }
 
         void CaptureAfter(DialogKind kind)
         {
-            if ((kind is DialogKind.Compile or DialogKind.Runtime) &&
-                selectionLocator is not null &&
-                !locationCaptures.Any(capture => capture.HasReliableLocation))
+            lock (locationCaptureGate)
             {
-                locationCaptures.Add(selectionLocator.Capture("after_dialog_action"));
+                if ((kind is DialogKind.Compile or DialogKind.Runtime) &&
+                    selectionLocator is not null &&
+                    !locationCaptures.Any(capture => capture.HasReliableLocation))
+                {
+                    locationCaptures.Add(selectionLocator.Capture("after_dialog_action"));
+                }
+                if (kind == DialogKind.Runtime)
+                {
+                    selectionLocator?.ResetBreakMode();
+                }
             }
-            if (kind == DialogKind.Runtime)
+        }
+
+        VbeSelectionCapture MergeCurrentCaptures()
+        {
+            lock (locationCaptureGate)
             {
-                selectionLocator?.ResetBreakMode();
+                return MergeCaptures(locationCaptures);
             }
         }
 
@@ -71,7 +86,7 @@ internal static class ExcelWorkerInvocation
             {
                 worker.Stop();
                 linked.Cancel();
-                return new WorkerInvocationResult(null, watcherTask.Result, [watcherTask.Result], MergeCaptures(locationCaptures), false, worker.ProcessId);
+                return new WorkerInvocationResult(null, watcherTask.Result, [watcherTask.Result], MergeCurrentCaptures(), false, worker.ProcessId);
             }
             if (worker.HasExited)
             {
@@ -88,9 +103,9 @@ internal static class ExcelWorkerInvocation
                 linked.Cancel();
                 if (postDialog is not null)
                 {
-                    return new WorkerInvocationResult(result, postDialog, [postDialog], MergeCaptures(locationCaptures), false, worker.ProcessId);
+                    return new WorkerInvocationResult(result, postDialog, [postDialog], MergeCurrentCaptures(), false, worker.ProcessId);
                 }
-                return new WorkerInvocationResult(result, null, [], MergeCaptures(locationCaptures), false, worker.ProcessId);
+                return new WorkerInvocationResult(result, null, [], MergeCurrentCaptures(), false, worker.ProcessId);
             }
             Thread.Sleep(25);
         }
@@ -98,7 +113,7 @@ internal static class ExcelWorkerInvocation
         worker.Stop();
         linked.Cancel();
         var dialogs = watcher.CaptureCurrentDialogs(watchRequest, includeUia: false).ToArray();
-        return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, MergeCaptures(locationCaptures), true, worker.ProcessId);
+        return new WorkerInvocationResult(null, dialogs.FirstOrDefault(), dialogs, MergeCurrentCaptures(), true, worker.ProcessId);
     }
 
     internal static DialogSnapshot? WaitForPostWorkerDialog(

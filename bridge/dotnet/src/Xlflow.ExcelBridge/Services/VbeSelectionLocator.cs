@@ -52,6 +52,7 @@ internal sealed class VbeSelectionLocator(
     VbeSourceMappingOptions sourceOptions,
     TimeSpan? timeout = null) : IVbeSelectionLocator
 {
+    private const int ResetControlId = 228;
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromMilliseconds(750);
 
     public VbeSelectionCapture Capture(string timing)
@@ -526,6 +527,12 @@ internal sealed class VbeSelectionLocator(
                 return null;
             }
 
+            var byId = FindBuiltInControl(commandBars, ResetControlId);
+            if (byId is not null)
+            {
+                return byId;
+            }
+
             foreach (var barName in new[] { "Run", "実行" })
             {
                 object? bar = null;
@@ -561,10 +568,16 @@ internal sealed class VbeSelectionLocator(
                             if (caption.Contains("Reset", StringComparison.OrdinalIgnoreCase) ||
                                 caption.Contains("リセット", StringComparison.Ordinal))
                             {
-                                return candidate;
+                                var found = candidate;
+                                candidate = null;
+                                return found;
                             }
                         }
                         catch
+                        {
+                            // Try the next control.
+                        }
+                        finally
                         {
                             ExcelBridgeSupport.ReleaseComObject(candidate);
                         }
@@ -590,6 +603,18 @@ internal sealed class VbeSelectionLocator(
             ExcelBridgeSupport.ReleaseComObject(commandBars);
         }
         return null;
+    }
+
+    private static object? FindBuiltInControl(object commandBars, int controlId)
+    {
+        try
+        {
+            return ExcelBridgeSupport.InvokeMethod(commandBars, "FindControl", Type.Missing, controlId);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static object? FindResetControlByCaption(object controls, string caption)
@@ -842,11 +867,15 @@ internal static class VbeSourcePathMapper
         {
             var fullRoot = Path.GetFullPath(root);
             var fullPath = Path.GetFullPath(path);
-            if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+            var relative = Path.GetRelativePath(fullRoot, fullPath);
+            if (Path.IsPathRooted(relative) ||
+                relative.Equals("..", StringComparison.Ordinal) ||
+                relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
             {
                 return path;
             }
-            return Path.GetRelativePath(fullRoot, fullPath).Replace('\\', '/');
+            return relative.Replace('\\', '/');
         }
         catch
         {

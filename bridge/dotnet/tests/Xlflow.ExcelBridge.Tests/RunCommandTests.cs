@@ -540,6 +540,25 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void VbeSourcePathMapperKeepsAbsolutePathForSiblingDirectoryOutsideProjectRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-source-map-" + Guid.NewGuid().ToString("N"));
+        var outsideRoot = root + "-sibling";
+        var options = new VbeSourceMappingOptions(
+            Path.Combine(root, "src", "modules"),
+            Path.Combine(root, "src", "classes"),
+            Path.Combine(root, "src", "forms"),
+            Path.Combine(root, "src", "workbook"),
+            "sidecar",
+            true,
+            "update",
+            true);
+        var path = Path.Combine(outsideRoot, "src", "modules", "Module1.bas");
+
+        Assert.Equal(path, VbeSourcePathMapper.ToProjectRelativePath(path, options));
+    }
+
+    [Fact]
     public void DialogWatcherRunsPreActionCallbackBeforeClick()
     {
         var events = new List<string>();
@@ -559,6 +578,54 @@ public sealed class RunCommandTests
             afterAction: _ => events.Add("after"));
 
         Assert.Equal(["before", "click", "after"], events);
+    }
+
+    [Fact]
+    public void DialogWatcherDoesNotRunHooksWhenActionIsNone()
+    {
+        var events = new List<string>();
+        var enumerator = new SequencedWindowEnumerator(events, [CompileDialogCandidate()]);
+        var watcher = new DialogWatcher(enumerator, new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 123,
+            ExcelMainHwnd: 456,
+            Kind: DialogKind.Compile,
+            ActionPolicy: DialogActionPolicy.ObserveOnly,
+            Timeout: TimeSpan.FromSeconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(10));
+
+        var dialog = watcher.WaitForDialog(
+            request,
+            beforeAction: _ => events.Add("before"),
+            afterAction: _ => events.Add("after"));
+
+        Assert.NotNull(dialog);
+        Assert.Equal(DialogAction.None.Name, dialog!.Action);
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public void DialogWatcherDoesNotRunAfterHookWhenActionFails()
+    {
+        var events = new List<string>();
+        var enumerator = new SequencedWindowEnumerator(events, false, [CompileDialogCandidate()]);
+        var watcher = new DialogWatcher(enumerator, new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 123,
+            ExcelMainHwnd: 456,
+            Kind: DialogKind.Compile,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromSeconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(10));
+
+        var dialog = watcher.WaitForDialog(
+            request,
+            beforeAction: _ => events.Add("before"),
+            afterAction: _ => events.Add("after"));
+
+        Assert.NotNull(dialog);
+        Assert.False(dialog!.ActionSucceeded);
+        Assert.Equal(["before", "click"], events);
     }
 
     [Fact]
@@ -629,16 +696,23 @@ public sealed class RunCommandTests
     {
         private readonly IReadOnlyList<WindowCandidate>[] _sequences;
         private readonly List<string>? _events;
+        private readonly bool _clickResult;
         private int _index;
 
         public SequencedWindowEnumerator(params IReadOnlyList<WindowCandidate>[] sequences)
-            : this(null, sequences)
+            : this(null, true, sequences)
         {
         }
 
         public SequencedWindowEnumerator(List<string>? events, params IReadOnlyList<WindowCandidate>[] sequences)
+            : this(events, true, sequences)
+        {
+        }
+
+        public SequencedWindowEnumerator(List<string>? events, bool clickResult, params IReadOnlyList<WindowCandidate>[] sequences)
         {
             _events = events;
+            _clickResult = clickResult;
             _sequences = sequences;
         }
 
@@ -658,7 +732,7 @@ public sealed class RunCommandTests
         {
             _events?.Add("click");
             ClickedButtons.Add(hwnd);
-            return true;
+            return _clickResult;
         }
 
         public bool CloseWindow(long hwnd)
