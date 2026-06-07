@@ -116,6 +116,108 @@ func TestWriteJSONEnvelopeIncludesPushDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsCompactsRunJSONByDefault(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_failed", Message: "boom", Number: 9, Phase: "invoke_macro"})
+	env.Logs = []string{"verbose log"}
+	env.Workbook = map[string]any{"path": `C:\temp\Book.xlsm`}
+	env.Bridge = map[string]any{"host": "dotnet"}
+	env.Runtime = map[string]any{"mode": "headless"}
+	env.Target = map[string]any{"kind": "live_session", "path": `C:\temp\Book.xlsm`}
+	env.Session = map[string]any{
+		"active":          true,
+		"mode":            "explicit",
+		"dirty":           true,
+		"save_required":   true,
+		"source_of_truth": "live_workbook",
+		"workbook_path":   `C:\temp\Book.xlsm`,
+		"extra":           "hidden",
+	}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "save it"}}
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42, "arguments": []any{"x"}, "error": map[string]any{"message": "dup"}}
+	env.RunDiagnostic = map[string]any{
+		"kind":             "runtime",
+		"suggestion":       "Inspect src/modules/Main.bas:12.",
+		"location":         map[string]any{"source_path": "src/modules/Main.bas", "component": "Main", "component_type": "module", "procedure": "Run", "line": 12, "end_line": 12, "text": "    Debug.Print foo", "confidence": "high", "method": "vbe.selection"},
+		"dialogs":          []map[string]any{{"title": "Microsoft Visual Basic"}},
+		"location_capture": map[string]any{"attempts": []map[string]any{{"timing": "before_dialog_action"}}},
+		"worker":           map[string]any{"pid": 1234},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"workbook", "bridge", "runtime", "logs", "run_diagnostic"} {
+		if _, ok := decoded[key]; ok {
+			t.Fatalf("did not expect %s in compact run JSON: %s", key, buf.String())
+		}
+	}
+	if got := decoded["suggestion"]; got != "Inspect src/modules/Main.bas:12." {
+		t.Fatalf("suggestion = %#v, want promoted suggestion", got)
+	}
+	location, ok := decoded["location"].(map[string]any)
+	if !ok || location["source_path"] != "src/modules/Main.bas" {
+		t.Fatalf("expected promoted location in compact run JSON: %s", buf.String())
+	}
+	macro, ok := decoded["macro"].(map[string]any)
+	if !ok || macro["name"] != "Main.Run" || macro["duration_ms"] != float64(42) {
+		t.Fatalf("unexpected compact macro payload: %s", buf.String())
+	}
+	if _, ok := macro["arguments"]; ok {
+		t.Fatalf("did not expect macro arguments in compact run JSON: %s", buf.String())
+	}
+	session, ok := decoded["session"].(map[string]any)
+	if !ok || session["workbook_path"] != `C:\temp\Book.xlsm` {
+		t.Fatalf("unexpected compact session payload: %s", buf.String())
+	}
+	if _, ok := session["extra"]; ok {
+		t.Fatalf("did not expect extra session fields in compact run JSON: %s", buf.String())
+	}
+}
+
+func TestWriteWithOptionsIncludesVerboseRunJSONDiagnostics(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_failed", Message: "boom", Number: 9, Phase: "invoke_macro"})
+	env.Logs = []string{"verbose log"}
+	env.Workbook = map[string]any{"path": `C:\temp\Book.xlsm`}
+	env.Bridge = map[string]any{"host": "dotnet"}
+	env.Runtime = map[string]any{"mode": "headless"}
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42, "arguments": []any{"x"}}
+	env.RunDiagnostic = map[string]any{
+		"kind":    "runtime",
+		"dialog":  map[string]any{"title": "Microsoft Visual Basic"},
+		"dialogs": []map[string]any{{"title": "Microsoft Visual Basic"}},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{JSON: true, Verbose: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["workbook"].(map[string]any); !ok {
+		t.Fatalf("expected workbook in verbose run JSON: %s", buf.String())
+	}
+	if _, ok := decoded["bridge"].(map[string]any); !ok {
+		t.Fatalf("expected bridge in verbose run JSON: %s", buf.String())
+	}
+	diag, ok := decoded["run_diagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected run_diagnostic in verbose run JSON: %s", buf.String())
+	}
+	if _, ok := diag["dialogs"]; !ok {
+		t.Fatalf("expected dialogs in verbose run JSON: %s", buf.String())
+	}
+	if _, ok := diag["dialog"]; ok {
+		t.Fatalf("did not expect duplicate dialog field in verbose run JSON: %s", buf.String())
+	}
+}
+
 func TestPushHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
 	env := Failure("push", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
 	env.Workbook = map[string]any{"path": "build/Book.xlsm"}

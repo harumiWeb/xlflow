@@ -359,6 +359,24 @@ func TestRunCommandDiagnosticDefaultsTrue(t *testing.T) {
 	}
 }
 
+func TestRunCommandIncludesVerboseFlag(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("verbose")
+	if flag == nil {
+		t.Fatal("expected --verbose flag")
+		return
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("verbose default = %q, want false", flag.DefValue)
+	}
+}
+
 func TestHeadlessGUIBoundaryLogsExplainProjectWideScanAndLintOverride(t *testing.T) {
 	logs := headlessGUIBoundaryLogs(config.Default())
 	for _, want := range []string{

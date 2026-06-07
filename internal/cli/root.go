@@ -2412,6 +2412,7 @@ func (a *app) runCommand() *cobra.Command {
 	var interactive bool
 	var direct bool
 	var fast bool
+	var verbose bool
 	var diagnostic bool
 	var guiCompileErrors bool
 	var session bool
@@ -2481,7 +2482,7 @@ func (a *app) runCommand() *cobra.Command {
 			if env.Status == output.StatusFailed && env.Error != nil && env.Error.Code == "macro_failed" && env.Error.Phase == "invoke_macro" {
 				env.RunDiagnostic = a.buildRunDiagnostic(cfg, env)
 			}
-			return a.write(env, code)
+			return a.writeWithOutputOptions(env, code, a.outputOptionsWithVerbose(verbose))
 		},
 	}
 	cmd.Flags().StringArrayVar(&argLiterals, "arg", nil, "pass a typed macro argument such as string:hello, int:7, double:3.5, or bool:true")
@@ -2496,6 +2497,7 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "run with Excel visible and alerts enabled for human interaction")
 	cmd.Flags().BoolVar(&direct, "direct", false, "run an argument-free macro without injecting a temporary harness")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast run defaults")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "include verbose diagnostic JSON fields for xlflow debugging")
 	cmd.Flags().BoolVar(&diagnostic, "diagnostic", true, "compile VBA before running and return structured compile diagnostics (default true)")
 	cmd.Flags().BoolVar(&guiCompileErrors, "gui-compile-errors", false, "allow VBA compile and runtime error dialogs to surface via the GUI instead of structured diagnostics")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
@@ -4909,7 +4911,11 @@ func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) err
 }
 
 func (a *app) write(env output.Envelope, code int) error {
-	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
+	return a.writeWithOutputOptions(env, code, a.outputOptions())
+}
+
+func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.Options) error {
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, opts); err != nil {
 		return output.WithExitCode(code, err)
 	}
 	if code != output.ExitSuccess {
@@ -4919,11 +4925,16 @@ func (a *app) write(env output.Envelope, code int) error {
 }
 
 func (a *app) outputOptions() output.Options {
+	return a.outputOptionsWithVerbose(false)
+}
+
+func (a *app) outputOptionsWithVerbose(verbose bool) output.Options {
 	interactive := !a.json && a.stdoutIsInteractive()
 	return output.Options{
 		JSON:        a.json,
 		Interactive: interactive,
 		Color:       interactive,
+		Verbose:     verbose,
 	}
 }
 

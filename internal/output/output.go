@@ -80,6 +80,7 @@ type Options struct {
 	JSON        bool
 	Interactive bool
 	Color       bool
+	Verbose     bool
 }
 
 type ExitError struct {
@@ -167,7 +168,9 @@ func Write(w io.Writer, env Envelope, jsonOutput bool) error {
 
 func WriteWithOptions(w io.Writer, env Envelope, opts Options) error {
 	if opts.JSON {
-		return Write(w, env, true)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(jsonPayload(env, opts))
 	}
 	text := renderHuman(env, opts)
 	if text == "" {
@@ -175,6 +178,186 @@ func WriteWithOptions(w io.Writer, env Envelope, opts Options) error {
 	}
 	_, err := fmt.Fprint(w, text)
 	return err
+}
+
+func jsonPayload(env Envelope, opts Options) any {
+	if env.Command == "run" {
+		return runJSONPayload(env, opts.Verbose)
+	}
+	return env
+}
+
+func runJSONPayload(env Envelope, verbose bool) map[string]any {
+	payload := map[string]any{
+		"status":  env.Status,
+		"command": env.Command,
+	}
+	if env.Error != nil {
+		payload["error"] = env.Error
+	}
+	if verbose {
+		if env.Logs != nil {
+			payload["logs"] = env.Logs
+		}
+		addPayloadField(payload, "diagnostics", env.Diagnostics)
+		addPayloadField(payload, "workbook", env.Workbook)
+		addPayloadField(payload, "backup", env.Backup)
+		addPayloadField(payload, "source", env.Source)
+		addPayloadField(payload, "bridge", env.Bridge)
+		addPayloadField(payload, "macros", env.Macros)
+		addPayloadField(payload, "forms", env.Forms)
+		addPayloadField(payload, "issues", env.Issues)
+		addPayloadField(payload, "tests", env.Tests)
+		addPayloadField(payload, "diff", env.Diff)
+		addPayloadField(payload, "inspect", env.Inspect)
+		addPayloadField(payload, "runtime", env.Runtime)
+		addPayloadField(payload, "gui_boundaries", env.GUIBoundaries)
+		addPayloadField(payload, "debug", env.Debug)
+		addPayloadField(payload, "ui", env.UI)
+		addPayloadField(payload, "runner", env.Runner)
+		addPayloadField(payload, "analysis", env.Analysis)
+		addPayloadField(payload, "check", env.Check)
+		addPayloadField(payload, "version", env.Version)
+		addPayloadField(payload, "push_diagnostic", env.PushDiagnostic)
+		addPayloadField(payload, "backups", env.Backups)
+		addPayloadField(payload, "rollback", env.Rollback)
+		addPayloadField(payload, "output", env.Output)
+		addPayloadField(payload, "spec", env.Spec)
+		addPayloadField(payload, "edit", env.Edit)
+		addPayloadField(payload, "project", env.Project)
+		addPayloadField(payload, "state", env.State)
+		addPayloadField(payload, "hints", env.Hints)
+		addPayloadField(payload, "default_entry", env.DefaultEntry)
+		addPayloadField(payload, "suggestions", env.Suggestions)
+		addPayloadField(payload, "process", env.Process)
+	}
+	if macro := compactRunMacro(env.Macro, verbose); macro != nil {
+		payload["macro"] = macro
+	}
+	if location := runLocation(env); location != nil {
+		payload["location"] = location
+	}
+	if session := runSessionPayload(env.Session, verbose); session != nil {
+		payload["session"] = session
+	}
+	addPayloadField(payload, "target", env.Target)
+	addPayloadField(payload, "warnings", env.Warnings)
+	if suggestion := runSuggestion(env); suggestion != "" {
+		payload["suggestion"] = suggestion
+	}
+	if verbose {
+		if diag := verboseRunDiagnostic(env.RunDiagnostic); diag != nil {
+			payload["run_diagnostic"] = diag
+		}
+	}
+	return payload
+}
+
+func addPayloadField(payload map[string]any, key string, value any) {
+	if value != nil {
+		payload[key] = value
+	}
+}
+
+func compactRunMacro(value any, verbose bool) any {
+	macro := clonedObjectMap(value)
+	if len(macro) == 0 {
+		return nil
+	}
+	if verbose {
+		return macro
+	}
+	compact := map[string]any{}
+	if name, ok := macro["name"]; ok && name != nil {
+		compact["name"] = name
+	}
+	if duration, ok := macro["duration_ms"]; ok && duration != nil {
+		compact["duration_ms"] = duration
+	}
+	if len(compact) == 0 {
+		return nil
+	}
+	return compact
+}
+
+func runSessionPayload(value any, verbose bool) any {
+	session := clonedObjectMap(value)
+	if len(session) == 0 {
+		return nil
+	}
+	if verbose {
+		return session
+	}
+	compact := map[string]any{}
+	for _, key := range []string{"active", "mode", "dirty", "save_required", "source_of_truth", "workbook_path"} {
+		if item, ok := session[key]; ok && item != nil {
+			compact[key] = item
+		}
+	}
+	if len(compact) == 0 {
+		return nil
+	}
+	return compact
+}
+
+func runLocation(env Envelope) any {
+	diag := clonedObjectMap(env.RunDiagnostic)
+	location := clonedObjectMap(diag["location"])
+	if len(location) > 0 {
+		return location
+	}
+	if env.Error == nil {
+		return nil
+	}
+	if env.Error.Source == "" && env.Error.Line == 0 {
+		return nil
+	}
+	location = map[string]any{}
+	if env.Error.Source != "" {
+		location["component"] = env.Error.Source
+	}
+	if env.Error.Line > 0 {
+		location["line"] = env.Error.Line
+		location["end_line"] = env.Error.Line
+	}
+	if len(location) == 0 {
+		return nil
+	}
+	return location
+}
+
+func runSuggestion(env Envelope) string {
+	diag := clonedObjectMap(env.RunDiagnostic)
+	if suggestion, ok := diag["suggestion"].(string); ok {
+		return strings.TrimSpace(suggestion)
+	}
+	return ""
+}
+
+func verboseRunDiagnostic(value any) any {
+	diag := clonedObjectMap(value)
+	if len(diag) == 0 {
+		return nil
+	}
+	if dialogs, ok := diag["dialogs"]; ok && dialogs != nil {
+		delete(diag, "dialog")
+	}
+	return diag
+}
+
+func clonedObjectMap(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	decoded := objectMap(value)
+	if len(decoded) == 0 {
+		return nil
+	}
+	clone := make(map[string]any, len(decoded))
+	for key, item := range decoded {
+		clone[key] = item
+	}
+	return clone
 }
 
 func renderHuman(env Envelope, opts Options) string {
