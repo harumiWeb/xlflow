@@ -195,6 +195,9 @@ func runJSONPayload(env Envelope, verbose bool) map[string]any {
 	if env.Error != nil {
 		payload["error"] = env.Error
 	}
+	addPayloadField(payload, "issues", env.Issues)
+	addPayloadField(payload, "analysis", env.Analysis)
+	addPayloadField(payload, "gui_boundaries", env.GUIBoundaries)
 	if verbose {
 		if env.Logs != nil {
 			payload["logs"] = env.Logs
@@ -206,16 +209,13 @@ func runJSONPayload(env Envelope, verbose bool) map[string]any {
 		addPayloadField(payload, "bridge", env.Bridge)
 		addPayloadField(payload, "macros", env.Macros)
 		addPayloadField(payload, "forms", env.Forms)
-		addPayloadField(payload, "issues", env.Issues)
 		addPayloadField(payload, "tests", env.Tests)
 		addPayloadField(payload, "diff", env.Diff)
 		addPayloadField(payload, "inspect", env.Inspect)
 		addPayloadField(payload, "runtime", env.Runtime)
-		addPayloadField(payload, "gui_boundaries", env.GUIBoundaries)
 		addPayloadField(payload, "debug", env.Debug)
 		addPayloadField(payload, "ui", env.UI)
 		addPayloadField(payload, "runner", env.Runner)
-		addPayloadField(payload, "analysis", env.Analysis)
 		addPayloadField(payload, "check", env.Check)
 		addPayloadField(payload, "version", env.Version)
 		addPayloadField(payload, "push_diagnostic", env.PushDiagnostic)

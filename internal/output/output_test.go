@@ -218,6 +218,35 @@ func TestWriteWithOptionsIncludesVerboseRunJSONDiagnostics(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsKeepsRunPreflightDiagnosticsByDefault(t *testing.T) {
+	env := Failure("run", Error{Code: "source_preflight_failed", Message: "preflight failed", Phase: "preflight"})
+	env.Issues = []map[string]any{{"code": "VB001", "file": "src/modules/Main.bas", "line": 10}}
+	env.Analysis = []map[string]any{{"code": "VBA101", "file": "src/modules/Main.bas", "line": 12}}
+	env.GUIBoundaries = []map[string]any{{"file": "src/modules/Main.bas", "line": 14, "kind": "modal_dialog"}}
+	env.Workbook = map[string]any{"path": `C:\temp\Book.xlsm`}
+	env.Runtime = map[string]any{"mode": "headless"}
+	env.Logs = []string{"blocked before Excel automation"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"issues", "analysis", "gui_boundaries"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("expected %s in compact run preflight JSON: %s", key, buf.String())
+		}
+	}
+	for _, key := range []string{"workbook", "runtime", "logs"} {
+		if _, ok := decoded[key]; ok {
+			t.Fatalf("did not expect %s in compact run preflight JSON: %s", key, buf.String())
+		}
+	}
+}
+
 func TestPushHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
 	env := Failure("push", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
 	env.Workbook = map[string]any{"path": "build/Book.xlsm"}
