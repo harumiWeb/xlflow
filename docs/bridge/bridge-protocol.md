@@ -17,6 +17,7 @@ xlflow.exe
 
 Rules:
 
+- stdin request JSON and stdout response JSON must be encoded as UTF-8 regardless of the active Windows console code page.
 - stdout is reserved for exactly one response JSON document.
 - Logs must be emitted through `logs` in the response or through stderr.
 - Fatal bridge failures should still return a structured JSON response when possible.

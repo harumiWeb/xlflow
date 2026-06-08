@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.12.1
+
+- Fixed `.NET` bridge stdin/stdout JSON transport on Windows to use explicit UTF-8 streams, preventing mojibake and invalid bridge JSON when project, workbook, or session paths contain Japanese or other non-ASCII characters.
+
 ## v0.12.0
 
 - Fixed: Add support for detecting implicit variants inside user-defined types (UDTs) in linter

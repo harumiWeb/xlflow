@@ -35,6 +35,33 @@ public sealed class SessionCommandTests
     }
 
     [Fact]
+    public void HandleParsesNonAsciiPayload()
+    {
+        const string workbookPath = @"C:\work\てすと\sources\帳票.xlsm";
+        const string metadataPath = @"C:\work\てすと\.xlflow\session.json";
+
+        var service = new FakeSessionService((request, args) =>
+        {
+            Assert.Equal("status", args.Action);
+            Assert.Equal(workbookPath, args.WorkbookPath);
+            Assert.Equal(metadataPath, args.MetadataPath);
+            return BridgeResponse.Ok(request);
+        });
+
+        var command = new SessionCommand(service);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-session-nonascii",
+            Command = "session",
+            Payload = JsonDocument.Parse("""{"Action":"status","WorkbookPath":"C:\\work\\てすと\\sources\\帳票.xlsm","MetadataPath":"C:\\work\\てすと\\.xlflow\\session.json","Visible":"false","UseSession":"false"}""").RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public void ReadSessionMetadataKeepsCompatibilityWithLegacyShape()
     {
         var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
@@ -51,6 +78,32 @@ public sealed class SessionCommandTests
             Assert.Equal(456, metadata.Pid);
             Assert.False(metadata.Poisoned);
             Assert.Equal("", metadata.HResult);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadSessionMetadataPreservesNonAsciiWorkbookPath()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            var workbookPath = Path.Combine(dir, "てすと", "sources", "帳票.xlsm");
+            Directory.CreateDirectory(Path.GetDirectoryName(workbookPath)!);
+            File.WriteAllText(path, $$"""{"hwnd":123,"pid":456,"workbook_path":"{{workbookPath.Replace("\\", "\\\\", StringComparison.Ordinal)}}"}""");
+
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.Equal(workbookPath, metadata!.WorkbookPath);
         }
         finally
         {
