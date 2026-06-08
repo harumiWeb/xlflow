@@ -221,3 +221,153 @@ func TestDotNetProviderExecuteDoctorWithRealBridge(t *testing.T) {
 		t.Fatalf("command = %q, want doctor", payload.Command)
 	}
 }
+
+func TestDotNetProviderExecuteNewWithNonASCIIPathKeepsJSONValid(t *testing.T) {
+	bridgeExe := publishRepoLocalDotNetBridge(t)
+	useIsolatedBridgeExecutable(t, bridgeExe)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	workbookPath := filepath.Join(t.TempDir(), "てすと", "sources", "帳票.xlsm")
+	response, err := (DotNetProvider{}).Execute(ctx, Request{
+		Command: "new",
+		Args: map[string]string{
+			"WorkbookPath": workbookPath,
+		},
+	})
+	if err != nil && len(response.Stdout) == 0 {
+		var bridgeErr *Error
+		if errors.As(err, &bridgeErr) && bridgeErr.Kind == ErrorDotNetRuntime {
+			t.Skip("dotnet runtime is not available for repo-local bridge execution")
+		}
+		t.Fatalf("Execute(new) error = %v", err)
+	}
+
+	payload := parseBridgeResponseEnvelope(t, response.Stdout)
+	if payload.ProtocolVersion != ProtocolVersion {
+		t.Fatalf("protocol_version = %d, want %d", payload.ProtocolVersion, ProtocolVersion)
+	}
+	if payload.Command != "new" {
+		t.Fatalf("command = %q, want new", payload.Command)
+	}
+	if payload.Error != nil && payload.Error.Code == "BRIDGE_REQUEST_INVALID_JSON" {
+		t.Fatalf("transport corrupted non-ASCII path into invalid JSON: %s", payload.Error.Message)
+	}
+	if payload.Error != nil && payload.Error.Code == "excel_com_failure" {
+		t.Skipf("Excel COM is not available for repo-local .NET bridge execution: %s", payload.Error.Message)
+	}
+}
+
+func TestDotNetProviderExecuteSessionStatusWithNonASCIIPathKeepsJSONValid(t *testing.T) {
+	bridgeExe := publishRepoLocalDotNetBridge(t)
+	useIsolatedBridgeExecutable(t, bridgeExe)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	projectRoot := filepath.Join(t.TempDir(), "てすと", "session-source")
+	metadataPath := filepath.Join(projectRoot, ".xlflow", "session.json")
+	workbookPath := filepath.Join(projectRoot, "帳票.xlsm")
+	response, err := (DotNetProvider{}).Execute(ctx, Request{
+		Command: "session",
+		Args: map[string]string{
+			"Action":       "status",
+			"WorkbookPath": workbookPath,
+			"MetadataPath": metadataPath,
+			"UseSession":   "false",
+			"Visible":      "false",
+		},
+	})
+	if err != nil && len(response.Stdout) == 0 {
+		var bridgeErr *Error
+		if errors.As(err, &bridgeErr) && bridgeErr.Kind == ErrorDotNetRuntime {
+			t.Skip("dotnet runtime is not available for repo-local bridge execution")
+		}
+		t.Fatalf("Execute(session status) error = %v", err)
+	}
+
+	payload := parseBridgeResponseEnvelope(t, response.Stdout)
+	if payload.ProtocolVersion != ProtocolVersion {
+		t.Fatalf("protocol_version = %d, want %d", payload.ProtocolVersion, ProtocolVersion)
+	}
+	if payload.Command != "session" {
+		t.Fatalf("command = %q, want session", payload.Command)
+	}
+	if payload.Error != nil && payload.Error.Code == "BRIDGE_REQUEST_INVALID_JSON" {
+		t.Fatalf("transport corrupted non-ASCII session path into invalid JSON: %s", payload.Error.Message)
+	}
+}
+
+type bridgeResponseEnvelope struct {
+	ProtocolVersion int    `json:"protocol_version"`
+	Status          string `json:"status"`
+	Command         string `json:"command"`
+	Error           *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func parseBridgeResponseEnvelope(t *testing.T, stdout []byte) bridgeResponseEnvelope {
+	t.Helper()
+
+	var payload bridgeResponseEnvelope
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		t.Fatalf("failed to parse bridge response: %v\nstdout=%s", err, string(stdout))
+	}
+	return payload
+}
+
+func publishRepoLocalDotNetBridge(t *testing.T) string {
+	t.Helper()
+
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only repo-local .NET bridge execution")
+	}
+	if _, err := exec.LookPath("dotnet"); err != nil {
+		t.Skip("dotnet is not available")
+	}
+	if _, ok := repoLocalDotNetBridgeProjectPath(); !ok {
+		t.Skip("repo-local .NET bridge project not found")
+	}
+
+	projectPath, _ := repoLocalDotNetBridgeProjectPath()
+	outDir := filepath.Join(t.TempDir(), "publish")
+	objDir := filepath.Join(t.TempDir(), "obj")
+	buildCmd := exec.Command(
+		"dotnet",
+		"publish",
+		projectPath,
+		"-c", "Release",
+		"-o", outDir,
+		"--disable-build-servers",
+		"-p:UseSharedCompilation=false",
+		"-p:BuildInParallel=false",
+		"-p:BaseIntermediateOutputPath="+objDir+string(os.PathSeparator),
+	)
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		t.Skipf("could not build isolated repo-local .NET bridge for execution test: %v\n%s", buildErr, string(buildOut))
+	}
+
+	bridgeExe := filepath.Join(outDir, dotNetBridgeBinaryName+".exe")
+	if _, err := os.Stat(bridgeExe); err != nil {
+		t.Skipf("isolated repo-local .NET bridge executable was not produced at %s: %v", bridgeExe, err)
+	}
+
+	return bridgeExe
+}
+
+func useIsolatedBridgeExecutable(t *testing.T, bridgeExe string) {
+	t.Helper()
+
+	originalCandidatesFunc := dotNetBridgeCandidatesFunc
+	originalProjectPathFunc := repoLocalDotNetBridgeProjectPathFunc
+	t.Cleanup(func() {
+		dotNetBridgeCandidatesFunc = originalCandidatesFunc
+		repoLocalDotNetBridgeProjectPathFunc = originalProjectPathFunc
+	})
+	dotNetBridgeCandidatesFunc = func() []string { return []string{bridgeExe} }
+	repoLocalDotNetBridgeProjectPathFunc = func() (string, bool) { return "", false }
+}

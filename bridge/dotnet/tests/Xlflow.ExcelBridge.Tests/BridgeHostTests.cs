@@ -2,6 +2,7 @@ using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Diagnostics;
+using Xlflow.ExcelBridge.Services;
 
 namespace Xlflow.ExcelBridge.Tests;
 
@@ -218,6 +219,46 @@ public sealed class BridgeHostTests
     }
 
     [Fact]
+    public void StdinNewRequestPreservesNonAsciiWorkbookPath()
+    {
+        const string workbookPath = @"C:\work\てすと\sources\帳票.xlsm";
+        const string request = """
+            {
+              "protocol_version": 1,
+              "request_id": "req-new-nonascii",
+              "command": "new",
+              "payload": {
+                "WorkbookPath": "C:\\work\\てすと\\sources\\帳票.xlsm"
+              }
+            }
+            """;
+        using var stdin = new StringReader(request);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var registry = CommandRegistry.Create(
+            probeExcel: null,
+            newService: new FakeNewService((bridgeRequest, args) =>
+            {
+                Assert.Equal(workbookPath, args.WorkbookPath);
+                return BridgeResponse.Ok(bridgeRequest, new Dictionary<string, object?>
+                {
+                    ["target"] = new Dictionary<string, object?>
+                    {
+                        ["path"] = args.WorkbookPath,
+                    },
+                });
+            }));
+
+        var code = BridgeHost.Run([], stdin, stdout, stderr, registry);
+
+        Assert.Equal(0, code);
+        using var json = JsonDocument.Parse(stdout.ToString());
+        Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal(workbookPath, json.RootElement.GetProperty("target").GetProperty("path").GetString());
+    }
+
+    [Fact]
     public void InvalidJsonReturnsStructuredRequestInvalidJsonError()
     {
         using var stdin = new StringReader("{");
@@ -230,5 +271,10 @@ public sealed class BridgeHostTests
         using var json = JsonDocument.Parse(stdout.ToString());
         Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
         Assert.Equal("BRIDGE_REQUEST_INVALID_JSON", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    private sealed class FakeNewService(Func<BridgeRequest, NewCommandArguments, BridgeResponse> handler) : INewService
+    {
+        public BridgeResponse Execute(BridgeRequest request, NewCommandArguments args, CancellationToken cancellationToken) => handler(request, args);
     }
 }
