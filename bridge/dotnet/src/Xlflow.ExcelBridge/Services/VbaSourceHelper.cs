@@ -427,12 +427,18 @@ internal static class VbaSourceHelper
             content = UpdateFolderAnnotationText(content, folderAnnotationMode, desiredAnnotation);
         }
 
-        var encoding = GetVbaImportEncoding();
+        var encoding = GetVbaInteropEncoding();
         File.WriteAllText(destPath, content, encoding);
         return destPath;
     }
 
-    public static Encoding GetVbaImportEncoding()
+    public static string ReadExportedTextAsUtf8(string exportedFile)
+    {
+        var content = File.ReadAllText(exportedFile, GetVbaInteropEncoding());
+        return ConvertToUtf8(content);
+    }
+
+    public static Encoding GetVbaInteropEncoding()
     {
         try
         {
@@ -443,6 +449,11 @@ internal static class VbaSourceHelper
         {
             return new UTF8Encoding(false);
         }
+    }
+
+    public static Encoding GetVbaImportEncoding()
+    {
+        return GetVbaInteropEncoding();
     }
 
     public static string ConvertToUtf8(string content)

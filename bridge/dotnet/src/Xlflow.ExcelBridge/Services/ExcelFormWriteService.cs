@@ -879,8 +879,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 var ext = Path.GetExtension(exportedFile).ToLowerInvariant();
                 if (ext is ".bas" or ".cls" or ".frm")
                 {
-                    var content = File.ReadAllText(exportedFile, Encoding.Default);
-                    content = VbaSourceHelper.ConvertToUtf8(content);
+                    var content = VbaSourceHelper.ReadExportedTextAsUtf8(exportedFile);
                     content = NormalizeUserFormArtifact(content, component);
                     if (args.FolderAnnotation == "update")
                     {
