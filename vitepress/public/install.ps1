@@ -240,14 +240,21 @@ function Install-Xlflow {
 
         $xlflowPath = Join-Path $binDir "xlflow.exe"
         Write-Info "Verifying installation"
-        & $xlflowPath version
+        $versionOutput = & $xlflowPath version 2>&1
+        if ($versionOutput) {
+            $versionOutput | Write-Output
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "xlflow.exe version exited with code $LASTEXITCODE."
+        }
 
         Write-Output ""
         Write-Info "Install complete."
         Write-Info "Next step: xlflow doctor"
         Write-Info "Release source: $(Get-ReleasePageUrl -RepoOwner $RepoOwner -RepoName $RepoName)"
     } catch {
-        Write-Error $_
+        Write-Warning $_
         Write-Output ""
         Write-Output "Install failed."
         Write-Output "Manual recovery: download the latest Windows ZIP from $(Get-ReleasePageUrl -RepoOwner $RepoOwner -RepoName $RepoName), extract it into $binDir, and add that directory to your user PATH."
@@ -280,7 +287,7 @@ function Uninstall-Xlflow {
             Write-Info "Nothing to remove at $TargetRoot"
         }
     } catch {
-        Write-Error $_
+        Write-Warning $_
         Write-Output ""
         Write-Output "Uninstall failed."
         Write-Output "Close any running xlflow.exe or xlflow-excel-bridge.exe processes, then remove $TargetRoot manually and delete $binDir from your user PATH if it still exists."
