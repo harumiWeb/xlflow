@@ -8,7 +8,7 @@ If you want the fastest path:
 
 ```powershell
 irm https://harumiweb.github.io/xlflow/install.ps1 | iex
-xlflow doctor
+xlflow new
 ```
 
 ### Uninstall
