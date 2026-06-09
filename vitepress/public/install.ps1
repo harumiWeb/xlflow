@@ -251,7 +251,7 @@ function Install-Xlflow {
 
         Write-Output ""
         Write-Info "Install complete."
-        Write-Info "Next step: xlflow doctor"
+        Write-Info "Next step: xlflow new"
         Write-Info "Release source: $(Get-ReleasePageUrl -RepoOwner $RepoOwner -RepoName $RepoName)"
     } catch {
         Write-Warning $_

@@ -150,7 +150,6 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ```powershell
 irm https://harumiweb.github.io/xlflow/install.ps1 | iex
-xlflow doctor
 ```
 
 ### Uninstall

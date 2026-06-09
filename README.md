@@ -149,7 +149,6 @@ For the fastest path for humans and AI agents:
 
 ```powershell
 irm https://harumiweb.github.io/xlflow/install.ps1 | iex
-xlflow doctor
 ```
 
 ### Uninstall
