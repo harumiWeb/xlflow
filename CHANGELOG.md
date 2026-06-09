@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a GitHub Pages-hosted PowerShell installer at `https://harumiweb.github.io/xlflow/install.ps1`, including review-first safer install guidance, one-line quick install guidance, and `-Action uninstall` support that removes `%LOCALAPPDATA%\xlflow` and its user PATH entry.
+
 ## v0.12.1
 
 - Fixed `.NET` bridge stdin/stdout JSON transport on Windows to use explicit UTF-8 streams, preventing mojibake and invalid bridge JSON when project, workbook, or session paths contain Japanese or other non-ASCII characters.

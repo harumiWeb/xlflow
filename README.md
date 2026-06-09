@@ -143,6 +143,24 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## Installation
 
+### Quick install
+
+For the fastest path for humans and AI agents:
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 | iex
+xlflow doctor
+```
+
+### Uninstall
+
+Use the same script in file mode when you want to remove the PATH entry and the `%LOCALAPPDATA%\xlflow` installation directory:
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 -OutFile .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Action uninstall
+```
+
 ### winget
 
 ```powershell
@@ -157,7 +175,7 @@ winget upgrade HarumiWeb.Xlflow
 
 > [!NOTE]
 > winget availability may lag behind a GitHub Release while the manifest is submitted and accepted upstream.
-> Use Scoop or the GitHub Releases ZIP when you need the newest release immediately.
+> Use the installer script, Scoop, or the GitHub Releases ZIP when you need the newest release immediately.
 
 ### Scoop
 
