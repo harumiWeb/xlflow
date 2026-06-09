@@ -296,8 +296,7 @@ public sealed class ExcelPullService : IPullService
 
                 if (IsTextFileExtension(ext))
                 {
-                    var content = File.ReadAllText(exportedFile, Encoding.Default);
-                    content = VbaSourceHelper.ConvertToUtf8(content);
+                    var content = VbaSourceHelper.ReadExportedTextAsUtf8(exportedFile);
 
                     if (type == ComponentTypeDocument)
                     {
