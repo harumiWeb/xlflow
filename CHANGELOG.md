@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a GitHub Pages-hosted PowerShell installer at `https://harumiweb.github.io/xlflow/install.ps1`, including review-first safer install guidance, one-line quick install guidance, and `-Action uninstall` support that removes `%LOCALAPPDATA%\xlflow` and its user PATH entry.
+
 ## v0.12.2
 
 - Fix .NET bridge VBA export decoding for non-ASCII pull sources

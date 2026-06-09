@@ -144,6 +144,24 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## インストール
 
+### Quick install
+
+人間と AI エージェント向けの最短導線:
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 | iex
+xlflow doctor
+```
+
+### Uninstall
+
+PATH entry と `%LOCALAPPDATA%\xlflow` 配下のインストールを削除する場合は、同じ script を file 実行で使います。
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 -OutFile .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Action uninstall
+```
+
 ### winget
 
 ```powershell
@@ -158,7 +176,7 @@ winget upgrade HarumiWeb.Xlflow
 
 > [!NOTE]
 > winget は manifest を upstream へ提出して承認されるまで、GitHub Release より反映が遅れる場合があります。
-> 最新 release をすぐに使いたい場合は、Scoop または GitHub Releases の ZIP を使ってください。
+> 最新 release をすぐに使いたい場合は installer script、Scoop、または GitHub Releases の ZIP を使ってください。
 
 ### Scoop
 

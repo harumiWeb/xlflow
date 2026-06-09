@@ -2,7 +2,27 @@
 
 ## Recommended for Windows users
 
-If you just want to use xlflow on Windows, install it with winget:
+### Quick install
+
+If you want the fastest path:
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 | iex
+xlflow doctor
+```
+
+### Uninstall
+
+Use the same script in file mode to remove the PATH entry and the `%LOCALAPPDATA%\xlflow` installation directory:
+
+```powershell
+irm https://harumiweb.github.io/xlflow/install.ps1 -OutFile .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Action uninstall
+```
+
+### winget
+
+If you just want to use xlflow on Windows with a package manager, install it with winget:
 
 ```powershell
 winget install HarumiWeb.Xlflow
