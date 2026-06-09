@@ -10,12 +10,12 @@ public sealed class VbaSourceHelperTests
         var tempFile = Path.Combine(Path.GetTempPath(), $"xlflow-vba-export-{Guid.NewGuid():N}.bas");
         try
         {
-            var exported = "Attribute VB_Name = \"Module1\"\nSub Hello()\n    MsgBox \"日本語テスト\"\nEnd Sub\n";
+            var exported = "Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"日本語テスト\"\r\nEnd Sub\r\n";
             File.WriteAllText(tempFile, exported, VbaSourceHelper.GetVbaInteropEncoding());
 
             var content = VbaSourceHelper.ReadExportedTextAsUtf8(tempFile);
 
-            Assert.Equal(exported.Replace("\n", "\r\n"), content);
+            Assert.Equal(exported, content);
         }
         finally
         {
@@ -27,7 +27,7 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
-    public void GetVbaImportEncoding_ReturnsInteropEncoding()
+    public void GetVbaImportEncoding_HasSameCodePageAsInteropEncoding()
     {
         Assert.Equal(VbaSourceHelper.GetVbaInteropEncoding().CodePage, VbaSourceHelper.GetVbaImportEncoding().CodePage);
     }
