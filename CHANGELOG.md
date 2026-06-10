@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added a GitHub Pages-hosted PowerShell installer at `https://harumiweb.github.io/xlflow/install.ps1`, including review-first safer install guidance, one-line quick install guidance, and `-Action uninstall` support that removes `%LOCALAPPDATA%\xlflow` and its user PATH entry.
+- Hardened `xlflow-excel-bridge.exe` direct startup so no-arg, help, version, and invalid launches exit immediately with clear output, while `xlflow.exe` uses an explicit internal run flag before starting the actual bridge runtime.
 
 ## v0.12.2
 

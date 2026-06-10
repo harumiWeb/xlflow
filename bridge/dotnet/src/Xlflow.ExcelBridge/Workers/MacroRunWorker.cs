@@ -415,6 +415,7 @@ public sealed class MacroRunWorkerProcess : IDisposable
             }
             startInfo.ArgumentList.Add(assemblyPath);
         }
+        startInfo.ArgumentList.Add(BridgeStartup.InternalRunFlag);
         startInfo.ArgumentList.Add("--run-worker");
         startInfo.Environment[MacroRunWorker.RequestPathEnv] = requestPath;
         startInfo.Environment[MacroRunWorker.ResultPathEnv] = resultPath;

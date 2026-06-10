@@ -15,6 +15,7 @@ import (
 
 const dotNetBridgeBinaryName = "xlflow-excel-bridge"
 const dotNetBridgeProjectRelativePath = "bridge/dotnet/src/Xlflow.ExcelBridge/Xlflow.ExcelBridge.csproj"
+const dotNetBridgeInternalRunFlag = "--bridge-internal-run"
 
 var dotNetLookPath = exec.LookPath
 var dotNetBridgeCandidatesFunc = dotNetBridgeCandidates
@@ -118,7 +119,8 @@ func (p DotNetProvider) Execute(ctx context.Context, req Request) (Response, err
 		return Response{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, command, args...)
+	execArgs := dotNetBridgeRuntimeArgs(args)
+	cmd := exec.CommandContext(ctx, command, execArgs...)
 	cmd.Stdin = bytes.NewReader(body)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -144,6 +146,12 @@ func (p DotNetProvider) Execute(ctx context.Context, req Request) (Response, err
 		return response, err
 	}
 	return response, nil
+}
+
+func dotNetBridgeRuntimeArgs(args []string) []string {
+	runtimeArgs := append([]string{}, args...)
+	runtimeArgs = append(runtimeArgs, dotNetBridgeInternalRunFlag)
+	return runtimeArgs
 }
 
 func DotNetBridgeCommand() (string, []string, error) {
