@@ -258,6 +258,15 @@ The bridge is a separate executable named `xlflow-excel-bridge.exe`.
 
 The Go CLI starts it for command-scoped work and communicates through stdin/stdout JSON. stdout is reserved for protocol JSON only. Diagnostic logs go into response `logs` or stderr.
 
+Direct launches are intentionally fail-fast hardened:
+
+- `xlflow-excel-bridge.exe` with no arguments prints a short explanation and exits `0`
+- `xlflow-excel-bridge.exe --help` and `-h` print help and exit `0`
+- `xlflow-excel-bridge.exe --version` prints the bridge version and exits `0`
+- invalid arguments print a clear error and exit without starting Excel, COM, UI Automation, or the long-running bridge host
+
+The long-running bridge runtime now requires an explicit internal flag. `xlflow.exe` passes that flag automatically when it launches the bundled bridge, but direct users and external validators should only observe immediate informational or error output.
+
 ## COM Threading Rule
 
 Excel COM operations must run in an STA context.

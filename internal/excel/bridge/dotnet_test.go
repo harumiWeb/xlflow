@@ -50,6 +50,30 @@ func TestDotNetBridgeCommandFallsBackToInstalledBridgeWhenSDKMissing(t *testing.
 	}
 }
 
+func TestDotNetBridgeInternalRunFlagConstant(t *testing.T) {
+	if dotNetBridgeInternalRunFlag != "--bridge-internal-run" {
+		t.Fatalf("dotNetBridgeInternalRunFlag = %q, want %q", dotNetBridgeInternalRunFlag, "--bridge-internal-run")
+	}
+}
+
+func TestDotNetBridgeRuntimeArgsAppendsInternalRunFlag(t *testing.T) {
+	base := []string{"bridge.dll", "--extra"}
+	got := dotNetBridgeRuntimeArgs(base)
+
+	if len(got) != 3 {
+		t.Fatalf("len(dotNetBridgeRuntimeArgs()) = %d, want 3: %v", len(got), got)
+	}
+	if got[0] != "bridge.dll" || got[1] != "--extra" {
+		t.Fatalf("dotNetBridgeRuntimeArgs() changed base args order: %v", got)
+	}
+	if got[2] != dotNetBridgeInternalRunFlag {
+		t.Fatalf("dotNetBridgeRuntimeArgs() missing internal run flag: %v", got)
+	}
+	if len(base) != 2 {
+		t.Fatalf("dotNetBridgeRuntimeArgs() mutated input slice length: %v", base)
+	}
+}
+
 func TestRepoLocalDotNetBridgeProjectPathExists(t *testing.T) {
 	projectPath, ok := repoLocalDotNetBridgeProjectPath()
 	if !ok {

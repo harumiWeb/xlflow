@@ -10,6 +10,7 @@ public sealed class MacroRunWorkerTests
         var startInfo = MacroRunWorkerProcess.CreateStartInfo("request.json", "result.json");
 
         Assert.False(startInfo.UseShellExecute);
+        Assert.Contains(BridgeStartup.InternalRunFlag, startInfo.ArgumentList);
         Assert.Contains("--run-worker", startInfo.ArgumentList);
         Assert.Equal("request.json", startInfo.Environment["XLFLOW_WORKER_REQUEST_PATH"]);
         Assert.Equal("result.json", startInfo.Environment["XLFLOW_WORKER_RESULT_PATH"]);
