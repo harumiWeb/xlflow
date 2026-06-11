@@ -4,7 +4,7 @@
 
 This spec defines the MVP command, configuration, JSON output, and exit-code contracts for xlflow.
 
-xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-controlled code. Excel operations use the `.NET` Excel bridge by default on Windows, with the PowerShell bridge retained as an explicit legacy fallback. Source-only commands such as `lint` should remain testable without Excel installed.
+xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-controlled code. Excel operations use the `.NET` Excel bridge by default on Windows, with the PowerShell bridge retained as an explicit legacy fallback. WSL is supported as a development frontend by delegating Excel-related commands to Windows `xlflow.exe`. Source-only commands such as `lint` remain local and testable without Excel installed.
 
 ## Commands
 
@@ -65,6 +65,12 @@ xlflow [--json] version [--verbose]
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto`, `powershell`, and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` prefers the `.NET` bridge and falls back to PowerShell only when `.NET` is unavailable, incompatible, or unsupported for the requested command. Explicit `--bridge dotnet` is strict and does not implicitly fall back to PowerShell. Explicit `--bridge powershell` always uses the legacy PowerShell bridge.
 
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
+
+Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
+
+The delegated process extends `WSLENV` with xlflow-owned runtime variables, including `XLFLOW_EXCEL_BRIDGE`, `XLFLOW_MODE`, and `XLFLOW_NO_UPDATE_CHECK`, so their WSL values reach Windows. Projects that require additional custom environment variables inside VBA must add those names to `WSLENV` themselves.
+
 When `--json` is not set, output is optimized for humans rather than machines. Interactive terminals may use Bubble Tea/Lipgloss presentation, color, and progress spinners for Excel COM-backed commands. Non-interactive output, such as CI logs and pipes, stays static and text-oriented while preserving the same command result information. Machine consumers must use `--json` instead of parsing human output.
 
 Excel COM-backed commands report progress on stderr. Interactive stderr terminals may show Bubble Tea/Lipgloss spinner output, while `--json` or non-interactive runs fall back to line-oriented stderr progress so stdout remains a single final human result or JSON envelope. Commands that stream UI or debug events to stderr may suppress separate progress output. Agents should wait for process exit instead of parsing interim stderr progress text.
@@ -75,7 +81,7 @@ Excel COM-backed commands report progress on stderr. Interactive stderr terminal
 
 Excel COM-backed commands also include top-level `bridge` metadata identifying the xlflow Excel bridge process. The fields vary by bridge provider. The PowerShell bridge returns `host` (process name, e.g. `pwsh.exe`), `edition` (e.g. `Core` or `Desktop`), and `version` (PowerShell version). The .NET bridge returns `name`, `version`, `protocol_version`, `runtime`, `architecture`, and may also include `commit`. If workbook VBA launches its own external PowerShell process, that workbook-side host may differ and must be inspected separately.
 
-`doctor --json` adds a top-level `diagnostics` object. Provider-specific `bridge` metadata and `diagnostics` serve different purposes: `bridge` identifies the bridge process itself, while `diagnostics` describes the probed Excel/runtime environment. `diagnostics.requested_bridge` records the requested mode, `diagnostics.selected_bridge` records the resolved provider, `diagnostics.fallback` reports whether `auto` fell back to PowerShell, and `diagnostics.legacy` reports whether the final provider is the legacy PowerShell bridge. With `.NET`, successful output also includes `diagnostics.protocol_version`, nested `runtime`, and nested `excel` probe fields. With PowerShell, callers must not assume the same nested shape unless the provider contract explicitly documents it for that bridge.
+`doctor --json` adds a top-level `diagnostics` object. Provider-specific `bridge` metadata and `diagnostics` serve different purposes: `bridge` identifies the bridge process itself, while `diagnostics` describes the probed Excel/runtime environment. `diagnostics.requested_bridge` records the requested mode, `diagnostics.selected_bridge` records the resolved provider, `diagnostics.fallback` reports whether `auto` fell back to PowerShell, and `diagnostics.legacy` reports whether the final provider is the legacy PowerShell bridge. With `.NET`, successful output also includes `diagnostics.protocol_version`, nested `runtime`, and nested `excel` probe fields. With PowerShell, callers must not assume the same nested shape unless the provider contract explicitly documents it for that bridge. Under WSL, the delegated Windows result is preserved and augmented with `diagnostics.host`, `diagnostics.windows`, and `diagnostics.path_translation`. These report WSL/distro detection, Windows xlflow path/version, bridge and Excel availability, and the translated project working directory. A WSL/Windows xlflow version mismatch is a warning rather than a hard failure.
 
 `new` creates a fresh macro-enabled workbook under `build/`, scaffolds the same project layout as `init`, and then automatically `push`es the scaffolded VBA source into that workbook so the initial workbook and `src/` tree start in sync. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
 
@@ -260,7 +266,7 @@ All JSON output uses a stable top-level envelope.
 
 Command-specific fields are added at the top level:
 
-- `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread)
+- `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread; WSL adds `host`, `windows`, and `path_translation`)
 - `workbook` and `backup` for Excel file commands
 - `source` for commands that write project source files
 - `macro` for `run`
@@ -394,13 +400,17 @@ When no Excel processes are running, `process` is an empty array and the command
 - `process_enumeration_failed` (exit code 3): process enumeration failed at the system level.
 - `process_termination_failed` (exit code 3): one or more targeted processes could not be terminated.
 - `process_cleanup_failed` (exit code 3): an unexpected error occurred during process cleanup.
+- `windows_xlflow_not_found` (exit code 3): WSL could not resolve the Windows `xlflow.exe`.
+- `wsl_project_path_unsupported` (exit code 3): a delegated project or absolute path is not under `/mnt/<drive>`.
+- `wsl_path_translation_failed` (exit code 3): `wslpath` could not translate a required path.
+- `windows_xlflow_execution_failed` (exit code 3): WSL could not start Windows xlflow or could not decode delegated doctor output.
 
 ## Exit Codes
 
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing filter targets, active workbook mismatches, duplicate test names, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
 - `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form build`, `form export-image`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
-- `3`: environment failure, including Excel, COM, VBIDE, PowerShell, script execution failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
+- `3`: environment failure, including Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

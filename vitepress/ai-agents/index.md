@@ -26,6 +26,18 @@ xlflow run Main.Run --headless --session --json
 xlflow save --session --json
 ```
 
+When the agent runs inside WSL, keep the repository under `/mnt/<drive>/...` and install xlflow on both WSL and Windows. The same commands transparently delegate Excel operations to Windows while `lint`, `fmt`, and `analyze` remain in WSL. Prefer the session-first sequence:
+
+```bash
+xlflow doctor --json
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --diagnostic --session --json
+xlflow inspect workbook --session --json
+xlflow save --session --json
+xlflow session stop --json
+```
+
 If a run fails, check state and recover with a short loop:
 
 ```bash

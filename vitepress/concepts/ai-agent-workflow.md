@@ -21,6 +21,7 @@ xlflow session stop --json
 Rules for agents:
 
 - Prefer `--json`.
+- Under WSL, keep projects under `/mnt/<drive>/...`; Excel-related commands delegate to Windows xlflow.
 - Run `doctor` before changing source for environment failures.
 - Use `macros` before guessing a `run` target.
 - Replace raw `MsgBox` / `InputBox` with `XlflowUI` and pass `--msgbox` / `--inputbox` during unattended `run` or `test` flows.

@@ -38,6 +38,14 @@ Successful `--json` output uses the xlflow envelope plus the `diagnostics` objec
 
 On Windows, `doctor` prefers the `.NET` bridge in `auto` mode. The nested `diagnostics` object always reports the requested bridge mode, the selected provider, and whether `auto` fell back to the legacy PowerShell bridge.
 
+Under WSL, `doctor` invokes Windows xlflow and augments the Windows result with:
+
+- `diagnostics.host`: Linux/WSL detection, distro, and WSL xlflow version.
+- `diagnostics.windows`: Windows xlflow path/version plus bridge and Excel availability.
+- `diagnostics.path_translation`: WSL and Windows project paths and support status.
+
+A version mismatch between WSL and Windows xlflow is reported as a warning but does not block delegation.
+
 ```json
 {
   "status": "ok",
@@ -60,6 +68,34 @@ On Windows, `doctor` prefers the `.NET` bridge in `auto` mode. The nested `diagn
       "vbide_access": true,
       "automation_security": 1,
       "trust_vba_access": null
+    }
+  }
+}
+```
+
+WSL output includes the same Windows diagnostics plus the delegation boundary:
+
+```json
+{
+  "status": "ok",
+  "command": "doctor",
+  "diagnostics": {
+    "host": {
+      "os": "linux",
+      "is_wsl": true,
+      "distro": "Ubuntu-24.04"
+    },
+    "windows": {
+      "xlflow_found": true,
+      "xlflow_path": "C:\\Users\\me\\AppData\\Local\\xlflow\\xlflow.exe",
+      "xlflow_version": "0.13.0",
+      "bridge_found": true,
+      "excel_available": true
+    },
+    "path_translation": {
+      "supported": true,
+      "wsl_path": "/mnt/c/dev/project",
+      "windows_path": "C:\\dev\\project"
     }
   }
 }
