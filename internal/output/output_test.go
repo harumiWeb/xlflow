@@ -603,6 +603,41 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersWSLDoctorDiagnostics(t *testing.T) {
+	env := New("doctor")
+	env.Diagnostics = map[string]any{
+		"host": map[string]any{
+			"os":     "linux",
+			"is_wsl": true,
+			"distro": "Ubuntu-24.04",
+		},
+		"windows": map[string]any{
+			"xlflow_found":   true,
+			"xlflow_path":    `C:\tools\xlflow.exe`,
+			"xlflow_version": "1.2.3",
+			"bridge_found":   true,
+		},
+		"path_translation": map[string]any{
+			"supported":    true,
+			"windows_path": `C:\dev\project`,
+		},
+		"excel": map[string]any{
+			"com_activation": true,
+			"vbide_access":   true,
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"WSL:", "Ubuntu-24.04", "Windows xlflow", `C:\tools\xlflow.exe`, "Windows bridge", "Path translation", `C:\dev\project`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersRunSummaryAndDebug(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}

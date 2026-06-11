@@ -115,7 +115,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AIエージェント連携 | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
 
 > [!IMPORTANT]
-> xlflow は **Windows-first** のツールです。Workbook 操作には **Microsoft Excel + COM** と Windows 既定の `.NET` Excel bridge を使用し、PowerShell bridge は明示指定用の legacy fallback として維持されます。
+> xlflow は workbook 実行について **Windows-first** のツールです。Workbook 操作には Windows 上の **Microsoft Excel + COM** と `.NET` Excel bridge を使用します。WSL は Windows 側の xlflow へ Excel 関連コマンドを委譲することで、開発 frontend として利用できます。
 
 ---
 
@@ -186,14 +186,14 @@ scoop install xlflow
 
 ### GitHub Releases
 
-Windows 向けの事前ビルド済みバイナリは次のページから取得できます。
+Windows x64 と Linux x64 向けの事前ビルド済みバイナリは次のページから取得できます。
 
 [https://github.com/harumiWeb/xlflow/releases](https://github.com/harumiWeb/xlflow/releases)
 
 > [!IMPORTANT]
-> 現在の事前ビルド配布は **Windows 向けのみ** です。
-> Workbook を操作する command には、**Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
+> Workbook を操作する command には、Windows 上の **Microsoft Excel**、Excel COM automation、**VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** 設定が必要です。
 > Windows 向け release ZIP には `xlflow.exe` と `xlflow-excel-bridge.exe` の両方が含まれます。Go CLI には runtime PowerShell bridge script も埋め込まれているため、workbook command のために sidecar `*.ps1` file を別配布する必要はありません。
+> Linux x64 archive は WSL/frontend CLI のみを含み、Windows `.NET` bridge は含みません。
 
 > [!WARNING]
 > `xlflow-excel-bridge.exe` は PowerShell execution policy の影響を受けませんが、AppLocker、WDAC、Defender / EDR policy、antivirus reputation、unsigned executable rule などでブロックされる可能性はあります。公開している checksum と GitHub attestation で確認できるのは artifact の integrity と provenance であり、Windows の Authenticode signing ではありません。
@@ -247,6 +247,52 @@ Taskfile を使用している場合:
 ```bash
 task run -- --help
 ```
+
+---
+
+## WSL で開発する
+
+WSL は編集と自動化の frontend として利用でき、Excel の実行 backend は Windows のままです。
+Excel は WSL 内では起動しません。Workbook command は Windows 側の `xlflow.exe` へ委譲され、そこから同梱の `.NET` bridge と Microsoft Excel COM automation が使われます。
+
+推奨セットアップ:
+
+1. まず Windows 側に xlflow をインストールします。installer、winget、Scoop、または Windows release ZIP を使えます。
+2. WSL shell から WSL frontend をインストールします。
+
+```bash
+curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
+```
+
+3. xlflow project は `/mnt/c/dev/my-vba-project` のような Windows-mounted path 配下に置いてください。
+
+> [!WARNING]
+> `/home/user/project` のような WSL 専用 path は、委譲された Excel automation では正式サポート外です。Windows Excel と COM から見える workbook path が必要です。
+
+作業を始める前に WSL から診断を実行します。
+
+```bash
+xlflow doctor --json
+```
+
+WSL から Windows 側の executable を見つけられない場合は、明示的に指定できます。
+
+```bash
+export XLFLOW_WINDOWS_EXE='C:\Users\you\AppData\Local\xlflow\xlflow.exe'
+```
+
+日常的な macro 開発では、Excel を開いたまま編集ループを回せる session workflow を推奨します。
+
+```bash
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --session --json
+xlflow inspect cell --sheet Sheet1 --address A1 --session --json
+xlflow save --session --json
+xlflow session stop --json
+```
+
+`lint`、`fmt`、`analyze`、`diff` などの source-only command は WSL 内で実行できます。`new`、`init`、`pull`、`push`、`run`、`test`、`inspect`、`save`、`doctor` などの Excel-backed command は Windows へ自動委譲されます。
 
 ---
 

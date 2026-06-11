@@ -43,6 +43,7 @@ type app struct {
 	json           bool
 	bridge         string
 	cwd            string
+	rawArgs        []string
 	stdout         io.Writer
 	stderr         io.Writer
 	stdoutTerminal func() bool
@@ -112,7 +113,7 @@ func ExecuteWithBuildInfo(info BuildInfo) error {
 	if err != nil {
 		return output.WithExitCode(output.ExitEnvironment, err)
 	}
-	a := &app{cwd: cwd, buildInfo: info.withDefaults()}
+	a := &app{cwd: cwd, rawArgs: append([]string{}, os.Args[1:]...), buildInfo: info.withDefaults()}
 	root := a.rootCommand()
 	return root.Execute()
 }
@@ -140,6 +141,9 @@ func (a *app) rootCommand() *cobra.Command {
 		Short:         "Agent-ready VBA development framework",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return a.delegateWSLCommand(cmd)
+		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
 	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, powershell, dotnet")

@@ -27,9 +27,22 @@ builds:
             -Runtime win-x64
             -OutputDir ./bridge/dotnet/artifacts/publish/win-x64
           output: true
+  - id: xlflow-linux
+    main: ./cmd/xlflow
+    binary: xlflow
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.date={{ .Date }}
+    goos:
+      - linux
+    goarch:
+      - amd64
 
 archives:
-  - id: xlflow
+  - id: xlflow-windows
     ids:
       - xlflow
     formats:
@@ -43,6 +56,18 @@ archives:
       - README.md
       - src: bridge/dotnet/artifacts/publish/{{ if eq .Os "windows" }}win-x64{{ else }}missing{{ end }}/xlflow-excel-bridge.exe
         strip_parent: true
+  - id: xlflow-linux
+    ids:
+      - xlflow-linux
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
 
 checksum:
   name_template: checksums.txt
@@ -99,7 +124,7 @@ winget:
       - vba
       - automation
     ids:
-      - xlflow
+      - xlflow-windows
     repository:
       owner: harumiWeb
       name: winget-pkgs

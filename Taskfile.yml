@@ -7,6 +7,61 @@ tasks:
       - go install ./cmd/xlflow
       - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-dotnet-bridge.ps1' -InstallToGoBin
 
+  uninstall:
+    desc: Remove xlflow and the Excel bridge from the local Go bin directory
+    cmds:
+      - |
+        powershell -NoProfile -ExecutionPolicy Bypass -Command '
+        $ErrorActionPreference = "Stop"
+        $goBin = (go env GOBIN).Trim()
+        if ([string]::IsNullOrWhiteSpace($goBin)) {
+          $goPath = (go env GOPATH).Trim()
+          if ([string]::IsNullOrWhiteSpace($goPath)) {
+            throw "Unable to resolve GOBIN/GOPATH from go env."
+          }
+          $goBin = Join-Path ($goPath.Split([IO.Path]::PathSeparator)[0]) "bin"
+        }
+        foreach ($name in @("xlflow.exe", "xlflow-excel-bridge.exe")) {
+          $path = Join-Path $goBin $name
+          if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+            Write-Output ("Removed " + $path)
+          } else {
+            Write-Output ("Not found: " + $path)
+          }
+        }
+        '
+
+  wsl-install:
+    desc: Install the xlflow frontend binary into the current WSL environment
+    cmds:
+      - go install ./cmd/xlflow
+      - |
+        bin="$(go env GOBIN)"
+        if [ -z "$bin" ]; then
+          bin="$(go env GOPATH | cut -d: -f1)/bin"
+        fi
+        printf "Installed xlflow to %s/xlflow\n" "$bin"
+        if ! command -v xlflow >/dev/null 2>&1; then
+          printf "Warning: xlflow is not on PATH inside WSL. Add %s to PATH.\n" "$bin"
+        fi
+
+  wsl-uninstall:
+    desc: Remove the xlflow frontend binary from the current WSL Go bin directory
+    cmds:
+      - |
+        bin="$(go env GOBIN)"
+        if [ -z "$bin" ]; then
+          bin="$(go env GOPATH | cut -d: -f1)/bin"
+        fi
+        target="$bin/xlflow"
+        if [ -e "$target" ]; then
+          rm -f "$target"
+          printf "Removed %s\n" "$target"
+        else
+          printf "Not found: %s\n" "$target"
+        fi
+
   run:
     desc: Run xlflow without install
     cmds:

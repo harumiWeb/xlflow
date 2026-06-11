@@ -21,5 +21,9 @@ Common examples:
 - `fmt_args_invalid`
 - `fmt_stdin_read_failed`
 - `fmt_stdin_write_failed`
+- `windows_xlflow_not_found`
+- `wsl_project_path_unsupported`
+- `wsl_path_translation_failed`
+- `windows_xlflow_execution_failed`
 
 Lint codes include `VB001` through `VB013`. Analyzer codes include `VBA101` and later runtime-risk findings.

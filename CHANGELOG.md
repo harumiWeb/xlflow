@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.13.0
+
+- Added WSL development support that delegates Excel-related commands to Windows `xlflow.exe`, translates Windows-mounted project paths, preserves command streams and exit codes, and extends `doctor` with WSL/Windows diagnostics. Linux x64 release archives are now published for the WSL frontend.
+- Added a GitHub Pages-hosted WSL/Linux frontend installer at `https://harumiweb.github.io/xlflow/install.sh`, including one-line `curl | sh` install guidance and `--uninstall` support.
+- Added `task wsl-install`, `task wsl-uninstall`, and `task uninstall` helpers for installing or removing local Go bin xlflow binaries during delegation testing.
 - Added a GitHub Pages-hosted PowerShell installer at `https://harumiweb.github.io/xlflow/install.ps1`, including review-first safer install guidance, one-line quick install guidance, and `-Action uninstall` support that removes `%LOCALAPPDATA%\xlflow` and its user PATH entry.
 - Hardened `xlflow-excel-bridge.exe` direct startup so no-arg, help, version, and invalid launches exit immediately with clear output, while `xlflow.exe` uses an explicit internal run flag before starting the actual bridge runtime.
 

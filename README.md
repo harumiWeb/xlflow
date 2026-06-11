@@ -114,7 +114,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
 
 > [!IMPORTANT]
-> xlflow is **Windows-first**. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows, with PowerShell retained as an explicit legacy fallback.
+> xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
 
 ---
 
@@ -185,14 +185,14 @@ scoop install xlflow
 
 ### GitHub Releases
 
-Download prebuilt Windows binaries from:
+Download prebuilt Windows and Linux x64 binaries from:
 
 [https://github.com/harumiWeb/xlflow/releases](https://github.com/harumiWeb/xlflow/releases)
 
 > [!IMPORTANT]
-> Current prebuilt distribution targets **Windows** only.
-> Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model**.
+> Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model** on Windows.
 > The Windows release ZIP includes both `xlflow.exe` and `xlflow-excel-bridge.exe`. The Go CLI still embeds the runtime PowerShell bridge scripts, so workbook commands do not require sidecar `*.ps1` files.
+> The Linux x64 archive contains the WSL/frontend CLI only and does not include the Windows `.NET` bridge.
 
 > [!WARNING]
 > `xlflow-excel-bridge.exe` avoids PowerShell execution policy, but it can still be blocked by AppLocker, WDAC, Defender or EDR policy, antivirus reputation, or unsigned-executable rules. The published checksum and GitHub attestation verify artifact integrity and provenance; they do not provide Windows Authenticode signing.
@@ -246,6 +246,52 @@ With Taskfile:
 ```bash
 task run -- --help
 ```
+
+---
+
+## WSL Development
+
+WSL can be used as the editing and automation frontend while Windows remains the Excel execution backend.
+Excel is not started inside WSL; workbook commands are delegated to the Windows `xlflow.exe`, which then uses the bundled `.NET` bridge and Microsoft Excel COM automation.
+
+Recommended setup:
+
+1. Install xlflow on Windows first, using the installer, winget, Scoop, or the Windows release ZIP.
+2. Install the WSL frontend from a WSL shell:
+
+```bash
+curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
+```
+
+3. Keep xlflow projects under a Windows-mounted path such as `/mnt/c/dev/my-vba-project`.
+
+> [!WARNING]
+> Projects under WSL-only paths such as `/home/user/project` are not supported for delegated Excel automation because Windows Excel and COM need a Windows-visible workbook path.
+
+Run diagnostics from WSL before starting work:
+
+```bash
+xlflow doctor --json
+```
+
+If the Windows executable is not discoverable from WSL, point xlflow at it explicitly:
+
+```bash
+export XLFLOW_WINDOWS_EXE='C:\Users\you\AppData\Local\xlflow\xlflow.exe'
+```
+
+For day-to-day macro development, use a session so Excel stays open across the edit loop:
+
+```bash
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --session --json
+xlflow inspect cell --sheet Sheet1 --address A1 --session --json
+xlflow save --session --json
+xlflow session stop --json
+```
+
+Source-only commands such as `lint`, `fmt`, `analyze`, and `diff` can run locally in WSL. Excel-backed commands such as `new`, `init`, `pull`, `push`, `run`, `test`, `inspect`, `save`, and `doctor` delegate to Windows automatically.
 
 ---
 

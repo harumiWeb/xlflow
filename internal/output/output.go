@@ -535,9 +535,40 @@ func (r renderer) renderDoctor(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	excel := objectMap(diag["excel"])
+	host := objectMap(diag["host"])
+	windows := objectMap(diag["windows"])
+	pathTranslation := objectMap(diag["path_translation"])
 	workbook := objectMap(env.Workbook)
 	var b strings.Builder
 	b.WriteString("\n")
+	if boolValue(host, "is_wsl") {
+		distro := stringValue(host, "distro")
+		if distro == "" {
+			distro = "detected"
+		}
+		b.WriteString(kv("WSL", distro))
+	}
+	if len(windows) > 0 {
+		detail := stringValue(windows, "xlflow_path")
+		if version := stringValue(windows, "xlflow_version"); version != "" {
+			if detail != "" {
+				detail += " "
+			}
+			detail += "(" + version + ")"
+		}
+		if detail == "" {
+			detail = "Windows xlflow.exe"
+		}
+		b.WriteString(r.checkLine(boolValue(windows, "xlflow_found"), "Windows xlflow", detail))
+		b.WriteString(r.checkLine(boolValue(windows, "bridge_found"), "Windows bridge", "Excel bridge is available"))
+	}
+	if len(pathTranslation) > 0 {
+		detail := stringValue(pathTranslation, "windows_path")
+		if detail == "" {
+			detail = "Windows-visible project path"
+		}
+		b.WriteString(r.checkLine(boolValue(pathTranslation, "supported"), "Path translation", detail))
+	}
 	if selected := stringValue(diag, "selected_bridge"); selected != "" {
 		b.WriteString(kv("Selected bridge", selected))
 	}
