@@ -33,7 +33,6 @@ var delegatedTopLevelCommands = map[string]struct{}{
 	"export-image": {},
 	"form":         {},
 	"init":         {},
-	"inspect":      {},
 	"list":         {},
 	"macros":       {},
 	"new":          {},
@@ -57,7 +56,7 @@ func (a *app) delegateWSLCommand(cmd *cobra.Command) error {
 		return nil
 	}
 	topLevel := topLevelCommandName(cmd)
-	if !shouldDelegateTopLevelCommand(topLevel) {
+	if !shouldDelegateCommand(cmd, topLevel) {
 		return nil
 	}
 
@@ -96,6 +95,28 @@ func (a *app) delegateWSLCommand(cmd *cobra.Command) error {
 func shouldDelegateTopLevelCommand(name string) bool {
 	_, ok := delegatedTopLevelCommands[name]
 	return ok
+}
+
+func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
+	if topLevel == "inspect" {
+		return shouldDelegateInspectCommand(cmd)
+	}
+	return shouldDelegateTopLevelCommand(topLevel)
+}
+
+func shouldDelegateInspectCommand(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	switch cmd.Name() {
+	case "form":
+		return true
+	case "workbook", "sheets", "range", "used-range", "cell":
+		flag := cmd.Flags().Lookup("session")
+		return flag != nil && flag.Value.String() == "true"
+	default:
+		return false
+	}
 }
 
 func topLevelCommandName(cmd *cobra.Command) string {
@@ -272,28 +293,42 @@ func delegatedEnvironment() []string {
 
 func mergeWSLEnv(current string, names ...string) string {
 	entries := strings.Split(current, ":")
-	seen := make(map[string]struct{}, len(entries)+len(names))
+	indexByName := make(map[string]int, len(entries)+len(names))
 	result := make([]string, 0, len(entries)+len(names))
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
-		name := entry
-		if before, _, ok := strings.Cut(entry, "/"); ok {
-			name = before
-		}
-		seen[name] = struct{}{}
+		name, _ := splitWSLEnvEntry(entry)
+		indexByName[name] = len(result)
 		result = append(result, entry)
 	}
 	for _, name := range names {
-		if _, ok := seen[name]; ok {
+		if index, ok := indexByName[name]; ok {
+			result[index] = ensureWSLEnvFlag(result[index], "w")
 			continue
 		}
-		seen[name] = struct{}{}
+		indexByName[name] = len(result)
 		result = append(result, name+"/w")
 	}
 	return strings.Join(result, ":")
+}
+
+func splitWSLEnvEntry(entry string) (string, string) {
+	name, flags, ok := strings.Cut(entry, "/")
+	if !ok {
+		return entry, ""
+	}
+	return name, flags
+}
+
+func ensureWSLEnvFlag(entry string, flag string) string {
+	name, flags := splitWSLEnvEntry(entry)
+	if strings.Contains(flags, flag) {
+		return entry
+	}
+	return name + "/" + flags + flag
 }
 
 func setEnvironmentValue(env []string, name string, value string) []string {

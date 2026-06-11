@@ -125,6 +125,43 @@ select_linux_asset_url() {
   fail "could not find a Linux x64 tar.gz asset in the latest release"
 }
 
+select_checksums_url() {
+  release_json="$1"
+  url=$(printf '%s\n' "$release_json" |
+    sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*checksums\.txt\)".*/\1/p' |
+    head -n 1)
+  if [ -n "$url" ]; then
+    printf '%s\n' "$url"
+    return
+  fi
+
+  fail "could not find checksums.txt in the latest release"
+}
+
+verify_checksum() {
+  archive_path="$1"
+  archive_name="$2"
+  checksums_url="$3"
+
+  checksums_path=$(mktemp)
+  download_to_file "$checksums_url" "$checksums_path"
+
+  expected=$(awk -v name="$archive_name" '$2 == name || $2 == "*" name { print $1; exit }' "$checksums_path")
+  rm -f "$checksums_path"
+  [ -n "$expected" ] || fail "could not find checksum for $archive_name"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$archive_path" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$archive_path" | awk '{print $1}')
+  else
+    fail "sha256sum or shasum is required for checksum verification"
+  fi
+
+  [ "$actual" = "$expected" ] || fail "checksum verification failed for $archive_name"
+  info "Verified checksum for $archive_name"
+}
+
 profile_file() {
   shell_name=$(basename "${SHELL:-sh}")
   case "$shell_name" in
@@ -195,6 +232,7 @@ install_xlflow() {
   need_cmd tar
   need_cmd sed
   need_cmd grep
+  need_cmd awk
   need_cmd find
   need_cmd mktemp
 
@@ -210,11 +248,14 @@ install_xlflow() {
   info "Fetching latest release metadata from $api_url"
   release_json=$(download_to_stdout "$api_url")
   asset_url=$(select_linux_asset_url "$release_json")
+  checksums_url=$(select_checksums_url "$release_json")
   archive_path="$tmp_root/xlflow-linux.tar.gz"
   extract_dir="$tmp_root/extract"
+  archive_name=$(basename "$asset_url")
 
-  info "Downloading $(basename "$asset_url")"
+  info "Downloading $archive_name"
   download_to_file "$asset_url" "$archive_path"
+  verify_checksum "$archive_path" "$archive_name" "$checksums_url"
 
   info "Extracting archive"
   mkdir -p "$extract_dir"

@@ -23,12 +23,12 @@ import (
 func TestDelegatedTopLevelCommands(t *testing.T) {
 	delegated := []string{
 		"attach", "check", "doctor", "edit", "export-image", "form", "init",
-		"inspect", "list", "macros", "new", "process", "pull", "push", "rollback",
+		"list", "macros", "new", "process", "pull", "push", "rollback",
 		"run", "runner", "save", "session", "status", "test", "ui",
 	}
 	local := []string{
 		"backup", "completion", "diff", "fmt", "generate", "inspect-gui", "lint",
-		"module", "skill", "version",
+		"inspect", "module", "skill", "version",
 	}
 	for _, name := range delegated {
 		if !shouldDelegateTopLevelCommand(name) {
@@ -42,6 +42,41 @@ func TestDelegatedTopLevelCommands(t *testing.T) {
 	}
 	if len(delegatedTopLevelCommands) != len(delegated) {
 		t.Fatalf("delegated command count = %d, want %d", len(delegatedTopLevelCommands), len(delegated))
+	}
+}
+
+func TestShouldDelegateInspectCommand(t *testing.T) {
+	cases := []struct {
+		name    string
+		session bool
+		want    bool
+	}{
+		{name: "form", want: true},
+		{name: "workbook", want: false},
+		{name: "workbook", session: true, want: true},
+		{name: "sheets", want: false},
+		{name: "sheets", session: true, want: true},
+		{name: "range", want: false},
+		{name: "range", session: true, want: true},
+		{name: "used-range", want: false},
+		{name: "used-range", session: true, want: true},
+		{name: "cell", want: false},
+		{name: "cell", session: true, want: true},
+		{name: "unknown", want: false},
+	}
+	for _, tt := range cases {
+		t.Run(fmt.Sprintf("%s/session=%v", tt.name, tt.session), func(t *testing.T) {
+			cmd := &cobra.Command{Use: tt.name}
+			cmd.Flags().Bool("session", false, "")
+			if tt.session {
+				if err := cmd.Flags().Set("session", "true"); err != nil {
+					t.Fatalf("set session flag: %v", err)
+				}
+			}
+			if got := shouldDelegateInspectCommand(cmd); got != tt.want {
+				t.Fatalf("shouldDelegateInspectCommand() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -457,7 +492,15 @@ func TestDelegationTestHelpers(t *testing.T) {
 
 func TestMergeWSLEnvPreservesExistingEntries(t *testing.T) {
 	got := mergeWSLEnv("GOPATH/l:XLFLOW_MODE", "XLFLOW_MODE", "XLFLOW_EXCEL_BRIDGE")
-	if got != "GOPATH/l:XLFLOW_MODE:XLFLOW_EXCEL_BRIDGE/w" {
+	if got != "GOPATH/l:XLFLOW_MODE/w:XLFLOW_EXCEL_BRIDGE/w" {
+		t.Fatalf("mergeWSLEnv() = %q", got)
+	}
+}
+
+func TestMergeWSLEnvUpgradesExistingOneWayEntries(t *testing.T) {
+	got := mergeWSLEnv("XLFLOW_MODE/u:XLFLOW_EXCEL_BRIDGE/up:XLFLOW_NO_UPDATE_CHECK/w", "XLFLOW_MODE", "XLFLOW_EXCEL_BRIDGE", "XLFLOW_NO_UPDATE_CHECK", "XLFLOW_WINDOWS_DELEGATED")
+	want := "XLFLOW_MODE/uw:XLFLOW_EXCEL_BRIDGE/upw:XLFLOW_NO_UPDATE_CHECK/w:XLFLOW_WINDOWS_DELEGATED/w"
+	if got != want {
 		t.Fatalf("mergeWSLEnv() = %q", got)
 	}
 }
