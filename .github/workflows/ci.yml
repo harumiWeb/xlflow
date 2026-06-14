@@ -98,6 +98,26 @@ jobs:
       - run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
       - run: go vet ./...
 
+  test-linux:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: go build ./...
+      - run: go test ./...
+      - run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
+      - run: go vet ./...
+
   security:
     needs: changes
     if: needs.changes.outputs.run_ci == 'true'
