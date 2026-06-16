@@ -1064,7 +1064,7 @@ try {
 		$result.errorCode = $inspect.error.code
 	}
 	if ($null -ne $inspect.forms -and $null -ne $inspect.forms.controls) {
-		$result.types = @($inspect.forms.controls | ForEach-Object { [string]$_.name })
+		$result.types = @($inspect.forms.controls | ForEach-Object { [string]$_.type })
 	}
 
 	$result | ConvertTo-Json -Compress
@@ -1113,9 +1113,9 @@ try {
 	if got.Status != "ok" {
 		t.Fatalf("expected inspect-form designer status ok, got %+v", got)
 	}
-	want := []string{"lblCaption", "txtValue"}
+	want := []string{"Label", "TextBox"}
 	if !reflect.DeepEqual(got.Types, want) {
-		t.Fatalf("designer control names = %#v, want %#v", got.Types, want)
+		t.Fatalf("designer control types = %#v, want %#v", got.Types, want)
 	}
 }
 

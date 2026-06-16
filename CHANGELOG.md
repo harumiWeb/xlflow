@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.13.1
+
+- Fixed `xlflow form snapshot` so Designer snapshots no longer require executing an injected helper macro, avoiding Trust Center / Insider Beta Office failures that blocked temporary macro workbooks from running.
+- Fixed `.NET` and PowerShell Designer inspection to recover concrete UserForm control types from COM metadata when `ProgId` is unavailable, so snapshots no longer persist generic `__ComObject` / `Control` types for standard MSForms controls.
+- Fixed `.NET` Designer inspection for controls such as `TabStrip` that do not expose a `Controls` collection, preventing `DISP_E_UNKNOWNNAME` failures when snapshotting forms that contain a broad set of MSForms controls.
+
 ## v0.13.0
 
 - Added WSL development support that delegates Excel-related commands to Windows `xlflow.exe`, translates Windows-mounted project paths, preserves command streams and exit codes, and extends `doctor` with WSL/Windows diagnostics. Linux x64 release archives are now published for the WSL frontend.

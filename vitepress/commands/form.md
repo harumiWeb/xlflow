@@ -23,6 +23,8 @@ xlflow form export-image <name> --out <png>
 | `--no-save`            | Leave session-backed build changes unsaved until `xlflow save`. | false   |
 | `--initializer <mode>` | Control initializer execution for image export.                 | default |
 
+`form snapshot` reads the design-time Designer state without loading the form at runtime or running workbook VBA. Controls created only by runtime code are visible through runtime inspection or image export, not through snapshot.
+
 ## Examples
 
 ```bash

@@ -477,7 +477,7 @@ func (a *app) formSnapshotCommand() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
 		Use:   "snapshot <name>",
-		Short: "Write a strict designer UserForm snapshot spec to a file",
+		Short: "Write a designer UserForm snapshot spec to a file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := buildFormSnapshotOptions(args[0], outPath, session, buildCommandOptions(a.stderrWriter()))
@@ -3361,7 +3361,6 @@ func buildFormSnapshotOptions(name, outPath string, session bool, commandOpts ex
 	if err != nil {
 		return formSnapshotCommandOptions{}, err
 	}
-	inspectOpts.StrictDesigner = true
 	trimmedOut := strings.TrimSpace(outPath)
 	if trimmedOut == "" {
 		return formSnapshotCommandOptions{}, fmt.Errorf("--out is required")

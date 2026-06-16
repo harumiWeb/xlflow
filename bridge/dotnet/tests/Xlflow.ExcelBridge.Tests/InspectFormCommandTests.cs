@@ -19,6 +19,39 @@ public sealed class InspectFormCommandTests
         Assert.Equal(expected, actual);
     }
 
+    [Theory]
+    [InlineData("MSForms.TextBox", "TextBox")]
+    [InlineData("CommandButtonClass", "CommandButton")]
+    [InlineData("IMdcCombo", "ComboBox")]
+    [InlineData("IMdcText", "TextBox")]
+    [InlineData("ILabelControl", "Label")]
+    [InlineData("IOptionFrame", "Frame")]
+    [InlineData("ICommandButton", "CommandButton")]
+    [InlineData("_Label", "Label")]
+    [InlineData("_IMdcText", "TextBox")]
+    [InlineData("_IMdcTextClass", "TextBox")]
+    [InlineData("__ComObject", null)]
+    [InlineData("", null)]
+    public void NormalizeComTypeName_CleansDesignerComNames(string? value, string? expected)
+    {
+        var actual = ExcelFormInspectionService.NormalizeComTypeName(value);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void GetChildControls_TreatsControlsPropertyMissingAsEmpty()
+    {
+        var controls = ExcelFormInspectionService.GetChildControls(new DesignerControlWithoutChildren(), "Parent");
+
+        Assert.Empty(controls);
+    }
+
+    [Fact]
+    public void GetChildControls_PropagatesEnumerationFailures()
+    {
+        Assert.ThrowsAny<Exception>(() => ExcelFormInspectionService.GetChildControls(new DesignerControlWithBrokenChildren(), "Parent"));
+    }
+
     [Fact]
     public void HandleParsesPayloadAndReturnsExpectedExtensions()
     {
@@ -150,5 +183,19 @@ public sealed class InspectFormCommandTests
             cancellationToken.ThrowIfCancellationRequested();
             return handler(request, args);
         }
+    }
+
+    private sealed class DesignerControlWithoutChildren
+    {
+    }
+
+    private sealed class DesignerControlWithBrokenChildren
+    {
+        public BrokenControls Controls => new();
+    }
+
+    private sealed class BrokenControls
+    {
+        public int Count => throw new InvalidOperationException("broken child enumeration");
     }
 }
