@@ -1485,8 +1485,8 @@ func TestBuildFormSnapshotOptionsValidatesAndNormalizes(t *testing.T) {
 	if opts.Inspect.Name != "UserForm1" || opts.Inspect.Basis != "designer" {
 		t.Fatalf("inspect opts = %#v", opts.Inspect)
 	}
-	if !opts.Inspect.StrictDesigner {
-		t.Fatalf("expected strict designer snapshot opts = %#v", opts.Inspect)
+	if opts.Inspect.StrictDesigner {
+		t.Fatalf("form snapshot should use non-executing designer opts = %#v", opts.Inspect)
 	}
 	if !opts.Inspect.Session || opts.Inspect.Keepalive.Stderr != &stderr {
 		t.Fatalf("command/session opts = %#v", opts.Inspect)

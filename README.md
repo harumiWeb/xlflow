@@ -495,7 +495,7 @@ End If
 | `process`           | Manage local Excel processes (list, cleanup)                    | `xlflow process list --json`                                                 |
 | `macros`            | Discover runnable macro entrypoints                             | `xlflow macros --json`                                                       |
 | `list forms`        | Discover workbook UserForms and expected source paths           | `xlflow list forms --json`                                                   |
-| `form snapshot`     | Persist strict Designer UserForm state as JSON or YAML spec     | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
+| `form snapshot`     | Persist Designer UserForm state as JSON or YAML spec            | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
 | `form build`        | Create a Designer-backed UserForm from a saved spec             | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
 | `form export-image` | Export a runtime UserForm to a PNG image                        | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
 | `run`               | Execute a macro from the CLI                                    | `xlflow run Main.Run --json`                                                 |

@@ -207,17 +207,93 @@ function Get-XlflowSafeControlList {
   return (,@($items.ToArray())), [int](Get-XlflowSafeMemberValue -Target $Control -Name "ListIndex" -Default -1)
 }
 
+function Get-XlflowKnownMsFormsInterfaceTypeName {
+  param([string]$Name)
+
+  $known = @{
+    "ICommandButton" = "CommandButton"
+    "IImage" = "Image"
+    "ILabelControl" = "Label"
+    "IMdcCheckBox" = "CheckBox"
+    "IMdcCombo" = "ComboBox"
+    "IMdcList" = "ListBox"
+    "IMdcOptionButton" = "OptionButton"
+    "IMdcText" = "TextBox"
+    "IMdcToggleButton" = "ToggleButton"
+    "IMultiPage" = "MultiPage"
+    "IOptionFrame" = "Frame"
+    "IPage" = "Page"
+    "IScrollbar" = "ScrollBar"
+    "ISpinbutton" = "SpinButton"
+    "ITabStrip" = "TabStrip"
+  }
+  if ($known.ContainsKey($Name)) {
+    return $known[$Name]
+  }
+  return $null
+}
+
+function ConvertTo-XlflowDesignerControlTypeName {
+  param([string]$Name)
+
+  if ([string]::IsNullOrWhiteSpace($Name)) {
+    return $null
+  }
+  $normalized = $Name.Trim()
+  if ([string]::Equals($normalized, "__ComObject", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $null
+  }
+  if ($normalized.StartsWith("MSForms.", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $normalized = $normalized.Substring("MSForms.".Length)
+  }
+  if ($normalized.EndsWith("Class", [System.StringComparison]::Ordinal)) {
+    $normalized = $normalized.Substring(0, $normalized.Length - "Class".Length)
+  }
+  $known = Get-XlflowKnownMsFormsInterfaceTypeName -Name $normalized
+  if (-not [string]::IsNullOrWhiteSpace($known)) {
+    return $known
+  }
+  if ($normalized.StartsWith("_", [System.StringComparison]::Ordinal)) {
+    $normalized = $normalized.Substring(1)
+  }
+  if (($normalized.Length -gt 1) -and $normalized.StartsWith("I", [System.StringComparison]::Ordinal) -and [char]::IsUpper($normalized[1])) {
+    $normalized = $normalized.Substring(1)
+  }
+  if ([string]::IsNullOrWhiteSpace($normalized)) {
+    return $null
+  }
+  return $normalized
+}
+
+function Get-XlflowDesignerControlTypeName {
+  param(
+    $Control,
+    [string]$ProgId
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($ProgId)) {
+    $segments = $ProgId.Split(".")
+    if (($segments.Length -ge 2) -and (-not [string]::IsNullOrWhiteSpace($segments[1]))) {
+      return $segments[1]
+    }
+  }
+  try {
+    $className = [System.ComponentModel.TypeDescriptor]::GetClassName($Control)
+    $normalized = ConvertTo-XlflowDesignerControlTypeName -Name $className
+    if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+      return $normalized
+    }
+  } catch {
+    Write-Verbose ("failed to resolve designer control class name: " + $_.Exception.Message)
+  }
+  return "Control"
+}
+
 function Get-XlflowDesignerControlSnapshot {
   param($Control)
 
   $progId = [string](Get-XlflowSafeMemberValue -Target $Control -Name "ProgId" -Default "")
-  $controlType = "Control"
-  if (-not [string]::IsNullOrWhiteSpace($progId)) {
-    $segments = $progId.Split(".")
-    if (($segments.Length -ge 2) -and (-not [string]::IsNullOrWhiteSpace($segments[1]))) {
-      $controlType = $segments[1]
-    }
-  }
+  $controlType = Get-XlflowDesignerControlTypeName -Control $Control -ProgId $progId
 
   $snapshot = [ordered]@{
     name = [string](Get-XlflowSafeMemberValue -Target $Control -Name "Name" -Default "")

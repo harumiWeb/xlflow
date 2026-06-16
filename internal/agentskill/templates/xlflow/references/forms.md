@@ -13,7 +13,7 @@ Load this reference when the task depends on `xlflow list forms`, `xlflow inspec
 - Use `xlflow inspect form <FormName> --designer --session --json` for direct VBIDE Designer inspection without running workbook VBA.
 - Use `xlflow inspect form <FormName> --runtime --session --json` for runtime-populated state from a temporary workbook copy. Add `--initializer <MethodName>` when the form must be explicitly populated before inspection.
 - Use `xlflow inspect form <FormName> --both --session --json` when you need designer and runtime snapshots in one pass.
-- Use `xlflow form snapshot <FormName> --out <path.json|path.yaml|path.yml> --session --json` when you need a persisted strict Designer spec suitable for review, diff, or later `form build`.
+- Use `xlflow form snapshot <FormName> --out <path.json|path.yaml|path.yml> --session --json` when you need a persisted Designer spec suitable for review, diff, or later `form build`.
 - Prefer `src/forms/specs/<FormName>.yaml` as that persisted artifact path in normal projects.
 - Use `xlflow form build <spec> --session --json` to create a new Designer-backed UserForm from a persisted spec.
 - Use `xlflow form build <spec> --session --overwrite --json` when the intended workflow is to replace an existing UserForm from spec.
@@ -131,7 +131,7 @@ When `progId` is present in the spec, xlflow prefers it. Otherwise it falls back
 
 - `inspect form --designer` reads the source workbook Designer directly.
 - `inspect form --runtime` and `form export-image` execute against a temporary workbook copy and may run `UserForm_Initialize` plus an optional explicit initializer.
-- `form snapshot` is stricter than `inspect form --designer`; it opens a temporary workbook copy and runs an injected helper to recover concrete control types for the persisted artifact.
+- `form snapshot` uses the same non-executing Designer basis as `inspect form --designer`; it resolves concrete control types from `ProgId` or COM metadata when Excel exposes them.
 - Disk-backed `inspect workbook|sheets|range|used-range|cell` commands do not reflect unsaved live session changes. Run `xlflow save --json` first if the live workbook may be newer than disk.
 
 ## Recommended Agent Workflow

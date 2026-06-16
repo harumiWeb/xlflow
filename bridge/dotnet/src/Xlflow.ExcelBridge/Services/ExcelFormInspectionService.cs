@@ -1,5 +1,8 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 
@@ -439,7 +442,7 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         }
     }
 
-    private static List<Dictionary<string, object?>> GetChildControls(object parent, string expectedParentName)
+    internal static List<Dictionary<string, object?>> GetChildControls(object parent, string expectedParentName)
     {
         var controls = new List<Dictionary<string, object?>>();
         object? children = null;
@@ -470,6 +473,10 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                 }
             }
         }
+        catch
+        {
+            return controls;
+        }
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(children);
@@ -481,10 +488,11 @@ public sealed class ExcelFormInspectionService : IInspectFormService
     private static Dictionary<string, object?> SerializeControl(object control)
     {
         var progId = TryGetStringMember(control, "ProgId") ?? "";
+        var fallbackTypeName = TryGetComControlTypeName(control) ?? control.GetType().Name;
         var result = new Dictionary<string, object?>
         {
             ["name"] = TryGetStringMember(control, "Name") ?? "",
-            ["type"] = ResolveDesignerControlType(progId, control.GetType().Name),
+            ["type"] = ResolveDesignerControlType(progId, fallbackTypeName),
         };
 
         if (!string.IsNullOrWhiteSpace(progId))
@@ -534,6 +542,140 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         }
 
         return string.IsNullOrWhiteSpace(fallbackTypeName) ? "Control" : fallbackTypeName;
+    }
+
+    internal static string? TryGetComControlTypeName(object control)
+    {
+        return NormalizeComTypeName(TryGetComTypeInfoName(control))
+            ?? NormalizeComTypeName(TryGetTypeDescriptorClassName(control));
+    }
+
+    internal static string? NormalizeComTypeName(string? value)
+    {
+        var normalized = (value ?? "").Trim();
+        if (normalized.Length == 0 || string.Equals(normalized, "__ComObject", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (normalized.StartsWith("MSForms.", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["MSForms.".Length..];
+        }
+        if (normalized.EndsWith("Class", StringComparison.OrdinalIgnoreCase) && normalized.Length > "Class".Length)
+        {
+            normalized = normalized[..^"Class".Length];
+        }
+        if (KnownMsFormsInterfaceTypeNames.TryGetValue(normalized, out var controlType))
+        {
+            return controlType;
+        }
+        if (normalized.StartsWith('_') && normalized.Length > 1)
+        {
+            normalized = normalized[1..];
+        }
+        if (normalized.StartsWith('I') && normalized.Length > 1 && char.IsUpper(normalized[1]))
+        {
+            normalized = normalized[1..];
+        }
+
+        return normalized.Length == 0 ? null : normalized;
+    }
+
+    private static readonly Dictionary<string, string> KnownMsFormsInterfaceTypeNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ICommandButton"] = "CommandButton",
+        ["IImage"] = "Image",
+        ["ILabelControl"] = "Label",
+        ["IMdcCheckBox"] = "CheckBox",
+        ["IMdcCombo"] = "ComboBox",
+        ["IMdcList"] = "ListBox",
+        ["IMdcOptionButton"] = "OptionButton",
+        ["IMdcText"] = "TextBox",
+        ["IMdcToggleButton"] = "ToggleButton",
+        ["IMultiPage"] = "MultiPage",
+        ["IOptionFrame"] = "Frame",
+        ["IPage"] = "Page",
+        ["IScrollbar"] = "ScrollBar",
+        ["ISpinbutton"] = "SpinButton",
+        ["ITabStrip"] = "TabStrip",
+    };
+
+    private static string? TryGetTypeDescriptorClassName(object control)
+    {
+        try
+        {
+            return TypeDescriptor.GetClassName(control);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetComTypeInfoName(object control)
+    {
+        if (!Marshal.IsComObject(control))
+        {
+            return null;
+        }
+
+        IntPtr dispatchPtr = IntPtr.Zero;
+        object? dispatchObject = null;
+        ITypeInfo? typeInfo = null;
+        try
+        {
+            dispatchPtr = Marshal.GetIDispatchForObject(control);
+            if (dispatchPtr == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            dispatchObject = Marshal.GetTypedObjectForIUnknown(dispatchPtr, typeof(IDispatch));
+            if (dispatchObject is not IDispatch dispatch)
+            {
+                return null;
+            }
+
+            if (dispatch.GetTypeInfo(0, 0, out typeInfo) != 0 || typeInfo is null)
+            {
+                return null;
+            }
+
+            typeInfo.GetDocumentation(-1, out var name, out _, out _, out _);
+            return name;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (typeInfo is not null && Marshal.IsComObject(typeInfo))
+            {
+                Marshal.ReleaseComObject(typeInfo);
+            }
+            if (dispatchObject is not null && Marshal.IsComObject(dispatchObject))
+            {
+                Marshal.ReleaseComObject(dispatchObject);
+            }
+            if (dispatchPtr != IntPtr.Zero)
+            {
+                Marshal.Release(dispatchPtr);
+            }
+        }
+    }
+
+    [ComImport]
+    [Guid("00020400-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IDispatch
+    {
+        [PreserveSig]
+        int GetTypeInfoCount(out uint pctinfo);
+
+        [PreserveSig]
+        int GetTypeInfo(uint iTInfo, uint lcid, out ITypeInfo ppTInfo);
     }
 
     private static bool HasExpectedParent(object control, string expectedParentName)

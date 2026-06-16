@@ -498,7 +498,7 @@ End If
 | `process`           | ローカル Excel プロセスの管理 (一覧表示、終了)                    | `xlflow process list --json`                                                 |
 | `macros`            | 実行可能な macro entrypoint を検出                                | `xlflow macros --json`                                                       |
 | `list forms`        | workbook の UserForm と想定 source path を列挙                    | `xlflow list forms --json`                                                   |
-| `form snapshot`     | 厳密な Designer UserForm state を JSON/YAML spec に保存           | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
+| `form snapshot`     | Designer UserForm state を JSON/YAML spec に保存                  | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
 | `form build`        | 保存済み spec から Designer-backed UserForm を作成                | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
 | `form export-image` | runtime UserForm を PNG 画像として出力                            | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
 | `run`               | CLI から macro を実行                                             | `xlflow run Main.Run --json`                                                 |
