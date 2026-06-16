@@ -28,6 +28,8 @@ public sealed class InspectFormCommandTests
     [InlineData("IOptionFrame", "Frame")]
     [InlineData("ICommandButton", "CommandButton")]
     [InlineData("_Label", "Label")]
+    [InlineData("_IMdcText", "TextBox")]
+    [InlineData("_IMdcTextClass", "TextBox")]
     [InlineData("__ComObject", null)]
     [InlineData("", null)]
     public void NormalizeComTypeName_CleansDesignerComNames(string? value, string? expected)
@@ -42,6 +44,12 @@ public sealed class InspectFormCommandTests
         var controls = ExcelFormInspectionService.GetChildControls(new DesignerControlWithoutChildren(), "Parent");
 
         Assert.Empty(controls);
+    }
+
+    [Fact]
+    public void GetChildControls_PropagatesEnumerationFailures()
+    {
+        Assert.ThrowsAny<Exception>(() => ExcelFormInspectionService.GetChildControls(new DesignerControlWithBrokenChildren(), "Parent"));
     }
 
     [Fact]
@@ -179,5 +187,15 @@ public sealed class InspectFormCommandTests
 
     private sealed class DesignerControlWithoutChildren
     {
+    }
+
+    private sealed class DesignerControlWithBrokenChildren
+    {
+        public BrokenControls Controls => new();
+    }
+
+    private sealed class BrokenControls
+    {
+        public int Count => throw new InvalidOperationException("broken child enumeration");
     }
 }

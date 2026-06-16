@@ -448,7 +448,14 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         object? children = null;
         try
         {
-            children = ExcelBridgeSupport.Get(parent, "Controls");
+            try
+            {
+                children = ExcelBridgeSupport.Get(parent, "Controls");
+            }
+            catch
+            {
+                return controls;
+            }
             if (children is null)
             {
                 return controls;
@@ -472,10 +479,6 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                     ExcelBridgeSupport.ReleaseComObject(control);
                 }
             }
-        }
-        catch
-        {
-            return controls;
         }
         finally
         {
@@ -566,13 +569,13 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         {
             normalized = normalized[..^"Class".Length];
         }
+        while (normalized.StartsWith('_') && normalized.Length > 1)
+        {
+            normalized = normalized[1..];
+        }
         if (KnownMsFormsInterfaceTypeNames.TryGetValue(normalized, out var controlType))
         {
             return controlType;
-        }
-        if (normalized.StartsWith('_') && normalized.Length > 1)
-        {
-            normalized = normalized[1..];
         }
         if (normalized.StartsWith('I') && normalized.Length > 1 && char.IsUpper(normalized[1]))
         {
