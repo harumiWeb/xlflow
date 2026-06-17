@@ -36,6 +36,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 
@@ -2990,7 +2991,62 @@ func (a *app) inspectCommand() *cobra.Command {
 		a.inspectRangeCommand(flags),
 		a.inspectUsedRangeCommand(flags),
 		a.inspectCellCommand(flags),
+		a.inspectSymbolsCommand(flags),
 	)
+	return cmd
+}
+
+func (a *app) inspectSymbolsCommand(flags *inspectSharedFlags) *cobra.Command {
+	var path string
+	var includePrivate bool
+	var includeLabels bool
+	var module string
+	cmd := &cobra.Command{
+		Use:   "symbols",
+		Short: "Inspect VBA source symbols",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			result, err := symbols.Inspect(symbols.Options{
+				RootDir:        a.cwd,
+				Config:         cfg,
+				Path:           path,
+				IncludePrivate: includePrivate,
+				IncludeLabels:  includeLabels,
+				Module:         module,
+			})
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Target = map[string]any{
+				"kind":        "source",
+				"path":        result.Root,
+				"description": "VBA source files",
+			}
+			env.Inspect = workbookinspect.Payload{
+				Target:  "symbols",
+				Format:  format,
+				Source:  "tree_sitter_vba",
+				Root:    result.Root,
+				Files:   result.Files,
+				Summary: result.Summary,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected %d VBA source file(s), found %d symbol(s)", result.Summary.Files, result.Summary.Symbols)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
+	cmd.Flags().BoolVar(&includePrivate, "include-private", false, "include private and local symbols")
+	cmd.Flags().BoolVar(&includeLabels, "include-labels", false, "include labels and line-number labels")
+	cmd.Flags().StringVar(&module, "module", "", "inspect only one module")
 	return cmd
 }
 

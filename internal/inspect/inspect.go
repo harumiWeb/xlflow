@@ -18,12 +18,15 @@ type Payload struct {
 	TargetInfo *TargetInfo      `json:"target_info,omitempty"`
 	Format     string           `json:"format,omitempty"`
 	Source     string           `json:"source,omitempty"`
+	Root       string           `json:"root,omitempty"`
 	Workbook   *WorkbookSummary `json:"workbook,omitempty"`
 	Sheets     []SheetSummary   `json:"sheets,omitempty"`
 	Range      *RangeSnapshot   `json:"range,omitempty"`
 	Cell       *CellSnapshot    `json:"cell,omitempty"`
 	Form       any              `json:"form,omitempty"`
 	Forms      any              `json:"forms,omitempty"`
+	Files      any              `json:"files,omitempty"`
+	Summary    any              `json:"summary,omitempty"`
 }
 
 type TargetInfo struct {

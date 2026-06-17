@@ -708,3 +708,78 @@ On failure, `status` is `failed`, and `error.code` and `error.message` are retur
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+---
+
+## Development setup
+
+Use this section when you are developing xlflow from a source checkout and need the full local toolchain, including source-only commands, the Go CLI, the `.NET` Excel bridge, and Excel COM workflows.
+
+### Required tools
+
+| Requirement                                  | Needed for                                                                   |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| Windows x64                                  | Full workbook-backed development and Excel COM verification                  |
+| Go version from `go.mod`                     | Building and testing the Go CLI                                              |
+| MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-gcc`     | Building the CGO-based tree-sitter VBA integration used by `inspect symbols` |
+| .NET SDK 8.0 or later                        | Building `xlflow-excel-bridge.exe`                                           |
+| Task                                         | Running repository tasks such as `task install`                              |
+| Microsoft Excel                              | End-to-end workbook commands and release-grade COM verification              |
+| Trust access to the VBA project object model | VBA import/export, compile, UserForm, run, and test workflows                |
+
+`xlflow inspect symbols` uses `tree-sitter-vba` through Go CGO bindings. Because of that, a working Windows C compiler is now required when building xlflow from source. Use MSYS2 UCRT64 GCC rather than older TDM-GCC installations.
+
+Install the MSYS2 compiler:
+
+```powershell
+winget install MSYS2.MSYS2
+C:\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc"
+```
+
+Then build/install from the repository with the UCRT64 compiler selected:
+
+```powershell
+$env:CC = "C:\msys64\ucrt64\bin\gcc.exe"
+task install
+xlflow --help
+xlflow version
+```
+
+If `task install` produces an `xlflow.exe` that fails with `The specified executable is not a valid application for this OS platform`, check the active C compiler:
+
+```powershell
+go env GOOS GOARCH CGO_ENABLED CC
+where.exe gcc
+```
+
+This failure can happen when CGO links through an incompatible GCC distribution, for example `C:\TDM-GCC-64\bin\gcc.exe`. Remove the broken binary, point `CC` at MSYS2 UCRT64 GCC, and reinstall:
+
+```powershell
+Remove-Item "$env:USERPROFILE\go\bin\xlflow.exe" -Force
+$env:CC = "C:\msys64\ucrt64\bin\gcc.exe"
+task install
+```
+
+For quick source-only checks while iterating, `go run` remains useful:
+
+```powershell
+go run .\cmd\xlflow --help
+go run .\cmd\xlflow inspect symbols --json
+go test ./...
+```
+
+### Excel COM verification
+
+Source-only tests can run without Excel, but changes that touch workbook automation, VBA import/export, macro execution, sessions, UserForms, or the bridge need real Windows Excel verification. Before release-grade validation, enable **Trust access to the VBA project object model** in Excel and install with `task install` so both `xlflow.exe` and `xlflow-excel-bridge.exe` are present in your Go bin directory.
+
+For repeated workbook-backed checks, prefer a session-backed workflow:
+
+```powershell
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --session --json
+xlflow test --session --json
+xlflow save --session --json
+xlflow session stop --json
+```

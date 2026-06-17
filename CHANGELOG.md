@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow inspect symbols`, a source-only tree-sitter-vba symbol indexer for exported `.bas`, `.cls`, and `.frm` VBA files with JSON and compact outline output.
+
 ## v0.13.1
 
 - Fixed `xlflow form snapshot` so Designer snapshots no longer require executing an injected helper macro, avoiding Trust Center / Insider Beta Office failures that blocked temporary macro workbooks from running.

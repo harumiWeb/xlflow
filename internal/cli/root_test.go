@@ -3089,6 +3089,130 @@ code_source = "sidecar"
 	}
 }
 
+func TestInspectSymbolsJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectSymbolsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "symbols"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect symbols json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Inspect struct {
+			Target  string `json:"target"`
+			Source  string `json:"source"`
+			Root    string `json:"root"`
+			Summary struct {
+				Files   int `json:"files"`
+				Symbols int `json:"symbols"`
+			} `json:"summary"`
+			Files []struct {
+				Path       string `json:"path"`
+				ModuleName string `json:"moduleName"`
+				Symbols    []struct {
+					Name string `json:"name"`
+					Kind string `json:"kind"`
+				} `json:"symbols"`
+			} `json:"files"`
+		} `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse inspect symbols output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "inspect" || got.Inspect.Target != "symbols" || got.Inspect.Source != "tree_sitter_vba" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Inspect.Root != "src" || got.Inspect.Summary.Files != 1 || len(got.Inspect.Files) != 1 {
+		t.Fatalf("unexpected inspect summary: %+v", got.Inspect)
+	}
+	if got.Inspect.Files[0].Path != "src/modules/Main.bas" || got.Inspect.Files[0].ModuleName != "Main" {
+		t.Fatalf("unexpected file result: %+v", got.Inspect.Files[0])
+	}
+	found := false
+	for _, symbol := range got.Inspect.Files[0].Symbols {
+		if symbol.Name == "Run" && symbol.Kind == "sub" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Run symbol missing: %+v", got.Inspect.Files[0].Symbols)
+	}
+}
+
+func TestInspectSymbolsStandaloneFormatJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectSymbolsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "--format", "json", "symbols"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect symbols format json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse standalone inspect output: %v\n%s", err, stdout.String())
+	}
+	if got["status"] != nil || got["command"] != nil {
+		t.Fatalf("standalone inspect output should not be envelope: %+v", got)
+	}
+	if got["target"] != "symbols" || got["source"] != "tree_sitter_vba" {
+		t.Fatalf("unexpected standalone payload: %+v", got)
+	}
+}
+
+func TestInspectSymbolsTextAndPath(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectSymbolsFixture(t, dir, "custom-src")
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "symbols", "--path", "custom-src"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect symbols text error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{"custom-src/Main.bas", "Module Main", "Public Sub Run()"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect symbols text missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func writeInspectSymbolsFixture(t *testing.T, dir, sourceDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPushRejectsAttributeContaminatedUserFormSidecarBeforeExcel(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
