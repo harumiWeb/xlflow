@@ -2140,6 +2140,9 @@ func renderInspectSymbolsMarkdown(env Envelope, payload map[string]any) string {
 		}
 		fmt.Fprintf(&b, "### `%s`\n\n", path)
 		moduleName := stringValue(file, "moduleName")
+		if moduleName == "" {
+			moduleName = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
 		moduleKind := stringValue(file, "moduleKind")
 		if moduleKind == "" {
 			moduleKind = "module"

@@ -21,18 +21,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up MSYS2 UCRT64 GCC
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: UCRT64
           update: true
@@ -45,7 +45,7 @@ jobs:
           "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           global-json-file: global.json
 
@@ -72,10 +72,10 @@ jobs:
             -OutputDir ./bridge/dotnet/artifacts/publish/win-x64
 
       - name: Set up Syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -133,17 +133,17 @@ jobs:
           "sbom_path=$($sbomPath.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Attest release archives
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-checksums: ${{ steps.artifacts.outputs.checksum_path }}
 
       - name: Attest checksums file
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-path: ${{ steps.artifacts.outputs.checksum_path }}
 
       - name: Attest SBOM artifact
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-path: ${{ steps.artifacts.outputs.sbom_path }}
 
@@ -154,18 +154,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           global-json-file: global.json
 
@@ -181,10 +181,10 @@ jobs:
         run: go test ./...
 
       - name: Set up Syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
 
       - name: Build Linux archive with GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -209,8 +209,14 @@ jobs:
           mkdir -p "$extract_path"
           tar -xzf "$archive_path" -C "$extract_path"
 
-          "$extract_path/xlflow_linux_x86_64/xlflow" --help
-          "$extract_path/xlflow_linux_x86_64/xlflow" version
+          xlflow_bin="$(find "$extract_path" -type f -name xlflow | sort | head -n 1)"
+          if [[ -z "$xlflow_bin" ]]; then
+            echo "Extracted Linux archive did not contain xlflow" >&2
+            exit 1
+          fi
+
+          "$xlflow_bin" --help
+          "$xlflow_bin" version
 
       - name: Discover Linux release artifacts
         id: linux-artifacts
@@ -251,16 +257,16 @@ jobs:
             "${{ steps.linux-artifacts.outputs.sbom_path }}"
 
       - name: Attest Linux release archive
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-checksums: ${{ steps.linux-artifacts.outputs.checksum_path }}
 
       - name: Attest Linux checksums file
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-path: ${{ steps.linux-artifacts.outputs.checksum_path }}
 
       - name: Attest Linux SBOM artifact
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-path: ${{ steps.linux-artifacts.outputs.sbom_path }}

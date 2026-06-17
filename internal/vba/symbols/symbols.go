@@ -279,17 +279,17 @@ func shouldSkipFormArtifact(root string, cfg config.Config, path string) bool {
 
 func kindForPath(root string, cfg config.Config, path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".cls":
-		return "class"
-	case ".frm":
-		return "form"
-	}
 	workbookRoot := filepath.Clean(filepath.Join(root, cfg.Src.Workbook))
 	formsRoot := filepath.Clean(filepath.Join(root, cfg.Src.Forms))
 	classesRoot := filepath.Clean(filepath.Join(root, cfg.Src.Classes))
 	if isPathInsideRoot(path, workbookRoot) {
 		return "document"
+	}
+	switch ext {
+	case ".frm":
+		return "form"
+	case ".cls":
+		return "class"
 	}
 	if isPathInsideRoot(path, filepath.Join(formsRoot, "code")) && matchingFormArtifact(formsRoot, path) {
 		return "form"
@@ -515,7 +515,7 @@ func (e *extractor) includeSymbol(sym Symbol) bool {
 	if sym.Kind == "module" || sym.Kind == "attribute" || sym.Kind == "implements" {
 		return true
 	}
-	if sym.Kind == "local_variable" {
+	if sym.Kind == "local_variable" || (sym.Kind == "const" && sym.Parent != "") {
 		return e.opts.IncludePrivate
 	}
 	if e.opts.IncludePrivate {

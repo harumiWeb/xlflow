@@ -15,25 +15,25 @@ xlflow inspect symbols [--path <dir-or-file>] [--include-private] [--include-lab
 
 ## Options and Arguments
 
-| Option / argument                 | Description                                               | Default |
-| --------------------------------- | --------------------------------------------------------- | ------- |
-| `workbook`                        | Return workbook-level metadata.                           | -       |
-| `sheets`                          | List worksheets.                                          | -       |
-| `range`                           | Read a worksheet range.                                   | -       |
-| `used-range`                      | Read a worksheet used range.                              | -       |
-| `cell`                            | Read one cell.                                            | -       |
-| `form <name>`                     | Inspect UserForm state.                                   | -       |
-| `symbols`                         | Inspect exported VBA source symbols.                      | -       |
-| `--sheet <name>`                  | Worksheet for sheet-scoped inspection.                    | -       |
-| `--address <range>`               | A1 address for range or cell inspection.                  | -       |
-| `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100     |
-| `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30      |
-| `--session`                       | Inspect the live workbook in the managed xlflow session.  | false   |
-| `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | runtime |
-| `--path <dir-or-file>`            | Source path for `inspect symbols`.                        | `src`   |
-| `--include-private`               | Include private and local symbols.                        | false   |
-| `--include-labels`                | Include labels and numeric line labels.                   | false   |
-| `--module <name>`                 | Filter `inspect symbols` to one module.                   | -       |
+| Option / argument                 | Description                                               | Default                  |
+| --------------------------------- | --------------------------------------------------------- | ------------------------ |
+| `workbook`                        | Return workbook-level metadata.                           | -                        |
+| `sheets`                          | List worksheets.                                          | -                        |
+| `range`                           | Read a worksheet range.                                   | -                        |
+| `used-range`                      | Read a worksheet used range.                              | -                        |
+| `cell`                            | Read one cell.                                            | -                        |
+| `form <name>`                     | Inspect UserForm state.                                   | -                        |
+| `symbols`                         | Inspect exported VBA source symbols.                      | -                        |
+| `--sheet <name>`                  | Worksheet for sheet-scoped inspection.                    | -                        |
+| `--address <range>`               | A1 address for range or cell inspection.                  | -                        |
+| `--max-rows <n>`                  | Limit rows returned by range or used-range inspection.    | 100                      |
+| `--max-cols <n>`                  | Limit columns returned by range or used-range inspection. | 30                       |
+| `--session`                       | Inspect the live workbook in the managed xlflow session.  | false                    |
+| `--runtime / --designer / --both` | Choose UserForm inspection mode.                          | runtime                  |
+| `--path <dir-or-file>`            | Source path for `inspect symbols`.                        | configured `[src]` roots |
+| `--include-private`               | Include private and local symbols.                        | false                    |
+| `--include-labels`                | Include labels and numeric line labels.                   | false                    |
+| `--module <name>`                 | Filter `inspect symbols` to one module.                   | -                        |
 
 ## Examples
 
@@ -87,7 +87,7 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
         ]
       }
     ],
-    "summary": { "files": 1, "symbols": 2, "parseErrors": 0, "missingNodes": 0 }
+    "summary": { "files": 1, "symbols": 1, "parseErrors": 0, "missingNodes": 0 }
   }
 }
 ```

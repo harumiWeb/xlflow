@@ -27,6 +27,7 @@ Public Enum Color
     Red = 1
 End Enum
 Public Function ParseJson(ByVal JsonString As String, Optional ByVal Strict As Boolean = False) As Object
+    Const LocalLimit As Long = 2
 Start:
 10  Debug.Print JsonString
 End Function
@@ -62,6 +63,7 @@ End Sub
 	}
 	assertNoSymbol(t, file.Symbols, "Hidden")
 	assertNoSymbol(t, file.Symbols, "Start")
+	assertNoSymbol(t, file.Symbols, "LocalLimit")
 
 	withPrivate, err := Inspect(Options{RootDir: dir, Config: cfg, IncludePrivate: true, IncludeLabels: true})
 	if err != nil {
@@ -72,6 +74,7 @@ End Sub
 	assertSymbol(t, privateFile.Symbols, "Hidden", "sub")
 	assertSymbol(t, privateFile.Symbols, "Start", "label")
 	assertSymbol(t, privateFile.Symbols, "10", "line_number_label")
+	assertSymbol(t, privateFile.Symbols, "LocalLimit", "const")
 }
 
 func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {
@@ -160,6 +163,35 @@ func TestInspectModuleFilter(t *testing.T) {
 	}
 	if len(result.Files) != 1 || result.Files[0].ModuleName != "B" {
 		t.Fatalf("unexpected module filter result: %+v", result.Files)
+	}
+}
+
+func TestInspectClassFileUnderWorkbookRootIsDocumentModule(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	workbookDir := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `VERSION 1.0 CLASS
+Attribute VB_Name = "ThisWorkbook"
+Option Explicit
+Public Sub Workbook_Open()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(workbookDir, "ThisWorkbook.cls"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %+v, want one workbook document", result.Files)
+	}
+	if result.Files[0].ModuleKind != "document" {
+		t.Fatalf("module kind = %q, want document", result.Files[0].ModuleKind)
 	}
 }
 
