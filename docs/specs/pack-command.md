@@ -39,17 +39,17 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 
 Each unsupported case is a specific, loud error. `pack` never falls back to best-effort behavior.
 
-| Case | Error code | Exit |
-| --- | --- | --- |
-| active xlflow session / live workbook | `pack_active_session` | 2 |
-| in-place overwrite of the template/source workbook | `pack_in_place_overwrite` | 2 |
-| protected VBA project | `pack_protected_project` | 1 |
-| signed VBA project | `pack_signed_project` | 1 |
-| full UserForm / `.frx` generation | `pack_userform_generation_unsupported` | 1 |
-| unknown or ambiguous VBA project layout | `pack_ambiguous_layout` | 1 |
-| missing `--out`, bad extension, other arg errors | `pack_args_invalid` | 2 |
-| missing `--experimental` | `pack_experimental_required` | 2 |
-| template/source workbook not found or unreadable | `pack_template_not_found` | 2 |
+| Case                                               | Error code                             | Exit |
+| -------------------------------------------------- | -------------------------------------- | ---- |
+| active xlflow session / live workbook              | `pack_active_session`                  | 2    |
+| in-place overwrite of the template/source workbook | `pack_in_place_overwrite`              | 2    |
+| protected VBA project                              | `pack_protected_project`               | 1    |
+| signed VBA project                                 | `pack_signed_project`                  | 1    |
+| full UserForm / `.frx` generation                  | `pack_userform_generation_unsupported` | 1    |
+| unknown or ambiguous VBA project layout            | `pack_ambiguous_layout`                | 1    |
+| missing `--out`, bad extension, other arg errors   | `pack_args_invalid`                    | 2    |
+| missing `--experimental`                           | `pack_experimental_required`           | 2    |
+| template/source workbook not found or unreadable   | `pack_template_not_found`              | 2    |
 
 ## Output / JSON contract
 
@@ -75,7 +75,10 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
     "modules": { "standard": 3, "class": 2, "document": 1, "carried_streams": 4 }
   },
   "warnings": [
-    { "code": "vbe_validation_skipped", "message": "pack did not open Excel; no VBE compile or runtime validation was performed." }
+    {
+      "code": "vbe_validation_skipped",
+      "message": "pack did not open Excel; no VBE compile or runtime validation was performed."
+    }
   ],
   "logs": []
 }

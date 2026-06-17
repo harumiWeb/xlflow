@@ -16,71 +16,230 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  release-windows:
+    runs-on: windows-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up MSYS2 UCRT64 GCC
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Add MSYS2 UCRT64 to PATH
+        shell: pwsh
+        run: |
+          "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           global-json-file: global.json
 
       - name: Run tests
+        env:
+          CGO_ENABLED: "1"
+          CC: C:/msys64/ucrt64/bin/gcc.exe
         run: go test ./...
 
       - name: Run .NET bridge tests
         run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
 
       - name: Build
+        env:
+          CGO_ENABLED: "1"
+          CC: C:/msys64/ucrt64/bin/gcc.exe
         run: go build ./...
 
+      - name: Build .NET bridge
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File ./scripts/build-dotnet-bridge.ps1 `
+            -Runtime win-x64 `
+            -OutputDir ./bridge/dotnet/artifacts/publish/win-x64
+
       - name: Set up Syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --config .goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          CGO_ENABLED: "1"
+          CC: C:/msys64/ucrt64/bin/gcc.exe
+
+      - name: Smoke test Windows archive
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter "xlflow_windows_x86_64.zip" | Select-Object -First 1
+          if (-not $zip) {
+            throw "Windows archive not found"
+          }
+
+          $extract = Join-Path $env:RUNNER_TEMP "xlflow-release-test"
+          Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $zip.FullName -DestinationPath $extract -Force
+
+          $oldPath = $env:Path
+          try {
+            $env:Path = ($env:Path -split ';' | Where-Object { $_ -notlike 'C:\msys64*' }) -join ';'
+            & "$extract\xlflow.exe" --help
+            & "$extract\xlflow.exe" version
+          } finally {
+            $env:Path = $oldPath
+          }
 
       - name: Discover release artifacts
         id: artifacts
+        shell: pwsh
+        run: |
+          $checksumPath = "dist/checksums.txt"
+          $archivePath = Get-ChildItem dist -Filter "*.zip" | Sort-Object Name | Select-Object -First 1
+          $sbomPath = Get-ChildItem dist -Filter "*.sbom.json" | Sort-Object Name | Select-Object -First 1
+
+          if (-not (Test-Path $checksumPath)) {
+            throw "missing checksums.txt"
+          }
+
+          if (-not $archivePath) {
+            throw "missing Windows release archive"
+          }
+
+          if (-not $sbomPath) {
+            throw "missing Windows SBOM artifact"
+          }
+
+          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
+          "archive_path=$($archivePath.FullName)" >> $env:GITHUB_OUTPUT
+          "sbom_path=$($sbomPath.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Attest release archives
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
+        with:
+          subject-checksums: ${{ steps.artifacts.outputs.checksum_path }}
+
+      - name: Attest checksums file
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
+        with:
+          subject-path: ${{ steps.artifacts.outputs.checksum_path }}
+
+      - name: Attest SBOM artifact
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
+        with:
+          subject-path: ${{ steps.artifacts.outputs.sbom_path }}
+
+  release-linux:
+    runs-on: ubuntu-latest
+    needs:
+      - release-windows
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          global-json-file: global.json
+
+      - name: Install native CGO toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Run tests
+        env:
+          CGO_ENABLED: "1"
+          CC: gcc
+        run: go test ./...
+
+      - name: Set up Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+
+      - name: Build Linux archive with GoReleaser
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --skip=publish --config .goreleaser.linux.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CGO_ENABLED: "1"
+          CC: gcc
+
+      - name: Smoke test Linux archive
+        run: |
+          set -euo pipefail
+
+          archive_path="$(find dist -maxdepth 1 -type f -name 'xlflow_linux_x86_64.tar.gz' | sort | head -n 1)"
+          if [[ -z "$archive_path" ]]; then
+            echo "Linux archive not found" >&2
+            exit 1
+          fi
+
+          extract_path="$RUNNER_TEMP/xlflow-release-test"
+          rm -rf "$extract_path"
+          mkdir -p "$extract_path"
+          tar -xzf "$archive_path" -C "$extract_path"
+
+          xlflow_bin="$(find "$extract_path" -type f -name xlflow | sort | head -n 1)"
+          if [[ -z "$xlflow_bin" ]]; then
+            echo "Extracted Linux archive did not contain xlflow" >&2
+            exit 1
+          fi
+
+          "$xlflow_bin" --help
+          "$xlflow_bin" version
+
+      - name: Discover Linux release artifacts
+        id: linux-artifacts
         shell: bash
         run: |
           set -euo pipefail
 
-          checksum_path="dist/checksums.txt"
-          archive_path="$(find dist -maxdepth 1 -type f -name '*.zip' | sort | head -n 1)"
+          checksum_path="dist/checksums-linux.txt"
+          archive_path="$(find dist -maxdepth 1 -type f -name 'xlflow_linux_x86_64.tar.gz' | sort | head -n 1)"
           sbom_path="$(find dist -maxdepth 1 -type f -name '*.sbom.json' | sort | head -n 1)"
 
           if [[ ! -f "$checksum_path" ]]; then
-            echo "missing checksums.txt" >&2
+            echo "missing checksums-linux.txt" >&2
             exit 1
           fi
 
           if [[ -z "$archive_path" ]]; then
-            echo "missing release archive" >&2
+            echo "missing Linux release archive" >&2
             exit 1
           fi
 
           if [[ -z "$sbom_path" ]]; then
-            echo "missing SBOM artifact" >&2
+            echo "missing Linux SBOM artifact" >&2
             exit 1
           fi
 
@@ -88,17 +247,26 @@ jobs:
           echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
           echo "sbom_path=$sbom_path" >> "$GITHUB_OUTPUT"
 
-      - name: Attest release archives
-        uses: actions/attest@v4
-        with:
-          subject-checksums: ${{ steps.artifacts.outputs.checksum_path }}
+      - name: Upload Linux artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "${{ steps.linux-artifacts.outputs.archive_path }}" \
+            "${{ steps.linux-artifacts.outputs.checksum_path }}" \
+            "${{ steps.linux-artifacts.outputs.sbom_path }}"
 
-      - name: Attest checksums file
-        uses: actions/attest@v4
+      - name: Attest Linux release archive
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
-          subject-path: ${{ steps.artifacts.outputs.checksum_path }}
+          subject-checksums: ${{ steps.linux-artifacts.outputs.checksum_path }}
 
-      - name: Attest SBOM artifact
-        uses: actions/attest@v4
+      - name: Attest Linux checksums file
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
-          subject-path: ${{ steps.artifacts.outputs.sbom_path }}
+          subject-path: ${{ steps.linux-artifacts.outputs.checksum_path }}
+
+      - name: Attest Linux SBOM artifact
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
+        with:
+          subject-path: ${{ steps.linux-artifacts.outputs.sbom_path }}

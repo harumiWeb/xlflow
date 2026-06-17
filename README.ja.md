@@ -711,3 +711,78 @@ xlflow module install --push
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+---
+
+## 開発環境のセットアップ
+
+このセクションは、ソースコードから xlflow を開発する場合や、ソースのみのコマンド、Go CLI、.NET Excel ブリッジ、Excel COM ワークフローを含むローカルのツールチェーン一式が必要な場合に使用してください。
+
+### 必要なツール
+
+| 要件                                                       | 用途                                                                                  |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Windows x64                                                | ワークブックベースの開発および Excel COM の完全な検証                                 |
+| `go.mod` に記載された Go のバージョン                      | Go CLI のビルドおよびテスト                                                           |
+| MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-gcc`                   | `inspect symbols` で使用する CGO ベースの tree-sitter VBA 統合のビルド                |
+| .NET SDK 8.0 以降                                          | `xlflow-excel-bridge.exe` のビルド                                                    |
+| Task                                                       | `task install` などのリポジトリタスクの実行                                           |
+| Microsoft Excel                                            | エンドツーエンドのワークブックコマンドおよびリリースレベルの COM 検証                 |
+| VBA プロジェクト オブジェクト モデルへのアクセスを信頼する | VBA のインポート/エクスポート、コンパイル、ユーザーフォーム、実行、テストワークフロー |
+
+`xlflow inspect symbols` は、Go CGO バインディングを通じて `tree-sitter-vba` を使用します。そのため、ソースから xlflow をビルドする際は、正常に動作する Windows C コンパイラが必須となります。古い TDM-GCC インストール環境ではなく、MSYS2 UCRT64 GCC を使用してください。
+
+MSYS2 コンパイラをインストールします：
+
+```powershell
+winget install MSYS2.MSYS2
+C:\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc"
+```
+
+次に、UCRT64 コンパイラを選択した状態でリポジトリからビルドおよびインストールを行います：
+
+```powershell
+$env:CC = "C:\msys64\ucrt64\bin\gcc.exe"
+task install
+xlflow --help
+xlflow version
+```
+
+もし `task install` で生成された `xlflow.exe` を実行した際に「指定された実行ファイルは、この OS プラットフォーム用の有効なアプリケーションではありません (The specified executable is not a valid application for this OS platform)」というエラーが出る場合は、現在有効な C コンパイラを確認してください：
+
+```powershell
+go env GOOS GOARCH CGO_ENABLED CC
+where.exe gcc
+```
+
+このエラーは、互換性のない GCC ディストリビューション（例：`C:\TDM-GCC-64\bin\gcc.exe`）を経由して CGO がリンクされた場合に発生することがあります。壊れたバイナリを削除し、`CC` 環境変数を MSYS2 UCRT64 GCC に指定し直してから再インストールしてください：
+
+```powershell
+Remove-Item "$env:USERPROFILE\go\bin\xlflow.exe" -Force
+$env:CC = "C:\msys64\ucrt64\bin\gcc.exe"
+task install
+```
+
+開発中の素早い確認には、引き続き `go run` が便利です：
+
+```powershell
+go run .\cmd\xlflow --help
+go run .\cmd\xlflow inspect symbols --json
+go test ./...
+```
+
+### Excel COM の検証
+
+ソースのみのテストは Excel なしでも実行可能ですが、ワークブックの自動化、VBA のインポート/エクスポート、マクロの実行、セッション、ユーザーフォーム、ブリッジに関わる変更については、実際の Windows 版 Excel による検証が必要です。リリースレベルの検証を行う前に、Excel で「VBA プロジェクト オブジェクト モデルへのアクセスを信頼する」を有効にし、`task install` を実行して `xlflow.exe` と `xlflow-excel-bridge.exe` の両方が Go の bin ディレクトリに配置されていることを確認してください。
+
+ワークブックを用いた繰り返しのチェックには、セッションベースのワークフローを推奨します：
+
+```powershell
+xlflow session start --json
+xlflow push --fast --session --no-save --json
+xlflow run Main.Run --session --json
+xlflow test --session --json
+xlflow save --session --json
+xlflow session stop --json
+```

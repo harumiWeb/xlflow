@@ -4,40 +4,22 @@ project_name: xlflow
 
 before:
   hooks:
-    - go mod tidy
+    - go mod download
+    - go mod verify
 
 builds:
   - id: xlflow
     main: ./cmd/xlflow
     binary: xlflow
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CC=C:/msys64/ucrt64/bin/gcc.exe
     flags:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.date={{ .Date }}
     goos:
       - windows
-    goarch:
-      - amd64
-    hooks:
-      pre:
-        - cmd: >-
-            pwsh -NoProfile -File ./scripts/build-dotnet-bridge.ps1
-            -Runtime win-x64
-            -OutputDir ./bridge/dotnet/artifacts/publish/win-x64
-          output: true
-  - id: xlflow-linux
-    main: ./cmd/xlflow
-    binary: xlflow
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.date={{ .Date }}
-    goos:
-      - linux
     goarch:
       - amd64
 
@@ -54,20 +36,8 @@ archives:
     files:
       - LICENSE
       - README.md
-      - src: bridge/dotnet/artifacts/publish/{{ if eq .Os "windows" }}win-x64{{ else }}missing{{ end }}/xlflow-excel-bridge.exe
+      - src: bridge/dotnet/artifacts/publish/win-x64/xlflow-excel-bridge.exe
         strip_parent: true
-  - id: xlflow-linux
-    ids:
-      - xlflow-linux
-    formats:
-      - tar.gz
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    files:
-      - LICENSE
-      - README.md
 
 checksum:
   name_template: checksums.txt

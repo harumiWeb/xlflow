@@ -569,6 +569,25 @@ func TestWriteWithOptionsRendersDoctorChecklist(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersSymbolsMarkdownModuleNameFallback(t *testing.T) {
+	env := New("inspect")
+	env.Inspect = map[string]any{
+		"target": "symbols",
+		"files": []map[string]any{
+			{
+				"path":       "src/modules/Main.bas",
+				"moduleKind": "standard",
+				"parse":      map[string]any{"hasError": false, "hasMissing": false},
+				"symbols":    []map[string]any{},
+			},
+		},
+	}
+	got := renderer{}.renderInspectMarkdown(env, env.Inspect.(map[string]any))
+	if !strings.Contains(got, "- Module Main") {
+		t.Fatalf("symbols markdown missing module fallback:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	env := New("doctor")
 	env.Diagnostics = map[string]any{

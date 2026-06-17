@@ -125,8 +125,16 @@ select_linux_asset_url() {
   fail "could not find a Linux x64 tar.gz asset in the latest release"
 }
 
-select_checksums_url() {
+select_linux_checksums_url() {
   release_json="$1"
+  url=$(printf '%s\n' "$release_json" |
+    sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*checksums-linux\.txt\)".*/\1/p' |
+    head -n 1)
+  if [ -n "$url" ]; then
+    printf '%s\n' "$url"
+    return
+  fi
+
   url=$(printf '%s\n' "$release_json" |
     sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*checksums\.txt\)".*/\1/p' |
     head -n 1)
@@ -135,7 +143,7 @@ select_checksums_url() {
     return
   fi
 
-  fail "could not find checksums.txt in the latest release"
+  fail "could not find checksums-linux.txt or checksums.txt in the latest release"
 }
 
 verify_checksum() {
@@ -248,7 +256,7 @@ install_xlflow() {
   info "Fetching latest release metadata from $api_url"
   release_json=$(download_to_stdout "$api_url")
   asset_url=$(select_linux_asset_url "$release_json")
-  checksums_url=$(select_checksums_url "$release_json")
+  checksums_url=$(select_linux_checksums_url "$release_json")
   archive_path="$tmp_root/xlflow-linux.tar.gz"
   extract_dir="$tmp_root/extract"
   archive_name=$(basename "$asset_url")

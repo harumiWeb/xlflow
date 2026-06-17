@@ -479,6 +479,9 @@ scope:
 
 - Windows archive に `xlflow-excel-bridge.exe` を同梱する。
 - Linux/macOS archive には含めない。
+- CGO 依存を含むため、release build は OS ごとの native runner で行う。
+- Windows は MSYS2 UCRT64 GCC、Linux は Ubuntu native GCC を使い、Linux asset は Windows release 作成後に同じ GitHub Release へ追加する。
+- checksum は初期対応として Windows `checksums.txt` と Linux `checksums-linux.txt` に分ける。
 - self-contained single-file publish を使う。
 - trimming は使わない。
 - code signing 方針を検討する。

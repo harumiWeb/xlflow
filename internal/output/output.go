@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -1770,6 +1771,8 @@ func (r renderer) renderInspect(env Envelope) string {
 		return r.renderInspectRange(env, payload)
 	case "cell":
 		return r.renderInspectCell(env, payload)
+	case "symbols":
+		return r.renderInspectSymbols(env, payload)
 	default:
 		return r.renderLogs(env)
 	}
@@ -2043,9 +2046,166 @@ func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) st
 		}
 		b.WriteString(renderWarningsAndHintsMarkdown(env))
 		return b.String()
+	case "symbols":
+		return renderInspectSymbolsMarkdown(env, payload)
 	default:
 		return ""
 	}
+}
+
+func (r renderer) renderInspectSymbols(env Envelope, payload map[string]any) string {
+	files := listOfObjects(payload["files"])
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
+	if root := stringValue(payload, "root"); root != "" {
+		b.WriteString(kv("Source", root))
+	}
+	summary := objectMap(payload["summary"])
+	if len(summary) > 0 {
+		b.WriteString(kv("Files", fmt.Sprintf("%d", intNumber(summary, "files"))))
+		b.WriteString(kv("Symbols", fmt.Sprintf("%d", intNumber(summary, "symbols"))))
+	}
+	if len(files) == 0 {
+		b.WriteString("No symbols found.\n")
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
+	}
+	for _, file := range files {
+		path := stringValue(file, "path")
+		if path == "" {
+			path = "<unknown>"
+		}
+		b.WriteString(path)
+		b.WriteString("\n")
+		moduleName := stringValue(file, "moduleName")
+		if moduleName == "" {
+			moduleName = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+		moduleKind := stringValue(file, "moduleKind")
+		if moduleKind == "" {
+			moduleKind = "module"
+		}
+		fmt.Fprintf(&b, "  %s %s\n", inspectModuleKindLabel(moduleKind), moduleName)
+		parse := objectMap(file["parse"])
+		if boolValue(parse, "hasError") || boolValue(parse, "hasMissing") {
+			recovery := []string{}
+			if boolValue(parse, "hasError") {
+				recovery = append(recovery, "ERROR")
+			}
+			if boolValue(parse, "hasMissing") {
+				recovery = append(recovery, "MISSING")
+			}
+			fmt.Fprintf(&b, "  Parse recovery: %s\n", strings.Join(recovery, ", "))
+		}
+		for _, symbol := range listOfObjects(file["symbols"]) {
+			if stringValue(symbol, "kind") == "module" {
+				continue
+			}
+			line := inspectSymbolLine(symbol)
+			if line == "" {
+				continue
+			}
+			b.WriteString("  ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
+func renderInspectSymbolsMarkdown(env Envelope, payload map[string]any) string {
+	files := listOfObjects(payload["files"])
+	var b strings.Builder
+	b.WriteString(renderInspectTargetSessionMarkdown(env))
+	if root := stringValue(payload, "root"); root != "" {
+		b.WriteString("Source: ")
+		b.WriteString(root)
+		b.WriteString("\n")
+	}
+	summary := objectMap(payload["summary"])
+	if len(summary) > 0 {
+		fmt.Fprintf(&b, "Files: %d\nSymbols: %d\n\n", intNumber(summary, "files"), intNumber(summary, "symbols"))
+	}
+	if len(files) == 0 {
+		b.WriteString("_No symbols found._\n")
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
+		return b.String()
+	}
+	for _, file := range files {
+		path := stringValue(file, "path")
+		if path == "" {
+			path = "<unknown>"
+		}
+		fmt.Fprintf(&b, "### `%s`\n\n", path)
+		moduleName := stringValue(file, "moduleName")
+		if moduleName == "" {
+			moduleName = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+		moduleKind := stringValue(file, "moduleKind")
+		if moduleKind == "" {
+			moduleKind = "module"
+		}
+		fmt.Fprintf(&b, "- %s %s\n", inspectModuleKindLabel(moduleKind), moduleName)
+		parse := objectMap(file["parse"])
+		if boolValue(parse, "hasError") || boolValue(parse, "hasMissing") {
+			recovery := []string{}
+			if boolValue(parse, "hasError") {
+				recovery = append(recovery, "ERROR")
+			}
+			if boolValue(parse, "hasMissing") {
+				recovery = append(recovery, "MISSING")
+			}
+			fmt.Fprintf(&b, "- Parse recovery: %s\n", strings.Join(recovery, ", "))
+		}
+		for _, symbol := range listOfObjects(file["symbols"]) {
+			if stringValue(symbol, "kind") == "module" {
+				continue
+			}
+			if line := inspectSymbolLine(symbol); line != "" {
+				fmt.Fprintf(&b, "- `%s`\n", line)
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(renderWarningsAndHintsMarkdown(env))
+	return b.String()
+}
+
+func inspectSymbolLine(symbol map[string]any) string {
+	if signature := stringValue(symbol, "signature"); signature != "" {
+		return signature
+	}
+	kind := strings.ReplaceAll(stringValue(symbol, "kind"), "_", " ")
+	name := stringValue(symbol, "name")
+	if kind == "" {
+		return name
+	}
+	if name == "" {
+		return kind
+	}
+	return titleCase(kind) + " " + name
+}
+
+func titleCase(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parts := strings.Fields(strings.ReplaceAll(value, "_", " "))
+	for i, part := range parts {
+		lower := strings.ToLower(part)
+		parts[i] = strings.ToUpper(lower[:1]) + lower[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func inspectModuleKindLabel(kind string) string {
+	if strings.EqualFold(kind, "standard") {
+		return "Module"
+	}
+	return titleCase(kind)
 }
 
 func renderInspectFormSnapshot(snapshot map[string]any, heading string) string {

@@ -47,7 +47,7 @@ If you prefer a manual install, download the Windows release archive from [GitHu
 
 The Windows ZIP contains both `xlflow.exe` and `xlflow-excel-bridge.exe`.
 
-Verify archive integrity against `checksums.txt`:
+Verify Windows archive integrity against `checksums.txt`:
 
 ```powershell
 Get-FileHash .\xlflow_windows_x86_64.zip -Algorithm SHA256
@@ -63,6 +63,8 @@ gh attestation verify .\xlflow_windows_x86_64.zip --repo harumiWeb/xlflow
 These checks validate artifact integrity and provenance metadata. They are not Windows Authenticode signing.
 
 The `.NET` bridge executable avoids PowerShell execution policy, but it can still be blocked by AppLocker, WDAC, Defender or EDR policy, antivirus reputation, or other unsigned-executable controls in managed Windows environments.
+
+Linux release archives are built separately with native CGO on Ubuntu and contain the Go CLI only. Verify `xlflow_linux_x86_64.tar.gz` against `checksums-linux.txt`; it does not include `xlflow-excel-bridge.exe`.
 
 ## WSL development frontend
 
