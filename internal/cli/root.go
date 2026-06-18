@@ -50,6 +50,7 @@ type app struct {
 	stderr         io.Writer
 	stdoutTerminal func() bool
 	stderrTerminal func() bool
+	configWarnings []map[string]any
 	buildInfo      BuildInfo
 	updateChecker  releaseChecker
 }
@@ -4968,6 +4969,9 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 	if err != nil {
 		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
 	}
+	if len(cfg.Warnings) > 0 {
+		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
+	}
 	return cfg, nil
 }
 
@@ -5001,6 +5005,7 @@ func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
 
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
 	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
+	a.addConfigWarnings(&env)
 	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
 		return output.WithExitCode(code, writeErr)
 	}
@@ -5009,6 +5014,7 @@ func (a *app) writeFailure(command string, code int, errCode string, err error) 
 
 func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) error {
 	env := output.Failure(command, output.Error{Code: specErr.Code, Message: specErr.Message})
+	a.addConfigWarnings(&env)
 	spec := map[string]any{}
 	if specErr.Path != "" {
 		spec["path"] = specErr.Path
@@ -5042,6 +5048,7 @@ func (a *app) write(env output.Envelope, code int) error {
 }
 
 func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.Options) error {
+	a.addConfigWarnings(&env)
 	if err := output.WriteWithOptions(a.stdoutWriter(), env, opts); err != nil {
 		return output.WithExitCode(code, err)
 	}
@@ -5049,6 +5056,17 @@ func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.
 		return output.WithExitCode(code, fmt.Errorf("%s failed", env.Command))
 	}
 	return nil
+}
+
+func (a *app) addConfigWarnings(env *output.Envelope) {
+	if env == nil || len(a.configWarnings) == 0 {
+		return
+	}
+	warnings := anySlice(env.Warnings)
+	for _, warning := range a.configWarnings {
+		warnings = append(warnings, warning)
+	}
+	env.Warnings = warnings
 }
 
 func (a *app) outputOptions() output.Options {

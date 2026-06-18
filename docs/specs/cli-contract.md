@@ -246,21 +246,7 @@ default_component_folders = true
 code_source = "sidecar"
 
 [lint]
-require_option_explicit = true
-forbid_select = true
-forbid_activate = true
-forbid_on_error_resume_next = true
-detect_implicit_variant = true
-forbid_public_module_fields = true
-forbid_interactive_input = true
-detect_scope_shadowing = false
-detect_multiple_declarator_clarity = true
-detect_unused_local_variables = false
-detect_unused_private_procedures = false
-detect_confusing_call_syntax = true
-detect_for_each_control_type = true
-detect_dangerous_resume = true
-detect_nested_with_ambiguity = false
+disabled_rules = []
 
 [analyze]
 detect_range_find_nothing_check = true
@@ -482,11 +468,15 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 
-Projects that intentionally use interactive GUI entrypoints may set `[lint].forbid_interactive_input = false` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
+Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
 Compile-dialog prevention findings `VB008` through `VB014` are always enabled and block source preflight before `push` or `run` opens Excel.
 
-Higher-signal lint rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB020`, `VB021`, and `VB027` are disabled by default and can be enabled with their `[lint]` booleans.
+Projects should disable configurable lint rules with `[lint].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VB002", "VB006"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
+
+Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_option_explicit`, `VB002` = `forbid_select`, `VB003` = `forbid_activate`, `VB004` = `forbid_on_error_resume_next`, `VB005` = `detect_implicit_variant`, `VB006` = `forbid_public_module_fields`, `VB007` = `forbid_interactive_input`, `VB018` = `detect_scope_shadowing`, `VB019` = `detect_multiple_declarator_clarity`, `VB020` = `detect_unused_local_variables`, `VB021` = `detect_unused_private_procedures`, `VB022` = `detect_confusing_call_syntax`, `VB023` = `detect_for_each_control_type`, `VB026` = `detect_dangerous_resume`, and `VB027` = `detect_nested_with_ambiguity`.
+
+Higher-signal lint rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB020`, `VB021`, and `VB027` are disabled by default and can still be enabled with their legacy `[lint]` booleans during the compatibility window.
 
 ## Analysis Rules
 

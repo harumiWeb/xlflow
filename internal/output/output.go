@@ -1022,6 +1022,7 @@ func (r renderer) renderLint(env Envelope) string {
 	b.WriteString("\n")
 	if len(issues) == 0 {
 		b.WriteString("No lint issues found.\n")
+		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
 	b.WriteString(kv("Issues", fmt.Sprintf("%d", len(issues))))
@@ -1032,6 +1033,7 @@ func (r renderer) renderLint(env Envelope) string {
 		}
 		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(issue, "severity")+"]", "214", true), stringValue(issue, "code"), loc, stringValue(issue, "message"))
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 
@@ -1044,6 +1046,7 @@ func (r renderer) renderAnalysis(env Envelope) string {
 	b.WriteString("\n")
 	if len(findings) == 0 {
 		b.WriteString("No analysis findings found.\n")
+		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
 	b.WriteString(kv("Findings", fmt.Sprintf("%d", len(findings))))
@@ -1059,6 +1062,7 @@ func (r renderer) renderAnalysis(env Envelope) string {
 			b.WriteString("\n")
 		}
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 

@@ -59,7 +59,18 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
-Rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide rules stay conservative opt-ins through `[lint]` settings. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.
+Disable configurable lint rules with `[lint].disabled_rules`:
+
+```toml
+[lint]
+disabled_rules = ["VB002", "VB006"]
+```
+
+Legacy per-rule booleans such as `forbid_select = false` remain accepted for compatibility, but xlflow emits a deprecation warning. If both formats disagree, `disabled_rules` takes precedence and xlflow reports a conflict warning.
+
+Safety diagnostics `VB008` through `VB014` are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+Rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide rules stay conservative opt-ins through legacy `[lint]` settings. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.
 
 ## JSON Output Example
 

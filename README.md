@@ -586,36 +586,8 @@ code_source = "sidecar"
 
 # Static analysis rules.
 [lint]
-# Require Option Explicit in every module.
-require_option_explicit = true
-# Forbid Select / Activate patterns.
-forbid_select = true
-# Forbid Activate usage.
-forbid_activate = true
-# Forbid On Error Resume Next.
-forbid_on_error_resume_next = true
-# Detect implicitly typed Variant variables.
-detect_implicit_variant = true
-# Forbid public fields in standard modules.
-forbid_public_module_fields = true
-# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
-forbid_interactive_input = true
-# Detect local names that shadow module or procedure names.
-detect_scope_shadowing = false
-# Explain mixed Dim declarations where only some declarators are typed.
-detect_multiple_declarator_clarity = true
-# Detect unused procedure-local variables.
-detect_unused_local_variables = false
-# Detect unused Private procedures.
-detect_unused_private_procedures = false
-# Detect confusing parenthesized call syntax.
-detect_confusing_call_syntax = true
-# Detect For Each control variable declaration/type issues.
-detect_for_each_control_type = true
-# Detect Resume statements outside likely error handlers.
-detect_dangerous_resume = true
-# Detect nested With blocks with ambiguous implicit Excel members.
-detect_nested_with_ambiguity = false
+# Disable specific lint rules by diagnostic ID.
+disabled_rules = []
 
 [analyze]
 # Detect Range.Find results used without a Nothing check.
@@ -644,7 +616,7 @@ detect_excel_object_member_mismatch = true
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
 
-Set `forbid_interactive_input = false` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries.
+Use `[lint].disabled_rules = ["VB007"]` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries. Legacy per-rule booleans such as `forbid_interactive_input = false` are still accepted for compatibility, but are deprecated.
 
 Syntax safety lint rules for typographic quotes, C-style quote escapes, unclosed or mismatched procedures, and malformed line-continuation underscores are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 

@@ -132,6 +132,42 @@ End Sub
 	}
 }
 
+func TestLinterHonorsDisabledRuleIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Range("A1").Select
+  ActiveCell.Activate
+End Sub
+`)
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+disabled_rules = ["VB002"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be disabled: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) == 0 {
+		t.Fatalf("VB003 should remain enabled: %+v", issues)
+	}
+}
+
 func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
@@ -15,13 +16,14 @@ const FileName = "xlflow.toml"
 var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, powershell, dotnet")
 
 type Config struct {
-	Project  ProjectConfig  `toml:"project"`
-	Excel    ExcelConfig    `toml:"excel"`
-	Src      SourceConfig   `toml:"src"`
-	VBA      VBAConfig      `toml:"vba"`
-	UserForm UserFormConfig `toml:"userform"`
-	Lint     LintConfig     `toml:"lint"`
-	Analyze  AnalyzeConfig  `toml:"analyze"`
+	Project  ProjectConfig    `toml:"project"`
+	Excel    ExcelConfig      `toml:"excel"`
+	Src      SourceConfig     `toml:"src"`
+	VBA      VBAConfig        `toml:"vba"`
+	UserForm UserFormConfig   `toml:"userform"`
+	Lint     LintConfig       `toml:"lint"`
+	Analyze  AnalyzeConfig    `toml:"analyze"`
+	Warnings []map[string]any `toml:"-"`
 }
 
 type ProjectConfig struct {
@@ -54,21 +56,22 @@ type UserFormConfig struct {
 }
 
 type LintConfig struct {
-	RequireOptionExplicit           bool `toml:"require_option_explicit"`
-	ForbidSelect                    bool `toml:"forbid_select"`
-	ForbidActivate                  bool `toml:"forbid_activate"`
-	ForbidOnErrorResumeNext         bool `toml:"forbid_on_error_resume_next"`
-	DetectImplicitVariant           bool `toml:"detect_implicit_variant"`
-	ForbidPublicModuleFields        bool `toml:"forbid_public_module_fields"`
-	ForbidInteractiveInput          bool `toml:"forbid_interactive_input"`
-	DetectScopeShadowing            bool `toml:"detect_scope_shadowing"`
-	DetectMultipleDeclaratorClarity bool `toml:"detect_multiple_declarator_clarity"`
-	DetectUnusedLocalVariables      bool `toml:"detect_unused_local_variables"`
-	DetectUnusedPrivateProcedures   bool `toml:"detect_unused_private_procedures"`
-	DetectConfusingCallSyntax       bool `toml:"detect_confusing_call_syntax"`
-	DetectForEachControlType        bool `toml:"detect_for_each_control_type"`
-	DetectDangerousResume           bool `toml:"detect_dangerous_resume"`
-	DetectNestedWithAmbiguity       bool `toml:"detect_nested_with_ambiguity"`
+	DisabledRules                   []string `toml:"disabled_rules"`
+	RequireOptionExplicit           bool     `toml:"require_option_explicit"`
+	ForbidSelect                    bool     `toml:"forbid_select"`
+	ForbidActivate                  bool     `toml:"forbid_activate"`
+	ForbidOnErrorResumeNext         bool     `toml:"forbid_on_error_resume_next"`
+	DetectImplicitVariant           bool     `toml:"detect_implicit_variant"`
+	ForbidPublicModuleFields        bool     `toml:"forbid_public_module_fields"`
+	ForbidInteractiveInput          bool     `toml:"forbid_interactive_input"`
+	DetectScopeShadowing            bool     `toml:"detect_scope_shadowing"`
+	DetectMultipleDeclaratorClarity bool     `toml:"detect_multiple_declarator_clarity"`
+	DetectUnusedLocalVariables      bool     `toml:"detect_unused_local_variables"`
+	DetectUnusedPrivateProcedures   bool     `toml:"detect_unused_private_procedures"`
+	DetectConfusingCallSyntax       bool     `toml:"detect_confusing_call_syntax"`
+	DetectForEachControlType        bool     `toml:"detect_for_each_control_type"`
+	DetectDangerousResume           bool     `toml:"detect_dangerous_resume"`
+	DetectNestedWithAmbiguity       bool     `toml:"detect_nested_with_ambiguity"`
 }
 
 type AnalyzeConfig struct {
@@ -84,6 +87,45 @@ type AnalyzeConfig struct {
 	DetectFunctionReturnPath        bool `toml:"detect_function_return_path"`
 	DetectExcelObjectMemberMismatch bool `toml:"detect_excel_object_member_mismatch"`
 }
+
+type lintRuleConfig struct {
+	ID      string
+	Key     string
+	Default bool
+	Get     func(LintConfig) bool
+	Set     func(*LintConfig, bool)
+}
+
+var configurableLintRules = []lintRuleConfig{
+	{ID: "VB001", Key: "require_option_explicit", Default: true, Get: func(c LintConfig) bool { return c.RequireOptionExplicit }, Set: func(c *LintConfig, v bool) { c.RequireOptionExplicit = v }},
+	{ID: "VB002", Key: "forbid_select", Default: true, Get: func(c LintConfig) bool { return c.ForbidSelect }, Set: func(c *LintConfig, v bool) { c.ForbidSelect = v }},
+	{ID: "VB003", Key: "forbid_activate", Default: true, Get: func(c LintConfig) bool { return c.ForbidActivate }, Set: func(c *LintConfig, v bool) { c.ForbidActivate = v }},
+	{ID: "VB004", Key: "forbid_on_error_resume_next", Default: true, Get: func(c LintConfig) bool { return c.ForbidOnErrorResumeNext }, Set: func(c *LintConfig, v bool) { c.ForbidOnErrorResumeNext = v }},
+	{ID: "VB005", Key: "detect_implicit_variant", Default: true, Get: func(c LintConfig) bool { return c.DetectImplicitVariant }, Set: func(c *LintConfig, v bool) { c.DetectImplicitVariant = v }},
+	{ID: "VB006", Key: "forbid_public_module_fields", Default: true, Get: func(c LintConfig) bool { return c.ForbidPublicModuleFields }, Set: func(c *LintConfig, v bool) { c.ForbidPublicModuleFields = v }},
+	{ID: "VB007", Key: "forbid_interactive_input", Default: true, Get: func(c LintConfig) bool { return c.ForbidInteractiveInput }, Set: func(c *LintConfig, v bool) { c.ForbidInteractiveInput = v }},
+	{ID: "VB018", Key: "detect_scope_shadowing", Default: false, Get: func(c LintConfig) bool { return c.DetectScopeShadowing }, Set: func(c *LintConfig, v bool) { c.DetectScopeShadowing = v }},
+	{ID: "VB019", Key: "detect_multiple_declarator_clarity", Default: true, Get: func(c LintConfig) bool { return c.DetectMultipleDeclaratorClarity }, Set: func(c *LintConfig, v bool) { c.DetectMultipleDeclaratorClarity = v }},
+	{ID: "VB020", Key: "detect_unused_local_variables", Default: false, Get: func(c LintConfig) bool { return c.DetectUnusedLocalVariables }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLocalVariables = v }},
+	{ID: "VB021", Key: "detect_unused_private_procedures", Default: false, Get: func(c LintConfig) bool { return c.DetectUnusedPrivateProcedures }, Set: func(c *LintConfig, v bool) { c.DetectUnusedPrivateProcedures = v }},
+	{ID: "VB022", Key: "detect_confusing_call_syntax", Default: true, Get: func(c LintConfig) bool { return c.DetectConfusingCallSyntax }, Set: func(c *LintConfig, v bool) { c.DetectConfusingCallSyntax = v }},
+	{ID: "VB023", Key: "detect_for_each_control_type", Default: true, Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
+	{ID: "VB026", Key: "detect_dangerous_resume", Default: true, Get: func(c LintConfig) bool { return c.DetectDangerousResume }, Set: func(c *LintConfig, v bool) { c.DetectDangerousResume = v }},
+	{ID: "VB027", Key: "detect_nested_with_ambiguity", Default: false, Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
+}
+
+var (
+	lintRuleByID               = indexLintRulesByID()
+	nonConfigurableLintRuleIDs = map[string]bool{
+		"VB008": true,
+		"VB009": true,
+		"VB010": true,
+		"VB011": true,
+		"VB012": true,
+		"VB013": true,
+		"VB014": true,
+	}
+)
 
 func Default() Config {
 	return Config{
@@ -154,10 +196,14 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		}
 		return cfg, err
 	}
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return cfg, err
 	}
 	applyDefaults(&cfg)
+	if err := applyLintRuleConfig(&cfg, meta); err != nil {
+		return cfg, err
+	}
 	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
 		return cfg, err
 	}
@@ -215,6 +261,79 @@ func validate(cfg Config) error {
 	return nil
 }
 
+func indexLintRulesByID() map[string]lintRuleConfig {
+	out := make(map[string]lintRuleConfig, len(configurableLintRules))
+	for _, rule := range configurableLintRules {
+		out[rule.ID] = rule
+	}
+	return out
+}
+
+func applyLintRuleConfig(cfg *Config, meta toml.MetaData) error {
+	disabled, disabledSet, err := normalizeDisabledLintRules(cfg.Lint.DisabledRules)
+	if err != nil {
+		return err
+	}
+	cfg.Lint.DisabledRules = disabled
+	warnings := make([]map[string]any, 0)
+	for _, rule := range configurableLintRules {
+		if !meta.IsDefined("lint", rule.Key) {
+			continue
+		}
+		warnings = append(warnings, map[string]any{
+			"code":    "deprecated_lint_rule_config",
+			"message": fmt.Sprintf("[lint].%s is deprecated. Use [lint].disabled_rules = [%q] instead.", rule.Key, rule.ID),
+			"rule":    rule.ID,
+			"key":     rule.Key,
+		})
+		if rule.Get(cfg.Lint) && disabledSet[rule.ID] {
+			warnings = append(warnings,
+				map[string]any{
+					"code":    "conflicting_lint_rule_config",
+					"message": fmt.Sprintf("lint rule %s is enabled by [lint].%s=true but also listed in [lint].disabled_rules.", rule.ID, rule.Key),
+					"rule":    rule.ID,
+					"key":     rule.Key,
+				},
+				map[string]any{
+					"code":    "disabled_rules_precedence",
+					"message": "[lint].disabled_rules takes precedence.",
+					"rule":    rule.ID,
+					"key":     rule.Key,
+				},
+			)
+		}
+	}
+	for id := range disabledSet {
+		rule := lintRuleByID[id]
+		rule.Set(&cfg.Lint, false)
+	}
+	cfg.Warnings = append(cfg.Warnings, warnings...)
+	return nil
+}
+
+func normalizeDisabledLintRules(ids []string) ([]string, map[string]bool, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if id == "" {
+			continue
+		}
+		if _, ok := lintRuleByID[id]; !ok {
+			if nonConfigurableLintRuleIDs[id] {
+				return nil, nil, fmt.Errorf("lint rule ID is not configurable in [lint].disabled_rules: %s", id)
+			}
+			return nil, nil, fmt.Errorf("unknown lint rule ID in [lint].disabled_rules: %s", id)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out, seen, nil
+}
+
 func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
 	mode, err := excelbridge.ParseMode(cfg.Excel.Bridge)
 	if err != nil {
@@ -230,6 +349,70 @@ func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
 	return nil
 }
 
+func renderLintConfig(cfg LintConfig) string {
+	var b strings.Builder
+	b.WriteString("# Disable specific lint rules by diagnostic ID.\n")
+	b.WriteString("#\n")
+	b.WriteString("# Example:\n")
+	b.WriteString("# disabled_rules = [\n")
+	b.WriteString("#   \"VB006\", # Allow public module-level fields in this legacy project.\n")
+	b.WriteString("# ]\n")
+	disabled := disabledLintRuleIDsForWrite(cfg)
+	if len(disabled) == 0 {
+		b.WriteString("disabled_rules = []\n")
+	} else {
+		b.WriteString("disabled_rules = [\n")
+		for _, id := range disabled {
+			b.WriteString("  \"")
+			b.WriteString(id)
+			b.WriteString("\",\n")
+		}
+		b.WriteString("]\n")
+	}
+	optIn := legacyOptInLintRulesForWrite(cfg)
+	if len(optIn) > 0 {
+		b.WriteString("\n")
+		b.WriteString("# Legacy opt-in lint settings. Prefer disabled_rules for disabling recommended rules.\n")
+		for _, rule := range optIn {
+			b.WriteString(rule.Key)
+			b.WriteString(" = true\n")
+		}
+	}
+	return b.String()
+}
+
+func disabledLintRuleIDsForWrite(cfg LintConfig) []string {
+	seen := map[string]bool{}
+	for _, raw := range cfg.DisabledRules {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if _, ok := lintRuleByID[id]; ok {
+			seen[id] = true
+		}
+	}
+	for _, rule := range configurableLintRules {
+		if rule.Default && !rule.Get(cfg) {
+			seen[rule.ID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for _, rule := range configurableLintRules {
+		if seen[rule.ID] {
+			out = append(out, rule.ID)
+		}
+	}
+	return out
+}
+
+func legacyOptInLintRulesForWrite(cfg LintConfig) []lintRuleConfig {
+	var out []lintRuleConfig
+	for _, rule := range configurableLintRules {
+		if !rule.Default && rule.Get(cfg) {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
 func Write(path string, cfg Config) (err error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -240,6 +423,8 @@ func Write(path string, cfg Config) (err error) {
 			err = closeErr
 		}
 	}()
+
+	lintConfigText := renderLintConfig(cfg.Lint)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -293,36 +478,7 @@ code_source = %q
 
 # Static analysis rules.
 [lint]
-# Require Option Explicit in every module.
-require_option_explicit = %t
-# Forbid Select / Activate patterns.
-forbid_select = %t
-# Forbid Activate usage.
-forbid_activate = %t
-# Forbid On Error Resume Next.
-forbid_on_error_resume_next = %t
-# Detect implicitly typed Variant variables.
-detect_implicit_variant = %t
-# Forbid public fields in standard modules.
-forbid_public_module_fields = %t
-# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
-forbid_interactive_input = %t
-# Detect local names that shadow module or procedure names.
-detect_scope_shadowing = %t
-# Explain mixed Dim declarations where only some declarators are typed.
-detect_multiple_declarator_clarity = %t
-# Detect unused procedure-local variables.
-detect_unused_local_variables = %t
-# Detect unused Private procedures.
-detect_unused_private_procedures = %t
-# Detect confusing parenthesized call syntax.
-detect_confusing_call_syntax = %t
-# Detect For Each control variable declaration/type issues.
-detect_for_each_control_type = %t
-# Detect Resume statements outside likely error handlers.
-detect_dangerous_resume = %t
-# Detect nested With blocks with ambiguous implicit Excel members.
-detect_nested_with_ambiguity = %t
+%s
 
 # Runtime-risk analysis rules.
 [analyze]
@@ -355,13 +511,7 @@ detect_excel_object_member_mismatch = %t
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
-		cfg.Lint.RequireOptionExplicit, cfg.Lint.ForbidSelect, cfg.Lint.ForbidActivate,
-		cfg.Lint.ForbidOnErrorResumeNext, cfg.Lint.DetectImplicitVariant,
-		cfg.Lint.ForbidPublicModuleFields, cfg.Lint.ForbidInteractiveInput,
-		cfg.Lint.DetectScopeShadowing, cfg.Lint.DetectMultipleDeclaratorClarity, cfg.Lint.DetectUnusedLocalVariables,
-		cfg.Lint.DetectUnusedPrivateProcedures, cfg.Lint.DetectConfusingCallSyntax,
-		cfg.Lint.DetectForEachControlType, cfg.Lint.DetectDangerousResume,
-		cfg.Lint.DetectNestedWithAmbiguity,
+		lintConfigText,
 		cfg.Analyze.DetectRangeFindNothingCheck, cfg.Analyze.DetectObjectUseBeforeSet,
 		cfg.Analyze.DetectApplicationStateRestore, cfg.Analyze.DetectErrorHandlerFallthrough,
 		cfg.Analyze.ForbidUnqualifiedExcelObjects, cfg.Analyze.DetectByRefArgumentMismatch,
