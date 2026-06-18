@@ -19,6 +19,8 @@ func TestInspectExtractsRepresentativeStandardModuleSymbols(t *testing.T) {
 Option Explicit
 Public Const MaxValue As Long = 10
 Private cache As Object
+Dim counts(1 To 3) As Long, title As String
+Public Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 Public Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
 Public Type Customer
     Name As String
@@ -26,7 +28,9 @@ End Type
 Public Enum Color
     Red = 1
 End Enum
-Public Function ParseJson(ByVal JsonString As String, Optional ByVal Strict As Boolean = False) As Object
+Public Function ParseJson(ByVal JsonString As String, Optional ByRef Strict As Boolean = False, ParamArray Extra() As Variant) As Object
+    Dim localValue As Long = 1
+    Static LocalCache As Object
     Const LocalLimit As Long = 2
 Start:
 10  Debug.Print JsonString
@@ -51,6 +55,10 @@ End Sub
 	}
 	assertSymbol(t, file.Symbols, "Main", "module")
 	assertSymbol(t, file.Symbols, "MaxValue", "const")
+	sleep := assertSymbol(t, file.Symbols, "Sleep", "declare_sub")
+	if len(sleep.Parameters) != 1 || sleep.Parameters[0].Name != "dwMilliseconds" || sleep.Parameters[0].Type != "Long" || sleep.Parameters[0].Passing != "ByVal" {
+		t.Fatalf("unexpected declare sub parameters: %+v", sleep.Parameters)
+	}
 	assertSymbol(t, file.Symbols, "GetTickCount", "declare_function")
 	assertSymbol(t, file.Symbols, "Customer", "type")
 	assertSymbol(t, file.Symbols, "Color", "enum")
@@ -58,8 +66,11 @@ End Sub
 	if parseJson.ReturnType != "Object" {
 		t.Fatalf("return type = %q, want Object", parseJson.ReturnType)
 	}
-	if len(parseJson.Parameters) != 2 || parseJson.Parameters[0].Name != "JsonString" || parseJson.Parameters[0].Passing != "ByVal" || !parseJson.Parameters[1].Optional {
+	if len(parseJson.Parameters) != 3 || parseJson.Parameters[0].Name != "JsonString" || parseJson.Parameters[0].Passing != "ByVal" || !parseJson.Parameters[1].Optional || parseJson.Parameters[1].Passing != "ByRef" || parseJson.Parameters[2].Name != "Extra" || parseJson.Parameters[2].Type != "Variant" {
 		t.Fatalf("unexpected parameters: %+v", parseJson.Parameters)
+	}
+	if parseJson.Parameters[1].Default == nil || *parseJson.Parameters[1].Default != "False" {
+		t.Fatalf("unexpected optional default: %+v", parseJson.Parameters[1].Default)
 	}
 	assertNoSymbol(t, file.Symbols, "Hidden")
 	assertNoSymbol(t, file.Symbols, "Start")
@@ -71,6 +82,19 @@ End Sub
 	}
 	privateFile := withPrivate.Files[0]
 	assertSymbol(t, privateFile.Symbols, "cache", "module_variable")
+	counts := assertSymbol(t, privateFile.Symbols, "counts", "module_variable")
+	if counts.ReturnType != "Long" {
+		t.Fatalf("counts return type = %q, want Long", counts.ReturnType)
+	}
+	assertSymbol(t, privateFile.Symbols, "title", "module_variable")
+	localValue := assertSymbol(t, privateFile.Symbols, "localValue", "local_variable")
+	if localValue.ReturnType != "Long" {
+		t.Fatalf("localValue return type = %q, want Long", localValue.ReturnType)
+	}
+	localCache := assertSymbol(t, privateFile.Symbols, "LocalCache", "local_variable")
+	if !localCache.Static {
+		t.Fatalf("LocalCache static = false, want true")
+	}
 	assertSymbol(t, privateFile.Symbols, "Hidden", "sub")
 	assertSymbol(t, privateFile.Symbols, "Start", "label")
 	assertSymbol(t, privateFile.Symbols, "10", "line_number_label")
@@ -87,10 +111,14 @@ func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {
 	body := `VERSION 1.0 CLASS
 Attribute VB_Name = "OrderService"
 Option Explicit
-Implements IService
+Implements Contracts.IService
 Public WithEvents App As Excel.Application
-Private mCount As Long
-Public Property Get Count() As Long
+Private mCount As Long, mName As String
+Public Static Property Get Count(ByVal Prefix As String) As Long
+End Property
+Public Property Let Count(ByVal Value As Long)
+End Property
+Public Property Set Service(ByRef Value As Object)
 End Property
 `
 	if err := os.WriteFile(filepath.Join(classDir, "OrderService.cls"), []byte(body), 0o644); err != nil {
@@ -105,10 +133,25 @@ End Property
 	if file.ModuleKind != "class" {
 		t.Fatalf("module kind = %q, want class", file.ModuleKind)
 	}
-	assertSymbol(t, file.Symbols, "IService", "implements")
-	assertSymbol(t, file.Symbols, "App", "withevents_field")
+	assertSymbol(t, file.Symbols, "Contracts.IService", "implements")
+	app := assertSymbol(t, file.Symbols, "App", "withevents_field")
+	if app.ReturnType != "Excel.Application" {
+		t.Fatalf("App return type = %q, want Excel.Application", app.ReturnType)
+	}
 	assertSymbol(t, file.Symbols, "mCount", "field")
-	assertSymbol(t, file.Symbols, "Count", "property_get")
+	assertSymbol(t, file.Symbols, "mName", "field")
+	getter := assertSymbol(t, file.Symbols, "Count", "property_get")
+	if !getter.Static || getter.ReturnType != "Long" || len(getter.Parameters) != 1 || getter.Parameters[0].Name != "Prefix" {
+		t.Fatalf("unexpected property get symbol: %+v", getter)
+	}
+	setter := assertSymbol(t, file.Symbols, "Count", "property_let")
+	if len(setter.Parameters) != 1 || setter.Parameters[0].Name != "Value" || setter.Parameters[0].Type != "Long" {
+		t.Fatalf("unexpected property let symbol: %+v", setter)
+	}
+	service := assertSymbol(t, file.Symbols, "Service", "property_set")
+	if len(service.Parameters) != 1 || service.Parameters[0].Passing != "ByRef" || service.Parameters[0].Type != "Object" {
+		t.Fatalf("unexpected property set symbol: %+v", service)
+	}
 }
 
 func TestInspectSidecarFormCodeAvoidsDuplicateFrmSymbols(t *testing.T) {

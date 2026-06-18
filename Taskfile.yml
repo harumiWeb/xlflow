@@ -4,7 +4,7 @@ tasks:
   install:
     desc: Install xlflow to local environment
     cmds:
-      - go install ./cmd/xlflow
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' install ./cmd/xlflow
       - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-dotnet-bridge.ps1' -InstallToGoBin
 
   uninstall:
@@ -65,7 +65,7 @@ tasks:
   run:
     desc: Run xlflow without install
     cmds:
-      - go run ./cmd/xlflow {{.CLI_ARGS}}
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow {{.CLI_ARGS}}
 
   doctor:
     cmds:
@@ -89,12 +89,12 @@ tasks:
 
   test:
     cmds:
-      - go test ./...
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./...
 
   verify:security:
     desc: Run vulnerability and third-party licence inventory checks
     cmds:
-      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\check-third-party-licences.ps1'
 
   verify:
@@ -105,10 +105,10 @@ tasks:
   fmt:
     parallel: true
     cmds:
-      - go fmt ./...
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' fmt ./...
       - pnpm run format
       - dotnet format bridge/dotnet/Xlflow.ExcelBridge.sln
 
   tidy:
     cmds:
-      - go mod tidy
+      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' mod tidy
