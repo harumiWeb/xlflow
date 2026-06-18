@@ -43,6 +43,17 @@ path = "build/Sales.xlsm"
 	if !cfg.Lint.ForbidInteractiveInput {
 		t.Fatalf("interactive input lint default was not applied")
 	}
+	if !cfg.Lint.ForbidUnqualifiedExcelObjects || !cfg.Lint.DetectErrorHandlerFallthrough ||
+		!cfg.Lint.DetectApplicationStateRestore || !cfg.Lint.DetectMultipleDeclaratorClarity ||
+		!cfg.Lint.DetectConfusingCallSyntax || !cfg.Lint.DetectForEachControlType ||
+		!cfg.Lint.ForbidActiveObjectDependency || !cfg.Lint.DetectDangerousResume {
+		t.Fatalf("expected high-signal AST lint defaults to be enabled: %+v", cfg.Lint)
+	}
+	if cfg.Lint.DetectScopeShadowing || cfg.Lint.DetectUnusedLocalVariables ||
+		cfg.Lint.DetectUnusedPrivateProcedures || cfg.Lint.DetectRangeFindNothingCheck ||
+		cfg.Lint.DetectNestedWithAmbiguity {
+		t.Fatalf("expected false-positive-prone AST lint defaults to be opt-in: %+v", cfg.Lint)
+	}
 }
 
 func TestLoadAllowsDisablingInteractiveInputLint(t *testing.T) {
