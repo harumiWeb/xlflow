@@ -25,6 +25,22 @@ End Sub
 	assertFinding(t, findings, "VBA101", 4)
 }
 
+func TestAnalyzerFindsMissingSetForModuleLevelObjectVariable(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ws As Worksheet
+Public Sub Run()
+  ws = ThisWorkbook.Worksheets("Sheet1")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA101", 4)
+}
+
 func TestAnalyzerFindsMissingSetForObjectReturningFunction(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -114,6 +130,23 @@ func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
   Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  ws.DisplayGridlines = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA104", 5)
+}
+
+func TestAnalyzerFindsWorksheetMemberOnModuleLevelVariable(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ws As Worksheet
+Public Sub Run()
   Set ws = ThisWorkbook.Worksheets(1)
   ws.DisplayGridlines = False
 End Sub
@@ -307,6 +340,23 @@ End Sub
 			t.Fatalf("%s should not trigger for guarded pattern: %+v", code, got)
 		}
 	}
+}
+
+func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Dim rng As Range
+  Set rng = ws.Range("A1")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA202", 5)
 }
 
 func TestAnalyzerOptInRuntimeRiskRules(t *testing.T) {

@@ -288,18 +288,23 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
-	for _, proc := range sourceProceduresFromAST(file.Root, file.Result.Source) {
-		findings = append(findings, a.analyzeProcedure(file, proc, ctx, reportedMissingHelpers)...)
+	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
+	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	for _, proc := range procedures {
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, reportedMissingHelpers)...)
 	}
-	if len(sourceProceduresFromAST(file.Root, file.Result.Source)) == 0 {
+	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		findings = append(findings, a.analyzeProcedure(file, proc, ctx, reportedMissingHelpers)...)
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, reportedMissingHelpers)...)
 	}
 	return findings
 }
 
-func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, ctx analysisContext, reportedMissingHelpers map[string]bool) []Finding {
-	decls := procedureDeclarations(file.Lines, proc)
+func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, reportedMissingHelpers map[string]bool) []Finding {
+	decls := cloneDeclarations(moduleDecls)
+	for key, decl := range procedureDeclarations(file.Lines, proc) {
+		decls[key] = decl
+	}
 	for _, param := range proc.Params {
 		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
 	}
@@ -346,6 +351,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, ctx an
 			findings = append(findings, a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
 		}
 		if setAssignRe.MatchString(stmt) {
+			if a.Config.Analyze.DetectObjectUseBeforeSet {
+				findings = append(findings, a.objectUseBeforeSetFindings(file, proc, lineNo, stmt, decls, initialized, maybeInitializedByCall)...)
+			}
 			if m := setAssignRe.FindStringSubmatch(stmt); len(m) > 0 {
 				initialized[strings.ToLower(m[1])] = true
 				if strings.EqualFold(m[1], proc.Name) {
@@ -510,6 +518,50 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		}
 	}
 	return decls
+}
+
+func moduleDeclarations(lines []string, procedures []sourceProcedure) map[string]sourceDeclaration {
+	decls := map[string]sourceDeclaration{}
+	for i := 0; i < len(lines); i++ {
+		lineNo := i + 1
+		if lineInAnyProcedure(lineNo, procedures) {
+			continue
+		}
+		stmt := normalizedCodeLine(lines[i])
+		lower := strings.ToLower(stmt)
+		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
+			continue
+		}
+		m := declRe.FindStringSubmatch(stmt)
+		if len(m) == 0 {
+			continue
+		}
+		for _, part := range strings.Split(m[1], ",") {
+			name, typ, array, newExpr := declarationNameAndType(part)
+			if name == "" {
+				continue
+			}
+			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr}
+		}
+	}
+	return decls
+}
+
+func lineInAnyProcedure(line int, procedures []sourceProcedure) bool {
+	for _, proc := range procedures {
+		if proc.StartLine <= line && line <= proc.EndLine {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneDeclarations(decls map[string]sourceDeclaration) map[string]sourceDeclaration {
+	clone := make(map[string]sourceDeclaration, len(decls))
+	for key, decl := range decls {
+		clone[key] = decl
+	}
+	return clone
 }
 
 func declarationNameAndType(text string) (string, string, bool, bool) {
