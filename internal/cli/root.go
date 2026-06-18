@@ -3018,13 +3018,11 @@ func (a *app) inspectCallsCommand(flags *inspectSharedFlags) *cobra.Command {
 				return err
 			}
 			result, err := calls.Inspect(calls.Options{
-				RootDir:         a.cwd,
-				Config:          cfg,
-				Path:            path,
-				From:            from,
-				To:              to,
-				IncludeMembers:  includeMembers,
-				IncludeBuiltins: includeBuiltins,
+				RootDir: a.cwd,
+				Config:  cfg,
+				Path:    path,
+				From:    from,
+				To:      to,
 			})
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)

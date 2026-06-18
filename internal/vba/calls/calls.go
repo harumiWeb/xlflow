@@ -13,13 +13,11 @@ import (
 )
 
 type Options struct {
-	RootDir         string
-	Config          config.Config
-	Path            string
-	From            string
-	To              string
-	IncludeMembers  bool
-	IncludeBuiltins bool
+	RootDir string
+	Config  config.Config
+	Path    string
+	From    string
+	To      string
 }
 
 type Result struct {
@@ -473,8 +471,22 @@ func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
 func (r resolver) resolve(callee Callee) Resolution {
 	base := strings.TrimPrefix(callee.BaseName, "New ")
 	base = cleanIdentifier(base)
+	candidates := r.byName[strings.ToLower(base)]
+	if callee.Receiver != nil {
+		receiver := cleanQualifiedName(*callee.Receiver)
+		if isExternalLikeReceiver(receiver) {
+			return Resolution{Status: "external"}
+		}
+		matches := candidatesForReceiver(candidates, receiver, base)
+		if len(matches) == 1 {
+			return Resolution{Status: "matched", Candidates: matches}
+		}
+		if len(matches) > 1 {
+			return Resolution{Status: "ambiguous", Candidates: matches}
+		}
+		return Resolution{Status: "member_call"}
+	}
 	if base != "" {
-		candidates := r.byName[strings.ToLower(base)]
 		if len(candidates) == 1 {
 			return Resolution{Status: "matched", Candidates: candidates}
 		}
@@ -482,18 +494,38 @@ func (r resolver) resolve(callee Callee) Resolution {
 			return Resolution{Status: "ambiguous", Candidates: candidates}
 		}
 	}
-	if callee.Receiver != nil {
-		receiver := strings.ToLower(cleanIdentifier(lastNamePart(*callee.Receiver)))
-		if externalLikeReceivers[receiver] {
-			return Resolution{Status: "external"}
-		}
-		return Resolution{Status: "member_call"}
-	}
 	textKey := strings.ToLower(strings.TrimPrefix(callee.Text, "New "))
 	if builtinLikeNames[textKey] || builtinLikeNames[strings.ToLower(base)] {
 		return Resolution{Status: "builtin_like"}
 	}
 	return Resolution{Status: "unresolved"}
+}
+
+func candidatesForReceiver(candidates []Candidate, receiver, base string) []Candidate {
+	if receiver == "" || base == "" {
+		return nil
+	}
+	qualified := strings.ToLower(receiver + "." + base)
+	shortQualified := strings.ToLower(cleanIdentifier(lastNamePart(receiver)) + "." + base)
+	matches := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		name := strings.ToLower(candidate.QualifiedName)
+		if name == qualified || name == shortQualified {
+			matches = append(matches, candidate)
+		}
+	}
+	return matches
+}
+
+func isExternalLikeReceiver(receiver string) bool {
+	for _, part := range strings.FieldsFunc(receiver, func(r rune) bool {
+		return r == '.' || r == '!'
+	}) {
+		if externalLikeReceivers[strings.ToLower(cleanIdentifier(part))] {
+			return true
+		}
+	}
+	return false
 }
 
 func addResolutionSummary(summary *ResultSummary, status string) {
@@ -583,6 +615,19 @@ func cleanIdentifier(text string) string {
 	text = strings.Trim(text, "[]")
 	text = strings.TrimRight(text, "$%&#@^!")
 	return text
+}
+
+func cleanQualifiedName(text string) string {
+	parts := strings.FieldsFunc(strings.TrimSpace(text), func(r rune) bool {
+		return r == '.' || r == '!'
+	})
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if clean := cleanIdentifier(part); clean != "" {
+			cleaned = append(cleaned, clean)
+		}
+	}
+	return strings.Join(cleaned, ".")
 }
 
 func (c Call) String() string {

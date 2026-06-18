@@ -125,6 +125,53 @@ End Sub
 	}
 }
 
+func TestInspectClassifiesReceiverBeforeBareNameMatch(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	main := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Debug.Print "ready"
+    total = Application.WorksheetFunction.Sum(values)
+    App.RunCore True
+End Sub
+
+Public Sub Print()
+End Sub
+
+Public Function Sum(ByVal values As Variant) As Double
+End Function
+`
+	app := `Attribute VB_Name = "App"
+Option Explicit
+Public Sub RunCore(ByVal showForm As Boolean)
+End Sub
+`
+	mustWrite(t, filepath.Join(moduleDir, "Main.bas"), main)
+	mustWrite(t, filepath.Join(moduleDir, "App.bas"), app)
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	debug := assertCall(t, result.Calls, "Debug.Print", "external", 1)
+	if len(debug.Resolution.Candidates) != 0 {
+		t.Fatalf("Debug.Print should not match project Print: %+v", debug.Resolution)
+	}
+	sum := assertCall(t, result.Calls, "Application.WorksheetFunction.Sum", "external", 1)
+	if len(sum.Resolution.Candidates) != 0 {
+		t.Fatalf("WorksheetFunction.Sum should not match project Sum: %+v", sum.Resolution)
+	}
+	runCore := assertCall(t, result.Calls, "App.RunCore", "matched", 1)
+	if len(runCore.Resolution.Candidates) != 1 || runCore.Resolution.Candidates[0].QualifiedName != "App.RunCore" {
+		t.Fatalf("App.RunCore should match qualified project symbol: %+v", runCore.Resolution)
+	}
+}
+
 func TestInspectReportsParseRecoveryWithoutCrashing(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
