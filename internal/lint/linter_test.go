@@ -132,6 +132,147 @@ End Sub
 	}
 }
 
+func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public SharedState As String
+Private c As String, d
+
+Sub Main()
+  Dim a, b As Long
+  Dim localValue
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb005 := issuesByCode(issues, "VB005")
+	if len(vb005) != 3 {
+		t.Fatalf("expected three VB005 findings, got %+v", vb005)
+	}
+	assertIssue(t, vb005, "VB005", 3)
+	assertIssue(t, vb005, "VB005", 6)
+	assertIssue(t, vb005, "VB005", 7)
+	a := findIssue(t, vb005, "VB005", 6)
+	if a.Column != 7 {
+		t.Fatalf("expected Dim a column 7, got %+v", a)
+	}
+	for _, issue := range vb005 {
+		if issue.Line == 6 && issue.Column != 7 {
+			t.Fatalf("Dim a should be the only line 6 implicit Variant, got %+v", vb005)
+		}
+	}
+	vb006 := issuesByCode(issues, "VB006")
+	if len(vb006) != 1 || vb006[0].Line != 2 {
+		t.Fatalf("expected only module-level Public variable to trigger VB006, got %+v", vb006)
+	}
+}
+
+func TestLinterASTIgnoresCommentsAndStringsForKeywordRules(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+  Debug.Print ".Select .Activate On Error Resume Next"
+  ' Range("A1").Select
+  ' ActiveCell.Activate
+  ' On Error Resume Next
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VB002", "VB003", "VB004"} {
+		if got := issuesByCode(issues, code); len(got) != 0 {
+			t.Fatalf("%s should ignore comments and strings, got %+v", code, got)
+		}
+	}
+}
+
+func TestLinterASTDetectsMemberAccessAndOnError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+  Range("A1").Select
+  ActiveCell.Activate
+  With Worksheets(1)
+    .Range("A1").Select
+  End With
+  On Error Resume Next
+  On Error GoTo ErrHandler
+ErrHandler:
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb002 := issuesByCode(issues, "VB002")
+	if len(vb002) != 2 {
+		t.Fatalf("expected two Select findings, got %+v", vb002)
+	}
+	assertIssue(t, vb002, "VB002", 3)
+	assertIssue(t, vb002, "VB002", 6)
+	vb003 := issuesByCode(issues, "VB003")
+	if len(vb003) != 1 || vb003[0].Line != 4 {
+		t.Fatalf("expected one Activate finding, got %+v", vb003)
+	}
+	vb004 := issuesByCode(issues, "VB004")
+	if len(vb004) != 1 || vb004[0].Line != 8 {
+		t.Fatalf("expected only On Error Resume Next to trigger VB004, got %+v", vb004)
+	}
+}
+
+func TestLinterReportsParserRecovery(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main(
+  Range("A1").Value = 1
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) == 0 {
+		t.Fatalf("expected parser recovery issue, got %+v", issues)
+	}
+	if vb014[0].Line == 0 || vb014[0].Column == 0 {
+		t.Fatalf("expected parser recovery issue to include line and column, got %+v", vb014[0])
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB014", vb014[0].Line)
+}
+
 func TestLinterHandlesImplicitVariantsInsideUDTs(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -180,6 +321,9 @@ End Sub
 	if len(vb005Lines) != 2 {
 		t.Fatalf("expected exactly two VB005 findings, got %+v", issues)
 	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("legal UDT implicit Variant fallback should not also trigger VB014: %+v", got)
+	}
 }
 
 func TestLinterIgnoresConditionalCompilationDirectivesInsideUDTs(t *testing.T) {
@@ -219,6 +363,9 @@ End Type
 	}
 	if len(vb005Lines) != 1 {
 		t.Fatalf("expected exactly one VB005 finding, got %+v", issues)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("legal UDT implicit Variant fallback should not also trigger VB014: %+v", got)
 	}
 }
 
@@ -611,4 +758,14 @@ func findIssue(t *testing.T, issues []Issue, code string, line int) Issue {
 	}
 	t.Fatalf("missing issue %s at line %d in %+v", code, line, issues)
 	return Issue{}
+}
+
+func issuesByCode(issues []Issue, code string) []Issue {
+	var filtered []Issue
+	for _, issue := range issues {
+		if issue.Code == code {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered
 }

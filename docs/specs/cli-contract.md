@@ -434,6 +434,10 @@ End Sub
 
 ## Lint Rules
 
+Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings.
+
+Core declaration, member-access, and error-handling rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
+
 - `VB001`: missing `Option Explicit`
 - `VB002`: `Select` usage
 - `VB003`: `Activate` usage
@@ -447,10 +451,11 @@ End Sub
 - `VB011`: unexpected `End Sub`, `End Function`, or `End Property`
 - `VB012`: mismatched procedure end statement
 - `VB013`: missing whitespace before a line-continuation underscore
+- `VB014`: `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].forbid_interactive_input = false` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB013` are always enabled and block source preflight before `push` or `run` opens Excel.
+Compile-dialog prevention findings `VB008` through `VB014` are always enabled and block source preflight before `push` or `run` opens Excel.
 
 ## Analysis Rules
 
