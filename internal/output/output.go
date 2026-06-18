@@ -1771,6 +1771,8 @@ func (r renderer) renderInspect(env Envelope) string {
 		return r.renderInspectRange(env, payload)
 	case "cell":
 		return r.renderInspectCell(env, payload)
+	case "calls":
+		return r.renderInspectCalls(env, payload)
 	case "symbols":
 		return r.renderInspectSymbols(env, payload)
 	default:
@@ -2046,6 +2048,8 @@ func (r renderer) renderInspectMarkdown(env Envelope, payload map[string]any) st
 		}
 		b.WriteString(renderWarningsAndHintsMarkdown(env))
 		return b.String()
+	case "calls":
+		return renderInspectCallsMarkdown(env, payload)
 	case "symbols":
 		return renderInspectSymbolsMarkdown(env, payload)
 	default:
@@ -2113,6 +2117,136 @@ func (r renderer) renderInspectSymbols(env Envelope, payload map[string]any) str
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func (r renderer) renderInspectCalls(env Envelope, payload map[string]any) string {
+	calls := listOfObjects(payload["calls"])
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(r.renderInspectTargetSession(env))
+	if root := stringValue(payload, "root"); root != "" {
+		b.WriteString(kv("Source", root))
+	}
+	summary := objectMap(payload["summary"])
+	if len(summary) > 0 {
+		b.WriteString(kv("Files", fmt.Sprintf("%d", intNumber(summary, "files"))))
+		b.WriteString(kv("Calls", fmt.Sprintf("%d", intNumber(summary, "calls"))))
+	}
+	if len(calls) == 0 {
+		b.WriteString("No calls found.\n")
+		b.WriteString(r.renderWarningsAndHints(env))
+		return b.String()
+	}
+	for _, fileGroup := range groupInspectCalls(calls) {
+		b.WriteString(fileGroup.file)
+		b.WriteString("\n")
+		for _, callerGroup := range fileGroup.callers {
+			b.WriteString(callerGroup.caller)
+			b.WriteString("\n")
+			for _, call := range callerGroup.calls {
+				callee := objectMap(call["callee"])
+				name := stringValue(callee, "text")
+				if name == "" {
+					name = "<unknown>"
+				}
+				fmt.Fprintf(&b, "  -> %-28s %s:%d\n", name, stringValue(call, "file"), intNumber(objectMap(call["range"]), "startLine"))
+			}
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
+func renderInspectCallsMarkdown(env Envelope, payload map[string]any) string {
+	calls := listOfObjects(payload["calls"])
+	var b strings.Builder
+	b.WriteString(renderInspectTargetSessionMarkdown(env))
+	if root := stringValue(payload, "root"); root != "" {
+		b.WriteString("Source: ")
+		b.WriteString(root)
+		b.WriteString("\n")
+	}
+	summary := objectMap(payload["summary"])
+	if len(summary) > 0 {
+		fmt.Fprintf(&b, "Files: %d\nCalls: %d\n\n", intNumber(summary, "files"), intNumber(summary, "calls"))
+	}
+	if len(calls) == 0 {
+		b.WriteString("_No calls found._\n")
+		b.WriteString(renderWarningsAndHintsMarkdown(env))
+		return b.String()
+	}
+	for _, fileGroup := range groupInspectCalls(calls) {
+		fmt.Fprintf(&b, "### `%s`\n\n", fileGroup.file)
+		for _, callerGroup := range fileGroup.callers {
+			fmt.Fprintf(&b, "#### `%s`\n\n", callerGroup.caller)
+			for _, call := range callerGroup.calls {
+				callee := objectMap(call["callee"])
+				name := stringValue(callee, "text")
+				if name == "" {
+					name = "<unknown>"
+				}
+				fmt.Fprintf(&b, "- `%s` at `%s:%d`\n", name, stringValue(call, "file"), intNumber(objectMap(call["range"]), "startLine"))
+			}
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(renderWarningsAndHintsMarkdown(env))
+	return b.String()
+}
+
+type inspectCallFileGroup struct {
+	file    string
+	callers []inspectCallCallerGroup
+}
+
+type inspectCallCallerGroup struct {
+	caller string
+	calls  []map[string]any
+}
+
+func groupInspectCalls(calls []map[string]any) []inspectCallFileGroup {
+	fileIndex := map[string]int{}
+	result := []inspectCallFileGroup{}
+	for _, call := range calls {
+		file := stringValue(call, "file")
+		if file == "" {
+			file = "<unknown>"
+		}
+		fi, ok := fileIndex[file]
+		if !ok {
+			fi = len(result)
+			fileIndex[file] = fi
+			result = append(result, inspectCallFileGroup{file: file})
+		}
+		caller := inspectCallCallerLabel(call)
+		ci := -1
+		for i, group := range result[fi].callers {
+			if group.caller == caller {
+				ci = i
+				break
+			}
+		}
+		if ci < 0 {
+			ci = len(result[fi].callers)
+			result[fi].callers = append(result[fi].callers, inspectCallCallerGroup{caller: caller})
+		}
+		result[fi].callers[ci].calls = append(result[fi].callers[ci].calls, call)
+	}
+	return result
+}
+
+func inspectCallCallerLabel(call map[string]any) string {
+	caller := objectMap(call["caller"])
+	if qualified := stringValue(caller, "qualifiedName"); qualified != "" {
+		return qualified
+	}
+	if name := stringValue(caller, "name"); name != "" {
+		return name
+	}
+	if module := stringValue(call, "module"); module != "" {
+		return module
+	}
+	return "<module>"
 }
 
 func renderInspectSymbolsMarkdown(env Envelope, payload map[string]any) string {

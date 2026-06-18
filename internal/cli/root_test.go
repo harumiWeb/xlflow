@@ -3189,6 +3189,88 @@ func TestInspectSymbolsTextAndPath(t *testing.T) {
 	}
 }
 
+func TestInspectCallsJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "calls"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect calls json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Inspect struct {
+			Target  string `json:"target"`
+			Source  string `json:"source"`
+			Root    string `json:"root"`
+			Summary struct {
+				Files int `json:"files"`
+				Calls int `json:"calls"`
+			} `json:"summary"`
+			Calls []struct {
+				File   string `json:"file"`
+				Module string `json:"module"`
+				Caller struct {
+					QualifiedName string `json:"qualifiedName"`
+				} `json:"caller"`
+				Callee struct {
+					Text     string `json:"text"`
+					BaseName string `json:"baseName"`
+				} `json:"callee"`
+				Resolution struct {
+					Status string `json:"status"`
+				} `json:"resolution"`
+			} `json:"calls"`
+		} `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse inspect calls output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "inspect" || got.Inspect.Target != "calls" || got.Inspect.Source != "tree_sitter_vba" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Inspect.Root != "src" || got.Inspect.Summary.Files != 1 || got.Inspect.Summary.Calls == 0 {
+		t.Fatalf("unexpected inspect summary: %+v", got.Inspect)
+	}
+	found := false
+	for _, call := range got.Inspect.Calls {
+		if call.Callee.Text == "BuildReport" && call.Caller.QualifiedName == "Main.Run" && call.Resolution.Status == "matched" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("BuildReport call missing: %+v", got.Inspect.Calls)
+	}
+}
+
+func TestInspectCallsTextPathAndFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, "custom-src")
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "calls", "--path", "custom-src", "--from", "Main.Run", "--to", "BuildReport"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect calls text error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{"custom-src/Main.bas", "Main.Run", "-> BuildReport"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect calls text missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Debug.Print") {
+		t.Fatalf("inspect calls filter included Debug.Print:\n%s", got)
+	}
+}
+
 func writeInspectSymbolsFixture(t *testing.T, dir, sourceDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {
@@ -3206,6 +3288,35 @@ path = "build/Book.xlsm"
 	body := `Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Run()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeInspectCallsFixture(t *testing.T, dir, sourceDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    BuildReport 1, 2
+    Debug.Print "done"
+End Sub
+
+Public Sub BuildReport(ByVal first As Long, ByVal second As Long)
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
