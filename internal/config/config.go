@@ -53,13 +53,26 @@ type UserFormConfig struct {
 }
 
 type LintConfig struct {
-	RequireOptionExplicit    bool `toml:"require_option_explicit"`
-	ForbidSelect             bool `toml:"forbid_select"`
-	ForbidActivate           bool `toml:"forbid_activate"`
-	ForbidOnErrorResumeNext  bool `toml:"forbid_on_error_resume_next"`
-	DetectImplicitVariant    bool `toml:"detect_implicit_variant"`
-	ForbidPublicModuleFields bool `toml:"forbid_public_module_fields"`
-	ForbidInteractiveInput   bool `toml:"forbid_interactive_input"`
+	RequireOptionExplicit           bool `toml:"require_option_explicit"`
+	ForbidSelect                    bool `toml:"forbid_select"`
+	ForbidActivate                  bool `toml:"forbid_activate"`
+	ForbidOnErrorResumeNext         bool `toml:"forbid_on_error_resume_next"`
+	DetectImplicitVariant           bool `toml:"detect_implicit_variant"`
+	ForbidPublicModuleFields        bool `toml:"forbid_public_module_fields"`
+	ForbidInteractiveInput          bool `toml:"forbid_interactive_input"`
+	ForbidUnqualifiedExcelObjects   bool `toml:"forbid_unqualified_excel_objects"`
+	DetectErrorHandlerFallthrough   bool `toml:"detect_error_handler_fallthrough"`
+	DetectApplicationStateRestore   bool `toml:"detect_application_state_restore"`
+	DetectScopeShadowing            bool `toml:"detect_scope_shadowing"`
+	DetectMultipleDeclaratorClarity bool `toml:"detect_multiple_declarator_clarity"`
+	DetectUnusedLocalVariables      bool `toml:"detect_unused_local_variables"`
+	DetectUnusedPrivateProcedures   bool `toml:"detect_unused_private_procedures"`
+	DetectConfusingCallSyntax       bool `toml:"detect_confusing_call_syntax"`
+	DetectForEachControlType        bool `toml:"detect_for_each_control_type"`
+	ForbidActiveObjectDependency    bool `toml:"forbid_active_object_dependency"`
+	DetectRangeFindNothingCheck     bool `toml:"detect_range_find_nothing_check"`
+	DetectDangerousResume           bool `toml:"detect_dangerous_resume"`
+	DetectNestedWithAmbiguity       bool `toml:"detect_nested_with_ambiguity"`
 }
 
 func Default() Config {
@@ -89,13 +102,21 @@ func Default() Config {
 			CodeSource: "sidecar",
 		},
 		Lint: LintConfig{
-			RequireOptionExplicit:    true,
-			ForbidSelect:             true,
-			ForbidActivate:           true,
-			ForbidOnErrorResumeNext:  true,
-			DetectImplicitVariant:    true,
-			ForbidPublicModuleFields: true,
-			ForbidInteractiveInput:   true,
+			RequireOptionExplicit:           true,
+			ForbidSelect:                    true,
+			ForbidActivate:                  true,
+			ForbidOnErrorResumeNext:         true,
+			DetectImplicitVariant:           true,
+			ForbidPublicModuleFields:        true,
+			ForbidInteractiveInput:          true,
+			ForbidUnqualifiedExcelObjects:   true,
+			DetectErrorHandlerFallthrough:   true,
+			DetectApplicationStateRestore:   true,
+			DetectMultipleDeclaratorClarity: true,
+			DetectConfusingCallSyntax:       true,
+			DetectForEachControlType:        true,
+			ForbidActiveObjectDependency:    true,
+			DetectDangerousResume:           true,
 		},
 	}
 }
@@ -270,6 +291,32 @@ detect_implicit_variant = %t
 forbid_public_module_fields = %t
 # Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = %t
+# Forbid unqualified Range/Cells/Rows/Columns access.
+forbid_unqualified_excel_objects = %t
+# Detect procedures that can fall through into an error handler.
+detect_error_handler_fallthrough = %t
+# Detect Application state changes without an obvious restore path.
+detect_application_state_restore = %t
+# Detect local names that shadow module or procedure names.
+detect_scope_shadowing = %t
+# Explain mixed Dim declarations where only some declarators are typed.
+detect_multiple_declarator_clarity = %t
+# Detect unused procedure-local variables.
+detect_unused_local_variables = %t
+# Detect unused Private procedures.
+detect_unused_private_procedures = %t
+# Detect confusing parenthesized call syntax.
+detect_confusing_call_syntax = %t
+# Detect For Each control variable declaration/type issues.
+detect_for_each_control_type = %t
+# Forbid ActiveWorkbook/ActiveSheet/ActiveCell/Selection dependencies.
+forbid_active_object_dependency = %t
+# Detect Range.Find results used without a Nothing check.
+detect_range_find_nothing_check = %t
+# Detect Resume statements outside likely error handlers.
+detect_dangerous_resume = %t
+# Detect nested With blocks with ambiguous implicit Excel members.
+detect_nested_with_ambiguity = %t
 `
 	_, err = fmt.Fprintf(f, tmpl,
 		cfg.Project.Name, cfg.Project.Entry,
@@ -280,6 +327,13 @@ forbid_interactive_input = %t
 		cfg.Lint.RequireOptionExplicit, cfg.Lint.ForbidSelect, cfg.Lint.ForbidActivate,
 		cfg.Lint.ForbidOnErrorResumeNext, cfg.Lint.DetectImplicitVariant,
 		cfg.Lint.ForbidPublicModuleFields, cfg.Lint.ForbidInteractiveInput,
+		cfg.Lint.ForbidUnqualifiedExcelObjects, cfg.Lint.DetectErrorHandlerFallthrough,
+		cfg.Lint.DetectApplicationStateRestore, cfg.Lint.DetectScopeShadowing,
+		cfg.Lint.DetectMultipleDeclaratorClarity, cfg.Lint.DetectUnusedLocalVariables,
+		cfg.Lint.DetectUnusedPrivateProcedures, cfg.Lint.DetectConfusingCallSyntax,
+		cfg.Lint.DetectForEachControlType, cfg.Lint.ForbidActiveObjectDependency,
+		cfg.Lint.DetectRangeFindNothingCheck, cfg.Lint.DetectDangerousResume,
+		cfg.Lint.DetectNestedWithAmbiguity,
 	)
 	return err
 }

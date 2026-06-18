@@ -102,17 +102,17 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## What xlflow can do
 
-| Area           | Capabilities                                                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                |
-| Execution      | Run macros from the CLI with typed arguments                                                                                                      |
-| Testing        | Discover and run VBA test procedures                                                                                                              |
-| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                   |
-| Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
-| GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                    |
-| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                              |
-| Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                  |
-| AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
+| Area           | Capabilities                                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Execution      | Run macros from the CLI with typed arguments                                                                                                                                 |
+| Testing        | Discover and run VBA test procedures                                                                                                                                         |
+| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
+| Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
+| GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                                               |
+| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                                                         |
+| Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
+| AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
@@ -600,6 +600,32 @@ detect_implicit_variant = true
 forbid_public_module_fields = true
 # Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = true
+# Forbid unqualified Range/Cells/Rows/Columns access.
+forbid_unqualified_excel_objects = true
+# Detect procedures that can fall through into an error handler.
+detect_error_handler_fallthrough = true
+# Detect Application state changes without an obvious restore path.
+detect_application_state_restore = true
+# Detect local names that shadow module or procedure names.
+detect_scope_shadowing = false
+# Explain mixed Dim declarations where only some declarators are typed.
+detect_multiple_declarator_clarity = true
+# Detect unused procedure-local variables.
+detect_unused_local_variables = false
+# Detect unused Private procedures.
+detect_unused_private_procedures = false
+# Detect confusing parenthesized call syntax.
+detect_confusing_call_syntax = true
+# Detect For Each control variable declaration/type issues.
+detect_for_each_control_type = true
+# Forbid ActiveWorkbook/ActiveSheet/ActiveCell/Selection dependencies.
+forbid_active_object_dependency = true
+# Detect Range.Find results used without a Nothing check.
+detect_range_find_nothing_check = false
+# Detect Resume statements outside likely error handlers.
+detect_dangerous_resume = true
+# Detect nested With blocks with ambiguous implicit Excel members.
+detect_nested_with_ambiguity = false
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.

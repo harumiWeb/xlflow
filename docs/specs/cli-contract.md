@@ -253,6 +253,19 @@ forbid_on_error_resume_next = true
 detect_implicit_variant = true
 forbid_public_module_fields = true
 forbid_interactive_input = true
+forbid_unqualified_excel_objects = true
+detect_error_handler_fallthrough = true
+detect_application_state_restore = true
+detect_scope_shadowing = false
+detect_multiple_declarator_clarity = true
+detect_unused_local_variables = false
+detect_unused_private_procedures = false
+detect_confusing_call_syntax = true
+detect_for_each_control_type = true
+forbid_active_object_dependency = true
+detect_range_find_nothing_check = false
+detect_dangerous_resume = true
+detect_nested_with_ambiguity = false
 ```
 
 ## JSON Envelope
@@ -436,7 +449,7 @@ End Sub
 
 Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings.
 
-Core declaration, member-access, and error-handling rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
+Core declaration, member-access, error-handling, Excel object, and procedure-scope rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
 
 - `VB001`: missing `Option Explicit`
 - `VB002`: `Select` usage
@@ -452,10 +465,25 @@ Core declaration, member-access, and error-handling rules use `tree-sitter-vba` 
 - `VB012`: mismatched procedure end statement
 - `VB013`: missing whitespace before a line-continuation underscore
 - `VB014`: `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes
+- `VB015`: unqualified Excel object access such as `Range(...)`, `Cells(...)`, `Rows(...)`, or `Columns(...)`
+- `VB016`: normal execution can fall through into an error-handler label
+- `VB017`: `Application.EnableEvents`, `Application.DisplayAlerts`, or `Application.ScreenUpdating` is disabled without an obvious restore path
+- `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
+- `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`
+- `VB020`: unused procedure-local variable
+- `VB021`: unused private procedure, excluding known event/callback naming patterns
+- `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
+- `VB023`: `For Each` control variable is undeclared or obviously incompatible
+- `VB024`: active object dependency such as `ActiveWorkbook`, `ActiveSheet`, `ActiveCell`, or `Selection`
+- `VB025`: `Range.Find` result is dereferenced before a `Nothing` check
+- `VB026`: `Resume` is used outside a likely error-handler context
+- `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].forbid_interactive_input = false` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
 Compile-dialog prevention findings `VB008` through `VB014` are always enabled and block source preflight before `push` or `run` opens Excel.
+
+Higher-signal rules `VB015`, `VB016`, `VB017`, `VB019`, `VB022`, `VB023`, `VB024`, and `VB026` are enabled by default. Heavier project-wide or dataflow-sensitive rules `VB018`, `VB020`, `VB021`, `VB025`, and `VB027` are disabled by default and can be enabled with their `[lint]` booleans.
 
 ## Analysis Rules
 
