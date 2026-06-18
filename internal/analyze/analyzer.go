@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -182,6 +183,11 @@ func (a Analyzer) Run() ([]Finding, error) {
 		if err != nil {
 			closeParsedFiles(parsedFiles)
 			return nil, err
+		}
+		if parsed.HasError || parsed.HasMissing {
+			parsed.Close()
+			closeParsedFiles(parsedFiles)
+			return nil, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
 		}
 		parsedFiles = append(parsedFiles, parsedFile{
 			Path:   file,
@@ -409,7 +415,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
-		markCallInitialized(stmt, decls, maybeInitializedByCall)
+		markCallInitialized(stmt, decls, ctx, maybeInitializedByCall)
 		_ = lower
 	}
 	if a.Config.Analyze.DetectApplicationStateRestore {
@@ -675,18 +681,28 @@ func (a Analyzer) objectUseBeforeSetFindings(file parsedFile, proc sourceProcedu
 	return findings
 }
 
-func markCallInitialized(stmt string, decls map[string]sourceDeclaration, maybeInitialized map[string]bool) {
+func markCallInitialized(stmt string, decls map[string]sourceDeclaration, ctx analysisContext, maybeInitialized map[string]bool) {
 	if strings.Contains(stmt, "=") {
 		return
 	}
-	lower := strings.ToLower(stmt)
-	for _, prefix := range []string{"dim ", "static ", "private ", "public "} {
-		if strings.HasPrefix(lower, prefix) {
-			return
-		}
+	name, args, ok := parseSimpleCall(stmt)
+	if !ok {
+		return
 	}
-	for key, decl := range decls {
-		if decl.Object && hasWord(lower, key) {
+	sig, ok := ctx.procedures[strings.ToLower(name)]
+	if !ok {
+		return
+	}
+	for i, arg := range args {
+		if i >= len(sig.Params) {
+			break
+		}
+		param := sig.Params[i]
+		if strings.EqualFold(param.Passing, "ByVal") || !isObjectType(param.Type) {
+			continue
+		}
+		key := strings.ToLower(cleanIdentifier(arg))
+		if decl, ok := decls[key]; ok && decl.Object {
 			maybeInitialized[key] = true
 		}
 	}
@@ -763,11 +779,49 @@ func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProc
 		if decl.Object && strings.Contains(lower, key+" = nothing") {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
 		}
-		if decl.Array && (strings.Contains(lower, key+" = ") || strings.Contains(lower, " = "+key)) {
+		if decl.Array && identifierComparedAsOperand(lower, key) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself."))
 		}
 	}
 	return findings
+}
+
+func identifierComparedAsOperand(stmt, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for _, op := range []string{"=", "<>", "<=", ">=", "<", ">"} {
+		parts := strings.Split(stmt, op)
+		if len(parts) < 2 {
+			continue
+		}
+		for i := 0; i < len(parts)-1; i++ {
+			if operandIsIdentifier(parts[i], name) || operandIsIdentifier(parts[i+1], name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func operandIsIdentifier(text, name string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return !isVBAIdentifierRune(r)
+	})
+	if len(fields) == 0 {
+		return false
+	}
+	candidate := strings.ToLower(cleanIdentifier(fields[len(fields)-1]))
+	if candidate == name {
+		return true
+	}
+	candidate = strings.ToLower(cleanIdentifier(fields[0]))
+	return candidate == name
 }
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -1092,8 +1146,11 @@ func applicationStateName(prop string) string {
 
 func parseSimpleCall(stmt string) (string, []string, bool) {
 	stmt = strings.TrimSpace(stmt)
-	if stmt == "" || strings.HasPrefix(strings.ToLower(stmt), "call ") {
-		stmt = strings.TrimSpace(strings.TrimPrefix(stmt, "Call "))
+	if stmt == "" {
+		return "", nil, false
+	}
+	if strings.HasPrefix(strings.ToLower(stmt), "call ") {
+		stmt = strings.TrimSpace(stmt[len("call "):])
 	}
 	if strings.Contains(stmt, "=") || strings.HasPrefix(strings.ToLower(stmt), "if ") {
 		return "", nil, false

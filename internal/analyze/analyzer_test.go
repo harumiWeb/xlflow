@@ -125,6 +125,22 @@ End Sub
 	}
 }
 
+func TestAnalyzerFailsOnParserRecovery(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Broken(ByVal value As String
+End Function
+`)
+
+	_, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err == nil {
+		t.Fatal("expected parser recovery error")
+	}
+	if !strings.Contains(err.Error(), "VBA parser reported errors or missing nodes") {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+}
+
 func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -359,6 +375,45 @@ End Sub
 	assertFinding(t, findings, "VBA202", 5)
 }
 
+func TestAnalyzerDoesNotTreatAnyObjectMentionAsInitialization(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  If ws Is Nothing Then Debug.Print "missing"
+  ws.Range("A1").Value = 1
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA202", 5)
+}
+
+func TestAnalyzerAllowsKnownByRefObjectInitializer(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub InitSheet(ByRef target As Worksheet)
+  Set target = ThisWorkbook.Worksheets(1)
+End Sub
+Public Sub Run()
+  Dim ws As Worksheet
+  InitSheet ws
+  ws.Range("A1").Value = 1
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("known ByRef object initializer should suppress VBA202: %+v", got)
+	}
+}
+
 func TestAnalyzerOptInRuntimeRiskRules(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -385,6 +440,47 @@ End Sub
 	assertFinding(t, findings, "VBA206", 9)
 	assertFinding(t, findings, "VBA207", 10)
 	assertFinding(t, findings, "VBA210", 4)
+}
+
+func TestAnalyzerByRefMismatchHandlesLowercaseCallKeyword(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub NeedsLong(ByRef value As Long)
+End Sub
+Public Sub Run()
+  call NeedsLong("abc")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectByRefArgumentMismatch = true
+
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA206", 5)
+}
+
+func TestAnalyzerArrayComparisonUsesIdentifierBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim a() As Variant
+  Dim total As Long
+  Dim amount As Long
+  If total = amount Then Debug.Print "ok"
+  If a = amount Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("expected only array comparison on line 7, got %+v", got)
+	}
 }
 
 func TestAnalyzerExpandedExcelMemberMismatch(t *testing.T) {
