@@ -36,6 +36,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
@@ -2991,8 +2992,64 @@ func (a *app) inspectCommand() *cobra.Command {
 		a.inspectRangeCommand(flags),
 		a.inspectUsedRangeCommand(flags),
 		a.inspectCellCommand(flags),
+		a.inspectCallsCommand(flags),
 		a.inspectSymbolsCommand(flags),
 	)
+	return cmd
+}
+
+func (a *app) inspectCallsCommand(flags *inspectSharedFlags) *cobra.Command {
+	var path string
+	var from string
+	var to string
+	var includeMembers bool
+	var includeBuiltins bool
+	cmd := &cobra.Command{
+		Use:   "calls",
+		Short: "Inspect VBA source call sites",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			result, err := calls.Inspect(calls.Options{
+				RootDir: a.cwd,
+				Config:  cfg,
+				Path:    path,
+				From:    from,
+				To:      to,
+			})
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Target = map[string]any{
+				"kind":        "source",
+				"path":        result.Root,
+				"description": "VBA source files",
+			}
+			env.Inspect = workbookinspect.Payload{
+				Target:  "calls",
+				Format:  format,
+				Source:  "tree_sitter_vba",
+				Root:    result.Root,
+				Calls:   result.Calls,
+				Summary: result.Summary,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected %d VBA source file(s), found %d call site(s)", result.Summary.Files, result.Summary.Calls)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
+	cmd.Flags().StringVar(&from, "from", "", "show only calls made from a module or procedure")
+	cmd.Flags().StringVar(&to, "to", "", "show only call sites whose callee matches this name")
+	cmd.Flags().BoolVar(&includeMembers, "include-members", false, "include member calls (included by default)")
+	cmd.Flags().BoolVar(&includeBuiltins, "include-builtins", false, "include built-in-looking calls (included by default)")
 	return cmd
 }
 

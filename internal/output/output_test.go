@@ -588,6 +588,37 @@ func TestWriteWithOptionsRendersSymbolsMarkdownModuleNameFallback(t *testing.T) 
 	}
 }
 
+func TestWriteWithOptionsRendersCallsText(t *testing.T) {
+	env := New("inspect")
+	env.Inspect = map[string]any{
+		"target": "calls",
+		"root":   "src",
+		"summary": map[string]any{
+			"files": 1,
+			"calls": 1,
+		},
+		"calls": []map[string]any{
+			{
+				"file":   "src/modules/Main.bas",
+				"module": "Main",
+				"caller": map[string]any{"qualifiedName": "Main.Run"},
+				"callee": map[string]any{"text": "BuildReport"},
+				"range":  map[string]any{"startLine": 42},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Source:", "src", "src/modules/Main.bas", "Main.Run", "-> BuildReport", "src/modules/Main.bas:42"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("calls output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	env := New("doctor")
 	env.Diagnostics = map[string]any{

@@ -26,6 +26,7 @@ type Payload struct {
 	Form       any              `json:"form,omitempty"`
 	Forms      any              `json:"forms,omitempty"`
 	Files      any              `json:"files,omitempty"`
+	Calls      any              `json:"calls,omitempty"`
 	Summary    any              `json:"summary,omitempty"`
 }
 
