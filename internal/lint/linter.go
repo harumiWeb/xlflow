@@ -287,8 +287,6 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 		inType = true
 	case "qualified_member_expression", "implicit_member_expression":
 		c.memberAccessIssue(node)
-	case "call_expression":
-		c.callExpressionIssue(node)
 	case "on_error_statement":
 		c.onErrorIssue(node)
 	case "variable_declaration":
@@ -318,34 +316,9 @@ func (c *astLintContext) memberAccessIssue(node *tree_sitter.Node) {
 	case c.linter.Config.Lint.ForbidActivate && strings.EqualFold(name, "Activate"):
 		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(property), "VB003", "warning", "Avoid Activate. Use direct object references instead."))
 	}
-	if c.linter.Config.Lint.ForbidActiveObjectDependency {
-		if object := node.ChildByFieldName("object"); object != nil && isActiveObjectName(cleanIdentifier(object.Utf8Text(c.source))) {
-			issue := c.linter.issueAt(c.path, vbaast.NodeRange(object), "VB024", "warning", "Avoid active Excel objects; pass or capture explicit Workbook/Worksheet/Range objects.")
-			issue.Symbol = cleanIdentifier(object.Utf8Text(c.source))
-			c.issues = append(c.issues, issue)
-		}
-	}
 	if c.linter.Config.Lint.DetectNestedWithAmbiguity && node.Kind() == "implicit_member_expression" && c.withDepth >= 2 && isExcelObjectAccessName(name) {
 		issue := c.linter.issueAt(c.path, vbaast.NodeRange(property), "VB027", "warning", "Avoid implicit Excel members inside nested With blocks; qualify the target explicitly.")
 		issue.Symbol = "." + name
-		c.issues = append(c.issues, issue)
-	}
-}
-
-func (c *astLintContext) callExpressionIssue(node *tree_sitter.Node) {
-	fn := node.ChildByFieldName("function")
-	if fn == nil {
-		return
-	}
-	name := cleanIdentifier(fn.Utf8Text(c.source))
-	if c.linter.Config.Lint.ForbidUnqualifiedExcelObjects && fn.Kind() == "identifier" && isExcelObjectAccessName(name) {
-		issue := c.linter.issueAt(c.path, vbaast.NodeRange(fn), "VB015", "warning", "Qualify Excel object access with an explicit Worksheet or Workbook object.")
-		issue.Symbol = name
-		c.issues = append(c.issues, issue)
-	}
-	if c.linter.Config.Lint.ForbidActiveObjectDependency && fn.Kind() == "identifier" && isActiveObjectName(name) {
-		issue := c.linter.issueAt(c.path, vbaast.NodeRange(fn), "VB024", "warning", "Avoid active Excel objects; pass or capture explicit Workbook/Worksheet/Range objects.")
-		issue.Symbol = name
 		c.issues = append(c.issues, issue)
 	}
 }
@@ -424,12 +397,8 @@ func (c *astLintContext) parseIssue(root *tree_sitter.Node) Issue {
 
 func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) []Issue {
 	cfg := l.Config.Lint
-	if !cfg.DetectErrorHandlerFallthrough &&
-		!cfg.DetectApplicationStateRestore &&
-		!cfg.DetectConfusingCallSyntax &&
+	if !cfg.DetectConfusingCallSyntax &&
 		!cfg.DetectForEachControlType &&
-		!cfg.ForbidActiveObjectDependency &&
-		!cfg.DetectRangeFindNothingCheck &&
 		!cfg.DetectDangerousResume {
 		return nil
 	}
@@ -439,23 +408,11 @@ func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) [
 	for _, proc := range procedures {
 		decls := procedureDeclarations(lines, proc)
 		handlerLabels := onErrorHandlerLabels(lines, proc)
-		if cfg.DetectErrorHandlerFallthrough {
-			issues = append(issues, l.errorHandlerFallthroughIssues(path, lines, proc, handlerLabels)...)
-		}
-		if cfg.DetectApplicationStateRestore {
-			issues = append(issues, l.applicationStateIssues(path, lines, proc)...)
-		}
 		if cfg.DetectConfusingCallSyntax {
 			issues = append(issues, l.confusingCallIssues(path, lines, proc)...)
 		}
 		if cfg.DetectForEachControlType {
 			issues = append(issues, l.forEachIssues(path, lines, proc, decls)...)
-		}
-		if cfg.ForbidActiveObjectDependency {
-			issues = append(issues, l.activeObjectIssues(path, lines, proc)...)
-		}
-		if cfg.DetectRangeFindNothingCheck {
-			issues = append(issues, l.rangeFindIssues(path, lines, proc)...)
 		}
 		if cfg.DetectDangerousResume {
 			issues = append(issues, l.dangerousResumeIssues(path, lines, proc, handlerLabels)...)
@@ -584,72 +541,6 @@ func onErrorHandlerLabels(lines []string, proc sourceProcedure) map[string]bool 
 	return labels
 }
 
-func (l Linter) errorHandlerFallthroughIssues(path string, lines []string, proc sourceProcedure, handlerLabels map[string]bool) []Issue {
-	if len(handlerLabels) == 0 {
-		return nil
-	}
-	var issues []Issue
-	lastCode := ""
-	for i := proc.StartLine - 1; i < proc.EndLine-1 && i < len(lines); i++ {
-		lineNo := i + 1
-		stmt := normalizedCodeLine(lines[i])
-		if stmt == "" {
-			continue
-		}
-		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
-			if !isCleanupFallthroughLabel(label) && !terminatesNormalFlow(lastCode) {
-				issue := l.issue(path, lineNo, "VB016", "warning", "Add Exit Sub/Function/Property before the error-handler label so normal execution cannot fall through.")
-				issue.Symbol = label
-				issues = append(issues, issue)
-			}
-		}
-		lastCode = stmt
-	}
-	return issues
-}
-
-func isCleanupFallthroughLabel(label string) bool {
-	switch strings.ToLower(label) {
-	case "cleanup", "clean_up", "finally", "done":
-		return true
-	default:
-		return false
-	}
-}
-
-func (l Linter) applicationStateIssues(path string, lines []string, proc sourceProcedure) []Issue {
-	props := []string{"enableevents", "displayalerts", "screenupdating"}
-	var issues []Issue
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		lower := compactStatement(strings.ToLower(stmt))
-		for _, prop := range props {
-			target := "application." + prop + "=false"
-			if !strings.Contains(lower, target) {
-				continue
-			}
-			if hasLaterApplicationRestore(lines, proc, i+1, prop) {
-				continue
-			}
-			issue := l.issue(path, i+1, "VB017", "warning", "Restore Application."+applicationStateName(prop)+" on a cleanup path after setting it to False.")
-			issue.Symbol = "Application." + applicationStateName(prop)
-			issues = append(issues, issue)
-		}
-	}
-	return issues
-}
-
-func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int, prop string) bool {
-	prefix := "application." + prop + "="
-	for i := start; i < proc.EndLine && i < len(lines); i++ {
-		lower := compactStatement(strings.ToLower(normalizedCodeLine(lines[i])))
-		if strings.Contains(lower, prefix) && !strings.Contains(lower, prefix+"false") {
-			return true
-		}
-	}
-	return false
-}
-
 func (l Linter) confusingCallIssues(path string, lines []string, proc sourceProcedure) []Issue {
 	var issues []Issue
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
@@ -707,79 +598,6 @@ func (l Linter) forEachIssues(path string, lines []string, proc sourceProcedure,
 	return issues
 }
 
-func (l Linter) activeObjectIssues(path string, lines []string, proc sourceProcedure) []Issue {
-	var issues []Issue
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		for _, name := range []string{"ActiveWorkbook", "ActiveSheet", "ActiveCell", "Selection"} {
-			if strings.Contains(strings.ToLower(stmt), strings.ToLower(name)+".") {
-				continue
-			}
-			if hasWord(stmt, name) {
-				issue := l.issue(path, i+1, "VB024", "warning", "Avoid active Excel objects; pass or capture explicit Workbook/Worksheet/Range objects.")
-				issue.Symbol = name
-				issues = append(issues, issue)
-			}
-		}
-	}
-	return issues
-}
-
-func (l Linter) rangeFindIssues(path string, lines []string, proc sourceProcedure) []Issue {
-	var issues []Issue
-	findAssignments := map[string]int{}
-	guarded := map[string]bool{}
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		lineNo := i + 1
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		for name := range findAssignments {
-			if strings.Contains(lower, "if "+strings.ToLower(name)+" is nothing") ||
-				strings.Contains(lower, "if not "+strings.ToLower(name)+" is nothing") {
-				guarded[strings.ToLower(name)] = true
-			}
-		}
-		if name, ok := rangeFindAssignment(stmt); ok {
-			findAssignments[strings.ToLower(name)] = lineNo
-			continue
-		}
-		for name, assignLine := range findAssignments {
-			if guarded[name] {
-				continue
-			}
-			if strings.Contains(lower, name+".") {
-				issue := l.issue(path, lineNo, "VB025", "warning", "Check the Range.Find result for Nothing before dereferencing it.")
-				issue.Symbol = name
-				if assignLine > 0 {
-					issue.Suggestion = "Add If " + name + " Is Nothing Then handling after the Find assignment."
-				}
-				issues = append(issues, issue)
-				guarded[name] = true
-			}
-		}
-	}
-	return issues
-}
-
-func rangeFindAssignment(stmt string) (string, bool) {
-	lower := strings.ToLower(stmt)
-	if !strings.Contains(lower, ".find(") && !strings.Contains(lower, ".find ") {
-		return "", false
-	}
-	left, _, ok := strings.Cut(stmt, "=")
-	if !ok {
-		return "", false
-	}
-	left = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(left), "Set "))
-	fields := strings.FieldsFunc(left, func(r rune) bool {
-		return !isVBAIdentifierRune(r)
-	})
-	if len(fields) == 0 {
-		return "", false
-	}
-	return cleanIdentifier(fields[len(fields)-1]), true
-}
-
 func (l Linter) dangerousResumeIssues(path string, lines []string, proc sourceProcedure, handlerLabels map[string]bool) []Issue {
 	var issues []Issue
 	inHandler := false
@@ -808,15 +626,6 @@ func labelName(stmt string) (string, bool) {
 	return name, name != ""
 }
 
-func terminatesNormalFlow(stmt string) bool {
-	lower := strings.ToLower(strings.TrimSpace(stmt))
-	return strings.HasPrefix(lower, "exit sub") ||
-		strings.HasPrefix(lower, "exit function") ||
-		strings.HasPrefix(lower, "exit property") ||
-		strings.HasPrefix(lower, "goto ") ||
-		lower == "end"
-}
-
 func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
@@ -825,23 +634,6 @@ func normalizedSourceLines(source string) []string {
 
 func normalizedCodeLine(line string) string {
 	return strings.Join(strings.Fields(maskStringLiterals(gui.StripComment(line))), " ")
-}
-
-func compactStatement(stmt string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(stmt, " ", ""), "\t", "")
-}
-
-func applicationStateName(prop string) string {
-	switch strings.ToLower(prop) {
-	case "enableevents":
-		return "EnableEvents"
-	case "displayalerts":
-		return "DisplayAlerts"
-	case "screenupdating":
-		return "ScreenUpdating"
-	default:
-		return prop
-	}
 }
 
 func isStatementKeyword(name string) bool {
@@ -865,15 +657,6 @@ func isObviouslyScalarType(typ string) bool {
 func isExcelObjectAccessName(name string) bool {
 	switch strings.ToLower(cleanIdentifier(name)) {
 	case "range", "cells", "rows", "columns":
-		return true
-	default:
-		return false
-	}
-}
-
-func isActiveObjectName(name string) bool {
-	switch strings.ToLower(cleanIdentifier(name)) {
-	case "activeworkbook", "activesheet", "activecell", "selection":
 		return true
 	default:
 		return false

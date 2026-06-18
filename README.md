@@ -600,12 +600,6 @@ detect_implicit_variant = true
 forbid_public_module_fields = true
 # Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = true
-# Forbid unqualified Range/Cells/Rows/Columns access.
-forbid_unqualified_excel_objects = true
-# Detect procedures that can fall through into an error handler.
-detect_error_handler_fallthrough = true
-# Detect Application state changes without an obvious restore path.
-detect_application_state_restore = true
 # Detect local names that shadow module or procedure names.
 detect_scope_shadowing = false
 # Explain mixed Dim declarations where only some declarators are typed.
@@ -618,14 +612,34 @@ detect_unused_private_procedures = false
 detect_confusing_call_syntax = true
 # Detect For Each control variable declaration/type issues.
 detect_for_each_control_type = true
-# Forbid ActiveWorkbook/ActiveSheet/ActiveCell/Selection dependencies.
-forbid_active_object_dependency = true
-# Detect Range.Find results used without a Nothing check.
-detect_range_find_nothing_check = false
 # Detect Resume statements outside likely error handlers.
 detect_dangerous_resume = true
 # Detect nested With blocks with ambiguous implicit Excel members.
 detect_nested_with_ambiguity = false
+
+[analyze]
+# Detect Range.Find results used without a Nothing check.
+detect_range_find_nothing_check = true
+# Detect object variables used before an obvious Set assignment.
+detect_object_use_before_set = true
+# Detect Application state changes without an obvious restore path.
+detect_application_state_restore = true
+# Detect procedures that can fall through into an error handler.
+detect_error_handler_fallthrough = true
+# Forbid unqualified Range/Cells/Rows/Columns access.
+forbid_unqualified_excel_objects = true
+# Detect likely ByRef argument type mismatches.
+detect_byref_argument_mismatch = false
+# Detect Dictionary/Collection access without an obvious guard.
+detect_dictionary_collection_guard = false
+# Detect ReDim Preserve usage on multi-dimensional arrays.
+detect_redim_preserve_dimension = true
+# Detect object or array comparison mistakes.
+detect_object_array_comparison = true
+# Detect functions that may exit without assigning their return value.
+detect_function_return_path = false
+# Detect known Excel object/member mismatches.
+detect_excel_object_member_mismatch = true
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.

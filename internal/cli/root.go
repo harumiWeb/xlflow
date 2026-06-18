@@ -4607,11 +4607,22 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
+	blockingIssues := lint.PushBlockingIssues(issues)
+	if len(blockingIssues) > 0 {
+		env := output.Failure(command, output.Error{
+			Code:    "lint_failed",
+			Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid a VBA editor dialog", len(blockingIssues), action),
+			Source:  "xlflow",
+			Phase:   "preflight",
+		})
+		env.Issues = blockingIssues
+		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
+		return a.write(env, output.ExitValidation)
+	}
 	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
 	}
-	blockingIssues := lint.PushBlockingIssues(issues)
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil

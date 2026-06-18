@@ -3024,7 +3024,7 @@ code_source = "sidecar"
 	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
 		t.Fatalf("unexpected contaminated-sidecar preflight payload: %+v", got)
 	}
-	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+	if len(got.Issues) != 1 || got.Issues[0].Code != "FRM202" || got.Issues[0].Line != 1 {
 		t.Fatalf("unexpected contaminated-sidecar issues: %+v", got.Issues)
 	}
 	if !strings.Contains(got.Issues[0].Suggestion, "Attribute VB_*") {
@@ -3387,7 +3387,7 @@ code_source = "sidecar"
 	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
 		t.Fatalf("unexpected push contaminated-sidecar payload: %+v", got)
 	}
-	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+	if len(got.Issues) != 1 || got.Issues[0].Code != "FRM202" || got.Issues[0].Line != 1 {
 		t.Fatalf("unexpected push contaminated-sidecar issues: %+v", got.Issues)
 	}
 }

@@ -43,16 +43,25 @@ path = "build/Sales.xlsm"
 	if !cfg.Lint.ForbidInteractiveInput {
 		t.Fatalf("interactive input lint default was not applied")
 	}
-	if !cfg.Lint.ForbidUnqualifiedExcelObjects || !cfg.Lint.DetectErrorHandlerFallthrough ||
-		!cfg.Lint.DetectApplicationStateRestore || !cfg.Lint.DetectMultipleDeclaratorClarity ||
+	if !cfg.Lint.DetectMultipleDeclaratorClarity ||
 		!cfg.Lint.DetectConfusingCallSyntax || !cfg.Lint.DetectForEachControlType ||
-		!cfg.Lint.ForbidActiveObjectDependency || !cfg.Lint.DetectDangerousResume {
+		!cfg.Lint.DetectDangerousResume {
 		t.Fatalf("expected high-signal AST lint defaults to be enabled: %+v", cfg.Lint)
 	}
 	if cfg.Lint.DetectScopeShadowing || cfg.Lint.DetectUnusedLocalVariables ||
-		cfg.Lint.DetectUnusedPrivateProcedures || cfg.Lint.DetectRangeFindNothingCheck ||
+		cfg.Lint.DetectUnusedPrivateProcedures ||
 		cfg.Lint.DetectNestedWithAmbiguity {
 		t.Fatalf("expected false-positive-prone AST lint defaults to be opt-in: %+v", cfg.Lint)
+	}
+	if !cfg.Analyze.DetectRangeFindNothingCheck || !cfg.Analyze.DetectObjectUseBeforeSet ||
+		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
+		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
+		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch {
+		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
+	}
+	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
+		cfg.Analyze.DetectFunctionReturnPath {
+		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
 	}
 }
 
@@ -66,6 +75,9 @@ path = "build/Book.xlsm"
 
 [lint]
 forbid_interactive_input = false
+
+[analyze]
+detect_byref_argument_mismatch = true
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -76,6 +88,9 @@ forbid_interactive_input = false
 	}
 	if cfg.Lint.ForbidInteractiveInput {
 		t.Fatal("expected forbid_interactive_input=false to be honored")
+	}
+	if !cfg.Analyze.DetectByRefArgumentMismatch {
+		t.Fatal("expected analyze override to be honored")
 	}
 	if !cfg.Lint.RequireOptionExplicit {
 		t.Fatal("expected other lint defaults to remain enabled")
@@ -199,5 +214,8 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !loaded.Lint.RequireOptionExplicit {
 		t.Fatal("expected require_option_explicit=true")
+	}
+	if !loaded.Analyze.DetectRangeFindNothingCheck {
+		t.Fatal("expected analyze defaults to be written and loaded")
 	}
 }

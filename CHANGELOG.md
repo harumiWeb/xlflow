@@ -4,7 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Refactored `xlflow lint` to use `tree-sitter-vba` AST-backed checks for core declaration, member-access, and error-handling rules, including per-declarator implicit `Variant` diagnostics and parser recovery findings.
+- Refactored `xlflow lint` to use `tree-sitter-vba` AST-backed checks for core declaration, member-access, and local code-shape rules, including per-declarator implicit `Variant` diagnostics and parser recovery findings.
+- Refactored `xlflow analyze` to use `tree-sitter-vba` AST-backed procedure context and added runtime-risk findings for `Range.Find` `Nothing` guards, object initialization, Application state restore, error-handler fallthrough, unqualified Excel object access, ByRef mismatch candidates, Dictionary/Collection guards, `ReDim Preserve`, object/array comparisons, function return paths, and expanded Excel member mismatches.
 - Documented the full `xlflow lint` rule list on the command page, including `VB001` through `VB014` codes and severity levels.
 - Added `xlflow inspect calls`, a source-only tree-sitter-vba call-site extractor for exported VBA files with caller context, argument summaries, source ranges, conservative project-symbol resolution, JSON output, and compact grouped text output.
 - Added `xlflow inspect symbols`, a source-only tree-sitter-vba symbol indexer for exported `.bas`, `.cls`, and `.frm` VBA files with JSON and compact outline output.

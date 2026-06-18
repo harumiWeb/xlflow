@@ -127,7 +127,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `pull` supports the `.NET` bridge in both explicit `--bridge dotnet` mode and Windows `auto` mode. In `auto`, xlflow prefers the `.NET` bridge and falls back to PowerShell only when `.NET` is unavailable, incompatible, or unsupported for the command. The command routes through the `.NET` Excel bridge executable (`xlflow-excel-bridge.exe`) and produces the same envelope fields (`target`, `session`, `workbook`, `source`, `logs`). The `.NET` bridge implementation handles standard modules, class modules, UserForms (`.frm` / `.frx`), document modules, Rubberduck folder annotations, and sidecar UserForm code-behind sidecars with the same behavior as the PowerShell path.
 
-`push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion. Source enumeration is recursive under each configured `[src]` root. In `sidecar` mode, `src/forms/code/*.bas` is reserved for UserForm code-behind sidecars: those files participate in source fingerprinting but are not imported as standalone standard modules. Instead, before Excel opens xlflow synchronizes tracked `.frm` embedded code from the sidecar so `src/forms/code/<FormName>.bas` remains authoritative, then after a `.frm` import succeeds it reapplies that sidecar to the imported UserForm `CodeModule`. If a sidecar contains exported UserForm header lines such as `Attribute VB_Name`, preflight fails with `source_preflight_failed` before Excel opens instead of synchronizing corrupted `.frm` content. In `sidecar` mode, push also validates `src/forms/specs/*.{yaml,yml,json}` against tracked `.frm` artifacts before Excel opens: the spec filename, `form.name`, `.frm` basename, and `.frm` `Attribute VB_Name` must agree, otherwise preflight fails with `source_preflight_failed` and issue code `FRM201` so xlflow cannot import the wrong Designer-backed form. In `frm` mode, `.frm` embedded code remains authoritative and `src/forms/code` is ignored. When `[vba].folder_annotation="update"`, xlflow rewrites `@Folder("A.B")` comments in temporary import copies from the file's relative directory below its configured root; the tracked source file itself is not rewritten during `push`. When `folder_annotation="preserve"`, existing annotations are kept as-is; `ignore` disables folder annotation read/write. Before starting Excel, `push` runs fatal source preflight checks for patterns that are known to surface as VBE modal dialogs instead of COM errors, including typographic quote characters, likely C-style quote escapes, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, removed legacy helper APIs such as `XlflowLog` / `XlflowSetTraceFile`, contaminated UserForm sidecars that still contain `Attribute VB_*` export headers, and spec/artifact mismatches that would cause a different UserForm name to be imported than the one declared in `src/forms/specs`. Recursive source trees are also validated for duplicate VBA component basenames; conflicts fail with `duplicate_module_name` before Excel opens. These failures return `lint_failed`, `analyze_failed`, `source_preflight_failed`, `duplicate_module_name`, or related environment failures, include top-level `issues` and/or `analysis` when applicable, and use validation exit code `1`. By default (or with `--backup=always`), `push` creates a timestamped workbook backup under `.xlflow/backups/<backup-id>/`, writes `metadata.json` beside the copied workbook file, replaces non-document VBA components, updates document modules, runs VBE Compile, saves the workbook, and writes source fingerprints to `.xlflow/state/push.json`. If VBE Compile fails after import, `push` returns `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`; the workbook is not saved and source fingerprints are not updated. `.NET` bridge compile failures may include top-level `push_diagnostic.kind = "compile"` with dialog metadata, VBE selection location, and non-fatal `location_capture` attempts. When source mapping is verified, `location.line` and `location.end_line` are source-file line numbers, adjusted for exported metadata such as hidden `Attribute VB_*` lines. `column` and `end_column` are omitted unless the VBE selection exposes a source-column value that xlflow can treat as reliable. Session-backed compile failures also report `session.dirty = true` / `save_required = true` because the live workbook has already received the imported source.
+`push` reads source-controlled `.bas`, `.cls`, and `.frm` files as UTF-8 without BOM, writes CP932 temporary import copies under `.xlflow/tmp/`, and imports those temporary files through VBIDE. `.frx` files are binary userform companions and are copied without text conversion. Source enumeration is recursive under each configured `[src]` root. In `sidecar` mode, `src/forms/code/*.bas` is reserved for UserForm code-behind sidecars: those files participate in source fingerprinting but are not imported as standalone standard modules. Instead, before Excel opens xlflow synchronizes tracked `.frm` embedded code from the sidecar so `src/forms/code/<FormName>.bas` remains authoritative, then after a `.frm` import succeeds it reapplies that sidecar to the imported UserForm `CodeModule`. If a sidecar contains exported UserForm header lines such as `Attribute VB_Name`, preflight fails with `source_preflight_failed` and issue code `FRM202` before Excel opens instead of synchronizing corrupted `.frm` content. In `sidecar` mode, push also validates `src/forms/specs/*.{yaml,yml,json}` against tracked `.frm` artifacts before Excel opens: the spec filename, `form.name`, `.frm` basename, and `.frm` `Attribute VB_Name` must agree, otherwise preflight fails with `source_preflight_failed` and issue code `FRM201` so xlflow cannot import the wrong Designer-backed form. In `frm` mode, `.frm` embedded code remains authoritative and `src/forms/code` is ignored. When `[vba].folder_annotation="update"`, xlflow rewrites `@Folder("A.B")` comments in temporary import copies from the file's relative directory below its configured root; the tracked source file itself is not rewritten during `push`. When `folder_annotation="preserve"`, existing annotations are kept as-is; `ignore` disables folder annotation read/write. Before starting Excel, `push` runs fatal source preflight checks for patterns that are known to surface as VBE modal dialogs instead of COM errors, including typographic quote characters, likely C-style quote escapes, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, removed legacy helper APIs such as `XlflowLog` / `XlflowSetTraceFile`, contaminated UserForm sidecars that still contain `Attribute VB_*` export headers, and spec/artifact mismatches that would cause a different UserForm name to be imported than the one declared in `src/forms/specs`. Recursive source trees are also validated for duplicate VBA component basenames; conflicts fail with `duplicate_module_name` before Excel opens. These failures return `lint_failed`, `analyze_failed`, `source_preflight_failed`, `duplicate_module_name`, or related environment failures, include top-level `issues` and/or `analysis` when applicable, and use validation exit code `1`. By default (or with `--backup=always`), `push` creates a timestamped workbook backup under `.xlflow/backups/<backup-id>/`, writes `metadata.json` beside the copied workbook file, replaces non-document VBA components, updates document modules, runs VBE Compile, saves the workbook, and writes source fingerprints to `.xlflow/state/push.json`. If VBE Compile fails after import, `push` returns `vba_compile_failed` with `error.phase = "compile_vba"` and validation exit code `1`; the workbook is not saved and source fingerprints are not updated. `.NET` bridge compile failures may include top-level `push_diagnostic.kind = "compile"` with dialog metadata, VBE selection location, and non-fatal `location_capture` attempts. When source mapping is verified, `location.line` and `location.end_line` are source-file line numbers, adjusted for exported metadata such as hidden `Attribute VB_*` lines. `column` and `end_column` are omitted unless the VBE selection exposes a source-column value that xlflow can treat as reliable. Session-backed compile failures also report `session.dirty = true` / `save_required = true` because the live workbook has already received the imported source.
 
 `push` supports the `.NET` bridge in both explicit `--bridge dotnet` mode and Windows `auto` mode. In `auto`, xlflow prefers the `.NET` bridge and falls back to PowerShell only when `.NET` is unavailable, incompatible, or unsupported for the command. The command routes through the `.NET` Excel bridge executable (`xlflow-excel-bridge.exe`) and produces the same envelope fields (`target`, `session`, `workbook`, `backup`, `source`, `logs`). The `.NET` bridge implementation handles standard modules, class modules, UserForms (`.frm` / `.frx`), document modules, backup mode, changed-only fingerprinting, sidecar UserForm code-behind synchronization, and Rubberduck folder annotations with the same behavior as the PowerShell path.
 
@@ -253,19 +253,27 @@ forbid_on_error_resume_next = true
 detect_implicit_variant = true
 forbid_public_module_fields = true
 forbid_interactive_input = true
-forbid_unqualified_excel_objects = true
-detect_error_handler_fallthrough = true
-detect_application_state_restore = true
 detect_scope_shadowing = false
 detect_multiple_declarator_clarity = true
 detect_unused_local_variables = false
 detect_unused_private_procedures = false
 detect_confusing_call_syntax = true
 detect_for_each_control_type = true
-forbid_active_object_dependency = true
-detect_range_find_nothing_check = false
 detect_dangerous_resume = true
 detect_nested_with_ambiguity = false
+
+[analyze]
+detect_range_find_nothing_check = true
+detect_object_use_before_set = true
+detect_application_state_restore = true
+detect_error_handler_fallthrough = true
+forbid_unqualified_excel_objects = true
+detect_byref_argument_mismatch = false
+detect_dictionary_collection_guard = false
+detect_redim_preserve_dimension = true
+detect_object_array_comparison = true
+detect_function_return_path = false
+detect_excel_object_member_mismatch = true
 ```
 
 ## JSON Envelope
@@ -465,17 +473,12 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB012`: mismatched procedure end statement
 - `VB013`: missing whitespace before a line-continuation underscore
 - `VB014`: `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes
-- `VB015`: unqualified Excel object access such as `Range(...)`, `Cells(...)`, `Rows(...)`, or `Columns(...)`
-- `VB016`: normal execution can fall through into an error-handler label
-- `VB017`: `Application.EnableEvents`, `Application.DisplayAlerts`, or `Application.ScreenUpdating` is disabled without an obvious restore path
 - `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
 - `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`
 - `VB020`: unused procedure-local variable
 - `VB021`: unused private procedure, excluding known event/callback naming patterns
 - `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible
-- `VB024`: active object dependency such as `ActiveWorkbook`, `ActiveSheet`, `ActiveCell`, or `Selection`
-- `VB025`: `Range.Find` result is dereferenced before a `Nothing` check
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 
@@ -483,10 +486,26 @@ Projects that intentionally use interactive GUI entrypoints may set `[lint].forb
 
 Compile-dialog prevention findings `VB008` through `VB014` are always enabled and block source preflight before `push` or `run` opens Excel.
 
-Higher-signal rules `VB015`, `VB016`, `VB017`, `VB019`, `VB022`, `VB023`, `VB024`, and `VB026` are enabled by default. Heavier project-wide or dataflow-sensitive rules `VB018`, `VB020`, `VB021`, `VB025`, and `VB027` are disabled by default and can be enabled with their `[lint]` booleans.
+Higher-signal lint rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB020`, `VB021`, and `VB027` are disabled by default and can be enabled with their `[lint]` booleans.
 
 ## Analysis Rules
 
 - `VBA101`: object variable assignment likely missing `Set`
 - `VBA102`: object-returning function assignment likely missing `Set`
 - `VBA103`: object-returning function body likely missing `Set <FunctionName> = ...`
+- `VBA104`: known Excel object/member mismatch such as `Worksheet.DisplayGridlines`
+- `VBA105`: removed `XlflowLog` trace helper call
+- `VBA106`: removed `XlflowSetTraceFile` trace helper call
+- `VBA201`: `Range.Find` result is dereferenced before a `Nothing` check
+- `VBA202`: object variable may be used before an obvious `Set` assignment
+- `VBA203`: `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.ScreenUpdating`, or `Application.Calculation` is changed without an obvious restore path
+- `VBA204`: normal execution can fall through into an error-handler label
+- `VBA205`: unqualified Excel object access or active object dependency
+- `VBA206`: likely ByRef argument type mismatch candidate
+- `VBA207`: `Dictionary` or `Collection` access without an obvious existence guard
+- `VBA208`: `ReDim Preserve` is used on a multi-dimensional array
+- `VBA209`: object or array comparison mistake
+- `VBA210`: function may exit without assigning its return value
+- `VBA211`: expanded known Excel object/member mismatch
+
+Analyzer rules `VBA101` through `VBA106`, `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are disabled by default and can be enabled with their `[analyze]` booleans.

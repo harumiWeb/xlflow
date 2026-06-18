@@ -71,6 +71,31 @@ detect_implicit_variant = true
 forbid_public_module_fields = true
 # Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = true
+
+# Runtime-risk analysis rules.
+[analyze]
+# Detect Range.Find results used without a Nothing check.
+detect_range_find_nothing_check = true
+# Detect object variables used before an obvious Set assignment.
+detect_object_use_before_set = true
+# Detect Application state changes without an obvious restore path.
+detect_application_state_restore = true
+# Detect procedures that can fall through into an error handler.
+detect_error_handler_fallthrough = true
+# Forbid unqualified Range/Cells/Rows/Columns access.
+forbid_unqualified_excel_objects = true
+# Detect likely ByRef argument type mismatches.
+detect_byref_argument_mismatch = false
+# Detect Dictionary/Collection access without an obvious guard.
+detect_dictionary_collection_guard = false
+# Detect ReDim Preserve usage on multi-dimensional arrays.
+detect_redim_preserve_dimension = true
+# Detect object or array comparison mistakes.
+detect_object_array_comparison = true
+# Detect functions that may exit without assigning their return value.
+detect_function_return_path = false
+# Detect known Excel object/member mismatches.
+detect_excel_object_member_mismatch = true
 ```
 
 ## Section reference
@@ -128,6 +153,22 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 | `detect_implicit_variant`     | bool | no       | `true`  | Detect implicitly typed `Variant` variables.                            |
 | `forbid_public_module_fields` | bool | no       | `true`  | Forbid public fields in standard modules.                               |
 | `forbid_interactive_input`    | bool | no       | `true`  | Forbid interactive input (`MsgBox`, `InputBox`, etc.) in headless runs. |
+
+### `[analyze]`
+
+| Key                                   | Type | Required | Default | Description                                                        |
+| ------------------------------------- | ---- | -------- | ------- | ------------------------------------------------------------------ |
+| `detect_range_find_nothing_check`     | bool | no       | `true`  | Detect `Range.Find` results used without a `Nothing` check.        |
+| `detect_object_use_before_set`        | bool | no       | `true`  | Detect object variables used before an obvious `Set` assignment.   |
+| `detect_application_state_restore`    | bool | no       | `true`  | Detect Application state changes without an obvious restore path.  |
+| `detect_error_handler_fallthrough`    | bool | no       | `true`  | Detect normal execution falling through into error-handler labels. |
+| `forbid_unqualified_excel_objects`    | bool | no       | `true`  | Detect unqualified `Range`, `Cells`, `Rows`, and `Columns` access. |
+| `detect_byref_argument_mismatch`      | bool | no       | `false` | Detect likely ByRef argument type mismatch candidates.             |
+| `detect_dictionary_collection_guard`  | bool | no       | `false` | Detect Dictionary/Collection lookup without an obvious guard.      |
+| `detect_redim_preserve_dimension`     | bool | no       | `true`  | Detect risky multi-dimensional `ReDim Preserve` usage.             |
+| `detect_object_array_comparison`      | bool | no       | `true`  | Detect object or array comparison mistakes.                        |
+| `detect_function_return_path`         | bool | no       | `false` | Detect functions that may exit without assigning a return value.   |
+| `detect_excel_object_member_mismatch` | bool | no       | `true`  | Detect known Excel object/member mismatches.                       |
 
 ## Defaults differ between `new` and `init`
 
