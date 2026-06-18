@@ -322,6 +322,34 @@ disabled_rules = ["VB006"]`)
 	}
 }
 
+func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningAnalyzeProject(t, `detect_byref_argument_mismatch = true`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "deprecated_analyze_rule_config", "VBA206") {
+		t.Fatalf("expected analyze config deprecation warning, got %+v", got.Warnings)
+	}
+}
+
 func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -340,6 +368,30 @@ path = "build/Book.xlsm"
 
 [lint]
 ` + lintConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCLIWarningAnalyzeProject(t *testing.T, analyzeConfig string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+` + analyzeConfig + "\n"
 	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

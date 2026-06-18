@@ -75,17 +75,18 @@ type LintConfig struct {
 }
 
 type AnalyzeConfig struct {
-	DetectRangeFindNothingCheck     bool `toml:"detect_range_find_nothing_check"`
-	DetectObjectUseBeforeSet        bool `toml:"detect_object_use_before_set"`
-	DetectApplicationStateRestore   bool `toml:"detect_application_state_restore"`
-	DetectErrorHandlerFallthrough   bool `toml:"detect_error_handler_fallthrough"`
-	ForbidUnqualifiedExcelObjects   bool `toml:"forbid_unqualified_excel_objects"`
-	DetectByRefArgumentMismatch     bool `toml:"detect_byref_argument_mismatch"`
-	DetectDictionaryCollectionGuard bool `toml:"detect_dictionary_collection_guard"`
-	DetectRedimPreserveDimension    bool `toml:"detect_redim_preserve_dimension"`
-	DetectObjectArrayComparison     bool `toml:"detect_object_array_comparison"`
-	DetectFunctionReturnPath        bool `toml:"detect_function_return_path"`
-	DetectExcelObjectMemberMismatch bool `toml:"detect_excel_object_member_mismatch"`
+	DisabledRules                   []string `toml:"disabled_rules"`
+	DetectRangeFindNothingCheck     bool     `toml:"detect_range_find_nothing_check"`
+	DetectObjectUseBeforeSet        bool     `toml:"detect_object_use_before_set"`
+	DetectApplicationStateRestore   bool     `toml:"detect_application_state_restore"`
+	DetectErrorHandlerFallthrough   bool     `toml:"detect_error_handler_fallthrough"`
+	ForbidUnqualifiedExcelObjects   bool     `toml:"forbid_unqualified_excel_objects"`
+	DetectByRefArgumentMismatch     bool     `toml:"detect_byref_argument_mismatch"`
+	DetectDictionaryCollectionGuard bool     `toml:"detect_dictionary_collection_guard"`
+	DetectRedimPreserveDimension    bool     `toml:"detect_redim_preserve_dimension"`
+	DetectObjectArrayComparison     bool     `toml:"detect_object_array_comparison"`
+	DetectFunctionReturnPath        bool     `toml:"detect_function_return_path"`
+	DetectExcelObjectMemberMismatch bool     `toml:"detect_excel_object_member_mismatch"`
 }
 
 type lintRuleConfig struct {
@@ -94,6 +95,14 @@ type lintRuleConfig struct {
 	Default bool
 	Get     func(LintConfig) bool
 	Set     func(*LintConfig, bool)
+}
+
+type analyzeRuleConfig struct {
+	ID      string
+	Key     string
+	Default bool
+	Get     func(AnalyzeConfig) bool
+	Set     func(*AnalyzeConfig, bool)
 }
 
 var configurableLintRules = []lintRuleConfig{
@@ -114,16 +123,37 @@ var configurableLintRules = []lintRuleConfig{
 	{ID: "VB027", Key: "detect_nested_with_ambiguity", Default: false, Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
 }
 
+var configurableAnalyzeRules = []analyzeRuleConfig{
+	{ID: "VBA201", Key: "detect_range_find_nothing_check", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectRangeFindNothingCheck }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRangeFindNothingCheck = v }},
+	{ID: "VBA202", Key: "detect_object_use_before_set", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectObjectUseBeforeSet }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectUseBeforeSet = v }},
+	{ID: "VBA203", Key: "detect_application_state_restore", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectApplicationStateRestore }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationStateRestore = v }},
+	{ID: "VBA204", Key: "detect_error_handler_fallthrough", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectErrorHandlerFallthrough }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorHandlerFallthrough = v }},
+	{ID: "VBA205", Key: "forbid_unqualified_excel_objects", Default: true, Get: func(c AnalyzeConfig) bool { return c.ForbidUnqualifiedExcelObjects }, Set: func(c *AnalyzeConfig, v bool) { c.ForbidUnqualifiedExcelObjects = v }},
+	{ID: "VBA206", Key: "detect_byref_argument_mismatch", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectByRefArgumentMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefArgumentMismatch = v }},
+	{ID: "VBA207", Key: "detect_dictionary_collection_guard", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryCollectionGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryCollectionGuard = v }},
+	{ID: "VBA208", Key: "detect_redim_preserve_dimension", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveDimension }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveDimension = v }},
+	{ID: "VBA209", Key: "detect_object_array_comparison", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectObjectArrayComparison }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectArrayComparison = v }},
+	{ID: "VBA210", Key: "detect_function_return_path", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnPath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnPath = v }},
+	{ID: "VBA211", Key: "detect_excel_object_member_mismatch", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectExcelObjectMemberMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelObjectMemberMismatch = v }},
+}
+
 var (
-	lintRuleByID               = indexLintRulesByID()
-	nonConfigurableLintRuleIDs = map[string]bool{
-		"VB008": true,
-		"VB009": true,
-		"VB010": true,
-		"VB011": true,
-		"VB012": true,
-		"VB013": true,
-		"VB014": true,
+	lintRuleByID           = indexLintRulesByID()
+	analyzeRuleByID        = indexAnalyzeRulesByID()
+	nonConfigurableRuleIDs = map[string]bool{
+		"VB008":  true,
+		"VB009":  true,
+		"VB010":  true,
+		"VB011":  true,
+		"VB012":  true,
+		"VB013":  true,
+		"VB014":  true,
+		"VBA101": true,
+		"VBA102": true,
+		"VBA103": true,
+		"VBA104": true,
+		"VBA105": true,
+		"VBA106": true,
 	}
 )
 
@@ -204,6 +234,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	if err := applyLintRuleConfig(&cfg, meta); err != nil {
 		return cfg, err
 	}
+	if err := applyAnalyzeRuleConfig(&cfg, meta); err != nil {
+		return cfg, err
+	}
 	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
 		return cfg, err
 	}
@@ -269,6 +302,14 @@ func indexLintRulesByID() map[string]lintRuleConfig {
 	return out
 }
 
+func indexAnalyzeRulesByID() map[string]analyzeRuleConfig {
+	out := make(map[string]analyzeRuleConfig, len(configurableAnalyzeRules))
+	for _, rule := range configurableAnalyzeRules {
+		out[rule.ID] = rule
+	}
+	return out
+}
+
 func applyLintRuleConfig(cfg *Config, meta toml.MetaData) error {
 	disabled, disabledSet, err := normalizeDisabledLintRules(cfg.Lint.DisabledRules)
 	if err != nil {
@@ -320,10 +361,75 @@ func normalizeDisabledLintRules(ids []string) ([]string, map[string]bool, error)
 			continue
 		}
 		if _, ok := lintRuleByID[id]; !ok {
-			if nonConfigurableLintRuleIDs[id] {
+			if nonConfigurableRuleIDs[id] {
 				return nil, nil, fmt.Errorf("lint rule ID is not configurable in [lint].disabled_rules: %s", id)
 			}
 			return nil, nil, fmt.Errorf("unknown lint rule ID in [lint].disabled_rules: %s", id)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out, seen, nil
+}
+
+func applyAnalyzeRuleConfig(cfg *Config, meta toml.MetaData) error {
+	disabled, disabledSet, err := normalizeDisabledAnalyzeRules(cfg.Analyze.DisabledRules)
+	if err != nil {
+		return err
+	}
+	cfg.Analyze.DisabledRules = disabled
+	warnings := make([]map[string]any, 0)
+	for _, rule := range configurableAnalyzeRules {
+		if !meta.IsDefined("analyze", rule.Key) {
+			continue
+		}
+		warnings = append(warnings, map[string]any{
+			"code":    "deprecated_analyze_rule_config",
+			"message": fmt.Sprintf("[analyze].%s is deprecated. Use [analyze].disabled_rules = [%q] instead.", rule.Key, rule.ID),
+			"rule":    rule.ID,
+			"key":     rule.Key,
+		})
+		if rule.Get(cfg.Analyze) && disabledSet[rule.ID] {
+			warnings = append(warnings,
+				map[string]any{
+					"code":    "conflicting_analyze_rule_config",
+					"message": fmt.Sprintf("analyze rule %s is enabled by [analyze].%s=true but also listed in [analyze].disabled_rules.", rule.ID, rule.Key),
+					"rule":    rule.ID,
+					"key":     rule.Key,
+				},
+				map[string]any{
+					"code":    "analyze_disabled_rules_precedence",
+					"message": "[analyze].disabled_rules takes precedence.",
+					"rule":    rule.ID,
+					"key":     rule.Key,
+				},
+			)
+		}
+	}
+	for id := range disabledSet {
+		rule := analyzeRuleByID[id]
+		rule.Set(&cfg.Analyze, false)
+	}
+	cfg.Warnings = append(cfg.Warnings, warnings...)
+	return nil
+}
+
+func normalizeDisabledAnalyzeRules(ids []string) ([]string, map[string]bool, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if id == "" {
+			continue
+		}
+		if _, ok := analyzeRuleByID[id]; !ok {
+			if nonConfigurableRuleIDs[id] {
+				return nil, nil, fmt.Errorf("analyze rule ID is not configurable in [analyze].disabled_rules: %s", id)
+			}
+			return nil, nil, fmt.Errorf("unknown analyze rule ID in [analyze].disabled_rules: %s", id)
 		}
 		if seen[id] {
 			continue
@@ -413,6 +519,70 @@ func legacyOptInLintRulesForWrite(cfg LintConfig) []lintRuleConfig {
 	return out
 }
 
+func renderAnalyzeConfig(cfg AnalyzeConfig) string {
+	var b strings.Builder
+	b.WriteString("# Disable specific analyzer rules by diagnostic ID.\n")
+	b.WriteString("#\n")
+	b.WriteString("# Example:\n")
+	b.WriteString("# disabled_rules = [\n")
+	b.WriteString("#   \"VBA205\", # Allow active worksheet dependencies in this legacy project.\n")
+	b.WriteString("# ]\n")
+	disabled := disabledAnalyzeRuleIDsForWrite(cfg)
+	if len(disabled) == 0 {
+		b.WriteString("disabled_rules = []\n")
+	} else {
+		b.WriteString("disabled_rules = [\n")
+		for _, id := range disabled {
+			b.WriteString("  \"")
+			b.WriteString(id)
+			b.WriteString("\",\n")
+		}
+		b.WriteString("]\n")
+	}
+	optIn := legacyOptInAnalyzeRulesForWrite(cfg)
+	if len(optIn) > 0 {
+		b.WriteString("\n")
+		b.WriteString("# Legacy opt-in analyzer settings. Prefer disabled_rules for disabling recommended rules.\n")
+		for _, rule := range optIn {
+			b.WriteString(rule.Key)
+			b.WriteString(" = true\n")
+		}
+	}
+	return b.String()
+}
+
+func disabledAnalyzeRuleIDsForWrite(cfg AnalyzeConfig) []string {
+	seen := map[string]bool{}
+	for _, raw := range cfg.DisabledRules {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if _, ok := analyzeRuleByID[id]; ok {
+			seen[id] = true
+		}
+	}
+	for _, rule := range configurableAnalyzeRules {
+		if rule.Default && !rule.Get(cfg) {
+			seen[rule.ID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for _, rule := range configurableAnalyzeRules {
+		if seen[rule.ID] {
+			out = append(out, rule.ID)
+		}
+	}
+	return out
+}
+
+func legacyOptInAnalyzeRulesForWrite(cfg AnalyzeConfig) []analyzeRuleConfig {
+	var out []analyzeRuleConfig
+	for _, rule := range configurableAnalyzeRules {
+		if !rule.Default && rule.Get(cfg) {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
 func Write(path string, cfg Config) (err error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -425,6 +595,7 @@ func Write(path string, cfg Config) (err error) {
 	}()
 
 	lintConfigText := renderLintConfig(cfg.Lint)
+	analyzeConfigText := renderAnalyzeConfig(cfg.Analyze)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -482,28 +653,7 @@ code_source = %q
 
 # Runtime-risk analysis rules.
 [analyze]
-# Detect Range.Find results used without a Nothing check.
-detect_range_find_nothing_check = %t
-# Detect object variables used before an obvious Set assignment.
-detect_object_use_before_set = %t
-# Detect Application state changes without an obvious restore path.
-detect_application_state_restore = %t
-# Detect procedures that can fall through into an error handler.
-detect_error_handler_fallthrough = %t
-# Forbid unqualified Range/Cells/Rows/Columns access.
-forbid_unqualified_excel_objects = %t
-# Detect likely ByRef argument type mismatches.
-detect_byref_argument_mismatch = %t
-# Detect Dictionary/Collection access without an obvious guard.
-detect_dictionary_collection_guard = %t
-# Detect ReDim Preserve usage on multi-dimensional arrays.
-detect_redim_preserve_dimension = %t
-# Detect object or array comparison mistakes.
-detect_object_array_comparison = %t
-# Detect functions that may exit without assigning their return value.
-detect_function_return_path = %t
-# Detect known Excel object/member mismatches.
-detect_excel_object_member_mismatch = %t
+%s
 `
 	_, err = fmt.Fprintf(f, tmpl,
 		cfg.Project.Name, cfg.Project.Entry,
@@ -512,12 +662,7 @@ detect_excel_object_member_mismatch = %t
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
 		lintConfigText,
-		cfg.Analyze.DetectRangeFindNothingCheck, cfg.Analyze.DetectObjectUseBeforeSet,
-		cfg.Analyze.DetectApplicationStateRestore, cfg.Analyze.DetectErrorHandlerFallthrough,
-		cfg.Analyze.ForbidUnqualifiedExcelObjects, cfg.Analyze.DetectByRefArgumentMismatch,
-		cfg.Analyze.DetectDictionaryCollectionGuard, cfg.Analyze.DetectRedimPreserveDimension,
-		cfg.Analyze.DetectObjectArrayComparison, cfg.Analyze.DetectFunctionReturnPath,
-		cfg.Analyze.DetectExcelObjectMemberMismatch,
+		analyzeConfigText,
 	)
 	return err
 }

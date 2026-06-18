@@ -249,17 +249,7 @@ code_source = "sidecar"
 disabled_rules = []
 
 [analyze]
-detect_range_find_nothing_check = true
-detect_object_use_before_set = true
-detect_application_state_restore = true
-detect_error_handler_fallthrough = true
-forbid_unqualified_excel_objects = true
-detect_byref_argument_mismatch = false
-detect_dictionary_collection_guard = false
-detect_redim_preserve_dimension = true
-detect_object_array_comparison = true
-detect_function_return_path = false
-detect_excel_object_member_mismatch = true
+disabled_rules = []
 ```
 
 ## JSON Envelope
@@ -498,4 +488,8 @@ Higher-signal lint rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by d
 - `VBA210`: function may exit without assigning its return value
 - `VBA211`: expanded known Excel object/member mismatch
 
-Analyzer rules `VBA101` through `VBA106`, `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are disabled by default and can be enabled with their `[analyze]` booleans.
+Projects should disable configurable analyzer rules with `[analyze].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VBA205", "VBA211"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
+
+Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect_range_find_nothing_check`, `VBA202` = `detect_object_use_before_set`, `VBA203` = `detect_application_state_restore`, `VBA204` = `detect_error_handler_fallthrough`, `VBA205` = `forbid_unqualified_excel_objects`, `VBA206` = `detect_byref_argument_mismatch`, `VBA207` = `detect_dictionary_collection_guard`, `VBA208` = `detect_redim_preserve_dimension`, `VBA209` = `detect_object_array_comparison`, `VBA210` = `detect_function_return_path`, and `VBA211` = `detect_excel_object_member_mismatch`.
+
+Analyzer rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are disabled by default and can still be enabled with their legacy `[analyze]` booleans during the compatibility window. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.

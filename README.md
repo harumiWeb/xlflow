@@ -590,28 +590,8 @@ code_source = "sidecar"
 disabled_rules = []
 
 [analyze]
-# Detect Range.Find results used without a Nothing check.
-detect_range_find_nothing_check = true
-# Detect object variables used before an obvious Set assignment.
-detect_object_use_before_set = true
-# Detect Application state changes without an obvious restore path.
-detect_application_state_restore = true
-# Detect procedures that can fall through into an error handler.
-detect_error_handler_fallthrough = true
-# Forbid unqualified Range/Cells/Rows/Columns access.
-forbid_unqualified_excel_objects = true
-# Detect likely ByRef argument type mismatches.
-detect_byref_argument_mismatch = false
-# Detect Dictionary/Collection access without an obvious guard.
-detect_dictionary_collection_guard = false
-# Detect ReDim Preserve usage on multi-dimensional arrays.
-detect_redim_preserve_dimension = true
-# Detect object or array comparison mistakes.
-detect_object_array_comparison = true
-# Detect functions that may exit without assigning their return value.
-detect_function_return_path = false
-# Detect known Excel object/member mismatches.
-detect_excel_object_member_mismatch = true
+# Disable specific analyzer rules by diagnostic ID.
+disabled_rules = []
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
@@ -619,6 +599,8 @@ detect_excel_object_member_mismatch = true
 Use `[lint].disabled_rules = ["VB007"]` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries. Legacy per-rule booleans such as `forbid_interactive_input = false` are still accepted for compatibility, but are deprecated.
 
 Syntax safety lint rules for typographic quotes, C-style quote escapes, unclosed or mismatched procedures, and malformed line-continuation underscores are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+Use `[analyze].disabled_rules = ["VBA205"]` to disable configurable analyzer rules. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.
 
 ---
 

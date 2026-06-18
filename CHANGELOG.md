@@ -4,7 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added `[lint].disabled_rules` for disabling configurable lint rules by stable diagnostic ID, with compatibility warnings for legacy per-rule booleans.
+- Added `[lint].disabled_rules` and `[analyze].disabled_rules` for disabling configurable source feedback rules by stable diagnostic ID, with compatibility warnings for legacy per-rule booleans.
 - Refactored `xlflow lint` to use `tree-sitter-vba` AST-backed checks for core declaration, member-access, and local code-shape rules, including per-declarator implicit `Variant` diagnostics and parser recovery findings.
 - Refactored `xlflow analyze` to use `tree-sitter-vba` AST-backed procedure context and added runtime-risk findings for `Range.Find` `Nothing` guards, object initialization, Application state restore, error-handler fallthrough, unqualified Excel object access, ByRef mismatch candidates, Dictionary/Collection guards, `ReDim Preserve`, object/array comparisons, function return paths, and expanded Excel member mismatches.
 - Documented the full `xlflow lint` rule list on the command page, including `VB001` through `VB014` codes and severity levels.
