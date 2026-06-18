@@ -343,20 +343,28 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		return
 	}
 	switch node.Kind() {
-	case "sub_declaration", "function_declaration", "property_declaration":
+	case "sub_declaration", "function_declaration", "property_declaration", "property_get_declaration", "property_let_declaration", "property_set_declaration":
 		sym := e.procedureSymbol(node)
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 		parentProc = sym.Name
-	case "declare_statement":
+	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		sym := e.simpleSymbol(node, "declare", "")
-		if hasWord(sym.Signature, "Declare") && hasWord(sym.Signature, "Sub") {
+		switch node.Kind() {
+		case "declare_sub_statement":
 			sym.Kind = "declare_sub"
-		} else if hasWord(sym.Signature, "Declare") && hasWord(sym.Signature, "Function") {
+		case "declare_function_statement":
 			sym.Kind = "declare_function"
+		default:
+			if hasWord(sym.Signature, "Declare") && hasWord(sym.Signature, "Sub") {
+				sym.Kind = "declare_sub"
+			} else if hasWord(sym.Signature, "Declare") && hasWord(sym.Signature, "Function") {
+				sym.Kind = "declare_function"
+			}
 		}
 		sym.ReturnType = typeText(node, e.source)
+		sym.Parameters = parameters(node, e.source)
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -403,10 +411,14 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 
 func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 	kind := strings.TrimSuffix(node.Kind(), "_declaration")
-	if kind == "sub" {
-		kind = "sub"
-	}
-	if node.Kind() == "property_declaration" {
+	switch node.Kind() {
+	case "property_get_declaration":
+		kind = "property_get"
+	case "property_let_declaration":
+		kind = "property_let"
+	case "property_set_declaration":
+		kind = "property_set"
+	case "property_declaration":
 		sig := strings.ToLower(firstLine(node.Utf8Text(e.source)))
 		switch {
 		case strings.Contains(sig, "property get"):
@@ -420,7 +432,7 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 		}
 	}
 	sym := e.simpleSymbol(node, kind, "")
-	sym.Static = hasWord(sym.Signature, "Static")
+	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 	sym.ReturnType = typeText(node, e.source)
 	sym.Parameters = parameters(node, e.source)
 	return sym
@@ -458,8 +470,8 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 		sym.Visibility = visibilityText(node, e.source)
 		sym.Signature = firstLine(node.Utf8Text(e.source))
 		sym.ReturnType = typeText(child, e.source)
-		sym.Static = hasWord(sym.Signature, "Static")
-		if hasWord(sym.Signature, "WithEvents") {
+		sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
+		if hasField(node, "with_events_modifier") || hasWord(sym.Signature, "WithEvents") {
 			sym.Kind = "withevents_field"
 		}
 		if e.includeSymbol(sym) {
@@ -469,7 +481,13 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 }
 
 func (e *extractor) implementsSymbol(node *tree_sitter.Node) Symbol {
-	name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(node.Utf8Text(e.source)), "Implements"))
+	name := ""
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		name = nameNode.Utf8Text(e.source)
+	}
+	if name == "" {
+		name = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(node.Utf8Text(e.source)), "Implements"))
+	}
 	sym := e.simpleSymbol(node, "implements", "")
 	sym.Name = name
 	if sym.Name == "" {
@@ -480,7 +498,9 @@ func (e *extractor) implementsSymbol(node *tree_sitter.Node) Symbol {
 
 func (e *extractor) lineNumberSymbol(node *tree_sitter.Node, parentProc string) Symbol {
 	sym := e.simpleSymbol(node, "line_number_label", parentProc)
-	if number := firstNamedChildKind(node, "line_number_literal"); number != nil {
+	if number := node.ChildByFieldName("number"); number != nil {
+		sym.Name = number.Utf8Text(e.source)
+	} else if number := firstNamedChildKind(node, "line_number_literal"); number != nil {
 		sym.Name = number.Utf8Text(e.source)
 	}
 	return sym
@@ -577,6 +597,9 @@ func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node 
 }
 
 func visibilityText(node *tree_sitter.Node, source []byte) string {
+	if visibility := node.ChildByFieldName("visibility"); visibility != nil {
+		return normalizeKeyword(visibility.Utf8Text(source))
+	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child == nil {
@@ -604,9 +627,18 @@ func visibilityText(node *tree_sitter.Node, source []byte) string {
 }
 
 func typeText(node *tree_sitter.Node, source []byte) string {
-	asType := firstNamedChildKind(node, "as_type_clause")
+	asType := node.ChildByFieldName("type")
+	if asType == nil {
+		asType = firstNamedChildKind(node, "as_type_clause")
+	}
 	if asType == nil {
 		return ""
+	}
+	if typeExpr := asType.ChildByFieldName("type"); typeExpr != nil {
+		return strings.TrimSpace(typeExpr.Utf8Text(source))
+	}
+	if asType.Kind() == "type_expression" {
+		return strings.TrimSpace(asType.Utf8Text(source))
 	}
 	text := strings.TrimSpace(asType.Utf8Text(source))
 	if strings.HasPrefix(strings.ToLower(text), "as ") {
@@ -616,7 +648,10 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 }
 
 func parameters(node *tree_sitter.Node, source []byte) []Parameter {
-	list := firstNamedChildKind(node, "parameter_list")
+	list := node.ChildByFieldName("parameters")
+	if list == nil {
+		list = firstNamedChildKind(node, "parameter_list")
+	}
 	if list == nil {
 		return nil
 	}
@@ -627,20 +662,52 @@ func parameters(node *tree_sitter.Node, source []byte) []Parameter {
 			continue
 		}
 		param := Parameter{Name: nodeName(child, source), Type: typeText(child, source)}
-		text := child.Utf8Text(source)
-		if hasWord(text, "ByVal") {
-			param.Passing = "ByVal"
-		} else if hasWord(text, "ByRef") {
-			param.Passing = "ByRef"
+		if passing := child.ChildByFieldName("passing_mode"); passing != nil {
+			param.Passing = modifierKeyword(passing)
+		} else {
+			text := child.Utf8Text(source)
+			if hasWord(text, "ByVal") {
+				param.Passing = "ByVal"
+			} else if hasWord(text, "ByRef") {
+				param.Passing = "ByRef"
+			}
 		}
-		param.Optional = hasWord(text, "Optional")
-		if initializer := firstNamedChildKind(child, "initializer"); initializer != nil {
-			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(initializer.Utf8Text(source)), "="))
+		param.Optional = hasField(child, "optional_modifier") || hasWord(child.Utf8Text(source), "Optional")
+		initializer := child.ChildByFieldName("default_value")
+		if initializer == nil {
+			initializer = firstNamedChildKind(child, "initializer")
+		}
+		if initializer != nil {
+			value := initializerText(initializer, source)
 			param.Default = &value
 		}
 		params = append(params, param)
 	}
 	return params
+}
+
+func hasField(node *tree_sitter.Node, field string) bool {
+	return node != nil && node.ChildByFieldName(field) != nil
+}
+
+func initializerText(node *tree_sitter.Node, source []byte) string {
+	if value := node.ChildByFieldName("value"); value != nil {
+		return strings.TrimSpace(value.Utf8Text(source))
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(node.Utf8Text(source)), "="))
+}
+
+func modifierKeyword(node *tree_sitter.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind() {
+	case "byval_modifier":
+		return "ByVal"
+	case "byref_modifier":
+		return "ByRef"
+	}
+	return normalizeKeyword(strings.TrimSuffix(node.Kind(), "_modifier"))
 }
 
 func firstLine(text string) string {

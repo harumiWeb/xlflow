@@ -8,14 +8,16 @@ This file is provided for attribution and licence review. It is not a substitute
 
 ## Direct dependencies
 
-| Module                               |   Version | Licence           | Licence file                                                      |
-| ------------------------------------ | --------: | ----------------- | ----------------------------------------------------------------- |
-| `github.com/BurntSushi/toml`         |  `v1.6.0` | MIT               | `https://github.com/BurntSushi/toml/blob/v1.6.0/COPYING`          |
-| `github.com/charmbracelet/bubbletea` | `v1.3.10` | MIT               | `https://github.com/charmbracelet/bubbletea/blob/v1.3.10/LICENSE` |
-| `github.com/charmbracelet/lipgloss`  |  `v1.1.0` | MIT               | `https://github.com/charmbracelet/lipgloss/blob/v1.1.0/LICENSE`   |
-| `github.com/spf13/cobra`             | `v1.10.2` | Apache-2.0        | `https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt`         |
-| `gopkg.in/yaml.v3`                   |  `v3.0.1` | MIT OR Apache-2.0 | `https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE`             |
-| `github.com/xuri/excelize/v2`        | `v2.10.1` | BSD-3-Clause      | `https://github.com/xuri/excelize/blob/v2.10.1/LICENSE`           |
+| Module                                  |   Version | Licence           | Licence file                                                         |
+| --------------------------------------- | --------: | ----------------- | -------------------------------------------------------------------- |
+| `github.com/BurntSushi/toml`            |  `v1.6.0` | MIT               | `https://github.com/BurntSushi/toml/blob/v1.6.0/COPYING`             |
+| `github.com/charmbracelet/bubbletea`    | `v1.3.10` | MIT               | `https://github.com/charmbracelet/bubbletea/blob/v1.3.10/LICENSE`    |
+| `github.com/charmbracelet/lipgloss`     |  `v1.1.0` | MIT               | `https://github.com/charmbracelet/lipgloss/blob/v1.1.0/LICENSE`      |
+| `github.com/harumiWeb/tree-sitter-vba`  |  `v0.6.0` | MIT               | `https://github.com/harumiWeb/tree-sitter-vba/blob/v0.6.0/LICENSE`   |
+| `github.com/spf13/cobra`                | `v1.10.2` | Apache-2.0        | `https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt`            |
+| `github.com/tree-sitter/go-tree-sitter` | `v0.25.0` | MIT               | `https://github.com/tree-sitter/go-tree-sitter/blob/v0.25.0/LICENSE` |
+| `gopkg.in/yaml.v3`                      |  `v3.0.1` | MIT OR Apache-2.0 | `https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE`                |
+| `github.com/xuri/excelize/v2`           | `v2.10.1` | BSD-3-Clause      | `https://github.com/xuri/excelize/blob/v2.10.1/LICENSE`              |
 
 ## Indirect dependencies
 
@@ -27,7 +29,6 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/charmbracelet/x/cellbuf`    | `v0.0.13-0.20250311204145-2c3ea96c31dd` | MIT          | `https://github.com/charmbracelet/x/blob/2c3ea96c31dd/cellbuf/LICENSE`    |
 | `github.com/charmbracelet/x/term`       |                                `v0.2.1` | MIT          | `https://github.com/charmbracelet/x/blob/term/v0.2.1/term/LICENSE`        |
 | `github.com/erikgeiser/coninput`        |    `v0.0.0-20211004153227-1c3628e74d0f` | MIT          | `https://github.com/erikgeiser/coninput/blob/1c3628e74d0f/LICENSE`        |
-| `github.com/harumiWeb/tree-sitter-vba`  |                                `v0.5.1` | MIT          | `https://github.com/harumiWeb/tree-sitter-vba/blob/v0.5.1/LICENSE`        |
 | `github.com/inconshreveable/mousetrap`  |                                `v1.1.0` | Apache-2.0   | `https://github.com/inconshreveable/mousetrap/blob/v1.1.0/LICENSE`        |
 | `github.com/lucasb-eyer/go-colorful`    |                                `v1.2.0` | MIT          | `https://github.com/lucasb-eyer/go-colorful/blob/v1.2.0/LICENSE`          |
 | `github.com/Microsoft/go-winio`         |                                `v0.6.2` | MIT          | `https://github.com/Microsoft/go-winio/blob/v0.6.2/LICENSE`               |
@@ -43,7 +44,6 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/rivo/uniseg`                |                                `v0.4.7` | MIT          | `https://github.com/rivo/uniseg/blob/v0.4.7/LICENSE.txt`                  |
 | `github.com/spf13/pflag`                |                                `v1.0.9` | BSD-3-Clause | `https://github.com/spf13/pflag/blob/v1.0.9/LICENSE`                      |
 | `github.com/tiendc/go-deepcopy`         |                                `v1.7.2` | MIT          | `https://github.com/tiendc/go-deepcopy/blob/v1.7.2/LICENSE`               |
-| `github.com/tree-sitter/go-tree-sitter` |                               `v0.25.0` | MIT          | `https://github.com/tree-sitter/go-tree-sitter/blob/v0.25.0/LICENSE`      |
 | `github.com/xo/terminfo`                |    `v0.0.0-20220910002029-abceb7e1c41e` | MIT          | `https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE`                |
 | `github.com/xuri/efp`                   |                                `v0.0.1` | BSD-3-Clause | `https://github.com/xuri/efp/blob/v0.0.1/LICENSE`                         |
 | `github.com/xuri/nfp`                   |  `v0.0.2-0.20250530014748-2ddeb826f9a9` | BSD-3-Clause | `https://github.com/xuri/nfp/blob/2ddeb826f9a9/LICENSE`                   |
