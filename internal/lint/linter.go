@@ -530,7 +530,12 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		lower := strings.ToLower(stmt)
 		if strings.HasPrefix(lower, "dim ") || strings.HasPrefix(lower, "static ") {
 			declText := strings.TrimSpace(stmt)
-			declText = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(strings.ToLower(declText), "static ")), "dim "), "dim ")
+			if strings.HasPrefix(lower, "static ") {
+				declText = strings.TrimSpace(declText[len("static "):])
+			}
+			if strings.HasPrefix(strings.ToLower(declText), "dim ") {
+				declText = strings.TrimSpace(declText[len("dim "):])
+			}
 			for _, part := range strings.Split(declText, ",") {
 				name, typ := declarationNameAndType(part)
 				if name != "" {
@@ -585,14 +590,14 @@ func (l Linter) errorHandlerFallthroughIssues(path string, lines []string, proc 
 	}
 	var issues []Issue
 	lastCode := ""
-	for i := proc.StartLine; i < proc.EndLine-1 && i < len(lines); i++ {
+	for i := proc.StartLine - 1; i < proc.EndLine-1 && i < len(lines); i++ {
 		lineNo := i + 1
 		stmt := normalizedCodeLine(lines[i])
 		if stmt == "" {
 			continue
 		}
 		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
-			if !terminatesNormalFlow(lastCode) {
+			if !isCleanupFallthroughLabel(label) && !terminatesNormalFlow(lastCode) {
 				issue := l.issue(path, lineNo, "VB016", "warning", "Add Exit Sub/Function/Property before the error-handler label so normal execution cannot fall through.")
 				issue.Symbol = label
 				issues = append(issues, issue)
@@ -601,6 +606,15 @@ func (l Linter) errorHandlerFallthroughIssues(path string, lines []string, proc 
 		lastCode = stmt
 	}
 	return issues
+}
+
+func isCleanupFallthroughLabel(label string) bool {
+	switch strings.ToLower(label) {
+	case "cleanup", "clean_up", "finally", "done":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) applicationStateIssues(path string, lines []string, proc sourceProcedure) []Issue {
@@ -979,7 +993,7 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 					source = string(body)
 					sourceCache[sym.File] = source
 				}
-				if !localNameReferenced(source, sym) {
+				if !localNameReferenced(source, sym, procedureEndLineForSymbol(file.Symbols, sym)) {
 					issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
 					issue.Symbol = sym.Name
 					issues = append(issues, issue)
@@ -1102,13 +1116,31 @@ func isIgnoredLocalName(name string) bool {
 	return name == "" || name == "_" || strings.HasPrefix(name, "unused") || strings.HasPrefix(name, "ignore")
 }
 
-func localNameReferenced(source string, sym symbols.Symbol) bool {
+func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
+	if sym.Parent == "" {
+		return sym.EndLine
+	}
+	for _, candidate := range all {
+		if !procedureSymbolKind(candidate.Kind) {
+			continue
+		}
+		if !strings.EqualFold(candidate.Name, sym.Parent) {
+			continue
+		}
+		if candidate.StartLine <= sym.StartLine && sym.StartLine <= candidate.EndLine {
+			return candidate.EndLine
+		}
+	}
+	return sym.EndLine
+}
+
+func localNameReferenced(source string, sym symbols.Symbol, endLine int) bool {
 	lines := normalizedSourceLines(source)
 	needle := sym.Name
 	count := 0
 	for i := sym.StartLine - 1; i < len(lines); i++ {
 		lineNo := i + 1
-		if sym.Parent != "" && sym.EndLine > 0 && lineNo > sym.EndLine {
+		if sym.Parent != "" && endLine > 0 && lineNo > endLine {
 			break
 		}
 		line := normalizedCodeLine(lines[i])

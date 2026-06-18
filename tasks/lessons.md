@@ -55,6 +55,7 @@
 - When spawning nested `powershell.exe -Command` helpers from PowerShell, escape every child-scope `$variable` reference with backticks in the command string. Otherwise the parent shell expands them before launch and the child helper can silently do nothing while UI state remains stuck.
 - Excel VBE compile automation should not assume the `CommandBars("Debug")` toolbar contains the compile command. In real Excel, `Compile VBAProject` can live only under `CommandBars("Menu Bar") -> Debug` (`Id = 578`), and `Enabled = false` should be treated as "no compile needed" rather than executed as a failure path.
 - `go test ./internal/excel/scripts` can take 2-3 minutes even when healthy. Do not infer success or failure from a short silent interval; use a generous timeout and wait for completion before treating the package as hung.
+- AST symbol ranges may describe declaration nodes rather than enclosing scopes. Lint rules that scan local references must derive the containing procedure bounds, and cleanup labels such as `Cleanup:` need explicit coverage because they can be normal fallthrough cleanup paths.
 
 # DialogWatcher
 

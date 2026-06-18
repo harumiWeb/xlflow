@@ -767,6 +767,26 @@ End Sub
 	assertIssue(t, issues, "VB019", 3)
 }
 
+func TestLinterAllowsCleanupLabelFallthrough(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error GoTo Cleanup
+  DoWork
+Cleanup:
+  CloseThing
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB016"); len(got) != 0 {
+		t.Fatalf("VB016 should allow normal fallthrough into cleanup labels: %+v", got)
+	}
+}
+
 func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
@@ -805,14 +825,14 @@ End Sub
 Public Sub Run()
   Dim moduleValue As Long
   Dim staleValue As Long
-  Dim item As Long
+  Dim Item As Long
   Application.EnableEvents = False
   ActiveSheet.Range("A1").Value = 1
   Set found = Range("A:A").Find("x")
   Debug.Print found.Value
   Foo (bar)
-  For Each item In Range("A1:A2")
-  Next item
+  For Each Item In Range("A1:A2")
+  Next Item
   Resume Next
   Used
 End Sub
@@ -839,6 +859,30 @@ End Sub
 		"VB026": 18,
 	} {
 		assertIssue(t, issues, code, line)
+	}
+	if issue := findIssue(t, issues, "VB023", 16); issue.Symbol != "Item" {
+		t.Fatalf("expected VB023 to preserve declaration casing, got %+v", issue)
+	}
+}
+
+func TestLinterUnusedLocalVariableUsesProcedureBounds(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim total As Long
+  total = 1
+  Debug.Print total
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLocalVariables = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 0 {
+		t.Fatalf("VB020 should scan to the enclosing procedure end: %+v", got)
 	}
 }
 
