@@ -21,6 +21,7 @@ type Config struct {
 	VBA      VBAConfig      `toml:"vba"`
 	UserForm UserFormConfig `toml:"userform"`
 	Lint     LintConfig     `toml:"lint"`
+	Analyze  AnalyzeConfig  `toml:"analyze"`
 }
 
 type ProjectConfig struct {
@@ -60,19 +61,28 @@ type LintConfig struct {
 	DetectImplicitVariant           bool `toml:"detect_implicit_variant"`
 	ForbidPublicModuleFields        bool `toml:"forbid_public_module_fields"`
 	ForbidInteractiveInput          bool `toml:"forbid_interactive_input"`
-	ForbidUnqualifiedExcelObjects   bool `toml:"forbid_unqualified_excel_objects"`
-	DetectErrorHandlerFallthrough   bool `toml:"detect_error_handler_fallthrough"`
-	DetectApplicationStateRestore   bool `toml:"detect_application_state_restore"`
 	DetectScopeShadowing            bool `toml:"detect_scope_shadowing"`
 	DetectMultipleDeclaratorClarity bool `toml:"detect_multiple_declarator_clarity"`
 	DetectUnusedLocalVariables      bool `toml:"detect_unused_local_variables"`
 	DetectUnusedPrivateProcedures   bool `toml:"detect_unused_private_procedures"`
 	DetectConfusingCallSyntax       bool `toml:"detect_confusing_call_syntax"`
 	DetectForEachControlType        bool `toml:"detect_for_each_control_type"`
-	ForbidActiveObjectDependency    bool `toml:"forbid_active_object_dependency"`
-	DetectRangeFindNothingCheck     bool `toml:"detect_range_find_nothing_check"`
 	DetectDangerousResume           bool `toml:"detect_dangerous_resume"`
 	DetectNestedWithAmbiguity       bool `toml:"detect_nested_with_ambiguity"`
+}
+
+type AnalyzeConfig struct {
+	DetectRangeFindNothingCheck     bool `toml:"detect_range_find_nothing_check"`
+	DetectObjectUseBeforeSet        bool `toml:"detect_object_use_before_set"`
+	DetectApplicationStateRestore   bool `toml:"detect_application_state_restore"`
+	DetectErrorHandlerFallthrough   bool `toml:"detect_error_handler_fallthrough"`
+	ForbidUnqualifiedExcelObjects   bool `toml:"forbid_unqualified_excel_objects"`
+	DetectByRefArgumentMismatch     bool `toml:"detect_byref_argument_mismatch"`
+	DetectDictionaryCollectionGuard bool `toml:"detect_dictionary_collection_guard"`
+	DetectRedimPreserveDimension    bool `toml:"detect_redim_preserve_dimension"`
+	DetectObjectArrayComparison     bool `toml:"detect_object_array_comparison"`
+	DetectFunctionReturnPath        bool `toml:"detect_function_return_path"`
+	DetectExcelObjectMemberMismatch bool `toml:"detect_excel_object_member_mismatch"`
 }
 
 func Default() Config {
@@ -109,14 +119,20 @@ func Default() Config {
 			DetectImplicitVariant:           true,
 			ForbidPublicModuleFields:        true,
 			ForbidInteractiveInput:          true,
-			ForbidUnqualifiedExcelObjects:   true,
-			DetectErrorHandlerFallthrough:   true,
-			DetectApplicationStateRestore:   true,
 			DetectMultipleDeclaratorClarity: true,
 			DetectConfusingCallSyntax:       true,
 			DetectForEachControlType:        true,
-			ForbidActiveObjectDependency:    true,
 			DetectDangerousResume:           true,
+		},
+		Analyze: AnalyzeConfig{
+			DetectRangeFindNothingCheck:     true,
+			DetectObjectUseBeforeSet:        true,
+			DetectApplicationStateRestore:   true,
+			DetectErrorHandlerFallthrough:   true,
+			ForbidUnqualifiedExcelObjects:   true,
+			DetectRedimPreserveDimension:    true,
+			DetectObjectArrayComparison:     true,
+			DetectExcelObjectMemberMismatch: true,
 		},
 	}
 }
@@ -291,12 +307,6 @@ detect_implicit_variant = %t
 forbid_public_module_fields = %t
 # Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
 forbid_interactive_input = %t
-# Forbid unqualified Range/Cells/Rows/Columns access.
-forbid_unqualified_excel_objects = %t
-# Detect procedures that can fall through into an error handler.
-detect_error_handler_fallthrough = %t
-# Detect Application state changes without an obvious restore path.
-detect_application_state_restore = %t
 # Detect local names that shadow module or procedure names.
 detect_scope_shadowing = %t
 # Explain mixed Dim declarations where only some declarators are typed.
@@ -309,14 +319,35 @@ detect_unused_private_procedures = %t
 detect_confusing_call_syntax = %t
 # Detect For Each control variable declaration/type issues.
 detect_for_each_control_type = %t
-# Forbid ActiveWorkbook/ActiveSheet/ActiveCell/Selection dependencies.
-forbid_active_object_dependency = %t
-# Detect Range.Find results used without a Nothing check.
-detect_range_find_nothing_check = %t
 # Detect Resume statements outside likely error handlers.
 detect_dangerous_resume = %t
 # Detect nested With blocks with ambiguous implicit Excel members.
 detect_nested_with_ambiguity = %t
+
+# Runtime-risk analysis rules.
+[analyze]
+# Detect Range.Find results used without a Nothing check.
+detect_range_find_nothing_check = %t
+# Detect object variables used before an obvious Set assignment.
+detect_object_use_before_set = %t
+# Detect Application state changes without an obvious restore path.
+detect_application_state_restore = %t
+# Detect procedures that can fall through into an error handler.
+detect_error_handler_fallthrough = %t
+# Forbid unqualified Range/Cells/Rows/Columns access.
+forbid_unqualified_excel_objects = %t
+# Detect likely ByRef argument type mismatches.
+detect_byref_argument_mismatch = %t
+# Detect Dictionary/Collection access without an obvious guard.
+detect_dictionary_collection_guard = %t
+# Detect ReDim Preserve usage on multi-dimensional arrays.
+detect_redim_preserve_dimension = %t
+# Detect object or array comparison mistakes.
+detect_object_array_comparison = %t
+# Detect functions that may exit without assigning their return value.
+detect_function_return_path = %t
+# Detect known Excel object/member mismatches.
+detect_excel_object_member_mismatch = %t
 `
 	_, err = fmt.Fprintf(f, tmpl,
 		cfg.Project.Name, cfg.Project.Entry,
@@ -327,13 +358,16 @@ detect_nested_with_ambiguity = %t
 		cfg.Lint.RequireOptionExplicit, cfg.Lint.ForbidSelect, cfg.Lint.ForbidActivate,
 		cfg.Lint.ForbidOnErrorResumeNext, cfg.Lint.DetectImplicitVariant,
 		cfg.Lint.ForbidPublicModuleFields, cfg.Lint.ForbidInteractiveInput,
-		cfg.Lint.ForbidUnqualifiedExcelObjects, cfg.Lint.DetectErrorHandlerFallthrough,
-		cfg.Lint.DetectApplicationStateRestore, cfg.Lint.DetectScopeShadowing,
-		cfg.Lint.DetectMultipleDeclaratorClarity, cfg.Lint.DetectUnusedLocalVariables,
+		cfg.Lint.DetectScopeShadowing, cfg.Lint.DetectMultipleDeclaratorClarity, cfg.Lint.DetectUnusedLocalVariables,
 		cfg.Lint.DetectUnusedPrivateProcedures, cfg.Lint.DetectConfusingCallSyntax,
-		cfg.Lint.DetectForEachControlType, cfg.Lint.ForbidActiveObjectDependency,
-		cfg.Lint.DetectRangeFindNothingCheck, cfg.Lint.DetectDangerousResume,
+		cfg.Lint.DetectForEachControlType, cfg.Lint.DetectDangerousResume,
 		cfg.Lint.DetectNestedWithAmbiguity,
+		cfg.Analyze.DetectRangeFindNothingCheck, cfg.Analyze.DetectObjectUseBeforeSet,
+		cfg.Analyze.DetectApplicationStateRestore, cfg.Analyze.DetectErrorHandlerFallthrough,
+		cfg.Analyze.ForbidUnqualifiedExcelObjects, cfg.Analyze.DetectByRefArgumentMismatch,
+		cfg.Analyze.DetectDictionaryCollectionGuard, cfg.Analyze.DetectRedimPreserveDimension,
+		cfg.Analyze.DetectObjectArrayComparison, cfg.Analyze.DetectFunctionReturnPath,
+		cfg.Analyze.DetectExcelObjectMemberMismatch,
 	)
 	return err
 }

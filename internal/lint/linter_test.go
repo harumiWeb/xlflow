@@ -749,12 +749,6 @@ func TestLinterFindsDefaultASTBackedRules(t *testing.T) {
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
   Dim a, b As Long
-  Range("A1").Value = 1
-  Worksheets(1).Range("A1").Value = 2
-  On Error GoTo ErrHandler
-  Debug.Print "work"
-ErrHandler:
-  Debug.Print Err.Description
 End Sub
 `)
 
@@ -762,29 +756,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertIssue(t, issues, "VB015", 4)
-	assertIssue(t, issues, "VB016", 8)
 	assertIssue(t, issues, "VB019", 3)
-}
-
-func TestLinterAllowsCleanupLabelFallthrough(t *testing.T) {
-	dir := t.TempDir()
-	writeLintModule(t, dir, "Main.bas", `Option Explicit
-Public Sub Run()
-  On Error GoTo Cleanup
-  DoWork
-Cleanup:
-  CloseThing
-End Sub
-`)
-
-	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := issuesByCode(issues, "VB016"); len(got) != 0 {
-		t.Fatalf("VB016 should allow normal fallthrough into cleanup labels: %+v", got)
-	}
 }
 
 func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
@@ -807,7 +779,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"VB004", "VB015"} {
+	for _, code := range []string{"VB004"} {
 		if got := issuesByCode(issues, code); len(got) != 0 {
 			t.Fatalf("%s should not trigger for qualified/narrow pattern: %+v", code, got)
 		}
@@ -841,21 +813,17 @@ End Sub
 	cfg.Lint.DetectScopeShadowing = true
 	cfg.Lint.DetectUnusedLocalVariables = true
 	cfg.Lint.DetectUnusedPrivateProcedures = true
-	cfg.Lint.DetectRangeFindNothingCheck = true
 
 	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for code, line := range map[string]int{
-		"VB017": 11,
 		"VB018": 8,
 		"VB020": 9,
 		"VB021": 5,
 		"VB022": 15,
 		"VB023": 16,
-		"VB024": 12,
-		"VB025": 14,
 		"VB026": 18,
 	} {
 		assertIssue(t, issues, code, line)
@@ -919,10 +887,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"VB015", "VB016"} {
-		if got := issuesByCode(issues, code); len(got) != 0 {
-			t.Fatalf("%s should ignore comments and strings: %+v", code, got)
-		}
+	if len(issues) != 0 {
+		t.Fatalf("comments and strings should not trigger lint issues: %+v", issues)
 	}
 }
 

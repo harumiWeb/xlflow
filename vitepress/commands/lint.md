@@ -48,23 +48,18 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB012` | error    | Mismatched procedure end statement.                                                                                        |
 | `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                  |
 | `VB014` | error    | `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes.                                             |
-| `VB015` | warning  | Unqualified Excel object access such as `Range(...)`, `Cells(...)`, `Rows(...)`, or `Columns(...)`.                        |
-| `VB016` | warning  | Normal execution can fall through into an error-handler label.                                                             |
-| `VB017` | warning  | `Application` state such as events, alerts, or screen updating is disabled without an obvious restore path.                |
 | `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                   |
 | `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                              |
 | `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                 |
 | `VB021` | warning  | Private procedure is not called from parsed source.                                                                        |
 | `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                   |
 | `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                       |
-| `VB024` | warning  | Active object dependency such as `ActiveWorkbook`, `ActiveSheet`, `ActiveCell`, or `Selection`.                            |
-| `VB025` | warning  | `Range.Find` result is dereferenced before a `Nothing` check.                                                              |
 | `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                   |
 | `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                             |
 
-Core declaration, member-access, error-handling, Excel object, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
+Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
-Rules `VB015`, `VB016`, `VB017`, `VB019`, `VB022`, `VB023`, `VB024`, and `VB026` are enabled by default. Heavier project-wide or dataflow-sensitive rules stay conservative opt-ins through `[lint]` settings.
+Rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide rules stay conservative opt-ins through `[lint]` settings. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.
 
 ## JSON Output Example
 

@@ -240,6 +240,142 @@ func TestAnalyzerSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzerFindsDefaultRuntimeRiskRules(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim found As Range
+  Dim ws As Worksheet
+  Set found = Range("A:A").Find("x")
+  Debug.Print found.Value
+  ws.Range("A1").Value = 1
+  Application.EnableEvents = False
+  On Error GoTo ErrHandler
+  Debug.Print "work"
+ErrHandler:
+  Debug.Print Err.Description
+  Dim values() As Variant
+  ReDim Preserve values(1 To 2, 1 To 3)
+  If ws = Nothing Then Debug.Print "missing"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for code, line := range map[string]int{
+		"VBA201": 6,
+		"VBA202": 7,
+		"VBA203": 8,
+		"VBA204": 11,
+		"VBA205": 5,
+		"VBA208": 14,
+		"VBA209": 15,
+	} {
+		assertFinding(t, findings, code, line)
+	}
+}
+
+func TestAnalyzerRuntimeRiskRulesAllowGuardedPatterns(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Build() As Range
+  Set Build = Sheet1.Range("A1")
+End Function
+Public Sub Run()
+  Dim found As Range
+  Dim ws As Worksheet
+  Dim oldEvents As Boolean
+  oldEvents = Application.EnableEvents
+  Set ws = ThisWorkbook.Worksheets(1)
+  Set found = ws.Range("A:A").Find("x")
+  If found Is Nothing Then Exit Sub
+  Debug.Print found.Value
+  Application.EnableEvents = False
+Cleanup:
+  Application.EnableEvents = oldEvents
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA201", "VBA202", "VBA203", "VBA204", "VBA205", "VBA210"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("%s should not trigger for guarded pattern: %+v", code, got)
+		}
+	}
+}
+
+func TestAnalyzerOptInRuntimeRiskRules(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub NeedsLong(ByRef value As Long)
+End Sub
+Public Function MissingReturn() As Range
+End Function
+Public Sub Run()
+  Dim dict As Dictionary
+  Set dict = CreateObject("Scripting.Dictionary")
+  NeedsLong "abc"
+  Debug.Print dict("missing")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectByRefArgumentMismatch = true
+	cfg.Analyze.DetectDictionaryCollectionGuard = true
+	cfg.Analyze.DetectFunctionReturnPath = true
+
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA206", 9)
+	assertFinding(t, findings, "VBA207", 10)
+	assertFinding(t, findings, "VBA210", 4)
+}
+
+func TestAnalyzerExpandedExcelMemberMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  ws.ScreenUpdating = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA211", 5)
+}
+
+func TestAnalyzerRuntimeRiskRulesIgnoreCommentsAndStrings(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Debug.Print "Range(""A1"") On Error GoTo ErrHandler Application.EnableEvents = False"
+  ' Set found = Range("A:A").Find("x")
+  ' Debug.Print found.Value
+  ' ErrHandler:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA201", "VBA203", "VBA204", "VBA205"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("%s should ignore comments and strings: %+v", code, got)
+		}
+	}
+}
+
 func writeModule(t *testing.T, dir, name, body string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "modules")
@@ -249,6 +385,16 @@ func writeModule(t *testing.T, dir, name, body string) {
 	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func findingsByCode(findings []Finding, code string) []Finding {
+	var matches []Finding
+	for _, finding := range findings {
+		if finding.Code == code {
+			matches = append(matches, finding)
+		}
+	}
+	return matches
 }
 
 func assertFinding(t *testing.T, findings []Finding, code string, line int) {

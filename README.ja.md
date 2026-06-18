@@ -600,12 +600,6 @@ detect_implicit_variant = true
 forbid_public_module_fields = true
 # ヘッドレス実行時の対話型入力（MsgBox、InputBoxなど）を禁止します。
 forbid_interactive_input = true
-# 修飾されていない Range/Cells/Rows/Columns アクセスを禁止します。
-forbid_unqualified_excel_objects = true
-# 通常実行が error handler label に落ちる procedure を検出します。
-detect_error_handler_fallthrough = true
-# 復元経路が明確でない Application state 変更を検出します。
-detect_application_state_restore = true
 # module 変数や procedure 名を隠す local 名を検出します。
 detect_scope_shadowing = false
 # 一部の declarator だけに型が付く Dim 文を説明します。
@@ -618,14 +612,34 @@ detect_unused_private_procedures = false
 detect_confusing_call_syntax = true
 # For Each control variable の宣言・型の問題を検出します。
 detect_for_each_control_type = true
-# ActiveWorkbook/ActiveSheet/ActiveCell/Selection 依存を禁止します。
-forbid_active_object_dependency = true
-# Nothing check 前に使われる Range.Find 結果を検出します。
-detect_range_find_nothing_check = false
 # error handler 外に見える Resume 文を検出します。
 detect_dangerous_resume = true
 # nested With 内の曖昧な implicit Excel member を検出します。
 detect_nested_with_ambiguity = false
+
+[analyze]
+# Nothing check 前に使われる Range.Find 結果を検出します。
+detect_range_find_nothing_check = true
+# 明確な Set 代入前に使われる object 変数を検出します。
+detect_object_use_before_set = true
+# 復元経路が明確でない Application state 変更を検出します。
+detect_application_state_restore = true
+# 通常実行が error handler label に落ちる procedure を検出します。
+detect_error_handler_fallthrough = true
+# 修飾されていない Range/Cells/Rows/Columns アクセスを禁止します。
+forbid_unqualified_excel_objects = true
+# ByRef 引数の型不一致候補を検出します。
+detect_byref_argument_mismatch = false
+# 明確な guard がない Dictionary/Collection access を検出します。
+detect_dictionary_collection_guard = false
+# 多次元配列での ReDim Preserve 使用を検出します。
+detect_redim_preserve_dimension = true
+# object または array の比較ミスを検出します。
+detect_object_array_comparison = true
+# return value を代入せずに抜ける可能性がある Function を検出します。
+detect_function_return_path = false
+# 既知の Excel object/member mismatch を検出します。
+detect_excel_object_member_mismatch = true
 ```
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。
