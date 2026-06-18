@@ -2,6 +2,8 @@
 
 The linter catches automation-hostile VBA and syntax patterns that can block agents or surface modal dialogs.
 
+Declaration, member-access, and error-handling checks are backed by `tree-sitter-vba`, so findings can distinguish comments and strings from executable code, module-level declarations from procedure-local declarations, and individual declarators in one `Dim` statement.
+
 Rules include:
 
 - Missing `Option Explicit`
