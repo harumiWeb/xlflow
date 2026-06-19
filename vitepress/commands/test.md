@@ -71,12 +71,28 @@ When test code opens another workbook with `GetObject(path)` or `Application.Wor
 ```vb
 Public Sub Test_ReadsOutputWorkbook()
     Dim wb As Object
+    Dim errNumber As Long
+    Dim errSource As String
+    Dim errDescription As String
+
+    On Error GoTo Cleanup
     Set wb = GetObject(outputPath)
 
     ' assertions...
 
-    wb.Close False
-    Set wb = Nothing
+Cleanup:
+    errNumber = Err.Number
+    errSource = Err.Source
+    errDescription = Err.Description
+
+    If Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close False
+        Set wb = Nothing
+        On Error GoTo 0
+    End If
+
+    If errNumber <> 0 Then Err.Raise errNumber, errSource, errDescription
 End Sub
 ```
 
