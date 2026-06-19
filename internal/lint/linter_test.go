@@ -1206,6 +1206,20 @@ func TestLinterSortsIssuesStably(t *testing.T) {
 	}
 }
 
+func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte("Sub Run()\n    Range(\"A1\").Select\n    Dim value\nEnd Sub\n")
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB001", 1)
+	assertIssue(t, issues, "VB002", 2)
+	assertIssue(t, issues, "VB005", 3)
+}
+
 func assertIssue(t *testing.T, issues []Issue, code string, line int) {
 	t.Helper()
 	findIssue(t, issues, code, line)

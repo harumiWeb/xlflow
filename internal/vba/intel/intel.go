@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms"
@@ -93,27 +94,20 @@ func (a Analyzer) Check() error {
 }
 
 func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
-	parser, err := ast.NewParser()
+	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintSource(doc.Path, []byte(doc.Source))
 	if err != nil {
 		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
 	}
-	defer parser.Close()
-	parsed := parser.Parse(doc.Path, []byte(doc.Source))
-	defer parsed.Close()
-	var out []Diagnostic
-	if parsed.HasError || parsed.HasMissing {
+	out := make([]Diagnostic, 0, len(issues))
+	for _, issue := range issues {
 		out = append(out, Diagnostic{
-			Code:     "VB014",
-			Severity: "error",
+			Code:     issue.Code,
+			Severity: issue.Severity,
 			Source:   "xlflow",
-			Message:  "VBA parser recovered from syntax errors; inspect this source before pushing to Excel.",
-			Range:    nodeRange(parsed.Root, doc.Source),
+			Message:  issue.Message,
+			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
 	}
-	if !hasOptionExplicit(doc.Source) {
-		out = append(out, lineDiagnostic("VB001", "error", 0, "Missing Option Explicit."))
-	}
-	out = append(out, implicitVariantDiagnostics(doc.Source)...)
 	return out
 }
 
@@ -861,101 +855,31 @@ func lineDiagnostic(code, severity string, zeroLine int, msg string) Diagnostic 
 	}
 }
 
-func implicitVariantDiagnostics(source string) []Diagnostic {
-	re := regexp.MustCompile(`(?i)^\s*(?:Dim|Private|Public|Static)\s+(.+)$`)
-	var out []Diagnostic
-	for i, line := range normalizedLines(source) {
-		m := re.FindStringSubmatch(line)
-		if len(m) == 0 {
-			continue
-		}
-		parts := strings.Split(m[1], ",")
-		offset := strings.Index(line, m[1])
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" || strings.Contains(strings.ToLower(part), " as ") {
-				offset += len(part) + 1
-				continue
-			}
-			name := strings.FieldsFunc(part, func(r rune) bool {
-				return !isIdentRune(r)
-			})
-			if len(name) == 0 {
-				continue
-			}
-			col := strings.Index(line[offset:], name[0])
-			if col < 0 {
-				col = 0
-			}
-			start := offset + col
-			out = append(out, Diagnostic{
-				Code:     "VB005",
-				Severity: "warning",
-				Source:   "xlflow",
-				Message:  "Declare an explicit type with As <Type>.",
-				Range: Range{
-					Start: Position{Line: i, Character: utf16Len(line[:start])},
-					End:   Position{Line: i, Character: utf16Len(line[:start+len(name[0])])},
-				},
-			})
-			offset += len(part) + 1
-		}
+func issueRange(source string, oneLine int, oneColumn int) Range {
+	line := max(0, oneLine-1)
+	lines := normalizedLines(source)
+	if len(lines) == 0 {
+		return Range{Start: Position{Line: line, Character: 0}, End: Position{Line: line, Character: 1}}
 	}
-	return out
-}
-
-func hasOptionExplicit(source string) bool {
-	for _, line := range normalizedLines(source) {
-		clean := strings.TrimSpace(strings.Split(line, "'")[0])
-		if strings.EqualFold(clean, "Option Explicit") {
-			return true
-		}
-		if clean != "" && !strings.HasPrefix(strings.ToLower(clean), "attribute ") {
-			return false
-		}
+	if line >= len(lines) {
+		line = len(lines) - 1
 	}
-	return false
-}
-
-func nodeRange(node interface {
-	StartByte() uint
-	EndByte() uint
-}, source string) Range {
-	if node == nil {
-		return Range{Start: Position{}, End: Position{Character: 1}}
+	start := 0
+	if oneColumn > 0 {
+		start = oneColumn - 1
 	}
-	return byteRangeToRange(source, int(node.StartByte()), int(node.EndByte()))
-}
-
-func byteRangeToRange(source string, start, end int) Range {
-	if start < 0 {
-		start = 0
+	text := lines[line]
+	if start > len(text) {
+		start = len(text)
 	}
-	if end < start {
-		end = start
+	for start > 0 && start < len(text) && !utf8.RuneStart(text[start]) {
+		start--
 	}
-	if end > len(source) {
-		end = len(source)
+	character := utf16Len(text[:start])
+	return Range{
+		Start: Position{Line: line, Character: character},
+		End:   Position{Line: line, Character: character + 1},
 	}
-	return Range{Start: byteOffsetToPosition(source, start), End: byteOffsetToPosition(source, end)}
-}
-
-func byteOffsetToPosition(source string, offset int) Position {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > len(source) {
-		offset = len(source)
-	}
-	line := 0
-	lineStart := 0
-	for i := 0; i < offset; i++ {
-		if source[i] == '\n' {
-			line++
-			lineStart = i + 1
-		}
-	}
-	return Position{Line: line, Character: utf16Len(source[lineStart:offset])}
 }
 
 func WordAt(source string, pos Position) (string, Range) {

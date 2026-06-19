@@ -30,6 +30,8 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 The MVP server supports full document synchronization, diagnostics, document symbols, workspace symbols, definition lookup, references, hover, and completion. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
 
+Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 For UserForms, xlflow reads tracked `.frm` files and extracts design-time controls for code intelligence. Controls such as `txtName` in `Me.txtName.Text` and `Me.Controls("txtName").Text` can participate in hover, completion, and definition lookup without opening Excel.

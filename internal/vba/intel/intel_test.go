@@ -32,6 +32,32 @@ func TestDiagnosticsHandlesMalformedSourceAndJapaneseText(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsUseSharedLintRulesForUnsavedContent(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Range("A1").Select
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	if !hasDiagnostic(diagnostics, "VB002") {
+		t.Fatalf("VB002 diagnostic missing: %+v", diagnostics)
+	}
+
+	doc.Source = `Option Explicit
+Public Sub Run()
+    Range("A1").Value = 1
+End Sub
+`
+	if diagnostics := analyzer.Diagnostics(doc); len(diagnostics) != 0 {
+		t.Fatalf("expected diagnostics to clear, got %+v", diagnostics)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -251,6 +277,15 @@ func hasCompletion(items []Completion, label string) bool {
 func hasSymbol(symbols []Symbol, name string) bool {
 	for _, symbol := range symbols {
 		if symbol.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
 			return true
 		}
 	}

@@ -170,7 +170,16 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
+	return l.lintSource(path, source, true)
+}
 
+// LintSource runs file-local lint rules against source content supplied by a
+// caller such as the LSP, where the editor buffer may not exist on disk yet.
+func (l Linter) LintSource(path string, source []byte) ([]Issue, error) {
+	return l.lintSource(path, source, false)
+}
+
+func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
 	issues, err := l.textSafetyIssues(path, string(source))
 	if err != nil {
 		return nil, err
@@ -192,7 +201,7 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 	}
 	issues = append(issues, l.flowIssues(path, string(source), parsed.Root)...)
 
-	if l.Config.Lint.ForbidInteractiveInput {
+	if includeFilesystemRules && l.Config.Lint.ForbidInteractiveInput {
 		boundaries, err := gui.Analyzer{RootDir: l.RootDir, Config: l.Config}.AnalyzeFile(path)
 		if err != nil {
 			return nil, err
