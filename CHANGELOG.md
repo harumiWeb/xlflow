@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added experimental `xlflow pack`, a pure-Go, cross-platform command that builds an `.xlsm` artifact from the source tree plus a workbook template without Excel. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces only that single zip entry, leaving the rest of the workbook untouched. Gated behind `--experimental`; supports standard, class, and unambiguous document modules, carries existing UserForm designer streams through byte-for-byte, and performs no VBE compile or runtime validation (every run reports `pack.vbe_validation = "not_performed"` and a `vbe_validation_skipped` warning). Fails loudly on protected or signed projects, UserForm generation, ambiguous layouts, active sessions, and in-place overwrite of the template or configured workbook. See `docs/specs/pack-command.md` and ADR-0012.
 - Added `xlflow inspect symbols`, a source-only tree-sitter-vba symbol indexer for exported `.bas`, `.cls`, and `.frm` VBA files with JSON and compact outline output.
 
 ## v0.13.1

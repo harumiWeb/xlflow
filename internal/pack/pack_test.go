@@ -1,8 +1,10 @@
 package pack
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +213,56 @@ func TestGenerateVBAProjectMissingTemplateModuleExplainsMVPLimitation(t *testing
 	}
 }
 
+func TestBuildWorkbookReplacesVBAProjectAndPreservesOtherEntries(t *testing.T) {
+	templateBin := readTestFile(t, "corpus", "p1_compiled.bin")
+	templateXlsm := buildWorkbookFixture(t, templateBin)
+	out, meta, err := BuildWorkbook(templateXlsm, p1SourceModules(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Standard != 1 || meta.Class != 1 || meta.Document != 0 {
+		t.Fatalf("module counts = %+v, want standard=1 class=1 document=0", meta)
+	}
+	if meta.CarriedStreams == 0 {
+		t.Fatalf("expected carried stream count from template, got %+v", meta)
+	}
+
+	wantEntries := zipEntries(t, templateXlsm)
+	gotEntries := zipEntries(t, out)
+	if len(gotEntries) != len(wantEntries) {
+		t.Fatalf("entry count = %d, want %d", len(gotEntries), len(wantEntries))
+	}
+	for i := range wantEntries {
+		want, got := wantEntries[i], gotEntries[i]
+		if got.name != want.name {
+			t.Fatalf("entry[%d] name = %q, want %q", i, got.name, want.name)
+		}
+		if got.method != want.method {
+			t.Fatalf("%s method = %d, want %d", got.name, got.method, want.method)
+		}
+		if got.name == "xl/vbaProject.bin" {
+			if bytes.Equal(got.body, want.body) {
+				t.Fatal("xl/vbaProject.bin was not replaced")
+			}
+			continue
+		}
+		if !bytes.Equal(got.body, want.body) {
+			t.Fatalf("%s body was not preserved byte-for-byte", got.name)
+		}
+	}
+	if _, err := vbaproject.Read(mustEntry(t, out, "xl/vbaProject.bin")); err != nil {
+		t.Fatalf("regenerated vbaProject.bin is not re-readable: %v", err)
+	}
+}
+
+func TestBuildWorkbookRejectsMissingVBAProject(t *testing.T) {
+	templateXlsm := buildWorkbookFixture(t, nil)
+	_, _, err := BuildWorkbook(templateXlsm, nil)
+	if !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("error = %v, want errors.Is(..., ErrAmbiguousLayout)", err)
+	}
+}
+
 func signedFixture(t *testing.T, template []byte) []byte {
 	t.Helper()
 	project, err := vbaproject.Read(template)
@@ -223,4 +275,73 @@ func signedFixture(t *testing.T, template []byte) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+type zipEntryForTest struct {
+	name   string
+	method uint16
+	body   []byte
+}
+
+func buildWorkbookFixture(t *testing.T, vbaProject []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	add := func(name string, method uint16, body []byte) {
+		t.Helper()
+		header := &zip.FileHeader{Name: name, Method: method}
+		w, err := writer.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("[Content_Types].xml", zip.Deflate, []byte(`<Types></Types>`))
+	add("xl/workbook.xml", zip.Store, []byte(`<workbook/>`))
+	if vbaProject != nil {
+		add("xl/vbaProject.bin", zip.Deflate, vbaProject)
+	}
+	add("docProps/core.xml", zip.Deflate, []byte(`<core/>`))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func zipEntries(t *testing.T, data []byte) []zipEntryForTest {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]zipEntryForTest, 0, len(reader.File))
+	for _, f := range reader.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		entries = append(entries, zipEntryForTest{name: f.Name, method: f.Method, body: body})
+	}
+	return entries
+}
+
+func mustEntry(t *testing.T, data []byte, name string) []byte {
+	t.Helper()
+	for _, entry := range zipEntries(t, data) {
+		if entry.name == name {
+			return entry.body
+		}
+	}
+	t.Fatalf("missing zip entry %s", name)
+	return nil
 }

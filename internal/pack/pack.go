@@ -4,7 +4,10 @@
 package pack
 
 import (
+	"archive/zip"
+	"bytes"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
@@ -40,6 +43,14 @@ type SourceModule struct {
 	Source string
 }
 
+// PackMeta summarizes the modules and opaque streams handled during pack.
+type PackMeta struct {
+	Standard       int
+	Class          int
+	Document       int
+	CarriedStreams int
+}
+
 // GenerateVBAProject returns a regenerated vbaProject.bin based on template.
 //
 // The engine replaces only supplied standard, class, and unambiguous document
@@ -48,64 +59,139 @@ type SourceModule struct {
 // Unsupported content returns one of the exported sentinel errors so the CLI can
 // map it to the pack error contract.
 func GenerateVBAProject(template []byte, sources []SourceModule) ([]byte, error) {
+	out, _, err := generateVBAProject(template, sources)
+	return out, err
+}
+
+// BuildWorkbook returns a new .xlsm zip with xl/vbaProject.bin regenerated from sources.
+//
+// All template zip entries are copied in their original order, with their names
+// and compression methods preserved. The only replaced entry is
+// xl/vbaProject.bin. If the template has no vbaProject.bin entry, BuildWorkbook
+// returns ErrAmbiguousLayout.
+func BuildWorkbook(templateXlsm []byte, sources []SourceModule) ([]byte, PackMeta, error) {
+	reader, err := zip.NewReader(bytes.NewReader(templateXlsm), int64(len(templateXlsm)))
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+
+	var vbaProject []byte
+	for _, entry := range reader.File {
+		if entry.Name != "xl/vbaProject.bin" {
+			continue
+		}
+		vbaProject, err = readZipEntry(entry)
+		if err != nil {
+			return nil, PackMeta{}, err
+		}
+		break
+	}
+	if vbaProject == nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: template is missing xl/vbaProject.bin", ErrAmbiguousLayout)
+	}
+
+	regenerated, meta, err := generateVBAProject(vbaProject, sources)
+	if err != nil {
+		return nil, PackMeta{}, err
+	}
+
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for _, entry := range reader.File {
+		header := entry.FileHeader
+		target, err := writer.CreateHeader(&header)
+		if err != nil {
+			_ = writer.Close()
+			return nil, PackMeta{}, err
+		}
+		if entry.Name == "xl/vbaProject.bin" {
+			if _, err := target.Write(regenerated); err != nil {
+				_ = writer.Close()
+				return nil, PackMeta{}, err
+			}
+			continue
+		}
+		if err := copyZipEntry(target, entry); err != nil {
+			_ = writer.Close()
+			return nil, PackMeta{}, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, PackMeta{}, err
+	}
+	return buf.Bytes(), meta, nil
+}
+
+func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMeta, error) {
 	if hasSignatureStream(template) {
-		return nil, ErrSignedProject
+		return nil, PackMeta{}, ErrSignedProject
 	}
 	project, err := vbaproject.Read(template)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
 	if project.Protection.IsProtected {
-		return nil, ErrProtectedProject
+		return nil, PackMeta{}, ErrProtectedProject
 	}
-	if err := applySources(project, sources); err != nil {
-		return nil, err
+	meta, err := applySources(project, sources)
+	if err != nil {
+		return nil, PackMeta{}, err
 	}
+	meta.CarriedStreams = len(project.RawStreams)
 	out, err := vbaproject.Write(project)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
-	return out, nil
+	return out, meta, nil
 }
 
-func applySources(project *vbaproject.Project, sources []SourceModule) error {
+func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta, error) {
 	byKey := make(map[string]int, len(project.Modules))
 	for i, m := range project.Modules {
 		key := moduleKey(m.Name, fromProjectModuleType(m.Type))
 		if _, exists := byKey[key]; exists {
-			return fmt.Errorf("%w: duplicate template module %s", ErrAmbiguousLayout, m.Name)
+			return PackMeta{}, fmt.Errorf("%w: duplicate template module %s", ErrAmbiguousLayout, m.Name)
 		}
 		byKey[key] = i
 	}
 
+	var meta PackMeta
 	seen := make(map[string]bool, len(sources))
 	for _, source := range sources {
 		if source.Type == ModuleTypeForm {
-			return ErrUserFormGenerationUnsupported
+			return PackMeta{}, ErrUserFormGenerationUnsupported
 		}
 		if source.Name == "" {
-			return fmt.Errorf("%w: source module name is empty", ErrAmbiguousLayout)
+			return PackMeta{}, fmt.Errorf("%w: source module name is empty", ErrAmbiguousLayout)
 		}
 		targetType, err := toProjectModuleType(source.Type)
 		if err != nil {
-			return err
+			return PackMeta{}, err
 		}
 		key := moduleKey(source.Name, source.Type)
 		if seen[key] {
-			return fmt.Errorf("%w: duplicate source module %s", ErrAmbiguousLayout, source.Name)
+			return PackMeta{}, fmt.Errorf("%w: duplicate source module %s", ErrAmbiguousLayout, source.Name)
 		}
 		seen[key] = true
 		idx, ok := byKey[key]
 		if !ok {
-			return fmt.Errorf("%w: source module %q is not in the template; pack updates existing modules only and cannot add new modules in the experimental MVP", ErrAmbiguousLayout, source.Name)
+			return PackMeta{}, fmt.Errorf("%w: source module %q is not in the template; pack updates existing modules only and cannot add new modules in the experimental MVP", ErrAmbiguousLayout, source.Name)
 		}
 		normalized, err := vbaproject.NormalizeModuleSource(targetType, source.Source, &project.Modules[idx])
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
 		project.Modules[idx].Source = normalized
+		switch source.Type {
+		case ModuleTypeStandard:
+			meta.Standard++
+		case ModuleTypeClass:
+			meta.Class++
+		case ModuleTypeDocument:
+			meta.Document++
+		}
 	}
-	return nil
+	return meta, nil
 }
 
 func toProjectModuleType(t ModuleType) (vbaproject.ModuleType, error) {
@@ -156,4 +242,23 @@ func hasSignatureStream(template []byte) bool {
 		}
 	}
 	return false
+}
+
+func readZipEntry(entry *zip.File) ([]byte, error) {
+	reader, err := entry.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+func copyZipEntry(dst io.Writer, entry *zip.File) error {
+	reader, err := entry.Open()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	_, err = io.Copy(dst, reader)
+	return err
 }
