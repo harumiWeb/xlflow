@@ -142,27 +142,27 @@ Safety diagnostics `VB008` through `VB014` are always enabled and cannot be disa
 
 ### `[analyze]`
 
-| Key              | Type     | Required | Default | Description                                          |
-| ---------------- | -------- | -------- | ------- | ---------------------------------------------------- |
+| Key              | Type     | Required | Default | Description                                           |
+| ---------------- | -------- | -------- | ------- | ----------------------------------------------------- |
 | `disabled_rules` | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID. |
 
 Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`.
 
 Configurable analyzer rule IDs:
 
-| ID       | Legacy key                              |
-| -------- | --------------------------------------- |
-| `VBA201` | `detect_range_find_nothing_check`       |
-| `VBA202` | `detect_object_use_before_set`          |
-| `VBA203` | `detect_application_state_restore`      |
-| `VBA204` | `detect_error_handler_fallthrough`      |
-| `VBA205` | `forbid_unqualified_excel_objects`      |
-| `VBA206` | `detect_byref_argument_mismatch`        |
-| `VBA207` | `detect_dictionary_collection_guard`    |
-| `VBA208` | `detect_redim_preserve_dimension`       |
-| `VBA209` | `detect_object_array_comparison`        |
-| `VBA210` | `detect_function_return_path`           |
-| `VBA211` | `detect_excel_object_member_mismatch`   |
+| ID       | Legacy key                            |
+| -------- | ------------------------------------- |
+| `VBA201` | `detect_range_find_nothing_check`     |
+| `VBA202` | `detect_object_use_before_set`        |
+| `VBA203` | `detect_application_state_restore`    |
+| `VBA204` | `detect_error_handler_fallthrough`    |
+| `VBA205` | `forbid_unqualified_excel_objects`    |
+| `VBA206` | `detect_byref_argument_mismatch`      |
+| `VBA207` | `detect_dictionary_collection_guard`  |
+| `VBA208` | `detect_redim_preserve_dimension`     |
+| `VBA209` | `detect_object_array_comparison`      |
+| `VBA210` | `detect_function_return_path`         |
+| `VBA211` | `detect_excel_object_member_mismatch` |
 
 Analyzer diagnostics `VBA101` through `VBA106` are always enabled and cannot be disabled with `disabled_rules`.
 

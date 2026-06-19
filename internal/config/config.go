@@ -323,7 +323,7 @@ func applyLintRuleConfig(cfg *Config, meta toml.MetaData) error {
 		}
 		warnings = append(warnings, map[string]any{
 			"code":    "deprecated_lint_rule_config",
-			"message": fmt.Sprintf("[lint].%s is deprecated. Use [lint].disabled_rules = [%q] instead.", rule.Key, rule.ID),
+			"message": deprecatedRuleConfigMessage("lint", rule.Key, rule.ID, rule.Get(cfg.Lint), rule.Default),
 			"rule":    rule.ID,
 			"key":     rule.Key,
 		})
@@ -388,7 +388,7 @@ func applyAnalyzeRuleConfig(cfg *Config, meta toml.MetaData) error {
 		}
 		warnings = append(warnings, map[string]any{
 			"code":    "deprecated_analyze_rule_config",
-			"message": fmt.Sprintf("[analyze].%s is deprecated. Use [analyze].disabled_rules = [%q] instead.", rule.Key, rule.ID),
+			"message": deprecatedRuleConfigMessage("analyze", rule.Key, rule.ID, rule.Get(cfg.Analyze), rule.Default),
 			"rule":    rule.ID,
 			"key":     rule.Key,
 		})
@@ -415,6 +415,21 @@ func applyAnalyzeRuleConfig(cfg *Config, meta toml.MetaData) error {
 	}
 	cfg.Warnings = append(cfg.Warnings, warnings...)
 	return nil
+}
+
+func deprecatedRuleConfigMessage(section, key, id string, enabled, defaultEnabled bool) string {
+	qualifiedKey := fmt.Sprintf("[%s].%s", section, key)
+	switch {
+	case !enabled:
+		if defaultEnabled {
+			return fmt.Sprintf("%s=false is deprecated. Use [%s].disabled_rules = [%q] instead.", qualifiedKey, section, id)
+		}
+		return fmt.Sprintf("%s=false is deprecated and redundant because %s is disabled by default. Remove %s.", qualifiedKey, id, qualifiedKey)
+	case defaultEnabled:
+		return fmt.Sprintf("%s=true is deprecated and redundant because %s is enabled by default. Remove %s.", qualifiedKey, id, qualifiedKey)
+	default:
+		return fmt.Sprintf("%s=true is deprecated but remains the compatibility opt-in for %s; keep it until an opt-in replacement is available.", qualifiedKey, id)
+	}
 }
 
 func normalizeDisabledAnalyzeRules(ids []string) ([]string, map[string]bool, error) {

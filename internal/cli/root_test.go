@@ -315,7 +315,7 @@ disabled_rules = ["VB006"]`)
 		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	text := stdout.String()
-	for _, want := range []string{"Warnings:", "[lint].forbid_public_module_fields is deprecated", "lint rule VB006 is enabled", "[lint].disabled_rules takes precedence"} {
+	for _, want := range []string{"Warnings:", "[lint].forbid_public_module_fields=true is deprecated", "Remove [lint].forbid_public_module_fields", "lint rule VB006 is enabled", "[lint].disabled_rules takes precedence"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected lint output to contain %q:\n%s", want, text)
 		}

@@ -266,6 +266,9 @@ forbid_select = false
 	if !hasConfigWarning(cfg.Warnings, "deprecated_lint_rule_config", "VB002") {
 		t.Fatalf("expected deprecated config warning, got %+v", cfg.Warnings)
 	}
+	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_lint_rule_config", "VB002", `Use [lint].disabled_rules = ["VB002"] instead`) {
+		t.Fatalf("expected false legacy lint warning to suggest disabled_rules, got %+v", cfg.Warnings)
+	}
 }
 
 func TestLoadWarnsForLegacyAnalyzeRuleConfig(t *testing.T) {
@@ -291,6 +294,41 @@ detect_byref_argument_mismatch = true
 	}
 	if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206") {
 		t.Fatalf("expected deprecated analyze config warning, got %+v", cfg.Warnings)
+	}
+	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "compatibility opt-in") {
+		t.Fatalf("expected true opt-in analyze warning to avoid disabled_rules migration, got %+v", cfg.Warnings)
+	}
+	if hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "disabled_rules") {
+		t.Fatalf("true opt-in analyze warning must not suggest disabled_rules, got %+v", cfg.Warnings)
+	}
+}
+
+func TestLoadWarnsForRedundantLegacyTrueRuleConfig(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+forbid_select = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Lint.ForbidSelect {
+		t.Fatal("expected legacy forbid_select=true to keep rule enabled")
+	}
+	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_lint_rule_config", "VB002", "Remove [lint].forbid_select") {
+		t.Fatalf("expected true default-on lint warning to suggest removal, got %+v", cfg.Warnings)
+	}
+	if hasConfigWarningMessage(cfg.Warnings, "deprecated_lint_rule_config", "VB002", "disabled_rules") {
+		t.Fatalf("true default-on lint warning must not suggest disabled_rules, got %+v", cfg.Warnings)
 	}
 }
 
@@ -499,6 +537,19 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 func hasConfigWarning(warnings []map[string]any, code string, rule string) bool {
 	for _, warning := range warnings {
 		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConfigWarningMessage(warnings []map[string]any, code string, rule string, text string) bool {
+	for _, warning := range warnings {
+		if warning["code"] != code || warning["rule"] != rule {
+			continue
+		}
+		message, _ := warning["message"].(string)
+		if strings.Contains(message, text) {
 			return true
 		}
 	}
