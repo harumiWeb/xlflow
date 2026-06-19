@@ -138,7 +138,7 @@ Configurable lint rule IDs:
 | `VB026` | `detect_dangerous_resume`            |
 | `VB027` | `detect_nested_with_ambiguity`       |
 
-Safety diagnostics `VB008` through `VB014` are always enabled and cannot be disabled with `disabled_rules`.
+Safety diagnostics `VB008` through `VB014` and `VB028` are always enabled and cannot be disabled with `disabled_rules`.
 
 ### `[analyze]`
 

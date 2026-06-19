@@ -3574,6 +3574,84 @@ code_source = "sidecar"
 	}
 }
 
+func TestPushRejectsBareDialogCallsWhenXlflowUIIsPresentBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	for _, subdir := range []string{
+		filepath.Join("src", "modules"),
+		filepath.Join("src", "classes"),
+		filepath.Join("src", "forms"),
+		filepath.Join("src", "workbook"),
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uiBody := `Attribute VB_Name = "XlflowUI"
+Option Explicit
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+End Function
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "XlflowUI.bas"), []byte(uiBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainBody := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    MsgBox "Done"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "Main.bas"), []byte(mainBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+		Issues []struct {
+			Code       string `json:"code"`
+			File       string `json:"file"`
+			Line       int    `json:"line"`
+			Kind       string `json:"kind"`
+			Symbol     string `json:"symbol"`
+			Suggestion string `json:"suggestion"`
+		} `json:"issues"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse push XlflowUI collision output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "lint_failed" || got.Error.Phase != "preflight" {
+		t.Fatalf("unexpected push XlflowUI collision payload: %+v", got)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VB028" || got.Issues[0].File != "src/modules/Main.bas" || got.Issues[0].Line != 4 {
+		t.Fatalf("unexpected push XlflowUI collision issues: %+v", got.Issues)
+	}
+	if got.Issues[0].Kind != "xlflowui_name_collision" || got.Issues[0].Symbol != "MsgBox" || !strings.Contains(got.Issues[0].Suggestion, "VBA.Interaction.MsgBox") {
+		t.Fatalf("unexpected VB028 metadata: %+v", got.Issues[0])
+	}
+}
+
 func TestPushRejectsSpecDrivenUserFormArtifactNameMismatchBeforeExcel(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
