@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.14.0
+
 - Added inline VBA suppression comments for lint and analyze diagnostics, supporting `xlflow:disable-next-line <ID>` and `xlflow:disable-line <ID>` with stable IDs such as `VB002` and `VBA205`, plus warnings for unknown, unsupported, or unused suppressions. Preflight-blocking errors remain unsuppressible.
 - Documented COM cleanup best practices for VBA tests that open external workbooks, including `Close` plus `Set ... = Nothing` to avoid file locks during test hooks.
 - Fixed test and macro discovery so Unicode VBA procedure names such as Japanese `Test*` and `*_Test` names are recognized by both PowerShell and `.NET` bridges.
