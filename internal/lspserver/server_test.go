@@ -1,12 +1,17 @@
 package lspserver
 
 import (
+	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/sourcegraph/jsonrpc2"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
@@ -108,6 +113,100 @@ func TestCompletionReturnsMemberCandidatesFromOpenDocument(t *testing.T) {
 	if !hasCompletionItem(list.Items, "Range") {
 		t.Fatalf("Range completion missing: %+v", list.Items)
 	}
+}
+
+func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+	if initResult.ServerInfo == nil || initResult.ServerInfo.Name != serverName {
+		t.Fatalf("unexpected initialize result: %+v", initResult.ServerInfo)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        protocol.DocumentUri(uri),
+			LanguageID: "vba",
+			Version:    1,
+			Text:       "Option Explicit\nSub Test()\n    Worksheets(\"Input\").Ra\nEnd Sub\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list protocol.CompletionList
+	if err := clientConn.Call(ctx, string(protocol.MethodTextDocumentCompletion), protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 27},
+		},
+	}, &list); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletionItem(list.Items, "Range") {
+		t.Fatalf("Range completion missing: %+v", list.Items)
+	}
+
+	var shutdown any
+	if err := clientConn.Call(ctx, string(protocol.MethodShutdown), nil, &shutdown); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.Notify(ctx, string(protocol.MethodExit), nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = serverConn.Close()
+	if !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) {
+		t.Fatalf("expected publishDiagnostics notification, got %v", recorder.methods())
+	}
+}
+
+type rpcRecorder struct {
+	mu          sync.Mutex
+	methodsSeen []string
+}
+
+func (r *rpcRecorder) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
+	r.mu.Lock()
+	r.methodsSeen = append(r.methodsSeen, req.Method)
+	r.mu.Unlock()
+	if !req.Notif {
+		_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "method not found"})
+	}
+}
+
+func (r *rpcRecorder) seen(method string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, candidate := range r.methodsSeen {
+		if candidate == method {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *rpcRecorder) methods() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.methodsSeen...)
 }
 
 func hasCompletionItem(items []protocol.CompletionItem, label string) bool {
