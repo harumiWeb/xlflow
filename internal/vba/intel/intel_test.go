@@ -58,6 +58,33 @@ End Sub
 	}
 }
 
+func TestDiagnosticsConvertLintByteColumnsToUTF16AfterJapaneseText(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	line := `    Debug.Print "😀日本": Range("A1").Select`
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nPublic Sub Run()\n" +
+			line + "\n" +
+			"End Sub\n",
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	var selectDiag *Diagnostic
+	for i := range diagnostics {
+		if diagnostics[i].Code == "VB002" {
+			selectDiag = &diagnostics[i]
+			break
+		}
+	}
+	if selectDiag == nil {
+		t.Fatalf("VB002 diagnostic missing: %+v", diagnostics)
+	}
+	want := utf16Len(line[:strings.Index(line, "Select")])
+	if selectDiag.Range.Start.Line != 2 || selectDiag.Range.Start.Character != want {
+		t.Fatalf("VB002 range start = %+v, want line 2 character %d", selectDiag.Range.Start, want)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

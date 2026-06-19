@@ -487,6 +487,7 @@ func fileURIToPath(raw string) (string, error) {
 
 func pathToFileURI(path string) string {
 	path = filepath.Clean(path)
+	host := ""
 	if runtime.GOOS == "windows" {
 		vol := filepath.VolumeName(path)
 		if strings.HasPrefix(vol, `\\`) {
@@ -494,33 +495,18 @@ func pathToFileURI(path string) string {
 			hostShare := strings.TrimPrefix(vol, `\\`)
 			parts := strings.SplitN(hostShare, `\`, 2)
 			if len(parts) == 2 {
-				return fileURLString(parts[0], "/"+parts[1]+filepath.ToSlash(rest))
+				host = parts[0]
+				path = "/" + parts[1] + filepath.ToSlash(rest)
+			} else {
+				path = "/" + filepath.ToSlash(path)
 			}
+		} else {
+			path = "/" + filepath.ToSlash(path)
 		}
-		path = "/" + filepath.ToSlash(path)
 	} else {
 		path = filepath.ToSlash(path)
 	}
-	return fileURLString("", path)
-}
-
-func fileURLString(host, path string) string {
-	if host != "" {
-		return "file://" + host + escapeFileURLPath(path)
-	}
-	return "file://" + escapeFileURLPath(path)
-}
-
-func escapeFileURLPath(path string) string {
-	leading := strings.HasPrefix(path, "/")
-	parts := strings.Split(path, "/")
-	for i, part := range parts {
-		if i == 0 && leading {
-			continue
-		}
-		parts[i] = url.PathEscape(part)
-	}
-	return strings.Join(parts, "/")
+	return (&url.URL{Scheme: "file", Host: host, Path: path}).String()
 }
 
 func normalizePathKey(path string) string {

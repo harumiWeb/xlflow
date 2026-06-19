@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,52 @@ func TestFileURIPathRoundTripWithEscapedJapanesePath(t *testing.T) {
 	}
 	if normalizePathKey(got) != normalizePathKey(path) {
 		t.Fatalf("roundtrip path = %q, want %q via %q", got, path, uri)
+	}
+}
+
+func TestFileURIPathRoundTripWithWindowsUNCPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows UNC path handling is OS-specific")
+	}
+	path := `\\server\share\日本 語#%dir\Main.bas`
+	uri := pathToFileURI(path)
+	if !strings.HasPrefix(uri, "file://server/share/") {
+		t.Fatalf("uri = %q, want UNC file URI with host and share", uri)
+	}
+	if strings.Contains(uri, "#") || strings.Contains(uri, "%dir") {
+		t.Fatalf("uri = %q, want escaped special characters", uri)
+	}
+
+	got, err := fileURIToPath(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalizePathKey(got) != normalizePathKey(path) {
+		t.Fatalf("roundtrip path = %q, want %q via %q", got, path, uri)
+	}
+}
+
+func TestDocumentsOverlayNormalizesWindowsDriveLetterCase(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows drive-letter normalization is OS-specific")
+	}
+	root := `C:\work`
+	docs := newDocuments(root)
+	upper := "file:///C:/work/src/modules/Main.bas"
+	lower := "file:///c:/work/src/modules/Main.bas"
+
+	if _, err := docs.open(upper, "Option Explicit\nSub UpperName()\nEnd Sub\n"); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := docs.change(lower, "Option Explicit\nSub LowerName()\nEnd Sub\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(changed.Source, "LowerName") {
+		t.Fatalf("changed source was not stored through normalized key: %q", changed.Source)
+	}
+	if len(docs.openDocuments()) != 1 {
+		t.Fatalf("open documents = %d, want 1", len(docs.openDocuments()))
 	}
 }
 
