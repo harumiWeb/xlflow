@@ -90,11 +90,17 @@ func TestReadReferences(t *testing.T) {
 }
 
 func TestProtectedAndForm(t *testing.T) {
-	prot, _ := Read(loadCorpus(t, "p3_protected"))
+	prot, err := Read(loadCorpus(t, "p3_protected"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !prot.Protection.IsProtected {
 		t.Errorf("p3 should be IsProtected=true")
 	}
-	form, _ := Read(loadCorpus(t, "p4_form"))
+	form, err := Read(loadCorpus(t, "p4_form"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var hasForm bool
 	for _, m := range form.Modules {
 		if m.Name == "UserForm1" && m.Type == ModuleForm {
@@ -105,7 +111,10 @@ func TestProtectedAndForm(t *testing.T) {
 		t.Errorf("p4 should have UserForm1=ModuleForm")
 	}
 	// Unprotected -> IsProtected=false
-	p1, _ := Read(loadCorpus(t, "p1_compiled"))
+	p1, err := Read(loadCorpus(t, "p1_compiled"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p1.Protection.IsProtected {
 		t.Errorf("p1 should be IsProtected=false")
 	}
@@ -121,8 +130,14 @@ func TestReadPreservationRawSpans(t *testing.T) {
 		t.Fatal(err)
 	}
 	// ProjectStreamRaw is byte-identical to the CFB PROJECT stream.
-	c, _ := cfb.Open(bin)
-	projRaw, _ := c.Stream("PROJECT")
+	c, err := cfb.Open(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projRaw, ok := c.Stream("PROJECT")
+	if !ok {
+		t.Fatal("missing PROJECT stream")
+	}
 	if !bytes.Equal(p.ProjectStreamRaw, projRaw) {
 		t.Error("ProjectStreamRaw does not match the PROJECT stream")
 	}
