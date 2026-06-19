@@ -163,6 +163,7 @@ root: .
 ## 5. 注意事項
 
 - xlflowはメインバイナリとdotnetブリッジバイナリの二つで動くため、E2E動作確認を行う際、`go install ./cmd/xlflow` でインストールしても、dotnet bridgeバイナリをインストールすることができない。必ず`task install`でインストールすること
+- Windows で `tree-sitter-vba` / CGO を含む Go コマンドを実行する場合は、TDM-GCC を拾わないように `scripts/dev/go.ps1` 経由で実行すること。例: `rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./...`。`task test` / `task install` / `task run` / `task tidy` はこの wrapper を使う。直接 `rtk go test` を実行して `runtime/cgo` や `tree-sitter-vba` が `cgo.exe: exit status 2` で落ちた場合は、まず UCRT64 PATH 問題を疑うこと
 
 ## grepai usage
 

@@ -4,8 +4,12 @@ tasks:
   install:
     desc: Install xlflow to local environment
     cmds:
-      - go install ./cmd/xlflow
-      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-dotnet-bridge.ps1' -InstallToGoBin
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' install ./cmd/xlflow
+        platforms: [windows]
+      - cmd: go install ./cmd/xlflow
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-dotnet-bridge.ps1' -InstallToGoBin
+        platforms: [windows]
 
   uninstall:
     desc: Remove xlflow and the Excel bridge from the local Go bin directory
@@ -65,7 +69,10 @@ tasks:
   run:
     desc: Run xlflow without install
     cmds:
-      - go run ./cmd/xlflow {{.CLI_ARGS}}
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow {{.CLI_ARGS}}
+        platforms: [windows]
+      - cmd: go run ./cmd/xlflow {{.CLI_ARGS}}
+        platforms: [linux, darwin]
 
   doctor:
     cmds:
@@ -89,13 +96,20 @@ tasks:
 
   test:
     cmds:
-      - go test ./...
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./...
+        platforms: [windows]
+      - cmd: go test ./...
+        platforms: [linux, darwin]
 
   verify:security:
     desc: Run vulnerability and third-party licence inventory checks
     cmds:
-      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-      - powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\check-third-party-licences.ps1'
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        platforms: [windows]
+      - cmd: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\check-third-party-licences.ps1'
+        platforms: [windows]
 
   verify:
     desc: Fast local verification (non-COM)
@@ -105,10 +119,16 @@ tasks:
   fmt:
     parallel: true
     cmds:
-      - go fmt ./...
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' fmt ./...
+        platforms: [windows]
+      - cmd: go fmt ./...
+        platforms: [linux, darwin]
       - pnpm run format
       - dotnet format bridge/dotnet/Xlflow.ExcelBridge.sln
 
   tidy:
     cmds:
-      - go mod tidy
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' mod tidy
+        platforms: [windows]
+      - cmd: go mod tidy
+        platforms: [linux, darwin]

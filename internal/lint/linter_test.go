@@ -132,6 +132,183 @@ End Sub
 	}
 }
 
+func TestLinterHonorsDisabledRuleIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Range("A1").Select
+  ActiveCell.Activate
+End Sub
+`)
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+disabled_rules = ["VB002"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be disabled: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) == 0 {
+		t.Fatalf("VB003 should remain enabled: %+v", issues)
+	}
+}
+
+func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public SharedState As String
+Private c As String, d
+
+Sub Main()
+  Dim a, b As Long
+  Dim localValue
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb005 := issuesByCode(issues, "VB005")
+	if len(vb005) != 3 {
+		t.Fatalf("expected three VB005 findings, got %+v", vb005)
+	}
+	assertIssue(t, vb005, "VB005", 3)
+	assertIssue(t, vb005, "VB005", 6)
+	assertIssue(t, vb005, "VB005", 7)
+	a := findIssue(t, vb005, "VB005", 6)
+	if a.Column != 7 {
+		t.Fatalf("expected Dim a column 7, got %+v", a)
+	}
+	for _, issue := range vb005 {
+		if issue.Line == 6 && issue.Column != 7 {
+			t.Fatalf("Dim a should be the only line 6 implicit Variant, got %+v", vb005)
+		}
+	}
+	vb006 := issuesByCode(issues, "VB006")
+	if len(vb006) != 1 || vb006[0].Line != 2 {
+		t.Fatalf("expected only module-level Public variable to trigger VB006, got %+v", vb006)
+	}
+}
+
+func TestLinterASTIgnoresCommentsAndStringsForKeywordRules(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+  Debug.Print ".Select .Activate On Error Resume Next"
+  ' Range("A1").Select
+  ' ActiveCell.Activate
+  ' On Error Resume Next
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VB002", "VB003", "VB004"} {
+		if got := issuesByCode(issues, code); len(got) != 0 {
+			t.Fatalf("%s should ignore comments and strings, got %+v", code, got)
+		}
+	}
+}
+
+func TestLinterASTDetectsMemberAccessAndOnError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+  Range("A1").Select
+  ActiveCell.Activate
+  With Worksheets(1)
+    .Range("A1").Select
+  End With
+  On Error Resume Next
+  On Error GoTo ErrHandler
+ErrHandler:
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb002 := issuesByCode(issues, "VB002")
+	if len(vb002) != 2 {
+		t.Fatalf("expected two Select findings, got %+v", vb002)
+	}
+	assertIssue(t, vb002, "VB002", 3)
+	assertIssue(t, vb002, "VB002", 6)
+	vb003 := issuesByCode(issues, "VB003")
+	if len(vb003) != 1 || vb003[0].Line != 4 {
+		t.Fatalf("expected one Activate finding, got %+v", vb003)
+	}
+	vb004 := issuesByCode(issues, "VB004")
+	if len(vb004) != 1 || vb004[0].Line != 8 {
+		t.Fatalf("expected only On Error Resume Next to trigger VB004, got %+v", vb004)
+	}
+}
+
+func TestLinterReportsParserRecovery(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main(
+  Range("A1").Value = 1
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) == 0 {
+		t.Fatalf("expected parser recovery issue, got %+v", issues)
+	}
+	if vb014[0].Line == 0 || vb014[0].Column == 0 {
+		t.Fatalf("expected parser recovery issue to include line and column, got %+v", vb014[0])
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB014", vb014[0].Line)
+}
+
 func TestLinterHandlesImplicitVariantsInsideUDTs(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -180,6 +357,9 @@ End Sub
 	if len(vb005Lines) != 2 {
 		t.Fatalf("expected exactly two VB005 findings, got %+v", issues)
 	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("legal UDT implicit Variant fallback should not also trigger VB014: %+v", got)
+	}
 }
 
 func TestLinterIgnoresConditionalCompilationDirectivesInsideUDTs(t *testing.T) {
@@ -219,6 +399,9 @@ End Type
 	}
 	if len(vb005Lines) != 1 {
 		t.Fatalf("expected exactly one VB005 finding, got %+v", issues)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("legal UDT implicit Variant fallback should not also trigger VB014: %+v", got)
 	}
 }
 
@@ -597,6 +780,177 @@ func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLinterFindsDefaultASTBackedRules(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim a, b As Long
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB019", 3)
+}
+
+func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  ws.Range("A1").Value = 1
+  With ws
+    .Cells(1, 1).Value = 1
+  End With
+  On Error Resume Next
+  Err.Clear
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VB004"} {
+		if got := issuesByCode(issues, code); len(got) != 0 {
+			t.Fatalf("%s should not trigger for qualified/narrow pattern: %+v", code, got)
+		}
+	}
+}
+
+func TestLinterOptInProcedureLocalRules(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private moduleValue As Long
+Private Sub Used()
+End Sub
+Private Sub Unused()
+End Sub
+Public Sub Run()
+  Dim moduleValue As Long
+  Dim staleValue As Long
+  Dim Item As Long
+  Application.EnableEvents = False
+  ActiveSheet.Range("A1").Value = 1
+  Set found = Range("A:A").Find("x")
+  Debug.Print found.Value
+  Foo (bar)
+  For Each Item In Range("A1:A2")
+  Next Item
+  Resume Next
+  Used
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectScopeShadowing = true
+	cfg.Lint.DetectUnusedLocalVariables = true
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for code, line := range map[string]int{
+		"VB018": 8,
+		"VB020": 9,
+		"VB021": 5,
+		"VB022": 15,
+		"VB023": 16,
+		"VB026": 18,
+	} {
+		assertIssue(t, issues, code, line)
+	}
+	if issue := findIssue(t, issues, "VB023", 16); issue.Symbol != "Item" {
+		t.Fatalf("expected VB023 to preserve declaration casing, got %+v", issue)
+	}
+}
+
+func TestLinterUnusedLocalVariableUsesProcedureBounds(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim total As Long
+  total = 1
+  Debug.Print total
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLocalVariables = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 0 {
+		t.Fatalf("VB020 should scan to the enclosing procedure end: %+v", got)
+	}
+}
+
+func TestLinterDetectsNestedWithAmbiguityWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  With ThisWorkbook
+    With .Worksheets(1)
+      .Range("A1").Value = 1
+    End With
+  End With
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectNestedWithAmbiguity = true
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB027", 5)
+}
+
+func TestLinterNewASTRulesIgnoreCommentsAndStrings(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Debug.Print "Range(""A1"") On Error GoTo ErrHandler"
+  ' Range("A1").Value = 1
+  ' ErrHandler:
+End Sub
+`)
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("comments and strings should not trigger lint issues: %+v", issues)
+	}
+}
+
+func TestLinterSortsIssuesStably(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "B.bas", "Sub B()\nRange(\"A1\").Value = 1\nEnd Sub\n")
+	writeLintModule(t, dir, "A.bas", "Sub A()\nRange(\"A1\").Value = 1\nEnd Sub\n")
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) < 2 {
+		t.Fatalf("expected lint issues, got %+v", issues)
+	}
+	last := Issue{}
+	for i, issue := range issues {
+		if i > 0 && (last.File > issue.File ||
+			(last.File == issue.File && last.Line > issue.Line) ||
+			(last.File == issue.File && last.Line == issue.Line && last.Column > issue.Column) ||
+			(last.File == issue.File && last.Line == issue.Line && last.Column == issue.Column && last.Code > issue.Code)) {
+			t.Fatalf("issues not sorted: %+v", issues)
+		}
+		last = issue
+	}
+}
+
 func assertIssue(t *testing.T, issues []Issue, code string, line int) {
 	t.Helper()
 	findIssue(t, issues, code, line)
@@ -611,4 +965,25 @@ func findIssue(t *testing.T, issues []Issue, code string, line int) Issue {
 	}
 	t.Fatalf("missing issue %s at line %d in %+v", code, line, issues)
 	return Issue{}
+}
+
+func issuesByCode(issues []Issue, code string) []Issue {
+	var filtered []Issue
+	for _, issue := range issues {
+		if issue.Code == code {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered
+}
+
+func writeLintModule(t *testing.T, dir, name, body string) {
+	t.Helper()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

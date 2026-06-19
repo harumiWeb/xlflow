@@ -24,6 +24,7 @@
 - Apply default normalization in one place and treat the normalized value as authoritative. Avoid re-running the same `withDefaults`/normalizer in individual command handlers once construction-time initialization has already done it.
 - Keep unit tests cross-platform unless the behavior is intentionally OS-specific. Do not hardcode Windows path separators in generic Go tests when `filepath.Join` can express the same case portably.
 - Gate shell-specific tests on actual tool availability. Tests that invoke `powershell` or other non-portable executables should `t.Skip` when the binary is absent so Linux CI can still validate the rest of the package.
+- On Windows, run CGO/tree-sitter Go commands through `scripts/dev/go.ps1` or Taskfile wrappers so MSYS2 UCRT64 is placed before legacy TDM-GCC on PATH. A raw `go test` can fail in `runtime/cgo` or `tree-sitter-vba` with `cgo.exe: exit status 2` when PATH resolves `C:\TDM-GCC-64\bin\gcc.exe` first.
 - Do not use .NET APIs that exist only in PowerShell Core / newer runtimes inside shared Excel bridge scripts. Helpers under `internal/excel/scripts/common.ps1` must remain compatible with Windows PowerShell 5.1, and path utilities need explicit regression coverage there.
 - Excel samples that schedule `Application.OnTime` callbacks or install global `Application.OnKey` hooks must wire `Workbook_BeforeClose` cleanup so closing the workbook cancels timers and restores keys instead of leaving Excel state behind.
 - Example sample docs must use `README.md` and stay aligned with the real startup path; if a sample claims it auto-runs on open or via `xlflow run`, wire the matching workbook event and keep the documented command consistent with the configured `entry`.
@@ -54,6 +55,7 @@
 - When spawning nested `powershell.exe -Command` helpers from PowerShell, escape every child-scope `$variable` reference with backticks in the command string. Otherwise the parent shell expands them before launch and the child helper can silently do nothing while UI state remains stuck.
 - Excel VBE compile automation should not assume the `CommandBars("Debug")` toolbar contains the compile command. In real Excel, `Compile VBAProject` can live only under `CommandBars("Menu Bar") -> Debug` (`Id = 578`), and `Enabled = false` should be treated as "no compile needed" rather than executed as a failure path.
 - `go test ./internal/excel/scripts` can take 2-3 minutes even when healthy. Do not infer success or failure from a short silent interval; use a generous timeout and wait for completion before treating the package as hung.
+- AST symbol ranges may describe declaration nodes rather than enclosing scopes. Lint rules that scan local references must derive the containing procedure bounds, and cleanup labels such as `Cleanup:` need explicit coverage because they can be normal fallthrough cleanup paths.
 
 # DialogWatcher
 

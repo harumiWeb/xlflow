@@ -39,7 +39,7 @@ func (i UserFormCodeSourceIssue) LintIssue(formsDir string) lint.Issue {
 		}
 	}
 	return lint.Issue{
-		Code:       "VBA201",
+		Code:       "FRM202",
 		Severity:   "warning",
 		File:       relPath,
 		Line:       i.Line,

@@ -18,7 +18,8 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
 
@@ -101,17 +102,17 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## What xlflow can do
 
-| Area           | Capabilities                                                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                |
-| Execution      | Run macros from the CLI with typed arguments                                                                                                      |
-| Testing        | Discover and run VBA test procedures                                                                                                              |
-| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                   |
-| Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, public module fields, and interactive operations |
-| GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                    |
-| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                              |
-| Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                  |
-| AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents           |
+| Area           | Capabilities                                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Execution      | Run macros from the CLI with typed arguments                                                                                                                                 |
+| Testing        | Discover and run VBA test procedures                                                                                                                                         |
+| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
+| Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
+| GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                                               |
+| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                                                         |
+| Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
+| AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
@@ -585,27 +586,21 @@ code_source = "sidecar"
 
 # Static analysis rules.
 [lint]
-# Require Option Explicit in every module.
-require_option_explicit = true
-# Forbid Select / Activate patterns.
-forbid_select = true
-# Forbid Activate usage.
-forbid_activate = true
-# Forbid On Error Resume Next.
-forbid_on_error_resume_next = true
-# Detect implicitly typed Variant variables.
-detect_implicit_variant = true
-# Forbid public fields in standard modules.
-forbid_public_module_fields = true
-# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
-forbid_interactive_input = true
+# Disable specific lint rules by diagnostic ID.
+disabled_rules = []
+
+[analyze]
+# Disable specific analyzer rules by diagnostic ID.
+disabled_rules = []
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
 
-Set `forbid_interactive_input = false` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries.
+Use `[lint].disabled_rules = ["VB007"]` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries. Legacy per-rule booleans such as `forbid_interactive_input = false` are still accepted for compatibility, but are deprecated.
 
 Syntax safety lint rules for typographic quotes, C-style quote escapes, unclosed or mismatched procedures, and malformed line-continuation underscores are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+Use `[analyze].disabled_rules = ["VBA205"]` to disable configurable analyzer rules. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.
 
 ---
 

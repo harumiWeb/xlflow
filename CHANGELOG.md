@@ -5,7 +5,13 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added experimental `xlflow pack`, a pure-Go, cross-platform command that builds an `.xlsm` artifact from the source tree plus a workbook template without Excel. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces only that single zip entry, leaving the rest of the workbook untouched. Gated behind `--experimental`; supports standard, class, and unambiguous document modules, carries existing UserForm designer streams through byte-for-byte, and performs no VBE compile or runtime validation (every run reports `pack.vbe_validation = "not_performed"` and a `vbe_validation_skipped` warning). Fails loudly on protected or signed projects, UserForm generation, ambiguous layouts, active sessions, and in-place overwrite of the template or configured workbook. See `docs/specs/pack-command.md` and ADR-0012.
+- Added `[lint].disabled_rules` and `[analyze].disabled_rules` for disabling configurable source feedback rules by stable diagnostic ID, with compatibility warnings for legacy per-rule booleans.
+- Refactored `xlflow lint` to use `tree-sitter-vba` AST-backed checks for core declaration, member-access, and local code-shape rules, including per-declarator implicit `Variant` diagnostics and parser recovery findings.
+- Refactored `xlflow analyze` to use `tree-sitter-vba` AST-backed procedure context and added runtime-risk findings for `Range.Find` `Nothing` guards, object initialization, Application state restore, error-handler fallthrough, unqualified Excel object access, ByRef mismatch candidates, Dictionary/Collection guards, `ReDim Preserve`, object/array comparisons, function return paths, and expanded Excel member mismatches.
+- Documented the full `xlflow lint` rule list on the command page, including `VB001` through `VB014` codes and severity levels.
+- Added `xlflow inspect calls`, a source-only tree-sitter-vba call-site extractor for exported VBA files with caller context, argument summaries, source ranges, conservative project-symbol resolution, JSON output, and compact grouped text output.
 - Added `xlflow inspect symbols`, a source-only tree-sitter-vba symbol indexer for exported `.bas`, `.cls`, and `.frm` VBA files with JSON and compact outline output.
+- Updated `xlflow inspect symbols` for the tree-sitter-vba 0.6.0 declaration node shape changes, including split property and declare nodes.
 
 ## v0.13.1
 

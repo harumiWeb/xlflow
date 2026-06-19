@@ -57,20 +57,13 @@ code_source = "sidecar"
 
 # Static analysis rules.
 [lint]
-# Require Option Explicit in every module.
-require_option_explicit = true
-# Forbid Select / Activate patterns.
-forbid_select = true
-# Forbid Activate usage.
-forbid_activate = true
-# Forbid On Error Resume Next.
-forbid_on_error_resume_next = true
-# Detect implicitly typed Variant variables.
-detect_implicit_variant = true
-# Forbid public fields in standard modules.
-forbid_public_module_fields = true
-# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
-forbid_interactive_input = true
+# Disable specific lint rules by diagnostic ID.
+disabled_rules = []
+
+# Runtime-risk analysis rules.
+[analyze]
+# Disable specific analyzer rules by diagnostic ID.
+disabled_rules = []
 ```
 
 ## Section reference
@@ -119,15 +112,59 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 
 ### `[lint]`
 
-| Key                           | Type | Required | Default | Description                                                             |
-| ----------------------------- | ---- | -------- | ------- | ----------------------------------------------------------------------- |
-| `require_option_explicit`     | bool | no       | `true`  | Require `Option Explicit` in every module.                              |
-| `forbid_select`               | bool | no       | `true`  | Forbid `Select` / `Activate` patterns.                                  |
-| `forbid_activate`             | bool | no       | `true`  | Forbid `Activate` usage.                                                |
-| `forbid_on_error_resume_next` | bool | no       | `true`  | Forbid `On Error Resume Next`.                                          |
-| `detect_implicit_variant`     | bool | no       | `true`  | Detect implicitly typed `Variant` variables.                            |
-| `forbid_public_module_fields` | bool | no       | `true`  | Forbid public fields in standard modules.                               |
-| `forbid_interactive_input`    | bool | no       | `true`  | Forbid interactive input (`MsgBox`, `InputBox`, etc.) in headless runs. |
+| Key              | Type     | Required | Default | Description                                       |
+| ---------------- | -------- | -------- | ------- | ------------------------------------------------- |
+| `disabled_rules` | string[] | no       | `[]`    | Disable configurable lint rules by diagnostic ID. |
+
+Legacy per-rule booleans such as `forbid_select = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VB002"]`.
+
+Configurable lint rule IDs:
+
+| ID      | Legacy key                           |
+| ------- | ------------------------------------ |
+| `VB001` | `require_option_explicit`            |
+| `VB002` | `forbid_select`                      |
+| `VB003` | `forbid_activate`                    |
+| `VB004` | `forbid_on_error_resume_next`        |
+| `VB005` | `detect_implicit_variant`            |
+| `VB006` | `forbid_public_module_fields`        |
+| `VB007` | `forbid_interactive_input`           |
+| `VB018` | `detect_scope_shadowing`             |
+| `VB019` | `detect_multiple_declarator_clarity` |
+| `VB020` | `detect_unused_local_variables`      |
+| `VB021` | `detect_unused_private_procedures`   |
+| `VB022` | `detect_confusing_call_syntax`       |
+| `VB023` | `detect_for_each_control_type`       |
+| `VB026` | `detect_dangerous_resume`            |
+| `VB027` | `detect_nested_with_ambiguity`       |
+
+Safety diagnostics `VB008` through `VB014` are always enabled and cannot be disabled with `disabled_rules`.
+
+### `[analyze]`
+
+| Key              | Type     | Required | Default | Description                                           |
+| ---------------- | -------- | -------- | ------- | ----------------------------------------------------- |
+| `disabled_rules` | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID. |
+
+Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`.
+
+Configurable analyzer rule IDs:
+
+| ID       | Legacy key                            |
+| -------- | ------------------------------------- |
+| `VBA201` | `detect_range_find_nothing_check`     |
+| `VBA202` | `detect_object_use_before_set`        |
+| `VBA203` | `detect_application_state_restore`    |
+| `VBA204` | `detect_error_handler_fallthrough`    |
+| `VBA205` | `forbid_unqualified_excel_objects`    |
+| `VBA206` | `detect_byref_argument_mismatch`      |
+| `VBA207` | `detect_dictionary_collection_guard`  |
+| `VBA208` | `detect_redim_preserve_dimension`     |
+| `VBA209` | `detect_object_array_comparison`      |
+| `VBA210` | `detect_function_return_path`         |
+| `VBA211` | `detect_excel_object_member_mismatch` |
+
+Analyzer diagnostics `VBA101` through `VBA106` are always enabled and cannot be disabled with `disabled_rules`.
 
 ## Defaults differ between `new` and `init`
 

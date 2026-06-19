@@ -78,7 +78,7 @@ Compile failures return `vba_compile_failed` with `error.phase = "compile_vba"` 
 
 ## Runtime Source Analysis
 
-`xlflow analyze` scans configured source directories without Excel COM. The v1 analyzer is deliberately pattern-based and detects likely missing `Set` assignments for object variables and object-returning functions, statically-known object/member mismatches such as `Worksheet.DisplayGridlines`, and removed legacy helper APIs when source-controlled VBA still calls `XlflowLog` or `XlflowSetTraceFile`. Stable analyzer codes are `VBA101`, `VBA102`, `VBA103`, `VBA104`, `VBA105`, and `VBA106`.
+`xlflow analyze` scans configured source directories without Excel COM. The analyzer uses `tree-sitter-vba` to build per-file and per-procedure context from declarations, parameters, function and property returns, labels, assignments, calls, and member access. It detects likely missing `Set` assignments for object variables and object-returning functions, statically-known Excel object/member mismatches, removed legacy helper APIs such as `XlflowLog` and `XlflowSetTraceFile`, `Range.Find` results used without `Nothing` guards, object variables used before obvious initialization, Application state leaks, error-handler fallthrough, unqualified Excel object access, and selected opt-in semantic risks. Stable analyzer codes are `VBA101` through `VBA106` and `VBA201` through `VBA211`.
 
 `xlflow check` aggregates `lint`, `analyze`, and `doctor`. It continues after lint/analyze findings and returns all cheap source feedback before reporting Excel COM doctor status.
 

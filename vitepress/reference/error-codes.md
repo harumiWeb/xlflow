@@ -14,6 +14,7 @@ Common examples:
 - `output_file_exists`
 - `unsupported_image_format`
 - `form_not_found`
+- `FRM202`
 - `spec_validation_failed`
 - `fmt_failed`
 - `fmt_check_failed`
@@ -26,4 +27,4 @@ Common examples:
 - `wsl_path_translation_failed`
 - `windows_xlflow_execution_failed`
 
-Lint codes include `VB001` through `VB013`. Analyzer codes include `VBA101` and later runtime-risk findings.
+Lint codes include `VB001` through `VB014`, `VB018` through `VB023`, `VB026`, and `VB027`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA211`.

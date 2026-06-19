@@ -269,6 +269,144 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "deprecated_lint_rule_config", "VB002") {
+		t.Fatalf("expected config deprecation warning, got %+v", got.Warnings)
+	}
+}
+
+func TestLintCommandPlainIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningLintProject(t, `forbid_public_module_fields = true
+disabled_rules = ["VB006"]`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	text := stdout.String()
+	for _, want := range []string{"Warnings:", "[lint].forbid_public_module_fields=true is deprecated", "Remove [lint].forbid_public_module_fields", "lint rule VB006 is enabled", "[lint].disabled_rules takes precedence"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected lint output to contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningAnalyzeProject(t, `detect_byref_argument_mismatch = true`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "deprecated_analyze_rule_config", "VBA206") {
+		t.Fatalf("expected analyze config deprecation warning, got %+v", got.Warnings)
+	}
+}
+
+func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+` + lintConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCLIWarningAnalyzeProject(t *testing.T, analyzeConfig string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+` + analyzeConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func hasCLIWarning(warnings []map[string]any, code string, rule string) bool {
+	for _, warning := range warnings {
+		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
+}
+
 func TestVersionCommandVerboseIncludesExecutableAndFeatures(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{
@@ -3024,7 +3162,7 @@ code_source = "sidecar"
 	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
 		t.Fatalf("unexpected contaminated-sidecar preflight payload: %+v", got)
 	}
-	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+	if len(got.Issues) != 1 || got.Issues[0].Code != "FRM202" || got.Issues[0].Line != 1 {
 		t.Fatalf("unexpected contaminated-sidecar issues: %+v", got.Issues)
 	}
 	if !strings.Contains(got.Issues[0].Suggestion, "Attribute VB_*") {
@@ -3189,6 +3327,88 @@ func TestInspectSymbolsTextAndPath(t *testing.T) {
 	}
 }
 
+func TestInspectCallsJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "inspect", "calls"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect calls json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Inspect struct {
+			Target  string `json:"target"`
+			Source  string `json:"source"`
+			Root    string `json:"root"`
+			Summary struct {
+				Files int `json:"files"`
+				Calls int `json:"calls"`
+			} `json:"summary"`
+			Calls []struct {
+				File   string `json:"file"`
+				Module string `json:"module"`
+				Caller struct {
+					QualifiedName string `json:"qualifiedName"`
+				} `json:"caller"`
+				Callee struct {
+					Text     string `json:"text"`
+					BaseName string `json:"baseName"`
+				} `json:"callee"`
+				Resolution struct {
+					Status string `json:"status"`
+				} `json:"resolution"`
+			} `json:"calls"`
+		} `json:"inspect"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse inspect calls output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "inspect" || got.Inspect.Target != "calls" || got.Inspect.Source != "tree_sitter_vba" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Inspect.Root != "src" || got.Inspect.Summary.Files != 1 || got.Inspect.Summary.Calls == 0 {
+		t.Fatalf("unexpected inspect summary: %+v", got.Inspect)
+	}
+	found := false
+	for _, call := range got.Inspect.Calls {
+		if call.Callee.Text == "BuildReport" && call.Caller.QualifiedName == "Main.Run" && call.Resolution.Status == "matched" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("BuildReport call missing: %+v", got.Inspect.Calls)
+	}
+}
+
+func TestInspectCallsTextPathAndFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, "custom-src")
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "calls", "--path", "custom-src", "--from", "Main.Run", "--to", "BuildReport"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect calls text error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{"custom-src/Main.bas", "Main.Run", "-> BuildReport"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect calls text missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Debug.Print") {
+		t.Fatalf("inspect calls filter included Debug.Print:\n%s", got)
+	}
+}
+
 func writeInspectSymbolsFixture(t *testing.T, dir, sourceDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {
@@ -3206,6 +3426,35 @@ path = "build/Book.xlsm"
 	body := `Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Run()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeInspectCallsFixture(t *testing.T, dir, sourceDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    BuildReport 1, 2
+    Debug.Print "done"
+End Sub
+
+Public Sub BuildReport(ByVal first As Long, ByVal second As Long)
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
@@ -3276,7 +3525,7 @@ code_source = "sidecar"
 	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
 		t.Fatalf("unexpected push contaminated-sidecar payload: %+v", got)
 	}
-	if len(got.Issues) != 1 || got.Issues[0].Code != "VBA201" || got.Issues[0].Line != 1 {
+	if len(got.Issues) != 1 || got.Issues[0].Code != "FRM202" || got.Issues[0].Line != 1 {
 		t.Fatalf("unexpected push contaminated-sidecar issues: %+v", got.Issues)
 	}
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
@@ -50,6 +51,7 @@ type app struct {
 	stderr         io.Writer
 	stdoutTerminal func() bool
 	stderrTerminal func() bool
+	configWarnings []map[string]any
 	buildInfo      BuildInfo
 	updateChecker  releaseChecker
 }
@@ -3104,8 +3106,64 @@ func (a *app) inspectCommand() *cobra.Command {
 		a.inspectRangeCommand(flags),
 		a.inspectUsedRangeCommand(flags),
 		a.inspectCellCommand(flags),
+		a.inspectCallsCommand(flags),
 		a.inspectSymbolsCommand(flags),
 	)
+	return cmd
+}
+
+func (a *app) inspectCallsCommand(flags *inspectSharedFlags) *cobra.Command {
+	var path string
+	var from string
+	var to string
+	var includeMembers bool
+	var includeBuiltins bool
+	cmd := &cobra.Command{
+		Use:   "calls",
+		Short: "Inspect VBA source call sites",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := validateInspectFormat(flags.format)
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitConfig, "inspect_args_invalid", err)
+			}
+			cfg, err := a.loadConfig("inspect")
+			if err != nil {
+				return err
+			}
+			result, err := calls.Inspect(calls.Options{
+				RootDir: a.cwd,
+				Config:  cfg,
+				Path:    path,
+				From:    from,
+				To:      to,
+			})
+			if err != nil {
+				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
+			}
+			env := output.New("inspect")
+			env.Target = map[string]any{
+				"kind":        "source",
+				"path":        result.Root,
+				"description": "VBA source files",
+			}
+			env.Inspect = workbookinspect.Payload{
+				Target:  "calls",
+				Format:  format,
+				Source:  "tree_sitter_vba",
+				Root:    result.Root,
+				Calls:   result.Calls,
+				Summary: result.Summary,
+			}
+			env.Logs = []string{fmt.Sprintf("inspected %d VBA source file(s), found %d call site(s)", result.Summary.Files, result.Summary.Calls)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
+	cmd.Flags().StringVar(&from, "from", "", "show only calls made from a module or procedure")
+	cmd.Flags().StringVar(&to, "to", "", "show only call sites whose callee matches this name")
+	cmd.Flags().BoolVar(&includeMembers, "include-members", false, "include member calls (included by default)")
+	cmd.Flags().BoolVar(&includeBuiltins, "include-builtins", false, "include built-in-looking calls (included by default)")
 	return cmd
 }
 
@@ -4758,11 +4816,22 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
+	blockingIssues := lint.PushBlockingIssues(issues)
+	if len(blockingIssues) > 0 {
+		env := output.Failure(command, output.Error{
+			Code:    "lint_failed",
+			Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid a VBA editor dialog", len(blockingIssues), action),
+			Source:  "xlflow",
+			Phase:   "preflight",
+		})
+		env.Issues = blockingIssues
+		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
+		return a.write(env, output.ExitValidation)
+	}
 	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
 	}
-	blockingIssues := lint.PushBlockingIssues(issues)
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil
@@ -5108,6 +5177,9 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 	if err != nil {
 		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
 	}
+	if len(cfg.Warnings) > 0 {
+		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
+	}
 	return cfg, nil
 }
 
@@ -5141,6 +5213,7 @@ func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
 
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
 	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
+	a.addConfigWarnings(&env)
 	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
 		return output.WithExitCode(code, writeErr)
 	}
@@ -5149,6 +5222,7 @@ func (a *app) writeFailure(command string, code int, errCode string, err error) 
 
 func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) error {
 	env := output.Failure(command, output.Error{Code: specErr.Code, Message: specErr.Message})
+	a.addConfigWarnings(&env)
 	spec := map[string]any{}
 	if specErr.Path != "" {
 		spec["path"] = specErr.Path
@@ -5182,6 +5256,7 @@ func (a *app) write(env output.Envelope, code int) error {
 }
 
 func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.Options) error {
+	a.addConfigWarnings(&env)
 	if err := output.WriteWithOptions(a.stdoutWriter(), env, opts); err != nil {
 		return output.WithExitCode(code, err)
 	}
@@ -5189,6 +5264,17 @@ func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.
 		return output.WithExitCode(code, fmt.Errorf("%s failed", env.Command))
 	}
 	return nil
+}
+
+func (a *app) addConfigWarnings(env *output.Envelope) {
+	if env == nil || len(a.configWarnings) == 0 {
+		return
+	}
+	warnings := anySlice(env.Warnings)
+	for _, warning := range a.configWarnings {
+		warnings = append(warnings, warning)
+	}
+	env.Warnings = warnings
 }
 
 func (a *app) outputOptions() output.Options {

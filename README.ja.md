@@ -18,7 +18,8 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
 
@@ -585,27 +586,21 @@ code_source = "sidecar"
 
 # 静的解析ルール
 [lint]
-# すべてのモジュールで Option Explicit を必須にします。
-require_option_explicit = true
-# Select / Activate パターンの使用を禁止します。
-forbid_select = true
-# Activate の使用を禁止します。
-forbid_activate = true
-# On Error Resume Next の使用を禁止します。
-forbid_on_error_resume_next = true
-# 暗黙的に型指定された Variant 変数を検出します。
-detect_implicit_variant = true
-# 標準モジュール内でのパブリックフィールドの使用を禁止します。
-forbid_public_module_fields = true
-# ヘッドレス実行時の対話型入力（MsgBox、InputBoxなど）を禁止します。
-forbid_interactive_input = true
+# 診断 ID で特定の lint ルールを無効化します。
+disabled_rules = []
+
+[analyze]
+# 診断 ID で特定の analyzer ルールを無効化します。
+disabled_rules = []
 ```
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。
 
-対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`forbid_interactive_input = false` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。
+対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`[lint].disabled_rules = ["VB007"]` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。`forbid_interactive_input = false` のような従来の per-rule boolean も互換性のため受け付けますが、非推奨です。
 
 typographic quote、C-style quote escape、閉じられていないまたは対応がずれた procedure、行継続 `_` の空白不足を検出する構文安全 lint は常に有効です。`push` や `run` が Excel を開く前に VBE compile dialog を防ぐためのルールです。
+
+analyzer ルールは `[analyze].disabled_rules = ["VBA205"]` のように無効化できます。`VBA101` から `VBA106` までの analyzer 診断は常に有効です。
 
 ---
 
