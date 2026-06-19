@@ -56,6 +56,7 @@
 - Excel VBE compile automation should not assume the `CommandBars("Debug")` toolbar contains the compile command. In real Excel, `Compile VBAProject` can live only under `CommandBars("Menu Bar") -> Debug` (`Id = 578`), and `Enabled = false` should be treated as "no compile needed" rather than executed as a failure path.
 - `go test ./internal/excel/scripts` can take 2-3 minutes even when healthy. Do not infer success or failure from a short silent interval; use a generous timeout and wait for completion before treating the package as hung.
 - AST symbol ranges may describe declaration nodes rather than enclosing scopes. Lint rules that scan local references must derive the containing procedure bounds, and cleanup labels such as `Cleanup:` need explicit coverage because they can be normal fallthrough cleanup paths.
+- GitHub Actions workflows that use `msys2/setup-msys2` must not hardcode `C:\msys64`. Use the action's `msys2-location` output to derive UCRT64 tool paths because hosted runners can install MSYS2 under `$RUNNER_TEMP`.
 
 # DialogWatcher
 
