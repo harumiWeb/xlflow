@@ -37,6 +37,15 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Worksheet", "Range"); !ok || got.ReturnType != "Excel.Range" {
 		t.Fatalf("Worksheet.Range = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Excel.Range", "Font"); !ok || got.ReturnType != "Excel.Font" {
+		t.Fatalf("Range.Font = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Borders", "Item"); !ok || got.ReturnType != "Excel.Border" {
+		t.Fatalf("Borders.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Application", "WorksheetFunction"); !ok || got.ReturnType != "Excel.WorksheetFunction" {
+		t.Fatalf("Application.WorksheetFunction = %+v, %v", got, ok)
+	}
 }
 
 func TestResolveConstant(t *testing.T) {
@@ -68,6 +77,12 @@ func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
 	}
 	if !hasMember(db.Members("Excel.Range"), "Value") {
 		t.Fatalf("Range.Value member missing: %+v", db.Members("Excel.Range"))
+	}
+	if !hasMember(db.Members("Excel.Range"), "Font") {
+		t.Fatalf("Range.Font member missing: %+v", db.Members("Excel.Range"))
+	}
+	if !hasMember(db.Members("Excel.Font"), "Color") {
+		t.Fatalf("Font.Color member missing: %+v", db.Members("Excel.Font"))
 	}
 }
 

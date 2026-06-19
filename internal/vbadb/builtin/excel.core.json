@@ -10,6 +10,7 @@
         { "name": "Workbooks", "return_type": "Excel.Workbooks" },
         { "name": "Worksheets", "return_type": "Excel.Worksheets" },
         { "name": "Sheets", "return_type": "Excel.Sheets" },
+        { "name": "WorksheetFunction", "return_type": "Excel.WorksheetFunction" },
         { "name": "ThisWorkbook", "return_type": "Excel.Workbook" },
         { "name": "ActiveWorkbook", "return_type": "Excel.Workbook" },
         { "name": "ActiveSheet", "return_type": "Excel.Worksheet" },
@@ -68,6 +69,11 @@
         { "name": "Columns", "return_type": "Excel.Range" },
         { "name": "ListObjects", "return_type": "Excel.ListObjects" },
         { "name": "Names", "return_type": "Excel.Names" },
+        { "name": "UsedRange", "return_type": "Excel.Range", "read_only": true },
+        { "name": "Hyperlinks", "return_type": "Excel.Hyperlinks" },
+        { "name": "PageSetup", "return_type": "Excel.PageSetup" },
+        { "name": "Sort", "return_type": "Excel.Sort" },
+        { "name": "AutoFilter", "return_type": "Excel.AutoFilter" },
         { "name": "Application", "return_type": "Excel.Application" }
       ],
       "methods": [{ "name": "Activate" }, { "name": "Copy" }],
@@ -116,7 +122,15 @@
         { "name": "End", "return_type": "Excel.Range" },
         { "name": "Rows", "return_type": "Excel.Range" },
         { "name": "Columns", "return_type": "Excel.Range" },
-        { "name": "Worksheet", "return_type": "Excel.Worksheet", "read_only": true }
+        { "name": "Worksheet", "return_type": "Excel.Worksheet", "read_only": true },
+        { "name": "Font", "return_type": "Excel.Font" },
+        { "name": "Interior", "return_type": "Excel.Interior" },
+        { "name": "Borders", "return_type": "Excel.Borders" },
+        { "name": "FormatConditions", "return_type": "Excel.FormatConditions" },
+        { "name": "Validation", "return_type": "Excel.Validation" },
+        { "name": "Hyperlinks", "return_type": "Excel.Hyperlinks" },
+        { "name": "Address", "return_type": "String", "read_only": true },
+        { "name": "Count", "return_type": "Long", "read_only": true }
       ],
       "methods": [
         { "name": "Select" },

@@ -145,6 +145,12 @@ func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.
 	if got, ok := analyzer.ResolveExpressionType(`Workbooks.Open("book.xlsx")`); !ok || got != "Excel.Workbook" {
 		t.Fatalf("Workbooks.Open(...) = %q, %v", got, ok)
 	}
+	if got, ok := analyzer.ResolveExpressionType(`Range("A1").Font`); !ok || got != "Excel.Font" {
+		t.Fatalf("Range(...).Font = %q, %v", got, ok)
+	}
+	if got, ok := analyzer.ResolveExpressionType(`Application.WorksheetFunction`); !ok || got != "Excel.WorksheetFunction" {
+		t.Fatalf("Application.WorksheetFunction = %q, %v", got, ok)
+	}
 
 	doc := Document{
 		Source: `Option Explicit
@@ -188,6 +194,17 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 	if !hasCompletion(items, "Range") {
 		t.Fatalf("Range completion missing: %+v", items)
+	}
+
+	fontSource := "Option Explicit\nSub Test()\n    Range(\"A1\").Font.Co\nEnd Sub\n"
+	fontLine := `    Range("A1").Font.Co`
+	fontDoc := Document{Path: filepath.Join(t.TempDir(), "Formatting.bas"), Source: fontSource}
+	items, err = analyzer.Completions(fontDoc, Position{Line: 2, Character: utf16Len(fontLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Color") {
+		t.Fatalf("Font.Color completion missing: %+v", items)
 	}
 
 	globalDoc := Document{Path: filepath.Join(t.TempDir(), "Globals.bas"), Source: "Option Explicit\nSub Test()\n    xlU\nEnd Sub\n"}
