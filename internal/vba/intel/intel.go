@@ -14,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
@@ -127,7 +128,9 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	if err != nil {
 		return nil, err
 	}
-	return symbolsFromFile(file, doc.URI), nil
+	out := symbolsFromFile(file, doc.URI)
+	out = append(out, a.formControlSymbols(doc)...)
+	return out, nil
 }
 
 func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, error) {
@@ -340,6 +343,15 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		word = currentIdentifierPrefix(prefix)
 	}
 	items := a.globalCompletions(word)
+	for _, control := range a.formControls(doc) {
+		if completionMatches(control.Name, word) {
+			items = append(items, Completion{
+				Label:  control.Name,
+				Kind:   "variable",
+				Detail: control.Type,
+			})
+		}
+	}
 	syms, err := a.WorkspaceSymbols(open, word)
 	if err != nil {
 		return nil, err
@@ -351,6 +363,12 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 }
 
 func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
+	if strings.EqualFold(word, "Me") && a.isFormDocument(doc) {
+		return "MSForms.UserForm", true
+	}
+	if control, ok := a.resolveFormControl(doc, word); ok {
+		return control.Type, true
+	}
 	if typ, ok := a.DB.ResolveGlobal(word); ok {
 		return typ.Name, true
 	}
@@ -413,7 +431,10 @@ func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument b
 		base = strings.TrimSpace(base[:idx])
 	}
 	var current string
-	if typ, ok := a.DB.ResolveGlobal(base); ok {
+	formMode := useDocument && strings.EqualFold(base, "Me") && a.isFormDocument(doc)
+	if formMode {
+		current = "MSForms.UserForm"
+	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
 		current = typ.Name
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
@@ -434,11 +455,29 @@ func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument b
 	for _, raw := range parts[1:] {
 		member := strings.TrimSpace(raw)
 		called := strings.Contains(member, "(")
+		args := ""
 		if idx := strings.Index(member, "("); idx >= 0 {
+			args = member[idx:]
 			member = strings.TrimSpace(member[:idx])
 		}
 		if member == "" {
 			continue
+		}
+		if formMode {
+			if control, ok := a.resolveFormControl(doc, member); ok {
+				current = control.Type
+				formMode = false
+				continue
+			}
+			if strings.EqualFold(member, "Controls") {
+				if controlName := firstStringArgument(args); controlName != "" {
+					if control, ok := a.resolveFormControl(doc, controlName); ok {
+						current = control.Type
+						formMode = false
+						continue
+					}
+				}
+			}
 		}
 		if info, ok := a.DB.ResolveMember(current, member); ok && info.ReturnType != "" {
 			current = info.ReturnType
@@ -460,6 +499,81 @@ func (a Analyzer) collectionDefaultType(name string) (string, bool) {
 		return "", false
 	}
 	return typ.ElementType, true
+}
+
+func (a Analyzer) formControlSymbols(doc Document) []Symbol {
+	controls := a.formControls(doc)
+	out := make([]Symbol, 0, len(controls))
+	for _, control := range controls {
+		out = append(out, Symbol{
+			Name:   control.Name,
+			Kind:   "field",
+			Detail: control.Name + " As " + control.Type,
+			File:   firstNonEmpty(doc.URI, doc.Path),
+			Module: a.formName(doc),
+			Range: Range{
+				Start: Position{Line: max(0, control.StartLine-1), Character: max(0, control.StartColumn-1)},
+				End:   Position{Line: max(0, control.EndLine-1), Character: max(0, control.EndColumn-1)},
+			},
+			Selection: Range{
+				Start: Position{Line: max(0, control.StartLine-1), Character: max(0, control.StartColumn-1)},
+				End:   Position{Line: max(0, control.StartLine-1), Character: max(0, control.StartColumn-1+utf16Len(control.Name))},
+			},
+		})
+	}
+	return out
+}
+
+func (a Analyzer) formControls(doc Document) []userforms.Control {
+	form := userforms.Parse(a.formSource(doc))
+	return form.Controls
+}
+
+func (a Analyzer) resolveFormControl(doc Document, name string) (userforms.Control, bool) {
+	for _, control := range a.formControls(doc) {
+		if strings.EqualFold(control.Name, name) {
+			return control, true
+		}
+	}
+	return userforms.Control{}, false
+}
+
+func (a Analyzer) isFormDocument(doc Document) bool {
+	return strings.EqualFold(doc.ModuleKind, "form") || strings.EqualFold(filepath.Ext(doc.Path), ".frm") || a.formSource(doc) != ""
+}
+
+func (a Analyzer) formName(doc Document) string {
+	form := userforms.Parse(a.formSource(doc))
+	if form.Name != "" {
+		return form.Name
+	}
+	return strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+}
+
+func (a Analyzer) formSource(doc Document) string {
+	if strings.EqualFold(filepath.Ext(doc.Path), ".frm") {
+		return doc.Source
+	}
+	for _, path := range a.candidateFormPaths(doc) {
+		body, err := os.ReadFile(path)
+		if err == nil {
+			return string(body)
+		}
+	}
+	return ""
+}
+
+func (a Analyzer) candidateFormPaths(doc Document) []string {
+	name := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+	var paths []string
+	if a.RootDir != "" && a.Config.Src.Forms != "" {
+		formsRoot := filepath.Join(a.RootDir, filepath.FromSlash(a.Config.Src.Forms))
+		paths = append(paths, filepath.Join(formsRoot, name+".frm"))
+		if parent := filepath.Base(filepath.Dir(doc.Path)); strings.EqualFold(parent, "code") {
+			paths = append(paths, filepath.Join(filepath.Dir(filepath.Dir(doc.Path)), name+".frm"))
+		}
+	}
+	return paths
 }
 
 func (a Analyzer) workspaceDocuments(open []Document) ([]Document, error) {
@@ -966,6 +1080,27 @@ func splitMemberExpression(expr string) []string {
 		parts = append(parts, tail)
 	}
 	return parts
+}
+
+func firstStringArgument(args string) string {
+	start := strings.Index(args, `"`)
+	if start < 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i := start + 1; i < len(args); i++ {
+		if args[i] != '"' {
+			b.WriteByte(args[i])
+			continue
+		}
+		if i+1 < len(args) && args[i+1] == '"' {
+			b.WriteByte('"')
+			i++
+			continue
+		}
+		return b.String()
+	}
+	return ""
 }
 
 func typeHover(typ vbadb.TypeInfo) string {

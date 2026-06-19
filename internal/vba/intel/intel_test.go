@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,6 +114,88 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 	if !hasCompletion(items, "xlUp") {
 		t.Fatalf("xlUp completion missing: %+v", items)
+	}
+}
+
+func TestUserFormControlsResolveForHoverCompletionAndDefinition(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} CustomerForm
+   Begin MSForms.TextBox txtName
+   End
+End
+Attribute VB_Name = "CustomerForm"
+Option Explicit
+Private Sub UserForm_Initialize()
+    Me.txtName.Text = "Alice"
+    Me.Controls("txtName").Text = "Bob"
+End Sub
+`
+	doc := Document{
+		URI:        "file:///C:/work/src/forms/CustomerForm.frm",
+		Path:       filepath.Join(t.TempDir(), "CustomerForm.frm"),
+		ModuleKind: "form",
+		Source:     source,
+	}
+
+	hoverLine := `    Me.txtName.Text = "Alice"`
+	hover, err := analyzer.Hover(doc, Position{Line: 8, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "txtName")+3])}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "MSForms.TextBox") {
+		t.Fatalf("unexpected hover: %+v", hover)
+	}
+
+	controlLine := `    Me.Controls("txtName").Te`
+	items, err := analyzer.Completions(doc, Position{Line: 9, Character: utf16Len(controlLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Text") {
+		t.Fatalf("Text completion missing: %+v", items)
+	}
+
+	defs, err := analyzer.Definition(doc, Position{Line: 8, Character: utf16Len(`    Me.txtN`)}, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) == 0 || defs[0].Range.Start.Line != 2 {
+		t.Fatalf("control definition = %+v, want declaration on .frm Begin line", defs)
+	}
+}
+
+func TestUserFormControlsResolveFromSidecarCodeBehind(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	codeDir := filepath.Join(formsDir, "code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} CustomerForm
+   Begin MSForms.TextBox txtName
+   End
+End
+Attribute VB_Name = "CustomerForm"
+`
+	if err := os.WriteFile(filepath.Join(formsDir, "CustomerForm.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:       filepath.Join(codeDir, "CustomerForm.bas"),
+		ModuleKind: "form",
+		Source:     "Option Explicit\nPrivate Sub UserForm_Initialize()\n    Me.txtName.Text = \"Alice\"\nEnd Sub\n",
+	}
+	line := `    Me.txtName.Text = "Alice"`
+	hover, err := analyzer.Hover(doc, Position{Line: 2, Character: utf16Len(line[:strings.Index(line, "txtName")+3])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "MSForms.TextBox") {
+		t.Fatalf("unexpected sidecar hover: %+v", hover)
 	}
 }
 
