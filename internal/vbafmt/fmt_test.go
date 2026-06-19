@@ -181,8 +181,9 @@ End Sub
 }
 
 func TestFormatBasLineContinuationPreserved(t *testing.T) {
-	input := `Sub Main() _
-    & "hello"
+	input := `Sub Main()
+message = "hello" & _
+    "world"
 End Sub
 `
 	got, err := FormatText(input, false)
@@ -194,8 +195,8 @@ End Sub
 	}
 
 	continuedIf := `Sub Main()
-If condition Then _
-    condition = False
+If condition _
+    And otherCondition Then
 value = 1
 End If
 End Sub
@@ -204,7 +205,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(continuedIfGot, "Then _") {
+	if !strings.Contains(continuedIfGot, "condition _") {
 		t.Fatalf("continued If opener missing continuation:\n%s", continuedIfGot)
 	}
 	if !strings.Contains(continuedIfGot, "End If") {
@@ -961,10 +962,35 @@ func TestFormatFileSkipsParserErrors(t *testing.T) {
 	}
 }
 
-func TestFormatTextStrictParseFailsParserErrors(t *testing.T) {
-	_, err := FormatTextWithOptions("Public Function Broken(ByVal x As String\nEnd Function\n", false, FormatConfig{StrictParse: true})
+func TestFormatFileFormatsVBA07RecoveredSyntax(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Legacy.bas")
+	original := "10  ' legacy comment\nPublic Sub Sample()\nDo While i < 10: i = i + 1: Loop\nIf condition _\n    And otherCondition Then\nDebug.Print \"yes\"\nEnd If\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fr, err := formatFile(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fr.Skipped {
+		t.Fatalf("v0.7.0-supported syntax should not be skipped: %s", fr.SkipReason)
+	}
+	if !strings.Contains(fr.Formatted, "10  ' legacy comment") {
+		t.Fatalf("expected legacy numbered comment to be preserved:\n%s", fr.Formatted)
+	}
+	if !strings.Contains(fr.Formatted, "    Do While i < 10: i = i + 1: Loop") {
+		t.Fatalf("expected colon-closed Do block to be formatted:\n%s", fr.Formatted)
+	}
+	if !strings.Contains(fr.Formatted, "    If condition _") {
+		t.Fatalf("expected continued If to be formatted:\n%s", fr.Formatted)
+	}
+}
+
+func TestFormatTextFailsParserErrors(t *testing.T) {
+	_, err := FormatText("Public Function Broken(ByVal x As String\nEnd Function\n", false)
 	if err == nil {
-		t.Fatal("expected strict parse to fail")
+		t.Fatal("expected parse to fail")
 	}
 	if !isFormatParseError(err) {
 		t.Fatalf("expected format parse error, got %T: %v", err, err)

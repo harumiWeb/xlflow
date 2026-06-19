@@ -26,7 +26,7 @@ type lineIndentModel struct {
 	levels []int
 }
 
-func parseFormattingModel(text string, strict bool) (*lineIndentModel, error) {
+func parseFormattingModel(text string) (*lineIndentModel, error) {
 	lines := splitLines(text)
 	model := &lineIndentModel{
 		levels: make([]int, len(lines)+1),
@@ -41,13 +41,10 @@ func parseFormattingModel(text string, strict bool) (*lineIndentModel, error) {
 	}
 	defer parser.Close()
 
-	parsed := parser.Parse("<fmt>", []byte(sourceForFormatterParse(lines)))
+	parsed := parser.Parse("<fmt>", []byte(text))
 	defer parsed.Close()
 
 	if parsed.HasError || parsed.HasMissing {
-		if !strict {
-			return heuristicFormattingModel(lines), nil
-		}
 		return nil, formatParseError{hasError: parsed.HasError, hasMissing: parsed.HasMissing}
 	}
 
@@ -70,71 +67,6 @@ func (m *lineIndentModel) level(line int) int {
 
 func (m *lineIndentModel) formatLine(line int, content string) string {
 	return strings.Repeat(" ", m.level(line)*indentWidth) + content
-}
-
-func sourceForFormatterParse(lines []string) string {
-	normalized := make([]string, 0, len(lines))
-	for _, line := range lines {
-		directive := parseLineNumberDirective(line)
-		if directive.Has {
-			normalized = append(normalized, directive.Content)
-		} else {
-			normalized = append(normalized, line)
-		}
-	}
-	return strings.Join(normalized, "\n")
-}
-
-func heuristicFormattingModel(lines []string) *lineIndentModel {
-	model := &lineIndentModel{
-		levels: make([]int, len(lines)+1),
-	}
-	level := 0
-	headerEnded := false
-	inBeginBlock := false
-
-	for i, line := range lines {
-		lineNumber := i + 1
-		if !headerEnded {
-			trimmedForHeader := strings.TrimLeft(line, " \t")
-			upperForHeader := strings.ToUpper(trimmedForHeader)
-			if inBeginBlock {
-				if upperForHeader == "END" {
-					inBeginBlock = false
-				}
-				continue
-			}
-			if isClassHeaderLine(line) || isBlankLine(line) {
-				if upperForHeader == "BEGIN" {
-					inBeginBlock = true
-				}
-				continue
-			}
-			headerEnded = true
-		}
-
-		directive := parseLineNumberDirective(line)
-		trimmed := strings.TrimRight(directive.Content, " \t")
-		content := strings.TrimLeft(trimmed, " \t")
-		if isBlankLine(trimmed) || isVBACommentLine(trimmed) || isLabelLine(content) {
-			model.levels[lineNumber] = level
-			continue
-		}
-
-		keyword, isStructural := classifyLine(content)
-		if isStructural && isDedentKeyword(keyword) {
-			level--
-			if level < 0 {
-				level = 0
-			}
-		}
-		model.levels[lineNumber] = level
-		if isStructural && isIndentKeyword(keyword) {
-			level++
-		}
-	}
-
-	return model
 }
 
 func applyNodeIndent(model *lineIndentModel, node *tree_sitter.Node) {

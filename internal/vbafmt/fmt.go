@@ -226,7 +226,7 @@ func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
 	}
 	isClass := ext == ".cls"
 	original := string(data)
-	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers, StrictParse: true})
+	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers})
 	if err != nil {
 		if isFormatParseError(err) {
 			return FileResult{
@@ -472,24 +472,6 @@ var dedentKeywords = []string{
 	"LOOP",
 	"NEXT",
 	"WEND",
-}
-
-func isIndentKeyword(kw string) bool {
-	for _, ik := range indentKeywords {
-		if kw == ik {
-			return true
-		}
-	}
-	return false
-}
-
-func isDedentKeyword(kw string) bool {
-	for _, dk := range dedentKeywords {
-		if kw == dk {
-			return true
-		}
-	}
-	return false
 }
 
 func isOptionExplicitGap(prev string) bool {

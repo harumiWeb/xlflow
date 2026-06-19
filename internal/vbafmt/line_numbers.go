@@ -17,7 +17,6 @@ const (
 
 type FormatConfig struct {
 	LineNumbers LineNumberMode
-	StrictParse bool
 }
 
 type LineNumberWarning struct {
@@ -182,7 +181,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 
 	mode := normalizeLineNumberMode(cfg.LineNumbers)
 	refs := collectNumericLabelReferences(lines)
-	indentModel, err := parseFormattingModel(text, cfg.StrictParse)
+	indentModel, err := parseFormattingModel(text)
 	if err != nil {
 		return "", lineNumberFileResult{}, err
 	}
