@@ -64,6 +64,40 @@ xlflow recognizes these reserved procedure names in each test module:
 
 All hooks must be public parameterless `Sub` procedures. If a hook fails, the affected tests are recorded as failed with a dedicated error code.
 
+## COM Object Cleanup
+
+When test code opens another workbook with `GetObject(path)` or `Application.Workbooks.Open(path)`, close it and release the object reference immediately. Otherwise Excel can keep the file locked after `wb.Close False`, and later hooks may fail with VBA error 70 (`Permission denied`) while deleting or overwriting the file.
+
+```vb
+Public Sub Test_ReadsOutputWorkbook()
+    Dim wb As Object
+    Dim errNumber As Long
+    Dim errSource As String
+    Dim errDescription As String
+
+    On Error GoTo Cleanup
+    Set wb = GetObject(outputPath)
+
+    ' assertions...
+
+Cleanup:
+    errNumber = Err.Number
+    errSource = Err.Source
+    errDescription = Err.Description
+
+    If Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close False
+        Set wb = Nothing
+        On Error GoTo 0
+    End If
+
+    If errNumber <> 0 Then Err.Raise errNumber, errSource, errDescription
+End Sub
+```
+
+Best-effort hook cleanup with `On Error Resume Next` can reduce cascading failures, but it does not replace releasing workbook references in the test that opened them.
+
 ## Examples
 
 ```bash
