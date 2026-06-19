@@ -55,13 +55,21 @@ func Write(p *Project) ([]byte, error) {
 	}
 	w.AddStream([]string{"PROJECT"}, p.ProjectStreamRaw)
 	w.AddStream([]string{"VBA", "_VBA_PROJECT"}, ovba.VBAProjectStub())
-	w.AddStream([]string{"VBA", "dir"}, ovba.Compress(dirPlain))
+	dirComp, err := ovba.Compress(dirPlain)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: compress dir: %w", err)
+	}
+	w.AddStream([]string{"VBA", "dir"}, dirComp)
 	for _, m := range p.Modules {
 		enc, err := encodeMBCS(m.Source, p.Props.CodePage)
 		if err != nil {
 			return nil, fmt.Errorf("vbaproject: module %q: %w", m.Name, err)
 		}
-		w.AddStream([]string{"VBA", m.StreamName}, ovba.Compress(enc))
+		comp, err := ovba.Compress(enc)
+		if err != nil {
+			return nil, fmt.Errorf("vbaproject: module %q: %w", m.Name, err)
+		}
+		w.AddStream([]string{"VBA", m.StreamName}, comp)
 	}
 	return w.Bytes()
 }

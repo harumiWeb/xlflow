@@ -20,7 +20,11 @@ func TestRoundTripSmall(t *testing.T) {
 		bytes.Repeat([]byte("a"), 50), // RLE
 		{},                            // empty
 	} {
-		got, err := Decompress(Compress(in))
+		comp, err := Compress(in)
+		if err != nil {
+			t.Fatalf("Compress error: %v", err)
+		}
+		got, err := Decompress(comp)
 		if err != nil {
 			t.Fatalf("Decompress error: %v", err)
 		}

@@ -66,7 +66,10 @@ func TestCompressMatchesGolden(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := Compress(in)
+		got, err := Compress(in)
+		if err != nil {
+			t.Fatalf("%s: Compress: %v", c.in, err)
+		}
 		if !bytesEqual(got, want) {
 			t.Errorf("%s: Compress len %d != golden len %d (first diff at %d)",
 				c.in, len(got), len(want), firstDiff(got, want))
