@@ -255,6 +255,22 @@ End Sub
 	}
 }
 
+func TestLinterDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n")
+
+	result, err := Linter{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(result.Issues, "VB008"); len(got) != 1 {
+		t.Fatalf("VB008 should remain unsuppressed: issues=%+v warnings=%+v", result.Issues, result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unsupported_inline_suppression_rule", "VB008") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", result.Warnings)
+	}
+}
+
 func TestLinterConfigDisabledRulesComposeWithInlineSuppressions(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit

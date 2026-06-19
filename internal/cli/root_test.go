@@ -4591,6 +4591,86 @@ func TestPushRejectsMissingLineContinuationWhitespaceBeforeExcel(t *testing.T) {
 	}
 }
 
+func TestPushDoesNotSuppressBlockingLintDiagnosticsInline(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Issues []struct {
+			Code string `json:"code"`
+		} `json:"issues"`
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VB008" {
+		t.Fatalf("expected unsuppressed VB008 issue, got issues=%+v output=%s", got.Issues, stdout.String())
+	}
+	if !hasCLIWarning(got.Warnings, "unsupported_inline_suppression_rule", "VB008") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", got.Warnings)
+	}
+}
+
+func TestPushDoesNotSuppressBlockingAnalyzeDiagnosticsInline(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ' xlflow:disable-next-line VBA104\n  ws.DisplayGridlines = False\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "push"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Analysis []struct {
+			Code string `json:"code"`
+		} `json:"analysis"`
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA104" {
+		t.Fatalf("expected unsuppressed VBA104 finding, got analysis=%+v output=%s", got.Analysis, stdout.String())
+	}
+	if !hasCLIWarning(got.Warnings, "unsupported_inline_suppression_rule", "VBA104") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", got.Warnings)
+	}
+}
+
 func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

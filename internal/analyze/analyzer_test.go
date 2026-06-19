@@ -408,6 +408,29 @@ End Sub
 	}
 }
 
+func TestAnalyzerDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets(1)
+  ' xlflow:disable-next-line VBA104
+  ws.DisplayGridlines = False
+End Sub
+`)
+
+	result, err := Analyzer{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA104"); len(got) != 1 {
+		t.Fatalf("VBA104 should remain unsuppressed: findings=%+v warnings=%+v", result.Findings, result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unsupported_inline_suppression_rule", "VBA104") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", result.Warnings)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesAllowGuardedPatterns(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

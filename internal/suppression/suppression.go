@@ -124,6 +124,16 @@ func directivesForFile(root, path string) ([]Directive, []map[string]any, error)
 				})
 				continue
 			}
+			if !config.InlineSuppressibleDiagnosticID(id) {
+				warnings = append(warnings, map[string]any{
+					"code":    "unsupported_inline_suppression_rule",
+					"message": fmt.Sprintf("Diagnostic ID %s cannot be suppressed inline because it blocks source preflight.", id),
+					"rule":    id,
+					"file":    file,
+					"line":    lineNo,
+				})
+				continue
+			}
 			directives = append(directives, Directive{
 				Code:       id,
 				File:       file,

@@ -174,7 +174,7 @@ When the user reports a runtime failure:
 - Use `xlflow backup list --json` to find rollback targets after a broken `push` or workbook-level mistake.
 - Use `xlflow rollback --latest --json` or `xlflow rollback --backup <id> --json` only after the workbook is closed or the xlflow session has been stopped; then run `xlflow pull --json` if source files should match the restored workbook.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
-- When a lint or analyze finding is a deliberate one-line exception, prefer a narrow inline suppression comment over changing project-wide `disabled_rules`: use `' xlflow:disable-next-line VB002` before the target line, or `Range("A1").Select ' xlflow:disable-line VB002` for same-line suppression. Use stable IDs from CLI output, such as `VB002` or `VBA205`; list multiple IDs with spaces.
+- When a lint or analyze finding is a deliberate one-line exception, prefer a narrow inline suppression comment over changing project-wide `disabled_rules`: use `' xlflow:disable-next-line VB002` before the target line, or `Range("A1").Select ' xlflow:disable-line VB002` for same-line suppression. Use stable IDs from CLI output, such as `VB002` or `VBA205`; list multiple IDs with spaces. Do not suppress preflight-blocking errors such as `VB008` through `VB014`, `VB028`, `VBA104`, `VBA105`, `VBA106`, or `VBA211`.
 - Use `xlflow test --session --json` as the primary correctness signal when tests exist.
 - Use `xlflow test --module <ModuleName> --session --json` to run only the tests in one module.
 - Use `xlflow test --tag <tag> --session --json` to run only tests matching a tag.
@@ -285,7 +285,7 @@ If `xlflow run --session --json` fails, read `debug.events`, identify the last s
 
 If a headless `XlflowUI` run behaves differently than expected, reproduce with the same `--msgbox` / `--inputbox` values plus `--ui-stream`. Compare the streamed stderr lines against the final `ui.events` payload to confirm which dialog ids resolved from scripted responses versus workbook defaults.
 
-If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`. Use inline suppression only when the exception is intentional, local, and safer to document beside the code than to disable globally. Unknown suppression IDs and stale suppressions are reported as command warnings, so inspect `warnings` after adding one.
+If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`. Use inline suppression only when the exception is intentional, local, and safer to document beside the code than to disable globally. Unknown, unsupported, and stale suppressions are reported as command warnings, so inspect `warnings` after adding one.
 
 Run `xlflow analyze --json` or `xlflow check --json` before changing object-heavy VBA. Analyzer findings such as `VBA101`, `VBA102`, and `VBA103` usually mean a missing `Set` assignment. For intentional one-line analyzer exceptions, use the same inline syntax with `VBA...` IDs, for example `' xlflow:disable-next-line VBA205`.
 

@@ -70,7 +70,7 @@ Range("A1").Value = 1
 Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
 ```
 
-Multiple IDs may be listed with spaces. Unknown IDs and suppressions that no longer match an analyzer diagnostic are reported as warnings.
+Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match an analyzer diagnostic are reported as warnings.
 
 Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. Diagnostics `VBA101` through `VBA106` are always enabled.
 

@@ -4636,10 +4636,11 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 }
 
 func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
-	issues, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
+	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
+	issues := lintResult.Issues
 	blockingIssues := lint.PushBlockingIssues(issues)
 	if len(blockingIssues) > 0 {
 		env := output.Failure(command, output.Error{
@@ -4649,13 +4650,15 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 			Phase:   "preflight",
 		})
 		env.Issues = blockingIssues
+		env.Warnings = lintResult.Warnings
 		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 		return a.write(env, output.ExitValidation)
 	}
-	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
+	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
 	}
+	findings := analyzeResult.Findings
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil
@@ -4679,6 +4682,7 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	if len(blockingFindings) > 0 {
 		env.Analysis = blockingFindings
 	}
+	env.Warnings = mergeWarningsUnique(lintResult.Warnings, analyzeResult.Warnings)
 	env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 	return a.write(env, output.ExitValidation)
 }

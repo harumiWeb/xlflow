@@ -53,6 +53,29 @@ func TestDirectivesForFilesReportsUnknownIDs(t *testing.T) {
 	}
 }
 
+func TestDirectivesForFilesRejectsPreflightBlockingIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	body := `' xlflow:disable-next-line VB008 VBA104 VBA211
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	directives, warnings, err := DirectivesForFiles(dir, []string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(directives) != 0 {
+		t.Fatalf("directives = %+v, want none", directives)
+	}
+	for _, rule := range []string{"VB008", "VBA104", "VBA211"} {
+		if !hasWarning(warnings, "unsupported_inline_suppression_rule", rule) {
+			t.Fatalf("missing unsupported warning for %s in %+v", rule, warnings)
+		}
+	}
+}
+
 func TestApplyReportsUnusedSuppressionsForCurrentFamilyOnly(t *testing.T) {
 	directives := []Directive{
 		{Code: "VB002", File: "src/modules/Main.bas", Line: 1, TargetLine: 2},
@@ -72,6 +95,15 @@ func TestApplyReportsUnusedSuppressionsForCurrentFamilyOnly(t *testing.T) {
 	if len(warnings) != 1 || warnings[0]["rule"] != "VBA205" {
 		t.Fatalf("analyze warnings = %+v, want unused VBA205 only", warnings)
 	}
+}
+
+func hasWarning(warnings []map[string]any, code string, rule string) bool {
+	for _, warning := range warnings {
+		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
 }
 
 func assertDirective(t *testing.T, directives []Directive, code string, line int, targetLine int) {

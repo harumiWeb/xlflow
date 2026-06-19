@@ -148,6 +148,8 @@ Range("A1").Select
 Range("A2").Select ' xlflow:disable-line VB002
 ```
 
+Preflight-blocking lint diagnostics `VB008` through `VB014` and `VB028` cannot be suppressed inline.
+
 ### `[analyze]`
 
 | Key              | Type     | Required | Default | Description                                           |
@@ -181,7 +183,7 @@ Analyzer diagnostics can use the same inline suppression syntax:
 Range("A1").Value = 1
 ```
 
-Unknown inline IDs and unused suppressions are reported as command warnings.
+Preflight-blocking analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VBA211` cannot be suppressed inline. Unknown inline IDs, unsupported IDs, and unused suppressions are reported as command warnings.
 
 ## Defaults differ between `new` and `init`
 
