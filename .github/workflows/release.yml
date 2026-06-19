@@ -32,6 +32,7 @@ jobs:
           cache: true
 
       - name: Set up MSYS2 UCRT64 GCC
+        id: msys2
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: UCRT64
@@ -39,10 +40,18 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
 
-      - name: Add MSYS2 UCRT64 to PATH
+      - name: Configure MSYS2 UCRT64 for CGO
+        id: cgo
         shell: pwsh
         run: |
-          "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+          $ucrtBin = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "ucrt64\bin"
+          $gcc = Join-Path $ucrtBin "gcc.exe"
+          if (-not (Test-Path -LiteralPath $gcc)) {
+            throw "MSYS2 UCRT64 gcc not found at $gcc"
+          }
+
+          $ucrtBin >> $env:GITHUB_PATH
+          "cc=$gcc" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -52,7 +61,7 @@ jobs:
       - name: Run tests
         env:
           CGO_ENABLED: "1"
-          CC: C:/msys64/ucrt64/bin/gcc.exe
+          CC: ${{ steps.cgo.outputs.cc }}
         run: go test ./...
 
       - name: Run .NET bridge tests
@@ -61,7 +70,7 @@ jobs:
       - name: Build
         env:
           CGO_ENABLED: "1"
-          CC: C:/msys64/ucrt64/bin/gcc.exe
+          CC: ${{ steps.cgo.outputs.cc }}
         run: go build ./...
 
       - name: Build .NET bridge
@@ -85,7 +94,7 @@ jobs:
           SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
           CGO_ENABLED: "1"
-          CC: C:/msys64/ucrt64/bin/gcc.exe
+          CC: ${{ steps.cgo.outputs.cc }}
 
       - name: Smoke test Windows archive
         shell: pwsh
@@ -100,8 +109,12 @@ jobs:
           Expand-Archive $zip.FullName -DestinationPath $extract -Force
 
           $oldPath = $env:Path
+          $msysRoot = "${{ steps.msys2.outputs.msys2-location }}"
           try {
-            $env:Path = ($env:Path -split ';' | Where-Object { $_ -notlike 'C:\msys64*' }) -join ';'
+            $env:Path = ($env:Path -split ';' | Where-Object {
+              -not $_.StartsWith($msysRoot, [StringComparison]::OrdinalIgnoreCase) -and
+              -not $_.StartsWith('C:\msys64', [StringComparison]::OrdinalIgnoreCase)
+            }) -join ';'
             & "$extract\xlflow.exe" --help
             & "$extract\xlflow.exe" version
           } finally {
