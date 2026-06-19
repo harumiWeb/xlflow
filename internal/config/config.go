@@ -158,6 +158,47 @@ var (
 	}
 )
 
+func KnownDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if _, ok := lintRuleByID[id]; ok {
+		return true
+	}
+	if _, ok := analyzeRuleByID[id]; ok {
+		return true
+	}
+	return nonConfigurableRuleIDs[id]
+}
+
+func LintDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if strings.HasPrefix(id, "VBA") {
+		return false
+	}
+	if _, ok := lintRuleByID[id]; ok {
+		return true
+	}
+	return strings.HasPrefix(id, "VB") && nonConfigurableRuleIDs[id]
+}
+
+func AnalyzeDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if _, ok := analyzeRuleByID[id]; ok {
+		return true
+	}
+	return strings.HasPrefix(id, "VBA") && nonConfigurableRuleIDs[id]
+}
+
+func InlineSuppressibleDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	switch id {
+	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB028",
+		"VBA104", "VBA105", "VBA106", "VBA211":
+		return false
+	default:
+		return KnownDiagnosticID(id)
+	}
+}
+
 func Default() Config {
 	return Config{
 		Project: ProjectConfig{

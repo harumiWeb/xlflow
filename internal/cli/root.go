@@ -4401,12 +4401,14 @@ func (a *app) lintCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			issues, err := lint.Linter{RootDir: a.cwd, Config: cfg}.Run()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
 			if err != nil {
 				return a.writeFailure("lint", output.ExitEnvironment, "lint_failed", err)
 			}
+			issues := lintResult.Issues
 			env := output.New("lint")
 			env.Issues = issues
+			env.Warnings = lintResult.Warnings
 			if len(issues) > 0 {
 				env.Status = output.StatusFailed
 				env.Error = &output.Error{Code: "lint_failed", Message: fmt.Sprintf("%d lint issue(s) found", len(issues))}
@@ -4428,12 +4430,14 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
 			if err != nil {
 				return a.writeFailure("analyze", output.ExitEnvironment, "analyze_failed", err)
 			}
+			findings := analyzeResult.Findings
 			env := output.New("analyze")
 			env.Analysis = findings
+			env.Warnings = analyzeResult.Warnings
 			if len(findings) > 0 {
 				env.Status = output.StatusFailed
 				env.Error = &output.Error{Code: "analyze_failed", Message: fmt.Sprintf("%d analysis finding(s) found", len(findings))}
@@ -4458,16 +4462,19 @@ func (a *app) checkCommand() *cobra.Command {
 			}
 			env := output.New("check")
 			check := map[string]any{}
-			issues, err := lint.Linter{RootDir: a.cwd, Config: cfg}.Run()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "lint_failed", err)
 			}
+			issues := lintResult.Issues
 			check["lint"] = map[string]any{"status": statusForCount(len(issues)), "count": len(issues)}
-			findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
 			}
+			findings := analyzeResult.Findings
 			check["analyze"] = map[string]any{"status": statusForCount(len(findings)), "count": len(findings)}
+			env.Warnings = mergeWarningsUnique(lintResult.Warnings, analyzeResult.Warnings)
 			var doctor output.Envelope
 			var doctorCode int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
@@ -4506,6 +4513,31 @@ func statusForCount(count int) string {
 		return output.StatusOK
 	}
 	return output.StatusFailed
+}
+
+func mergeWarningsUnique(warningSets ...any) []any {
+	var merged []any
+	seen := map[string]bool{}
+	for _, warningSet := range warningSets {
+		for _, raw := range anySlice(warningSet) {
+			warning := mapValue(raw)
+			key := warningKey(warning)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, raw)
+		}
+	}
+	return merged
+}
+
+func warningKey(warning map[string]any) string {
+	return fmt.Sprint(warning["code"]) + "|" +
+		fmt.Sprint(warning["rule"]) + "|" +
+		fmt.Sprint(warning["file"]) + "|" +
+		fmt.Sprint(warning["line"]) + "|" +
+		fmt.Sprint(warning["target_line"])
 }
 
 func (a *app) inspectGUICommand() *cobra.Command {
@@ -4604,10 +4636,11 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 }
 
 func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
-	issues, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
+	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
+	issues := lintResult.Issues
 	blockingIssues := lint.PushBlockingIssues(issues)
 	if len(blockingIssues) > 0 {
 		env := output.Failure(command, output.Error{
@@ -4617,13 +4650,15 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 			Phase:   "preflight",
 		})
 		env.Issues = blockingIssues
+		env.Warnings = lintResult.Warnings
 		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 		return a.write(env, output.ExitValidation)
 	}
-	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.Run()
+	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
 	}
+	findings := analyzeResult.Findings
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil
@@ -4647,6 +4682,7 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	if len(blockingFindings) > 0 {
 		env.Analysis = blockingFindings
 	}
+	env.Warnings = mergeWarningsUnique(lintResult.Warnings, analyzeResult.Warnings)
 	env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 	return a.write(env, output.ExitValidation)
 }

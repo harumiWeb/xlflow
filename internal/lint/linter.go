@@ -8,6 +8,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -25,6 +26,11 @@ type Issue struct {
 	Symbol           string `json:"symbol,omitempty"`
 	Suggestion       string `json:"suggestion,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
+}
+
+type Result struct {
+	Issues   []Issue
+	Warnings []map[string]any
 }
 
 type Linter struct {
@@ -60,26 +66,40 @@ var (
 const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
 
 func (l Linter) Run() ([]Issue, error) {
-	files, err := l.files()
+	result, err := l.RunResult()
 	if err != nil {
 		return nil, err
+	}
+	return result.Issues, nil
+}
+
+func (l Linter) RunResult() (Result, error) {
+	files, err := l.files()
+	if err != nil {
+		return Result{}, err
 	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
 		fileIssues, err := l.lintFile(file)
 		if err != nil {
-			return nil, err
+			return Result{}, err
 		}
 		issues = append(issues, fileIssues...)
 	}
 	issues = append(issues, l.xlflowUIBareDialogIssues(files)...)
 	projectIssues, err := l.projectIssues()
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	issues = append(issues, projectIssues...)
 	sortIssues(issues)
-	return issues, nil
+	directives, warnings, err := suppression.DirectivesForFiles(l.RootDir, files)
+	if err != nil {
+		return Result{}, err
+	}
+	issues, suppressionWarnings := applyInlineSuppressions(issues, directives)
+	warnings = append(warnings, suppressionWarnings...)
+	return Result{Issues: issues, Warnings: warnings}, nil
 }
 
 func (l Linter) files() ([]string, error) {
@@ -1031,6 +1051,29 @@ func sortIssues(issues []Issue) {
 		}
 		return a.Code < b.Code
 	})
+}
+
+func applyInlineSuppressions(issues []Issue, directives []suppression.Directive) ([]Issue, []map[string]any) {
+	diagnostics := make([]suppression.Diagnostic, 0, len(issues))
+	for _, issue := range issues {
+		diagnostics = append(diagnostics, suppression.Diagnostic{
+			Code: issue.Code,
+			File: issue.File,
+			Line: issue.Line,
+		})
+	}
+	suppressed, warnings := suppression.Apply(diagnostics, directives, suppression.FamilyLint)
+	if len(suppressed) == 0 {
+		return issues, warnings
+	}
+	filtered := make([]Issue, 0, len(issues))
+	for i, issue := range issues {
+		if suppressed[i] {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+	return filtered, warnings
 }
 
 func procedureSymbolKind(kind string) bool {

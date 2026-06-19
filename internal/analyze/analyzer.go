@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -26,6 +27,11 @@ type Finding struct {
 	Reason     string   `json:"reason"`
 	Suggestion string   `json:"suggestion"`
 	NearbyCode []string `json:"nearby_code,omitempty"`
+}
+
+type Result struct {
+	Findings []Finding
+	Warnings []map[string]any
 }
 
 type Analyzer struct {
@@ -168,13 +174,21 @@ type withInfo struct {
 }
 
 func (a Analyzer) Run() ([]Finding, error) {
-	files, err := a.files()
+	result, err := a.RunResult()
 	if err != nil {
 		return nil, err
 	}
+	return result.Findings, nil
+}
+
+func (a Analyzer) RunResult() (Result, error) {
+	files, err := a.files()
+	if err != nil {
+		return Result{}, err
+	}
 	parser, err := vbaast.NewParser()
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	defer parser.Close()
 	parsedFiles := make([]parsedFile, 0, len(files))
@@ -182,12 +196,12 @@ func (a Analyzer) Run() ([]Finding, error) {
 		parsed, err := parser.ParseFile(file)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
-			return nil, err
+			return Result{}, err
 		}
 		if parsed.HasError || parsed.HasMissing {
 			parsed.Close()
 			closeParsedFiles(parsedFiles)
-			return nil, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
+			return Result{}, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
 		}
 		parsedFiles = append(parsedFiles, parsedFile{
 			Path:   file,
@@ -205,7 +219,13 @@ func (a Analyzer) Run() ([]Finding, error) {
 		findings = append(findings, a.analyzeParsedFile(file, ctx)...)
 	}
 	sortFindings(findings)
-	return findings, nil
+	directives, warnings, err := suppression.DirectivesForFiles(a.RootDir, files)
+	if err != nil {
+		return Result{}, err
+	}
+	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
+	warnings = append(warnings, suppressionWarnings...)
+	return Result{Findings: findings, Warnings: warnings}, nil
 }
 
 func closeParsedFiles(files []parsedFile) {
@@ -1327,6 +1347,29 @@ func sortFindings(findings []Finding) {
 		}
 		return a.Code < b.Code
 	})
+}
+
+func applyInlineSuppressions(findings []Finding, directives []suppression.Directive) ([]Finding, []map[string]any) {
+	diagnostics := make([]suppression.Diagnostic, 0, len(findings))
+	for _, finding := range findings {
+		diagnostics = append(diagnostics, suppression.Diagnostic{
+			Code: finding.Code,
+			File: finding.File,
+			Line: finding.Line,
+		})
+	}
+	suppressed, warnings := suppression.Apply(diagnostics, directives, suppression.FamilyAnalyze)
+	if len(suppressed) == 0 {
+		return findings, warnings
+	}
+	filtered := make([]Finding, 0, len(findings))
+	for i, finding := range findings {
+		if suppressed[i] {
+			continue
+		}
+		filtered = append(filtered, finding)
+	}
+	return filtered, warnings
 }
 
 func strconvItoa(v int) string {
