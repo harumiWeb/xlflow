@@ -1,0 +1,11 @@
+Attribute VB_Name = "UserForm1"
+Attribute VB_Base = "0{5A352896-124D-420C-80E8-2C4BC088CC1C}{95A506B3-11F2-4259-860C-CB0FC1817653}"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Attribute VB_TemplateDerived = False
+Attribute VB_Customizable = False
+Private Sub CommandButton1_Click()
+    Debug.Print "CommandButton1_Click"
+End Sub

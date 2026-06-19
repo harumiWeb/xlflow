@@ -35,6 +35,7 @@ import (
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
+	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -160,6 +161,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.formCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
+		a.packCommand(),
 		a.rollbackCommand(),
 		a.sessionCommand(),
 		a.saveCommand(),
@@ -1205,6 +1207,123 @@ func (a *app) pullCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *app) packCommand() *cobra.Command {
+	var outPath string
+	var templatePath string
+	var experimental bool
+	cmd := &cobra.Command{
+		Use:   "pack --out <path.xlsm> --experimental",
+		Short: "Build an .xlsm artifact from source and a workbook template",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !experimental {
+				return a.writeFailure("pack", output.ExitConfig, "pack_experimental_required", errors.New("pack requires --experimental"))
+			}
+			if strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm") {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--out is required and must end in .xlsm"))
+			}
+
+			cfg, err := a.loadConfig("pack")
+			if err != nil {
+				return err
+			}
+			configuredWorkbook := workbookArgPath(a.cwd, cfg.Excel.Path)
+			resolvedTemplate := strings.TrimSpace(templatePath)
+			if resolvedTemplate == "" {
+				resolvedTemplate = configuredWorkbook
+			} else {
+				resolvedTemplate = workbookArgPath(a.cwd, resolvedTemplate)
+			}
+			if strings.TrimSpace(resolvedTemplate) == "" {
+				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", errors.New("template workbook path is empty"))
+			}
+			if _, err := os.Stat(resolvedTemplate); err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
+			}
+
+			resolvedOut := workbookArgPath(a.cwd, outPath)
+			if samePath(resolvedOut, resolvedTemplate) || samePath(resolvedOut, configuredWorkbook) {
+				return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
+			}
+			candidates := uniqueNonEmptyPaths(resolvedTemplate, configuredWorkbook, resolvedOut)
+			for _, candidate := range candidates {
+				if lockPath, locked := officeLockFilePresent(candidate); locked {
+					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))
+				}
+			}
+			if wb, active, err := a.packActiveSession(candidates); err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("could not check for an active session: %w", err))
+			} else if active {
+				return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("an xlflow session is active for %s", wb))
+			}
+
+			sources, err := collectPackSourceModules(a.cwd, cfg)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitEnvironment, "pack_source_read_failed", err)
+			}
+			templateBytes, err := os.ReadFile(resolvedTemplate)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
+			}
+			workbookBytes, meta, err := packpkg.BuildWorkbook(templateBytes, sources)
+			if err != nil {
+				return a.writePackEngineFailure(err)
+			}
+			createdParentDirs, err := writePackOutput(resolvedOut, workbookBytes)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitEnvironment, "pack_write_failed", err)
+			}
+
+			env := output.New("pack")
+			outputPayload := map[string]any{
+				"path":   displayPath(a.cwd, resolvedOut),
+				"format": "xlsm",
+			}
+			if createdParentDirs {
+				outputPayload["created_parent_dirs"] = true
+			}
+			env.Output = outputPayload
+			env.Pack = map[string]any{
+				"backend":        "pure-go",
+				"experimental":   true,
+				"vbe_validation": "not_performed",
+				"template":       displayPath(a.cwd, resolvedTemplate),
+				"modules": map[string]any{
+					"standard":        meta.Standard,
+					"class":           meta.Class,
+					"document":        meta.Document,
+					"carried_streams": meta.CarriedStreams,
+				},
+			}
+			env.Warnings = []map[string]any{{
+				"code":    "vbe_validation_skipped",
+				"message": "pack did not open Excel; no VBE compile or runtime validation was performed.",
+			}}
+			env.Logs = []string{"packed " + displayPath(a.cwd, resolvedOut)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&outPath, "out", "", "destination .xlsm artifact path")
+	cmd.Flags().StringVar(&templatePath, "template", "", "workbook template path")
+	cmd.Flags().BoolVar(&experimental, "experimental", false, "enable experimental pure-Go pack")
+	return cmd
+}
+
+func (a *app) writePackEngineFailure(err error) error {
+	switch {
+	case errors.Is(err, packpkg.ErrProtectedProject):
+		return a.writeFailure("pack", output.ExitValidation, "pack_protected_project", err)
+	case errors.Is(err, packpkg.ErrSignedProject):
+		return a.writeFailure("pack", output.ExitValidation, "pack_signed_project", err)
+	case errors.Is(err, packpkg.ErrUserFormGenerationUnsupported):
+		return a.writeFailure("pack", output.ExitValidation, "pack_userform_generation_unsupported", err)
+	case errors.Is(err, packpkg.ErrAmbiguousLayout):
+		return a.writeFailure("pack", output.ExitValidation, "pack_ambiguous_layout", err)
+	default:
+		return a.writeFailure("pack", output.ExitEnvironment, "pack_failed", err)
+	}
+}
+
 func (a *app) pushCommand() *cobra.Command {
 	var backupMode string
 	var fast bool
@@ -1425,18 +1544,44 @@ type sessionMetadata struct {
 	WorkbookPath string `json:"workbook_path"`
 }
 
-func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
-	metadataPath := filepath.Join(a.cwd, ".xlflow", "session.json")
-	body, err := os.ReadFile(metadataPath)
+// readSessionMetadata loads .xlflow/session.json. found is false when no session
+// file exists; a present-but-unreadable or malformed file returns an error.
+func (a *app) readSessionMetadata() (sessionMetadata, bool, error) {
+	body, err := os.ReadFile(filepath.Join(a.cwd, ".xlflow", "session.json"))
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return sessionMetadata{}, false, nil
 	}
 	if err != nil {
-		return false, err
+		return sessionMetadata{}, false, err
 	}
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 	var metadata sessionMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
+		return sessionMetadata{}, false, err
+	}
+	return metadata, true, nil
+}
+
+// packActiveSession reports whether .xlflow/session.json records a session for any
+// of the candidate workbooks. pack must not read possibly-dirty live state, so a
+// recorded session blocks it regardless of process liveness; the Office lock-file
+// check covers the open-in-Excel case separately.
+func (a *app) packActiveSession(candidates []string) (string, bool, error) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil || !found {
+		return "", false, err
+	}
+	for _, candidate := range candidates {
+		if samePath(metadata.WorkbookPath, candidate) {
+			return metadata.WorkbookPath, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil || !found {
 		return false, err
 	}
 	if !samePath(metadata.WorkbookPath, workbookPath) {
@@ -3863,6 +4008,101 @@ func collectSourceUserFormNames(formsDir string) []string {
 	}
 	slices.Sort(result)
 	return result
+}
+
+func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
+	var sources []packpkg.SourceModule
+	collect := func(dir string, typ packpkg.ModuleType, exts ...string) error {
+		base := workbookArgPath(root, dir)
+		if strings.TrimSpace(base) == "" {
+			return nil
+		}
+		if _, err := os.Stat(base); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		allowed := map[string]bool{}
+		for _, ext := range exts {
+			allowed[strings.ToLower(ext)] = true
+		}
+		return filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d == nil || d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if !allowed[ext] {
+				return nil
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+			sources = append(sources, packpkg.SourceModule{
+				Name:   name,
+				Type:   typ,
+				Source: string(body),
+			})
+			return nil
+		})
+	}
+	if err := collect(cfg.Src.Modules, packpkg.ModuleTypeStandard, ".bas"); err != nil {
+		return nil, err
+	}
+	if err := collect(cfg.Src.Classes, packpkg.ModuleTypeClass, ".cls"); err != nil {
+		return nil, err
+	}
+	if err := collect(cfg.Src.Workbook, packpkg.ModuleTypeDocument, ".bas", ".cls"); err != nil {
+		return nil, err
+	}
+	return sources, nil
+}
+
+func uniqueNonEmptyPaths(paths ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		key := strings.ToLower(filepath.Clean(path))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, path)
+	}
+	return out
+}
+
+func officeLockFilePresent(workbookPath string) (string, bool) {
+	lockPath := filepath.Join(filepath.Dir(workbookPath), "~$"+filepath.Base(workbookPath))
+	if _, err := os.Stat(lockPath); err == nil {
+		return lockPath, true
+	}
+	return lockPath, false
+}
+
+func writePackOutput(path string, body []byte) (bool, error) {
+	parent := filepath.Dir(path)
+	createdParentDirs := false
+	if parent != "." && parent != "" {
+		if _, err := os.Stat(parent); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return false, err
+			}
+			createdParentDirs = true
+		}
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return false, err
+		}
+	}
+	return createdParentDirs, os.WriteFile(path, body, 0o644)
 }
 
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {

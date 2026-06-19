@@ -66,6 +66,7 @@ type Envelope struct {
 	Rollback       any `json:"rollback,omitempty"`
 	Target         any `json:"target,omitempty"`
 	Output         any `json:"output,omitempty"`
+	Pack           any `json:"pack,omitempty"`
 	Spec           any `json:"spec,omitempty"`
 	Edit           any `json:"edit,omitempty"`
 	Project        any `json:"project,omitempty"`
@@ -420,6 +421,8 @@ func renderHuman(env Envelope, opts Options) string {
 	case "save":
 		b.WriteString(r.renderSave(env))
 	case "export-image":
+		b.WriteString(r.renderExportImage(env))
+	case "pack":
 		b.WriteString(r.renderExportImage(env))
 	case "form export-image":
 		b.WriteString(r.renderFormExportImage(env))

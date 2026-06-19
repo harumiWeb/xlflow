@@ -2,7 +2,7 @@
 
 ## Status
 
-Experimental and not yet implemented. This spec defines the intended contract for the pure-Go `pack` path so it can be reviewed before any implementation lands. When `pack` leaves experimental status, this contract folds into `docs/specs/cli-contract.md`. See `docs/adr/ADR-0012-pack-command.md` for the rationale and the `pack`/`push` boundary.
+Experimental. This spec defines the contract for the pure-Go `pack` path, now implemented behind the required `--experimental` flag. When `pack` leaves experimental status, this contract folds into `docs/specs/cli-contract.md`. See `docs/adr/ADR-0012-pack-command.md` for the rationale and the `pack`/`push` boundary.
 
 ## Scope
 
