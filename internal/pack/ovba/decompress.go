@@ -49,6 +49,7 @@ func Decompress(data []byte) ([]byte, error) {
 
 // decompressChunk expands one compressed chunk body. [MS-OVBA] §2.4.1.3.2.
 func decompressChunk(body []byte) ([]byte, error) {
+	const maxChunkOut = 4096 // [MS-OVBA] §2.4.1.1.4: a DecompressedChunk is at most 4096 bytes.
 	var out []byte
 	i := 0
 	for i < len(body) {
@@ -56,6 +57,9 @@ func decompressChunk(body []byte) ([]byte, error) {
 		i++
 		for bit := 0; bit < 8 && i < len(body); bit++ {
 			if flag&(1<<uint(bit)) == 0 {
+				if len(out)+1 > maxChunkOut {
+					return nil, errors.New("ovba: decompressed chunk exceeds 4096 bytes")
+				}
 				out = append(out, body[i]) // literal
 				i++
 				continue
@@ -72,6 +76,9 @@ func decompressChunk(body []byte) ([]byte, error) {
 			start := len(out) - offset
 			if start < 0 {
 				return nil, errors.New("ovba: CopyToken offset out of range")
+			}
+			if len(out)+length > maxChunkOut {
+				return nil, errors.New("ovba: decompressed chunk exceeds 4096 bytes")
 			}
 			for k := 0; k < length; k++ { // one byte at a time, to support overlapping copies (RLE)
 				out = append(out, out[start+k])

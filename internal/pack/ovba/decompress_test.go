@@ -34,6 +34,17 @@ func TestRoundTripSmall(t *testing.T) {
 	}
 }
 
+func TestDecompressChunkRejectsOversizedOutput(t *testing.T) {
+	// flag 0x02: bit0 literal, bit1 copy-token. One seed byte then a copy token
+	// (offset 1, max length) expands the output to ~4099 bytes, past the 4096
+	// per-chunk ceiling ([MS-OVBA] §2.4.1.1.4). A malformed chunk must be rejected
+	// rather than allocating unbounded output.
+	body := []byte{0x02, 0x41, 0xFF, 0x0F}
+	if _, err := decompressChunk(body); err == nil {
+		t.Fatal("expected error for chunk exceeding 4096 decompressed bytes, got nil")
+	}
+}
+
 func TestDecompressGoldenModules(t *testing.T) {
 	books := []string{"p1_compiled", "p5_mbcs"}
 	mods := []string{"Module1", "Class1", "Sheet1", "ThisWorkbook"}
