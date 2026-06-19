@@ -257,7 +257,7 @@ public sealed class ExcelMacrosService : IMacrosService
         }
     }
 
-    private static List<MacroEntry> FindMacroProcedures(string moduleName, string componentTypeName, string code)
+    internal static List<MacroEntry> FindMacroProcedures(string moduleName, string componentTypeName, string code)
     {
         var macros = new List<MacroEntry>();
         var lines = code.Split(["\r\n", "\n"], StringSplitOptions.None);
@@ -277,7 +277,7 @@ public sealed class ExcelMacrosService : IMacrosService
 
             var match = System.Text.RegularExpressions.Regex.Match(
                 line,
-                @"^(?:(Public)\s+)?(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?",
+                $@"^(?:(Public)\s+)?(Sub|Function)\s+({VbaIdentifierPattern.Identifier})\s*(?:\(([^)]*)\))?",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (!match.Success)
@@ -427,7 +427,7 @@ public sealed class ExcelMacrosService : IMacrosService
         }
     }
 
-    private sealed class MacroEntry
+    internal sealed class MacroEntry
     {
         public string Module { get; init; } = "";
         public string Name { get; init; } = "";

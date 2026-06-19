@@ -596,7 +596,7 @@ public sealed class ExcelTestService : ITestService
         {
             var line = lines[i].Trim();
             var match = Regex.Match(line,
-                @"^(?:Public\s+)?Sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(?:'.*)?$",
+                $@"^(?:Public\s+)?Sub\s+({VbaIdentifierPattern.Identifier})\s*(?:\(\s*\))?\s*(?:'.*)?$",
                 RegexOptions.IgnoreCase);
             if (!match.Success)
             {
@@ -604,7 +604,7 @@ public sealed class ExcelTestService : ITestService
             }
 
             var name = match.Groups[1].Value;
-            if (!name.StartsWith("Test", StringComparison.Ordinal) && !name.EndsWith("_Test", StringComparison.Ordinal))
+            if (!name.StartsWith("Test", StringComparison.OrdinalIgnoreCase) && !name.EndsWith("_Test", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

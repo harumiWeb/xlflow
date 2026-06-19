@@ -139,6 +139,29 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void FindTestProceduresDiscoversUnicodeTestPrefixAndSuffix()
+    {
+        const string code = """
+            Option Explicit
+
+            Public Sub Test_集計結果が正しい()
+            End Sub
+
+            Public Sub 集計結果_Test()
+            End Sub
+
+            Public Sub Helper_集計()
+            End Sub
+            """;
+
+        var tests = ExcelTestService.FindTestProcedures("Module1", code);
+
+        Assert.Equal(2, tests.Count);
+        Assert.Equal("Test_集計結果が正しい", tests[0].Name);
+        Assert.Equal("集計結果_Test", tests[1].Name);
+    }
+
+    [Fact]
     public void FindTestProceduresCollectsTagAnnotations()
     {
         const string code = """
@@ -157,6 +180,24 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(2, tests[0].Tags.Length);
         Assert.Contains("smoke", tests[0].Tags);
         Assert.Contains("fast", tests[0].Tags);
+    }
+
+    [Fact]
+    public void FindTestProceduresCollectsUnicodeTagAnnotations()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @Tag("集計")
+            Public Sub Test_集計結果が正しい()
+            End Sub
+            """;
+
+        var tests = ExcelTestService.FindTestProcedures("Module1", code);
+
+        Assert.Single(tests);
+        Assert.Equal("Test_集計結果が正しい", tests[0].Name);
+        Assert.Equal(["集計"], tests[0].Tags);
     }
 
     [Fact]
