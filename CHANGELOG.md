@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added inline VBA suppression comments for lint and analyze diagnostics, supporting `xlflow:disable-next-line <ID>` and `xlflow:disable-line <ID>` with stable IDs such as `VB002` and `VBA205`, plus warnings for unknown, unsupported, or unused suppressions. Preflight-blocking errors remain unsuppressible.
+- Documented COM cleanup best practices for VBA tests that open external workbooks, including `Close` plus `Set ... = Nothing` to avoid file locks during test hooks.
+- Fixed test and macro discovery so Unicode VBA procedure names such as Japanese `Test*` and `*_Test` names are recognized by both PowerShell and `.NET` bridges.
 - Added experimental `xlflow pack`, a pure-Go, cross-platform command that builds an `.xlsm` artifact from the source tree plus a workbook template without Excel. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces only that single zip entry, leaving the rest of the workbook untouched. Gated behind `--experimental`; supports standard, class, and unambiguous document modules, carries existing UserForm designer streams through byte-for-byte, and performs no VBE compile or runtime validation (every run reports `pack.vbe_validation = "not_performed"` and a `vbe_validation_skipped` warning). Fails loudly on protected or signed projects, UserForm generation, ambiguous layouts, active sessions, and in-place overwrite of the template or configured workbook. See `docs/specs/pack-command.md` and ADR-0012.
 - Updated `tree-sitter-vba` to v0.7.0 and removed `xlflow fmt` parser-workaround fallback for legacy numbered comments, colon-separated block lines, and valid line-continuation forms now handled by the grammar.
 - Refactored `xlflow fmt` to use `tree-sitter-vba` structure-aware indentation for supported VBA blocks while preserving comments, strings, attributes, line continuations, line-number workflows, and `.frm` skip behavior.
@@ -14,6 +17,7 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow inspect calls`, a source-only tree-sitter-vba call-site extractor for exported VBA files with caller context, argument summaries, source ranges, conservative project-symbol resolution, JSON output, and compact grouped text output.
 - Added `xlflow inspect symbols`, a source-only tree-sitter-vba symbol indexer for exported `.bas`, `.cls`, and `.frm` VBA files with JSON and compact outline output.
 - Updated `xlflow inspect symbols` for the tree-sitter-vba 0.6.0 declaration node shape changes, including split property and declare nodes.
+- Added `VB028` source preflight blocking for bare `MsgBox` / `InputBox` calls when `XlflowUI.bas` is present, so `push` fails before Excel opens with guidance to use `XlflowUI` wrappers or explicit `VBA.Interaction.*` native dialogs.
 
 ## v0.13.1
 

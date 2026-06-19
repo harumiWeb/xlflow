@@ -168,6 +168,137 @@ disabled_rules = ["VB002"]
 	}
 }
 
+func TestLinterSupportsInlineSuppressions(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select
+  Range("A2").Select ' xlflow:disable-line VB002
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+}
+
+func TestLinterSupportsMultipleInlineSuppressionIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002 VB003
+  Range("A1").Select: ActiveCell.Activate
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) != 0 {
+		t.Fatalf("VB003 should be suppressed: %+v", got)
+	}
+}
+
+func TestLinterInlineSuppressionKeepsUnrelatedSameLineDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select: ActiveCell.Activate
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) != 1 {
+		t.Fatalf("VB003 should remain: %+v", issues)
+	}
+}
+
+func TestLinterReportsUnknownAndUnusedInlineSuppressionsAsWarnings(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB999
+  Debug.Print "ok"
+  ' xlflow:disable-next-line VB002
+  Debug.Print "still ok"
+End Sub
+`)
+
+	result, err := Linter{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("issues = %+v, want none", result.Issues)
+	}
+	if !hasWarning(result.Warnings, "unknown_inline_suppression_rule", "VB999") {
+		t.Fatalf("expected unknown suppression warning, got %+v", result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unused_inline_suppression", "VB002") {
+		t.Fatalf("expected unused suppression warning, got %+v", result.Warnings)
+	}
+}
+
+func TestLinterDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n")
+
+	result, err := Linter{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(result.Issues, "VB008"); len(got) != 1 {
+		t.Fatalf("VB008 should remain unsuppressed: issues=%+v warnings=%+v", result.Issues, result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unsupported_inline_suppression_rule", "VB008") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", result.Warnings)
+	}
+}
+
+func TestLinterConfigDisabledRulesComposeWithInlineSuppressions(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select
+  ActiveCell.Activate
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.ForbidSelect = false
+	cfg.Lint.DisabledRules = []string{"VB002"}
+
+	result, err := Linter{RootDir: dir, Config: cfg}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(result.Issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be globally disabled: %+v", got)
+	}
+	if got := issuesByCode(result.Issues, "VB003"); len(got) == 0 {
+		t.Fatalf("VB003 should remain enabled: %+v", result.Issues)
+	}
+	if !hasWarning(result.Warnings, "unused_inline_suppression", "VB002") {
+		t.Fatalf("expected unused inline warning for globally disabled VB002, got %+v", result.Warnings)
+	}
+}
+
 func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -465,6 +596,130 @@ End Sub
 		if issue.Code == "VB007" {
 			t.Fatalf("wrapper helper should not trigger VB007: %+v", issues)
 		}
+	}
+}
+
+func TestLinterBlocksBareDialogsWhenXlflowUIIsPresent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	uiBody := `Attribute VB_Name = "XlflowUI"
+Option Explicit
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+End Function
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String) As String
+End Function
+`
+	if err := os.WriteFile(filepath.Join(src, "XlflowUI.bas"), []byte(uiBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+  MsgBox "Done"
+  Call MsgBox("Done")
+  Dim answer As String
+  answer = InputBox("Name?")
+  XlflowUI.MsgBox "confirm", "OK"
+  VBA.Interaction.MsgBox "Native"
+  Debug.Print "MsgBox in a string"
+  ' InputBox "comment"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb028 := issuesByCode(issues, "VB028")
+	if len(vb028) != 3 {
+		t.Fatalf("expected three XlflowUI name-collision issues, got %+v", vb028)
+	}
+	assertIssue(t, vb028, "VB028", 5)
+	assertIssue(t, vb028, "VB028", 6)
+	assertIssue(t, vb028, "VB028", 8)
+	for _, issue := range vb028 {
+		if issue.Severity != "error" || issue.Kind != "xlflowui_name_collision" {
+			t.Fatalf("unexpected VB028 metadata: %+v", issue)
+		}
+		if !strings.Contains(issue.Message, "VBA.Interaction."+issue.Symbol) || !strings.Contains(issue.Suggestion, "XlflowUI."+issue.Symbol) {
+			t.Fatalf("VB028 should explain both supported remedies: %+v", issue)
+		}
+	}
+	blocking := PushBlockingIssues(issues)
+	assertIssue(t, blocking, "VB028", 5)
+	assertIssue(t, blocking, "VB028", 6)
+	assertIssue(t, blocking, "VB028", 8)
+}
+
+func TestLinterVB028UsesStatementCallContext(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	uiBody := `Attribute VB_Name = "XlflowUI"
+Option Explicit
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+End Function
+`
+	if err := os.WriteFile(filepath.Join(src, "XlflowUI.bas"), []byte(uiBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run(): MsgBox "Done": End Sub
+
+Private Sub Assignments()
+  Dim MsgBox As String
+  MsgBox = "not a dialog call"
+  Debug.Print MsgBox
+End Sub
+
+Public Function NativeName() As String
+  NativeName = "ok"
+End Function
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb028 := issuesByCode(issues, "VB028")
+	if len(vb028) != 1 {
+		t.Fatalf("expected only the one-line procedure dialog call to trigger VB028, got %+v", vb028)
+	}
+	assertIssue(t, vb028, "VB028", 4)
+}
+
+func TestLinterAllowsBareDialogsWithoutXlflowUI(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  MsgBox "Done"
+  Debug.Print InputBox("Name?")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB028"); len(got) != 0 {
+		t.Fatalf("VB028 should require XlflowUI.bas to be present, got %+v", got)
 	}
 }
 
@@ -975,6 +1230,15 @@ func issuesByCode(issues []Issue, code string) []Issue {
 		}
 	}
 	return filtered
+}
+
+func hasWarning(warnings []map[string]any, code string, rule string) bool {
+	for _, warning := range warnings {
+		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
 }
 
 func writeLintModule(t *testing.T, dir, name, body string) {

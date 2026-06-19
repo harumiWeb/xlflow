@@ -203,22 +203,27 @@ disabled_rules = ["VBA999"]
 }
 
 func TestLoadRejectsNonConfigurableDisabledLintRule(t *testing.T) {
-	dir := t.TempDir()
-	body := []byte(`[project]
+	for _, ruleID := range []string{"VB013", "VB028"} {
+		t.Run(ruleID, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte(`[project]
 entry = "Main.Run"
 
 [excel]
 path = "build/Book.xlsm"
 
 [lint]
-disabled_rules = ["VB013"]
+disabled_rules = ["` + ruleID + `"]
 `)
-	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "lint rule ID is not configurable in [lint].disabled_rules: VB013") {
-		t.Fatalf("expected non-configurable lint rule error, got %v", err)
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			want := "lint rule ID is not configurable in [lint].disabled_rules: " + ruleID
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected non-configurable lint rule error %q, got %v", want, err)
+			}
+		})
 	}
 }
 

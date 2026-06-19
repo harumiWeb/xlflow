@@ -8,6 +8,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -25,6 +26,11 @@ type Issue struct {
 	Symbol           string `json:"symbol,omitempty"`
 	Suggestion       string `json:"suggestion,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
+}
+
+type Result struct {
+	Issues   []Issue
+	Warnings []map[string]any
 }
 
 type Linter struct {
@@ -60,25 +66,40 @@ var (
 const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
 
 func (l Linter) Run() ([]Issue, error) {
-	files, err := l.files()
+	result, err := l.RunResult()
 	if err != nil {
 		return nil, err
+	}
+	return result.Issues, nil
+}
+
+func (l Linter) RunResult() (Result, error) {
+	files, err := l.files()
+	if err != nil {
+		return Result{}, err
 	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
 		fileIssues, err := l.lintFile(file)
 		if err != nil {
-			return nil, err
+			return Result{}, err
 		}
 		issues = append(issues, fileIssues...)
 	}
+	issues = append(issues, l.xlflowUIBareDialogIssues(files)...)
 	projectIssues, err := l.projectIssues()
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	issues = append(issues, projectIssues...)
 	sortIssues(issues)
-	return issues, nil
+	directives, warnings, err := suppression.DirectivesForFiles(l.RootDir, files)
+	if err != nil {
+		return Result{}, err
+	}
+	issues, suppressionWarnings := applyInlineSuppressions(issues, directives)
+	warnings = append(warnings, suppressionWarnings...)
+	return Result{Issues: issues, Warnings: warnings}, nil
 }
 
 func (l Linter) files() ([]string, error) {
@@ -681,11 +702,158 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" {
 			blocking = append(blocking, issue)
 		}
 	}
 	return blocking
+}
+
+func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
+	if !hasXlflowUIModule(files) {
+		return nil
+	}
+	var issues []Issue
+	for _, path := range files {
+		if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
+			continue
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
+		for i, line := range lines {
+			code := maskStringLiterals(gui.StripComment(line))
+			for _, statement := range splitStatements(code) {
+				for _, symbol := range bareDialogCalls(statement) {
+					issue := l.issue(path, i+1, "VB028", "error", "Bare "+symbol+" is not allowed when XlflowUI.bas is present because VBA can bind it to XlflowUI."+symbol+" instead of the built-in dialog. Use XlflowUI."+symbol+" with a stable dialog id, or explicitly call VBA.Interaction."+symbol+" for intentional human-only dialogs.")
+					issue.Kind = "xlflowui_name_collision"
+					issue.Symbol = symbol
+					issue.Suggestion = "Use XlflowUI." + symbol + "(...) for xlflow-managed dialogs, or VBA.Interaction." + symbol + "(...) for intentional native dialogs."
+					issues = append(issues, issue)
+				}
+			}
+		}
+	}
+	return issues
+}
+
+func hasXlflowUIModule(files []string) bool {
+	for _, path := range files {
+		if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
+			return true
+		}
+	}
+	return false
+}
+
+func bareDialogCalls(code string) []string {
+	var symbols []string
+	for _, symbol := range []string{"MsgBox", "InputBox"} {
+		if containsBareIdentifierUse(code, symbol) {
+			symbols = append(symbols, symbol)
+		}
+	}
+	return symbols
+}
+
+func containsBareIdentifierUse(code, symbol string) bool {
+	if isDeclarationStatement(code) {
+		return false
+	}
+	lowerCode := strings.ToLower(code)
+	lowerSymbol := strings.ToLower(symbol)
+	for offset := 0; ; {
+		index := strings.Index(lowerCode[offset:], lowerSymbol)
+		if index < 0 {
+			return false
+		}
+		index += offset
+		end := index + len(symbol)
+		if isIdentifierBoundary(code, index-1) && isIdentifierBoundary(code, end) && !isQualifiedIdentifier(code, index) && isCallSiteUse(code, end) {
+			return true
+		}
+		offset = end
+	}
+}
+
+func isIdentifierBoundary(code string, index int) bool {
+	if index < 0 || index >= len(code) {
+		return true
+	}
+	return !isIdentifierChar(code[index])
+}
+
+func isQualifiedIdentifier(code string, index int) bool {
+	for i := index - 1; i >= 0; i-- {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '.':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func isCallSiteUse(code string, end int) bool {
+	if isAssignmentTarget(code, end) {
+		return false
+	}
+	for i := end; i < len(code); i++ {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '=':
+			return false
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func isAssignmentTarget(code string, end int) bool {
+	for i := end; i < len(code); i++ {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '=':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func isDeclarationStatement(code string) bool {
+	fields := lowerFields(code)
+	if len(fields) == 0 {
+		return false
+	}
+	index := 0
+	for index < len(fields) {
+		switch fields[index] {
+		case "public", "private", "friend", "static":
+			index++
+		default:
+			goto afterVisibility
+		}
+	}
+afterVisibility:
+	if index >= len(fields) {
+		return false
+	}
+	switch fields[index] {
+	case "sub", "function", "property", "declare", "dim", "const", "type", "enum", "event":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) projectIssues() ([]Issue, error) {
@@ -883,6 +1051,29 @@ func sortIssues(issues []Issue) {
 		}
 		return a.Code < b.Code
 	})
+}
+
+func applyInlineSuppressions(issues []Issue, directives []suppression.Directive) ([]Issue, []map[string]any) {
+	diagnostics := make([]suppression.Diagnostic, 0, len(issues))
+	for _, issue := range issues {
+		diagnostics = append(diagnostics, suppression.Diagnostic{
+			Code: issue.Code,
+			File: issue.File,
+			Line: issue.Line,
+		})
+	}
+	suppressed, warnings := suppression.Apply(diagnostics, directives, suppression.FamilyLint)
+	if len(suppressed) == 0 {
+		return issues, warnings
+	}
+	filtered := make([]Issue, 0, len(issues))
+	for i, issue := range issues {
+		if suppressed[i] {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+	return filtered, warnings
 }
 
 func procedureSymbolKind(kind string) bool {

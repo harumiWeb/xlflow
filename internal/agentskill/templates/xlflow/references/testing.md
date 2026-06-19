@@ -109,6 +109,54 @@ Public Sub Test_Setup_Ran()
 End Sub
 ```
 
+## COM Object Cleanup in Tests
+
+When a test opens an external workbook, always release the COM reference immediately after closing it. `GetObject(path)` and `Application.Workbooks.Open(path)` return workbook COM proxies that can keep the file locked even after `wb.Close False` if the VBA variable still holds the object reference.
+
+Required pattern:
+
+```vb
+Set wb = GetObject(path)
+wb.Close False
+Set wb = Nothing
+
+Set wb = Application.Workbooks.Open(path)
+wb.Close False
+Set wb = Nothing
+```
+
+Use a cleanup block when assertions or runtime errors can happen before the close:
+
+```vb
+Public Sub Test_ReadsExternalWorkbook()
+    Dim wb As Object
+    Dim errNumber As Long
+    Dim errSource As String
+    Dim errDescription As String
+
+    On Error GoTo Cleanup
+    Set wb = GetObject(outputPath)
+
+    ' assertions...
+
+Cleanup:
+    errNumber = Err.Number
+    errSource = Err.Source
+    errDescription = Err.Description
+
+    If Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close False
+        Set wb = Nothing
+        On Error GoTo 0
+    End If
+
+    If errNumber <> 0 Then Err.Raise errNumber, errSource, errDescription
+End Sub
+```
+
+Missing `Set wb = Nothing` often shows up away from the leaking test. Tests may pass individually but fail as a suite when `BeforeAll`, `AfterAll`, `BeforeEach`, or `AfterEach` later tries to delete or overwrite the same file. VBA error 70, `Permission denied`, or a localized write-denied message during cleanup is a strong signal to check for an unreleased workbook reference in an earlier test.
+
 ## Running Tests
 
 ### Basic usage

@@ -463,6 +463,7 @@ xlflow inspect-gui --json
 
 > [!WARNING]
 > Headless automation and modal Excel UIs do not work well together. We recommend using `inspect-gui` before unattended execution and replacing existing `MsgBox` or `InputBox` calls with `XlflowUI`.
+> When `XlflowUI.bas` is present, bare `MsgBox` / `InputBox` calls are rejected during source preflight because VBA can bind them to `XlflowUI` instead of the built-ins. Use `XlflowUI` wrappers by default, or explicitly call `VBA.Interaction.MsgBox` / `VBA.Interaction.InputBox` for intentional native dialogs.
 
 ### Runtime-aware VBA branches
 
