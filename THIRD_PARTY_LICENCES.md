@@ -13,7 +13,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/BurntSushi/toml`            |  `v1.6.0` | MIT               | `https://github.com/BurntSushi/toml/blob/v1.6.0/COPYING`             |
 | `github.com/charmbracelet/bubbletea`    | `v1.3.10` | MIT               | `https://github.com/charmbracelet/bubbletea/blob/v1.3.10/LICENSE`    |
 | `github.com/charmbracelet/lipgloss`     |  `v1.1.0` | MIT               | `https://github.com/charmbracelet/lipgloss/blob/v1.1.0/LICENSE`      |
-| `github.com/harumiWeb/tree-sitter-vba`  |  `v0.6.0` | MIT               | `https://github.com/harumiWeb/tree-sitter-vba/blob/v0.6.0/LICENSE`   |
+| `github.com/harumiWeb/tree-sitter-vba`  |  `v0.7.0` | MIT               | `https://github.com/harumiWeb/tree-sitter-vba/blob/v0.7.0/LICENSE`   |
 | `github.com/spf13/cobra`                | `v1.10.2` | Apache-2.0        | `https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt`            |
 | `github.com/tree-sitter/go-tree-sitter` | `v0.25.0` | MIT               | `https://github.com/tree-sitter/go-tree-sitter/blob/v0.25.0/LICENSE` |
 | `gopkg.in/yaml.v3`                      |  `v3.0.1` | MIT OR Apache-2.0 | `https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE`                |

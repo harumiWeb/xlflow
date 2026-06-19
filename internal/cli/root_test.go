@@ -1162,6 +1162,50 @@ func TestFmtStdinViaCLI(t *testing.T) {
 	}
 }
 
+func TestFmtStdinParseErrorViaCLI(t *testing.T) {
+	input := "Public Function Broken(ByVal x As String\nEnd Function\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--stdin"})
+	err = root.Execute()
+	if err == nil {
+		t.Fatal("expected fmt --stdin parse error")
+	}
+	if output.ExitCode(err) != output.ExitEnvironment {
+		t.Fatalf("expected environment exit, got %d for %v", output.ExitCode(err), err)
+	}
+	var env map[string]any
+	if jsonErr := json.Unmarshal(stdout.Bytes(), &env); jsonErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", jsonErr, stdout.String())
+	}
+	errorMap, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error map, got %#v", env["error"])
+	}
+	if errorMap["code"] != "fmt_failed" {
+		t.Fatalf("expected fmt_failed, got %#v", errorMap)
+	}
+}
+
 func TestFmtStdinRejectsPathArgsViaCLI(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{

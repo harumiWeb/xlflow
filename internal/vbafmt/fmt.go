@@ -53,16 +53,6 @@ type FmtOptions struct {
 	LineNumbers LineNumberMode
 }
 
-type indenter struct {
-	level   int
-	fileCtx *fileContext
-}
-
-type fileContext struct {
-	isClass bool
-	lines   []string
-}
-
 func Run(opts FmtOptions) (*Result, error) {
 	files, err := resolveFiles(opts)
 	if err != nil {
@@ -238,6 +228,13 @@ func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
 	original := string(data)
 	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers})
 	if err != nil {
+		if isFormatParseError(err) {
+			return FileResult{
+				Path:       path,
+				Skipped:    true,
+				SkipReason: "parse error: " + err.Error(),
+			}, nil
+		}
 		return FileResult{}, err
 	}
 	return FileResult{
@@ -475,24 +472,6 @@ var dedentKeywords = []string{
 	"LOOP",
 	"NEXT",
 	"WEND",
-}
-
-func isIndentKeyword(kw string) bool {
-	for _, ik := range indentKeywords {
-		if kw == ik {
-			return true
-		}
-	}
-	return false
-}
-
-func isDedentKeyword(kw string) bool {
-	for _, dk := range dedentKeywords {
-		if kw == dk {
-			return true
-		}
-	}
-	return false
 }
 
 func isOptionExplicitGap(prev string) bool {
