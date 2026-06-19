@@ -249,7 +249,7 @@ func readZipEntry(entry *zip.File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	return io.ReadAll(reader)
 }
 
@@ -258,7 +258,7 @@ func copyZipEntry(dst io.Writer, entry *zip.File) error {
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	_, err = io.Copy(dst, reader)
 	return err
 }

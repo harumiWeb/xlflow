@@ -76,10 +76,12 @@ func TestPathsMatchGolden(t *testing.T) {
 		if rerr != nil {
 			t.Fatalf("%s: failed to read golden streams: %v", book, rerr)
 		}
-		var wantPaths []string
-		for _, l := range strings.Split(strings.TrimSpace(string(want)), "\n") {
-			wantPaths = append(wantPaths, l)
-		}
+		// Golden files are committed with LF, but Windows checkouts with
+		// core.autocrlf=true rewrite them to CRLF. TrimSpace only trims the
+		// whole blob, so normalize CRLF before splitting to keep the per-line
+		// comparison platform-independent.
+		normalized := strings.ReplaceAll(string(want), "\r\n", "\n")
+		wantPaths := strings.Split(strings.TrimSpace(normalized), "\n")
 		got := append([]string{}, c.Paths()...)
 		sort.Strings(got)
 		sort.Strings(wantPaths)
