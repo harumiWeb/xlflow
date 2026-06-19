@@ -1,0 +1,4 @@
+Attribute VB_Name = "Spike"
+Sub WriteSentinel()
+    ThisWorkbook.Sheets(1).Range("A1").Value = "SPIKE0_RECOMPILED_OK"
+End Sub
