@@ -1245,10 +1245,16 @@ func (a *app) packCommand() *cobra.Command {
 			if samePath(resolvedOut, resolvedTemplate) || samePath(resolvedOut, configuredWorkbook) {
 				return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
 			}
-			for _, candidate := range uniqueNonEmptyPaths(resolvedTemplate, configuredWorkbook) {
+			candidates := uniqueNonEmptyPaths(resolvedTemplate, configuredWorkbook, resolvedOut)
+			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
 					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))
 				}
+			}
+			if wb, active, err := a.packActiveSession(candidates); err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("could not check for an active session: %w", err))
+			} else if active {
+				return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("an xlflow session is active for %s", wb))
 			}
 
 			sources, err := collectPackSourceModules(a.cwd, cfg)
@@ -1538,18 +1544,44 @@ type sessionMetadata struct {
 	WorkbookPath string `json:"workbook_path"`
 }
 
-func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
-	metadataPath := filepath.Join(a.cwd, ".xlflow", "session.json")
-	body, err := os.ReadFile(metadataPath)
+// readSessionMetadata loads .xlflow/session.json. found is false when no session
+// file exists; a present-but-unreadable or malformed file returns an error.
+func (a *app) readSessionMetadata() (sessionMetadata, bool, error) {
+	body, err := os.ReadFile(filepath.Join(a.cwd, ".xlflow", "session.json"))
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return sessionMetadata{}, false, nil
 	}
 	if err != nil {
-		return false, err
+		return sessionMetadata{}, false, err
 	}
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 	var metadata sessionMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
+		return sessionMetadata{}, false, err
+	}
+	return metadata, true, nil
+}
+
+// packActiveSession reports whether .xlflow/session.json records a session for any
+// of the candidate workbooks. pack must not read possibly-dirty live state, so a
+// recorded session blocks it regardless of process liveness; the Office lock-file
+// check covers the open-in-Excel case separately.
+func (a *app) packActiveSession(candidates []string) (string, bool, error) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil || !found {
+		return "", false, err
+	}
+	for _, candidate := range candidates {
+		if samePath(metadata.WorkbookPath, candidate) {
+			return metadata.WorkbookPath, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func (a *app) rollbackBlockedBySession(workbookPath string) (bool, error) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil || !found {
 		return false, err
 	}
 	if !samePath(metadata.WorkbookPath, workbookPath) {

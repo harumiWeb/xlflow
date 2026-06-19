@@ -100,6 +100,52 @@ func TestPackCommandActiveSessionLockFile(t *testing.T) {
 	}
 }
 
+func TestPackCommandActiveSessionOutputLockFile(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A lock file for the --out target means the destination workbook is open.
+	if err := os.WriteFile(filepath.Join(dir, "dist", "~$Book.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_active_session" {
+		t.Fatalf("error code = %q, want pack_active_session\n%s", got, stdout)
+	}
+}
+
+func TestPackCommandActiveSessionMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	// An xlflow session recorded for the template, with no Office lock file present.
+	meta, err := json.Marshal(map[string]any{
+		"workbook_path": filepath.Join(dir, "build", "Book.xlsm"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".xlflow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".xlflow", "session.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_active_session" {
+		t.Fatalf("error code = %q, want pack_active_session\n%s", got, stdout)
+	}
+}
+
 func TestCollectPackSourceModulesIgnoresForms(t *testing.T) {
 	dir := t.TempDir()
 	writePackSourceTree(t, dir, true)
