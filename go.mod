@@ -7,7 +7,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/harumiWeb/tree-sitter-vba v0.7.0
+	github.com/harumiWeb/tree-sitter-vba v0.8.1
 	github.com/richardlehane/mscfb v1.0.6
 	github.com/sourcegraph/jsonrpc2 v0.2.0
 	github.com/spf13/cobra v1.10.2

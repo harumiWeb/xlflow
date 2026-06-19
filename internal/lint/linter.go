@@ -326,19 +326,19 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 }
 
 func (c *astLintContext) memberAccessIssue(node *tree_sitter.Node) {
-	property := node.ChildByFieldName("property")
-	if property == nil {
+	member := childByFieldNameAny(node, "member", "property")
+	if member == nil {
 		return
 	}
-	name := cleanIdentifier(property.Utf8Text(c.source))
+	name := cleanIdentifier(member.Utf8Text(c.source))
 	switch {
 	case c.linter.Config.Lint.ForbidSelect && strings.EqualFold(name, "Select"):
-		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(property), "VB002", "warning", "Avoid Select. Use direct object references instead."))
+		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(member), "VB002", "warning", "Avoid Select. Use direct object references instead."))
 	case c.linter.Config.Lint.ForbidActivate && strings.EqualFold(name, "Activate"):
-		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(property), "VB003", "warning", "Avoid Activate. Use direct object references instead."))
+		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(member), "VB003", "warning", "Avoid Activate. Use direct object references instead."))
 	}
 	if c.linter.Config.Lint.DetectNestedWithAmbiguity && node.Kind() == "implicit_member_expression" && c.withDepth >= 2 && isExcelObjectAccessName(name) {
-		issue := c.linter.issueAt(c.path, vbaast.NodeRange(property), "VB027", "warning", "Avoid implicit Excel members inside nested With blocks; qualify the target explicitly.")
+		issue := c.linter.issueAt(c.path, vbaast.NodeRange(member), "VB027", "warning", "Avoid implicit Excel members inside nested With blocks; qualify the target explicitly.")
 		issue.Symbol = "." + name
 		c.issues = append(c.issues, issue)
 	}
@@ -1342,6 +1342,18 @@ func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node 
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child != nil && child.Kind() == kind {
+			return child
+		}
+	}
+	return nil
+}
+
+func childByFieldNameAny(node *tree_sitter.Node, names ...string) *tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	for _, name := range names {
+		if child := node.ChildByFieldName(name); child != nil {
 			return child
 		}
 	}
