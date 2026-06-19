@@ -6,9 +6,10 @@ Accepted
 
 ## Context
 
-xlflow needs editor-grade VBA intelligence for diagnostics, symbols, hover, and
-definition lookup. The same analysis must also remain available to CLI commands
-such as `lint`, `analyze`, `inspect symbols`, and future agent integrations.
+xlflow needs editor-grade VBA intelligence for diagnostics, symbols, hover,
+completion, references, and definition lookup. The same analysis must also
+remain available to CLI commands such as `lint`, `analyze`, `inspect symbols`,
+and future agent integrations.
 
 Placing parsing logic inside a VS Code extension would create a second VBA
 analysis stack and make CLI and editor behavior drift. Placing LSP protocol

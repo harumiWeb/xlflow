@@ -28,9 +28,9 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `xlflow lsp --check` works even before a project has an `xlflow.toml`; it validates the parser and built-in type database using default configuration.
 
-The MVP server supports full document synchronization, diagnostics, document symbols, workspace symbols, definition lookup, and hover. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
+The MVP server supports full document synchronization, diagnostics, document symbols, workspace symbols, definition lookup, references, hover, and completion. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
 
-The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover and basic type inference.
+The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 ## VS Code Client
 

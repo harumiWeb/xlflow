@@ -97,7 +97,9 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentDocumentSymbol: s.documentSymbol,
 		WorkspaceSymbol:            s.workspaceSymbol,
 		TextDocumentDefinition:     s.definition,
+		TextDocumentReferences:     s.references,
 		TextDocumentHover:          s.hover,
+		TextDocumentCompletion:     s.completion,
 	}
 	return s, cleanup, nil
 }
@@ -274,6 +276,26 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	return out, nil
 }
 
+func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	locs, err := s.analyzer.References(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), params.Context.IncludeDeclaration, s.docs.uriForDisplayPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.Location, 0, len(locs))
+	for _, loc := range locs {
+		uri := loc.URI
+		if !strings.HasPrefix(uri, "file:") {
+			uri = s.docs.uriForDisplayPath(loc.Path)
+		}
+		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
+	}
+	return out, nil
+}
+
 func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -290,6 +312,36 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		},
 		Range: toProtocolRangePtr(hover.Range),
 	}, nil
+}
+
+func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	completions, err := s.analyzer.Completions(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil {
+		return nil, err
+	}
+	items := make([]protocol.CompletionItem, 0, len(completions))
+	for _, completion := range completions {
+		kind := completionItemKind(completion.Kind)
+		item := protocol.CompletionItem{
+			Label: completion.Label,
+			Kind:  &kind,
+		}
+		if completion.Detail != "" {
+			item.Detail = &completion.Detail
+		}
+		if completion.Documentation != "" {
+			item.Documentation = protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
+				Value: completion.Documentation,
+			}
+		}
+		items = append(items, item)
+	}
+	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
 }
 
 func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
@@ -540,6 +592,25 @@ func symbolKind(kind string) protocol.SymbolKind {
 		return protocol.SymbolKindEvent
 	default:
 		return protocol.SymbolKindObject
+	}
+}
+
+func completionItemKind(kind string) protocol.CompletionItemKind {
+	switch strings.ToLower(kind) {
+	case "method":
+		return protocol.CompletionItemKindMethod
+	case "function":
+		return protocol.CompletionItemKindFunction
+	case "property":
+		return protocol.CompletionItemKindProperty
+	case "variable":
+		return protocol.CompletionItemKindVariable
+	case "type":
+		return protocol.CompletionItemKindClass
+	case "constant":
+		return protocol.CompletionItemKindConstant
+	default:
+		return protocol.CompletionItemKindText
 	}
 }
 

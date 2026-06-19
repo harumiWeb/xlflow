@@ -53,3 +53,47 @@ func TestResolveConstant(t *testing.T) {
 		t.Fatalf("unexpected xlUp metadata: %+v", constant)
 	}
 }
+
+func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasGlobal(db.GlobalsList(), "ThisWorkbook", "Excel.Workbook") {
+		t.Fatalf("ThisWorkbook global missing: %+v", db.GlobalsList())
+	}
+	if !hasConstant(db.ConstantsList(), "xlUp") {
+		t.Fatal("xlUp constant missing")
+	}
+	if !hasMember(db.Members("Excel.Range"), "Value") {
+		t.Fatalf("Range.Value member missing: %+v", db.Members("Excel.Range"))
+	}
+}
+
+func hasGlobal(items []MemberInfo, name, typ string) bool {
+	for _, item := range items {
+		if item.Name == name && item.ReturnType == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConstant(items []ConstantInfo, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMember(items []MemberInfo, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}

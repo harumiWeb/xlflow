@@ -19,6 +19,7 @@ type DB struct {
 	Constants    map[string]ConstantInfo
 	ProgIDs      map[string]string
 	GlobalValues map[string]string
+	GlobalNames  map[string]string
 }
 
 type TypeInfo struct {
@@ -78,6 +79,7 @@ func LoadBuiltin() (*DB, error) {
 		Constants:    map[string]ConstantInfo{},
 		ProgIDs:      map[string]string{},
 		GlobalValues: map[string]string{},
+		GlobalNames:  map[string]string{},
 	}
 	err := fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -105,6 +107,7 @@ func LoadBuiltin() (*DB, error) {
 		}
 		for name, typ := range data.GlobalValues {
 			db.GlobalValues[fold(name)] = typ
+			db.GlobalNames[fold(name)] = name
 		}
 		return nil
 	})
@@ -118,7 +121,6 @@ func (db *DB) addType(typ TypeInfo) {
 	if typ.Name == "" {
 		return
 	}
-	db.Types[fold(typ.Name)] = typ
 	db.Aliases[fold(typ.Name)] = typ.Name
 	short := typ.Name
 	if idx := strings.LastIndex(short, "."); idx >= 0 {
@@ -131,6 +133,7 @@ func (db *DB) addType(typ TypeInfo) {
 	if typ.Kind == "collection" {
 		typ.Collection = true
 	}
+	db.Types[fold(typ.Name)] = typ
 }
 
 func (db *DB) ResolveType(name string) (TypeInfo, bool) {
@@ -191,6 +194,40 @@ func (db *DB) ResolveMember(receiverType, member string) (MemberInfo, bool) {
 	return MemberInfo{}, false
 }
 
+func (db *DB) Members(receiverType string) []MemberInfo {
+	typ, ok := db.ResolveType(receiverType)
+	if !ok {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []MemberInfo
+	add := func(m MemberInfo) {
+		if m.Name == "" {
+			return
+		}
+		key := fold(m.Name)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, m)
+	}
+	for _, m := range typ.Properties {
+		add(m)
+	}
+	for _, m := range typ.Methods {
+		add(m)
+	}
+	for _, m := range typ.Events {
+		add(m)
+	}
+	if typ.DefaultMember != "" {
+		add(MemberInfo{Name: typ.DefaultMember, ReturnType: typ.ElementType, Default: true})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 func (db *DB) TypeNames() []string {
 	if db == nil {
 		return nil
@@ -201,6 +238,34 @@ func (db *DB) TypeNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (db *DB) ConstantsList() []ConstantInfo {
+	if db == nil {
+		return nil
+	}
+	out := make([]ConstantInfo, 0, len(db.Constants))
+	for _, constant := range db.Constants {
+		out = append(out, constant)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (db *DB) GlobalsList() []MemberInfo {
+	if db == nil {
+		return nil
+	}
+	out := make([]MemberInfo, 0, len(db.GlobalValues))
+	for key, typ := range db.GlobalValues {
+		name := db.GlobalNames[key]
+		if name == "" {
+			name = key
+		}
+		out = append(out, MemberInfo{Name: name, ReturnType: typ})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 func fold(s string) string {

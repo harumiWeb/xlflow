@@ -2,8 +2,10 @@ package intel
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"unicode/utf16"
@@ -65,6 +67,13 @@ type Location struct {
 type Hover struct {
 	Contents string
 	Range    Range
+}
+
+type Completion struct {
+	Label         string
+	Kind          string
+	Detail        string
+	Documentation string
 }
 
 func (a Analyzer) Check() error {
@@ -187,6 +196,96 @@ func (a Analyzer) Definition(doc Document, pos Position, open []Document, uriFor
 	return out, nil
 }
 
+func (a Analyzer) References(doc Document, pos Position, open []Document, includeDeclaration bool, uriForPath func(string) string) ([]Location, error) {
+	word, _ := WordAt(doc.Source, pos)
+	if word == "" {
+		return nil, nil
+	}
+	docs, err := a.workspaceDocuments(open)
+	if err != nil {
+		return nil, err
+	}
+	declarations := map[string]bool{}
+	var declarationRanges []Location
+	if !includeDeclaration {
+		defs, err := a.Definition(doc, pos, open, nil)
+		if err != nil {
+			return nil, err
+		}
+		for _, def := range defs {
+			declarations[locationKey(def.Path, def.Range)] = true
+			declarationRanges = append(declarationRanges, def)
+		}
+		for _, candidate := range docs {
+			syms, err := a.DocumentSymbols(candidate)
+			if err != nil {
+				continue
+			}
+			for _, sym := range syms {
+				if !strings.EqualFold(sym.Name, word) {
+					continue
+				}
+				declarations[locationKey(candidate.Path, sym.Selection)] = true
+				declarations[locationKey(candidate.URI, sym.Selection)] = true
+				declarationRanges = append(declarationRanges, Location{URI: candidate.URI, Path: candidate.Path, Range: sym.Range})
+			}
+		}
+	}
+	var out []Location
+	for _, candidate := range docs {
+		for _, r := range identifierRanges(candidate.Source, word) {
+			if !includeDeclaration && (declarations[locationKey(candidate.Path, r)] || declarations[locationKey(candidate.URI, r)]) {
+				continue
+			}
+			if !includeDeclaration && containedInDeclaration(candidate, r, declarationRanges) {
+				continue
+			}
+			uri := candidate.URI
+			if uri == "" && uriForPath != nil {
+				uri = uriForPath(candidate.Path)
+			}
+			out = append(out, Location{URI: uri, Path: candidate.Path, Range: r})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		if out[i].Range.Start.Line != out[j].Range.Start.Line {
+			return out[i].Range.Start.Line < out[j].Range.Start.Line
+		}
+		return out[i].Range.Start.Character < out[j].Range.Start.Character
+	})
+	return out, nil
+}
+
+func containedInDeclaration(doc Document, r Range, declarations []Location) bool {
+	for _, declaration := range declarations {
+		sameDocument := pathKey(declaration.Path) == pathKey(doc.Path)
+		if !sameDocument && declaration.URI != "" && doc.URI != "" {
+			sameDocument = declaration.URI == doc.URI
+		}
+		if sameDocument && declaration.Range.Start.Line == r.Start.Line && rangeContains(declaration.Range, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeContains(outer, inner Range) bool {
+	if comparePosition(outer.Start, inner.Start) > 0 {
+		return false
+	}
+	return comparePosition(outer.End, inner.End) >= 0
+}
+
+func comparePosition(a, b Position) int {
+	if a.Line != b.Line {
+		return a.Line - b.Line
+	}
+	return a.Character - b.Character
+}
+
 func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, error) {
 	word, r := WordAt(doc.Source, pos)
 	if word == "" {
@@ -223,6 +322,32 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		}
 	}
 	return nil, nil
+}
+
+func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
+	line := lineAt(doc.Source, pos.Line)
+	prefix := utf16Prefix(line, pos.Character)
+	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
+	if memberMode {
+		typ, ok := a.resolveDocumentExpressionType(doc, receiverExpr)
+		if !ok {
+			return nil, nil
+		}
+		return a.memberCompletions(typ, memberPrefix), nil
+	}
+	word, _ := WordAt(doc.Source, pos)
+	if strings.TrimSpace(word) == "" {
+		word = currentIdentifierPrefix(prefix)
+	}
+	items := a.globalCompletions(word)
+	syms, err := a.WorkspaceSymbols(open, word)
+	if err != nil {
+		return nil, err
+	}
+	for _, sym := range syms {
+		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
+	}
+	return uniqueCompletions(items), nil
 }
 
 func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
@@ -271,6 +396,14 @@ func (a Analyzer) inferExpressionType(source string, pos Position) (string, bool
 }
 
 func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
+	return a.resolveExpressionType(Document{}, expr, false)
+}
+
+func (a Analyzer) resolveDocumentExpressionType(doc Document, expr string) (string, bool) {
+	return a.resolveExpressionType(doc, expr, true)
+}
+
+func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument bool) (string, bool) {
 	parts := splitMemberExpression(expr)
 	if len(parts) == 0 {
 		return "", false
@@ -284,6 +417,12 @@ func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
 		current = typ.Name
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
+	} else if useDocument {
+		if typ, ok := a.inferWordType(doc, base); ok {
+			current = typ
+		} else {
+			return "", false
+		}
 	} else {
 		return "", false
 	}
@@ -321,6 +460,256 @@ func (a Analyzer) collectionDefaultType(name string) (string, bool) {
 		return "", false
 	}
 	return typ.ElementType, true
+}
+
+func (a Analyzer) workspaceDocuments(open []Document) ([]Document, error) {
+	out := make([]Document, 0, len(open))
+	seen := map[string]bool{}
+	for _, doc := range open {
+		key := pathKey(doc.Path)
+		if key == "" {
+			key = doc.URI
+		}
+		seen[key] = true
+		out = append(out, doc)
+	}
+	dirs := []struct {
+		path string
+		kind string
+	}{
+		{a.Config.Src.Modules, "standard"},
+		{a.Config.Src.Classes, "class"},
+		{a.Config.Src.Forms, "form"},
+		{a.Config.Src.Workbook, "document"},
+	}
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir.path) == "" {
+			continue
+		}
+		root := filepath.Join(a.RootDir, filepath.FromSlash(dir.path))
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if os.IsNotExist(walkErr) {
+					return nil
+				}
+				return walkErr
+			}
+			if d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".bas" && ext != ".cls" && ext != ".frm" {
+				return nil
+			}
+			key := pathKey(path)
+			if seen[key] {
+				return nil
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			seen[key] = true
+			out = append(out, Document{Path: path, Source: string(body), ModuleKind: dir.kind})
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func identifierRanges(source, name string) []Range {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	var out []Range
+	for lineNo, line := range normalizedLines(source) {
+		limit := codeLimit(line)
+		for start := 0; start < limit; {
+			r, size := firstRune(line[start:limit])
+			if !isIdentStartRune(r) {
+				start += max(1, size)
+				continue
+			}
+			end := start + size
+			for end < limit {
+				r, size = firstRune(line[end:limit])
+				if !isIdentRune(r) {
+					break
+				}
+				end += size
+			}
+			if strings.EqualFold(line[start:end], name) {
+				out = append(out, Range{
+					Start: Position{Line: lineNo, Character: utf16Len(line[:start])},
+					End:   Position{Line: lineNo, Character: utf16Len(line[:end])},
+				})
+			}
+			start = end
+		}
+	}
+	return out
+}
+
+func codeLimit(line string) int {
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return i
+			}
+		}
+	}
+	return len(line)
+}
+
+func (a Analyzer) memberCompletions(receiverType, prefix string) []Completion {
+	var out []Completion
+	for _, member := range a.DB.Members(receiverType) {
+		if !completionMatches(member.Name, prefix) {
+			continue
+		}
+		kind := "method"
+		if member.ReadOnly || member.WriteOnly || member.ReturnType != "" {
+			kind = "property"
+		}
+		out = append(out, Completion{
+			Label:         member.Name,
+			Kind:          kind,
+			Detail:        memberDetail(member),
+			Documentation: member.Summary,
+		})
+	}
+	return uniqueCompletions(out)
+}
+
+func (a Analyzer) globalCompletions(prefix string) []Completion {
+	var out []Completion
+	for _, typ := range a.DB.TypeNames() {
+		if completionMatches(typ, prefix) {
+			out = append(out, Completion{Label: typ, Kind: "type", Detail: "type"})
+		}
+	}
+	for _, constant := range a.DB.ConstantsList() {
+		if completionMatches(constant.Name, prefix) {
+			out = append(out, Completion{
+				Label:         constant.Name,
+				Kind:          "constant",
+				Detail:        firstNonEmpty(constant.EnumGroup, constant.Type, constant.Kind),
+				Documentation: constant.Summary,
+			})
+		}
+	}
+	for _, global := range a.DB.GlobalsList() {
+		if completionMatches(global.Name, prefix) {
+			out = append(out, Completion{
+				Label:  global.Name,
+				Kind:   "variable",
+				Detail: global.ReturnType,
+			})
+		}
+	}
+	return uniqueCompletions(out)
+}
+
+func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr string, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !strings.HasSuffix(beforeWord, ".") {
+		return "", "", false
+	}
+	receiver := expressionBefore(strings.TrimSuffix(beforeWord, "."))
+	if receiver == "" {
+		return "", "", false
+	}
+	return wordPrefix, receiver, true
+}
+
+func currentIdentifierPrefix(prefix string) string {
+	end := len(prefix)
+	start := end
+	for start > 0 {
+		r, size := lastRune(prefix[:start])
+		if !isIdentRune(r) {
+			break
+		}
+		start -= size
+	}
+	return prefix[start:end]
+}
+
+func completionMatches(label, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	return prefix == "" || strings.HasPrefix(strings.ToLower(label), strings.ToLower(prefix))
+}
+
+func uniqueCompletions(items []Completion) []Completion {
+	seen := map[string]bool{}
+	out := items[:0]
+	for _, item := range items {
+		if item.Label == "" {
+			continue
+		}
+		key := strings.ToLower(item.Kind + "\x00" + item.Label)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Label != out[j].Label {
+			return strings.ToLower(out[i].Label) < strings.ToLower(out[j].Label)
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
+func memberDetail(member vbadb.MemberInfo) string {
+	if member.ReturnType == "" {
+		return member.Name
+	}
+	return member.Name + " As " + member.ReturnType
+}
+
+func completionKindForSymbol(kind string) string {
+	switch strings.ToLower(kind) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set":
+		return "function"
+	case "const":
+		return "constant"
+	case "module_variable", "local_variable", "field":
+		return "variable"
+	case "class", "module", "enum":
+		return "type"
+	default:
+		return "symbol"
+	}
+}
+
+func locationKey(path string, r Range) string {
+	return fmt.Sprintf("%s:%d:%d:%d:%d", pathKey(path), r.Start.Line, r.Start.Character, r.End.Line, r.End.Character)
+}
+
+func pathKey(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		clean = strings.ToLower(clean)
+	}
+	return clean
 }
 
 func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
@@ -623,6 +1012,10 @@ func constantHover(c vbadb.ConstantInfo) string {
 func isIdentRune(r rune) bool {
 	return r == '_' || r == '$' || r == '%' || r == '&' || r == '!' || r == '#' || r == '@' || r == '^' ||
 		r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+}
+
+func isIdentStartRune(r rune) bool {
+	return r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
 }
 
 func isExprRune(r rune) bool {

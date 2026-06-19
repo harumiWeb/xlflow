@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
 func TestCheckLoadsBuiltinDatabase(t *testing.T) {
@@ -74,4 +75,46 @@ func TestNewCreatesLogFileWithoutStartingServer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, logPath)); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCompletionReturnsMemberCandidatesFromOpenDocument(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    Worksheets(\"Input\").Ra\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 27},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	if !hasCompletionItem(list.Items, "Range") {
+		t.Fatalf("Range completion missing: %+v", list.Items)
+	}
+}
+
+func hasCompletionItem(items []protocol.CompletionItem, label string) bool {
+	for _, item := range items {
+		if item.Label == label {
+			return true
+		}
+	}
+	return false
 }

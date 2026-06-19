@@ -92,6 +92,61 @@ func TestHoverUsesUTF16PositionsAfterJapaneseText(t *testing.T) {
 	}
 }
 
+func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\nSub Test()\n    Worksheets(\"Input\").Ra\nEnd Sub\n"
+	memberLine := `    Worksheets("Input").Ra`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(memberLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Range") {
+		t.Fatalf("Range completion missing: %+v", items)
+	}
+
+	globalDoc := Document{Path: filepath.Join(t.TempDir(), "Globals.bas"), Source: "Option Explicit\nSub Test()\n    xlU\nEnd Sub\n"}
+	items, err = analyzer.Completions(globalDoc, Position{Line: 2, Character: utf16Len("    xlU")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "xlUp") {
+		t.Fatalf("xlUp completion missing: %+v", items)
+	}
+}
+
+func TestReferencesFindOpenDocumentOccurrencesAndCanSkipDeclaration(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub RunReport()
+    RunReport
+End Sub
+`
+	doc := Document{
+		URI:        "file:///C:/work/src/modules/Main.bas",
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	pos := Position{Line: 1, Character: utf16Len("Public Sub Run")}
+
+	withDecl, err := analyzer.References(doc, pos, []Document{doc}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withDecl) != 2 {
+		t.Fatalf("references with declaration = %d, want 2: %+v", len(withDecl), withDecl)
+	}
+	withoutDecl, err := analyzer.References(doc, pos, []Document{doc}, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withoutDecl) != 1 || withoutDecl[0].Range.Start.Line != 2 {
+		t.Fatalf("references without declaration = %+v, want only call line", withoutDecl)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()
@@ -99,6 +154,15 @@ func newTestAnalyzer(t *testing.T) Analyzer {
 		t.Fatal(err)
 	}
 	return Analyzer{RootDir: t.TempDir(), Config: config.Default(), DB: db}
+}
+
+func hasCompletion(items []Completion, label string) bool {
+	for _, item := range items {
+		if item.Label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSymbol(symbols []Symbol, name string) bool {
