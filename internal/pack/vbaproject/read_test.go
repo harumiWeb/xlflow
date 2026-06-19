@@ -127,8 +127,8 @@ func TestReadPreservationRawSpans(t *testing.T) {
 		t.Error("ProjectStreamRaw does not match the PROJECT stream")
 	}
 	// ProjectInfoRaw is a non-empty span that begins with SYSKIND(0x0001).
-	if len(p.ProjectInfoRaw) == 0 {
-		t.Fatal("ProjectInfoRaw is empty")
+	if len(p.ProjectInfoRaw) < 2 {
+		t.Fatalf("ProjectInfoRaw too short: %d", len(p.ProjectInfoRaw))
 	}
 	if id := binary.LittleEndian.Uint16(p.ProjectInfoRaw); id != 0x0001 {
 		t.Errorf("ProjectInfoRaw leading id = 0x%04X, want 0x0001", id)

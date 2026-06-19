@@ -8,7 +8,10 @@ import (
 )
 
 func TestVBAProjectStub(t *testing.T) {
-	want, _ := os.ReadFile(filepath.Join("testdata", "golden", "_VBA_PROJECT"))
+	want, err := os.ReadFile(filepath.Join("testdata", "golden", "_VBA_PROJECT"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := VBAProjectStub(); !bytesEqual(got, want) {
 		t.Errorf("VBAProjectStub = %x, want %x", got, want)
 	}

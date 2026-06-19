@@ -17,8 +17,13 @@ type Container struct {
 // return value is false if no such stream exists.
 func (c *Container) Stream(path string) ([]byte, bool) { d, ok := c.streams[path]; return d, ok }
 
-// Paths returns the paths of all stored streams in discovery order.
-func (c *Container) Paths() []string { return c.order }
+// Paths returns the paths of all stored streams in discovery order. It returns a
+// copy so callers cannot mutate the Container's internal ordering.
+func (c *Container) Paths() []string {
+	out := make([]string, len(c.order))
+	copy(out, c.order)
+	return out
+}
 
 type cfbHeader struct {
 	firstDir     uint32

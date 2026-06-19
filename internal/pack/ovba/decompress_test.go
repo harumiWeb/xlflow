@@ -55,7 +55,10 @@ func TestDecompressGoldenModules(t *testing.T) {
 			if err != nil {
 				continue // skip e.g. when p5 has no module of the same name
 			}
-			want, _ := os.ReadFile(filepath.Join(dir, mod+".plain"))
+			want, err := os.ReadFile(filepath.Join(dir, mod+".plain"))
+			if err != nil {
+				t.Fatalf("%s/%s: read plain: %v", book, mod, err)
+			}
 			got, err := Decompress(comp)
 			if err != nil {
 				t.Fatalf("%s/%s: %v", book, mod, err)

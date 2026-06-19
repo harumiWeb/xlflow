@@ -2,6 +2,7 @@ package cfb
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,17 @@ func loadBin(t *testing.T, book string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestPathsReturnsCopy(t *testing.T) {
+	// Paths() must not expose the Container's internal order slice; a caller
+	// mutating the result must not corrupt subsequent reads.
+	c := &Container{order: []string{"PROJECT", "VBA/dir"}}
+	got := c.Paths()
+	got[0] = "MUTATED"
+	if c.Paths()[0] != "PROJECT" {
+		t.Errorf("Paths() exposed internal slice: got %q after caller mutation", c.Paths()[0])
+	}
 }
 
 func TestOpenRejectsBadSignature(t *testing.T) {
@@ -129,14 +141,16 @@ func TestContentMatchesMscfb(t *testing.T) {
 			if entry.Size == 0 {
 				continue
 			}
-			buf := make([]byte, entry.Size)
-			n, _ := entry.Read(buf)
+			buf, rerr := io.ReadAll(entry)
+			if rerr != nil {
+				t.Fatalf("%s: read %q: %v", book, entry.Name, rerr)
+			}
 			key := entry.Name
 			if len(entry.Path) > 0 {
 				key = strings.Join(entry.Path, "/") + "/" + entry.Name
 			}
 			got, ok := lookupStream(c, key)
-			if !ok || !bytes.Equal(got, buf[:n]) {
+			if !ok || !bytes.Equal(got, buf) {
 				t.Errorf("%s: stream %q does not match mscfb (ok=%v)", book, key, ok)
 			}
 		}

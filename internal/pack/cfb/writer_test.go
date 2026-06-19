@@ -2,6 +2,7 @@ package cfb
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -17,13 +18,15 @@ func readBack(t *testing.T, data []byte) map[string][]byte {
 	}
 	out := map[string][]byte{}
 	for entry, err := doc.Next(); err == nil; entry, err = doc.Next() {
-		buf := make([]byte, entry.Size)
-		n, _ := entry.Read(buf)
+		buf, rerr := io.ReadAll(entry)
+		if rerr != nil {
+			t.Fatalf("read %q: %v", entry.Name, rerr)
+		}
 		key := entry.Name
 		if len(entry.Path) > 0 {
 			key = strings.Join(entry.Path, "/") + "/" + entry.Name
 		}
-		out[key] = buf[:n]
+		out[key] = buf
 	}
 	return out
 }
