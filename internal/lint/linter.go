@@ -705,12 +705,14 @@ func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
 		lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
 		for i, line := range lines {
 			code := maskStringLiterals(gui.StripComment(line))
-			for _, symbol := range bareDialogCalls(code) {
-				issue := l.issue(path, i+1, "VB028", "error", "Bare "+symbol+" is not allowed when XlflowUI.bas is present because VBA can bind it to XlflowUI."+symbol+" instead of the built-in dialog. Use XlflowUI."+symbol+" with a stable dialog id, or explicitly call VBA.Interaction."+symbol+" for intentional human-only dialogs.")
-				issue.Kind = "xlflowui_name_collision"
-				issue.Symbol = symbol
-				issue.Suggestion = "Use XlflowUI." + symbol + "(...) for xlflow-managed dialogs, or VBA.Interaction." + symbol + "(...) for intentional native dialogs."
-				issues = append(issues, issue)
+			for _, statement := range splitStatements(code) {
+				for _, symbol := range bareDialogCalls(statement) {
+					issue := l.issue(path, i+1, "VB028", "error", "Bare "+symbol+" is not allowed when XlflowUI.bas is present because VBA can bind it to XlflowUI."+symbol+" instead of the built-in dialog. Use XlflowUI."+symbol+" with a stable dialog id, or explicitly call VBA.Interaction."+symbol+" for intentional human-only dialogs.")
+					issue.Kind = "xlflowui_name_collision"
+					issue.Symbol = symbol
+					issue.Suggestion = "Use XlflowUI." + symbol + "(...) for xlflow-managed dialogs, or VBA.Interaction." + symbol + "(...) for intentional native dialogs."
+					issues = append(issues, issue)
+				}
 			}
 		}
 	}
@@ -737,6 +739,9 @@ func bareDialogCalls(code string) []string {
 }
 
 func containsBareIdentifierUse(code, symbol string) bool {
+	if isDeclarationStatement(code) {
+		return false
+	}
 	lowerCode := strings.ToLower(code)
 	lowerSymbol := strings.ToLower(symbol)
 	for offset := 0; ; {
@@ -746,7 +751,7 @@ func containsBareIdentifierUse(code, symbol string) bool {
 		}
 		index += offset
 		end := index + len(symbol)
-		if isIdentifierBoundary(code, index-1) && isIdentifierBoundary(code, end) && !isQualifiedIdentifier(code, index) && !isDialogDeclaration(code[:index]) {
+		if isIdentifierBoundary(code, index-1) && isIdentifierBoundary(code, end) && !isQualifiedIdentifier(code, index) && isCallSiteUse(code, end) {
 			return true
 		}
 		offset = end
@@ -774,15 +779,61 @@ func isQualifiedIdentifier(code string, index int) bool {
 	return false
 }
 
-func isDialogDeclaration(prefix string) bool {
-	fields := lowerFields(prefix)
-	for _, field := range fields {
-		switch field {
-		case "sub", "function", "property", "declare":
+func isCallSiteUse(code string, end int) bool {
+	if isAssignmentTarget(code, end) {
+		return false
+	}
+	for i := end; i < len(code); i++ {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '=':
+			return false
+		default:
 			return true
 		}
 	}
 	return false
+}
+
+func isAssignmentTarget(code string, end int) bool {
+	for i := end; i < len(code); i++ {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '=':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func isDeclarationStatement(code string) bool {
+	fields := lowerFields(code)
+	if len(fields) == 0 {
+		return false
+	}
+	index := 0
+	for index < len(fields) {
+		switch fields[index] {
+		case "public", "private", "friend", "static":
+			index++
+		default:
+			goto afterVisibility
+		}
+	}
+afterVisibility:
+	if index >= len(fields) {
+		return false
+	}
+	switch fields[index] {
+	case "sub", "function", "property", "declare", "dim", "const", "type", "enum", "event":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) projectIssues() ([]Issue, error) {
