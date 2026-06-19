@@ -52,7 +52,16 @@ Use `analyze` for fast source-level feedback before opening Excel.
 | `VBA210` | warning  | Function may exit without assigning its return value.                     |
 | `VBA211` | error    | Expanded known Excel object/member mismatch.                              |
 
-Rules `VBA101` through `VBA106`, `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are opt-in through `[analyze]` because they are more dataflow-sensitive.
+Disable configurable analyzer rules with `[analyze].disabled_rules`:
+
+```toml
+[analyze]
+disabled_rules = ["VBA205", "VBA211"]
+```
+
+Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. If both formats disagree, `disabled_rules` takes precedence and xlflow reports a conflict warning.
+
+Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. Diagnostics `VBA101` through `VBA106` are always enabled.
 
 ## JSON Output Example
 

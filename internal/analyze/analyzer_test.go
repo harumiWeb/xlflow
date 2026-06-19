@@ -326,6 +326,43 @@ End Sub
 	}
 }
 
+func TestAnalyzerHonorsDisabledRuleIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim found As Range
+  Set found = Range("A:A").Find("x")
+  found.Value = 1
+End Sub
+`)
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+disabled_rules = ["VBA205"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA205"); len(got) != 0 {
+		t.Fatalf("VBA205 should be disabled: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA201"); len(got) == 0 {
+		t.Fatalf("VBA201 should remain enabled: %+v", findings)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesAllowGuardedPatterns(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

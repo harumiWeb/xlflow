@@ -269,6 +269,144 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "deprecated_lint_rule_config", "VB002") {
+		t.Fatalf("expected config deprecation warning, got %+v", got.Warnings)
+	}
+}
+
+func TestLintCommandPlainIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningLintProject(t, `forbid_public_module_fields = true
+disabled_rules = ["VB006"]`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	text := stdout.String()
+	for _, want := range []string{"Warnings:", "[lint].forbid_public_module_fields=true is deprecated", "Remove [lint].forbid_public_module_fields", "lint rule VB006 is enabled", "[lint].disabled_rules takes precedence"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected lint output to contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
+	dir := writeCLIWarningAnalyzeProject(t, `detect_byref_argument_mismatch = true`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "deprecated_analyze_rule_config", "VBA206") {
+		t.Fatalf("expected analyze config deprecation warning, got %+v", got.Warnings)
+	}
+}
+
+func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+` + lintConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCLIWarningAnalyzeProject(t *testing.T, analyzeConfig string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+` + analyzeConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func hasCLIWarning(warnings []map[string]any, code string, rule string) bool {
+	for _, warning := range warnings {
+		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
+}
+
 func TestVersionCommandVerboseIncludesExecutableAndFeatures(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{

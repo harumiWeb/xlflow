@@ -586,67 +586,21 @@ code_source = "sidecar"
 
 # Static analysis rules.
 [lint]
-# Require Option Explicit in every module.
-require_option_explicit = true
-# Forbid Select / Activate patterns.
-forbid_select = true
-# Forbid Activate usage.
-forbid_activate = true
-# Forbid On Error Resume Next.
-forbid_on_error_resume_next = true
-# Detect implicitly typed Variant variables.
-detect_implicit_variant = true
-# Forbid public fields in standard modules.
-forbid_public_module_fields = true
-# Forbid interactive input (MsgBox, InputBox, etc.) in headless runs.
-forbid_interactive_input = true
-# Detect local names that shadow module or procedure names.
-detect_scope_shadowing = false
-# Explain mixed Dim declarations where only some declarators are typed.
-detect_multiple_declarator_clarity = true
-# Detect unused procedure-local variables.
-detect_unused_local_variables = false
-# Detect unused Private procedures.
-detect_unused_private_procedures = false
-# Detect confusing parenthesized call syntax.
-detect_confusing_call_syntax = true
-# Detect For Each control variable declaration/type issues.
-detect_for_each_control_type = true
-# Detect Resume statements outside likely error handlers.
-detect_dangerous_resume = true
-# Detect nested With blocks with ambiguous implicit Excel members.
-detect_nested_with_ambiguity = false
+# Disable specific lint rules by diagnostic ID.
+disabled_rules = []
 
 [analyze]
-# Detect Range.Find results used without a Nothing check.
-detect_range_find_nothing_check = true
-# Detect object variables used before an obvious Set assignment.
-detect_object_use_before_set = true
-# Detect Application state changes without an obvious restore path.
-detect_application_state_restore = true
-# Detect procedures that can fall through into an error handler.
-detect_error_handler_fallthrough = true
-# Forbid unqualified Range/Cells/Rows/Columns access.
-forbid_unqualified_excel_objects = true
-# Detect likely ByRef argument type mismatches.
-detect_byref_argument_mismatch = false
-# Detect Dictionary/Collection access without an obvious guard.
-detect_dictionary_collection_guard = false
-# Detect ReDim Preserve usage on multi-dimensional arrays.
-detect_redim_preserve_dimension = true
-# Detect object or array comparison mistakes.
-detect_object_array_comparison = true
-# Detect functions that may exit without assigning their return value.
-detect_function_return_path = false
-# Detect known Excel object/member mismatches.
-detect_excel_object_member_mismatch = true
+# Disable specific analyzer rules by diagnostic ID.
+disabled_rules = []
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
 
-Set `forbid_interactive_input = false` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries.
+Use `[lint].disabled_rules = ["VB007"]` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries. Legacy per-rule booleans such as `forbid_interactive_input = false` are still accepted for compatibility, but are deprecated.
 
 Syntax safety lint rules for typographic quotes, C-style quote escapes, unclosed or mismatched procedures, and malformed line-continuation underscores are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+Use `[analyze].disabled_rules = ["VBA205"]` to disable configurable analyzer rules. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.
 
 ---
 

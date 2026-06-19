@@ -586,67 +586,21 @@ code_source = "sidecar"
 
 # 静的解析ルール
 [lint]
-# すべてのモジュールで Option Explicit を必須にします。
-require_option_explicit = true
-# Select / Activate パターンの使用を禁止します。
-forbid_select = true
-# Activate の使用を禁止します。
-forbid_activate = true
-# On Error Resume Next の使用を禁止します。
-forbid_on_error_resume_next = true
-# 暗黙的に型指定された Variant 変数を検出します。
-detect_implicit_variant = true
-# 標準モジュール内でのパブリックフィールドの使用を禁止します。
-forbid_public_module_fields = true
-# ヘッドレス実行時の対話型入力（MsgBox、InputBoxなど）を禁止します。
-forbid_interactive_input = true
-# module 変数や procedure 名を隠す local 名を検出します。
-detect_scope_shadowing = false
-# 一部の declarator だけに型が付く Dim 文を説明します。
-detect_multiple_declarator_clarity = true
-# 未参照の procedure-local 変数を検出します。
-detect_unused_local_variables = false
-# 未参照の Private procedure を検出します。
-detect_unused_private_procedures = false
-# 紛らわしい parenthesized call syntax を検出します。
-detect_confusing_call_syntax = true
-# For Each control variable の宣言・型の問題を検出します。
-detect_for_each_control_type = true
-# error handler 外に見える Resume 文を検出します。
-detect_dangerous_resume = true
-# nested With 内の曖昧な implicit Excel member を検出します。
-detect_nested_with_ambiguity = false
+# 診断 ID で特定の lint ルールを無効化します。
+disabled_rules = []
 
 [analyze]
-# Nothing check 前に使われる Range.Find 結果を検出します。
-detect_range_find_nothing_check = true
-# 明確な Set 代入前に使われる object 変数を検出します。
-detect_object_use_before_set = true
-# 復元経路が明確でない Application state 変更を検出します。
-detect_application_state_restore = true
-# 通常実行が error handler label に落ちる procedure を検出します。
-detect_error_handler_fallthrough = true
-# 修飾されていない Range/Cells/Rows/Columns アクセスを禁止します。
-forbid_unqualified_excel_objects = true
-# ByRef 引数の型不一致候補を検出します。
-detect_byref_argument_mismatch = false
-# 明確な guard がない Dictionary/Collection access を検出します。
-detect_dictionary_collection_guard = false
-# 多次元配列での ReDim Preserve 使用を検出します。
-detect_redim_preserve_dimension = true
-# object または array の比較ミスを検出します。
-detect_object_array_comparison = true
-# return value を代入せずに抜ける可能性がある Function を検出します。
-detect_function_return_path = false
-# 既知の Excel object/member mismatch を検出します。
-detect_excel_object_member_mismatch = true
+# 診断 ID で特定の analyzer ルールを無効化します。
+disabled_rules = []
 ```
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。
 
-対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`forbid_interactive_input = false` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。
+対話前提の project で `UserForm` やダイアログを意図的に使う場合は、`[lint].disabled_rules = ["VB007"]` にすると `VB007` 警告を抑止できます。これは lint だけに効き、`xlflow run --headless` の GUI 境界チェックは引き続きブロックします。`forbid_interactive_input = false` のような従来の per-rule boolean も互換性のため受け付けますが、非推奨です。
 
 typographic quote、C-style quote escape、閉じられていないまたは対応がずれた procedure、行継続 `_` の空白不足を検出する構文安全 lint は常に有効です。`push` や `run` が Excel を開く前に VBE compile dialog を防ぐためのルールです。
+
+analyzer ルールは `[analyze].disabled_rules = ["VBA205"]` のように無効化できます。`VBA101` から `VBA106` までの analyzer 診断は常に有効です。
 
 ---
 
