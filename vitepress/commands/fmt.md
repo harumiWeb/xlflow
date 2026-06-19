@@ -1,6 +1,6 @@
 # xlflow fmt
 
-Format VBA source files with a conservative, non-destructive formatter.
+Format VBA source files with a conservative, structure-aware formatter backed by `tree-sitter-vba`.
 
 ## Usage
 
@@ -68,9 +68,13 @@ cat MyModule.bas | xlflow fmt --stdin --json
 
 > [!IMPORTANT]
 > `fmt` is source-only and does not open Excel COM. It targets `.bas` and `.cls` files under the configured project source directories plus `tests/`.
+> It uses parser-backed block structure for indentation and only applies minimal text edits.
 
 > [!WARNING]
 > `.frm` files are skipped by default. The formatter preserves class module metadata (`Attribute VB_*`, `VERSION`, `BEGIN`/`END` blocks) verbatim.
+
+> [!WARNING]
+> Files with VBA parser errors are skipped in file-based formatting so broken source is not rewritten. With `--stdin`, parser errors return `fmt_failed`.
 
 > [!NOTE]
 > Plain `xlflow fmt` uses `--line-numbers preserve`. It does not add line numbers automatically, but it preserves existing ones where possible.

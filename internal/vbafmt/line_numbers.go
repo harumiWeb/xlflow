@@ -17,6 +17,7 @@ const (
 
 type FormatConfig struct {
 	LineNumbers LineNumberMode
+	StrictParse bool
 }
 
 type LineNumberWarning struct {
@@ -181,13 +182,9 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 
 	mode := normalizeLineNumberMode(cfg.LineNumbers)
 	refs := collectNumericLabelReferences(lines)
-
-	ind := &indenter{
-		level: 0,
-		fileCtx: &fileContext{
-			lines:   lines,
-			isClass: isClass,
-		},
+	indentModel, err := parseFormattingModel(text, cfg.StrictParse)
+	if err != nil {
+		return "", lineNumberFileResult{}, err
 	}
 
 	formatted := make([]formattedLine, 0, len(lines))
@@ -232,7 +229,7 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 		isCommentLine := isVBACommentLine(trimmed)
 
 		if isEmpty || isCommentLine {
-			indent := strings.Repeat(" ", ind.level*indentWidth)
+			indent := strings.Repeat(" ", indentModel.level(i+1)*indentWidth)
 			outLine := indent
 			if !isEmpty {
 				outLine = indent + content
@@ -258,16 +255,9 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 			continue
 		}
 
-		keyword, isStructural := classifyLine(content)
-		if isStructural && isDedentKeyword(keyword) {
-			ind.level--
-			if ind.level < 0 {
-				ind.level = 0
-			}
-		}
+		keyword, _ := classifyLine(content)
 
-		indent := strings.Repeat(" ", ind.level*indentWidth)
-		outLine := indent + content
+		outLine := indentModel.formatLine(i+1, content)
 		recoverableLegacyLineNumber := inProcedure && (inLineContinuationTail || isRecoverableLegacyNonEligibleLine(content))
 		formatted = append(formatted, formattedLine{
 			Text:                        outLine,
@@ -281,9 +271,6 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 
 		if isProcedureStartKeyword(keyword) {
 			inProcedure = true
-		}
-		if isStructural && isIndentKeyword(keyword) {
-			ind.level++
 		}
 		if isProcedureEndKeyword(keyword) {
 			inProcedure = false

@@ -53,16 +53,6 @@ type FmtOptions struct {
 	LineNumbers LineNumberMode
 }
 
-type indenter struct {
-	level   int
-	fileCtx *fileContext
-}
-
-type fileContext struct {
-	isClass bool
-	lines   []string
-}
-
 func Run(opts FmtOptions) (*Result, error) {
 	files, err := resolveFiles(opts)
 	if err != nil {
@@ -236,8 +226,15 @@ func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
 	}
 	isClass := ext == ".cls"
 	original := string(data)
-	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers})
+	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers, StrictParse: true})
 	if err != nil {
+		if isFormatParseError(err) {
+			return FileResult{
+				Path:       path,
+				Skipped:    true,
+				SkipReason: "parse error: " + err.Error(),
+			}, nil
+		}
 		return FileResult{}, err
 	}
 	return FileResult{

@@ -4254,7 +4254,7 @@ func (a *app) runFmtStdin() error {
 		_, _ = fmt.Fprintln(a.stdoutWriter())
 		return nil
 	}
-	formatted, err := vbafmt.FormatText(input, looksLikeClassModule(input))
+	formatted, err := vbafmt.FormatTextWithOptions(input, looksLikeClassModule(input), vbafmt.FormatConfig{StrictParse: true})
 	if err != nil {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
 	}
