@@ -468,6 +468,82 @@ End Sub
 	}
 }
 
+func TestLinterBlocksBareDialogsWhenXlflowUIIsPresent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	uiBody := `Attribute VB_Name = "XlflowUI"
+Option Explicit
+Public Function MsgBox(ByVal Id As String, ByVal Prompt As String) As VbMsgBoxResult
+End Function
+Public Function InputBox(ByVal Id As String, ByVal Prompt As String) As String
+End Function
+`
+	if err := os.WriteFile(filepath.Join(src, "XlflowUI.bas"), []byte(uiBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+  MsgBox "Done"
+  Dim answer As String
+  answer = InputBox("Name?")
+  XlflowUI.MsgBox "confirm", "OK"
+  VBA.Interaction.MsgBox "Native"
+  Debug.Print "MsgBox in a string"
+  ' InputBox "comment"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb028 := issuesByCode(issues, "VB028")
+	if len(vb028) != 2 {
+		t.Fatalf("expected two XlflowUI name-collision issues, got %+v", vb028)
+	}
+	assertIssue(t, vb028, "VB028", 5)
+	assertIssue(t, vb028, "VB028", 7)
+	for _, issue := range vb028 {
+		if issue.Severity != "error" || issue.Kind != "xlflowui_name_collision" {
+			t.Fatalf("unexpected VB028 metadata: %+v", issue)
+		}
+		if !strings.Contains(issue.Message, "VBA.Interaction."+issue.Symbol) || !strings.Contains(issue.Suggestion, "XlflowUI."+issue.Symbol) {
+			t.Fatalf("VB028 should explain both supported remedies: %+v", issue)
+		}
+	}
+	blocking := PushBlockingIssues(issues)
+	assertIssue(t, blocking, "VB028", 5)
+	assertIssue(t, blocking, "VB028", 7)
+}
+
+func TestLinterAllowsBareDialogsWithoutXlflowUI(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  MsgBox "Done"
+  Debug.Print InputBox("Name?")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.ForbidInteractiveInput = false
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB028"); len(got) != 0 {
+		t.Fatalf("VB028 should require XlflowUI.bas to be present, got %+v", got)
+	}
+}
+
 func TestLinterFindsTypographicQuotesThatTriggerVBECompileDialogs(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

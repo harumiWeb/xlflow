@@ -148,6 +148,7 @@ var (
 		"VB012":  true,
 		"VB013":  true,
 		"VB014":  true,
+		"VB028":  true,
 		"VBA101": true,
 		"VBA102": true,
 		"VBA103": true,

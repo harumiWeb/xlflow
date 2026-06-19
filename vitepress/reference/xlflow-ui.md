@@ -150,6 +150,8 @@ The intended remediation is not "never show dialogs". The intended remediation i
 
 Only disable `VB007` with `[lint].forbid_interactive_input = false` for genuinely human-only projects. That setting does not make `run --headless` capable of answering raw dialogs.
 
+When `XlflowUI.bas` is present, `push` also rejects bare `MsgBox` and `InputBox` calls before Excel opens. This is separate from `VB007`: unqualified names can bind to `XlflowUI.MsgBox` / `XlflowUI.InputBox` instead of the VBA built-ins. Use `XlflowUI` wrappers by default. If a module intentionally needs the native human-only dialog, write `VBA.Interaction.MsgBox` or `VBA.Interaction.InputBox` explicitly.
+
 ## Design Guidance
 
 - Use `XlflowUI` only for true user interaction points.

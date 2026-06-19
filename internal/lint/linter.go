@@ -72,6 +72,7 @@ func (l Linter) Run() ([]Issue, error) {
 		}
 		issues = append(issues, fileIssues...)
 	}
+	issues = append(issues, l.xlflowUIBareDialogIssues(files)...)
 	projectIssues, err := l.projectIssues()
 	if err != nil {
 		return nil, err
@@ -681,11 +682,107 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" {
 			blocking = append(blocking, issue)
 		}
 	}
 	return blocking
+}
+
+func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
+	if !hasXlflowUIModule(files) {
+		return nil
+	}
+	var issues []Issue
+	for _, path := range files {
+		if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
+			continue
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
+		for i, line := range lines {
+			code := maskStringLiterals(gui.StripComment(line))
+			for _, symbol := range bareDialogCalls(code) {
+				issue := l.issue(path, i+1, "VB028", "error", "Bare "+symbol+" is not allowed when XlflowUI.bas is present because VBA can bind it to XlflowUI."+symbol+" instead of the built-in dialog. Use XlflowUI."+symbol+" with a stable dialog id, or explicitly call VBA.Interaction."+symbol+" for intentional human-only dialogs.")
+				issue.Kind = "xlflowui_name_collision"
+				issue.Symbol = symbol
+				issue.Suggestion = "Use XlflowUI." + symbol + "(...) for xlflow-managed dialogs, or VBA.Interaction." + symbol + "(...) for intentional native dialogs."
+				issues = append(issues, issue)
+			}
+		}
+	}
+	return issues
+}
+
+func hasXlflowUIModule(files []string) bool {
+	for _, path := range files {
+		if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
+			return true
+		}
+	}
+	return false
+}
+
+func bareDialogCalls(code string) []string {
+	var symbols []string
+	for _, symbol := range []string{"MsgBox", "InputBox"} {
+		if containsBareIdentifierUse(code, symbol) {
+			symbols = append(symbols, symbol)
+		}
+	}
+	return symbols
+}
+
+func containsBareIdentifierUse(code, symbol string) bool {
+	lowerCode := strings.ToLower(code)
+	lowerSymbol := strings.ToLower(symbol)
+	for offset := 0; ; {
+		index := strings.Index(lowerCode[offset:], lowerSymbol)
+		if index < 0 {
+			return false
+		}
+		index += offset
+		end := index + len(symbol)
+		if isIdentifierBoundary(code, index-1) && isIdentifierBoundary(code, end) && !isQualifiedIdentifier(code, index) && !isDialogDeclaration(code[:index]) {
+			return true
+		}
+		offset = end
+	}
+}
+
+func isIdentifierBoundary(code string, index int) bool {
+	if index < 0 || index >= len(code) {
+		return true
+	}
+	return !isIdentifierChar(code[index])
+}
+
+func isQualifiedIdentifier(code string, index int) bool {
+	for i := index - 1; i >= 0; i-- {
+		switch code[i] {
+		case ' ', '\t':
+			continue
+		case '.':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func isDialogDeclaration(prefix string) bool {
+	fields := lowerFields(prefix)
+	for _, field := range fields {
+		switch field {
+		case "sub", "function", "property", "declare":
+			return true
+		}
+	}
+	return false
 }
 
 func (l Linter) projectIssues() ([]Issue, error) {
