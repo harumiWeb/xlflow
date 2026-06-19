@@ -125,9 +125,65 @@ End Sub
 	}
 }
 
+func TestFormatBasStructureAwareNestedBlocks(t *testing.T) {
+	input := `Sub Main()
+If ready Then
+Select Case value
+Case 1 To 5
+With ws
+.Range("A1").Value = "Case Is >= 10 stays string"
+End With
+Case Is >= 10
+For Each item In items
+Do While item.Ready
+item.Run
+Loop
+Next item
+Case Else
+result = "Case Else"
+End Select
+End If
+End Sub
+`
+	want := `Sub Main()
+    If ready Then
+        Select Case value
+        Case 1 To 5
+            With ws
+                .Range("A1").Value = "Case Is >= 10 stays string"
+            End With
+        Case Is >= 10
+            For Each item In items
+                Do While item.Ready
+                    item.Run
+                Loop
+            Next item
+        Case Else
+            result = "Case Else"
+        End Select
+    End If
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("unexpected structure-aware format:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
 func TestFormatBasLineContinuationPreserved(t *testing.T) {
-	input := `Sub Main() _
-    & "hello"
+	input := `Sub Main()
+message = "hello" & _
+    "world"
 End Sub
 `
 	got, err := FormatText(input, false)
@@ -139,8 +195,8 @@ End Sub
 	}
 
 	continuedIf := `Sub Main()
-If condition Then _
-    condition = False
+If condition _
+    And otherCondition Then
 value = 1
 End If
 End Sub
@@ -149,7 +205,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(continuedIfGot, "Then _") {
+	if !strings.Contains(continuedIfGot, "condition _") {
 		t.Fatalf("continued If opener missing continuation:\n%s", continuedIfGot)
 	}
 	if !strings.Contains(continuedIfGot, "End If") {
@@ -884,6 +940,63 @@ func TestFormatFileSkipsUnsupportedExtension(t *testing.T) {
 	}
 }
 
+func TestFormatFileSkipsParserErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Broken.bas")
+	original := "Public Function Broken(ByVal x As String\nEnd Function\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fr, err := formatFile(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fr.Skipped {
+		t.Fatal("expected parser error file to be skipped")
+	}
+	if !strings.Contains(fr.SkipReason, "parse error") {
+		t.Fatalf("expected parse error skip reason, got %q", fr.SkipReason)
+	}
+	if fr.Changed {
+		t.Fatal("skipped parser error file must not be marked changed")
+	}
+}
+
+func TestFormatFileFormatsVBA07RecoveredSyntax(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Legacy.bas")
+	original := "10  ' legacy comment\nPublic Sub Sample()\nDo While i < 10: i = i + 1: Loop\nIf condition _\n    And otherCondition Then\nDebug.Print \"yes\"\nEnd If\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fr, err := formatFile(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fr.Skipped {
+		t.Fatalf("v0.7.0-supported syntax should not be skipped: %s", fr.SkipReason)
+	}
+	if !strings.Contains(fr.Formatted, "10  ' legacy comment") {
+		t.Fatalf("expected legacy numbered comment to be preserved:\n%s", fr.Formatted)
+	}
+	if !strings.Contains(fr.Formatted, "    Do While i < 10: i = i + 1: Loop") {
+		t.Fatalf("expected colon-closed Do block to be formatted:\n%s", fr.Formatted)
+	}
+	if !strings.Contains(fr.Formatted, "    If condition _") {
+		t.Fatalf("expected continued If to be formatted:\n%s", fr.Formatted)
+	}
+}
+
+func TestFormatTextFailsParserErrors(t *testing.T) {
+	_, err := FormatText("Public Function Broken(ByVal x As String\nEnd Function\n", false)
+	if err == nil {
+		t.Fatal("expected parse to fail")
+	}
+	if !isFormatParseError(err) {
+		t.Fatalf("expected format parse error, got %T: %v", err, err)
+	}
+}
+
 func TestResolveExplicitPathsIncludesFrm(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "UserForm1.frm")
@@ -1111,6 +1224,29 @@ func TestRunExplicitFrmProducesSkippedResult(t *testing.T) {
 	}
 	if len(result.SkippedReasons) != 1 {
 		t.Fatal("expected SkippedReasons to contain skip reason")
+	}
+}
+
+func TestRunWriteLeavesExplicitFrmUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "UserForm1.frm")
+	original := "VERSION 5.00\nBegin VB.Form UserForm1\n   Caption = \"Do not touch\"\nEnd\nAttribute VB_Name = \"UserForm1\"\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(FmtOptions{Write: true, Paths: []string{path}, Root: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped != 1 || result.Changed != 0 {
+		t.Fatalf("expected .frm skipped without changes, got changed=%d skipped=%d", result.Changed, result.Skipped)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf(".frm designer metadata should be unchanged:\n%s", string(data))
 	}
 }
 
