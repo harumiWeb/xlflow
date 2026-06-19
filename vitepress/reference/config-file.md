@@ -140,6 +140,14 @@ Configurable lint rule IDs:
 
 Safety diagnostics `VB008` through `VB014` and `VB028` are always enabled and cannot be disabled with `disabled_rules`.
 
+For local exceptions, keep the rule enabled and suppress a specific source line with an apostrophe comment:
+
+```vb
+' xlflow:disable-next-line VB002
+Range("A1").Select
+Range("A2").Select ' xlflow:disable-line VB002
+```
+
 ### `[analyze]`
 
 | Key              | Type     | Required | Default | Description                                           |
@@ -165,6 +173,15 @@ Configurable analyzer rule IDs:
 | `VBA211` | `detect_excel_object_member_mismatch` |
 
 Analyzer diagnostics `VBA101` through `VBA106` are always enabled and cannot be disabled with `disabled_rules`.
+
+Analyzer diagnostics can use the same inline suppression syntax:
+
+```vb
+' xlflow:disable-next-line VBA205
+Range("A1").Value = 1
+```
+
+Unknown inline IDs and unused suppressions are reported as command warnings.
 
 ## Defaults differ between `new` and `init`
 

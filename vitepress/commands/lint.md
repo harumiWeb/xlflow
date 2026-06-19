@@ -69,6 +69,17 @@ disabled_rules = ["VB002", "VB006"]
 
 Legacy per-rule booleans such as `forbid_select = false` remain accepted for compatibility, but xlflow emits a deprecation warning. If both formats disagree, `disabled_rules` takes precedence and xlflow reports a conflict warning.
 
+Use inline suppression comments for intentional local exceptions while keeping rules enabled globally:
+
+```vb
+' xlflow:disable-next-line VB002
+Range("A1").Select
+
+Range("A2").Select ' xlflow:disable-line VB002
+```
+
+Multiple IDs may be listed with spaces. Unknown IDs and suppressions that no longer match a lint diagnostic are reported as warnings.
+
 Safety diagnostics `VB008` through `VB014` and `VB028` are always enabled because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 Rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide rules stay conservative opt-ins through legacy `[lint]` settings. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.

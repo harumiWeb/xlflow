@@ -158,6 +158,36 @@ var (
 	}
 )
 
+func KnownDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if _, ok := lintRuleByID[id]; ok {
+		return true
+	}
+	if _, ok := analyzeRuleByID[id]; ok {
+		return true
+	}
+	return nonConfigurableRuleIDs[id]
+}
+
+func LintDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if strings.HasPrefix(id, "VBA") {
+		return false
+	}
+	if _, ok := lintRuleByID[id]; ok {
+		return true
+	}
+	return strings.HasPrefix(id, "VB") && nonConfigurableRuleIDs[id]
+}
+
+func AnalyzeDiagnosticID(id string) bool {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if _, ok := analyzeRuleByID[id]; ok {
+		return true
+	}
+	return strings.HasPrefix(id, "VBA") && nonConfigurableRuleIDs[id]
+}
+
 func Default() Config {
 	return Config{
 		Project: ProjectConfig{

@@ -350,6 +350,116 @@ func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
 	}
 }
 
+func TestLintCommandJSONIncludesInlineSuppressionWarnings(t *testing.T) {
+	dir := writeCLIInlineSuppressionProject(t, "lint", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB999
+  Debug.Print "ok"
+End Sub
+`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "unknown_inline_suppression_rule", "VB999") {
+		t.Fatalf("expected inline suppression warning, got %+v", got.Warnings)
+	}
+}
+
+func TestLintCommandPlainIncludesInlineSuppressionWarnings(t *testing.T) {
+	dir := writeCLIInlineSuppressionProject(t, "lint", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Debug.Print "ok"
+End Sub
+`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	text := stdout.String()
+	for _, want := range []string{"Warnings:", "unused_inline_suppression", "VB002"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected lint output to contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnalyzeCommandJSONIncludesInlineSuppressionWarnings(t *testing.T) {
+	dir := writeCLIInlineSuppressionProject(t, "analyze", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VBA999
+  Debug.Print "ok"
+End Sub
+`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCLIWarning(got.Warnings, "unknown_inline_suppression_rule", "VBA999") {
+		t.Fatalf("expected inline suppression warning, got %+v", got.Warnings)
+	}
+}
+
+func TestMergeWarningsUniqueDeduplicatesCheckSuppressionWarnings(t *testing.T) {
+	lintWarnings := []map[string]any{
+		{"code": "unknown_inline_suppression_rule", "rule": "VB999", "file": "src/modules/Main.bas", "line": 2},
+	}
+	analyzeWarnings := []map[string]any{
+		{"code": "unknown_inline_suppression_rule", "rule": "VB999", "file": "src/modules/Main.bas", "line": 2},
+		{"code": "unused_inline_suppression", "rule": "VBA205", "file": "src/modules/Main.bas", "line": 3, "target_line": 4},
+	}
+
+	got := mergeWarningsUnique(lintWarnings, analyzeWarnings)
+	if len(got) != 2 {
+		t.Fatalf("warnings = %+v, want 2 unique entries", got)
+	}
+}
+
 func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -368,6 +478,38 @@ path = "build/Book.xlsm"
 
 [lint]
 ` + lintConfig + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCLIInlineSuppressionProject(t *testing.T, command string, moduleBody string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(moduleBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[lint]
+
+[analyze]
+`
+	if command == "lint" {
+		body = strings.Replace(body, "\n[analyze]\n", "\n", 1)
+	}
+	if command == "analyze" {
+		body = strings.Replace(body, "\n[lint]\n", "\n", 1)
+	}
 	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -61,6 +61,17 @@ disabled_rules = ["VBA205", "VBA211"]
 
 Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. If both formats disagree, `disabled_rules` takes precedence and xlflow reports a conflict warning.
 
+Use inline suppression comments for intentional local exceptions while keeping rules enabled globally:
+
+```vb
+' xlflow:disable-next-line VBA205
+Range("A1").Value = 1
+
+Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
+```
+
+Multiple IDs may be listed with spaces. Unknown IDs and suppressions that no longer match an analyzer diagnostic are reported as warnings.
+
 Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, and `VBA211` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. Diagnostics `VBA101` through `VBA106` are always enabled.
 
 ## JSON Output Example

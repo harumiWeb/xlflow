@@ -168,6 +168,121 @@ disabled_rules = ["VB002"]
 	}
 }
 
+func TestLinterSupportsInlineSuppressions(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select
+  Range("A2").Select ' xlflow:disable-line VB002
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+}
+
+func TestLinterSupportsMultipleInlineSuppressionIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002 VB003
+  Range("A1").Select: ActiveCell.Activate
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) != 0 {
+		t.Fatalf("VB003 should be suppressed: %+v", got)
+	}
+}
+
+func TestLinterInlineSuppressionKeepsUnrelatedSameLineDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select: ActiveCell.Activate
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be suppressed: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB003"); len(got) != 1 {
+		t.Fatalf("VB003 should remain: %+v", issues)
+	}
+}
+
+func TestLinterReportsUnknownAndUnusedInlineSuppressionsAsWarnings(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB999
+  Debug.Print "ok"
+  ' xlflow:disable-next-line VB002
+  Debug.Print "still ok"
+End Sub
+`)
+
+	result, err := Linter{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("issues = %+v, want none", result.Issues)
+	}
+	if !hasWarning(result.Warnings, "unknown_inline_suppression_rule", "VB999") {
+		t.Fatalf("expected unknown suppression warning, got %+v", result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unused_inline_suppression", "VB002") {
+		t.Fatalf("expected unused suppression warning, got %+v", result.Warnings)
+	}
+}
+
+func TestLinterConfigDisabledRulesComposeWithInlineSuppressions(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  ' xlflow:disable-next-line VB002
+  Range("A1").Select
+  ActiveCell.Activate
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.ForbidSelect = false
+	cfg.Lint.DisabledRules = []string{"VB002"}
+
+	result, err := Linter{RootDir: dir, Config: cfg}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(result.Issues, "VB002"); len(got) != 0 {
+		t.Fatalf("VB002 should be globally disabled: %+v", got)
+	}
+	if got := issuesByCode(result.Issues, "VB003"); len(got) == 0 {
+		t.Fatalf("VB003 should remain enabled: %+v", result.Issues)
+	}
+	if !hasWarning(result.Warnings, "unused_inline_suppression", "VB002") {
+		t.Fatalf("expected unused inline warning for globally disabled VB002, got %+v", result.Warnings)
+	}
+}
+
 func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -1099,6 +1214,15 @@ func issuesByCode(issues []Issue, code string) []Issue {
 		}
 	}
 	return filtered
+}
+
+func hasWarning(warnings []map[string]any, code string, rule string) bool {
+	for _, warning := range warnings {
+		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
 }
 
 func writeLintModule(t *testing.T, dir, name, body string) {
