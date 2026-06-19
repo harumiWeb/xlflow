@@ -3498,7 +3498,7 @@ func TestTestProcedureDiscoveryRules(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $body = @('Option Explicit','Public Sub TestCreateReport()','End Sub','Sub Totals_Test()','End Sub','Private Sub TestPrivate()','End Sub','Public Sub TestWithArg(value As Variant)','End Sub','Public Sub Helper()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'ReportTests' -Code $body | ConvertTo-Json -Compress",
+		". ./common.ps1; $body = @('Option Explicit','Public Sub TestCreateReport()','End Sub','Sub Totals_Test()','End Sub','Public Sub Test_集計結果が正しい()','End Sub','Public Sub 集計結果_Test()','End Sub','Private Sub TestPrivate()','End Sub','Public Sub TestWithArg(value As Variant)','End Sub','Public Sub Helper()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'ReportTests' -Code $body | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -3512,14 +3512,20 @@ func TestTestProcedureDiscoveryRules(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("failed to parse discovery output: %v\n%s", err, out)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 discovered tests, got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 discovered tests, got %d: %+v", len(got), got)
 	}
 	if got[0].Name != "TestCreateReport" || got[0].Module != "ReportTests" {
 		t.Fatalf("unexpected first test: %+v", got[0])
 	}
 	if got[1].Name != "Totals_Test" || got[1].Module != "ReportTests" {
 		t.Fatalf("unexpected second test: %+v", got[1])
+	}
+	if got[2].Name != "Test_集計結果が正しい" || got[2].Module != "ReportTests" {
+		t.Fatalf("unexpected third test: %+v", got[2])
+	}
+	if got[3].Name != "集計結果_Test" || got[3].Module != "ReportTests" {
+		t.Fatalf("unexpected fourth test: %+v", got[3])
 	}
 }
 
@@ -3528,7 +3534,7 @@ func TestTestProcedureTagDiscovery(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $body = @('Option Explicit','''@Tag(\"smoke\")','Public Sub Test_Smoke()','End Sub','''@Tag(\"integration\")','Public Sub Test_Integration()','End Sub','Public Sub Test_NoTag()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'TagTests' -Code $body | ConvertTo-Json -Compress",
+		". ./common.ps1; $body = @('Option Explicit','''@Tag(\"smoke\")','Public Sub Test_Smoke()','End Sub','''@Tag(\"integration\")','Public Sub Test_Integration()','End Sub','''@Tag(\"集計\")','Public Sub Test_集計結果が正しい()','End Sub','Public Sub Test_NoTag()','End Sub') -join [Environment]::NewLine; Find-XlflowTestProcedures -ModuleName 'TagTests' -Code $body | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -3542,8 +3548,8 @@ func TestTestProcedureTagDiscovery(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("failed to parse tag discovery output: %v\n%s", err, out)
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 discovered tests, got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 discovered tests, got %d: %+v", len(got), got)
 	}
 	if got[0].Name != "Test_Smoke" || len(got[0].Tags) != 1 || got[0].Tags[0] != "smoke" {
 		t.Fatalf("unexpected first test tags: %+v", got[0])
@@ -3551,8 +3557,11 @@ func TestTestProcedureTagDiscovery(t *testing.T) {
 	if got[1].Name != "Test_Integration" || len(got[1].Tags) != 1 || got[1].Tags[0] != "integration" {
 		t.Fatalf("unexpected second test tags: %+v", got[1])
 	}
-	if got[2].Name != "Test_NoTag" || len(got[2].Tags) != 0 {
+	if got[2].Name != "Test_集計結果が正しい" || len(got[2].Tags) != 1 || got[2].Tags[0] != "集計" {
 		t.Fatalf("unexpected third test tags: %+v", got[2])
+	}
+	if got[3].Name != "Test_NoTag" || len(got[3].Tags) != 0 {
+		t.Fatalf("unexpected fourth test tags: %+v", got[3])
 	}
 }
 
@@ -3584,7 +3593,7 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 		"pwsh",
 		"-NoProfile",
 		"-Command",
-		". ./common.ps1; $body = @('Option Explicit','Public Sub Run()','End Sub','Sub Generate(path As String, count As Long)','End Sub','Public Function Build() As Boolean','End Function','Private Sub Hidden()','End Sub') -join [Environment]::NewLine; Find-XlflowMacroProcedures -ModuleName 'Main' -ComponentType 1 -Code $body | ConvertTo-Json -Compress",
+		". ./common.ps1; $body = @('Option Explicit','Public Sub Run()','End Sub','Sub 集計結果を作成()','End Sub','Sub Generate(path As String, count As Long)','End Sub','Public Function Build() As Boolean','End Function','Private Sub Hidden()','End Sub') -join [Environment]::NewLine; Find-XlflowMacroProcedures -ModuleName 'Main' -ComponentType 1 -Code $body | ConvertTo-Json -Compress",
 	)
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
@@ -3607,8 +3616,8 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("failed to parse discovery output: %v\n%s", err, out)
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 discovered macros, got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 discovered macros, got %d: %+v", len(got), got)
 	}
 	if got[0].QualifiedName != "Main.Run" || got[0].Kind != "sub" {
 		t.Fatalf("unexpected first macro: %+v", got[0])
@@ -3616,23 +3625,26 @@ func TestMacroProcedureDiscoveryRules(t *testing.T) {
 	if !got[0].Runnable {
 		t.Fatalf("expected Main.Run to be runnable (no params): %+v", got[0])
 	}
-	if got[1].Name != "Generate" || len(got[1].Args) != 2 || got[1].Args[0] != "path As String" {
-		t.Fatalf("unexpected argument discovery: %+v", got[1])
+	if got[1].QualifiedName != "Main.集計結果を作成" || got[1].Kind != "sub" || !got[1].Runnable {
+		t.Fatalf("unexpected unicode macro discovery: %+v", got[1])
 	}
-	if got[1].Runnable || !got[1].HasParameters {
-		t.Fatalf("expected Generate to be not runnable with has_parameters: %+v", got[1])
+	if got[2].Name != "Generate" || len(got[2].Args) != 2 || got[2].Args[0] != "path As String" {
+		t.Fatalf("unexpected argument discovery: %+v", got[2])
 	}
-	if got[1].ReasonNotRunnable == nil || *got[1].ReasonNotRunnable != "has_parameters" {
-		t.Fatalf("expected reason_not_runnable=has_parameters, got %v", got[1].ReasonNotRunnable)
+	if got[2].Runnable || !got[2].HasParameters {
+		t.Fatalf("expected Generate to be not runnable with has_parameters: %+v", got[2])
 	}
-	if got[2].Name != "Build" || got[2].Kind != "function" {
-		t.Fatalf("unexpected function discovery: %+v", got[2])
+	if got[2].ReasonNotRunnable == nil || *got[2].ReasonNotRunnable != "has_parameters" {
+		t.Fatalf("expected reason_not_runnable=has_parameters, got %v", got[2].ReasonNotRunnable)
 	}
-	if !got[2].Runnable {
-		t.Fatalf("expected Build to be runnable: %+v", got[2])
+	if got[3].Name != "Build" || got[3].Kind != "function" {
+		t.Fatalf("unexpected function discovery: %+v", got[3])
 	}
-	if got[2].RunCommand != nil {
-		t.Fatalf("expected run_command to be nil (generated by macros.ps1, not by Find-XlflowMacroProcedures), got %v", *got[2].RunCommand)
+	if !got[3].Runnable {
+		t.Fatalf("expected Build to be runnable: %+v", got[3])
+	}
+	if got[3].RunCommand != nil {
+		t.Fatalf("expected run_command to be nil (generated by macros.ps1, not by Find-XlflowMacroProcedures), got %v", *got[3].RunCommand)
 	}
 }
 

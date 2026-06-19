@@ -27,6 +27,7 @@ xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=r
 ## Test Location
 
 Tests should live under the configured module source directory (for example `src/modules/Tests/`). This keeps tests under the same source tree as production code so `push` naturally imports them into the workbook without a separate folder convention.
+Test procedure names may use Unicode VBA identifiers, so names such as `Test_集計結果が正しい` and `集計結果_Test` are discovered.
 
 ```text
 src/

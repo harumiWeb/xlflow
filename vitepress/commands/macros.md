@@ -26,6 +26,8 @@ xlflow macros --runnable --json
 
 ## Notes
 
+Macro procedure names may use Unicode VBA identifiers; discovered `name` and `qualified_name` values preserve those names.
+
 ::: tip
 Run `macros --json` before `run` so agents can choose an exact entrypoint. Use `--runnable` to filter out non-runnable procedures (those with parameters, event handlers, or on unsupported component types).
 :::

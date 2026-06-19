@@ -3530,6 +3530,12 @@ function Write-XlflowJson {
   $Result | ConvertTo-Json -Depth 10
 }
 
+$script:XlflowVbaIdentifierPattern = '[\p{L}_][\p{L}\p{Mn}\p{Mc}\p{Nd}_]*'
+
+function Get-XlflowVbaIdentifierPattern {
+  return $script:XlflowVbaIdentifierPattern
+}
+
 function Find-XlflowTestProcedures {
   param([string]$ModuleName, [string]$Code)
 
@@ -3538,10 +3544,11 @@ function Find-XlflowTestProcedures {
     return $tests
   }
 
+  $identifierPattern = Get-XlflowVbaIdentifierPattern
   $lines = $Code -split "`r?`n"
   for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i].Trim()
-    $match = [regex]::Match($line, '^(?:Public\s+)?Sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(?:''.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $match = [regex]::Match($line, "^(?:Public\s+)?Sub\s+($identifierPattern)\s*(?:\(\s*\))?\s*(?:'.*)?$", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     if (-not $match.Success) {
       continue
     }
@@ -4625,13 +4632,14 @@ function Find-XlflowMacroProcedures {
 
   $componentTypeName = Get-XlflowComponentTypeName -ComponentType $ComponentType
 
+  $identifierPattern = Get-XlflowVbaIdentifierPattern
   $lines = $Code -split "`r?`n"
   for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i].Trim()
     if ($line -match '^(?i)(Private|Friend)\s+(Sub|Function)\b') {
       continue
     }
-    $match = [regex]::Match($line, '^(?:(Public)\s+)?(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $match = [regex]::Match($line, "^(?:(Public)\s+)?(Sub|Function)\s+($identifierPattern)\s*(?:\(([^)]*)\))?", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     if (-not $match.Success) {
       continue
     }
