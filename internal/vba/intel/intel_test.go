@@ -215,6 +215,28 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	if !hasCompletion(items, "xlUp") {
 		t.Fatalf("xlUp completion missing: %+v", items)
 	}
+	layoutDoc := Document{Path: filepath.Join(t.TempDir(), "Layout.bas"), Source: "Option Explicit\nSub Test()\n    xlLand\nEnd Sub\n"}
+	items, err = analyzer.Completions(layoutDoc, Position{Line: 2, Character: utf16Len("    xlLand")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "xlLandscape") {
+		t.Fatalf("xlLandscape completion missing: %+v", items)
+	}
+}
+
+func TestHoverUsesConstantMetadata(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	line := "    Debug.Print xlLandscape"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Constants.bas"), Source: "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n"}
+
+	hover, err := analyzer.Hover(doc, Position{Line: 2, Character: utf16Len(line[:strings.Index(line, "xlLandscape")+3])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "XlPageOrientation") {
+		t.Fatalf("unexpected constant hover: %+v", hover)
+	}
 }
 
 func TestUserFormControlsResolveForHoverCompletionAndDefinition(t *testing.T) {

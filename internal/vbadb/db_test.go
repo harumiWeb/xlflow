@@ -61,6 +61,13 @@ func TestResolveConstant(t *testing.T) {
 	if constant.Library != "Excel" || constant.EnumGroup != "XlDirection" {
 		t.Fatalf("unexpected xlUp metadata: %+v", constant)
 	}
+	constant, ok = db.ResolveConstant("xlLandscape")
+	if !ok {
+		t.Fatal("xlLandscape was not loaded")
+	}
+	if constant.EnumGroup != "XlPageOrientation" {
+		t.Fatalf("unexpected xlLandscape metadata: %+v", constant)
+	}
 }
 
 func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
@@ -74,6 +81,9 @@ func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
 	}
 	if !hasConstant(db.ConstantsList(), "xlUp") {
 		t.Fatal("xlUp constant missing")
+	}
+	if !hasConstant(db.ConstantsList(), "xlThin") {
+		t.Fatal("xlThin constant missing")
 	}
 	if !hasMember(db.Members("Excel.Range"), "Value") {
 		t.Fatalf("Range.Value member missing: %+v", db.Members("Excel.Range"))

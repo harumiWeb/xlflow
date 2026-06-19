@@ -1101,6 +1101,10 @@ func constantHover(c vbadb.ConstantInfo) string {
 		b.WriteString(c.Value)
 	}
 	b.WriteString("\n```")
+	if c.EnumGroup != "" {
+		b.WriteString("\n")
+		b.WriteString(c.EnumGroup)
+	}
 	if c.Summary != "" {
 		b.WriteString("\n")
 		b.WriteString(c.Summary)
