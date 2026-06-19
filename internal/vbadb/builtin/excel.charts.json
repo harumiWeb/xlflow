@@ -1,0 +1,61 @@
+{
+  "types": [
+    {
+      "name": "Excel.Chart",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Chart"],
+      "properties": [
+        { "name": "SeriesCollection", "return_type": "Excel.SeriesCollection" },
+        { "name": "ChartArea", "return_type": "Excel.ChartArea" },
+        { "name": "PlotArea", "return_type": "Excel.PlotArea" },
+        { "name": "Legend", "return_type": "Excel.Legend" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ChartObject",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["ChartObject"],
+      "properties": [{ "name": "Chart", "return_type": "Excel.Chart" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ChartObjects",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["ChartObjects"],
+      "element_type": "Excel.ChartObject",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Excel.ChartObject", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Shape",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Shape"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "TextFrame", "return_type": "Object" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Shapes",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Shapes"],
+      "element_type": "Excel.Shape",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Excel.Shape", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

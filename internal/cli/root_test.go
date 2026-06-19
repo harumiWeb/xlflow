@@ -269,6 +269,37 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestLSPCheckUsesDefaultConfigWhenProjectConfigIsMissing(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            t.TempDir(),
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lsp", "--check"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lsp check error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status      string         `json:"status"`
+		Diagnostics map[string]any `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK {
+		t.Fatalf("status = %q, want %q", got.Status, output.StatusOK)
+	}
+	if got.Diagnostics["server"] != "xlflow-vba-lsp" {
+		t.Fatalf("unexpected diagnostics: %+v", got.Diagnostics)
+	}
+}
+
 func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
 	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
 	var stdout bytes.Buffer

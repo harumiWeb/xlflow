@@ -1,0 +1,91 @@
+{
+  "types": [
+    {
+      "name": "Excel.ListObject",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["ListObject"],
+      "properties": [
+        { "name": "Range", "return_type": "Excel.Range" },
+        { "name": "ListColumns", "return_type": "Excel.ListColumns" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ListObjects",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["ListObjects"],
+      "element_type": "Excel.ListObject",
+      "default_member": "Item",
+      "methods": [
+        { "name": "Item", "return_type": "Excel.ListObject", "default": true },
+        { "name": "Add", "return_type": "Excel.ListObject" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ListColumn",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["ListColumn"],
+      "properties": [
+        { "name": "Range", "return_type": "Excel.Range" },
+        { "name": "DataBodyRange", "return_type": "Excel.Range" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ListColumns",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["ListColumns"],
+      "element_type": "Excel.ListColumn",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Excel.ListColumn", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.QueryTable",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["QueryTable"],
+      "methods": [{ "name": "Refresh", "return_type": "Boolean" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PivotTable",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["PivotTable"],
+      "properties": [
+        { "name": "PivotFields", "return_type": "Object" },
+        { "name": "PivotCache", "return_type": "Excel.PivotCache" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PivotField",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["PivotField"],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PivotCache",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["PivotCache"],
+      "methods": [{ "name": "Refresh" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

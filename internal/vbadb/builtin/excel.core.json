@@ -1,0 +1,194 @@
+{
+  "types": [
+    {
+      "name": "Excel.Application",
+      "library": "Excel",
+      "kind": "class",
+      "summary": "Excel application object.",
+      "aliases": ["Application"],
+      "properties": [
+        { "name": "Workbooks", "return_type": "Excel.Workbooks" },
+        { "name": "Worksheets", "return_type": "Excel.Worksheets" },
+        { "name": "Sheets", "return_type": "Excel.Sheets" },
+        { "name": "ThisWorkbook", "return_type": "Excel.Workbook" },
+        { "name": "ActiveWorkbook", "return_type": "Excel.Workbook" },
+        { "name": "ActiveSheet", "return_type": "Excel.Worksheet" },
+        { "name": "Range", "return_type": "Excel.Range" },
+        { "name": "Cells", "return_type": "Excel.Range" },
+        { "name": "Rows", "return_type": "Excel.Range" },
+        { "name": "Columns", "return_type": "Excel.Range" }
+      ],
+      "methods": [{ "name": "Run", "return_type": "Variant" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Workbook",
+      "library": "Excel",
+      "kind": "class",
+      "summary": "Excel workbook.",
+      "aliases": ["Workbook"],
+      "properties": [
+        { "name": "Worksheets", "return_type": "Excel.Worksheets" },
+        { "name": "Sheets", "return_type": "Excel.Sheets" },
+        { "name": "Names", "return_type": "Excel.Names" },
+        { "name": "Application", "return_type": "Excel.Application" }
+      ],
+      "methods": [{ "name": "Save" }, { "name": "Close" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Workbooks",
+      "library": "Excel",
+      "kind": "collection",
+      "summary": "Collection of open workbooks.",
+      "aliases": ["Workbooks"],
+      "element_type": "Excel.Workbook",
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        { "name": "Item", "return_type": "Excel.Workbook", "default": true },
+        { "name": "Open", "return_type": "Excel.Workbook" },
+        { "name": "Add", "return_type": "Excel.Workbook" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Worksheet",
+      "library": "Excel",
+      "kind": "class",
+      "summary": "Excel worksheet.",
+      "aliases": ["Worksheet"],
+      "properties": [
+        { "name": "Range", "return_type": "Excel.Range" },
+        { "name": "Cells", "return_type": "Excel.Range" },
+        { "name": "Rows", "return_type": "Excel.Range" },
+        { "name": "Columns", "return_type": "Excel.Range" },
+        { "name": "ListObjects", "return_type": "Excel.ListObjects" },
+        { "name": "Names", "return_type": "Excel.Names" },
+        { "name": "Application", "return_type": "Excel.Application" }
+      ],
+      "methods": [{ "name": "Activate" }, { "name": "Copy" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Worksheets",
+      "library": "Excel",
+      "kind": "collection",
+      "summary": "Collection of worksheets.",
+      "aliases": ["Worksheets"],
+      "element_type": "Excel.Worksheet",
+      "default_member": "Item",
+      "methods": [
+        { "name": "Item", "return_type": "Excel.Worksheet", "default": true },
+        { "name": "Add", "return_type": "Excel.Worksheet" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Sheets",
+      "library": "Excel",
+      "kind": "collection",
+      "summary": "Collection of worksheets and chart sheets.",
+      "aliases": ["Sheets"],
+      "element_type": "Object",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Object", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Range",
+      "library": "Excel",
+      "kind": "class",
+      "summary": "Cell or cell range.",
+      "aliases": ["Range"],
+      "properties": [
+        { "name": "Value", "return_type": "Variant" },
+        { "name": "Value2", "return_type": "Variant" },
+        { "name": "Text", "return_type": "String", "read_only": true },
+        { "name": "Offset", "return_type": "Excel.Range" },
+        { "name": "Resize", "return_type": "Excel.Range" },
+        { "name": "End", "return_type": "Excel.Range" },
+        { "name": "Rows", "return_type": "Excel.Range" },
+        { "name": "Columns", "return_type": "Excel.Range" },
+        { "name": "Worksheet", "return_type": "Excel.Worksheet", "read_only": true }
+      ],
+      "methods": [
+        { "name": "Select" },
+        { "name": "Copy" },
+        { "name": "ClearContents" },
+        { "name": "Find", "return_type": "Excel.Range" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Name",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Name"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "RefersTo", "return_type": "String" },
+        { "name": "RefersToRange", "return_type": "Excel.Range" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Names",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Names"],
+      "element_type": "Excel.Name",
+      "default_member": "Item",
+      "methods": [
+        { "name": "Item", "return_type": "Excel.Name", "default": true },
+        { "name": "Add", "return_type": "Excel.Name" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Window",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Window"],
+      "properties": [{ "name": "DisplayGridlines", "return_type": "Boolean" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Windows",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Windows"],
+      "element_type": "Excel.Window",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Excel.Window", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ],
+  "global_values": {
+    "Application": "Excel.Application",
+    "ThisWorkbook": "Excel.Workbook",
+    "ActiveWorkbook": "Excel.Workbook",
+    "ActiveSheet": "Excel.Worksheet",
+    "Workbooks": "Excel.Workbooks",
+    "Worksheets": "Excel.Worksheets",
+    "Sheets": "Excel.Sheets",
+    "Range": "Excel.Range",
+    "Cells": "Excel.Range",
+    "Rows": "Excel.Range",
+    "Columns": "Excel.Range"
+  },
+  "progids": {
+    "Excel.Application": "Excel.Application"
+  }
+}

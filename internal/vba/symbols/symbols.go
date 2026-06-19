@@ -86,6 +86,14 @@ type fileCandidate struct {
 	moduleKind string
 }
 
+type SourceOptions struct {
+	RootDir        string
+	Path           string
+	ModuleKind     string
+	IncludePrivate bool
+	IncludeLabels  bool
+}
+
 type extractor struct {
 	opts       Options
 	rootDir    string
@@ -171,6 +179,60 @@ func Inspect(opts Options) (*Result, error) {
 	}
 	result.Summary.Files = len(result.Files)
 	return result, nil
+}
+
+func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return FileResult{}, err
+	}
+	path := opts.Path
+	if strings.TrimSpace(path) == "" {
+		path = "Untitled.bas"
+	}
+	moduleKind := opts.ModuleKind
+	if moduleKind == "" {
+		moduleKind = kindForPath(rootDir, config.Config{}, path)
+	}
+	parser, err := vbaast.NewParser()
+	if err != nil {
+		return FileResult{}, err
+	}
+	defer parser.Close()
+	parsed := parser.Parse(path, source)
+	defer parsed.Close()
+	rel := displayPath(rootDir, path)
+	if !filepath.IsAbs(path) {
+		rel = filepath.ToSlash(path)
+	}
+	moduleName, attrs := moduleMetadata(path, parsed.Source)
+	ext := extractor{
+		opts: Options{
+			RootDir:        rootDir,
+			IncludePrivate: opts.IncludePrivate,
+			IncludeLabels:  opts.IncludeLabels,
+		},
+		rootDir:    rootDir,
+		source:     parsed.Source,
+		file:       rel,
+		moduleName: moduleName,
+		moduleKind: moduleKind,
+		attrs:      attrs,
+	}
+	return FileResult{
+		Path:       rel,
+		ModuleName: moduleName,
+		ModuleKind: moduleKind,
+		Parse: ParseSummary{
+			HasError:   parsed.HasError,
+			HasMissing: parsed.HasMissing,
+		},
+		Symbols: ext.extract(parsed.Root),
+	}, nil
 }
 
 func discoverFiles(opts Options) ([]fileCandidate, error) {

@@ -50,6 +50,7 @@ xlflow [--json] inspect calls [--path <dir-or-file>] [--from <module-or-procedur
 xlflow [--json] inspect symbols [--path <dir-or-file>] [--include-private] [--include-labels] [--module <name>] [--format text|json|markdown]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
+xlflow lsp (--stdio | --check | --version) [--log-file <path>]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
 xlflow [--json] analyze
 xlflow [--json] check
@@ -67,7 +68,7 @@ xlflow [--json] version [--verbose]
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto`, `powershell`, and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` prefers the `.NET` bridge and falls back to PowerShell only when `.NET` is unavailable, incompatible, or unsupported for the requested command. Explicit `--bridge dotnet` is strict and does not implicitly fall back to PowerShell. Explicit `--bridge powershell` always uses the legacy PowerShell bridge.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -110,6 +111,10 @@ Interactive `new` and `init` runs may show a welcome banner that checks the late
 For GitHub Copilot, use `agents` because Copilot reads repository instructions from `.agents`. `--target <dir>` installs to `<dir>/xlflow` instead of a provider default. `--agent` and `--target` cannot be combined. Existing skill directories are not overwritten unless `--force` is set. If neither `--agent` nor `--target` is provided, interactive terminals use the Bubble Tea provider selector; `--json` and non-interactive runs return a configuration error instead.
 
 `version` reports build metadata. `version --verbose` additionally includes the resolved executable path, Go/build information when available, embedded-versus-override PowerShell script resolution details, and a supported-feature list. This command does not require Excel COM.
+
+`lsp --stdio` starts the reusable VBA language server over Language Server Protocol JSON-RPC using standard input and standard output. While the server is running, stdout is reserved exclusively for framed LSP messages; normal logging goes to stderr by default or to `--log-file <path>` when supplied. The initial MVP supports `initialize`, `initialized`, `shutdown`, `exit`, full-document `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`, diagnostic publication, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, and `textDocument/hover`. Open editor buffers are authoritative over filesystem content until `didClose`. Diagnostics use `source="xlflow"` and xlflow rule IDs such as `VB001`, `VB005`, and `VB014`.
+
+`lsp --check` performs server preflight without starting JSON-RPC transport. It loads the built-in VBA/COM type database and validates that parser initialization succeeds. If `xlflow.toml` is absent, `lsp --check` uses the default configuration because the preflight does not need a workbook project. `lsp --version` prints LSP server build metadata. Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `list forms` opens the configured workbook through the same session-aware Excel bridge as other workbook-backed read commands and lists `VBProject.VBComponents` entries whose type is `3` (`vbext_ct_MSForm`). Each returned form includes `name`, `component_type="MSForm"`, `has_frx`, `source_path`, and optional `frx_path`. The source paths are project-relative expected source-tree locations resolved with the same folder-aware path logic as `pull`, not proof that a `.frm` export already exists. `list forms` does not load UserForms at runtime and therefore does not execute `UserForm_Initialize`. When VBProject access is blocked, the command returns `vbproject_access_denied` with guidance to enable Trust Center access.
 

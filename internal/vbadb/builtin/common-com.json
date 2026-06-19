@@ -1,0 +1,130 @@
+{
+  "types": [
+    {
+      "name": "Scripting.Dictionary",
+      "library": "Scripting",
+      "kind": "class",
+      "aliases": ["Dictionary"],
+      "properties": [
+        { "name": "Count", "return_type": "Long", "read_only": true },
+        { "name": "Item", "return_type": "Variant" }
+      ],
+      "methods": [
+        { "name": "Add" },
+        { "name": "Exists", "return_type": "Boolean" },
+        { "name": "Remove" },
+        { "name": "RemoveAll" },
+        { "name": "Keys", "return_type": "Variant" },
+        { "name": "Items", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Scripting.FileSystemObject",
+      "library": "Scripting",
+      "kind": "class",
+      "aliases": ["FileSystemObject"],
+      "methods": [
+        { "name": "OpenTextFile", "return_type": "Scripting.TextStream" },
+        { "name": "CreateTextFile", "return_type": "Scripting.TextStream" },
+        { "name": "FileExists", "return_type": "Boolean" },
+        { "name": "FolderExists", "return_type": "Boolean" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Scripting.TextStream",
+      "library": "Scripting",
+      "kind": "class",
+      "aliases": ["TextStream"],
+      "methods": [
+        { "name": "ReadAll", "return_type": "String" },
+        { "name": "Write" },
+        { "name": "WriteLine" },
+        { "name": "Close" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Connection",
+      "library": "ADODB",
+      "kind": "class",
+      "aliases": ["Connection"],
+      "methods": [
+        { "name": "Open" },
+        { "name": "Close" },
+        { "name": "Execute", "return_type": "ADODB.Recordset" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Recordset",
+      "library": "ADODB",
+      "kind": "class",
+      "aliases": ["Recordset"],
+      "properties": [
+        { "name": "EOF", "return_type": "Boolean" },
+        { "name": "Fields", "return_type": "Object" }
+      ],
+      "methods": [{ "name": "Open" }, { "name": "Close" }, { "name": "MoveNext" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "VBIDE.VBProject",
+      "library": "VBIDE",
+      "kind": "class",
+      "aliases": ["VBProject"],
+      "properties": [{ "name": "VBComponents", "return_type": "Object" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "VBIDE.VBComponent",
+      "library": "VBIDE",
+      "kind": "class",
+      "aliases": ["VBComponent"],
+      "properties": [
+        { "name": "CodeModule", "return_type": "VBIDE.CodeModule" },
+        { "name": "Name", "return_type": "String" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "VBIDE.CodeModule",
+      "library": "VBIDE",
+      "kind": "class",
+      "aliases": ["CodeModule"],
+      "methods": [
+        { "name": "AddFromString" },
+        { "name": "DeleteLines" },
+        { "name": "InsertLines" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Office.CommandBar",
+      "library": "Office",
+      "kind": "class",
+      "aliases": ["CommandBar"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Controls", "return_type": "Object" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ],
+  "progids": {
+    "Scripting.Dictionary": "Scripting.Dictionary",
+    "Scripting.FileSystemObject": "Scripting.FileSystemObject",
+    "ADODB.Connection": "ADODB.Connection",
+    "ADODB.Recordset": "ADODB.Recordset"
+  }
+}

@@ -28,7 +28,7 @@ func TestDelegatedTopLevelCommands(t *testing.T) {
 	}
 	local := []string{
 		"backup", "completion", "diff", "fmt", "generate", "inspect-gui", "lint",
-		"inspect", "module", "skill", "version",
+		"inspect", "lsp", "module", "skill", "version",
 	}
 	for _, name := range delegated {
 		if !shouldDelegateTopLevelCommand(name) {

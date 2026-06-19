@@ -34,6 +34,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/lspserver"
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
@@ -177,6 +178,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.inspectCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
+		a.lspCommand(),
 		a.fmtCommand(),
 		a.analyzeCommand(),
 		a.checkCommand(),
@@ -255,6 +257,7 @@ func resolvedExecutablePath() string {
 func supportedVersionFeatures() []versionFeature {
 	return []versionFeature{
 		{Name: "version-verbose", Description: "Show executable path, build settings, script resolution, and supported features."},
+		{Name: "vba-lsp-stdio", Description: "Run a reusable VBA language server over stdio for editor and agent integrations."},
 		{Name: "auto-session-reuse", Description: "Reuse a matching active xlflow session workbook when --session is omitted for workbook-backed commands."},
 		{Name: "save-state-visibility", Description: "Return structured save-required state when a live session workbook differs from disk."},
 		{Name: "push-save-default", Description: "Save workbook changes by default after push unless --no-save opts out during a session."},
@@ -4660,6 +4663,75 @@ func (a *app) lintCommand() *cobra.Command {
 	}
 }
 
+func (a *app) lspCommand() *cobra.Command {
+	var stdio bool
+	var check bool
+	var showVersion bool
+	var logFile string
+	cmd := &cobra.Command{
+		Use:   "lsp",
+		Short: "Run the VBA language server",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			modeCount := 0
+			for _, enabled := range []bool{stdio, check, showVersion} {
+				if enabled {
+					modeCount++
+				}
+			}
+			if modeCount != 1 {
+				return a.writeFailure("lsp", output.ExitConfig, "lsp_args_invalid", fmt.Errorf("exactly one of --stdio, --check, or --version is required"))
+			}
+			if showVersion {
+				env := output.New("lsp")
+				env.Version = map[string]any{
+					"name":    "xlflow-vba-lsp",
+					"version": a.buildInfo.withDefaults().Version,
+					"commit":  a.buildInfo.withDefaults().Commit,
+					"date":    a.buildInfo.withDefaults().Date,
+				}
+				env.Logs = []string{"xlflow-vba-lsp " + a.buildInfo.withDefaults().Version}
+				return a.write(env, output.ExitSuccess)
+			}
+			cfg, err := a.loadLSPConfig()
+			if err != nil {
+				return err
+			}
+			opts := lspserver.Options{
+				RootDir: a.cwd,
+				Config:  cfg,
+				Build: lspserver.BuildInfo{
+					Version: a.buildInfo.withDefaults().Version,
+					Commit:  a.buildInfo.withDefaults().Commit,
+					Date:    a.buildInfo.withDefaults().Date,
+				},
+				LogFile: logFile,
+				Stderr:  a.stderrWriter(),
+			}
+			if check {
+				if err := lspserver.Check(opts); err != nil {
+					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
+				}
+				env := output.New("lsp")
+				env.Diagnostics = map[string]any{
+					"server":        "xlflow-vba-lsp",
+					"transport":     "stdio",
+					"type_database": "builtin",
+					"sync":          "full",
+				}
+				env.Logs = []string{"lsp pre-launch check passed"}
+				return a.write(env, output.ExitSuccess)
+			}
+			return lspserver.RunStdio(opts)
+		},
+	}
+	cmd.Flags().BoolVar(&stdio, "stdio", false, "run the language server over stdio")
+	cmd.Flags().BoolVar(&check, "check", false, "validate LSP prerequisites and exit")
+	cmd.Flags().BoolVar(&showVersion, "version", false, "show LSP server version and exit")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "write LSP logs to this file instead of stderr")
+	return cmd
+}
+
 func (a *app) analyzeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "analyze",
@@ -5244,6 +5316,23 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 	}
 	if err != nil {
 		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
+	}
+	if len(cfg.Warnings) > 0 {
+		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
+	}
+	return cfg, nil
+}
+
+func (a *app) loadLSPConfig() (config.Config, error) {
+	cfg, err := config.Load(a.cwd)
+	if err != nil && errors.Is(err, config.ErrInvalidExcelBridge) && a.hasValidBridgeOverride() {
+		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), config.FileName+" not found") {
+			return cfg, nil
+		}
+		return cfg, a.writeFailure("lsp", output.ExitConfig, "config_error", err)
 	}
 	if len(cfg.Warnings) > 0 {
 		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
