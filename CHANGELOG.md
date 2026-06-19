@@ -8,6 +8,7 @@ All notable changes to xlflow will be documented in this file.
 - Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
 - Updated LSP diagnostics to reuse the same file-local VBA lint rules as `xlflow lint` for unsaved editor buffers, including stable `VB...` diagnostic codes and diagnostic clearing when issues are fixed.
 - Hardened LSP file URI and range handling for Windows paths, UNC paths, escaped Japanese paths, and UTF-16 diagnostic positions after non-ASCII text.
+- Fixed LSP workspace symbols so an open editor buffer hides stale filesystem symbols for the same module, preserving the in-memory document priority used by definition and reference features.
 - Updated `tree-sitter-vba` to v0.8.1 and adapted call extraction and lint member-access checks to the new stable `receiver` / `member` / `arguments` AST fields.
 
 ## v0.14.0

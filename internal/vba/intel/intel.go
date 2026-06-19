@@ -137,8 +137,17 @@ func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, err
 	if err != nil {
 		return nil, err
 	}
+	openKeys := make(map[string]bool, len(open))
+	for _, doc := range open {
+		for _, key := range a.workspacePathKeys(doc.Path) {
+			openKeys[key] = true
+		}
+	}
 	var out []Symbol
 	for _, file := range result.Files {
+		if hasAnyPathKey(openKeys, a.workspacePathKeys(file.Path)) {
+			continue
+		}
 		out = append(out, symbolsFromFile(file, "")...)
 	}
 	for _, doc := range open {
@@ -168,6 +177,37 @@ func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, err
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+func (a Analyzer) workspacePathKeys(path string) []string {
+	keys := []string{}
+	if key := pathKey(path); key != "" {
+		keys = append(keys, key)
+	}
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(a.RootDir) == "" {
+		return keys
+	}
+	if filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(a.RootDir, path); err == nil {
+			if key := pathKey(rel); key != "" {
+				keys = append(keys, key)
+			}
+		}
+		return keys
+	}
+	if key := pathKey(filepath.Join(a.RootDir, filepath.FromSlash(path))); key != "" {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func hasAnyPathKey(set map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if set[key] {
+			return true
+		}
+	}
+	return false
 }
 
 func (a Analyzer) Definition(doc Document, pos Position, open []Document, uriForPath func(string) string) ([]Location, error) {

@@ -106,6 +106,36 @@ End Sub
 	}
 }
 
+func TestWorkspaceSymbolsPreferOpenDocumentOverFilesystemContent(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Main.bas")
+	if err := os.WriteFile(path, []byte("Option Explicit\nPublic Sub OldName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	open := Document{
+		URI:    "file:///C:/work/src/modules/Main.bas",
+		Path:   path,
+		Source: "Option Explicit\nPublic Sub NewName()\nEnd Sub\n",
+	}
+
+	symbols, err := analyzer.WorkspaceSymbols([]Document{open}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSymbol(symbols, "OldName") {
+		t.Fatalf("stale filesystem symbol should be hidden while document is open: %+v", symbols)
+	}
+	if !hasSymbol(symbols, "NewName") {
+		t.Fatalf("open document symbol missing: %+v", symbols)
+	}
+}
+
 func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 
