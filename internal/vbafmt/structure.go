@@ -1,6 +1,7 @@
 package vbafmt
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,8 +19,8 @@ func (e formatParseError) Error() string {
 }
 
 func isFormatParseError(err error) bool {
-	_, ok := err.(formatParseError)
-	return ok
+	var target formatParseError
+	return errors.As(err, &target)
 }
 
 type lineIndentModel struct {
@@ -76,6 +77,7 @@ func applyNodeIndent(model *lineIndentModel, node *tree_sitter.Node) {
 		"property_get_declaration",
 		"property_let_declaration",
 		"property_set_declaration",
+		"property_declaration",
 		"conditional_sub_declaration",
 		"conditional_function_declaration",
 		"conditional_property_declaration",
