@@ -818,6 +818,35 @@ End Sub
 	}
 }
 
+func TestHoverUsesCurrentProcedureParameterSymbol(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub First(value)
+    Debug.Print value
+End Sub
+
+Sub Second(value As String)
+    Debug.Print value
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	line := `    Debug.Print value`
+	hover, err := analyzer.Hover(doc, Position{Line: 2, Character: utf16Len(line[:strings.Index(line, "value")+3])}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "value") {
+		t.Fatalf("parameter hover missing: %+v", hover)
+	}
+	if strings.Contains(hover.Contents, "String") {
+		t.Fatalf("parameter hover should not use another procedure parameter: %+v", hover)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()

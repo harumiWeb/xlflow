@@ -21,6 +21,7 @@ All notable changes to xlflow will be documented in this file.
 - Added an LSP workspace symbol cache for saved source files plus open-document overlays, reducing repeated full-project symbol indexing during completion, hover, definition, and workspace symbol requests.
 - Improved VBA LSP definition and reference resolution for procedure-local variables and constants so same-name locals in other procedures are no longer returned for the current local scope.
 - Added VBA parameter symbols so LSP definition and reference lookup can resolve procedure arguments within the current procedure scope.
+- Improved VBA LSP hover for local symbols and parameters by reusing scoped definition lookup and avoiding type inference from later declarations.
 - Updated the VS Code LSP dev client to enable VBA quick suggestions and explicitly trigger suggestions for module declaration prefixes such as `Pu`, `Public S`, and `Dim`.
 - Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
 - Expanded the built-in Excel VBA/COM type database with common formatting and worksheet helper objects such as `Excel.Font`, `Excel.Interior`, `Excel.Borders`, `Excel.Validation`, `Excel.Hyperlinks`, `Excel.PageSetup`, `Excel.AutoFilter`, `Excel.Sort`, and `Excel.WorksheetFunction`.

@@ -408,18 +408,17 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		}
 		return &Hover{Contents: "```vb\n" + word + " As " + typ + "\n```", Range: r}, nil
 	}
-	syms, err := a.WorkspaceSymbols(open, word)
+	syms, err := a.definitionSymbols(doc, pos, open, word)
 	if err != nil {
 		return nil, err
 	}
-	for _, sym := range syms {
-		if strings.EqualFold(sym.Name, word) {
-			detail := sym.Detail
-			if detail == "" {
-				detail = sym.Kind + " " + sym.Name
-			}
-			return &Hover{Contents: "```vb\n" + detail + "\n```", Range: r}, nil
+	if len(syms) > 0 {
+		sym := syms[0]
+		detail := sym.Detail
+		if detail == "" {
+			detail = sym.Kind + " " + sym.Name
 		}
+		return &Hover{Contents: "```vb\n" + detail + "\n```", Range: r}, nil
 	}
 	if typ, ok := a.inferExpressionType(doc.Source, pos); ok {
 		if dbType, found := a.DB.ResolveType(typ); found {
@@ -865,9 +864,6 @@ func bestTypeMatch(source string, re *regexp.Regexp, offset int, group int) (str
 			bestStart = start
 			bestType = source[match[group*2]:match[group*2+1]]
 		}
-	}
-	if bestType == "" && offset >= 0 {
-		return bestTypeMatch(source, re, -1, group)
 	}
 	return bestType, bestType != ""
 }
