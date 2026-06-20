@@ -30,7 +30,14 @@
       "aliases": ["ChartObjects"],
       "element_type": "Excel.ChartObject",
       "default_member": "Item",
-      "methods": [{ "name": "Item", "return_type": "Excel.ChartObject", "default": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.ChartObject",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
@@ -41,7 +48,9 @@
       "aliases": ["Shape"],
       "properties": [
         { "name": "Name", "return_type": "String" },
-        { "name": "TextFrame", "return_type": "Object" }
+        { "name": "TextFrame", "return_type": "Excel.TextFrame" },
+        { "name": "TopLeftCell", "return_type": "Excel.Range" },
+        { "name": "BottomRightCell", "return_type": "Excel.Range" }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -53,7 +62,39 @@
       "aliases": ["Shapes"],
       "element_type": "Excel.Shape",
       "default_member": "Item",
-      "methods": [{ "name": "Item", "return_type": "Excel.Shape", "default": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.Shape",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.TextFrame",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["TextFrame"],
+      "properties": [
+        { "name": "Characters", "return_type": "Excel.Characters" },
+        { "name": "HorizontalAlignment", "return_type": "Variant" },
+        { "name": "VerticalAlignment", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Characters",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Characters"],
+      "properties": [
+        { "name": "Text", "return_type": "String" },
+        { "name": "Font", "return_type": "Excel.Font" }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     }

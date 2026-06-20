@@ -215,6 +215,12 @@ func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.
 	if got, ok := analyzer.ResolveExpressionType(`Worksheets("入力").ListObjects("売上一覧").ListColumns("金額").DataBodyRange`); !ok || got != "Excel.Range" {
 		t.Fatalf("ListObjects(...).ListColumns(...).DataBodyRange = %q, %v", got, ok)
 	}
+	if got, ok := analyzer.ResolveExpressionType(`Worksheets("集計").PivotTables("Pivot1").PivotFields("Name").DataRange`); !ok || got != "Excel.Range" {
+		t.Fatalf("PivotTables(...).PivotFields(...).DataRange = %q, %v", got, ok)
+	}
+	if got, ok := analyzer.ResolveExpressionType(`Worksheets("入力").Shapes("Button1").TextFrame.Characters.Text`); !ok || got != "String" {
+		t.Fatalf("Shapes(...).TextFrame.Characters.Text = %q, %v", got, ok)
+	}
 
 	doc := Document{
 		Source: `Option Explicit
@@ -256,6 +262,44 @@ End Sub
 	}
 	if hover == nil || !strings.Contains(hover.Contents, "Excel.ListColumn.DataBodyRange As Excel.Range") {
 		t.Fatalf("unexpected ListColumn.DataBodyRange hover: %+v", hover)
+	}
+}
+
+func TestPivotAndShapeChainCompletionAndHover(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim ws As Worksheet
+    ws.PivotTables("Pivot1").PivotFields("Name").Data
+    ws.Shapes("Button1").TextFrame.Characters.Te
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	pivotLine := `    ws.PivotTables("Pivot1").PivotFields("Name").Data`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(pivotLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "DataRange") {
+		t.Fatalf("PivotField.DataRange completion missing: %+v", items)
+	}
+
+	shapeLine := `    ws.Shapes("Button1").TextFrame.Characters.Te`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(shapeLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Text") {
+		t.Fatalf("Characters.Text completion missing: %+v", items)
+	}
+
+	hover, err := analyzer.Hover(doc, Position{Line: 4, Character: utf16Len(shapeLine[:strings.Index(shapeLine, "TextFrame")+len("Text")])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.Shape.TextFrame As Excel.TextFrame") {
+		t.Fatalf("unexpected Shape.TextFrame hover: %+v", hover)
 	}
 }
 

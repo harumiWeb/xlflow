@@ -64,6 +64,24 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.ListRows", "Item"); !ok || got.ReturnType != "Excel.ListRow" {
 		t.Fatalf("ListRows.Item = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Excel.Worksheet", "PivotTables"); !ok || got.ReturnType != "Excel.PivotTables" {
+		t.Fatalf("Worksheet.PivotTables = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.PivotTables", "Item"); !ok || got.ReturnType != "Excel.PivotTable" || len(got.Parameters) != 1 {
+		t.Fatalf("PivotTables.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.PivotFields", "Item"); !ok || got.ReturnType != "Excel.PivotField" || len(got.Parameters) != 1 {
+		t.Fatalf("PivotFields.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Worksheet", "Shapes"); !ok || got.ReturnType != "Excel.Shapes" {
+		t.Fatalf("Worksheet.Shapes = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Shapes", "Item"); !ok || got.ReturnType != "Excel.Shape" || len(got.Parameters) != 1 {
+		t.Fatalf("Shapes.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Shape", "TextFrame"); !ok || got.ReturnType != "Excel.TextFrame" {
+		t.Fatalf("Shape.TextFrame = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("VBA.Collection", "Count"); !ok || got.ReturnType != "Long" {
 		t.Fatalf("Collection.Count = %+v, %v", got, ok)
 	}

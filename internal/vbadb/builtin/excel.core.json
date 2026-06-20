@@ -112,6 +112,9 @@
           "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
         },
         { "name": "ListObjects", "return_type": "Excel.ListObjects" },
+        { "name": "PivotTables", "return_type": "Excel.PivotTables" },
+        { "name": "Shapes", "return_type": "Excel.Shapes" },
+        { "name": "ChartObjects", "return_type": "Excel.ChartObjects" },
         { "name": "Names", "return_type": "Excel.Names" },
         { "name": "UsedRange", "return_type": "Excel.Range", "read_only": true },
         { "name": "Hyperlinks", "return_type": "Excel.Hyperlinks" },

@@ -109,8 +109,27 @@
       "kind": "class",
       "aliases": ["PivotTable"],
       "properties": [
-        { "name": "PivotFields", "return_type": "Object" },
+        { "name": "Name", "return_type": "String" },
+        { "name": "PivotFields", "return_type": "Excel.PivotFields" },
         { "name": "PivotCache", "return_type": "Excel.PivotCache" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PivotTables",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["PivotTables"],
+      "element_type": "Excel.PivotTable",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.PivotTable",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -120,6 +139,30 @@
       "library": "Excel",
       "kind": "class",
       "aliases": ["PivotField"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Caption", "return_type": "String" },
+        { "name": "DataRange", "return_type": "Excel.Range" },
+        { "name": "LabelRange", "return_type": "Excel.Range" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PivotFields",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["PivotFields"],
+      "element_type": "Excel.PivotField",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.PivotField",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
