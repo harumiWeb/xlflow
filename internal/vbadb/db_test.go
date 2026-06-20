@@ -49,6 +49,21 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Application", "WorksheetFunction"); !ok || got.ReturnType != "Excel.WorksheetFunction" {
 		t.Fatalf("Application.WorksheetFunction = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Excel.ListObjects", "Item"); !ok || got.ReturnType != "Excel.ListObject" || len(got.Parameters) != 1 {
+		t.Fatalf("ListObjects.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.ListObject", "DataBodyRange"); !ok || got.ReturnType != "Excel.Range" {
+		t.Fatalf("ListObject.DataBodyRange = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.ListColumns", "Item"); !ok || got.ReturnType != "Excel.ListColumn" || len(got.Parameters) != 1 {
+		t.Fatalf("ListColumns.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.ListColumn", "DataBodyRange"); !ok || got.ReturnType != "Excel.Range" {
+		t.Fatalf("ListColumn.DataBodyRange = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.ListRows", "Item"); !ok || got.ReturnType != "Excel.ListRow" {
+		t.Fatalf("ListRows.Item = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("VBA.Collection", "Count"); !ok || got.ReturnType != "Long" {
 		t.Fatalf("Collection.Count = %+v, %v", got, ok)
 	}

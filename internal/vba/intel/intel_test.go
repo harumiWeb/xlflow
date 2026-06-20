@@ -212,6 +212,9 @@ func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.
 	if got, ok := analyzer.ResolveExpressionType(`Application.WorksheetFunction`); !ok || got != "Excel.WorksheetFunction" {
 		t.Fatalf("Application.WorksheetFunction = %q, %v", got, ok)
 	}
+	if got, ok := analyzer.ResolveExpressionType(`Worksheets("入力").ListObjects("売上一覧").ListColumns("金額").DataBodyRange`); !ok || got != "Excel.Range" {
+		t.Fatalf("ListObjects(...).ListColumns(...).DataBodyRange = %q, %v", got, ok)
+	}
 
 	doc := Document{
 		Source: `Option Explicit
@@ -224,6 +227,35 @@ End Sub
 	}
 	if got, ok := analyzer.inferWordType(doc, "dict"); !ok || got != "Scripting.Dictionary" {
 		t.Fatalf("dict type = %q, %v", got, ok)
+	}
+}
+
+func TestListObjectChainCompletionAndHover(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim ws As Worksheet
+    ws.ListObjects("売上一覧").ListColumns("金額").DataBodyRange
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	line := `    ws.ListObjects("売上一覧").ListColumns("金額").DataBodyRange`
+	completionPrefix := line[:strings.Index(line, "DataBody")+len("DataBody")]
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(completionPrefix)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "DataBodyRange") {
+		t.Fatalf("ListColumn.DataBodyRange completion missing: %+v", items)
+	}
+
+	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(line[:strings.Index(line, "DataBodyRange")+len("Data")])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.ListColumn.DataBodyRange As Excel.Range") {
+		t.Fatalf("unexpected ListColumn.DataBodyRange hover: %+v", hover)
 	}
 }
 

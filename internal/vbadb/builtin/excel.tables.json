@@ -6,8 +6,13 @@
       "kind": "class",
       "aliases": ["ListObject"],
       "properties": [
+        { "name": "Name", "return_type": "String" },
         { "name": "Range", "return_type": "Excel.Range" },
-        { "name": "ListColumns", "return_type": "Excel.ListColumns" }
+        { "name": "DataBodyRange", "return_type": "Excel.Range" },
+        { "name": "HeaderRowRange", "return_type": "Excel.Range" },
+        { "name": "TotalsRowRange", "return_type": "Excel.Range" },
+        { "name": "ListColumns", "return_type": "Excel.ListColumns" },
+        { "name": "ListRows", "return_type": "Excel.ListRows" }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -20,7 +25,12 @@
       "element_type": "Excel.ListObject",
       "default_member": "Item",
       "methods": [
-        { "name": "Item", "return_type": "Excel.ListObject", "default": true },
+        {
+          "name": "Item",
+          "return_type": "Excel.ListObject",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        },
         { "name": "Add", "return_type": "Excel.ListObject" }
       ],
       "confidence": "curated",
@@ -45,7 +55,42 @@
       "aliases": ["ListColumns"],
       "element_type": "Excel.ListColumn",
       "default_member": "Item",
-      "methods": [{ "name": "Item", "return_type": "Excel.ListColumn", "default": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.ListColumn",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ListRow",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["ListRow"],
+      "properties": [{ "name": "Range", "return_type": "Excel.Range" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ListRows",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["ListRows"],
+      "element_type": "Excel.ListRow",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.ListRow",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        },
+        { "name": "Add", "return_type": "Excel.ListRow" }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
