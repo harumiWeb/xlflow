@@ -8,7 +8,7 @@ import "testing"
 // rebuilt PROJECTMODULES (driven by Type) can diverge from PROJECT text.
 func TestCheckModuleSetDetectsKindMismatch(t *testing.T) {
 	p := &Project{
-		ProjectStreamRaw: []byte("Class=Foo\r\n"),         // PROJECT says Foo is a Class
+		ProjectStreamRaw: []byte("Class=Foo\r\n"),                  // PROJECT says Foo is a Class
 		Modules:          []Module{{Name: "Foo", Type: ModuleStd}}, // model says standard module
 	}
 	if err := checkModuleSet(p); err == nil {

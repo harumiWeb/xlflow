@@ -57,7 +57,7 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                   |
 | `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                             |
 | `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.         |
-| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                           |
+| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                            |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
