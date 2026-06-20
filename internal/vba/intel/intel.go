@@ -56,6 +56,7 @@ type Symbol struct {
 	Detail     string
 	File       string
 	Module     string
+	ModuleKind string
 	Parent     string
 	Visibility string
 	Range      Range
@@ -377,6 +378,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		}
 		return a.moduleMemberCompletions(open, receiverExpr, memberPrefix)
 	}
+	if typePrefix, replaceRange, ok := typeCompletionContext(prefix, pos); ok {
+		return a.typeCompletions(typePrefix, replaceRange, doc, open)
+	}
 	word, _ := WordAt(doc.Source, pos)
 	if strings.TrimSpace(word) == "" {
 		word = currentIdentifierPrefix(prefix)
@@ -403,6 +407,119 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
 	}
 	return uniqueCompletions(items), nil
+}
+
+func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Document, open []Document) ([]Completion, error) {
+	var out []Completion
+	for _, typ := range a.typeCompletionNames() {
+		if !completionMatches(typ.Label, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        typ.Label,
+			Kind:         "type",
+			Detail:       typ.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	syms, err := a.WorkspaceSymbols(open, prefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, sym := range syms {
+		if !a.visibleCompletionSymbol(doc, sym) || !typeSymbolCompletion(sym) || !completionMatches(sym.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        sym.Name,
+			Kind:         completionKindForSymbol(sym.Kind),
+			Detail:       sym.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out), nil
+}
+
+type typeCompletionName struct {
+	Label  string
+	Detail string
+}
+
+func (a Analyzer) typeCompletionNames() []typeCompletionName {
+	seen := map[string]bool{}
+	out := make([]typeCompletionName, 0)
+	add := func(label, detail string) {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return
+		}
+		key := strings.ToLower(label)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, typeCompletionName{Label: label, Detail: detail})
+	}
+	for _, name := range builtinVBATypeNames {
+		add(name, "VBA built-in type")
+	}
+	for _, name := range a.DB.TypeNames() {
+		add(name, "type")
+	}
+	for _, canonical := range a.DB.Aliases {
+		typ, ok := a.DB.ResolveType(canonical)
+		if !ok {
+			continue
+		}
+		for _, label := range append([]string{shortTypeName(typ.Name)}, typ.Aliases...) {
+			detail := typ.Name
+			if strings.EqualFold(label, typ.Name) {
+				detail = "type"
+			}
+			add(label, detail)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Label) < strings.ToLower(out[j].Label)
+	})
+	return out
+}
+
+var builtinVBATypeNames = []string{
+	"Boolean",
+	"Byte",
+	"Currency",
+	"Date",
+	"Decimal",
+	"Double",
+	"Integer",
+	"Long",
+	"LongLong",
+	"LongPtr",
+	"Object",
+	"Single",
+	"String",
+	"Variant",
+}
+
+func shortTypeName(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[idx+1:]
+	}
+	return name
+}
+
+func typeSymbolCompletion(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "type", "enum":
+		return true
+	case "module":
+		return strings.EqualFold(sym.ModuleKind, "class")
+	default:
+		return false
+	}
 }
 
 func (a Analyzer) visibleCompletionSymbol(doc Document, sym Symbol) bool {
@@ -1141,6 +1258,31 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 	return wordPrefix, receiver, true
 }
 
+func typeCompletionContext(prefix string, pos Position) (typePrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !endsWithTypeIntro(beforeWord) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func endsWithTypeIntro(prefix string) bool {
+	fields := strings.Fields(prefix)
+	if len(fields) == 0 {
+		return false
+	}
+	last := strings.ToLower(fields[len(fields)-1])
+	if last == "as" || last == "new" {
+		return true
+	}
+	return false
+}
+
 func statementPrefix(prefix string) (start int, typed string, ok bool) {
 	start = len(prefix) - len(strings.TrimLeft(prefix, " \t"))
 	typed = strings.TrimSpace(prefix[start:])
@@ -1300,6 +1442,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
 			File:       firstNonEmpty(uri, file.Path, sym.File),
 			Module:     sym.Module,
+			ModuleKind: file.ModuleKind,
 			Parent:     sym.Parent,
 			Visibility: sym.Visibility,
 			Range: Range{

@@ -322,6 +322,71 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 }
 
+func TestCompletionsReturnTypeCandidatesInDeclarationContexts(t *testing.T) {
+	root := t.TempDir()
+	classDir := filepath.Join(root, "src", "classes")
+	if err := os.MkdirAll(classDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(classDir, "MyService.cls"), []byte(`VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1
+END
+Attribute VB_Name = "MyService"
+Option Explicit
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:   filepath.Join(root, "src", "modules", "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    Dim ws As Wo\nEnd Sub\n",
+	}
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Dim ws As Wo")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Workbook") {
+		t.Fatalf("Workbook type alias completion missing: %+v", items)
+	}
+	if hasCompletion(items, "xlWorksheet") || hasCompletion(items, "ThisWorkbook") {
+		t.Fatalf("type context should not include constants or globals: %+v", items)
+	}
+	workbook, ok := findCompletion(items, "Workbook")
+	if !ok || workbook.ReplaceRange == nil || workbook.ReplaceRange.Start.Character != utf16Len("    Dim ws As ") {
+		t.Fatalf("Workbook should replace only typed type prefix: %+v", workbook)
+	}
+
+	doc.Source = "Option Explicit\nSub Test()\n    Dim value As Str\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Dim value As Str")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "String") {
+		t.Fatalf("String built-in type completion missing: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nSub Test()\n    Set dict = New Di\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Set dict = New Di")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Dictionary") {
+		t.Fatalf("Dictionary alias completion missing after New: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nSub Test()\n    Dim service As My\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Dim service As My")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "MyService") {
+		t.Fatalf("class module type completion missing: %+v", items)
+	}
+}
+
 func TestCompletionsReturnModuleProcedureCandidates(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

@@ -275,6 +275,50 @@ func TestCompletionReturnsModuleDeclarationSnippet(t *testing.T) {
 	}
 }
 
+func TestCompletionReturnsTypeCandidates(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    Dim ws As Wo\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok := findCompletionItem(list.Items, "Workbook")
+	if !ok {
+		t.Fatalf("Workbook type completion missing: %+v", list.Items)
+	}
+	if item.Kind == nil || *item.Kind != protocol.CompletionItemKindClass {
+		t.Fatalf("Workbook kind = %+v, want class/type completion", item.Kind)
+	}
+	edit, ok := item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("Workbook text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.Range.Start.Character != 14 || edit.Range.End.Character != 16 || edit.NewText != "Workbook" {
+		t.Fatalf("Workbook text edit = %+v, want replacement for typed type prefix", edit)
+	}
+}
+
 func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
