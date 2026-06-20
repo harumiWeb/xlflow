@@ -7,6 +7,7 @@ import {
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
+let suggestTimer: NodeJS.Timeout | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const outputChannel = vscode.window.createOutputChannel("xlflow LSP Dev Client", { log: true });
@@ -44,10 +45,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(outputChannel, traceOutputChannel, {
     dispose: () => {
+      clearPendingSuggest();
       void client?.stop();
       client = undefined;
     },
   });
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      scheduleDeclarationSuggest(event.document);
+    }),
+  );
 
   try {
     await client.start();
@@ -59,7 +66,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export async function deactivate(): Promise<void> {
+  clearPendingSuggest();
   const runningClient = client;
   client = undefined;
   await runningClient?.stop();
+}
+
+function scheduleDeclarationSuggest(document: vscode.TextDocument): void {
+  const editor = vscode.window.activeTextEditor;
+  if (editor === undefined || editor.document !== document || document.languageId !== "vba") {
+    return;
+  }
+  const position = editor.selection.active;
+  const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+  if (!isDeclarationPrefix(linePrefix)) {
+    return;
+  }
+
+  clearPendingSuggest();
+  suggestTimer = setTimeout(() => {
+    suggestTimer = undefined;
+    void vscode.commands.executeCommand("editor.action.triggerSuggest");
+  }, 75);
+}
+
+function clearPendingSuggest(): void {
+  if (suggestTimer !== undefined) {
+    clearTimeout(suggestTimer);
+    suggestTimer = undefined;
+  }
+}
+
+function isDeclarationPrefix(linePrefix: string): boolean {
+  const typed = linePrefix.trimStart();
+  if (typed.length === 0 || /[."'():=]/.test(typed)) {
+    return false;
+  }
+  return /^(o|op|opt|opti|optio|option|option\s+\w*|p|pu|pub|publ|publi|public|public\s+\w*|pr|pri|priv|priva|privat|private|private\s+\w*|f|fr|fri|frie|frien|friend|friend\s+\w*|s|su|sub|fu|fun|func|funct|functi|functio|function|d|di|dim|c|co|con|cons|const|t|ty|typ|type|e|en|enu|enum|declare|declare\s+\w*)$/i.test(
+    typed,
+  );
 }
