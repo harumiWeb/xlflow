@@ -863,6 +863,9 @@ func pathKey(path string) string {
 func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 	out := make([]Symbol, 0, len(file.Symbols))
 	for _, sym := range file.Symbols {
+		if strings.TrimSpace(sym.Name) == "" {
+			continue
+		}
 		out = append(out, Symbol{
 			Name:   sym.Name,
 			Kind:   sym.Kind,

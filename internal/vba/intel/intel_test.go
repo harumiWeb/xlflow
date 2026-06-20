@@ -106,6 +106,25 @@ End Sub
 	}
 }
 
+func TestDocumentSymbolsSkipEmptyNamesFromIncompleteSource(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     "Option Explicit\nPublic Sub \n    Dim \nEnd Sub\n",
+	}
+
+	symbols, err := analyzer.DocumentSymbols(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range symbols {
+		if strings.TrimSpace(sym.Name) == "" {
+			t.Fatalf("empty symbol name should not be returned: %+v", symbols)
+		}
+	}
+}
+
 func TestWorkspaceSymbolsPreferOpenDocumentOverFilesystemContent(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")
