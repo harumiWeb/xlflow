@@ -132,6 +132,9 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		kind := protocol.TextDocumentSyncKindFull
 		syncOptions.Change = &kind
 	}
+	if capabilities.CompletionProvider != nil {
+		capabilities.CompletionProvider.TriggerCharacters = []string{"."}
+	}
 	version := s.opts.Build.Version
 	if version == "" {
 		version = "dev"

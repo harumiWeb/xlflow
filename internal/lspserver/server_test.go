@@ -185,6 +185,9 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if initResult.ServerInfo == nil || initResult.ServerInfo.Name != serverName {
 		t.Fatalf("unexpected initialize result: %+v", initResult.ServerInfo)
 	}
+	if initResult.Capabilities.CompletionProvider == nil || !containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") {
+		t.Fatalf("completion trigger characters = %+v, want dot trigger", initResult.Capabilities.CompletionProvider)
+	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
@@ -210,6 +213,30 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	}
 	if !hasCompletionItem(list.Items, "Range") {
 		t.Fatalf("Range completion missing: %+v", list.Items)
+	}
+
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Version:                2,
+		},
+		ContentChanges: []any{
+			map[string]any{"text": "Option Explicit\nSub Test()\n    Range(\"A1\").Font.Co\nEnd Sub\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var fontList protocol.CompletionList
+	if err := clientConn.Call(ctx, string(protocol.MethodTextDocumentCompletion), protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 23},
+		},
+	}, &fontList); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletionItem(fontList.Items, "Color") {
+		t.Fatalf("Font.Color completion missing: %+v", fontList.Items)
 	}
 
 	var shutdown any
@@ -259,6 +286,15 @@ func (r *rpcRecorder) methods() []string {
 func hasCompletionItem(items []protocol.CompletionItem, label string) bool {
 	for _, item := range items {
 		if item.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
 			return true
 		}
 	}
