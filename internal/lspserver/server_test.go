@@ -207,6 +207,46 @@ End Function
 	}
 }
 
+func TestCompletionReturnsModuleDeclarationSnippet(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\n\nPu\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok := findCompletionItem(list.Items, "Public Sub")
+	if !ok {
+		t.Fatalf("Public Sub completion missing: %+v", list.Items)
+	}
+	if item.InsertText == nil || !strings.Contains(*item.InsertText, "End Sub") {
+		t.Fatalf("Public Sub insert text = %+v, want snippet with End Sub", item.InsertText)
+	}
+	if item.InsertTextFormat == nil || *item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("Public Sub insert text format = %+v, want snippet", item.InsertTextFormat)
+	}
+}
+
 func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -329,12 +369,17 @@ func (r *rpcRecorder) methods() []string {
 }
 
 func hasCompletionItem(items []protocol.CompletionItem, label string) bool {
+	_, ok := findCompletionItem(items, label)
+	return ok
+}
+
+func findCompletionItem(items []protocol.CompletionItem, label string) (protocol.CompletionItem, bool) {
 	for _, item := range items {
 		if item.Label == label {
-			return true
+			return item, true
 		}
 	}
-	return false
+	return protocol.CompletionItem{}, false
 }
 
 func containsString(items []string, needle string) bool {

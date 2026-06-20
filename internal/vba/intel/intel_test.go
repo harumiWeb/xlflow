@@ -336,6 +336,43 @@ End Sub
 	}
 }
 
+func TestCompletionsReturnModuleDeclarationSnippets(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+
+Pu
+Public Sub Existing()
+End Sub
+`,
+	}
+
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("Pu")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicSub, ok := findCompletion(items, "Public Sub")
+	if !ok {
+		t.Fatalf("Public Sub completion missing: %+v", items)
+	}
+	if !publicSub.Snippet || !strings.Contains(publicSub.InsertText, "End Sub") {
+		t.Fatalf("Public Sub should be a procedure snippet: %+v", publicSub)
+	}
+	if !hasCompletion(items, "Public Function") {
+		t.Fatalf("Public Function completion missing: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nSub Existing()\n    Pu\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Pu")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "Public Sub") {
+		t.Fatalf("module-level declaration snippets should not appear inside procedures: %+v", items)
+	}
+}
+
 func TestHoverUsesConstantMetadata(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	line := "    Debug.Print xlLandscape"
@@ -473,12 +510,17 @@ func newTestAnalyzer(t *testing.T) Analyzer {
 }
 
 func hasCompletion(items []Completion, label string) bool {
+	_, ok := findCompletion(items, label)
+	return ok
+}
+
+func findCompletion(items []Completion, label string) (Completion, bool) {
 	for _, item := range items {
 		if item.Label == label {
-			return true
+			return item, true
 		}
 	}
-	return false
+	return Completion{}, false
 }
 
 func hasSymbol(symbols []Symbol, name string) bool {

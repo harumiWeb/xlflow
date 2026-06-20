@@ -77,6 +77,8 @@ type Completion struct {
 	Kind          string
 	Detail        string
 	Documentation string
+	InsertText    string
+	Snippet       bool
 }
 
 func (a Analyzer) Check() error {
@@ -377,7 +379,8 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if strings.TrimSpace(word) == "" {
 		word = currentIdentifierPrefix(prefix)
 	}
-	items := a.globalCompletions(word)
+	items := a.syntaxCompletions(doc, pos, prefix)
+	items = append(items, a.globalCompletions(word)...)
 	for _, control := range a.formControls(doc) {
 		if completionMatches(control.Name, word) {
 			items = append(items, Completion{
@@ -807,6 +810,14 @@ func moduleMemberCompletionSymbol(sym Symbol) bool {
 	return !strings.EqualFold(sym.Visibility, "Private")
 }
 
+func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) []Completion {
+	word := currentIdentifierPrefix(prefix)
+	if !atStatementStart(prefix, word) || !isModuleLevelPosition(doc.Source, pos) {
+		return nil
+	}
+	return declarationCompletions(word)
+}
+
 func (a Analyzer) globalCompletions(prefix string) []Completion {
 	var out []Completion
 	for _, typ := range a.DB.TypeNames() {
@@ -836,6 +847,232 @@ func (a Analyzer) globalCompletions(prefix string) []Completion {
 	return uniqueCompletions(out)
 }
 
+type syntaxCompletionSpec struct {
+	label         string
+	detail        string
+	insertText    string
+	documentation string
+}
+
+var moduleDeclarationCompletions = []syntaxCompletionSpec{
+	{
+		label:         "Option Explicit",
+		detail:        "Require explicit variable declarations",
+		insertText:    "Option Explicit",
+		documentation: "Adds the module-level `Option Explicit` declaration.",
+	},
+	{
+		label:         "Option Base 1",
+		detail:        "Set default array lower bound",
+		insertText:    "Option Base 1",
+		documentation: "Adds the module-level `Option Base 1` declaration.",
+	},
+	{
+		label:         "Option Private Module",
+		detail:        "Hide module members from external projects",
+		insertText:    "Option Private Module",
+		documentation: "Adds the module-level `Option Private Module` declaration.",
+	},
+	{
+		label:         "Public",
+		detail:        "Public declaration modifier",
+		insertText:    "Public ",
+		documentation: "Starts a public module-level declaration.",
+	},
+	{
+		label:         "Private",
+		detail:        "Private declaration modifier",
+		insertText:    "Private ",
+		documentation: "Starts a private module-level declaration.",
+	},
+	{
+		label:         "Friend",
+		detail:        "Friend declaration modifier",
+		insertText:    "Friend ",
+		documentation: "Starts a friend declaration in a class module.",
+	},
+	{
+		label:         "Sub",
+		detail:        "Procedure declaration",
+		insertText:    "Sub ${1:Name}()\n    $0\nEnd Sub",
+		documentation: "Creates a module-level Sub procedure.",
+	},
+	{
+		label:         "Public Sub",
+		detail:        "Public procedure declaration",
+		insertText:    "Public Sub ${1:Name}()\n    $0\nEnd Sub",
+		documentation: "Creates a public Sub procedure.",
+	},
+	{
+		label:         "Private Sub",
+		detail:        "Private procedure declaration",
+		insertText:    "Private Sub ${1:Name}()\n    $0\nEnd Sub",
+		documentation: "Creates a private Sub procedure.",
+	},
+	{
+		label:         "Function",
+		detail:        "Function declaration",
+		insertText:    "Function ${1:Name}() As ${2:Variant}\n    $0\nEnd Function",
+		documentation: "Creates a module-level Function procedure.",
+	},
+	{
+		label:         "Public Function",
+		detail:        "Public function declaration",
+		insertText:    "Public Function ${1:Name}() As ${2:Variant}\n    $0\nEnd Function",
+		documentation: "Creates a public Function procedure.",
+	},
+	{
+		label:         "Private Function",
+		detail:        "Private function declaration",
+		insertText:    "Private Function ${1:Name}() As ${2:Variant}\n    $0\nEnd Function",
+		documentation: "Creates a private Function procedure.",
+	},
+	{
+		label:         "Property Get",
+		detail:        "Property getter declaration",
+		insertText:    "Property Get ${1:Name}() As ${2:Variant}\n    $0\nEnd Property",
+		documentation: "Creates a Property Get procedure.",
+	},
+	{
+		label:         "Property Let",
+		detail:        "Property setter declaration",
+		insertText:    "Property Let ${1:Name}(ByVal ${2:value} As ${3:Variant})\n    $0\nEnd Property",
+		documentation: "Creates a Property Let procedure.",
+	},
+	{
+		label:         "Property Set",
+		detail:        "Object property setter declaration",
+		insertText:    "Property Set ${1:Name}(ByVal ${2:value} As ${3:Object})\n    $0\nEnd Property",
+		documentation: "Creates a Property Set procedure.",
+	},
+	{
+		label:         "Public Property Get",
+		detail:        "Public property getter declaration",
+		insertText:    "Public Property Get ${1:Name}() As ${2:Variant}\n    $0\nEnd Property",
+		documentation: "Creates a public Property Get procedure.",
+	},
+	{
+		label:         "Public Property Let",
+		detail:        "Public property setter declaration",
+		insertText:    "Public Property Let ${1:Name}(ByVal ${2:value} As ${3:Variant})\n    $0\nEnd Property",
+		documentation: "Creates a public Property Let procedure.",
+	},
+	{
+		label:         "Public Property Set",
+		detail:        "Public object property setter declaration",
+		insertText:    "Public Property Set ${1:Name}(ByVal ${2:value} As ${3:Object})\n    $0\nEnd Property",
+		documentation: "Creates a public Property Set procedure.",
+	},
+	{
+		label:         "Private Property Get",
+		detail:        "Private property getter declaration",
+		insertText:    "Private Property Get ${1:Name}() As ${2:Variant}\n    $0\nEnd Property",
+		documentation: "Creates a private Property Get procedure.",
+	},
+	{
+		label:         "Private Property Let",
+		detail:        "Private property setter declaration",
+		insertText:    "Private Property Let ${1:Name}(ByVal ${2:value} As ${3:Variant})\n    $0\nEnd Property",
+		documentation: "Creates a private Property Let procedure.",
+	},
+	{
+		label:         "Private Property Set",
+		detail:        "Private object property setter declaration",
+		insertText:    "Private Property Set ${1:Name}(ByVal ${2:value} As ${3:Object})\n    $0\nEnd Property",
+		documentation: "Creates a private Property Set procedure.",
+	},
+	{
+		label:         "Dim",
+		detail:        "Module variable declaration",
+		insertText:    "Dim ${1:name} As ${2:Variant}",
+		documentation: "Declares a module-level variable.",
+	},
+	{
+		label:         "Const",
+		detail:        "Constant declaration",
+		insertText:    "Const ${1:Name} As ${2:Variant} = ${3:value}",
+		documentation: "Declares a module-level constant.",
+	},
+	{
+		label:         "Public Const",
+		detail:        "Public constant declaration",
+		insertText:    "Public Const ${1:Name} As ${2:Variant} = ${3:value}",
+		documentation: "Declares a public module-level constant.",
+	},
+	{
+		label:         "Private Const",
+		detail:        "Private constant declaration",
+		insertText:    "Private Const ${1:Name} As ${2:Variant} = ${3:value}",
+		documentation: "Declares a private module-level constant.",
+	},
+	{
+		label:         "Type",
+		detail:        "User-defined type declaration",
+		insertText:    "Type ${1:Name}\n    ${2:Field} As ${3:Variant}\nEnd Type",
+		documentation: "Declares a user-defined type.",
+	},
+	{
+		label:         "Public Type",
+		detail:        "Public user-defined type declaration",
+		insertText:    "Public Type ${1:Name}\n    ${2:Field} As ${3:Variant}\nEnd Type",
+		documentation: "Declares a public user-defined type.",
+	},
+	{
+		label:         "Private Type",
+		detail:        "Private user-defined type declaration",
+		insertText:    "Private Type ${1:Name}\n    ${2:Field} As ${3:Variant}\nEnd Type",
+		documentation: "Declares a private user-defined type.",
+	},
+	{
+		label:         "Enum",
+		detail:        "Enum declaration",
+		insertText:    "Enum ${1:Name}\n    ${2:Member} = ${3:0}\nEnd Enum",
+		documentation: "Declares an enum.",
+	},
+	{
+		label:         "Public Enum",
+		detail:        "Public enum declaration",
+		insertText:    "Public Enum ${1:Name}\n    ${2:Member} = ${3:0}\nEnd Enum",
+		documentation: "Declares a public enum.",
+	},
+	{
+		label:         "Private Enum",
+		detail:        "Private enum declaration",
+		insertText:    "Private Enum ${1:Name}\n    ${2:Member} = ${3:0}\nEnd Enum",
+		documentation: "Declares a private enum.",
+	},
+	{
+		label:         "Declare PtrSafe Function",
+		detail:        "External function declaration",
+		insertText:    "Public Declare PtrSafe Function ${1:Name} Lib \"${2:library}\" (${3:args}) As ${4:LongPtr}",
+		documentation: "Declares an external PtrSafe function.",
+	},
+	{
+		label:         "Declare PtrSafe Sub",
+		detail:        "External sub declaration",
+		insertText:    "Public Declare PtrSafe Sub ${1:Name} Lib \"${2:library}\" (${3:args})",
+		documentation: "Declares an external PtrSafe subroutine.",
+	},
+}
+
+func declarationCompletions(prefix string) []Completion {
+	var out []Completion
+	for _, spec := range moduleDeclarationCompletions {
+		if !completionMatches(spec.label, prefix) {
+			continue
+		}
+		out = append(out, Completion{
+			Label:         spec.label,
+			Kind:          "snippet",
+			Detail:        spec.detail,
+			Documentation: spec.documentation,
+			InsertText:    spec.insertText,
+			Snippet:       strings.Contains(spec.insertText, "$"),
+		})
+	}
+	return out
+}
+
 func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr string, ok bool) {
 	wordPrefix := currentIdentifierPrefix(prefix)
 	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
@@ -847,6 +1084,65 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 		return "", "", false
 	}
 	return wordPrefix, receiver, true
+}
+
+func atStatementStart(prefix, word string) bool {
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(word)], " \t")
+	return beforeWord == ""
+}
+
+func isModuleLevelPosition(source string, pos Position) bool {
+	lines := normalizedLines(source)
+	if pos.Line <= 0 {
+		return true
+	}
+	depth := 0
+	for lineNo, line := range lines {
+		if lineNo >= pos.Line {
+			break
+		}
+		text := strings.TrimSpace(line[:codeLimit(line)])
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		switch {
+		case strings.HasPrefix(lower, "end sub") || strings.HasPrefix(lower, "end function") || strings.HasPrefix(lower, "end property"):
+			if depth > 0 {
+				depth--
+			}
+		case procedureStartLine(lower):
+			depth++
+		}
+	}
+	return depth == 0
+}
+
+func procedureStartLine(lower string) bool {
+	if strings.HasPrefix(lower, "end ") {
+		return false
+	}
+	fields := strings.Fields(lower)
+	for len(fields) > 0 {
+		switch fields[0] {
+		case "public", "private", "friend", "static":
+			fields = fields[1:]
+		default:
+			goto done
+		}
+	}
+done:
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "sub", "function":
+		return true
+	case "property":
+		return len(fields) > 1 && (fields[1] == "get" || fields[1] == "let" || fields[1] == "set")
+	default:
+		return false
+	}
 }
 
 func currentIdentifierPrefix(prefix string) string {

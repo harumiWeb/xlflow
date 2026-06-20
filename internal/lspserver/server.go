@@ -333,6 +333,13 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 			Label: completion.Label,
 			Kind:  &kind,
 		}
+		if completion.InsertText != "" {
+			item.InsertText = &completion.InsertText
+		}
+		if completion.Snippet {
+			format := protocol.InsertTextFormatSnippet
+			item.InsertTextFormat = &format
+		}
 		if completion.Detail != "" {
 			item.Detail = &completion.Detail
 		}
@@ -598,6 +605,10 @@ func completionItemKind(kind string) protocol.CompletionItemKind {
 		return protocol.CompletionItemKindClass
 	case "constant":
 		return protocol.CompletionItemKindConstant
+	case "keyword":
+		return protocol.CompletionItemKindKeyword
+	case "snippet":
+		return protocol.CompletionItemKindSnippet
 	default:
 		return protocol.CompletionItemKindText
 	}
