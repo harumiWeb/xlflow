@@ -701,6 +701,24 @@ End Sub
 		t.Fatalf("Public Sub should replace the typed declaration prefix: %+v", publicSub.ReplaceRange)
 	}
 
+	doc.Source = ""
+	items, err = analyzer.Completions(doc, Position{Line: 0, Character: 0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Option Explicit") {
+		t.Fatalf("empty module should offer Option Explicit: %+v", items)
+	}
+
+	doc.Source = "Option Explicit"
+	items, err = analyzer.Completions(doc, Position{Line: 0, Character: utf16Len("Option Explicit")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "Option Explicit") {
+		t.Fatalf("completed Option Explicit should not be offered again: %+v", items)
+	}
+
 	doc.Source = "Option Explicit\nSub Existing()\n    Pu\nEnd Sub\n"
 	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Pu")}, nil)
 	if err != nil {

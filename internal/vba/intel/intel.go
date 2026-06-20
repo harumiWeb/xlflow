@@ -1604,6 +1604,9 @@ func completionsFromSpecs(specs []syntaxCompletionSpec, prefix string, replaceRa
 		if !completionMatches(spec.label, prefix) {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(spec.label), strings.TrimSpace(prefix)) {
+			continue
+		}
 		replace := replaceRange
 		out = append(out, Completion{
 			Label:         spec.label,

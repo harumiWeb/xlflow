@@ -10,6 +10,7 @@ All notable changes to xlflow will be documented in this file.
 - Improved VBA hover display with member signatures, canonical receiver types, and source/provenance notes for declarations, inferred object types, built-in globals, UserForm controls, and built-in object model members.
 - Added context-aware ProgID completion inside `CreateObject("...")` while suppressing unrelated completions in ordinary string literals.
 - Added active `With` block receiver tracking for VBA hover and member completion, including nested `With .Member` blocks.
+- Fixed VBA statement snippets so an already completed declaration such as `Option Explicit` is not immediately suggested again.
 - Added reusable `xlflow lsp --stdio` VBA language server support with full-document synchronization, diagnostics, document/workspace symbols, definition lookup, references, hover, completion, and a practical built-in VBA/COM type database for common Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata.
 - Fixed LSP document symbols so incomplete VBA declarations do not return empty symbol names that VS Code rejects while editing.
 - Added `.` as an LSP completion trigger character so VS Code requests member completions such as `Range("A1").Font.Color` while typing.
