@@ -361,7 +361,7 @@ func hasLocalDefinitionSymbol(syms []Symbol) bool {
 }
 
 func isLocalSymbol(sym Symbol) bool {
-	return strings.EqualFold(sym.Kind, "local_variable") || (sym.Parent != "" && strings.EqualFold(sym.Kind, "const"))
+	return strings.EqualFold(sym.Kind, "local_variable") || strings.EqualFold(sym.Kind, "parameter") || (sym.Parent != "" && strings.EqualFold(sym.Kind, "const"))
 }
 
 func containedInDeclaration(doc Document, r Range, declarations []Location) bool {
@@ -1562,7 +1562,7 @@ func completionKindForSymbol(kind string) string {
 		return "function"
 	case "const":
 		return "constant"
-	case "module_variable", "local_variable", "field":
+	case "module_variable", "local_variable", "field", "parameter":
 		return "variable"
 	case "class", "module", "enum":
 		return "type"

@@ -775,6 +775,49 @@ End Sub
 	}
 }
 
+func TestDefinitionAndReferencesResolveCurrentProcedureParameter(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub First(ByVal value As Long)
+    value = value + 1
+End Sub
+
+Sub Second(ByVal value As Long)
+    value = value + 2
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	pos := Position{Line: 2, Character: utf16Len("    val")}
+
+	defs, err := analyzer.Definition(doc, pos, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].Range.Start.Line != 1 {
+		t.Fatalf("parameter definition = %+v, want First.value parameter only", defs)
+	}
+
+	withDecl, err := analyzer.References(doc, pos, []Document{doc}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withDecl) != 3 || withDecl[0].Range.Start.Line != 1 || withDecl[1].Range.Start.Line != 2 || withDecl[2].Range.Start.Line != 2 {
+		t.Fatalf("parameter references with declaration = %+v, want First parameter and body references only", withDecl)
+	}
+
+	withoutDecl, err := analyzer.References(doc, pos, []Document{doc}, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withoutDecl) != 2 || withoutDecl[0].Range.Start.Line != 2 || withoutDecl[1].Range.Start.Line != 2 {
+		t.Fatalf("parameter references without declaration = %+v, want First body references only", withoutDecl)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()
