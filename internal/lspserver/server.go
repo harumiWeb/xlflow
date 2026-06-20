@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/tliron/glsp"
@@ -22,6 +23,8 @@ import (
 )
 
 const serverName = "xlflow-vba-lsp"
+
+const diagnosticsDebounce = 300 * time.Millisecond
 
 type BuildInfo struct {
 	Version string
@@ -44,6 +47,9 @@ type Server struct {
 	handler  protocol.Handler
 	docs     *documents
 	logger   *log.Logger
+
+	diagMu     sync.Mutex
+	diagTimers map[string]*time.Timer
 }
 
 func Check(opts Options) error {
@@ -83,8 +89,9 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      db,
 		},
-		docs:   newDocuments(opts.RootDir),
-		logger: logger,
+		docs:       newDocuments(opts.RootDir),
+		logger:     logger,
+		diagTimers: make(map[string]*time.Timer),
 	}
 	s.handler = protocol.Handler{
 		Initialize:                 s.initialize,
@@ -101,7 +108,10 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentHover:          s.hover,
 		TextDocumentCompletion:     s.completion,
 	}
-	return s, cleanup, nil
+	return s, func() {
+		s.stopDiagnosticTimers()
+		cleanup()
+	}, nil
 }
 
 func newLogger(opts Options) (*log.Logger, func(), error) {
@@ -184,7 +194,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if err != nil {
 		return err
 	}
-	s.publishDiagnostics(ctx, doc)
+	s.scheduleDiagnostics(ctx, doc)
 	return nil
 }
 
@@ -204,6 +214,7 @@ func fullChangeText(change any) (string, bool) {
 
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
+	s.cancelDiagnostics(uri)
 	s.docs.close(uri)
 	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentUri(uri),
@@ -358,6 +369,42 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		items = append(items, item)
 	}
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+}
+
+func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
+	if doc.URI == "" {
+		s.publishDiagnostics(ctx, doc)
+		return
+	}
+	s.diagMu.Lock()
+	if timer := s.diagTimers[doc.URI]; timer != nil {
+		timer.Stop()
+	}
+	s.diagTimers[doc.URI] = time.AfterFunc(diagnosticsDebounce, func() {
+		s.diagMu.Lock()
+		delete(s.diagTimers, doc.URI)
+		s.diagMu.Unlock()
+		s.publishDiagnostics(ctx, doc)
+	})
+	s.diagMu.Unlock()
+}
+
+func (s *Server) cancelDiagnostics(uri string) {
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	if timer := s.diagTimers[uri]; timer != nil {
+		timer.Stop()
+		delete(s.diagTimers, uri)
+	}
+}
+
+func (s *Server) stopDiagnosticTimers() {
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	for uri, timer := range s.diagTimers {
+		timer.Stop()
+		delete(s.diagTimers, uri)
+	}
 }
 
 func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
@@ -621,11 +668,7 @@ func completionItemKind(kind string) protocol.CompletionItemKind {
 }
 
 func completionTriggerCharacters() []string {
-	chars := []string{"."}
-	for _, ch := range "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" {
-		chars = append(chars, string(ch))
-	}
-	return chars
+	return []string{"."}
 }
 
 func max(a, b int) int {

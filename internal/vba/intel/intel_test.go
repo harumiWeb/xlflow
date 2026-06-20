@@ -490,6 +490,57 @@ Public Const PUBLIC_VALUE As Long = 2
 	}
 }
 
+func TestCompletionsHideLocalsFromOtherProcedures(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Private Const MODULE_SECRET As Long = 1
+
+Sub First()
+    Dim firstLocal As Long
+    fi
+End Sub
+
+Sub Second()
+    Dim secondLocal As Long
+    se
+End Sub
+`,
+	}
+
+	items, err := analyzer.Completions(doc, Position{Line: 5, Character: utf16Len("    fi")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "firstLocal") {
+		t.Fatalf("current procedure local should be completed: %+v", items)
+	}
+	if hasCompletion(items, "secondLocal") {
+		t.Fatalf("other procedure local should not be completed: %+v", items)
+	}
+
+	items, err = analyzer.Completions(doc, Position{Line: 10, Character: utf16Len("    se")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "secondLocal") {
+		t.Fatalf("current procedure local should be completed: %+v", items)
+	}
+	if hasCompletion(items, "firstLocal") {
+		t.Fatalf("other procedure local should not be completed: %+v", items)
+	}
+
+	doc.Source = strings.Replace(doc.Source, "    fi", "    MO", 1)
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len("    MO")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "MODULE_SECRET") {
+		t.Fatalf("same module private const should remain available: %+v", items)
+	}
+}
+
 func TestCompletionsReturnModuleDeclarationSnippets(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

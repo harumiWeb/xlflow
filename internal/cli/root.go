@@ -3197,8 +3197,8 @@ func (a *app) inspectCallsCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
 	cmd.Flags().StringVar(&from, "from", "", "show only calls made from a module or procedure")
 	cmd.Flags().StringVar(&to, "to", "", "show only call sites whose callee matches this name")
-	cmd.Flags().BoolVar(&includeMembers, "include-members", false, "include member calls (included by default)")
-	cmd.Flags().BoolVar(&includeBuiltins, "include-builtins", false, "include built-in-looking calls (included by default)")
+	cmd.Flags().BoolVar(&includeMembers, "include-members", false, "compatibility no-op; member calls are included by default")
+	cmd.Flags().BoolVar(&includeBuiltins, "include-builtins", false, "compatibility no-op; built-in-looking calls are included by default")
 	return cmd
 }
 

@@ -400,8 +400,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if err != nil {
 		return nil, err
 	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	for _, sym := range syms {
-		if !a.visibleCompletionSymbol(doc, sym) {
+		if !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
 			continue
 		}
 		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
@@ -427,8 +428,9 @@ func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Documen
 	if err != nil {
 		return nil, err
 	}
+	currentProcedure := currentProcedureNameForDocument(doc, replaceRange.End)
 	for _, sym := range syms {
-		if !a.visibleCompletionSymbol(doc, sym) || !typeSymbolCompletion(sym) || !completionMatches(sym.Name, prefix) {
+		if !a.visibleCompletionSymbol(doc, currentProcedure, sym) || !typeSymbolCompletion(sym) || !completionMatches(sym.Name, prefix) {
 			continue
 		}
 		replace := replaceRange
@@ -522,17 +524,82 @@ func typeSymbolCompletion(sym Symbol) bool {
 	}
 }
 
-func (a Analyzer) visibleCompletionSymbol(doc Document, sym Symbol) bool {
+func (a Analyzer) visibleCompletionSymbol(doc Document, currentProcedure string, sym Symbol) bool {
 	if strings.EqualFold(sym.Kind, "module") {
 		return true
+	}
+	if sym.Parent != "" {
+		return currentProcedure != "" && strings.EqualFold(sym.Parent, currentProcedure) && a.sameDocumentSymbol(doc, sym)
 	}
 	if a.sameDocumentSymbol(doc, sym) {
 		return true
 	}
-	if sym.Parent != "" {
-		return false
-	}
 	return !strings.EqualFold(sym.Visibility, "Private")
+}
+
+func currentProcedureNameForDocument(doc Document, pos Position) string {
+	lines := normalizedLines(doc.Source)
+	depth := 0
+	current := ""
+	for lineNo, line := range lines {
+		if lineNo > pos.Line {
+			break
+		}
+		text := strings.TrimSpace(line[:codeLimit(line)])
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		switch {
+		case strings.HasPrefix(lower, "end sub") || strings.HasPrefix(lower, "end function") || strings.HasPrefix(lower, "end property"):
+			if depth > 0 {
+				depth--
+			}
+			if depth == 0 {
+				current = ""
+			}
+		case procedureStartLine(lower):
+			depth++
+			if depth == 1 {
+				current = procedureNameFromLine(text)
+			}
+		}
+	}
+	return current
+}
+
+func procedureNameFromLine(text string) string {
+	fields := strings.Fields(text)
+	for len(fields) > 0 {
+		switch strings.ToLower(fields[0]) {
+		case "public", "private", "friend", "static":
+			fields = fields[1:]
+		default:
+			goto done
+		}
+	}
+done:
+	if len(fields) == 0 {
+		return ""
+	}
+	switch strings.ToLower(fields[0]) {
+	case "sub", "function":
+		if len(fields) > 1 {
+			return trimProcedureName(fields[1])
+		}
+	case "property":
+		if len(fields) > 2 {
+			return trimProcedureName(fields[2])
+		}
+	}
+	return ""
+}
+
+func trimProcedureName(name string) string {
+	if idx := strings.IndexAny(name, "("); idx >= 0 {
+		name = name[:idx]
+	}
+	return strings.TrimSpace(name)
 }
 
 func (a Analyzer) sameDocumentSymbol(doc Document, sym Symbol) bool {
@@ -1451,7 +1518,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			},
 			Selection: Range{
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},
-				End:   Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1+len([]rune(sym.Name)))},
+				End:   Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1+utf16Len(sym.Name))},
 			},
 		}
 		if !rangeContains(converted.Range, converted.Selection) {
