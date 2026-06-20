@@ -133,7 +133,7 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		syncOptions.Change = &kind
 	}
 	if capabilities.CompletionProvider != nil {
-		capabilities.CompletionProvider.TriggerCharacters = []string{"."}
+		capabilities.CompletionProvider.TriggerCharacters = completionTriggerCharacters()
 	}
 	version := s.opts.Build.Version
 	if version == "" {
@@ -612,6 +612,14 @@ func completionItemKind(kind string) protocol.CompletionItemKind {
 	default:
 		return protocol.CompletionItemKindText
 	}
+}
+
+func completionTriggerCharacters() []string {
+	chars := []string{"."}
+	for _, ch := range "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" {
+		chars = append(chars, string(ch))
+	}
+	return chars
 }
 
 func max(a, b int) int {

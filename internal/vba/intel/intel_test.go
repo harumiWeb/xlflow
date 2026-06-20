@@ -122,6 +122,28 @@ func TestDocumentSymbolsSkipEmptyNamesFromIncompleteSource(t *testing.T) {
 		if strings.TrimSpace(sym.Name) == "" {
 			t.Fatalf("empty symbol name should not be returned: %+v", symbols)
 		}
+		if !rangeContains(sym.Range, sym.Selection) {
+			t.Fatalf("symbol selection range must be contained in full range: %+v", sym)
+		}
+	}
+}
+
+func TestDocumentSymbolsKeepSelectionInsideRangeForBareIncompleteSource(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     "P",
+	}
+
+	symbols, err := analyzer.DocumentSymbols(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range symbols {
+		if !rangeContains(sym.Range, sym.Selection) {
+			t.Fatalf("symbol selection range must be contained in full range: %+v", sym)
+		}
 	}
 }
 

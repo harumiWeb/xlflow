@@ -270,8 +270,10 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if initResult.ServerInfo == nil || initResult.ServerInfo.Name != serverName {
 		t.Fatalf("unexpected initialize result: %+v", initResult.ServerInfo)
 	}
-	if initResult.Capabilities.CompletionProvider == nil || !containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") {
-		t.Fatalf("completion trigger characters = %+v, want dot trigger", initResult.Capabilities.CompletionProvider)
+	if initResult.Capabilities.CompletionProvider == nil ||
+		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") ||
+		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "P") {
+		t.Fatalf("completion trigger characters = %+v, want dot and declaration triggers", initResult.Capabilities.CompletionProvider)
 	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")

@@ -1229,7 +1229,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 		if strings.TrimSpace(sym.Name) == "" {
 			continue
 		}
-		out = append(out, Symbol{
+		converted := Symbol{
 			Name:       sym.Name,
 			Kind:       sym.Kind,
 			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
@@ -1244,7 +1244,11 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},
 				End:   Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1+len([]rune(sym.Name)))},
 			},
-		})
+		}
+		if !rangeContains(converted.Range, converted.Selection) {
+			converted.Selection = Range{Start: converted.Range.Start, End: converted.Range.Start}
+		}
+		out = append(out, converted)
 	}
 	return out
 }
