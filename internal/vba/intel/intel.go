@@ -444,6 +444,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if insideOpenString(prefix) {
 		return nil, nil
 	}
+	if memberPrefix, receiverType, ok := a.withBlockMemberCompletionContext(doc, pos, prefix); ok {
+		return a.memberCompletions(receiverType, memberPrefix), nil
+	}
 	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
 	if memberMode {
 		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
@@ -822,9 +825,24 @@ func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset
 	if !strings.HasSuffix(beforeWord, ".") {
 		return nil, false
 	}
-	receiverExpr := expressionBefore(strings.TrimSuffix(beforeWord, "."))
+	beforeDot := strings.TrimSuffix(beforeWord, ".")
+	receiverExpr := expressionBefore(beforeDot)
+	if withRelativeDotPrefix(beforeDot) {
+		receiverExpr = ""
+	}
 	if receiverExpr == "" {
-		return nil, false
+		receiverType, ok := a.withBlockTypeAt(doc, wordRange.Start, offset)
+		if !ok {
+			return nil, false
+		}
+		if typ, ok := a.DB.ResolveType(receiverType); ok {
+			receiverType = typ.Name
+		}
+		member, ok := a.DB.ResolveMember(receiverType, word)
+		if !ok {
+			return nil, false
+		}
+		return &Hover{Contents: memberHover(receiverType, member, a.memberKind(receiverType, word)), Range: wordRange}, true
 	}
 	if strings.EqualFold(receiverExpr, "Me") {
 		if control, ok := a.resolveFormControl(doc, word); ok {
@@ -953,6 +971,96 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 		}
 	}
 	return current, true
+}
+
+func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (string, bool) {
+	lines := normalizedLines(doc.Source)
+	if pos.Line <= 0 || pos.Line > len(lines) {
+		return "", false
+	}
+	var stack []string
+	for lineNo := 0; lineNo < pos.Line; lineNo++ {
+		trimmed := strings.TrimSpace(stripLineComment(lines[lineNo]))
+		if trimmed == "" {
+			continue
+		}
+		if regexp.MustCompile(`(?i)^End\s+With\b`).MatchString(trimmed) {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			continue
+		}
+		m := regexp.MustCompile(`(?i)^With\s+(.+)$`).FindStringSubmatch(trimmed)
+		if len(m) == 0 {
+			continue
+		}
+		if typ, ok := a.resolveWithExpressionTypeAt(doc, strings.TrimSpace(m[1]), stack, offset); ok {
+			stack = append(stack, typ)
+		} else {
+			stack = append(stack, "")
+		}
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] != "" {
+			return stack[i], true
+		}
+	}
+	return "", false
+}
+
+func (a Analyzer) resolveWithExpressionTypeAt(doc Document, expr string, stack []string, offset int) (string, bool) {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, ".") {
+		if len(stack) == 0 || stack[len(stack)-1] == "" {
+			return "", false
+		}
+		return a.resolveMemberChainFromType(stack[len(stack)-1], expr)
+	}
+	return a.resolveDocumentExpressionTypeAt(doc, expr, offset)
+}
+
+func (a Analyzer) resolveMemberChainFromType(baseType, expr string) (string, bool) {
+	current := baseType
+	for _, raw := range splitMemberExpression(strings.TrimPrefix(strings.TrimSpace(expr), ".")) {
+		member := strings.TrimSpace(raw)
+		called := strings.Contains(member, "(")
+		if idx := strings.Index(member, "("); idx >= 0 {
+			member = strings.TrimSpace(member[:idx])
+		}
+		if member == "" {
+			continue
+		}
+		info, ok := a.DB.ResolveMember(current, member)
+		if !ok || info.ReturnType == "" {
+			return "", false
+		}
+		current = info.ReturnType
+		if called {
+			if typ, ok := a.collectionDefaultType(current); ok {
+				current = typ
+			}
+		}
+	}
+	return current, true
+}
+
+func stripLineComment(line string) string {
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return line[:i]
+			}
+		}
+	}
+	return line
 }
 
 func bestTypeMatch(source string, re *regexp.Regexp, offset int, group int) (string, bool) {
@@ -1521,6 +1629,28 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 		return "", "", false
 	}
 	return wordPrefix, receiver, true
+}
+
+func (a Analyzer) withBlockMemberCompletionContext(doc Document, pos Position, prefix string) (memberPrefix string, receiverType string, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !strings.HasSuffix(beforeWord, ".") {
+		return "", "", false
+	}
+	beforeDot := strings.TrimSuffix(beforeWord, ".")
+	if strings.TrimSpace(beforeDot) != "" && !withRelativeDotPrefix(beforeDot) {
+		return "", "", false
+	}
+	typ, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos))
+	if !ok {
+		return "", "", false
+	}
+	return wordPrefix, typ, true
+}
+
+func withRelativeDotPrefix(beforeDot string) bool {
+	fields := strings.Fields(beforeDot)
+	return len(fields) > 0 && strings.EqualFold(fields[len(fields)-1], "With")
 }
 
 func typeCompletionContext(prefix string, pos Position) (typePrefix string, replaceRange Range, ok bool) {

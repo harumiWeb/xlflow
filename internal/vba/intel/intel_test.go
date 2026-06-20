@@ -363,6 +363,52 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 }
 
+func TestWithBlockHoverAndCompletionsUseActiveReceiverType(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim ws As Worksheet
+    With ws.Range("A1")
+        .Va
+        With .Font
+            .Bo
+        End With
+    End With
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	valueLine := `        .Va`
+	items, err := analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(valueLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Value") {
+		t.Fatalf("With Range should complete Range.Value: %+v", items)
+	}
+	if hasCompletion(items, "Bold") {
+		t.Fatalf("outer With Range should not complete Font.Bold directly: %+v", items)
+	}
+
+	hoverLine := `        With .Font`
+	hover, err := analyzer.Hover(doc, Position{Line: 5, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "Font")+2])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.Range.Font As Excel.Font") {
+		t.Fatalf("unexpected With .Font hover: %+v", hover)
+	}
+
+	boldLine := `            .Bo`
+	items, err = analyzer.Completions(doc, Position{Line: 6, Character: utf16Len(boldLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Bold") {
+		t.Fatalf("nested With Font should complete Font.Bold: %+v", items)
+	}
+}
+
 func TestCompletionsReturnTypeCandidatesInDeclarationContexts(t *testing.T) {
 	root := t.TempDir()
 	classDir := filepath.Join(root, "src", "classes")
