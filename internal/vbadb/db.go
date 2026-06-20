@@ -18,6 +18,7 @@ type DB struct {
 	Aliases      map[string]string
 	Constants    map[string]ConstantInfo
 	ProgIDs      map[string]string
+	ProgIDNames  map[string]string
 	GlobalValues map[string]string
 	GlobalNames  map[string]string
 }
@@ -78,6 +79,7 @@ func LoadBuiltin() (*DB, error) {
 		Aliases:      map[string]string{},
 		Constants:    map[string]ConstantInfo{},
 		ProgIDs:      map[string]string{},
+		ProgIDNames:  map[string]string{},
 		GlobalValues: map[string]string{},
 		GlobalNames:  map[string]string{},
 	}
@@ -103,7 +105,9 @@ func LoadBuiltin() (*DB, error) {
 			db.Constants[fold(c.Name)] = c
 		}
 		for progID, typ := range data.ProgIDs {
-			db.ProgIDs[fold(progID)] = typ
+			key := fold(progID)
+			db.ProgIDs[key] = typ
+			db.ProgIDNames[key] = progID
 		}
 		for name, typ := range data.GlobalValues {
 			db.GlobalValues[fold(name)] = typ
@@ -249,6 +253,22 @@ func (db *DB) ConstantsList() []ConstantInfo {
 		out = append(out, constant)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (db *DB) ProgIDsList() []string {
+	if db == nil {
+		return nil
+	}
+	out := make([]string, 0, len(db.ProgIDs))
+	for progID := range db.ProgIDs {
+		name := db.ProgIDNames[progID]
+		if name == "" {
+			name = progID
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
 	return out
 }
 

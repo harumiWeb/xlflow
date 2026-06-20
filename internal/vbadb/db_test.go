@@ -57,6 +57,21 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 }
 
+func TestProgIDsListPreservesDisplayNames(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	progIDs := db.ProgIDsList()
+	if !hasString(progIDs, "Scripting.Dictionary") {
+		t.Fatalf("ProgIDsList should include canonical Scripting.Dictionary, got %+v", progIDs)
+	}
+	if hasString(progIDs, "scripting.dictionary") {
+		t.Fatalf("ProgIDsList should not expose folded ProgID names: %+v", progIDs)
+	}
+}
+
 func TestResolveConstant(t *testing.T) {
 	db, err := LoadBuiltin()
 	if err != nil {
@@ -126,6 +141,15 @@ func hasConstant(items []ConstantInfo, name string) bool {
 func hasMember(items []MemberInfo, name string) bool {
 	for _, item := range items {
 		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasString(items []string, name string) bool {
+	for _, item := range items {
+		if item == name {
 			return true
 		}
 	}

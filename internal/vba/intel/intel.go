@@ -438,6 +438,12 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
 	line := lineAt(doc.Source, pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
+	if progIDPrefix, replaceRange, ok := createObjectProgIDCompletionContext(prefix, pos); ok {
+		return a.progIDCompletions(progIDPrefix, replaceRange), nil
+	}
+	if insideOpenString(prefix) {
+		return nil, nil
+	}
 	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
 	if memberMode {
 		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
@@ -510,6 +516,28 @@ func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Documen
 		})
 	}
 	return uniqueCompletions(out), nil
+}
+
+func (a Analyzer) progIDCompletions(prefix string, replaceRange Range) []Completion {
+	var out []Completion
+	for _, progID := range a.DB.ProgIDsList() {
+		if !completionMatches(progID, prefix) {
+			continue
+		}
+		replace := replaceRange
+		detail := "ProgID"
+		if typ, ok := a.DB.ResolveProgID(progID); ok {
+			detail = typ.Name
+		}
+		out = append(out, Completion{
+			Label:        progID,
+			Kind:         "type",
+			Detail:       detail,
+			InsertText:   progID,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out)
 }
 
 type typeCompletionName struct {
@@ -1506,6 +1534,40 @@ func typeCompletionContext(prefix string, pos Position) (typePrefix string, repl
 		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
 		End:   pos,
 	}, true
+}
+
+func createObjectProgIDCompletionContext(prefix string, pos Position) (progIDPrefix string, replaceRange Range, ok bool) {
+	quote := strings.LastIndex(prefix, `"`)
+	if quote < 0 {
+		return "", Range{}, false
+	}
+	beforeQuote := prefix[:quote]
+	if !regexp.MustCompile(`(?i)\bCreateObject\s*\(\s*$`).MatchString(beforeQuote) {
+		return "", Range{}, false
+	}
+	progIDPrefix = prefix[quote+1:]
+	if strings.Contains(progIDPrefix, `"`) {
+		return "", Range{}, false
+	}
+	return progIDPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:quote+1])},
+		End:   pos,
+	}, true
+}
+
+func insideOpenString(prefix string) bool {
+	inString := false
+	for i := 0; i < len(prefix); i++ {
+		if prefix[i] != '"' {
+			continue
+		}
+		if inString && i+1 < len(prefix) && prefix[i+1] == '"' {
+			i++
+			continue
+		}
+		inString = !inString
+	}
+	return inString
 }
 
 func endsWithTypeIntro(prefix string) bool {

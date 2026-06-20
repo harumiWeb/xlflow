@@ -28,7 +28,7 @@
         "editor.quickSuggestions": {
           "other": "on",
           "comments": "off",
-          "strings": "off"
+          "strings": "on"
         },
         "editor.autoClosingBrackets": "always",
         "editor.autoClosingQuotes": "always",

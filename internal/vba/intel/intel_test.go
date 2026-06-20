@@ -428,6 +428,40 @@ Option Explicit
 	}
 }
 
+func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	line := `    Set dict = CreateObject("Scripting.Dic`
+	doc := Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n",
+	}
+
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(line)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "Scripting.Dictionary")
+	if !ok {
+		t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
+	}
+	if item.Detail != "Scripting.Dictionary" {
+		t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
+	}
+	if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != utf16Len(`    Set dict = CreateObject("`) || item.ReplaceRange.End.Character != utf16Len(line) {
+		t.Fatalf("ProgID replace range = %+v, want string literal content range", item.ReplaceRange)
+	}
+
+	otherString := `    Debug.Print "xlU`
+	doc.Source = "Option Explicit\nSub Test()\n" + otherString + "\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(otherString)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("non-CreateObject strings should not return completions: %+v", items)
+	}
+}
+
 func TestCompletionsReturnModuleProcedureCandidates(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")
