@@ -1,0 +1,37 @@
+{
+  "types": [
+    {
+      "name": "VBA.Collection",
+      "library": "VBA",
+      "kind": "collection",
+      "summary": "Built-in VBA collection object.",
+      "aliases": ["Collection"],
+      "element_type": "Variant",
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        {
+          "name": "Add",
+          "parameters": [
+            { "name": "Item", "type": "Variant" },
+            { "name": "Key", "type": "String", "optional": true },
+            { "name": "Before", "type": "Variant", "optional": true },
+            { "name": "After", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Item",
+          "return_type": "Variant",
+          "default": true,
+          "parameters": [{ "name": "Index", "type": "Variant" }]
+        },
+        {
+          "name": "Remove",
+          "parameters": [{ "name": "Index", "type": "Variant" }]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

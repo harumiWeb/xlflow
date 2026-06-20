@@ -17,6 +17,9 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
 		t.Fatalf("ResolveProgID(Scripting.Dictionary) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveType("Collection"); !ok || typ.Name != "VBA.Collection" {
+		t.Fatalf("ResolveType(Collection) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveGlobal("Worksheets"); !ok || typ.Name != "Excel.Worksheets" {
 		t.Fatalf("ResolveGlobal(Worksheets) = %+v, %v", typ, ok)
 	}
@@ -45,6 +48,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("Excel.Application", "WorksheetFunction"); !ok || got.ReturnType != "Excel.WorksheetFunction" {
 		t.Fatalf("Application.WorksheetFunction = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.Collection", "Count"); !ok || got.ReturnType != "Long" {
+		t.Fatalf("Collection.Count = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Collection", "Item"); !ok || got.ReturnType != "Variant" {
+		t.Fatalf("Collection.Item = %+v, %v", got, ok)
 	}
 }
 
