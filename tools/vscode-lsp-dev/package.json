@@ -1,0 +1,48 @@
+{
+  "name": "xlflow-vscode-lsp-dev",
+  "displayName": "xlflow LSP Dev Client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Development-only VS Code Language Client for xlflow lsp --stdio.",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
+  "main": "out/extension.js",
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "check": "tsc -p . --noEmit",
+    "test": "pnpm check"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/vscode": "^1.125.0",
+    "typescript": "^6.0.3"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "vba",
+        "aliases": [
+          "VBA",
+          "Visual Basic for Applications"
+        ],
+        "extensions": [
+          ".bas",
+          ".cls",
+          ".frm"
+        ]
+      }
+    ]
+  },
+  "activationEvents": [
+    "onLanguage:vba"
+  ],
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "packageManager": "pnpm@10.28.1"
+}
