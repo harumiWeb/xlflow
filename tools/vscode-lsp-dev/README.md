@@ -60,6 +60,8 @@ The root launch configuration uses:
 
 This prevents VS Code from treating the repository root package as the extension manifest.
 
+The prelaunch task runs `pnpm --dir tools/vscode-lsp-dev compile`; on Windows it uses `pnpm.cmd` directly to avoid shell argument parsing issues.
+
 If you open `tools/vscode-lsp-dev` directly in VS Code, run `pnpm compile` before pressing `F5`.
 
 The client starts:

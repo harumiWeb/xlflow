@@ -3,8 +3,11 @@
   "tasks": [
     {
       "label": "compile xlflow LSP Dev Client",
-      "type": "shell",
+      "type": "process",
       "command": "pnpm",
+      "windows": {
+        "command": "pnpm.cmd"
+      },
       "args": [
         "--dir",
         "tools/vscode-lsp-dev",
