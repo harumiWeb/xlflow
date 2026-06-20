@@ -334,7 +334,7 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if constant, ok := a.DB.ResolveConstant(word); ok {
 		return &Hover{Contents: constantHover(constant), Range: r}, nil
 	}
-	if typ, ok := a.inferWordType(doc, word); ok {
+	if typ, ok := a.inferWordTypeAt(doc, word, byteOffsetForPosition(doc.Source, pos)); ok {
 		if dbType, found := a.DB.ResolveType(typ); found {
 			return &Hover{Contents: typeHover(dbType), Range: r}, nil
 		}
@@ -366,7 +366,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	prefix := utf16Prefix(line, pos.Character)
 	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
 	if memberMode {
-		typ, ok := a.resolveDocumentExpressionType(doc, receiverExpr)
+		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
 		if !ok {
 			return nil, nil
 		}
@@ -397,6 +397,10 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 }
 
 func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
+	return a.inferWordTypeAt(doc, word, -1)
+}
+
+func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string, bool) {
 	if strings.EqualFold(word, "Me") && a.isFormDocument(doc) {
 		return "MSForms.UserForm", true
 	}
@@ -408,19 +412,19 @@ func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
 	}
 	var declared string
 	declRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b(?:\s*\([^)]*\))?\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
-	if m := declRe.FindStringSubmatch(doc.Source); len(m) > 1 {
-		declared = m[1]
+	if typ, ok := bestTypeMatch(doc.Source, declRe, offset, 1); ok {
+		declared = typ
 		if !isObjectFallbackType(declared) {
 			return declared, true
 		}
 	}
 	newRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*New\s+([A-Za-z_][A-Za-z0-9_.]*)`)
-	if m := newRe.FindStringSubmatch(doc.Source); len(m) > 1 {
-		return m[1], true
+	if typ, ok := bestTypeMatch(doc.Source, newRe, offset, 1); ok {
+		return typ, true
 	}
 	createRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*CreateObject\s*\(\s*"([^"]+)"\s*\)`)
-	if m := createRe.FindStringSubmatch(doc.Source); len(m) > 1 {
-		if typ, ok := a.DB.ResolveProgID(m[1]); ok {
+	if progID, ok := bestTypeMatch(doc.Source, createRe, offset, 1); ok {
+		if typ, ok := a.DB.ResolveProgID(progID); ok {
 			return typ.Name, true
 		}
 	}
@@ -451,11 +455,15 @@ func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
 	return a.resolveExpressionType(Document{}, expr, false)
 }
 
-func (a Analyzer) resolveDocumentExpressionType(doc Document, expr string) (string, bool) {
-	return a.resolveExpressionType(doc, expr, true)
+func (a Analyzer) resolveDocumentExpressionTypeAt(doc Document, expr string, offset int) (string, bool) {
+	return a.resolveExpressionTypeAt(doc, expr, true, offset)
 }
 
 func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument bool) (string, bool) {
+	return a.resolveExpressionTypeAt(doc, expr, useDocument, -1)
+}
+
+func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument bool, offset int) (string, bool) {
 	parts := splitMemberExpression(expr)
 	if len(parts) == 0 {
 		return "", false
@@ -473,7 +481,7 @@ func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument b
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
 	} else if useDocument {
-		if typ, ok := a.inferWordType(doc, base); ok {
+		if typ, ok := a.inferWordTypeAt(doc, base, offset); ok {
 			current = typ
 		} else {
 			return "", false
@@ -525,6 +533,29 @@ func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument b
 		}
 	}
 	return current, true
+}
+
+func bestTypeMatch(source string, re *regexp.Regexp, offset int, group int) (string, bool) {
+	matches := re.FindAllStringSubmatchIndex(source, -1)
+	bestStart := -1
+	bestType := ""
+	for _, match := range matches {
+		if len(match) <= group*2+1 || match[group*2] < 0 || match[group*2+1] < 0 {
+			continue
+		}
+		start := match[0]
+		if offset >= 0 && start > offset {
+			continue
+		}
+		if bestStart < 0 || start > bestStart {
+			bestStart = start
+			bestType = source[match[group*2]:match[group*2+1]]
+		}
+	}
+	if bestType == "" && offset >= 0 {
+		return bestTypeMatch(source, re, -1, group)
+	}
+	return bestType, bestType != ""
 }
 
 func (a Analyzer) collectionDefaultType(name string) (string, bool) {
@@ -977,6 +1008,25 @@ func utf16Prefix(line string, character int) string {
 		idx = len(line)
 	}
 	return line[:idx]
+}
+
+func byteOffsetForPosition(source string, pos Position) int {
+	lines := normalizedLines(source)
+	if pos.Line < 0 {
+		return 0
+	}
+	offset := 0
+	for lineNo, line := range lines {
+		if lineNo == pos.Line {
+			idx := byteIndexForUTF16(line, pos.Character)
+			if idx > len(line) {
+				idx = len(line)
+			}
+			return offset + idx
+		}
+		offset += len(line) + 1
+	}
+	return len(source)
 }
 
 func byteIndexForUTF16(s string, character int) int {

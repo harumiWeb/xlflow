@@ -204,6 +204,9 @@ func TestHoverUsesUTF16PositionsAfterJapaneseText(t *testing.T) {
 func TestHoverAndCompletionsResolveBuiltInCollection(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
+Private Sub Earlier(ByVal result As Boolean)
+End Sub
+
 Sub Test()
     Dim result As Collection
     Set result = New Collection
@@ -213,16 +216,19 @@ End Sub
 	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
 
 	hoverLine := `    Set result = New Collection`
-	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "result")+3])}, nil)
+	hover, err := analyzer.Hover(doc, Position{Line: 6, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "result")+3])}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if hover == nil || !strings.Contains(hover.Contents, "VBA.Collection") {
 		t.Fatalf("unexpected Collection hover: %+v", hover)
 	}
+	if strings.Contains(hover.Contents, "Boolean") {
+		t.Fatalf("Collection hover should not use earlier Boolean declaration: %+v", hover)
+	}
 
 	completionLine := `    result.Co`
-	items, err := analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(completionLine)}, nil)
+	items, err := analyzer.Completions(doc, Position{Line: 7, Character: utf16Len(completionLine)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
