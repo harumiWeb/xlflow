@@ -789,6 +789,11 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 			return inferredType{Type: typ.Name, Source: "inferred from CreateObject"}, true
 		}
 	}
+	if expr, exprOffset, ok := bestSetAssignmentExpression(doc.Source, word, offset); ok {
+		if typ, ok := a.resolveDocumentExpressionTypeAt(doc, expr, exprOffset); ok {
+			return inferredType{Type: typ, Source: "inferred from Set assignment"}, true
+		}
+	}
 	if declared != "" {
 		return inferredType{Type: declared, Source: "declaration"}, true
 	}
@@ -1081,6 +1086,33 @@ func bestTypeMatch(source string, re *regexp.Regexp, offset int, group int) (str
 		}
 	}
 	return bestType, bestType != ""
+}
+
+func bestSetAssignmentExpression(source, word string, offset int) (string, int, bool) {
+	re := regexp.MustCompile(`(?im)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*([^\r\n:]+)`)
+	matches := re.FindAllStringSubmatchIndex(source, -1)
+	bestStart := -1
+	bestExpr := ""
+	bestExprOffset := -1
+	for _, match := range matches {
+		if len(match) < 4 || match[2] < 0 || match[3] < 0 {
+			continue
+		}
+		start := match[0]
+		if offset >= 0 && start > offset {
+			continue
+		}
+		expr := strings.TrimSpace(stripLineComment(source[match[2]:match[3]]))
+		if expr == "" {
+			continue
+		}
+		if bestStart < 0 || start > bestStart {
+			bestStart = start
+			bestExpr = expr
+			bestExprOffset = match[2]
+		}
+	}
+	return bestExpr, bestExprOffset, bestExpr != ""
 }
 
 func (a Analyzer) collectionDefaultType(name string) (string, bool) {

@@ -227,6 +227,57 @@ End Sub
 	}
 }
 
+func TestSetAssignmentInferencePropagatesRightHandExpressionTypes(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim ws As Worksheet
+    Dim target As Object
+    Set target = ws.Range("A1")
+    target.Va
+
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim ts As Object
+    Set ts = fso.OpenTextFile(path)
+    ts.Read
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	if got, ok := analyzer.inferWordType(doc, "target"); !ok || got != "Excel.Range" {
+		t.Fatalf("target type = %q, %v, want Excel.Range", got, ok)
+	}
+	targetLine := `    target.Va`
+	items, err := analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(targetLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Value") {
+		t.Fatalf("target should complete Range.Value after Set assignment: %+v", items)
+	}
+	hoverLine := `    Set target = ws.Range("A1")`
+	hover, err := analyzer.Hover(doc, Position{Line: 4, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "target")+3])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "target As Excel.Range") || !strings.Contains(hover.Contents, "Source: inferred from Set assignment") {
+		t.Fatalf("unexpected target hover: %+v", hover)
+	}
+
+	if got, ok := analyzer.inferWordType(doc, "ts"); !ok || got != "Scripting.TextStream" {
+		t.Fatalf("ts type = %q, %v, want Scripting.TextStream", got, ok)
+	}
+	textLine := `    ts.Read`
+	items, err = analyzer.Completions(doc, Position{Line: 11, Character: utf16Len(textLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "ReadLine") {
+		t.Fatalf("ts should complete TextStream.ReadLine after method-return inference: %+v", items)
+	}
+}
+
 func TestHoverUsesUTF16PositionsAfterJapaneseText(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := "Option Explicit\nSub Test()\n    Debug.Print \"日本語\" & Range(\"A1\").Value\nEnd Sub\n"

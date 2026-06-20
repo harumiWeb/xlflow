@@ -46,6 +46,7 @@
       "kind": "class",
       "aliases": ["TextStream"],
       "methods": [
+        { "name": "ReadLine", "return_type": "String" },
         { "name": "ReadAll", "return_type": "String" },
         { "name": "Write" },
         { "name": "WriteLine" },
