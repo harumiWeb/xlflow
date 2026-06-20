@@ -200,6 +200,7 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 		issues = append(issues, ctx.parseIssue(parsed.Root))
 	}
 	issues = append(issues, l.flowIssues(path, string(source), parsed.Root)...)
+	issues = append(issues, l.undeclaredVariableIssues(path, string(source), parsed.Root)...)
 
 	if includeFilesystemRules && l.Config.Lint.ForbidInteractiveInput {
 		boundaries, err := gui.Analyzer{RootDir: l.RootDir, Config: l.Config}.AnalyzeFile(path)
@@ -449,6 +450,246 @@ func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) [
 		}
 	}
 	return issues
+}
+
+func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_sitter.Node) []Issue {
+	if !sourceHasOptionExplicit(source) {
+		return nil
+	}
+	file, err := symbols.InspectSource(symbols.SourceOptions{
+		RootDir:        l.RootDir,
+		Path:           path,
+		IncludePrivate: true,
+		IncludeLabels:  false,
+	}, []byte(source))
+	if err != nil {
+		return nil
+	}
+	scope := declarationScopeFromSymbols(file.Symbols)
+	lines := normalizedSourceLines(source)
+	scope.addTextDeclarations(lines, sourceProceduresFromAST(root, []byte(source)))
+	var issues []Issue
+	for _, proc := range scope.procedures {
+		declared := scope.declaredForProcedure(proc.Name)
+		for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
+			lineNo := i + 1
+			code := maskStringLiterals(gui.StripComment(lines[i]))
+			for _, statement := range splitStatements(code) {
+				name, ok := undeclaredAssignmentTarget(statement)
+				if !ok || declared[strings.ToLower(name)] {
+					continue
+				}
+				issue := l.issue(path, lineNo, "VB029", "error", "Variable "+name+" is not declared. Add a Dim/Private/Public declaration or correct the identifier.")
+				issue.Symbol = name
+				issue.Kind = "undeclared_variable"
+				issue.Column = sourceColumnForName(lines[i], name)
+				issues = append(issues, issue)
+			}
+		}
+	}
+	return issues
+}
+
+type declarationScope struct {
+	procedures []symbols.Symbol
+	module     map[string]bool
+	local      map[string]map[string]bool
+}
+
+func declarationScopeFromSymbols(syms []symbols.Symbol) declarationScope {
+	scope := declarationScope{
+		module: map[string]bool{},
+		local:  map[string]map[string]bool{},
+	}
+	for _, sym := range syms {
+		key := strings.ToLower(sym.Name)
+		if key == "" {
+			continue
+		}
+		if procedureSymbolKind(sym.Kind) {
+			scope.procedures = append(scope.procedures, sym)
+			scope.module[key] = true
+			for _, param := range sym.Parameters {
+				paramKey := strings.ToLower(param.Name)
+				if paramKey == "" {
+					continue
+				}
+				if scope.local[key] == nil {
+					scope.local[key] = map[string]bool{}
+				}
+				scope.local[key][paramKey] = true
+			}
+			continue
+		}
+		if sym.Parent != "" {
+			parentKey := strings.ToLower(sym.Parent)
+			if scope.local[parentKey] == nil {
+				scope.local[parentKey] = map[string]bool{}
+			}
+			scope.local[parentKey][key] = true
+			continue
+		}
+		switch sym.Kind {
+		case "module", "module_variable", "field", "withevents_field", "const", "type", "enum", "declare", "declare_sub", "declare_function", "implements":
+			scope.module[key] = true
+		}
+	}
+	sort.SliceStable(scope.procedures, func(i, j int) bool {
+		return scope.procedures[i].StartLine < scope.procedures[j].StartLine
+	})
+	return scope
+}
+
+func (s declarationScope) declaredForProcedure(procName string) map[string]bool {
+	declared := make(map[string]bool, len(s.module)+len(s.local[strings.ToLower(procName)])+1)
+	for name := range s.module {
+		declared[name] = true
+	}
+	procKey := strings.ToLower(procName)
+	declared[procKey] = true
+	for name := range s.local[procKey] {
+		declared[name] = true
+	}
+	return declared
+}
+
+func (s declarationScope) addTextDeclarations(lines []string, procedures []sourceProcedure) {
+	for _, proc := range procedures {
+		procKey := strings.ToLower(proc.Name)
+		if procKey == "" {
+			continue
+		}
+		if s.local[procKey] == nil {
+			s.local[procKey] = map[string]bool{}
+		}
+		for name := range procedureDeclarations(lines, proc) {
+			s.local[procKey][name] = true
+		}
+	}
+}
+
+func sourceHasOptionExplicit(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		if strings.EqualFold(normalizedCodeLine(line), "Option Explicit") {
+			return true
+		}
+	}
+	return false
+}
+
+func undeclaredAssignmentTarget(statement string) (string, bool) {
+	stmt := strings.TrimSpace(statement)
+	if stmt == "" {
+		return "", false
+	}
+	lower := strings.ToLower(stmt)
+	if skipUndeclaredAssignmentStatement(lower) {
+		return "", false
+	}
+	if strings.HasPrefix(lower, "for each ") {
+		rest := strings.TrimSpace(stmt[len("for each "):])
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return "", false
+		}
+		return cleanUndeclaredTarget(fields[0])
+	}
+	if strings.HasPrefix(lower, "for ") {
+		rest := strings.TrimSpace(stmt[len("for "):])
+		if before, ok := splitAssignmentLeft(rest); ok {
+			return cleanUndeclaredTarget(before)
+		}
+		return "", false
+	}
+	left, ok := splitAssignmentLeft(stmt)
+	if !ok {
+		return "", false
+	}
+	left = stripAssignmentModifier(left, "Set")
+	left = stripAssignmentModifier(left, "Let")
+	if strings.Contains(left, ".") {
+		return "", false
+	}
+	return cleanUndeclaredTarget(left)
+}
+
+func skipUndeclaredAssignmentStatement(lower string) bool {
+	for _, prefix := range []string{
+		"if ", "elseif ", "while ", "do ", "loop ", "select ", "case ", "with ",
+		"dim ", "static ", "const ", "public ", "private ", "friend ", "sub ",
+		"function ", "property ", "end ",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return lower == "else" || strings.HasPrefix(lower, "#")
+}
+
+func splitAssignmentLeft(statement string) (string, bool) {
+	inString := false
+	for i := 0; i < len(statement); i++ {
+		switch statement[i] {
+		case '"':
+			inString = !inString
+		case '=':
+			if inString || isComparisonEqual(statement, i) {
+				continue
+			}
+			return strings.TrimSpace(statement[:i]), true
+		}
+	}
+	return "", false
+}
+
+func isComparisonEqual(statement string, index int) bool {
+	prev := byte(0)
+	next := byte(0)
+	if index > 0 {
+		prev = statement[index-1]
+	}
+	if index+1 < len(statement) {
+		next = statement[index+1]
+	}
+	return prev == '<' || prev == '>' || prev == '=' || next == '='
+}
+
+func stripAssignmentModifier(text string, modifier string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= len(modifier) || !strings.EqualFold(text[:len(modifier)], modifier) {
+		return text
+	}
+	if text[len(modifier)] != ' ' && text[len(modifier)] != '\t' {
+		return text
+	}
+	return strings.TrimSpace(text[len(modifier):])
+}
+
+func cleanUndeclaredTarget(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if idx := strings.Index(text, "("); idx >= 0 {
+		text = strings.TrimSpace(text[:idx])
+	}
+	if strings.ContainsAny(text, " \t") {
+		return "", false
+	}
+	name := cleanIdentifier(text)
+	if name == "" || isStatementKeyword(name) {
+		return "", false
+	}
+	r := rune(name[0])
+	if r >= '0' && r <= '9' {
+		return "", false
+	}
+	return name, true
+}
+
+func sourceColumnForName(line string, name string) int {
+	idx := strings.Index(strings.ToLower(line), strings.ToLower(name))
+	if idx < 0 {
+		return 0
+	}
+	return idx + 1
 }
 
 type sourceProcedure struct {
@@ -711,7 +952,7 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" {
 			blocking = append(blocking, issue)
 		}
 	}

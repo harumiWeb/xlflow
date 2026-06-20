@@ -203,7 +203,7 @@ disabled_rules = ["VBA999"]
 }
 
 func TestLoadRejectsNonConfigurableDisabledLintRule(t *testing.T) {
-	for _, ruleID := range []string{"VB013", "VB028"} {
+	for _, ruleID := range []string{"VB013", "VB028", "VB029"} {
 		t.Run(ruleID, func(t *testing.T) {
 			dir := t.TempDir()
 			body := []byte(`[project]

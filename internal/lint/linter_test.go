@@ -1220,6 +1220,57 @@ func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
 	assertIssue(t, issues, "VB005", 3)
 }
 
+func TestLinterReportsUndeclaredAssignmentsWithOptionExplicit(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private moduleValue As Long
+
+Public Function Build(ByVal inputValue As Long) As Long
+  Dim localValue As Long
+  localValue = inputValue
+  moduleValue = localValue
+  Build = moduleValue
+  missingValue = 1
+  For index = 1 To 3
+  Next index
+End Function
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb029 := issuesByCode(issues, "VB029")
+	if len(vb029) != 2 {
+		t.Fatalf("expected two undeclared variable issues, got %+v", vb029)
+	}
+	missing := findIssue(t, vb029, "VB029", 9)
+	if missing.Symbol != "missingValue" || missing.Kind != "undeclared_variable" || missing.Column != 3 {
+		t.Fatalf("unexpected missingValue issue: %+v", missing)
+	}
+	index := findIssue(t, vb029, "VB029", 10)
+	if index.Symbol != "index" || index.Column != 7 {
+		t.Fatalf("unexpected For index issue: %+v", index)
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB029", 9)
+}
+
+func TestLinterUndeclaredAssignmentsRequireOptionExplicit(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Public Sub Run()
+  missingValue = 1
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB029"); len(got) != 0 {
+		t.Fatalf("VB029 should require Option Explicit in the source, got %+v", got)
+	}
+}
+
 func assertIssue(t *testing.T, issues []Issue, code string, line int) {
 	t.Helper()
 	findIssue(t, issues, code, line)

@@ -50,6 +50,26 @@ End Sub
 
 	doc.Source = `Option Explicit
 Public Sub Run()
+    missingValue = 1
+End Sub
+`
+	diagnostics = analyzer.Diagnostics(doc)
+	if !hasDiagnostic(diagnostics, "VB029") {
+		t.Fatalf("VB029 diagnostic missing: %+v", diagnostics)
+	}
+
+	doc.Source = `Option Explicit
+Public Sub Run()
+    Dim missingValue As Long
+    missingValue = 1
+End Sub
+`
+	if diagnostics := analyzer.Diagnostics(doc); len(diagnostics) != 0 {
+		t.Fatalf("expected undeclared diagnostic to clear, got %+v", diagnostics)
+	}
+
+	doc.Source = `Option Explicit
+Public Sub Run()
     Range("A1").Value = 1
 End Sub
 `
@@ -358,6 +378,53 @@ End Sub
 	}
 }
 
+func TestCompletionsHidePrivateSymbolsFromOtherModules(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Utils.bas"), []byte(`Attribute VB_Name = "Utils"
+Option Explicit
+Private Const SECRET_VALUE As Long = 1
+Public Const PUBLIC_VALUE As Long = 2
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:   filepath.Join(moduleDir, "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    SE\nEnd Sub\n",
+	}
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    SE")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "SECRET_VALUE") {
+		t.Fatalf("private const from another module should not be completed: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nSub Test()\n    PU\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    PU")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "PUBLIC_VALUE") {
+		t.Fatalf("public const from another module should be completed: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nPrivate Const SECRET_VALUE As Long = 1\nSub Test()\n    SE\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 3, Character: utf16Len("    SE")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "SECRET_VALUE") {
+		t.Fatalf("private const from the same document should remain available: %+v", items)
+	}
+}
+
 func TestCompletionsReturnModuleDeclarationSnippets(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -404,6 +471,19 @@ End Sub
 	}
 	if hasCompletion(items, "Public Sub") {
 		t.Fatalf("module-level declaration snippets should not appear inside procedures: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\nSub Existing()\n    Di\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Di")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Dim") {
+		t.Fatalf("procedure Dim snippet should appear inside procedures: %+v", items)
+	}
+	dimSnippet, ok := findCompletion(items, "Dim")
+	if !ok || !dimSnippet.Snippet || !strings.Contains(dimSnippet.InsertText, "As ${2:Variant}") {
+		t.Fatalf("Dim should be a local declaration snippet: %+v", dimSnippet)
 	}
 }
 

@@ -56,6 +56,7 @@ type Symbol struct {
 	Detail     string
 	File       string
 	Module     string
+	Parent     string
 	Visibility string
 	Range      Range
 	Selection  Range
@@ -396,9 +397,44 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		return nil, err
 	}
 	for _, sym := range syms {
+		if !a.visibleCompletionSymbol(doc, sym) {
+			continue
+		}
 		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
 	}
 	return uniqueCompletions(items), nil
+}
+
+func (a Analyzer) visibleCompletionSymbol(doc Document, sym Symbol) bool {
+	if strings.EqualFold(sym.Kind, "module") {
+		return true
+	}
+	if a.sameDocumentSymbol(doc, sym) {
+		return true
+	}
+	if sym.Parent != "" {
+		return false
+	}
+	return !strings.EqualFold(sym.Visibility, "Private")
+}
+
+func (a Analyzer) sameDocumentSymbol(doc Document, sym Symbol) bool {
+	if doc.URI != "" && sym.File != "" && sym.File == doc.URI {
+		return true
+	}
+	docKeys := a.workspacePathKeys(doc.Path)
+	if len(docKeys) == 0 {
+		return false
+	}
+	return hasAnyPathKey(keySet(docKeys), a.workspacePathKeys(sym.File))
+}
+
+func keySet(keys []string) map[string]bool {
+	out := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		out[key] = true
+	}
+	return out
 }
 
 func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
@@ -813,13 +849,17 @@ func moduleMemberCompletionSymbol(sym Symbol) bool {
 
 func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) []Completion {
 	start, typed, ok := statementPrefix(prefix)
-	if !ok || !isModuleLevelPosition(doc.Source, pos) {
+	if !ok {
 		return nil
 	}
-	return declarationCompletions(typed, Range{
+	replaceRange := Range{
 		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
 		End:   pos,
-	})
+	}
+	if isModuleLevelPosition(doc.Source, pos) {
+		return completionsFromSpecs(moduleDeclarationCompletions, typed, replaceRange)
+	}
+	return completionsFromSpecs(procedureStatementCompletions, typed, replaceRange)
 }
 
 func (a Analyzer) globalCompletions(prefix string) []Completion {
@@ -1059,9 +1099,18 @@ var moduleDeclarationCompletions = []syntaxCompletionSpec{
 	},
 }
 
-func declarationCompletions(prefix string, replaceRange Range) []Completion {
+var procedureStatementCompletions = []syntaxCompletionSpec{
+	{
+		label:         "Dim",
+		detail:        "Local variable declaration",
+		insertText:    "Dim ${1:name} As ${2:Variant}",
+		documentation: "Declares a procedure-local variable.",
+	},
+}
+
+func completionsFromSpecs(specs []syntaxCompletionSpec, prefix string, replaceRange Range) []Completion {
 	var out []Completion
-	for _, spec := range moduleDeclarationCompletions {
+	for _, spec := range specs {
 		if !completionMatches(spec.label, prefix) {
 			continue
 		}
@@ -1251,6 +1300,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
 			File:       firstNonEmpty(uri, file.Path, sym.File),
 			Module:     sym.Module,
+			Parent:     sym.Parent,
 			Visibility: sym.Visibility,
 			Range: Range{
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},

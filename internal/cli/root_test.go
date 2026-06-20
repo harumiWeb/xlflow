@@ -3290,11 +3290,11 @@ code_source = "sidecar"
 	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"frm\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"sidecar\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -3412,11 +3412,11 @@ code_source = "sidecar"
 	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"frm\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"sidecar\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
