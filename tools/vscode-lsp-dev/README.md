@@ -72,6 +72,20 @@ xlflow lsp --stdio --log-file .xlflow/lsp.log
 
 The server working directory is the first VS Code workspace folder in the Extension Development Host.
 
+## Syntax highlighting
+
+This dev client contributes a VBA TextMate grammar for `.bas`, `.cls`, and `.frm` files.
+
+The grammar is intentionally useful enough to serve as a reference for a future production extension. It highlights:
+
+- comments, strings, date literals, numeric literals, and line continuations
+- `Attribute` lines and VBA preprocessor directives
+- procedures, properties, declares, enums, types, variables, parameters, and labels
+- VBA control-flow keywords, storage modifiers, primitive types, common Excel/COM types, and common constants
+- member access such as `.Range` / `.Value`
+
+The grammar is still development-only and should be treated as a smoke/reference implementation, not production branding or packaging.
+
 ## Logs
 
 Use VS Code's Output panel:
@@ -93,6 +107,7 @@ Standard output is reserved for LSP JSON-RPC frames. Non-LSP server logs should 
 - [ ] Start Extension Development Host
 - [ ] Open an xlflow project or VBA source folder
 - [ ] Open a `.bas`, `.cls`, or `.frm` file
+- [ ] Confirm VBA syntax highlighting is applied to comments, strings, declarations, keywords, and member access
 - [ ] Confirm `xlflow lsp --stdio` starts
 - [ ] Confirm no non-LSP logs are printed to stdout
 - [ ] Confirm server logs are written to `.xlflow/lsp.log`

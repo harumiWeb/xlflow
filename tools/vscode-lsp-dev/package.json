@@ -45,7 +45,15 @@
           ".bas",
           ".cls",
           ".frm"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vba",
+        "scopeName": "source.vba",
+        "path": "./syntaxes/vba.tmLanguage.json"
       }
     ]
   },
