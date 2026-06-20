@@ -30,6 +30,8 @@
           "comments": "off",
           "strings": "off"
         },
+        "editor.autoClosingBrackets": "always",
+        "editor.autoClosingQuotes": "always",
         "editor.snippetSuggestions": "top",
         "editor.suggest.snippetsPreventQuickSuggestions": false
       }

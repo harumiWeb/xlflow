@@ -601,6 +601,16 @@ End Sub
 	if !ok || !dimSnippet.Snippet || !strings.Contains(dimSnippet.InsertText, "As ${2:Variant}") {
 		t.Fatalf("Dim should be a local declaration snippet: %+v", dimSnippet)
 	}
+
+	doc.Source = "Option Explicit\nSub Existing()\n    Se\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Se")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setSnippet, ok := findCompletion(items, "Set")
+	if !ok || !setSnippet.Snippet || !strings.Contains(setSnippet.InsertText, "Set ${1:target} = ${2:expression}") {
+		t.Fatalf("Set should be an object assignment snippet: %+v", setSnippet)
+	}
 }
 
 func TestHoverUsesConstantMetadata(t *testing.T) {

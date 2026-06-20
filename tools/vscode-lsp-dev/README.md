@@ -108,6 +108,7 @@ Standard output is reserved for LSP JSON-RPC frames. Non-LSP server logs should 
 - [ ] Open an xlflow project or VBA source folder
 - [ ] Open a `.bas`, `.cls`, or `.frm` file
 - [ ] Confirm VBA syntax highlighting is applied to comments, strings, declarations, keywords, and member access
+- [ ] Confirm `(` and `"` insert their closing pair in VBA files
 - [ ] Confirm `xlflow lsp --stdio` starts
 - [ ] Confirm no non-LSP logs are printed to stdout
 - [ ] Confirm server logs are written to `.xlflow/lsp.log`

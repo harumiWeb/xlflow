@@ -1375,6 +1375,12 @@ var procedureStatementCompletions = []syntaxCompletionSpec{
 		insertText:    "Dim ${1:name} As ${2:Variant}",
 		documentation: "Declares a procedure-local variable.",
 	},
+	{
+		label:         "Set",
+		detail:        "Object assignment",
+		insertText:    "Set ${1:target} = ${2:expression}",
+		documentation: "Assigns an object reference in a procedure.",
+	},
 }
 
 func completionsFromSpecs(specs []syntaxCompletionSpec, prefix string, replaceRange Range) []Completion {
