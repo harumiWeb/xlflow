@@ -229,15 +229,12 @@ func (a Analyzer) Definition(doc Document, pos Position, open []Document, uriFor
 	if word == "" {
 		return nil, nil
 	}
-	syms, err := a.WorkspaceSymbols(open, word)
+	syms, err := a.definitionSymbols(doc, pos, open, word)
 	if err != nil {
 		return nil, err
 	}
 	var out []Location
 	for _, sym := range syms {
-		if !strings.EqualFold(sym.Name, word) {
-			continue
-		}
 		uri := sym.File
 		if uriForPath != nil {
 			uri = uriForPath(sym.File)
@@ -256,16 +253,23 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 	if err != nil {
 		return nil, err
 	}
+	defSyms, err := a.definitionSymbols(doc, pos, open, word)
+	if err != nil {
+		return nil, err
+	}
+	var localScope *Range
+	if hasLocalDefinitionSymbol(defSyms) {
+		if scope, ok := currentProcedureRangeForDocument(doc, pos); ok {
+			localScope = &scope
+			docs = []Document{doc}
+		}
+	}
 	declarations := map[string]bool{}
 	var declarationRanges []Location
 	if !includeDeclaration {
-		defs, err := a.Definition(doc, pos, open, nil)
-		if err != nil {
-			return nil, err
-		}
-		for _, def := range defs {
-			declarations[locationKey(def.Path, def.Range)] = true
-			declarationRanges = append(declarationRanges, def)
+		for _, sym := range defSyms {
+			declarations[locationKey(sym.File, sym.Selection)] = true
+			declarationRanges = append(declarationRanges, Location{Path: sym.File, Range: sym.Range})
 		}
 		for _, candidate := range docs {
 			syms, err := a.DocumentSymbols(candidate)
@@ -285,6 +289,9 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 	var out []Location
 	for _, candidate := range docs {
 		for _, r := range identifierRanges(candidate.Source, word) {
+			if localScope != nil && !rangeContains(*localScope, r) {
+				continue
+			}
 			if !includeDeclaration && (declarations[locationKey(candidate.Path, r)] || declarations[locationKey(candidate.URI, r)]) {
 				continue
 			}
@@ -308,6 +315,53 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 		return out[i].Range.Start.Character < out[j].Range.Start.Character
 	})
 	return out, nil
+}
+
+func (a Analyzer) definitionSymbols(doc Document, pos Position, open []Document, word string) ([]Symbol, error) {
+	syms, err := a.WorkspaceSymbols(open, word)
+	if err != nil {
+		return nil, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	var out []Symbol
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, word) || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
+			continue
+		}
+		out = append(out, sym)
+	}
+	if local := localDefinitionSymbols(out); len(local) > 0 {
+		return local, nil
+	}
+	return out, nil
+}
+
+func (a Analyzer) visibleDefinitionSymbol(doc Document, currentProcedure string, sym Symbol) bool {
+	if sym.Parent != "" {
+		return currentProcedure != "" && strings.EqualFold(sym.Parent, currentProcedure) && a.sameDocumentSymbol(doc, sym)
+	}
+	if a.sameDocumentSymbol(doc, sym) {
+		return true
+	}
+	return !strings.EqualFold(sym.Visibility, "Private")
+}
+
+func localDefinitionSymbols(syms []Symbol) []Symbol {
+	var out []Symbol
+	for _, sym := range syms {
+		if isLocalSymbol(sym) {
+			out = append(out, sym)
+		}
+	}
+	return out
+}
+
+func hasLocalDefinitionSymbol(syms []Symbol) bool {
+	return len(localDefinitionSymbols(syms)) > 0
+}
+
+func isLocalSymbol(sym Symbol) bool {
+	return strings.EqualFold(sym.Kind, "local_variable") || (sym.Parent != "" && strings.EqualFold(sym.Kind, "const"))
 }
 
 func containedInDeclaration(doc Document, r Range, declarations []Location) bool {
@@ -546,11 +600,25 @@ func (a Analyzer) visibleCompletionSymbol(doc Document, currentProcedure string,
 }
 
 func currentProcedureNameForDocument(doc Document, pos Position) string {
+	name, _ := currentProcedureForDocument(doc, pos)
+	return name
+}
+
+func currentProcedureRangeForDocument(doc Document, pos Position) (Range, bool) {
+	_, scope := currentProcedureForDocument(doc, pos)
+	if scope == nil {
+		return Range{}, false
+	}
+	return *scope, true
+}
+
+func currentProcedureForDocument(doc Document, pos Position) (string, *Range) {
 	lines := normalizedLines(doc.Source)
 	depth := 0
 	current := ""
+	var scope *Range
 	for lineNo, line := range lines {
-		if lineNo > pos.Line {
+		if lineNo > pos.Line && scope == nil {
 			break
 		}
 		text := strings.TrimSpace(line[:codeLimit(line)])
@@ -564,16 +632,29 @@ func currentProcedureNameForDocument(doc Document, pos Position) string {
 				depth--
 			}
 			if depth == 0 {
-				current = ""
+				if scope != nil {
+					scope.End = Position{Line: lineNo, Character: utf16Len(line)}
+				}
+				if lineNo < pos.Line {
+					current = ""
+					scope = nil
+				}
+				if lineNo >= pos.Line {
+					return current, scope
+				}
 			}
 		case procedureStartLine(lower):
+			if lineNo > pos.Line {
+				return current, scope
+			}
 			depth++
 			if depth == 1 {
 				current = procedureNameFromLine(text)
+				scope = &Range{Start: Position{Line: lineNo, Character: 0}, End: Position{Line: len(lines), Character: 0}}
 			}
 		}
 	}
-	return current
+	return current, scope
 }
 
 func procedureNameFromLine(text string) string {

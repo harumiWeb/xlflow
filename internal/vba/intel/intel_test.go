@@ -730,6 +730,51 @@ End Sub
 	}
 }
 
+func TestDefinitionAndReferencesPreferCurrentProcedureLocal(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub First()
+    Dim value As Long
+    value = 1
+End Sub
+
+Sub Second()
+    Dim value As Long
+    value = 2
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	pos := Position{Line: 3, Character: utf16Len("    val")}
+
+	defs, err := analyzer.Definition(doc, pos, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].Range.Start.Line != 2 {
+		t.Fatalf("definition = %+v, want First.value declaration only", defs)
+	}
+
+	withDecl, err := analyzer.References(doc, pos, []Document{doc}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withDecl) != 2 || withDecl[0].Range.Start.Line != 2 || withDecl[1].Range.Start.Line != 3 {
+		t.Fatalf("local references with declaration = %+v, want First declaration and assignment only", withDecl)
+	}
+
+	withoutDecl, err := analyzer.References(doc, pos, []Document{doc}, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withoutDecl) != 1 || withoutDecl[0].Range.Start.Line != 3 {
+		t.Fatalf("local references without declaration = %+v, want First assignment only", withoutDecl)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()
