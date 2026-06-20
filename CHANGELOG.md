@@ -10,6 +10,7 @@ All notable changes to xlflow will be documented in this file.
 - Added `.` as an LSP completion trigger character so VS Code requests member completions such as `Range("A1").Font.Color` while typing.
 - Added built-in `VBA.Collection` metadata so LSP hover and member completions resolve `Dim result As Collection` and `Set result = New Collection` correctly.
 - Fixed LSP type inference to prefer the nearest in-scope VBA declaration before the cursor, avoiding stale same-name declarations such as `result As Boolean` overriding a local `result As Collection`.
+- Added LSP completions for module-qualified VBA procedure calls such as `Utils.BuildName` after typing `Utils.`.
 - Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
 - Expanded the built-in Excel VBA/COM type database with common formatting and worksheet helper objects such as `Excel.Font`, `Excel.Interior`, `Excel.Borders`, `Excel.Validation`, `Excel.Hyperlinks`, `Excel.PageSetup`, `Excel.AutoFilter`, `Excel.Sort`, and `Excel.WorksheetFunction`.
 - Expanded built-in Excel constant metadata for common formatting, border, alignment, page orientation, and sort constants, and included enum group information in constant hover output.

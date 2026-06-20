@@ -162,6 +162,51 @@ func TestCompletionReturnsMemberCandidatesFromOpenDocument(t *testing.T) {
 	}
 }
 
+func TestCompletionReturnsModuleProcedureCandidates(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Utils.bas"), []byte(`Attribute VB_Name = "Utils"
+Option Explicit
+Public Function BuildName() As String
+End Function
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(moduleDir, "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    Utils.Bu\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 12},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	if !hasCompletionItem(list.Items, "BuildName") {
+		t.Fatalf("Utils.BuildName completion missing: %+v", list.Items)
+	}
+}
+
 func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

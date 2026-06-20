@@ -51,13 +51,14 @@ type Diagnostic struct {
 }
 
 type Symbol struct {
-	Name      string
-	Kind      string
-	Detail    string
-	File      string
-	Module    string
-	Range     Range
-	Selection Range
+	Name       string
+	Kind       string
+	Detail     string
+	File       string
+	Module     string
+	Visibility string
+	Range      Range
+	Selection  Range
 }
 
 type Location struct {
@@ -367,10 +368,10 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
 	if memberMode {
 		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
-		if !ok {
-			return nil, nil
+		if ok {
+			return a.memberCompletions(typ, memberPrefix), nil
 		}
-		return a.memberCompletions(typ, memberPrefix), nil
+		return a.moduleMemberCompletions(open, receiverExpr, memberPrefix)
 	}
 	word, _ := WordAt(doc.Source, pos)
 	if strings.TrimSpace(word) == "" {
@@ -771,6 +772,41 @@ func (a Analyzer) memberCompletions(receiverType, prefix string) []Completion {
 	return uniqueCompletions(out)
 }
 
+func (a Analyzer) moduleMemberCompletions(open []Document, moduleName, prefix string) ([]Completion, error) {
+	moduleName = strings.TrimSpace(moduleName)
+	if moduleName == "" {
+		return nil, nil
+	}
+	syms, err := a.WorkspaceSymbols(open, "")
+	if err != nil {
+		return nil, err
+	}
+	var out []Completion
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Module, moduleName) || !moduleMemberCompletionSymbol(sym) {
+			continue
+		}
+		if !completionMatches(sym.Name, prefix) {
+			continue
+		}
+		out = append(out, Completion{
+			Label:  sym.Name,
+			Kind:   completionKindForSymbol(sym.Kind),
+			Detail: sym.Detail,
+		})
+	}
+	return uniqueCompletions(out), nil
+}
+
+func moduleMemberCompletionSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set":
+	default:
+		return false
+	}
+	return !strings.EqualFold(sym.Visibility, "Private")
+}
+
 func (a Analyzer) globalCompletions(prefix string) []Completion {
 	var out []Completion
 	for _, typ := range a.DB.TypeNames() {
@@ -898,11 +934,12 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			continue
 		}
 		out = append(out, Symbol{
-			Name:   sym.Name,
-			Kind:   sym.Kind,
-			Detail: firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
-			File:   firstNonEmpty(uri, file.Path, sym.File),
-			Module: sym.Module,
+			Name:       sym.Name,
+			Kind:       sym.Kind,
+			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
+			File:       firstNonEmpty(uri, file.Path, sym.File),
+			Module:     sym.Module,
+			Visibility: sym.Visibility,
 			Range: Range{
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},
 				End:   Position{Line: sym.EndLine - 1, Character: max(0, sym.EndColumn-1)},

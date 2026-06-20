@@ -280,6 +280,62 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 }
 
+func TestCompletionsReturnModuleProcedureCandidates(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	utilsPath := filepath.Join(moduleDir, "Utils.bas")
+	if err := os.WriteFile(utilsPath, []byte(`Attribute VB_Name = "Utils"
+Option Explicit
+Public Function BuildName() As String
+End Function
+Private Function HiddenName() As String
+End Function
+Sub RunDefault()
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:   filepath.Join(moduleDir, "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    Utils.Bu\nEnd Sub\n",
+	}
+	line := `    Utils.Bu`
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(line)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "BuildName") {
+		t.Fatalf("Utils.BuildName completion missing: %+v", items)
+	}
+	if hasCompletion(items, "HiddenName") {
+		t.Fatalf("private module member should not be completed: %+v", items)
+	}
+
+	openUtils := Document{
+		URI:    "file:///C:/work/src/modules/Utils.bas",
+		Path:   utilsPath,
+		Source: "Attribute VB_Name = \"Utils\"\nOption Explicit\nPublic Function UnsavedName() As String\nEnd Function\n",
+	}
+	doc.Source = "Option Explicit\nSub Test()\n    Utils.Un\nEnd Sub\n"
+	line = `    Utils.Un`
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(line)}, []Document{openUtils})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "UnsavedName") {
+		t.Fatalf("open document module member completion missing: %+v", items)
+	}
+	if hasCompletion(items, "BuildName") {
+		t.Fatalf("stale filesystem module member should be hidden while open document exists: %+v", items)
+	}
+}
+
 func TestHoverUsesConstantMetadata(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	line := "    Debug.Print xlLandscape"
