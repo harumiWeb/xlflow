@@ -245,6 +245,34 @@ func TestCompletionReturnsModuleDeclarationSnippet(t *testing.T) {
 	if item.InsertTextFormat == nil || *item.InsertTextFormat != protocol.InsertTextFormatSnippet {
 		t.Fatalf("Public Sub insert text format = %+v, want snippet", item.InsertTextFormat)
 	}
+
+	if _, err := s.docs.change(uri, "Option Explicit\n\nPublic S\n"); err != nil {
+		t.Fatal(err)
+	}
+	result, err = s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 8},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok = result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok = findCompletionItem(list.Items, "Public Sub")
+	if !ok {
+		t.Fatalf("Public Sub completion missing for multi-word prefix: %+v", list.Items)
+	}
+	edit, ok := item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("Public Sub text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.Range.Start.Character != 0 || edit.Range.End.Character != 8 || !strings.Contains(edit.NewText, "End Sub") {
+		t.Fatalf("Public Sub text edit = %+v, want replacement for typed prefix", edit)
+	}
 }
 
 func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {

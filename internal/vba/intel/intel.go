@@ -79,6 +79,7 @@ type Completion struct {
 	Documentation string
 	InsertText    string
 	Snippet       bool
+	ReplaceRange  *Range
 }
 
 func (a Analyzer) Check() error {
@@ -811,11 +812,14 @@ func moduleMemberCompletionSymbol(sym Symbol) bool {
 }
 
 func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) []Completion {
-	word := currentIdentifierPrefix(prefix)
-	if !atStatementStart(prefix, word) || !isModuleLevelPosition(doc.Source, pos) {
+	start, typed, ok := statementPrefix(prefix)
+	if !ok || !isModuleLevelPosition(doc.Source, pos) {
 		return nil
 	}
-	return declarationCompletions(word)
+	return declarationCompletions(typed, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	})
 }
 
 func (a Analyzer) globalCompletions(prefix string) []Completion {
@@ -1055,12 +1059,13 @@ var moduleDeclarationCompletions = []syntaxCompletionSpec{
 	},
 }
 
-func declarationCompletions(prefix string) []Completion {
+func declarationCompletions(prefix string, replaceRange Range) []Completion {
 	var out []Completion
 	for _, spec := range moduleDeclarationCompletions {
 		if !completionMatches(spec.label, prefix) {
 			continue
 		}
+		replace := replaceRange
 		out = append(out, Completion{
 			Label:         spec.label,
 			Kind:          "snippet",
@@ -1068,6 +1073,7 @@ func declarationCompletions(prefix string) []Completion {
 			Documentation: spec.documentation,
 			InsertText:    spec.insertText,
 			Snippet:       strings.Contains(spec.insertText, "$"),
+			ReplaceRange:  &replace,
 		})
 	}
 	return out
@@ -1086,9 +1092,19 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 	return wordPrefix, receiver, true
 }
 
-func atStatementStart(prefix, word string) bool {
-	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(word)], " \t")
-	return beforeWord == ""
+func statementPrefix(prefix string) (start int, typed string, ok bool) {
+	start = len(prefix) - len(strings.TrimLeft(prefix, " \t"))
+	typed = strings.TrimSpace(prefix[start:])
+	if typed == "" {
+		return start, typed, true
+	}
+	for _, r := range typed {
+		if isIdentRune(r) || r == ' ' || r == '\t' {
+			continue
+		}
+		return 0, "", false
+	}
+	return start, strings.Join(strings.Fields(typed), " "), true
 }
 
 func isModuleLevelPosition(source string, pos Position) bool {

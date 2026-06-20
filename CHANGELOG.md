@@ -13,6 +13,7 @@ All notable changes to xlflow will be documented in this file.
 - Added LSP completions for module-qualified VBA procedure calls such as `Utils.BuildName` after typing `Utils.`.
 - Added module-level VBA declaration snippet completions such as `Public Sub`, `Public Function`, `Dim`, `Const`, `Type`, and `Enum` while typing at the top level of a module.
 - Fixed LSP document symbols for empty or incomplete VBA files so VS Code does not reject module symbols whose selection range exceeds the source range, and added identifier trigger characters so declaration snippets appear while typing.
+- Fixed module-level declaration snippets so multi-word prefixes such as `Public S` are completed by replacing the typed declaration prefix instead of disappearing after a modifier is typed.
 - Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
 - Expanded the built-in Excel VBA/COM type database with common formatting and worksheet helper objects such as `Excel.Font`, `Excel.Interior`, `Excel.Borders`, `Excel.Validation`, `Excel.Hyperlinks`, `Excel.PageSetup`, `Excel.AutoFilter`, `Excel.Sort`, and `Excel.WorksheetFunction`.
 - Expanded built-in Excel constant metadata for common formatting, border, alignment, page orientation, and sort constants, and included enum group information in constant hover output.

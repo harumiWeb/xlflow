@@ -336,6 +336,12 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		if completion.InsertText != "" {
 			item.InsertText = &completion.InsertText
 		}
+		if completion.ReplaceRange != nil {
+			item.TextEdit = protocol.TextEdit{
+				Range:   toProtocolRange(*completion.ReplaceRange),
+				NewText: firstNonEmpty(completion.InsertText, completion.Label),
+			}
+		}
 		if completion.Snippet {
 			format := protocol.InsertTextFormatSnippet
 			item.InsertTextFormat = &format
@@ -627,6 +633,15 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type stdioReadWriteCloser struct{}

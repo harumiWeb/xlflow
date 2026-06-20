@@ -384,6 +384,18 @@ End Sub
 	if !hasCompletion(items, "Public Function") {
 		t.Fatalf("Public Function completion missing: %+v", items)
 	}
+	doc.Source = "Option Explicit\n\nPublic S\nPublic Sub Existing()\nEnd Sub\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("Public S")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicSub, ok = findCompletion(items, "Public Sub")
+	if !ok {
+		t.Fatalf("Public Sub completion missing for multi-word prefix: %+v", items)
+	}
+	if publicSub.ReplaceRange == nil || publicSub.ReplaceRange.Start.Character != 0 || publicSub.ReplaceRange.End.Character != utf16Len("Public S") {
+		t.Fatalf("Public Sub should replace the typed declaration prefix: %+v", publicSub.ReplaceRange)
+	}
 
 	doc.Source = "Option Explicit\nSub Existing()\n    Pu\nEnd Sub\n"
 	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Pu")}, nil)
