@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,7 @@ type Server struct {
 	handler  protocol.Handler
 	docs     *documents
 	logger   *log.Logger
+	symbols  *workspaceSymbolCache
 
 	diagMu     sync.Mutex
 	diagTimers map[string]*time.Timer
@@ -91,8 +93,10 @@ func New(opts Options) (*Server, func(), error) {
 		},
 		docs:       newDocuments(opts.RootDir),
 		logger:     logger,
+		symbols:    newWorkspaceSymbolCache(),
 		diagTimers: make(map[string]*time.Timer),
 	}
+	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.handler = protocol.Handler{
 		Initialize:                 s.initialize,
 		Initialized:                s.initialized,
@@ -178,6 +182,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 	if err != nil {
 		return err
 	}
+	s.symbols.invalidateOpen(doc)
 	s.publishDiagnostics(ctx, doc)
 	return nil
 }
@@ -194,6 +199,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if err != nil {
 		return err
 	}
+	s.symbols.invalidateOpen(doc)
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
 }
@@ -215,6 +221,9 @@ func fullChangeText(change any) (string, bool) {
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
 	s.cancelDiagnostics(uri)
+	if path, err := fileURIToPath(uri); err == nil {
+		s.symbols.invalidateOpen(intel.Document{URI: uri, Path: path})
+	}
 	s.docs.close(uri)
 	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentUri(uri),
@@ -426,6 +435,194 @@ func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
 		URI:         protocol.DocumentUri(doc.URI),
 		Diagnostics: out,
 	})
+}
+
+func (s *Server) baseAnalyzer() intel.Analyzer {
+	return intel.Analyzer{RootDir: s.opts.RootDir, Config: s.opts.Config, DB: s.db}
+}
+
+func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]intel.Symbol, error) {
+	analyzer := s.baseAnalyzer()
+	base, err := s.symbols.base(analyzer)
+	if err != nil {
+		return nil, err
+	}
+	openKeys := make(map[string]bool, len(open))
+	for _, doc := range open {
+		for _, key := range s.symbolPathKeys(doc.Path) {
+			openKeys[key] = true
+		}
+	}
+	out := make([]intel.Symbol, 0, len(base))
+	for _, sym := range base {
+		if hasSymbolPathKey(openKeys, s.symbolPathKeys(sym.File)) {
+			continue
+		}
+		out = append(out, sym)
+	}
+	for _, doc := range open {
+		syms, err := s.symbols.open(analyzer, doc)
+		if err != nil {
+			continue
+		}
+		out = append(out, syms...)
+	}
+	return filterWorkspaceSymbols(out, query), nil
+}
+
+type workspaceSymbolCache struct {
+	mu          sync.RWMutex
+	baseSymbols []intel.Symbol
+	baseOK      bool
+	openSymbols map[string]cachedOpenSymbols
+}
+
+type cachedOpenSymbols struct {
+	source  string
+	symbols []intel.Symbol
+}
+
+func newWorkspaceSymbolCache() *workspaceSymbolCache {
+	return &workspaceSymbolCache{openSymbols: map[string]cachedOpenSymbols{}}
+}
+
+func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, error) {
+	c.mu.RLock()
+	if c.baseOK {
+		out := cloneSymbols(c.baseSymbols)
+		c.mu.RUnlock()
+		return out, nil
+	}
+	c.mu.RUnlock()
+
+	syms, err := analyzer.WorkspaceSymbols(nil, "")
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.baseSymbols = cloneSymbols(syms)
+	c.baseOK = true
+	c.mu.Unlock()
+	return cloneSymbols(syms), nil
+}
+
+func (c *workspaceSymbolCache) open(analyzer intel.Analyzer, doc intel.Document) ([]intel.Symbol, error) {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return analyzer.DocumentSymbols(doc)
+	}
+	c.mu.RLock()
+	if cached, ok := c.openSymbols[key]; ok && cached.source == doc.Source {
+		out := cloneSymbols(cached.symbols)
+		c.mu.RUnlock()
+		return out, nil
+	}
+	c.mu.RUnlock()
+
+	syms, err := analyzer.DocumentSymbols(doc)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.openSymbols[key] = cachedOpenSymbols{source: doc.Source, symbols: cloneSymbols(syms)}
+	c.mu.Unlock()
+	return cloneSymbols(syms), nil
+}
+
+func (c *workspaceSymbolCache) invalidateOpen(doc intel.Document) {
+	if key := documentSymbolKey(doc); key != "" {
+		c.mu.Lock()
+		delete(c.openSymbols, key)
+		c.mu.Unlock()
+	}
+}
+
+func documentSymbolKey(doc intel.Document) string {
+	if doc.Path != "" {
+		return symbolFileKey(doc.Path)
+	}
+	if doc.URI != "" {
+		if path, err := fileURIToPath(doc.URI); err == nil {
+			return symbolFileKey(path)
+		}
+		return strings.ToLower(doc.URI)
+	}
+	return ""
+}
+
+func symbolFileKey(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "file:") {
+		if decoded, err := fileURIToPath(path); err == nil {
+			path = decoded
+		}
+	}
+	return normalizePathKey(path)
+}
+
+func (s *Server) symbolPathKeys(path string) []string {
+	var keys []string
+	if key := symbolFileKey(path); key != "" {
+		keys = append(keys, key)
+	}
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(s.opts.RootDir) == "" {
+		return keys
+	}
+	if filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(s.opts.RootDir, path); err == nil {
+			if key := symbolFileKey(rel); key != "" {
+				keys = append(keys, key)
+			}
+		}
+		return keys
+	}
+	if key := symbolFileKey(filepath.Join(s.opts.RootDir, filepath.FromSlash(path))); key != "" {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func hasSymbolPathKey(set map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if set[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneSymbols(syms []intel.Symbol) []intel.Symbol {
+	out := make([]intel.Symbol, len(syms))
+	copy(out, syms)
+	return out
+}
+
+func filterWorkspaceSymbols(syms []intel.Symbol, query string) []intel.Symbol {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query != "" {
+		filtered := syms[:0]
+		for _, sym := range syms {
+			if strings.Contains(strings.ToLower(sym.Name), query) || strings.Contains(strings.ToLower(sym.Module+"."+sym.Name), query) {
+				filtered = append(filtered, sym)
+			}
+		}
+		syms = filtered
+	}
+	sort.SliceStable(syms, func(i, j int) bool {
+		if syms[i].File != syms[j].File {
+			return syms[i].File < syms[j].File
+		}
+		if syms[i].Range.Start.Line != syms[j].Range.Start.Line {
+			return syms[i].Range.Start.Line < syms[j].Range.Start.Line
+		}
+		if syms[i].Range.Start.Character != syms[j].Range.Start.Character {
+			return syms[i].Range.Start.Character < syms[j].Range.Start.Character
+		}
+		return syms[i].Name < syms[j].Name
+	})
+	return syms
 }
 
 type documents struct {

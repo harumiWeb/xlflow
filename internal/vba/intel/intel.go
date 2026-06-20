@@ -20,9 +20,10 @@ import (
 )
 
 type Analyzer struct {
-	RootDir string
-	Config  config.Config
-	DB      *vbadb.DB
+	RootDir              string
+	Config               config.Config
+	DB                   *vbadb.DB
+	WorkspaceSymbolsFunc func(open []Document, query string) ([]Symbol, error)
 }
 
 type Document struct {
@@ -134,6 +135,13 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 }
 
 func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, error) {
+	if a.WorkspaceSymbolsFunc != nil {
+		return a.WorkspaceSymbolsFunc(open, query)
+	}
+	return a.workspaceSymbols(open, query)
+}
+
+func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, error) {
 	result, err := symbols.Inspect(symbols.Options{
 		RootDir:        a.RootDir,
 		Config:         a.Config,

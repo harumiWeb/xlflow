@@ -115,6 +115,60 @@ func TestDocumentsOverlayUsesUnsavedChangesAndClearsOnClose(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolCacheUsesOpenDocumentOverlay(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Main.bas")
+	if err := os.WriteFile(path, []byte("Option Explicit\nSub SavedName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	uri := pathToFileURI(path)
+	if _, err := s.docs.open(uri, "Option Explicit\nSub OpenName()\nEnd Sub\n"); err != nil {
+		t.Fatal(err)
+	}
+	openSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "OpenName"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWorkspaceSymbol(openSymbols, "OpenName") {
+		t.Fatalf("open document symbol missing: %+v", openSymbols)
+	}
+	savedSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "SavedName"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasWorkspaceSymbol(savedSymbols, "SavedName") {
+		t.Fatalf("saved symbol should be hidden by open document overlay: %+v", savedSymbols)
+	}
+
+	if _, err := s.docs.change(uri, "Option Explicit\nSub ChangedName()\nEnd Sub\n"); err != nil {
+		t.Fatal(err)
+	}
+	changedSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "ChangedName"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWorkspaceSymbol(changedSymbols, "ChangedName") {
+		t.Fatalf("changed open document symbol missing: %+v", changedSymbols)
+	}
+	oldOpenSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "OpenName"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasWorkspaceSymbol(oldOpenSymbols, "OpenName") {
+		t.Fatalf("stale open document symbol should be invalidated by source change: %+v", oldOpenSymbols)
+	}
+}
+
 func TestNewCreatesLogFileWithoutStartingServer(t *testing.T) {
 	root := t.TempDir()
 	logPath := filepath.Join(".xlflow", "lsp.log")
@@ -454,6 +508,15 @@ func findCompletionItem(items []protocol.CompletionItem, label string) (protocol
 		}
 	}
 	return protocol.CompletionItem{}, false
+}
+
+func hasWorkspaceSymbol(items []protocol.SymbolInformation, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func containsString(items []string, needle string) bool {
