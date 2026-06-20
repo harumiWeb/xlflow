@@ -396,17 +396,24 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if word == "" {
 		return nil, nil
 	}
+	if hover, ok := a.memberHover(doc, word, r, byteOffsetForPosition(doc.Source, pos)); ok {
+		return hover, nil
+	}
+	if control, ok := a.resolveFormControl(doc, word); ok {
+		return &Hover{Contents: variableHover(word, control.Type, "UserForm control"), Range: r}, nil
+	}
 	if typ, ok := a.DB.ResolveType(word); ok {
-		return &Hover{Contents: typeHover(typ), Range: r}, nil
+		return &Hover{Contents: typeHover(typ, "built-in type database"), Range: r}, nil
 	}
 	if constant, ok := a.DB.ResolveConstant(word); ok {
 		return &Hover{Contents: constantHover(constant), Range: r}, nil
 	}
-	if typ, ok := a.inferWordTypeAt(doc, word, byteOffsetForPosition(doc.Source, pos)); ok {
+	if inferred, ok := a.inferWordTypeInfoAt(doc, word, byteOffsetForPosition(doc.Source, pos)); ok {
+		typ := inferred.Type
 		if dbType, found := a.DB.ResolveType(typ); found {
-			return &Hover{Contents: typeHover(dbType), Range: r}, nil
+			return &Hover{Contents: variableHover(word, dbType.Name, inferred.Source), Range: r}, nil
 		}
-		return &Hover{Contents: "```vb\n" + word + " As " + typ + "\n```", Range: r}, nil
+		return &Hover{Contents: variableHover(word, typ, inferred.Source), Range: r}, nil
 	}
 	syms, err := a.definitionSymbols(doc, pos, open, word)
 	if err != nil {
@@ -418,11 +425,11 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		if detail == "" {
 			detail = sym.Kind + " " + sym.Name
 		}
-		return &Hover{Contents: "```vb\n" + detail + "\n```", Range: r}, nil
+		return &Hover{Contents: symbolHover(detail, symbolSource(sym)), Range: r}, nil
 	}
 	if typ, ok := a.inferExpressionType(doc.Source, pos); ok {
 		if dbType, found := a.DB.ResolveType(typ); found {
-			return &Hover{Contents: typeHover(dbType), Range: r}, nil
+			return &Hover{Contents: typeHover(dbType, "inferred expression"), Range: r}, nil
 		}
 	}
 	return nil, nil
@@ -713,38 +720,48 @@ func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
 	return a.inferWordTypeAt(doc, word, -1)
 }
 
+type inferredType struct {
+	Type   string
+	Source string
+}
+
 func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string, bool) {
+	inferred, ok := a.inferWordTypeInfoAt(doc, word, offset)
+	return inferred.Type, ok
+}
+
+func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (inferredType, bool) {
 	if strings.EqualFold(word, "Me") && a.isFormDocument(doc) {
-		return "MSForms.UserForm", true
+		return inferredType{Type: "MSForms.UserForm", Source: "UserForm instance"}, true
 	}
 	if control, ok := a.resolveFormControl(doc, word); ok {
-		return control.Type, true
+		return inferredType{Type: control.Type, Source: "UserForm control"}, true
 	}
 	if typ, ok := a.DB.ResolveGlobal(word); ok {
-		return typ.Name, true
+		return inferredType{Type: typ.Name, Source: "built-in global"}, true
 	}
 	var declared string
 	declRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b(?:\s*\([^)]*\))?\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
 	if typ, ok := bestTypeMatch(doc.Source, declRe, offset, 1); ok {
 		declared = typ
 		if !isObjectFallbackType(declared) {
-			return declared, true
+			return inferredType{Type: declared, Source: "declaration"}, true
 		}
 	}
 	newRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*New\s+([A-Za-z_][A-Za-z0-9_.]*)`)
 	if typ, ok := bestTypeMatch(doc.Source, newRe, offset, 1); ok {
-		return typ, true
+		return inferredType{Type: typ, Source: "inferred from Set New"}, true
 	}
 	createRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*CreateObject\s*\(\s*"([^"]+)"\s*\)`)
 	if progID, ok := bestTypeMatch(doc.Source, createRe, offset, 1); ok {
 		if typ, ok := a.DB.ResolveProgID(progID); ok {
-			return typ.Name, true
+			return inferredType{Type: typ.Name, Source: "inferred from CreateObject"}, true
 		}
 	}
 	if declared != "" {
-		return declared, true
+		return inferredType{Type: declared, Source: "declaration"}, true
 	}
-	return "", false
+	return inferredType{}, false
 }
 
 func isObjectFallbackType(name string) bool {
@@ -762,6 +779,68 @@ func (a Analyzer) inferExpressionType(source string, pos Position) (string, bool
 		return "", false
 	}
 	return a.ResolveExpressionType(expr)
+}
+
+func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset int) (*Hover, bool) {
+	line := lineAt(doc.Source, wordRange.Start.Line)
+	if line == "" {
+		return nil, false
+	}
+	startByte := byteIndexForUTF16(line, wordRange.Start.Character)
+	if startByte > len(line) {
+		startByte = len(line)
+	}
+	beforeWord := strings.TrimRight(line[:startByte], " \t")
+	if !strings.HasSuffix(beforeWord, ".") {
+		return nil, false
+	}
+	receiverExpr := expressionBefore(strings.TrimSuffix(beforeWord, "."))
+	if receiverExpr == "" {
+		return nil, false
+	}
+	if strings.EqualFold(receiverExpr, "Me") {
+		if control, ok := a.resolveFormControl(doc, word); ok {
+			return &Hover{Contents: variableHover(word, control.Type, "UserForm control"), Range: wordRange}, true
+		}
+	}
+	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+	if !ok {
+		return nil, false
+	}
+	if typ, ok := a.DB.ResolveType(receiverType); ok {
+		receiverType = typ.Name
+	}
+	member, ok := a.DB.ResolveMember(receiverType, word)
+	if !ok {
+		return nil, false
+	}
+	return &Hover{Contents: memberHover(receiverType, member, a.memberKind(receiverType, word)), Range: wordRange}, true
+}
+
+func (a Analyzer) memberKind(receiverType, memberName string) string {
+	typ, ok := a.DB.ResolveType(receiverType)
+	if !ok {
+		return ""
+	}
+	for _, member := range typ.Properties {
+		if strings.EqualFold(member.Name, memberName) {
+			return "property"
+		}
+	}
+	for _, member := range typ.Methods {
+		if strings.EqualFold(member.Name, memberName) {
+			return "method"
+		}
+	}
+	for _, member := range typ.Events {
+		if strings.EqualFold(member.Name, memberName) {
+			return "event"
+		}
+	}
+	if typ.DefaultMember != "" && strings.EqualFold(typ.DefaultMember, memberName) {
+		return "default_member"
+	}
+	return ""
 }
 
 func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
@@ -1824,7 +1903,7 @@ func firstStringArgument(args string) string {
 	return ""
 }
 
-func typeHover(typ vbadb.TypeInfo) string {
+func typeHover(typ vbadb.TypeInfo, source string) string {
 	var b strings.Builder
 	b.WriteString("```vb\n")
 	b.WriteString(typ.Name)
@@ -1837,12 +1916,106 @@ func typeHover(typ vbadb.TypeInfo) string {
 		b.WriteString("\n")
 		b.WriteString(typ.Summary)
 	}
+	if source != "" {
+		b.WriteString("\n\nSource: ")
+		b.WriteString(source)
+	}
 	if typ.ElementType != "" {
 		b.WriteString("\n\nCollection element: `")
 		b.WriteString(typ.ElementType)
 		b.WriteString("`")
 	}
 	return b.String()
+}
+
+func variableHover(name, typ, source string) string {
+	var b strings.Builder
+	b.WriteString("```vb\n")
+	b.WriteString(name)
+	b.WriteString(" As ")
+	b.WriteString(typ)
+	b.WriteString("\n```")
+	if source != "" {
+		b.WriteString("\nSource: ")
+		b.WriteString(source)
+	}
+	return b.String()
+}
+
+func symbolHover(signature, source string) string {
+	var b strings.Builder
+	b.WriteString("```vb\n")
+	b.WriteString(signature)
+	b.WriteString("\n```")
+	if source != "" {
+		b.WriteString("\nSource: ")
+		b.WriteString(source)
+	}
+	return b.String()
+}
+
+func memberHover(receiverType string, member vbadb.MemberInfo, kind string) string {
+	var b strings.Builder
+	b.WriteString("```vb\n")
+	b.WriteString(memberSignature(receiverType, member, kind))
+	b.WriteString("\n```")
+	if member.Summary != "" {
+		b.WriteString("\n")
+		b.WriteString(member.Summary)
+	}
+	b.WriteString("\n\nSource: built-in ")
+	if library, _, ok := strings.Cut(receiverType, "."); ok && library != "" {
+		b.WriteString(library)
+		b.WriteString(" object model DB")
+	} else {
+		b.WriteString("VBA/COM type DB")
+	}
+	return b.String()
+}
+
+func memberSignature(receiverType string, member vbadb.MemberInfo, kind string) string {
+	var b strings.Builder
+	b.WriteString(receiverType)
+	b.WriteString(".")
+	b.WriteString(member.Name)
+	if len(member.Parameters) > 0 {
+		b.WriteString("(")
+		for i, param := range member.Parameters {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			if param.Optional {
+				b.WriteString("Optional ")
+			}
+			b.WriteString(param.Name)
+			if param.Type != "" {
+				b.WriteString(" As ")
+				b.WriteString(param.Type)
+			}
+		}
+		b.WriteString(")")
+	}
+	if member.ReturnType != "" {
+		b.WriteString(" As ")
+		b.WriteString(member.ReturnType)
+	} else if kind == "method" {
+		b.WriteString(" As void")
+	}
+	return b.String()
+}
+
+func symbolSource(sym Symbol) string {
+	if isLocalSymbol(sym) {
+		return "declaration"
+	}
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set", "module_variable", "const", "field", "parameter":
+		return "declaration"
+	case "module", "class":
+		return "project symbol"
+	default:
+		return ""
+	}
 }
 
 func constantHover(c vbadb.ConstantInfo) string {

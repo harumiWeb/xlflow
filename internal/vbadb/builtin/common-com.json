@@ -10,7 +10,13 @@
         { "name": "Item", "return_type": "Variant" }
       ],
       "methods": [
-        { "name": "Add" },
+        {
+          "name": "Add",
+          "parameters": [
+            { "name": "Key", "type": "Variant" },
+            { "name": "Item", "type": "Variant" }
+          ]
+        },
         { "name": "Exists", "return_type": "Boolean" },
         { "name": "Remove" },
         { "name": "RemoveAll" },

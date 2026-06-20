@@ -14,10 +14,32 @@
         { "name": "ThisWorkbook", "return_type": "Excel.Workbook" },
         { "name": "ActiveWorkbook", "return_type": "Excel.Workbook" },
         { "name": "ActiveSheet", "return_type": "Excel.Worksheet" },
-        { "name": "Range", "return_type": "Excel.Range" },
-        { "name": "Cells", "return_type": "Excel.Range" },
-        { "name": "Rows", "return_type": "Excel.Range" },
-        { "name": "Columns", "return_type": "Excel.Range" }
+        {
+          "name": "Range",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "Cell1", "type": "Variant" },
+            { "name": "Cell2", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Cells",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "RowIndex", "type": "Variant", "optional": true },
+            { "name": "ColumnIndex", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Rows",
+          "return_type": "Excel.Range",
+          "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
+        },
+        {
+          "name": "Columns",
+          "return_type": "Excel.Range",
+          "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
+        }
       ],
       "methods": [{ "name": "Run", "return_type": "Variant" }],
       "confidence": "curated",
@@ -63,10 +85,32 @@
       "summary": "Excel worksheet.",
       "aliases": ["Worksheet"],
       "properties": [
-        { "name": "Range", "return_type": "Excel.Range" },
-        { "name": "Cells", "return_type": "Excel.Range" },
-        { "name": "Rows", "return_type": "Excel.Range" },
-        { "name": "Columns", "return_type": "Excel.Range" },
+        {
+          "name": "Range",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "Cell1", "type": "Variant" },
+            { "name": "Cell2", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Cells",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "RowIndex", "type": "Variant", "optional": true },
+            { "name": "ColumnIndex", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Rows",
+          "return_type": "Excel.Range",
+          "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
+        },
+        {
+          "name": "Columns",
+          "return_type": "Excel.Range",
+          "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
+        },
         { "name": "ListObjects", "return_type": "Excel.ListObjects" },
         { "name": "Names", "return_type": "Excel.Names" },
         { "name": "UsedRange", "return_type": "Excel.Range", "read_only": true },

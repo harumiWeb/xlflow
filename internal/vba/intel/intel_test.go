@@ -279,6 +279,47 @@ End Sub
 	}
 }
 
+func TestHoverFormatsMemberSignaturesAndSources(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.Add "a", 1
+    Dim ws As Worksheet
+    ws.Range("A1").Value = 1
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	dictLine := `    Set dict = CreateObject("Scripting.Dictionary")`
+	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(dictLine[:strings.Index(dictLine, "dict")+2])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "dict As Scripting.Dictionary") || !strings.Contains(hover.Contents, "Source: inferred from CreateObject") {
+		t.Fatalf("unexpected dict hover: %+v", hover)
+	}
+
+	addLine := `    dict.Add "a", 1`
+	hover, err = analyzer.Hover(doc, Position{Line: 4, Character: utf16Len(addLine[:strings.Index(addLine, "Add")+2])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Scripting.Dictionary.Add(Key As Variant, Item As Variant) As void") || !strings.Contains(hover.Contents, "Source: built-in Scripting object model DB") {
+		t.Fatalf("unexpected Dictionary.Add hover: %+v", hover)
+	}
+
+	rangeLine := `    ws.Range("A1").Value = 1`
+	hover, err = analyzer.Hover(doc, Position{Line: 6, Character: utf16Len(rangeLine[:strings.Index(rangeLine, "Range")+3])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.Worksheet.Range(Cell1 As Variant, Optional Cell2 As Variant) As Excel.Range") {
+		t.Fatalf("unexpected Worksheet.Range hover: %+v", hover)
+	}
+}
+
 func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := "Option Explicit\nSub Test()\n    Worksheets(\"Input\").Ra\nEnd Sub\n"
@@ -653,7 +694,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hover == nil || !strings.Contains(hover.Contents, "MSForms.TextBox") {
+	if hover == nil || !strings.Contains(hover.Contents, "MSForms.TextBox") || !strings.Contains(hover.Contents, "Source: UserForm control") {
 		t.Fatalf("unexpected hover: %+v", hover)
 	}
 
