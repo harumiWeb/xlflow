@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run xlflow LSP Dev Client",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/tools/vscode-lsp-dev"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/tools/vscode-lsp-dev/out/**/*.js"
+      ],
+      "preLaunchTask": "compile xlflow LSP Dev Client"
+    }
+  ]
+}

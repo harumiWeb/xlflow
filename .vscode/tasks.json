@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "compile xlflow LSP Dev Client",
+      "type": "shell",
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "tools/vscode-lsp-dev",
+        "compile"
+      ],
+      "problemMatcher": "$tsc",
+      "group": "build"
+    }
+  ]
+}

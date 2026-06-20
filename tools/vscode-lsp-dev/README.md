@@ -44,11 +44,23 @@ xlflow lsp --check
 
 ## Running in VS Code
 
-1. Open `tools/vscode-lsp-dev` in VS Code.
-2. Run `pnpm compile`.
+From the repository root:
+
+1. Open the repository root in VS Code.
+2. Select `Run xlflow LSP Dev Client` in Run and Debug.
 3. Press `F5` or choose `Run and Debug: Start Debugging`.
 4. In the Extension Development Host, open an xlflow project or a folder containing VBA source.
 5. Open a `.bas`, `.cls`, or `.frm` file.
+
+The root launch configuration uses:
+
+```text
+--extensionDevelopmentPath=${workspaceFolder}/tools/vscode-lsp-dev
+```
+
+This prevents VS Code from treating the repository root package as the extension manifest.
+
+If you open `tools/vscode-lsp-dev` directly in VS Code, run `pnpm compile` before pressing `F5`.
 
 The client starts:
 
