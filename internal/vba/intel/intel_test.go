@@ -705,7 +705,7 @@ Option Explicit
 
 func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
-	line := `    Set dict = CreateObject("Scripting.Dic`
+	line := `    Set dict = CreateObject("`
 	doc := Document{
 		Path:   filepath.Join(t.TempDir(), "Main.bas"),
 		Source: "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n",
@@ -721,6 +721,15 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	}
 	if item.Detail != "Scripting.Dictionary" {
 		t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
+	}
+	for _, want := range []string{"ADODB.Connection", "ADODB.Recordset", "Excel.Application"} {
+		item, ok := findCompletion(items, want)
+		if !ok {
+			t.Fatalf("%s ProgID completion missing: %+v", want, items)
+		}
+		if item.Detail != want {
+			t.Fatalf("%s ProgID detail = %q, want resolved type", want, item.Detail)
+		}
 	}
 	if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != utf16Len(`    Set dict = CreateObject("`) || item.ReplaceRange.End.Character != utf16Len(line) {
 		t.Fatalf("ProgID replace range = %+v, want string literal content range", item.ReplaceRange)

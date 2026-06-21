@@ -865,7 +865,7 @@ func completionItemKind(kind string) protocol.CompletionItemKind {
 }
 
 func completionTriggerCharacters() []string {
-	return []string{"."}
+	return []string{".", "\""}
 }
 
 func max(a, b int) int {

@@ -17,6 +17,15 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
 		t.Fatalf("ResolveProgID(Scripting.Dictionary) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveProgID("ADODB.Connection"); !ok || typ.Name != "ADODB.Connection" {
+		t.Fatalf("ResolveProgID(ADODB.Connection) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveProgID("ADODB.Recordset"); !ok || typ.Name != "ADODB.Recordset" {
+		t.Fatalf("ResolveProgID(ADODB.Recordset) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveProgID("Excel.Application"); !ok || typ.Name != "Excel.Application" {
+		t.Fatalf("ResolveProgID(Excel.Application) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveType("Collection"); !ok || typ.Name != "VBA.Collection" {
 		t.Fatalf("ResolveType(Collection) = %+v, %v", typ, ok)
 	}
@@ -99,6 +108,11 @@ func TestProgIDsListPreservesDisplayNames(t *testing.T) {
 	progIDs := db.ProgIDsList()
 	if !hasString(progIDs, "Scripting.Dictionary") {
 		t.Fatalf("ProgIDsList should include canonical Scripting.Dictionary, got %+v", progIDs)
+	}
+	for _, want := range []string{"ADODB.Connection", "ADODB.Recordset", "Excel.Application"} {
+		if !hasString(progIDs, want) {
+			t.Fatalf("ProgIDsList should include %s, got %+v", want, progIDs)
+		}
 	}
 	if hasString(progIDs, "scripting.dictionary") {
 		t.Fatalf("ProgIDsList should not expose folded ProgID names: %+v", progIDs)

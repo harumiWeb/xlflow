@@ -398,8 +398,9 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	}
 	if initResult.Capabilities.CompletionProvider == nil ||
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") ||
+		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "\"") ||
 		containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "P") {
-		t.Fatalf("completion trigger characters = %+v, want only dot-triggered LSP completions", initResult.Capabilities.CompletionProvider)
+		t.Fatalf("completion trigger characters = %+v, want member and string-literal LSP completions only", initResult.Capabilities.CompletionProvider)
 	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
