@@ -402,6 +402,9 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "P") {
 		t.Fatalf("completion trigger characters = %+v, want member and string-literal LSP completions only", initResult.Capabilities.CompletionProvider)
 	}
+	if initResult.Capabilities.DocumentFormattingProvider == nil {
+		t.Fatalf("documentFormattingProvider was not advertised: %+v", initResult.Capabilities)
+	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
@@ -463,6 +466,68 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	_ = serverConn.Close()
 	if !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) {
 		t.Fatalf("expected publishDiagnostics notification, got %v", recorder.methods())
+	}
+}
+
+func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\nIf True Then\nDebug.Print \"ok\"\nEnd If\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 1 {
+		t.Fatalf("formatting edits = %+v, want one full-document edit", edits)
+	}
+	if edits[0].Range.Start.Line != 0 || edits[0].Range.Start.Character != 0 {
+		t.Fatalf("formatting edit start = %+v, want document start", edits[0].Range.Start)
+	}
+	if edits[0].Range.End.Line != 6 || edits[0].Range.End.Character != 0 {
+		t.Fatalf("formatting edit end = %+v, want document end", edits[0].Range.End)
+	}
+	want := "Option Explicit\n\nSub Test()\n    If True Then\n        Debug.Print \"ok\"\n    End If\nEnd Sub\n"
+	if edits[0].NewText != want {
+		t.Fatalf("formatted text:\n%q\nwant:\n%q", edits[0].NewText, want)
+	}
+}
+
+func TestFormattingSkipsFrmDocuments(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "forms", "UserForm1.frm")
+	uri := pathToFileURI(path)
+	if _, err := s.docs.open(uri, "VERSION 5.00\nBegin VB.Form UserForm1\nEnd\n"); err != nil {
+		t.Fatal(err)
+	}
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 0 {
+		t.Fatalf("frm formatting edits = %+v, want none", edits)
 	}
 }
 

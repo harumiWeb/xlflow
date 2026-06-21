@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/tliron/glsp"
@@ -21,6 +22,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
+	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 
 const serverName = "xlflow-vba-lsp"
@@ -111,6 +113,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentReferences:     s.references,
 		TextDocumentHover:          s.hover,
 		TextDocumentCompletion:     s.completion,
+		TextDocumentFormatting:     s.formatting,
 	}
 	return s, func() {
 		s.stopDiagnosticTimers()
@@ -378,6 +381,29 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		items = append(items, item)
 	}
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+}
+
+func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	if !documentSupportsFormatting(doc) {
+		return []protocol.TextEdit{}, nil
+	}
+	formatted, err := vbafmt.FormatTextWithOptions(doc.Source, documentIsClass(doc), vbafmt.FormatConfig{
+		LineNumbers: vbafmt.LineNumberModePreserve,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if formatted == doc.Source {
+		return []protocol.TextEdit{}, nil
+	}
+	return []protocol.TextEdit{{
+		Range:   fullDocumentRange(doc.Source),
+		NewText: formatted,
+	}}, nil
 }
 
 func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
@@ -788,6 +814,30 @@ func moduleKindForPath(path string) string {
 	}
 }
 
+func documentSupportsFormatting(doc intel.Document) bool {
+	ext := strings.ToLower(filepath.Ext(doc.Path))
+	return ext == ".bas" || ext == ".cls"
+}
+
+func documentIsClass(doc intel.Document) bool {
+	return strings.EqualFold(doc.ModuleKind, "class") || strings.EqualFold(filepath.Ext(doc.Path), ".cls")
+}
+
+func fullDocumentRange(source string) protocol.Range {
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	source = strings.ReplaceAll(source, "\r", "\n")
+	lines := strings.Split(source, "\n")
+	lastLine := len(lines) - 1
+	lastChar := 0
+	if lastLine >= 0 {
+		lastChar = utf16Len(lines[lastLine])
+	}
+	return protocol.Range{
+		Start: protocol.Position{Line: 0, Character: 0},
+		End:   protocol.Position{Line: protocol.UInteger(max(0, lastLine)), Character: protocol.UInteger(max(0, lastChar))},
+	}
+}
+
 func toProtocolRange(r intel.Range) protocol.Range {
 	return protocol.Range{Start: toProtocolPosition(r.Start), End: toProtocolPosition(r.End)}
 }
@@ -803,6 +853,10 @@ func toProtocolPosition(pos intel.Position) protocol.Position {
 
 func fromProtocolPosition(pos protocol.Position) intel.Position {
 	return intel.Position{Line: int(pos.Line), Character: int(pos.Character)}
+}
+
+func utf16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
 }
 
 func diagnosticSeverity(severity string) protocol.DiagnosticSeverity {
