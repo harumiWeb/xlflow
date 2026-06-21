@@ -1,6 +1,8 @@
 package vbaproject
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -30,6 +32,10 @@ func Read(data []byte) (*Project, error) {
 	}
 	di := ovba.ParseDir(dirPlain)
 
+	protected, err := isProtected(pt.CMG)
+	if err != nil {
+		return nil, err
+	}
 	p := &Project{
 		Props: ProjectProps{
 			ProjectID: pt.ID, Name: pt.Name,
@@ -37,7 +43,7 @@ func Read(data []byte) (*Project, error) {
 		},
 		Protection: Protection{
 			CMG: pt.CMG, DPB: pt.DPB, GC: pt.GC,
-			IsProtected: isProtected(pt.DPB),
+			IsProtected: protected,
 		},
 	}
 	for _, name := range di.RefNames {
@@ -110,12 +116,42 @@ func classify(name, projectKey string, c *cfb.Container) ModuleType {
 	return ModuleClass
 }
 
-// isProtected determines whether a project is protected. The spec-compliant check decrypts
-// CMG/ProjectProtectionState ([MS-OVBA] §2.4.3), but this library does not decrypt the DPB, so it uses a
-// heuristic: an unprotected DPB is a short obfuscated value (~16-20 chars measured in the corpus), while a
-// protected one contains a key hash and is longer (over 60 chars in the protected sample). The threshold 28
-// is the valley between them. Protected projects are treated as an edge case in v1 (see DESIGN.md).
-func isProtected(dpb string) bool { return len(dpb) > 28 }
+// ProjectProtectionState bits (MS-OVBA §2.3.1.15). The decrypted CMG Data is a
+// 4-byte little-endian value; any of these bits means the project's VBA is locked
+// for viewing, which pack cannot regenerate from source, so such projects are
+// rejected (see write.go / pack.go).
+const (
+	fUserProtected uint32 = 1 << 0
+	fHostProtected uint32 = 1 << 1
+	fVBAProtected  uint32 = 1 << 2
+)
+
+// isProtected reports whether the project's CMG (ProjectProtectionState, §2.3.1.15)
+// marks it as protected. cmg is the unquoted hex string from the PROJECT stream.
+// An earlier heuristic measured DPB (password) length; this reads the actual
+// protection bits by decrypting CMG (reversible obfuscation, no password needed).
+//
+// An empty CMG means the project has no protection record and is unprotected. A
+// CMG that cannot be hex-decoded or decrypted, or whose state is not 4 bytes, is a
+// fail-loud error rather than a silent misclassification in either direction.
+func isProtected(cmg string) (bool, error) {
+	if cmg == "" {
+		return false, nil
+	}
+	raw, err := hex.DecodeString(cmg)
+	if err != nil {
+		return false, fmt.Errorf("vbaproject: CMG hex decode: %w", err)
+	}
+	state, err := ovba.DecryptData(raw)
+	if err != nil {
+		return false, fmt.Errorf("vbaproject: CMG decrypt: %w", err)
+	}
+	if len(state) != 4 {
+		return false, fmt.Errorf("vbaproject: CMG protection state is %d bytes (want 4)", len(state))
+	}
+	bits := binary.LittleEndian.Uint32(state)
+	return bits&(fUserProtected|fHostProtected|fVBAProtected) != 0, nil
+}
 
 // firstSegment returns the first "/"-separated component of a CFB stream path
 // (e.g. "VBA" for "VBA/dir", "UserForm1" for "UserForm1/\x03VBFrame", and

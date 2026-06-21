@@ -120,6 +120,46 @@ func TestProtectedAndForm(t *testing.T) {
 	}
 }
 
+func TestIsProtectedClassifiesCorpus(t *testing.T) {
+	// p3 is the protected sample; the rest are unprotected. CMG comes straight
+	// from the PROJECT stream of each real fixture, so this is the external
+	// oracle for the decryption + bit interpretation.
+	cases := []struct {
+		book string
+		want bool
+	}{
+		{"p1_compiled", false},
+		{"p2_refs", false},
+		{"p3_protected", true},
+		{"p5_mbcs", false},
+		{"p6_nested_form", false},
+	}
+	for _, c := range cases {
+		t.Run(c.book, func(t *testing.T) {
+			p, err := Read(loadCorpus(t, c.book))
+			if err != nil {
+				t.Fatalf("Read(%s): %v", c.book, err)
+			}
+			if p.Protection.IsProtected != c.want {
+				t.Errorf("%s: IsProtected=%v want %v (CMG=%q)",
+					c.book, p.Protection.IsProtected, c.want, p.Protection.CMG)
+			}
+		})
+	}
+}
+
+func TestIsProtectedEdgeCases(t *testing.T) {
+	// Empty CMG => no protection record => unprotected, no error.
+	got, err := isProtected("")
+	if err != nil || got {
+		t.Fatalf("empty CMG: got (%v, %v), want (false, nil)", got, err)
+	}
+	// Non-hex CMG => fail-loud.
+	if _, err := isProtected("zz"); err == nil {
+		t.Error("non-hex CMG: expected error, got nil")
+	}
+}
+
 func TestReadPreservationRawSpans(t *testing.T) {
 	bin, err := os.ReadFile("testdata/corpus/p1_compiled.bin")
 	if err != nil {
