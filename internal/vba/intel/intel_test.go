@@ -859,6 +859,224 @@ Option Explicit
 	}
 }
 
+func TestCompletionsRespectValueRHSContext(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Helpers.bas"), []byte(`Attribute VB_Name = "Helpers"
+Option Explicit
+Public Sub RunReport()
+End Sub
+Public Function BuildName() As String
+End Function
+Public Function BuildWorkbook() As Workbook
+End Function
+Public Const PUBLIC_VALUE As Long = 1
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path: filepath.Join(moduleDir, "Main.bas"),
+		Source: `Option Explicit
+Private Const MODULE_VALUE As Long = 2
+Sub Test()
+    Dim localValue As Long
+    Dim value As Variant
+    value = xl
+    value = Bu
+    value = PU
+    value = local
+    Range("A1").Value = xl
+End Sub
+`,
+	}
+
+	constLine := `    value = xl`
+	items, err := analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(constLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "xlUp") {
+		t.Fatalf("value RHS context should include constants: %+v", items)
+	}
+	if hasCompletion(items, "Dim") || hasCompletion(items, "Workbook") {
+		t.Fatalf("value RHS context should exclude snippets and type-only candidates: %+v", items)
+	}
+
+	funcLine := `    value = Bu`
+	items, err = analyzer.Completions(doc, Position{Line: 6, Character: utf16Len(funcLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "BuildName") || !hasCompletion(items, "BuildWorkbook") {
+		t.Fatalf("value RHS context should include value-returning functions: %+v", items)
+	}
+	if hasCompletion(items, "RunReport") {
+		t.Fatalf("value RHS context should exclude Sub procedures: %+v", items)
+	}
+
+	publicConstLine := `    value = PU`
+	items, err = analyzer.Completions(doc, Position{Line: 7, Character: utf16Len(publicConstLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "PUBLIC_VALUE") {
+		t.Fatalf("value RHS context should include visible constants: %+v", items)
+	}
+
+	localLine := `    value = local`
+	items, err = analyzer.Completions(doc, Position{Line: 8, Character: utf16Len(localLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "localValue") {
+		t.Fatalf("value RHS context should include current procedure locals: %+v", items)
+	}
+
+	propertyLine := `    Range("A1").Value = xl`
+	items, err = analyzer.Completions(doc, Position{Line: 9, Character: utf16Len(propertyLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "xlUp") {
+		t.Fatalf("value RHS context should support property assignment targets: %+v", items)
+	}
+}
+
+func TestCompletionsRespectConditionContexts(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Helpers.bas"), []byte(`Attribute VB_Name = "Helpers"
+Option Explicit
+Public Function BuildReady() As Boolean
+End Function
+Public Const PUBLIC_FLAG As Boolean = True
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path: filepath.Join(moduleDir, "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim localFlag As Boolean
+    If PU
+    If local
+    Do While Bu
+    If localFlag = PU
+End Sub
+`,
+	}
+
+	publicFlagLine := `    If PU`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(publicFlagLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "PUBLIC_FLAG") {
+		t.Fatalf("condition context should include constants: %+v", items)
+	}
+	if hasCompletion(items, "Dim") || hasCompletion(items, "String") {
+		t.Fatalf("condition context should exclude snippets and type-only candidates: %+v", items)
+	}
+
+	localLine := `    If local`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(localLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "localFlag") {
+		t.Fatalf("condition context should include current procedure locals: %+v", items)
+	}
+
+	functionLine := `    Do While Bu`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(functionLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "BuildReady") {
+		t.Fatalf("condition context should include value-returning functions: %+v", items)
+	}
+
+	comparisonLine := `    If localFlag = PU`
+	items, err = analyzer.Completions(doc, Position{Line: 6, Character: utf16Len(comparisonLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "PUBLIC_FLAG") {
+		t.Fatalf("condition context should complete after comparison operators: %+v", items)
+	}
+}
+
+func TestCompletionsReturnControlFlowSnippetsAndForEachValues(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Helpers.bas"), []byte(`Attribute VB_Name = "Helpers"
+Option Explicit
+Public Function BuildItems() As Collection
+End Function
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path: filepath.Join(moduleDir, "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim items As Collection
+    I
+    For Each item In Bu
+    For Each item In items
+End Sub
+`,
+	}
+
+	snippetLine := `    I`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(snippetLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "If Then") || !hasCompletion(items, "If Else") {
+		t.Fatalf("procedure statement context should include If snippets: %+v", items)
+	}
+
+	functionLine := `    For Each item In Bu`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(functionLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "BuildItems") {
+		t.Fatalf("For Each In context should include value-returning functions: %+v", items)
+	}
+	if hasCompletion(items, "For Each") || hasCompletion(items, "Collection") {
+		t.Fatalf("For Each In context should exclude snippets and type-only candidates: %+v", items)
+	}
+
+	localLine := `    For Each item In items`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(localLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "items") {
+		t.Fatalf("For Each In context should include local collection variables: %+v", items)
+	}
+}
+
 func TestCompletionsHidePrivateSymbolsFromOtherModules(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

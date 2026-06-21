@@ -467,6 +467,15 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if setPrefix, replaceRange, ok := setRHSCompletionContext(prefix, pos); ok {
 		return a.setRHSCompletions(setPrefix, replaceRange, doc, pos, open)
 	}
+	if valuePrefix, replaceRange, ok := valueRHSCompletionContext(prefix, pos); ok {
+		return a.valueRHSCompletions(valuePrefix, replaceRange, doc, pos, open)
+	}
+	if conditionPrefix, replaceRange, ok := conditionCompletionContext(prefix, pos); ok {
+		return a.valueRHSCompletions(conditionPrefix, replaceRange, doc, pos, open)
+	}
+	if eachPrefix, replaceRange, ok := forEachInCompletionContext(prefix, pos); ok {
+		return a.valueRHSCompletions(eachPrefix, replaceRange, doc, pos, open)
+	}
 	word, _ := WordAt(doc.Source, pos)
 	if strings.TrimSpace(word) == "" {
 		word = currentIdentifierPrefix(prefix)
@@ -620,6 +629,109 @@ func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Docum
 		})
 	}
 	return uniqueCompletions(out), nil
+}
+
+func (a Analyzer) valueRHSCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
+	var out []Completion
+	for _, constant := range a.DB.ConstantsList() {
+		if !completionMatches(constant.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:         constant.Name,
+			Kind:          "constant",
+			Detail:        firstNonEmpty(constant.EnumGroup, constant.Type, constant.Kind),
+			Documentation: constant.Summary,
+			ReplaceRange:  &replace,
+		})
+	}
+	for _, global := range a.DB.GlobalsList() {
+		if !completionMatches(global.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        global.Name,
+			Kind:         "variable",
+			Detail:       global.ReturnType,
+			ReplaceRange: &replace,
+		})
+	}
+	for _, control := range a.formControls(doc) {
+		if !completionMatches(control.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        control.Name,
+			Kind:         "variable",
+			Detail:       control.Type,
+			ReplaceRange: &replace,
+		})
+	}
+	out = append(out, localValueCompletionsFromSource(doc, pos, prefix, replaceRange)...)
+	syms, err := a.WorkspaceSymbols(open, prefix)
+	if err != nil {
+		return nil, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	for _, sym := range syms {
+		if !a.visibleCompletionSymbol(doc, currentProcedure, sym) || !completionMatches(sym.Name, prefix) {
+			continue
+		}
+		if !valueRHSCompletionSymbol(sym) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        sym.Name,
+			Kind:         completionKindForSymbol(sym.Kind),
+			Detail:       sym.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out), nil
+}
+
+func localValueCompletionsFromSource(doc Document, pos Position, prefix string, replaceRange Range) []Completion {
+	lines := normalizedLines(doc.Source)
+	if pos.Line >= len(lines) {
+		return nil
+	}
+	startLine := 0
+	if scope, ok := currentProcedureRangeForDocument(doc, pos); ok {
+		startLine = scope.Start.Line
+	}
+	var out []Completion
+	dimRe := regexp.MustCompile(`(?i)^\s*Dim\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:As\s+([A-Za-z_][A-Za-z0-9_.]*))?`)
+	constRe := regexp.MustCompile(`(?i)^\s*(?:Private\s+|Public\s+)?Const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:As\s+([A-Za-z_][A-Za-z0-9_.]*))?`)
+	for lineNo := startLine; lineNo <= pos.Line && lineNo < len(lines); lineNo++ {
+		text := stripLineComment(lines[lineNo])
+		if m := dimRe.FindStringSubmatch(text); len(m) > 0 {
+			if completionMatches(m[1], prefix) {
+				replace := replaceRange
+				out = append(out, Completion{
+					Label:        m[1],
+					Kind:         "variable",
+					Detail:       firstNonEmpty(m[2], "Variant"),
+					ReplaceRange: &replace,
+				})
+			}
+		}
+		if m := constRe.FindStringSubmatch(text); len(m) > 0 {
+			if completionMatches(m[1], prefix) {
+				replace := replaceRange
+				out = append(out, Completion{
+					Label:        m[1],
+					Kind:         "constant",
+					Detail:       firstNonEmpty(m[2], "Variant"),
+					ReplaceRange: &replace,
+				})
+			}
+		}
+	}
+	return out
 }
 
 type typeCompletionName struct {
@@ -1497,6 +1609,15 @@ func setRHSCompletionSymbol(sym Symbol) bool {
 	}
 }
 
+func valueRHSCompletionSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "const", "module_variable", "local_variable", "field", "parameter", "function", "property", "property_get":
+		return true
+	default:
+		return false
+	}
+}
+
 func returnTypeFromDetail(detail string) string {
 	re := regexp.MustCompile(`(?i)\bAs\s+([A-Za-z_][A-Za-z0-9_.]*)\s*$`)
 	if m := re.FindStringSubmatch(strings.TrimSpace(detail)); len(m) > 1 {
@@ -1789,6 +1910,54 @@ var procedureStatementCompletions = []syntaxCompletionSpec{
 		insertText:    "Set ${1:target} = ${2:expression}",
 		documentation: "Assigns an object reference in a procedure.",
 	},
+	{
+		label:         "If Then",
+		detail:        "Conditional block",
+		insertText:    "If ${1:condition} Then\n    $0\nEnd If",
+		documentation: "Creates an If block.",
+	},
+	{
+		label:         "If Else",
+		detail:        "Conditional block with Else",
+		insertText:    "If ${1:condition} Then\n    ${2:statements}\nElse\n    $0\nEnd If",
+		documentation: "Creates an If block with an Else branch.",
+	},
+	{
+		label:         "For Next",
+		detail:        "Counter loop",
+		insertText:    "For ${1:i} = ${2:1} To ${3:10}\n    $0\nNext ${1:i}",
+		documentation: "Creates a For...Next loop.",
+	},
+	{
+		label:         "For Each",
+		detail:        "Collection loop",
+		insertText:    "For Each ${1:item} In ${2:collection}\n    $0\nNext ${1:item}",
+		documentation: "Creates a For Each loop.",
+	},
+	{
+		label:         "Do While",
+		detail:        "Condition loop",
+		insertText:    "Do While ${1:condition}\n    $0\nLoop",
+		documentation: "Creates a Do While loop.",
+	},
+	{
+		label:         "Do Until",
+		detail:        "Condition loop",
+		insertText:    "Do Until ${1:condition}\n    $0\nLoop",
+		documentation: "Creates a Do Until loop.",
+	},
+	{
+		label:         "Select Case",
+		detail:        "Select block",
+		insertText:    "Select Case ${1:expression}\nCase ${2:value}\n    $0\nEnd Select",
+		documentation: "Creates a Select Case block.",
+	},
+	{
+		label:         "With",
+		detail:        "With block",
+		insertText:    "With ${1:expression}\n    $0\nEnd With",
+		documentation: "Creates a With block.",
+	},
 }
 
 func completionsFromSpecs(specs []syntaxCompletionSpec, prefix string, replaceRange Range) []Completion {
@@ -1888,6 +2057,53 @@ func setRHSCompletionContext(prefix string, pos Position) (rhsPrefix string, rep
 	}, true
 }
 
+func valueRHSCompletionContext(prefix string, pos Position) (rhsPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	eq := assignmentOperatorIndex(beforeWord)
+	if eq < 0 {
+		return "", Range{}, false
+	}
+	lhs := strings.TrimSpace(beforeWord[:eq])
+	if disallowedValueAssignmentLHS(lhs) {
+		return "", Range{}, false
+	}
+	if strings.TrimSpace(beforeWord[eq+1:]) != "" {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func conditionCompletionContext(prefix string, pos Position) (conditionPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !conditionExpressionPrefix(beforeWord) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func forEachInCompletionContext(prefix string, pos Position) (eachPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !regexp.MustCompile(`(?i)(^|:)\s*For\s+Each\s+[A-Za-z_][A-Za-z0-9_]*\s+In\s*$`).MatchString(beforeWord) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
 func createObjectProgIDCompletionContext(prefix string, pos Position) (progIDPrefix string, replaceRange Range, ok bool) {
 	quote := strings.LastIndex(prefix, `"`)
 	if quote < 0 {
@@ -1920,6 +2136,99 @@ func insideOpenString(prefix string) bool {
 		inString = !inString
 	}
 	return inString
+}
+
+func assignmentOperatorIndex(prefix string) int {
+	inString := false
+	depth := 0
+	idx := -1
+	for i := 0; i < len(prefix); i++ {
+		ch := prefix[i]
+		if ch == '"' {
+			if inString && i+1 < len(prefix) && prefix[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case '=':
+			if depth == 0 && isAssignmentEqual(prefix, i) {
+				idx = i
+			}
+		}
+	}
+	return idx
+}
+
+func isAssignmentEqual(prefix string, idx int) bool {
+	if idx > 0 {
+		switch prefix[idx-1] {
+		case '<', '>', '=':
+			return false
+		}
+	}
+	if idx+1 < len(prefix) {
+		switch prefix[idx+1] {
+		case '<', '>', '=':
+			return false
+		}
+	}
+	return true
+}
+
+func disallowedValueAssignmentLHS(lhs string) bool {
+	fields := strings.Fields(strings.ToLower(lhs))
+	if len(fields) == 0 {
+		return true
+	}
+	switch fields[0] {
+	case "set", "if", "elseif", "while", "until", "for", "case", "select":
+		return true
+	case "do", "loop":
+		return len(fields) > 1 && (fields[1] == "while" || fields[1] == "until")
+	default:
+		return false
+	}
+}
+
+func conditionExpressionPrefix(prefix string) bool {
+	clean := strings.TrimSpace(stripLineComment(prefix))
+	if clean == "" {
+		return false
+	}
+	lower := strings.ToLower(clean)
+	if regexp.MustCompile(`\bthen\b`).MatchString(lower) {
+		return false
+	}
+	switch {
+	case lower == "if" || strings.HasPrefix(lower, "if "):
+		return true
+	case lower == "elseif" || strings.HasPrefix(lower, "elseif "):
+		return true
+	case lower == "while" || strings.HasPrefix(lower, "while "):
+		return true
+	case lower == "do while" || strings.HasPrefix(lower, "do while "):
+		return true
+	case lower == "do until" || strings.HasPrefix(lower, "do until "):
+		return true
+	case lower == "loop while" || strings.HasPrefix(lower, "loop while "):
+		return true
+	case lower == "loop until" || strings.HasPrefix(lower, "loop until "):
+		return true
+	default:
+		return false
+	}
 }
 
 func endsWithTypeIntro(prefix string) bool {
