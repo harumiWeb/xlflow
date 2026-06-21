@@ -202,3 +202,67 @@ func TestNormalizeDocumentEdited(t *testing.T) {
 		t.Errorf("edited document mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+func TestNormalizeFormKeepsExistingHeaderSwapsCode(t *testing.T) {
+	existing := &Module{
+		Name: "UserForm1",
+		Type: ModuleForm,
+		Source: "Attribute VB_Name = \"UserForm1\"\r\n" +
+			"Attribute VB_Base = \"0{5A352896-124D-420C-80E8-2C4BC088CC1C}{95A506B3-11F2-4259-860C-CB0FC1817653}\"\r\n" +
+			"Attribute VB_GlobalNameSpace = False\r\n" +
+			"Attribute VB_Creatable = False\r\n" +
+			"Attribute VB_PredeclaredId = True\r\n" +
+			"Attribute VB_Exposed = False\r\n" +
+			"Attribute VB_TemplateDerived = False\r\n" +
+			"Attribute VB_Customizable = False\r\n" +
+			"Private Sub CommandButton1_Click()\r\n" +
+			"    Debug.Print \"OLD\"\r\n" +
+			"End Sub\r\n",
+	}
+	disk := "VERSION 5.00\r\n" +
+		"Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\r\n" +
+		"   Caption = \"Form\"\r\n" +
+		"   ClientHeight = 3000\r\n" +
+		"End\r\n" +
+		"Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Attribute VB_GlobalNameSpace = False\r\n" +
+		"Attribute VB_Creatable = False\r\n" +
+		"Attribute VB_PredeclaredId = True\r\n" +
+		"Attribute VB_Exposed = False\r\n" +
+		"Private Sub CommandButton1_Click()\r\n" +
+		"    Debug.Print \"NEW\"\r\n" +
+		"End Sub\r\n"
+	want := "Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Attribute VB_Base = \"0{5A352896-124D-420C-80E8-2C4BC088CC1C}{95A506B3-11F2-4259-860C-CB0FC1817653}\"\r\n" +
+		"Attribute VB_GlobalNameSpace = False\r\n" +
+		"Attribute VB_Creatable = False\r\n" +
+		"Attribute VB_PredeclaredId = True\r\n" +
+		"Attribute VB_Exposed = False\r\n" +
+		"Attribute VB_TemplateDerived = False\r\n" +
+		"Attribute VB_Customizable = False\r\n" +
+		"Private Sub CommandButton1_Click()\r\n" +
+		"    Debug.Print \"NEW\"\r\n" +
+		"End Sub\r\n"
+	got, err := NormalizeModuleSource(ModuleForm, disk, existing)
+	if err != nil {
+		t.Fatalf("NormalizeModuleSource: %v", err)
+	}
+	if got != want {
+		t.Errorf("normalizeForm mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestNormalizeFormErrorsWithoutExisting(t *testing.T) {
+	_, err := NormalizeModuleSource(ModuleForm, "Attribute VB_Name = \"X\"\r\ncode\r\n", nil)
+	if err == nil {
+		t.Fatal("expected error when existing is nil")
+	}
+}
+
+func TestNormalizeFormErrorsWhenFRMHasNoAttribute(t *testing.T) {
+	existing := &Module{Source: "Attribute VB_Name = \"X\"\r\nold\r\n"}
+	_, err := NormalizeModuleSource(ModuleForm, "VERSION 5.00\r\nBegin x\r\nEnd\r\n", existing)
+	if err == nil {
+		t.Fatal("expected error when .frm has no Attribute VB_ line")
+	}
+}
