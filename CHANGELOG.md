@@ -6,6 +6,7 @@ All notable changes to xlflow will be documented in this file.
 
 - Deprecated the legacy PowerShell bridge for v0.15.0. Windows `auto` bridge mode now uses the `.NET` bridge without falling back to PowerShell; explicit `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` remain available only as deprecated opt-ins and emit `powershell_bridge_deprecated`. PowerShell bridge removal is planned for v0.16.0.
 - Fixed `xlflow analyze` false positives for `VBA209` array element and UDT-array member assignments, clarified `VBA204` fallthrough guidance, and recognized paired Push/Pop `Application` state restore helpers for `VBA203`.
+- Extended experimental `xlflow pack` to update a UserForm's code-behind from its `.frm` source when the form already exists in the template (ADR-0012 Stage 2). The form's designer storage is carried through from the template byte-for-byte and `.frx` is not read, so layout is preserved but not authored; a `.frm` whose form is not in the template fails loudly with `pack_userform_generation_unsupported`. See `docs/specs/pack-command.md`.
 
 ## v0.14.1
 
