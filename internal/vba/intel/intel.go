@@ -1990,10 +1990,27 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 		return "", "", false
 	}
 	receiver := expressionBefore(strings.TrimSuffix(beforeWord, "."))
+	receiver = trimWithExpressionPrefix(receiver)
 	if receiver == "" {
 		return "", "", false
 	}
 	return wordPrefix, receiver, true
+}
+
+func trimWithExpressionPrefix(expr string) string {
+	trimmed := strings.TrimSpace(expr)
+	if len(trimmed) < len("With ") || !strings.EqualFold(trimmed[:len("With")], "With") || !isSpaceByte(trimmed[len("With")]) {
+		return expr
+	}
+	rest := strings.TrimSpace(trimmed[len("With"):])
+	if rest == "" {
+		return expr
+	}
+	return rest
+}
+
+func isSpaceByte(ch byte) bool {
+	return ch == ' ' || ch == '\t'
 }
 
 func (a Analyzer) withBlockMemberCompletionContext(doc Document, pos Position, prefix string) (memberPrefix string, receiverType string, ok bool) {

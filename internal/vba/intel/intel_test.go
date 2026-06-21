@@ -598,8 +598,17 @@ End Sub
 `
 	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
 
+	withStartLine := `    With ws.Ra`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(withStartLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Range") {
+		t.Fatalf("With receiver expression should complete Worksheet.Range: %+v", items)
+	}
+
 	valueLine := `        .Va`
-	items, err := analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(valueLine)}, nil)
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(valueLine)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
