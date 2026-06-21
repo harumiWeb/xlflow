@@ -1297,6 +1297,7 @@ func (a *app) packCommand() *cobra.Command {
 					"standard":        meta.Standard,
 					"class":           meta.Class,
 					"document":        meta.Document,
+					"form":            meta.Form,
 					"carried_streams": meta.CarriedStreams,
 				},
 			}

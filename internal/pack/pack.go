@@ -27,16 +27,19 @@ const (
 	// ModuleTypeDocument is an Excel host document module, such as ThisWorkbook or a sheet module.
 	ModuleTypeDocument ModuleType = "document"
 
-	// ModuleTypeForm is a UserForm module. It is detected to fail loudly because MVP pack never generates forms.
+	// ModuleTypeForm is a UserForm module. Its code-behind is updated from a .frm when the form
+	// already exists in the template; the form's designer storage is carried verbatim and never
+	// authored, so creating a new form is unsupported.
 	ModuleTypeForm ModuleType = "form"
 )
 
 // SourceModule is one source-tree module to apply to a template vbaProject.bin.
 //
-// Source must be the disk-form text read from a .bas or .cls file. Standard and
-// class modules are replaced when Name and Type match an existing template
-// module. Document modules are replaced only by exact module name match against
-// an existing template document module. UserForm modules are unsupported.
+// Source is the disk-form text read from a .bas/.cls/.frm file. Standard and class modules are
+// replaced when Name and Type match an existing template module. Document modules are replaced by
+// exact module name match against an existing template document module. A UserForm's code-behind is
+// replaced when the form already exists in the template; its designer layout is preserved, not
+// authored, and creating a new form is unsupported.
 type SourceModule struct {
 	Name   string
 	Type   ModuleType
@@ -48,6 +51,7 @@ type PackMeta struct {
 	Standard       int
 	Class          int
 	Document       int
+	Form           int
 	CarriedStreams int
 }
 
@@ -158,9 +162,6 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 	var meta PackMeta
 	seen := make(map[string]bool, len(sources))
 	for _, source := range sources {
-		if source.Type == ModuleTypeForm {
-			return PackMeta{}, ErrUserFormGenerationUnsupported
-		}
 		if source.Name == "" {
 			return PackMeta{}, fmt.Errorf("%w: source module name is empty", ErrAmbiguousLayout)
 		}
@@ -175,6 +176,12 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 		seen[key] = true
 		idx, ok := byKey[key]
 		if !ok {
+			if source.Type == ModuleTypeForm {
+				// A form's designer storage cannot be authored from source, so creating a
+				// form that is not already in the template is UserForm generation (Stage 3),
+				// not the generic "cannot add modules" limitation.
+				return PackMeta{}, fmt.Errorf("%w: form %q is not in the template; pack updates the code-behind of existing forms only and cannot create a new UserForm", ErrUserFormGenerationUnsupported, source.Name)
+			}
 			return PackMeta{}, fmt.Errorf("%w: source module %q is not in the template; pack updates existing modules only and cannot add new modules in the experimental MVP", ErrAmbiguousLayout, source.Name)
 		}
 		normalized, err := vbaproject.NormalizeModuleSource(targetType, source.Source, &project.Modules[idx])
@@ -189,6 +196,8 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 			meta.Class++
 		case ModuleTypeDocument:
 			meta.Document++
+		case ModuleTypeForm:
+			meta.Form++
 		}
 	}
 	return meta, nil
@@ -203,7 +212,7 @@ func toProjectModuleType(t ModuleType) (vbaproject.ModuleType, error) {
 	case ModuleTypeDocument:
 		return vbaproject.ModuleDocument, nil
 	case ModuleTypeForm:
-		return vbaproject.ModuleForm, ErrUserFormGenerationUnsupported
+		return vbaproject.ModuleForm, nil
 	default:
 		return 0, fmt.Errorf("%w: unsupported source module type %q", ErrAmbiguousLayout, t)
 	}
