@@ -142,6 +142,18 @@ func isProtected(cmg string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("vbaproject: CMG hex decode: %w", err)
 	}
+	// CMG always decrypts to a 4-byte ProjectProtectionState (§2.3.1.15), so the
+	// encrypted structure has a fixed size: Seed+VersionEnc+ProjKeyEnc (3) +
+	// IgnoredEnc + LengthEnc (4) + DataEnc (4). Validate that up front so a large
+	// but internally consistent CMG cannot force O(size) decrypt work before the
+	// 4-byte state check rejects it.
+	if len(raw) < 11 {
+		return false, fmt.Errorf("vbaproject: CMG too short (%d bytes)", len(raw))
+	}
+	ignoredLen := int((raw[0] & 0x06) >> 1)
+	if want := 3 + ignoredLen + 4 + 4; len(raw) != want {
+		return false, fmt.Errorf("vbaproject: CMG length is %d bytes (want %d)", len(raw), want)
+	}
 	state, err := ovba.DecryptData(raw)
 	if err != nil {
 		return false, fmt.Errorf("vbaproject: CMG decrypt: %w", err)

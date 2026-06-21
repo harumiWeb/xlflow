@@ -158,6 +158,13 @@ func TestIsProtectedEdgeCases(t *testing.T) {
 	if _, err := isProtected("zz"); err == nil {
 		t.Error("non-hex CMG: expected error, got nil")
 	}
+	// A CMG whose structure size is wrong (20 bytes; a valid CMG is 11-14) must be
+	// rejected up front, before decryption does O(size) work. Seed byte 0x00 here
+	// implies an expected length of 11.
+	oversized := "0002000000000000000000000000000000000000" // 20 bytes
+	if _, err := isProtected(oversized); err == nil {
+		t.Error("oversized CMG: expected error, got nil")
+	}
 }
 
 func TestReadPreservationRawSpans(t *testing.T) {
