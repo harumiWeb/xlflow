@@ -74,7 +74,7 @@ public sealed class DoctorCommand : ICommandHandler
         {
             return FailedWithDiagnostics(request, diagnostics, new BridgeError(
                 Code: "systemprofile_desktop_missing",
-                Message: MissingSystemProfileDesktopMessage(),
+                Message: MissingSystemProfileDesktopMessage(systemProfileDesktop),
                 Phase: "doctor",
                 Source: "xlflow-excel-bridge",
                 Details: new Dictionary<string, object?>
@@ -211,13 +211,13 @@ public sealed class DoctorCommand : ICommandHandler
         }
     }
 
-    private static string MissingSystemProfileDesktopMessage()
+    private static string MissingSystemProfileDesktopMessage(SystemProfileDesktopDiagnostics systemProfileDesktop)
     {
-        return """
+        return $"""
             systemprofile Desktop directories are missing.
             Create both directories:
-            - C:\Windows\System32\config\systemprofile\Desktop
-            - C:\Windows\SysWOW64\config\systemprofile\Desktop
+            - {systemProfileDesktop.System32.Path}
+            - {systemProfileDesktop.SysWow64.Path}
 
             This is required for Excel COM automation in non-interactive sessions such as SSH, services, or CI.
             """;

@@ -601,12 +601,17 @@ func (r renderer) renderDoctor(env Envelope) string {
 		default:
 			b.WriteString(r.checkLine(false, "Systemprofile Desktop", systemProfileDetail))
 		}
-		if systemProfileStatus == "failed" && (env.Error == nil || !strings.Contains(env.Error.Message, "Create both directories:")) {
+		if systemProfileStatus == "failed" && (env.Error == nil || env.Error.Code != "systemprofile_desktop_missing") {
+			system32Path, syswow64Path := systemProfileDesktopPaths(systemProfileDesktop)
 			b.WriteString("\n")
 			b.WriteString("systemprofile Desktop directories are missing.\n")
 			b.WriteString("Create both directories:\n")
-			b.WriteString("- C:\\Windows\\System32\\config\\systemprofile\\Desktop\n")
-			b.WriteString("- C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop\n\n")
+			b.WriteString("- ")
+			b.WriteString(system32Path)
+			b.WriteString("\n")
+			b.WriteString("- ")
+			b.WriteString(syswow64Path)
+			b.WriteString("\n\n")
 			b.WriteString("This is required for Excel COM automation in non-interactive sessions such as SSH, services, or CI.\n")
 		}
 	}
@@ -645,6 +650,20 @@ func summarizeSystemProfileDesktop(systemProfileDesktop map[string]any) (string,
 	default:
 		return "warning", "systemprofile Desktop readiness could not be fully inspected"
 	}
+}
+
+func systemProfileDesktopPaths(systemProfileDesktop map[string]any) (string, string) {
+	system32 := objectMap(systemProfileDesktop["system32"])
+	syswow64 := objectMap(systemProfileDesktop["syswow64"])
+	system32Path := stringValue(system32, "path")
+	if system32Path == "" {
+		system32Path = "C:\\Windows\\System32\\config\\systemprofile\\Desktop"
+	}
+	syswow64Path := stringValue(syswow64, "path")
+	if syswow64Path == "" {
+		syswow64Path = "C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop"
+	}
+	return system32Path, syswow64Path
 }
 
 func (r renderer) doctorBool(diag map[string]any, excel map[string]any, flatKey string, nestedKey string) bool {

@@ -147,7 +147,9 @@ public sealed class DoctorCommandTests
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
-            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: false, SysWow64: true));
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(
+                System32: new SystemProfileDesktopPathDiagnostics(@"D:\Windows\System32\config\systemprofile\Desktop", SystemProfileDesktopStatus.Missing),
+                SysWow64: new SystemProfileDesktopPathDiagnostics(@"D:\Windows\SysWOW64\config\systemprofile\Desktop", SystemProfileDesktopStatus.Exists)));
 
         var command = new DoctorCommand(() => probeResult);
         var request = new BridgeRequest
@@ -165,7 +167,8 @@ public sealed class DoctorCommandTests
         Assert.Equal("systemprofile_desktop_missing", error.GetProperty("code").GetString());
         Assert.Equal("doctor", error.GetProperty("phase").GetString());
         Assert.Contains("systemprofile Desktop directories are missing", error.GetProperty("message").GetString());
-        Assert.Contains(@"C:\Windows\System32\config\systemprofile\Desktop", error.GetProperty("message").GetString());
+        Assert.Contains(@"D:\Windows\System32\config\systemprofile\Desktop", error.GetProperty("message").GetString());
+        Assert.Contains(@"D:\Windows\SysWOW64\config\systemprofile\Desktop", error.GetProperty("message").GetString());
 
         var systemProfileDesktop = json.RootElement.GetProperty("diagnostics").GetProperty("excel").GetProperty("systemprofile_desktop");
         Assert.Equal("missing", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
