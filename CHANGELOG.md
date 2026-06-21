@@ -15,6 +15,7 @@ All notable changes to xlflow will be documented in this file.
 - Strengthened Excel table collection metadata and resolution tests for `ListObjects(...).ListColumns(...).DataBodyRange` chains, including Japanese table and column names.
 - Added Excel PivotTable/PivotField and Shape/TextFrame metadata so LSP hover and completion can resolve chains such as `PivotTables(...).PivotFields(...).DataRange` and `Shapes(...).TextFrame.Characters.Text`.
 - Added practical `Sheets(...)` inference so worksheet-like member chains such as `Sheets("Input").Range("A1")` and `ThisWorkbook.Sheets("Input").ListObjects(...)` resolve as worksheet operations without changing the underlying `Excel.Sheets` database type.
+- Expanded practical chain coverage for `FileSystemObject.OpenTextFile`, `Application.Workbooks.Open`, workbook worksheet collections, table ranges, pivot fields, and shape text frames.
 - Added reusable `xlflow lsp --stdio` VBA language server support with full-document synchronization, diagnostics, document/workspace symbols, definition lookup, references, hover, completion, and a practical built-in VBA/COM type database for common Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata.
 - Fixed LSP document symbols so incomplete VBA declarations do not return empty symbol names that VS Code rejects while editing.
 - Added `.` as an LSP completion trigger character so VS Code requests member completions such as `Range("A1").Font.Color` while typing.

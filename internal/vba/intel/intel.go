@@ -944,6 +944,9 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 		if typ, ok := a.collectionDefaultType(current); ok {
 			current = typ
 		}
+		if strings.EqualFold(current, "Object") && sheetsDefaultExpression(parts[0]) {
+			current = "Excel.Worksheet"
+		}
 	}
 	pendingSheetsDefault := strings.EqualFold(current, "Object") && sheetsDefaultExpression(parts[0])
 	for _, raw := range parts[1:] {
@@ -986,6 +989,9 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 		if called {
 			if typ, ok := a.collectionDefaultType(current); ok {
 				current = typ
+			}
+			if strings.EqualFold(current, "Object") && strings.EqualFold(member, "Sheets") {
+				current = "Excel.Worksheet"
 			}
 		}
 		pendingSheetsDefault = called && strings.EqualFold(current, "Object") && strings.EqualFold(member, "Sheets")

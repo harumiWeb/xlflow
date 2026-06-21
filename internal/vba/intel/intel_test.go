@@ -392,6 +392,61 @@ End Sub
 	}
 }
 
+func TestPracticalWorkbookFileSystemAndWorksheetChains(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub hoge()
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    Dim ts As Object
+    Set ts = fso.OpenTextFile("hoge.txt")
+
+    ts.ReadLine
+End Sub
+
+Public Sub fuga()
+    Dim wb As Workbook
+    Set wb = Application.Workbooks.Open("Sample.xlsx")
+
+    Dim ws As Worksheet
+    Set ws = wb.Worksheets("Input")
+
+    wb.Worksheets(1).Range("A1")
+    wb.Sheets("Sheet1")
+    ws.ListObjects("Table1").DataBodyRange
+    ws.PivotTables("Pivot1").PivotFields("Name")
+    ws.Shapes("Button1").TextFrame
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	assertType := func(expr, want string) {
+		t.Helper()
+		if got, ok := analyzer.resolveDocumentExpressionTypeAt(doc, expr, len(source)); !ok || got != want {
+			t.Fatalf("%s = %q, %v, want %s", expr, got, ok, want)
+		}
+	}
+
+	assertType(`fso.OpenTextFile("hoge.txt")`, "Scripting.TextStream")
+	assertType(`ts.ReadLine`, "String")
+	assertType(`Application.Workbooks.Open("Sample.xlsx")`, "Excel.Workbook")
+	assertType(`wb.Worksheets(1).Range("A1")`, "Excel.Range")
+	assertType(`wb.Sheets("Sheet1")`, "Excel.Worksheet")
+	assertType(`ws.ListObjects("Table1").DataBodyRange`, "Excel.Range")
+	assertType(`ws.PivotTables("Pivot1").PivotFields("Name")`, "Excel.PivotField")
+	assertType(`ws.Shapes("Button1").TextFrame`, "Excel.TextFrame")
+
+	line := `    ts.Read`
+	items, err := analyzer.Completions(doc, Position{Line: 8, Character: utf16Len(line)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "ReadLine") {
+		t.Fatalf("ts.Read should complete TextStream.ReadLine: %+v", items)
+	}
+}
+
 func TestHoverUsesUTF16PositionsAfterJapaneseText(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := "Option Explicit\nSub Test()\n    Debug.Print \"日本語\" & Range(\"A1\").Value\nEnd Sub\n"
