@@ -590,10 +590,35 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString(kv("Bridge role", role))
 	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "excel_installed", "com_activation"), "Excel automation", "Excel COM can be created"))
+	systemProfileDesktop := objectMap(excel["systemprofile_desktop"])
+	if len(systemProfileDesktop) > 0 {
+		systemProfileStatus, systemProfileDetail := summarizeSystemProfileDesktop(systemProfileDesktop)
+		switch systemProfileStatus {
+		case "ok":
+			b.WriteString(r.checkLine(true, "Systemprofile Desktop", systemProfileDetail))
+		case "warning":
+			b.WriteString(r.warnLine("Systemprofile Desktop", systemProfileDetail))
+		default:
+			b.WriteString(r.checkLine(false, "Systemprofile Desktop", systemProfileDetail))
+		}
+		if systemProfileStatus == "failed" && (env.Error == nil || env.Error.Code != "systemprofile_desktop_missing") {
+			system32Path, syswow64Path := systemProfileDesktopPaths(systemProfileDesktop)
+			b.WriteString("\n")
+			b.WriteString("systemprofile Desktop directories are missing.\n")
+			b.WriteString("Create both directories:\n")
+			b.WriteString("- ")
+			b.WriteString(system32Path)
+			b.WriteString("\n")
+			b.WriteString("- ")
+			b.WriteString(syswow64Path)
+			b.WriteString("\n\n")
+			b.WriteString("This is required for Excel COM automation in non-interactive sessions such as SSH, services, or CI.\n")
+		}
+	}
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(r.checkLine(boolValue(diag, "workbook_openable"), "Workbook", path))
 	} else {
-		b.WriteString(r.checkLine(false, "Workbook", "No configured workbook was checked"))
+		b.WriteString(r.skipLine("Workbook", "Not checked; run xlflow doctor --workbook to open the configured workbook"))
 	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "vbide_access", ""), "VBIDE access", "VBA project object model is available"))
 	if fix := stringValue(diag, "fix"); fix != "" {
@@ -604,6 +629,41 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func summarizeSystemProfileDesktop(systemProfileDesktop map[string]any) (string, string) {
+	system32 := objectMap(systemProfileDesktop["system32"])
+	syswow64 := objectMap(systemProfileDesktop["syswow64"])
+	system32Status := stringValue(system32, "status")
+	syswow64Status := stringValue(syswow64, "status")
+	switch {
+	case system32Status == "exists" && syswow64Status == "exists":
+		return "ok", "systemprofile Desktop directories are available"
+	case system32Status == "missing" || syswow64Status == "missing":
+		return "failed", "systemprofile Desktop directories are missing"
+	case system32Status == "access_denied" && syswow64Status == "access_denied":
+		return "warning", "systemprofile Desktop paths could not be inspected without elevated permissions"
+	case system32Status == "access_denied":
+		return "warning", "System32 path could not be inspected without elevated permissions"
+	case syswow64Status == "access_denied":
+		return "warning", "SysWOW64 path could not be inspected without elevated permissions"
+	default:
+		return "warning", "systemprofile Desktop readiness could not be fully inspected"
+	}
+}
+
+func systemProfileDesktopPaths(systemProfileDesktop map[string]any) (string, string) {
+	system32 := objectMap(systemProfileDesktop["system32"])
+	syswow64 := objectMap(systemProfileDesktop["syswow64"])
+	system32Path := stringValue(system32, "path")
+	if system32Path == "" {
+		system32Path = "C:\\Windows\\System32\\config\\systemprofile\\Desktop"
+	}
+	syswow64Path := stringValue(syswow64, "path")
+	if syswow64Path == "" {
+		syswow64Path = "C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop"
+	}
+	return system32Path, syswow64Path
 }
 
 func (r renderer) doctorBool(diag map[string]any, excel map[string]any, flatKey string, nestedKey string) bool {
@@ -686,6 +746,14 @@ func (r renderer) checkLine(ok bool, name, detail string) string {
 		marker = r.style("[ok]", "42", true)
 	}
 	return fmt.Sprintf("%s %s - %s\n", marker, r.style(name, "", true), detail)
+}
+
+func (r renderer) skipLine(name, detail string) string {
+	return fmt.Sprintf("%s %s - %s\n", r.style("[-]", "244", true), r.style(name, "", true), detail)
+}
+
+func (r renderer) warnLine(name, detail string) string {
+	return fmt.Sprintf("%s %s - %s\n", r.style("[!]", "214", true), r.style(name, "", true), detail)
 }
 
 func summarizeRuntime(runtime map[string]any) string {

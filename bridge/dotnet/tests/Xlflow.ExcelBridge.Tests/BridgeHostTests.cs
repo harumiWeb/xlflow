@@ -64,7 +64,8 @@ public sealed class BridgeHostTests
             VbideAccess: true,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
-            Error: null);
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
 
         const string request = """
             {
@@ -100,6 +101,10 @@ public sealed class BridgeHostTests
         Assert.True(excel.GetProperty("vbide_access").GetBoolean());
         Assert.Equal(1, excel.GetProperty("automation_security").GetInt32());
         Assert.Equal(JsonValueKind.Null, excel.GetProperty("trust_vba_access").ValueKind);
+        var systemProfileDesktop = excel.GetProperty("systemprofile_desktop");
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("syswow64").GetProperty("status").GetString());
+        Assert.True(systemProfileDesktop.GetProperty("ok").GetBoolean());
     }
 
     [Fact]

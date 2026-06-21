@@ -1,11 +1,11 @@
 # xlflow doctor
 
-Diagnose Excel, COM, PowerShell, VBIDE access, workbook access, and GUI-boundary prerequisites.
+Diagnose Excel, COM, PowerShell, VBIDE access, systemprofile Desktop readiness, optional workbook access, and GUI-boundary prerequisites.
 
 ## Usage
 
 ```bash
-xlflow doctor [--bridge <auto|powershell|dotnet>]
+xlflow doctor [--bridge <auto|powershell|dotnet>] [--workbook]
 ```
 
 ## Options and Arguments
@@ -14,18 +14,24 @@ xlflow doctor [--bridge <auto|powershell|dotnet>]
 | --------------------- | ------------------------------------------------------------------ | ------- |
 | `--json`              | Return structured diagnostics for agents and CI logs.              | false   |
 | `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | `auto`  |
+| `--workbook`          | Open and close the configured workbook as part of diagnostics.     | false   |
 
 ## Examples
 
 ```bash
 xlflow doctor
 xlflow doctor --bridge dotnet --json
+xlflow doctor --workbook
 ```
 
 ## Notes
 
 ::: tip
 Run `doctor` before debugging workbook behavior on a new Windows or Excel installation.
+:::
+
+::: tip
+By default, `doctor` performs lightweight Excel COM, VBIDE, and systemprofile Desktop checks without opening the configured workbook. Use `--workbook` when you need to prove that the configured workbook can be opened by the selected bridge.
 :::
 
 ::: warning
@@ -67,11 +73,24 @@ A version mismatch between WSL and Windows xlflow is reported as a warning but d
       "build": "12345",
       "vbide_access": true,
       "automation_security": 1,
-      "trust_vba_access": null
+      "trust_vba_access": null,
+      "systemprofile_desktop": {
+        "system32": {
+          "path": "C:\\Windows\\System32\\config\\systemprofile\\Desktop",
+          "status": "exists"
+        },
+        "syswow64": {
+          "path": "C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop",
+          "status": "exists"
+        },
+        "ok": true
+      }
     }
   }
 }
 ```
+
+With `--workbook`, successful output also includes the configured workbook path and `diagnostics.workbook_openable: true`.
 
 WSL output includes the same Windows diagnostics plus the delegation boundary:
 
@@ -139,6 +158,40 @@ When Excel COM activation fails with `--bridge dotnet`, the response uses the st
   }
 }
 ```
+
+When the Windows systemprofile Desktop directories are missing, `doctor` fails with an actionable environment error. These directories are required for Excel COM workbook automation in non-interactive sessions such as SSH, services, and CI.
+
+```json
+{
+  "status": "failed",
+  "command": "doctor",
+  "error": {
+    "code": "systemprofile_desktop_missing",
+    "message": "systemprofile Desktop directories are missing.\nCreate both directories:\n- C:\\Windows\\System32\\config\\systemprofile\\Desktop\n- C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop\n\nThis is required for Excel COM automation in non-interactive sessions such as SSH, services, or CI.",
+    "phase": "doctor",
+    "source": "xlflow-excel-bridge"
+  },
+  "diagnostics": {
+    "excel": {
+      "com_activation": true,
+      "systemprofile_desktop": {
+        "system32": {
+          "path": "C:\\Windows\\System32\\config\\systemprofile\\Desktop",
+          "status": "missing"
+        },
+        "syswow64": {
+          "path": "C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop",
+          "status": "missing"
+        },
+        "ok": false,
+        "missing": true
+      }
+    }
+  }
+}
+```
+
+If a systemprofile Desktop path exists but cannot be inspected by the current user, `status` is `access_denied`. That condition is reported as a warning in human output; it does not by itself make `doctor` fail.
 
 ## Related
 

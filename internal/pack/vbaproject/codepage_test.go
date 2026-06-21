@@ -60,4 +60,9 @@ func TestEncodeMBCSErrors(t *testing.T) {
 	if _, err := encodeMBCS("\u65e5\u672c\u8a9e", 1252); err == nil {
 		t.Error("characters not representable in CP1252 should return an error")
 	}
+	// cp932 is the primary VBA codepage; it must also fail loudly on a character
+	// it cannot represent (an emoji) rather than emit silent mojibake.
+	if _, err := encodeMBCS("x \U0001F600 y", 932); err == nil {
+		t.Error("characters not representable in CP932 should return an error")
+	}
 }

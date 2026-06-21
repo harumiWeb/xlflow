@@ -44,6 +44,11 @@ All notable changes to xlflow will be documented in this file.
 - Fixed LSP workspace symbols so an open editor buffer hides stale filesystem symbols for the same module, preserving the in-memory document priority used by definition and reference features.
 - Updated `tree-sitter-vba` to v0.8.1 and adapted call extraction and lint member-access checks to the new stable `receiver` / `member` / `arguments` AST fields.
 
+## v0.14.1
+
+- Improved `xlflow pack` protected-project detection: it now reads the CMG `ProjectProtectionState` bits (MS-OVBA §2.3.1.15) instead of a DPB password-length heuristic, so protected and unprotected projects are classified by the spec-defined signal rather than a corpus-calibrated threshold.
+- Added `.NET doctor` diagnostics for the Windows systemprofile Desktop directories required by non-interactive Excel COM workbook automation. Missing directories now return `systemprofile_desktop_missing` with instructions to create both `System32` and `SysWOW64` Desktop paths, while permission-denied inspection results are reported as warnings instead of false missing-directory failures. `xlflow doctor` remains lightweight by default, while the new `--workbook` option opens the configured workbook and reports `workbook_openable`.
+
 ## v0.14.0
 
 - Added inline VBA suppression comments for lint and analyze diagnostics, supporting `xlflow:disable-next-line <ID>` and `xlflow:disable-line <ID>` with stable IDs such as `VB002` and `VBA205`, plus warnings for unknown, unsupported, or unused suppressions. Preflight-blocking errors remain unsuppressible.

@@ -884,6 +884,46 @@ func TestRunnerRejectsDotNetProtocolMismatch(t *testing.T) {
 	}
 }
 
+func TestRunnerDoctorChecksWorkbookOnlyWhenRequested(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var requests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			supports: true,
+			requests: &requests,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"doctor","logs":[],"error":null,"diagnostics":{"excel":{"com_activation":true,"vbide_access":true}}}`)},
+		}
+	}
+
+	root := t.TempDir()
+	cfg := config.Default()
+	if _, _, err := (Runner{RootDir: root, BridgeMode: "dotnet"}).Doctor(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := (Runner{RootDir: root, BridgeMode: "dotnet"}).DoctorWithOptions(cfg, DoctorOptions{CheckWorkbook: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("request count = %d, want 2", len(requests))
+	}
+	if got := requests[0].Args["CheckWorkbook"]; got != "false" {
+		t.Fatalf("default CheckWorkbook = %q, want false", got)
+	}
+	if _, ok := requests[0].Args["WorkbookPath"]; ok {
+		t.Fatalf("default doctor unexpectedly sent WorkbookPath: %#v", requests[0].Args)
+	}
+	if got := requests[1].Args["CheckWorkbook"]; got != "true" {
+		t.Fatalf("opt-in CheckWorkbook = %q, want true", got)
+	}
+	if got := requests[1].Args["WorkbookPath"]; got != filepath.Join(root, cfg.Excel.Path) {
+		t.Fatalf("opt-in WorkbookPath = %q, want %q", got, filepath.Join(root, cfg.Excel.Path))
+	}
+}
+
 func TestRunnerDoctorPreservesDotNetBridgeMetadataAndDiagnostics(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })

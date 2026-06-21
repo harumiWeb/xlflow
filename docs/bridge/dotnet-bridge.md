@@ -47,13 +47,26 @@ The Go CLI remains responsible for command parsing, config loading, source-tree 
       "build": "12345",
       "vbide_access": true,
       "automation_security": 1,
-      "trust_vba_access": null
+      "trust_vba_access": null,
+      "systemprofile_desktop": {
+        "system32": {
+          "path": "C:\\Windows\\System32\\config\\systemprofile\\Desktop",
+          "status": "exists"
+        },
+        "syswow64": {
+          "path": "C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop",
+          "status": "exists"
+        },
+        "ok": true
+      }
     }
   }
 }
 ```
 
-When Excel COM activation fails, the bridge returns a structured error with `code`, `message`, `phase`, `source`, `number`, `h_result`, and `details` fields. The `h_result` field is a hex HRESULT string (e.g. `"0x80040154"`).
+When Excel COM activation fails, the bridge returns a structured error with `code`, `message`, `phase`, `source`, `number`, `h_result`, and `details` fields. The `h_result` field is a hex HRESULT string (e.g. `"0x80040154"`). When either systemprofile Desktop directory is definitely missing, the bridge returns `systemprofile_desktop_missing` with the same `diagnostics.excel.systemprofile_desktop` payload and an actionable message to create both directories. If a path cannot be inspected because the current user lacks permission, its status is `access_denied`; this is reported as a warning, not as a missing-directory failure.
+
+By default, `doctor` does not open the configured workbook. When the CLI sends `CheckWorkbook=true` for `xlflow doctor --workbook`, the bridge opens and closes the configured workbook and reports `diagnostics.workbook_openable`. A failed workbook open returns `workbook_open_failed` with `phase = "doctor.open_workbook"` and keeps the diagnostic payload in the response.
 
 Fields:
 
@@ -71,6 +84,14 @@ Fields:
 - `excel.vbide_access` — `true` when the VBA project object model is accessible.
 - `excel.automation_security` — observed `AutomationSecurity` value.
 - `excel.trust_vba_access` — observed Trust access state; `null` when not determinable.
+- `excel.systemprofile_desktop.system32.path` — `C:\Windows\System32\config\systemprofile\Desktop`.
+- `excel.systemprofile_desktop.system32.status` — `exists`, `missing`, `access_denied`, or `unknown`.
+- `excel.systemprofile_desktop.syswow64.path` — `C:\Windows\SysWOW64\config\systemprofile\Desktop`.
+- `excel.systemprofile_desktop.syswow64.status` — `exists`, `missing`, `access_denied`, or `unknown`.
+- `excel.systemprofile_desktop.ok` — `true` when both systemprofile Desktop directories are known to exist. These directories are required for reliable Excel COM workbook automation in non-interactive sessions such as SSH, services, and CI.
+- `excel.systemprofile_desktop.missing` — `true` when either path is definitely missing.
+- `excel.systemprofile_desktop.access_denied` — `true` when either path could not be inspected without elevated permissions.
+- `workbook_openable` — present only when workbook checking was requested; `true` when the configured workbook was opened and closed successfully.
 - `excel.error` — present only when a non-fatal diagnostic warning occurred.
 
 ### `inspect`

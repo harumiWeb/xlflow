@@ -276,6 +276,8 @@ curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
 xlflow doctor --json
 ```
 
+Windows Excel が設定済み workbook を開けることまで確認したい場合は `xlflow doctor --workbook --json` を使います。
+
 WSL から Windows 側の executable を見つけられない場合は、明示的に指定できます。
 
 ```bash
@@ -332,7 +334,9 @@ xlflow doctor --json
 ```
 
 > [!TIP]
-> `pull` / `push` / `run` / `test` が Excel、COM、bridge、VBIDE 設定の問題で失敗する場合は、まず `doctor` を実行してください。
+> `doctor` はデフォルトでは軽量診断です。設定済み workbook を開けることまで確認したい場合は `xlflow doctor --workbook --json` を実行してください。
+>
+> `pull` / `push` / `run` / `test` が Excel、COM、bridge、VBIDE、または workbook open 設定の問題で失敗する場合は、まず `doctor` を実行してください。
 
 ### 3. VBA をソースファイルとして取り出す
 
@@ -486,7 +490,7 @@ End If
 | ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `new`               | 新しい xlflow プロジェクトと `.xlsm` workbook を作成              | `xlflow new Book.xlsm`                                                       |
 | `init`              | 既存 workbook から xlflow プロジェクトを初期化                    | `xlflow init Book.xlsm`                                                      |
-| `doctor`            | Excel、COM、PowerShell、VBIDE access を診断                       | `xlflow doctor --json`                                                       |
+| `doctor`            | Excel、COM、PowerShell、VBIDE access、任意の workbook open を診断 | `xlflow doctor --workbook --json`                                            |
 | `attach`            | Excel で現在 active な workbook を検証                            | `xlflow attach --active --json`                                              |
 | `backup list`       | rollback 用 workbook backup を一覧表示                            | `xlflow backup list --json`                                                  |
 | `pull`              | VBA component を `src/` へエクスポート                            | `xlflow pull --json`                                                         |
