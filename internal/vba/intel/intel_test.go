@@ -784,6 +784,81 @@ End Sub
 	}
 }
 
+func TestCompletionsRespectCallAndSetRHSContexts(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	classDir := filepath.Join(root, "src", "classes")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(classDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Helpers.bas"), []byte(`Attribute VB_Name = "Helpers"
+Option Explicit
+Public Sub RunReport()
+End Sub
+Private Sub HiddenReport()
+End Sub
+Public Function BuildWorkbook() As Workbook
+End Function
+Public Function BuildName() As String
+End Function
+Public Const PUBLIC_VALUE As Long = 1
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(classDir, "ReportService.cls"), []byte(`VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1
+END
+Attribute VB_Name = "ReportService"
+Option Explicit
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:   filepath.Join(moduleDir, "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    Call Ru\n    Set ws = Th\n    Set service = Re\nEnd Sub\n",
+	}
+
+	callLine := `    Call Ru`
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(callLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "RunReport") {
+		t.Fatalf("Call context should include public Sub: %+v", items)
+	}
+	if hasCompletion(items, "HiddenReport") || hasCompletion(items, "PUBLIC_VALUE") || hasCompletion(items, "ThisWorkbook") {
+		t.Fatalf("Call context should exclude private/non-callable/global candidates: %+v", items)
+	}
+
+	setWorkbookLine := `    Set ws = Th`
+	items, err = analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(setWorkbookLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "ThisWorkbook") {
+		t.Fatalf("Set RHS context should include object globals: %+v", items)
+	}
+	if hasCompletion(items, "xlUp") || hasCompletion(items, "String") || hasCompletion(items, "PUBLIC_VALUE") || hasCompletion(items, "BuildName") {
+		t.Fatalf("Set RHS context should exclude constants, primitive types, and scalar functions: %+v", items)
+	}
+
+	setServiceLine := `    Set service = Re`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(setServiceLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "ReportService") {
+		t.Fatalf("Set RHS context should include class modules: %+v", items)
+	}
+}
+
 func TestCompletionsHidePrivateSymbolsFromOtherModules(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

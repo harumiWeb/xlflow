@@ -461,6 +461,12 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if typePrefix, replaceRange, ok := typeCompletionContext(prefix, pos); ok {
 		return a.typeCompletions(typePrefix, replaceRange, doc, open)
 	}
+	if callPrefix, replaceRange, ok := callCompletionContext(prefix, pos); ok {
+		return a.callCompletions(callPrefix, replaceRange, doc, pos, open)
+	}
+	if setPrefix, replaceRange, ok := setRHSCompletionContext(prefix, pos); ok {
+		return a.setRHSCompletions(setPrefix, replaceRange, doc, pos, open)
+	}
 	word, _ := WordAt(doc.Source, pos)
 	if strings.TrimSpace(word) == "" {
 		word = currentIdentifierPrefix(prefix)
@@ -544,6 +550,76 @@ func (a Analyzer) progIDCompletions(prefix string, replaceRange Range) []Complet
 		})
 	}
 	return uniqueCompletions(out)
+}
+
+func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
+	syms, err := a.WorkspaceSymbols(open, prefix)
+	if err != nil {
+		return nil, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	var out []Completion
+	for _, sym := range syms {
+		if !callableCompletionSymbol(sym) || !a.visibleCompletionSymbol(doc, currentProcedure, sym) || !completionMatches(sym.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        sym.Name,
+			Kind:         completionKindForSymbol(sym.Kind),
+			Detail:       sym.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out), nil
+}
+
+func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
+	var out []Completion
+	replace := replaceRange
+	if completionMatches("CreateObject", prefix) {
+		out = append(out, Completion{
+			Label:        "CreateObject",
+			Kind:         "function",
+			Detail:       "Create object from ProgID",
+			InsertText:   "CreateObject(\"${1:Scripting.Dictionary}\")",
+			Snippet:      true,
+			ReplaceRange: &replace,
+		})
+	}
+	for _, global := range a.DB.GlobalsList() {
+		if !completionMatches(global.Name, prefix) || !objectLikeType(global.ReturnType) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        global.Name,
+			Kind:         "variable",
+			Detail:       global.ReturnType,
+			ReplaceRange: &replace,
+		})
+	}
+	syms, err := a.WorkspaceSymbols(open, prefix)
+	if err != nil {
+		return nil, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	for _, sym := range syms {
+		if !a.visibleCompletionSymbol(doc, currentProcedure, sym) || !completionMatches(sym.Name, prefix) {
+			continue
+		}
+		if !setRHSCompletionSymbol(sym) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        sym.Name,
+			Kind:         completionKindForSymbol(sym.Kind),
+			Detail:       sym.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out), nil
 }
 
 type typeCompletionName struct {
@@ -1399,6 +1475,55 @@ func moduleMemberCompletionSymbol(sym Symbol) bool {
 	return !strings.EqualFold(sym.Visibility, "Private")
 }
 
+func callableCompletionSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func setRHSCompletionSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "class":
+		return true
+	case "module":
+		return strings.EqualFold(sym.ModuleKind, "class") || strings.EqualFold(sym.ModuleKind, "form")
+	case "function", "property", "property_get":
+		return objectLikeType(returnTypeFromDetail(sym.Detail))
+	default:
+		return false
+	}
+}
+
+func returnTypeFromDetail(detail string) string {
+	re := regexp.MustCompile(`(?i)\bAs\s+([A-Za-z_][A-Za-z0-9_.]*)\s*$`)
+	if m := re.FindStringSubmatch(strings.TrimSpace(detail)); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func objectLikeType(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if isObjectFallbackType(name) {
+		return true
+	}
+	if strings.Contains(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "boolean", "byte", "currency", "date", "decimal", "double", "integer", "long", "longlong", "longptr", "single", "string", "variant", "any":
+		return false
+	default:
+		return true
+	}
+}
+
 func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) []Completion {
 	start, typed, ok := statementPrefix(prefix)
 	if !ok {
@@ -1728,6 +1853,32 @@ func typeCompletionContext(prefix string, pos Position) (typePrefix string, repl
 	wordPrefix := currentIdentifierPrefix(prefix)
 	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
 	if !endsWithTypeIntro(beforeWord) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func callCompletionContext(prefix string, pos Position) (callPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !regexp.MustCompile(`(?i)(^|:)\s*Call\s*$`).MatchString(beforeWord) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func setRHSCompletionContext(prefix string, pos Position) (rhsPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if !regexp.MustCompile(`(?i)(^|:)\s*Set\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*$`).MatchString(beforeWord) {
 		return "", Range{}, false
 	}
 	start := len(prefix) - len(wordPrefix)
