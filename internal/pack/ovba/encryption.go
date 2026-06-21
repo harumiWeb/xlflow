@@ -65,6 +65,9 @@ func DecryptData(enc []byte) ([]byte, error) {
 		lenBuf[i] = b
 	}
 	dataLen := binary.LittleEndian.Uint32(lenBuf[:])
+	if remaining := len(enc) - pos; uint64(dataLen) > uint64(remaining) {
+		return nil, fmt.Errorf("ovba: declared data length %d exceeds %d remaining bytes", dataLen, remaining)
+	}
 
 	out := make([]byte, 0, dataLen)
 	for i := uint32(0); i < dataLen; i++ {

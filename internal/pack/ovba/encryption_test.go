@@ -82,3 +82,28 @@ func TestDecryptDataRejectsShort(t *testing.T) {
 		t.Fatal("expected error for input shorter than 3 bytes, got nil")
 	}
 }
+
+func TestDecryptDataRejectsOversizedLength(t *testing.T) {
+	// Craft a structure whose decrypted Length is ~4 GiB but with no data bytes,
+	// so DecryptData must fail loudly on the length check rather than attempt a
+	// multi-gigabyte allocation before discovering the input is too short.
+	const seed, projKey = byte(0), byte(0x10) // seed=0 => IgnoredLength 0
+	versionEnc := seed ^ 2
+	projKeyEnc := seed ^ projKey
+	unencByte1, encByte1, encByte2 := projKey, projKeyEnc, versionEnc
+	enc := []byte{seed, versionEnc, projKeyEnc}
+	encNext := func(b byte) byte {
+		be := b ^ (encByte2 + unencByte1)
+		encByte2, encByte1, unencByte1 = encByte1, be, b
+		return be
+	}
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], 0xFFFFFFFF)
+	for _, b := range lenBuf {
+		enc = append(enc, encNext(b))
+	}
+	// No data bytes follow.
+	if _, err := DecryptData(enc); err == nil {
+		t.Fatal("expected error for declared length exceeding input, got nil")
+	}
+}
