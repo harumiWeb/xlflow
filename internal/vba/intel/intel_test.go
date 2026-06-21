@@ -221,6 +221,15 @@ func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.
 	if got, ok := analyzer.ResolveExpressionType(`Worksheets("入力").Shapes("Button1").TextFrame.Characters.Text`); !ok || got != "String" {
 		t.Fatalf("Shapes(...).TextFrame.Characters.Text = %q, %v", got, ok)
 	}
+	if got, ok := analyzer.ResolveExpressionType(`Sheets("入力").Range("A1")`); !ok || got != "Excel.Range" {
+		t.Fatalf("Sheets(...).Range(...) = %q, %v", got, ok)
+	}
+	if got, ok := analyzer.ResolveExpressionType(`ThisWorkbook.Sheets("入力").ListObjects("売上一覧").DataBodyRange`); !ok || got != "Excel.Range" {
+		t.Fatalf("ThisWorkbook.Sheets(...).ListObjects(...).DataBodyRange = %q, %v", got, ok)
+	}
+	if got, ok := analyzer.ResolveExpressionType(`Sheets("入力").Shapes("Button1").TextFrame.Characters.Text`); !ok || got != "String" {
+		t.Fatalf("Sheets(...).Shapes(...).TextFrame.Characters.Text = %q, %v", got, ok)
+	}
 
 	doc := Document{
 		Source: `Option Explicit
@@ -262,6 +271,35 @@ End Sub
 	}
 	if hover == nil || !strings.Contains(hover.Contents, "Excel.ListColumn.DataBodyRange As Excel.Range") {
 		t.Fatalf("unexpected ListColumn.DataBodyRange hover: %+v", hover)
+	}
+}
+
+func TestSheetsDefaultMemberAssumesWorksheetForWorksheetMembers(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Sheets("入力").Ra
+    ThisWorkbook.Sheets("入力").ListObjects("売上一覧").DataBodyRange
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+
+	rangeLine := `    Sheets("入力").Ra`
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(rangeLine)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Range") {
+		t.Fatalf("Sheets default member should complete Worksheet.Range: %+v", items)
+	}
+
+	dataLine := `    ThisWorkbook.Sheets("入力").ListObjects("売上一覧").DataBodyRange`
+	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(dataLine[:strings.Index(dataLine, "ListObjects")+len("List")])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.Worksheet.ListObjects As Excel.ListObjects") {
+		t.Fatalf("unexpected Sheets worksheet-assumption hover: %+v", hover)
 	}
 }
 

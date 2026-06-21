@@ -451,6 +451,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if memberMode {
 		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
 		if ok {
+			if strings.EqualFold(typ, "Object") && sheetsDefaultExpression(receiverExpr) {
+				typ = "Excel.Worksheet"
+			}
 			return a.memberCompletions(typ, memberPrefix), nil
 		}
 		return a.moduleMemberCompletions(open, receiverExpr, memberPrefix)
@@ -861,6 +864,11 @@ func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset
 	if typ, ok := a.DB.ResolveType(receiverType); ok {
 		receiverType = typ.Name
 	}
+	if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiverExpr) {
+		if _, ok := a.DB.ResolveMember("Excel.Worksheet", word); ok {
+			receiverType = "Excel.Worksheet"
+		}
+	}
 	member, ok := a.DB.ResolveMember(receiverType, word)
 	if !ok {
 		return nil, false
@@ -937,6 +945,7 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 			current = typ
 		}
 	}
+	pendingSheetsDefault := strings.EqualFold(current, "Object") && sheetsDefaultExpression(parts[0])
 	for _, raw := range parts[1:] {
 		member := strings.TrimSpace(raw)
 		called := strings.Contains(member, "(")
@@ -964,6 +973,11 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 				}
 			}
 		}
+		if pendingSheetsDefault {
+			if _, ok := a.DB.ResolveMember("Excel.Worksheet", member); ok {
+				current = "Excel.Worksheet"
+			}
+		}
 		if info, ok := a.DB.ResolveMember(current, member); ok && info.ReturnType != "" {
 			current = info.ReturnType
 		} else {
@@ -974,8 +988,24 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 				current = typ
 			}
 		}
+		pendingSheetsDefault = called && strings.EqualFold(current, "Object") && strings.EqualFold(member, "Sheets")
 	}
 	return current, true
+}
+
+func sheetsDefaultExpression(expr string) bool {
+	parts := splitMemberExpression(expr)
+	if len(parts) == 0 {
+		return false
+	}
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if !strings.Contains(last, "(") {
+		return false
+	}
+	if idx := strings.Index(last, "("); idx >= 0 {
+		last = strings.TrimSpace(last[:idx])
+	}
+	return strings.EqualFold(last, "Sheets")
 }
 
 func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (string, bool) {
