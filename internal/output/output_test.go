@@ -635,6 +635,11 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 			"vbide_access":        true,
 			"automation_security": float64(1),
 			"trust_vba_access":    nil,
+			"systemprofile_desktop": map[string]any{
+				"system32": map[string]any{"path": `C:\Windows\System32\config\systemprofile\Desktop`, "status": "exists"},
+				"syswow64": map[string]any{"path": `C:\Windows\SysWOW64\config\systemprofile\Desktop`, "status": "exists"},
+				"ok":       true,
+			},
 		},
 	}
 	env.Status = StatusOK
@@ -643,13 +648,95 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"xlflow doctor", "Selected bridge:", "dotnet", "Requested bridge:", "auto", "Fallback:", "no", "Bridge role:", "primary", "Excel automation", "VBIDE access"} {
+	for _, want := range []string{"xlflow doctor", "Selected bridge:", "dotnet", "Requested bridge:", "auto", "Fallback:", "no", "Bridge role:", "primary", "Excel automation", "Systemprofile Desktop", "Workbook", "Not checked", "VBIDE access"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "FAILED") {
 		t.Fatalf("doctor output should not contain FAILED for dotnet bridge:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRendersMissingSystemProfileDesktopFix(t *testing.T) {
+	env := New("doctor")
+	env.Status = StatusFailed
+	env.Error = &Error{
+		Code:    "systemprofile_desktop_missing",
+		Message: "systemprofile Desktop directories are missing.\nCreate both directories:\n- C:\\Windows\\System32\\config\\systemprofile\\Desktop\n- C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop\n\nThis is required for Excel COM automation in non-interactive sessions such as SSH, services, or CI.",
+		Source:  "xlflow-excel-bridge",
+		Phase:   "doctor",
+	}
+	env.Diagnostics = map[string]any{
+		"selected_bridge": "dotnet",
+		"excel": map[string]any{
+			"com_activation": true,
+			"vbide_access":   true,
+			"systemprofile_desktop": map[string]any{
+				"system32": map[string]any{"path": `C:\Windows\System32\config\systemprofile\Desktop`, "status": "missing"},
+				"syswow64": map[string]any{"path": `C:\Windows\SysWOW64\config\systemprofile\Desktop`, "status": "exists"},
+				"ok":       false,
+				"missing":  true,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"FAILED",
+		"systemprofile Desktop directories are missing.",
+		"Create both directories:",
+		`C:\Windows\System32\config\systemprofile\Desktop`,
+		`C:\Windows\SysWOW64\config\systemprofile\Desktop`,
+		"non-interactive sessions such as SSH, services, or CI",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+	if count := strings.Count(got, "Create both directories:"); count != 1 {
+		t.Fatalf("doctor output repeated systemprofile fix %d times:\n%s", count, got)
+	}
+}
+
+func TestWriteWithOptionsRendersSystemProfileDesktopAccessDeniedWarning(t *testing.T) {
+	env := New("doctor")
+	env.Diagnostics = map[string]any{
+		"selected_bridge": "dotnet",
+		"excel": map[string]any{
+			"com_activation": true,
+			"vbide_access":   true,
+			"systemprofile_desktop": map[string]any{
+				"system32":      map[string]any{"path": `C:\Windows\System32\config\systemprofile\Desktop`, "status": "exists"},
+				"syswow64":      map[string]any{"path": `C:\Windows\SysWOW64\config\systemprofile\Desktop`, "status": "access_denied", "message": "Access is denied."},
+				"ok":            false,
+				"access_denied": true,
+			},
+		},
+		"workbook_openable": true,
+	}
+	env.Workbook = map[string]any{"path": `C:\dev\go\xlflow\example\calendar-pick\build\Book.xlsm`}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"OK xlflow doctor",
+		"[!] Systemprofile Desktop - SysWOW64 path could not be inspected without elevated permissions",
+		`[ok] Workbook - C:\dev\go\xlflow\example\calendar-pick\build\Book.xlsm`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "systemprofile_desktop_missing") {
+		t.Fatalf("doctor output should not fail on access_denied:\n%s", got)
 	}
 }
 

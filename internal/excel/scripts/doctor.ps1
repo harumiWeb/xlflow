@@ -31,6 +31,12 @@ try {
     }
   } else {
     Set-XlflowExcelAutomationDefaults -Excel $excel -DisplayAlerts $false
+    try {
+      $null = $excel.VBE
+      $diagnostics.vbide_access = $true
+    } catch {
+      $diagnostics.fix = "Enable 'Trust access to the VBA project object model' in Excel Trust Center."
+    }
   }
 
   $result.diagnostics = $diagnostics
