@@ -1117,6 +1117,7 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 }
 
 func (a *app) doctorCommand() *cobra.Command {
+	var checkWorkbook bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose Excel COM and VBIDE access",
@@ -1131,7 +1132,10 @@ func (a *app) doctorCommand() *cobra.Command {
 			var code int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).Doctor(cfg, commandOpts)
+				env, code, runErr = a.excelRunnerForConfig(cfg).DoctorWithOptions(cfg, excel.DoctorOptions{
+					CheckWorkbook: checkWorkbook,
+					Keepalive:     commandOpts,
+				})
 				return runErr
 			})
 			if err != nil {
@@ -1146,6 +1150,7 @@ func (a *app) doctorCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
+	cmd.Flags().BoolVar(&checkWorkbook, "workbook", false, "open the configured workbook as part of doctor diagnostics")
 	return cmd
 }
 

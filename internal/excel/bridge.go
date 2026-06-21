@@ -481,11 +481,28 @@ type UIButtonRemoveOptions struct {
 	Session bool
 }
 
+type DoctorOptions struct {
+	CheckWorkbook bool
+	Keepalive     CommandOptions
+}
+
 func (r Runner) Doctor(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
-	return r.run("doctor", map[string]string{
-		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, opts...)
+	doctorOpts := DoctorOptions{}
+	if len(opts) > 0 {
+		doctorOpts.Keepalive = opts[0]
+	}
+	return r.DoctorWithOptions(cfg, doctorOpts)
+}
+
+func (r Runner) DoctorWithOptions(cfg config.Config, opts DoctorOptions) (output.Envelope, int, error) {
+	args := map[string]string{
+		"Visible":       strconv.FormatBool(cfg.Excel.Visible),
+		"CheckWorkbook": strconv.FormatBool(opts.CheckWorkbook),
+	}
+	if opts.CheckWorkbook {
+		args["WorkbookPath"] = workbookPath(r.RootDir, cfg.Excel.Path)
+	}
+	return r.run("doctor", args, opts.Keepalive)
 }
 
 func (r Runner) New(workbook string, opts ...CommandOptions) (output.Envelope, int, error) {

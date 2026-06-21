@@ -11,7 +11,7 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ```text
 xlflow [--json] [--bridge <auto|powershell|dotnet>] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] [--bridge <auto|powershell|dotnet>] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
-xlflow [--json] [--bridge <auto|powershell|dotnet>] doctor
+xlflow [--json] [--bridge <auto|powershell|dotnet>] doctor [--workbook]
 xlflow [--json] [--bridge <auto|powershell|dotnet>] attach --active
 xlflow [--json] backup list
 xlflow [--json] list forms [--session]
@@ -83,7 +83,7 @@ Excel COM-backed commands report progress on stderr. Interactive stderr terminal
 
 Excel COM-backed commands also include top-level `bridge` metadata identifying the xlflow Excel bridge process. The fields vary by bridge provider. The PowerShell bridge returns `host` (process name, e.g. `pwsh.exe`), `edition` (e.g. `Core` or `Desktop`), and `version` (PowerShell version). The .NET bridge returns `name`, `version`, `protocol_version`, `runtime`, `architecture`, and may also include `commit`. If workbook VBA launches its own external PowerShell process, that workbook-side host may differ and must be inspected separately.
 
-`doctor --json` adds a top-level `diagnostics` object. Provider-specific `bridge` metadata and `diagnostics` serve different purposes: `bridge` identifies the bridge process itself, while `diagnostics` describes the probed Excel/runtime environment. `diagnostics.requested_bridge` records the requested mode, `diagnostics.selected_bridge` records the resolved provider, `diagnostics.fallback` reports whether `auto` fell back to PowerShell, and `diagnostics.legacy` reports whether the final provider is the legacy PowerShell bridge. With `.NET`, successful output also includes `diagnostics.protocol_version`, nested `runtime`, and nested `excel` probe fields. With PowerShell, callers must not assume the same nested shape unless the provider contract explicitly documents it for that bridge. Under WSL, the delegated Windows result is preserved and augmented with `diagnostics.host`, `diagnostics.windows`, and `diagnostics.path_translation`. These report WSL/distro detection, Windows xlflow path/version, bridge and Excel availability, and the translated project working directory. A WSL/Windows xlflow version mismatch is a warning rather than a hard failure.
+`doctor --json` adds a top-level `diagnostics` object. Provider-specific `bridge` metadata and `diagnostics` serve different purposes: `bridge` identifies the bridge process itself, while `diagnostics` describes the probed Excel/runtime environment. `diagnostics.requested_bridge` records the requested mode, `diagnostics.selected_bridge` records the resolved provider, `diagnostics.fallback` reports whether `auto` fell back to PowerShell, and `diagnostics.legacy` reports whether the final provider is the legacy PowerShell bridge. With `.NET`, successful output also includes `diagnostics.protocol_version`, nested `runtime`, and nested `excel` probe fields. Default `doctor` does not open the configured workbook; `doctor --workbook` opens and closes it and reports `diagnostics.workbook_openable`. With PowerShell, callers must not assume the same nested shape unless the provider contract explicitly documents it for that bridge. Under WSL, the delegated Windows result is preserved and augmented with `diagnostics.host`, `diagnostics.windows`, and `diagnostics.path_translation`. These report WSL/distro detection, Windows xlflow path/version, bridge and Excel availability, and the translated project working directory. A WSL/Windows xlflow version mismatch is a warning rather than a hard failure.
 
 `new` creates a fresh macro-enabled workbook under `build/`, scaffolds the same project layout as `init`, and then automatically `push`es the scaffolded VBA source into that workbook so the initial workbook and `src/` tree start in sync. Without an argument it creates `build/Book.xlsm`; when the argument has no extension, `.xlsm` is appended. Any other extension is rejected because workbook creation always uses Excel macro-enabled format `52`. New projects write `[userform].code_source = "sidecar"` into `xlflow.toml`.
 
@@ -269,7 +269,7 @@ All JSON output uses a stable top-level envelope.
 
 Command-specific fields are added at the top level:
 
-- `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread; WSL adds `host`, `windows`, and `path_translation`)
+- `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread, plus `.NET` bridge `excel.systemprofile_desktop` readiness with per-path `status` values of `exists`, `missing`, `access_denied`, or `unknown`; `doctor --workbook` additionally opens the configured workbook and reports `workbook_openable`; WSL adds `host`, `windows`, and `path_translation`)
 - `workbook` and `backup` for Excel file commands
 - `source` for commands that write project source files
 - `macro` for `run`

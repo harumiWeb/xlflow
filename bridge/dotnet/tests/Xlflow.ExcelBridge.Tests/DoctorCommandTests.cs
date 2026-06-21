@@ -18,7 +18,8 @@ public sealed class DoctorCommandTests
             VbideAccess: true,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
-            Error: null);
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
 
         var command = new DoctorCommand(() => probeResult);
         var request = new BridgeRequest
@@ -51,6 +52,10 @@ public sealed class DoctorCommandTests
         Assert.Equal("16.0", excel.GetProperty("version").GetString());
         Assert.Equal("17726.20160", excel.GetProperty("build").GetString());
         Assert.True(excel.GetProperty("vbide_access").GetBoolean());
+        var systemProfileDesktop = excel.GetProperty("systemprofile_desktop");
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("syswow64").GetProperty("status").GetString());
+        Assert.True(systemProfileDesktop.GetProperty("ok").GetBoolean());
     }
 
     [Fact]
@@ -70,7 +75,8 @@ public sealed class DoctorCommandTests
             {
                 ["source"] = "test",
                 ["stack_trace"] = "at TestMethod",
-            });
+            },
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
 
         var command = new DoctorCommand(() => probeResult);
         var request = new BridgeRequest
@@ -94,6 +100,8 @@ public sealed class DoctorCommandTests
         Assert.Equal(-2147221164, error.GetProperty("number").GetInt32());
         Assert.Equal("0x80040154", error.GetProperty("h_result").GetString());
         Assert.Equal(JsonValueKind.Object, error.GetProperty("details").ValueKind);
+        var systemProfileDesktop = json.RootElement.GetProperty("diagnostics").GetProperty("excel").GetProperty("systemprofile_desktop");
+        Assert.True(systemProfileDesktop.GetProperty("ok").GetBoolean());
     }
 
     [Fact]
@@ -106,7 +114,8 @@ public sealed class DoctorCommandTests
             VbideAccess: false,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
-            Error: "VBIDE access unavailable");
+            Error: "VBIDE access unavailable",
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
 
         var command = new DoctorCommand(() => probeResult);
         var request = new BridgeRequest
@@ -125,6 +134,161 @@ public sealed class DoctorCommandTests
         Assert.True(excel.GetProperty("com_activation").GetBoolean());
         Assert.False(excel.GetProperty("vbide_access").GetBoolean());
         Assert.Equal("VBIDE access unavailable", excel.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void HandleReturnsFailedResponseWhenSystemProfileDesktopDirectoriesAreMissing()
+    {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: true,
+            AutomationSecurity: 1,
+            TrustVbaAccess: null,
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(
+                System32: new SystemProfileDesktopPathDiagnostics(@"D:\Windows\System32\config\systemprofile\Desktop", SystemProfileDesktopStatus.Missing),
+                SysWow64: new SystemProfileDesktopPathDiagnostics(@"D:\Windows\SysWOW64\config\systemprofile\Desktop", SystemProfileDesktopStatus.Exists)));
+
+        var command = new DoctorCommand(() => probeResult);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-doctor-systemprofile",
+            Command = "doctor",
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal("systemprofile_desktop_missing", error.GetProperty("code").GetString());
+        Assert.Equal("doctor", error.GetProperty("phase").GetString());
+        Assert.Contains("systemprofile Desktop directories are missing", error.GetProperty("message").GetString());
+        Assert.Contains(@"D:\Windows\System32\config\systemprofile\Desktop", error.GetProperty("message").GetString());
+        Assert.Contains(@"D:\Windows\SysWOW64\config\systemprofile\Desktop", error.GetProperty("message").GetString());
+
+        var systemProfileDesktop = json.RootElement.GetProperty("diagnostics").GetProperty("excel").GetProperty("systemprofile_desktop");
+        Assert.Equal("missing", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("syswow64").GetProperty("status").GetString());
+        Assert.False(systemProfileDesktop.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public void HandleDoesNotFailWhenSystemProfileDesktopCannotBeInspected()
+    {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: true,
+            AutomationSecurity: 1,
+            TrustVbaAccess: null,
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(
+                System32: new SystemProfileDesktopPathDiagnostics(@"C:\Windows\System32\config\systemprofile\Desktop", SystemProfileDesktopStatus.Exists),
+                SysWow64: new SystemProfileDesktopPathDiagnostics(@"C:\Windows\SysWOW64\config\systemprofile\Desktop", SystemProfileDesktopStatus.AccessDenied, "Access is denied.")));
+
+        var command = new DoctorCommand(() => probeResult);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-doctor-systemprofile-access-denied",
+            Command = "doctor",
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
+        var systemProfileDesktop = json.RootElement.GetProperty("diagnostics").GetProperty("excel").GetProperty("systemprofile_desktop");
+        Assert.Equal("exists", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
+        Assert.Equal("access_denied", systemProfileDesktop.GetProperty("syswow64").GetProperty("status").GetString());
+        Assert.True(systemProfileDesktop.GetProperty("access_denied").GetBoolean());
+        Assert.False(systemProfileDesktop.GetProperty("missing").GetBoolean());
+    }
+
+    [Fact]
+    public void HandleChecksWorkbookWhenRequested()
+    {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: true,
+            AutomationSecurity: 1,
+            TrustVbaAccess: null,
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
+
+        var command = new DoctorCommand(() => probeResult);
+        var missingWorkbookPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "Book.xlsm");
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-doctor-workbook",
+            Command = "doctor",
+            Payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+            {
+                ["CheckWorkbook"] = "true",
+                ["WorkbookPath"] = missingWorkbookPath,
+            }),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal("workbook_open_failed", error.GetProperty("code").GetString());
+        Assert.Equal("doctor.open_workbook", error.GetProperty("phase").GetString());
+        Assert.Contains("Configured workbook could not be opened", error.GetProperty("message").GetString());
+
+        var diagnostics = json.RootElement.GetProperty("diagnostics");
+        Assert.False(diagnostics.GetProperty("workbook_openable").GetBoolean());
+        Assert.Equal(Path.GetFullPath(missingWorkbookPath), json.RootElement.GetProperty("workbook").GetProperty("path").GetString());
+    }
+
+    [Fact]
+    public void HandleStillChecksWorkbookWhenSystemProfileDesktopDirectoriesAreMissing()
+    {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: true,
+            AutomationSecurity: 1,
+            TrustVbaAccess: null,
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: false, SysWow64: false));
+
+        var command = new DoctorCommand(() => probeResult);
+        var missingWorkbookPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "Book.xlsm");
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-doctor-systemprofile-workbook",
+            Command = "doctor",
+            Payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+            {
+                ["CheckWorkbook"] = "true",
+                ["WorkbookPath"] = missingWorkbookPath,
+            }),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
+        Assert.Equal("systemprofile_desktop_missing", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(Path.GetFullPath(missingWorkbookPath), json.RootElement.GetProperty("workbook").GetProperty("path").GetString());
+
+        var diagnostics = json.RootElement.GetProperty("diagnostics");
+        Assert.False(diagnostics.GetProperty("workbook_openable").GetBoolean());
+        var systemProfileDesktop = diagnostics.GetProperty("excel").GetProperty("systemprofile_desktop");
+        Assert.False(systemProfileDesktop.GetProperty("ok").GetBoolean());
     }
 
     [Fact]

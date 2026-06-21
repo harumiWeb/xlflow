@@ -4,7 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.14.1
+
 - Improved `xlflow pack` protected-project detection: it now reads the CMG `ProjectProtectionState` bits (MS-OVBA §2.3.1.15) instead of a DPB password-length heuristic, so protected and unprotected projects are classified by the spec-defined signal rather than a corpus-calibrated threshold.
+- Added `.NET doctor` diagnostics for the Windows systemprofile Desktop directories required by non-interactive Excel COM workbook automation. Missing directories now return `systemprofile_desktop_missing` with instructions to create both `System32` and `SysWOW64` Desktop paths, while permission-denied inspection results are reported as warnings instead of false missing-directory failures. `xlflow doctor` remains lightweight by default, while the new `--workbook` option opens the configured workbook and reports `workbook_openable`.
 
 ## v0.14.0
 

@@ -15,7 +15,37 @@ public sealed record ExcelDiagnosticsResult(
     string? Error,
     int? ComErrorNumber = null,
     string? ComHResult = null,
-    IReadOnlyDictionary<string, object?>? ComDetails = null);
+    IReadOnlyDictionary<string, object?>? ComDetails = null,
+    SystemProfileDesktopDiagnostics? SystemProfileDesktop = null);
+
+public sealed record SystemProfileDesktopDiagnostics(
+    SystemProfileDesktopPathDiagnostics System32,
+    SystemProfileDesktopPathDiagnostics SysWow64)
+{
+    public SystemProfileDesktopDiagnostics(bool System32, bool SysWow64)
+        : this(
+            new SystemProfileDesktopPathDiagnostics("C:\\Windows\\System32\\config\\systemprofile\\Desktop", System32 ? SystemProfileDesktopStatus.Exists : SystemProfileDesktopStatus.Missing),
+            new SystemProfileDesktopPathDiagnostics("C:\\Windows\\SysWOW64\\config\\systemprofile\\Desktop", SysWow64 ? SystemProfileDesktopStatus.Exists : SystemProfileDesktopStatus.Missing))
+    {
+    }
+
+    public bool Ok => System32.Status == SystemProfileDesktopStatus.Exists && SysWow64.Status == SystemProfileDesktopStatus.Exists;
+    public bool Missing => System32.Status == SystemProfileDesktopStatus.Missing || SysWow64.Status == SystemProfileDesktopStatus.Missing;
+    public bool AccessDenied => System32.Status == SystemProfileDesktopStatus.AccessDenied || SysWow64.Status == SystemProfileDesktopStatus.AccessDenied;
+}
+
+public sealed record SystemProfileDesktopPathDiagnostics(
+    string Path,
+    string Status,
+    string? Message = null);
+
+public static class SystemProfileDesktopStatus
+{
+    public const string Exists = "exists";
+    public const string Missing = "missing";
+    public const string AccessDenied = "access_denied";
+    public const string Unknown = "unknown";
+}
 
 [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "This bridge only runs on Windows where Excel COM is available.")]
 public static class ExcelDiagnostics
@@ -24,6 +54,7 @@ public static class ExcelDiagnostics
     public static ExcelDiagnosticsResult Probe()
     {
         object? app = null;
+        var systemProfileDesktop = ProbeSystemProfileDesktop();
         try
         {
             var excelType = Type.GetTypeFromProgID("Excel.Application");
@@ -36,7 +67,8 @@ public static class ExcelDiagnostics
                     VbideAccess: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
-                    Error: "Excel.Application ProgID not registered");
+                    Error: "Excel.Application ProgID not registered",
+                    SystemProfileDesktop: systemProfileDesktop);
             }
 
             try
@@ -59,7 +91,8 @@ public static class ExcelDiagnostics
                     {
                         ["source"] = ex.Source,
                         ["stack_trace"] = ex.StackTrace,
-                    });
+                    },
+                    SystemProfileDesktop: systemProfileDesktop);
             }
             catch (Exception ex)
             {
@@ -70,7 +103,8 @@ public static class ExcelDiagnostics
                     VbideAccess: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
-                    Error: $"COM activation failed: {ex.Message}");
+                    Error: $"COM activation failed: {ex.Message}",
+                    SystemProfileDesktop: systemProfileDesktop);
             }
 
             if (app is null)
@@ -82,7 +116,8 @@ public static class ExcelDiagnostics
                     VbideAccess: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
-                    Error: "COM activation returned null");
+                    Error: "COM activation returned null",
+                    SystemProfileDesktop: systemProfileDesktop);
             }
 
             string? version = null;
@@ -136,7 +171,8 @@ public static class ExcelDiagnostics
                 VbideAccess: vbideAccess,
                 AutomationSecurity: automationSecurity,
                 TrustVbaAccess: trustVbaAccess,
-                Error: null);
+                Error: null,
+                SystemProfileDesktop: systemProfileDesktop);
         }
         finally
         {
@@ -161,6 +197,53 @@ public static class ExcelDiagnostics
                     // best-effort cleanup
                 }
             }
+        }
+    }
+
+    private static SystemProfileDesktopDiagnostics ProbeSystemProfileDesktop()
+    {
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windows))
+        {
+            windows = "C:\\Windows";
+        }
+
+        var system32 = Path.Combine(windows, "System32", "config", "systemprofile", "Desktop");
+        var sysWow64 = Path.Combine(windows, "SysWOW64", "config", "systemprofile", "Desktop");
+
+        return new SystemProfileDesktopDiagnostics(
+            System32: ProbeSystemProfileDesktopPath(system32),
+            SysWow64: ProbeSystemProfileDesktopPath(sysWow64));
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Systemprofile Desktop diagnostics must classify inaccessible or unusual filesystem states without failing doctor.")]
+    private static SystemProfileDesktopPathDiagnostics ProbeSystemProfileDesktopPath(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.Directory) == FileAttributes.Directory)
+            {
+                return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.Exists);
+            }
+
+            return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.Missing, "Path exists but is not a directory.");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.AccessDenied, ex.Message);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.Missing, ex.Message);
+        }
+        catch (FileNotFoundException ex)
+        {
+            return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.Missing, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return new SystemProfileDesktopPathDiagnostics(path, SystemProfileDesktopStatus.Unknown, ex.Message);
         }
     }
 
