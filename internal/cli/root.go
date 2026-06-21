@@ -4066,6 +4066,12 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 	if err := collect(cfg.Src.Workbook, packpkg.ModuleTypeDocument, ".bas", ".cls"); err != nil {
 		return nil, err
 	}
+	// .frm carries a UserForm's code-behind; the form's designer storage is carried from the
+	// template, so only the .frm (not the .frx) is read here. Forms not in the template are
+	// rejected downstream in applySources (pack updates existing form code-behind only).
+	if err := collect(cfg.Src.Forms, packpkg.ModuleTypeForm, ".frm"); err != nil {
+		return nil, err
+	}
 	return sources, nil
 }
 

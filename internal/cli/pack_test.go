@@ -146,7 +146,7 @@ func TestPackCommandActiveSessionMetadata(t *testing.T) {
 	}
 }
 
-func TestCollectPackSourceModulesIgnoresForms(t *testing.T) {
+func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	dir := t.TempDir()
 	writePackSourceTree(t, dir, true)
 	cfg := config.Default()
@@ -156,20 +156,26 @@ func TestCollectPackSourceModulesIgnoresForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := map[packpkg.ModuleType]int{}
+	var sawForm bool
 	for _, source := range sources {
 		counts[source.Type]++
-		if source.Name == "UserForm1" {
-			t.Fatal("forms must not be passed to the pack engine as source modules")
+		if source.Name == "UserForm1" && source.Type == packpkg.ModuleTypeForm {
+			sawForm = true
 		}
 	}
-	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 {
+	if !sawForm {
+		t.Fatal("UserForm1.frm should be collected as a ModuleTypeForm source")
+	}
+	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 || counts[packpkg.ModuleTypeForm] != 1 {
 		t.Fatalf("source counts = %v", counts)
 	}
 }
 
 func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	dir := t.TempDir()
-	writePackProject(t, dir, true)
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	writePackSourceTree(t, dir, false) // std/class/document only; the form path has its own E2E
 
 	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
 	if err != nil {
@@ -219,6 +225,44 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	}
 	if len(env.Warnings) != 1 || env.Warnings[0].Code != "vbe_validation_skipped" {
 		t.Fatalf("unexpected warnings: %#v", env.Warnings)
+	}
+}
+
+func TestPackCommandEndToEndUpdatesFormCodeBehind(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+	frm := "VERSION 5.00\r\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\r\n" +
+		"   Caption = \"x\"\r\nEnd\r\n" +
+		"Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Attribute VB_GlobalNameSpace = False\r\n" +
+		"Attribute VB_Creatable = False\r\n" +
+		"Attribute VB_PredeclaredId = True\r\n" +
+		"Attribute VB_Exposed = False\r\n" +
+		"Private Sub CommandButton1_Click()\r\n    Debug.Print \"CLI_PACKED_FORM\"\r\nEnd Sub\r\n"
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "UserForm1.frm"), []byte(frm))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err != nil {
+		t.Fatalf("pack command error = %v, exit = %d\n%s", err, output.ExitCode(err), stdout)
+	}
+	bin := zipEntryBytes(t, readFileForTest(t, filepath.Join(dir, "dist", "Book.xlsm")), "xl/vbaProject.bin")
+	project, err := vbaproject.Read(bin)
+	if err != nil {
+		t.Fatalf("output vbaProject.bin is not readable: %v", err)
+	}
+	if got := moduleSourceForTest(project, "UserForm1"); !bytes.Contains([]byte(got), []byte(`Debug.Print "CLI_PACKED_FORM"`)) {
+		t.Fatalf("UserForm1 code-behind was not packed from source:\n%s", got)
+	}
+	var env struct {
+		Pack map[string]any `json:"pack"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout)
+	}
+	modules, _ := env.Pack["modules"].(map[string]any)
+	if modules["form"] != float64(1) {
+		t.Fatalf("expected form count 1, got %#v", modules)
 	}
 }
 
