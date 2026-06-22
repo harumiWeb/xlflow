@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `xlflow analyze` false positives for `VBA209` array element and UDT-array member assignments, clarified `VBA204` fallthrough guidance, and recognized paired Push/Pop `Application` state restore helpers for `VBA203`.
+
 ## v0.14.1
 
 - Improved `xlflow pack` protected-project detection: it now reads the CMG `ProjectProtectionState` bits (MS-OVBA §2.3.1.15) instead of a DPB password-length heuristic, so protected and unprotected projects are classified by the spec-defined signal rather than a corpus-calibrated threshold.
