@@ -34,7 +34,7 @@ Use `--with-skill --agent codex` when the project will be maintained primarily b
 The generated workbook is macro-enabled. Keep the `.xlsm` extension so Excel can preserve VBA components.
 :::
 
-`new` supports explicit `--bridge dotnet` on Windows.
+`new` uses the `.NET` bridge on Windows in `auto` mode. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 
 ## JSON Output Example
 

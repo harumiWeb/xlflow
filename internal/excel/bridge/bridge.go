@@ -8,7 +8,7 @@ import (
 
 const EnvBridge = "XLFLOW_EXCEL_BRIDGE"
 
-var ErrInvalidMode = errors.New("bridge mode must be one of auto, powershell, dotnet")
+var ErrInvalidMode = errors.New("bridge mode must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
 
 type Mode string
 

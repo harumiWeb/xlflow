@@ -43,6 +43,8 @@ All notable changes to xlflow will be documented in this file.
 - Hardened LSP file URI and range handling for Windows paths, UNC paths, escaped Japanese paths, and UTF-16 diagnostic positions after non-ASCII text.
 - Fixed LSP workspace symbols so an open editor buffer hides stale filesystem symbols for the same module, preserving the in-memory document priority used by definition and reference features.
 - Updated `tree-sitter-vba` to v0.8.1 and adapted call extraction and lint member-access checks to the new stable `receiver` / `member` / `arguments` AST fields.
+- Deprecated the legacy PowerShell bridge for v0.15.0. Windows `auto` bridge mode now uses the `.NET` bridge without falling back to PowerShell; explicit `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` remain available only as deprecated opt-ins and emit `powershell_bridge_deprecated`. PowerShell bridge removal is planned for v0.16.0.
+- Fixed `xlflow analyze` false positives for `VBA209` array element and UDT-array member assignments, clarified `VBA204` fallthrough guidance, and recognized paired Push/Pop `Application` state restore helpers for `VBA203`.
 
 ## v0.14.1
 

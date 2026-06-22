@@ -77,6 +77,24 @@ func (p trackingBridgeProvider) Execute(_ context.Context, req excelbridge.Reque
 	return p.response, p.err
 }
 
+func hasWarningCode(value any, code string) bool {
+	switch warnings := value.(type) {
+	case []map[string]any:
+		for _, warning := range warnings {
+			if warning["code"] == code {
+				return true
+			}
+		}
+	case []any:
+		for _, raw := range warnings {
+			if warning, ok := raw.(map[string]any); ok && warning["code"] == code {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestExternalScriptPathFindsRepositoryScripts(t *testing.T) {
 	path, ok := externalScriptPath(t.TempDir(), "run")
 	if !ok {
@@ -330,7 +348,7 @@ func TestRunnerAutoBridgeUsesDotNetWhenSupported(t *testing.T) {
 	}
 }
 
-func TestRunnerAutoBridgeFallsBackToPowerShellForUnsupportedDotNetInspectTarget(t *testing.T) {
+func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForUnsupportedDotNetInspectTarget(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -369,27 +387,23 @@ func TestRunnerAutoBridgeFallsBackToPowerShellForUnsupportedDotNetInspectTarget(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
-	if dotNetCalls != 1 || powerShellCalls != 1 {
-		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 each", dotNetCalls, powerShellCalls)
+	if dotNetCalls != 1 || powerShellCalls != 0 {
+		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 and 0", dotNetCalls, powerShellCalls)
 	}
-	if len(dotNetRequests) != 1 || len(powerShellRequests) != 1 {
+	if len(dotNetRequests) != 1 || len(powerShellRequests) != 0 {
 		t.Fatalf("unexpected request counts: dotnet=%d powershell=%d", len(dotNetRequests), len(powerShellRequests))
 	}
 	if got := dotNetRequests[0].Args["Target"]; got != "used-range" {
 		t.Fatalf("dotnet target = %q, want used-range", got)
 	}
-	if got := powerShellRequests[0].Args["Target"]; got != "used-range" {
-		t.Fatalf("powershell target = %q, want used-range", got)
-	}
 	if env.Command != "inspect" {
 		t.Fatalf("Command = %q, want inspect", env.Command)
 	}
-	payload, ok := env.Inspect.(map[string]interface{})
-	if !ok || payload["target"] != "used-range" {
-		t.Fatalf("unexpected inspect payload: %+v", env.Inspect)
+	if env.Error == nil || env.Error.Code != "BRIDGE_COMMAND_UNSUPPORTED" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
@@ -1060,7 +1074,7 @@ func TestRunnerDoctorPreservesDotNetBridgeStructuredErrorMetadata(t *testing.T) 
 	}
 }
 
-func TestRunnerDoctorAddsFallbackAndLegacyDiagnosticsForPowerShellAutoFallback(t *testing.T) {
+func TestRunnerDoctorAutoDoesNotFallbackWhenDotNetMissing(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -1091,27 +1105,14 @@ func TestRunnerDoctorAddsFallbackAndLegacyDiagnosticsForPowerShellAutoFallback(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
-	if dotNetCalls != 1 || powerShellCalls != 1 {
-		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 each", dotNetCalls, powerShellCalls)
+	if dotNetCalls != 1 || powerShellCalls != 0 {
+		t.Fatalf("dotnet calls = %d, powershell calls = %d, want 1 and 0", dotNetCalls, powerShellCalls)
 	}
-	diagnostics, ok := env.Diagnostics.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected diagnostics map, got %#v", env.Diagnostics)
-	}
-	if diagnostics["requested_bridge"] != "auto" {
-		t.Fatalf("Diagnostics.requested_bridge = %v, want auto", diagnostics["requested_bridge"])
-	}
-	if diagnostics["selected_bridge"] != "powershell" {
-		t.Fatalf("Diagnostics.selected_bridge = %v, want powershell", diagnostics["selected_bridge"])
-	}
-	if diagnostics["fallback"] != true {
-		t.Fatalf("Diagnostics.fallback = %v, want true", diagnostics["fallback"])
-	}
-	if diagnostics["legacy"] != true {
-		t.Fatalf("Diagnostics.legacy = %v, want true", diagnostics["legacy"])
+	if env.Error == nil || env.Error.Code != "bridge_not_available" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
@@ -1154,6 +1155,68 @@ func TestRunnerDoctorAddsLegacyDiagnosticsForExplicitPowerShell(t *testing.T) {
 	}
 	if diagnostics["legacy"] != true {
 		t.Fatalf("Diagnostics.legacy = %v, want true", diagnostics["legacy"])
+	}
+	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
+		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	}
+}
+
+func TestRunnerEnvPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	t.Setenv(excelbridge.EnvBridge, "powershell")
+
+	var powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:      string(mode),
+			supports:  true,
+			callCount: &powerShellCalls,
+			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir()}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
+		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	}
+}
+
+func TestRunnerConfigPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:      string(mode),
+			supports:  true,
+			callCount: &powerShellCalls,
+			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), ConfigBridgeMode: "powershell"}.ProcessList(ProcessListOptions{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if powerShellCalls != 1 {
+		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	}
+	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
+		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
 	}
 }
 
@@ -1199,7 +1262,7 @@ func TestRunnerDotNetExplicitModeDoesNotFallBackOnDecodeError(t *testing.T) {
 	}
 }
 
-func TestRunnerAutoModeDoesNotFallBackForUnsupportedCommand(t *testing.T) {
+func TestRunnerAutoModeAttemptsDotNetForUnsupportedCommand(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -1223,24 +1286,27 @@ func TestRunnerAutoModeDoesNotFallBackForUnsupportedCommand(t *testing.T) {
 		}
 	}
 
-	_, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Run(config.Default(), RunOptions{
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Run(config.Default(), RunOptions{
 		Macro: "Module1.Main",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dotNetCalls != 0 {
-		t.Fatalf(".NET must not be called for commands it does not support, got %d calls", dotNetCalls)
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
+	}
+	if env.Error == nil || env.Error.Code != "bridge_protocol_mismatch" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
-func TestRunnerAutoModeFallsBackToPowerShellOnDecodeError(t *testing.T) {
+func TestRunnerAutoModeDoesNotFallBackToPowerShellOnDecodeError(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -1268,26 +1334,21 @@ func TestRunnerAutoModeFallsBackToPowerShellOnDecodeError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
 	if dotNetCalls != 1 {
 		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1 (fallback expected)", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("expected powershell result with one process, got %v", env.Process)
-	}
-	first, ok := processes[0].(map[string]interface{})
-	if !ok || first["pid"] != float64(9999) {
-		t.Fatalf("unexpected process payload: %+v", processes[0])
+	if env.Error == nil || env.Error.Code != "invalid_script_json" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
-func TestRunnerAutoModeFallsBackToPowerShellWhenDotNetProtocolVersionMissing(t *testing.T) {
+func TestRunnerAutoModeDoesNotFallBackToPowerShellWhenDotNetProtocolVersionMissing(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -1315,22 +1376,17 @@ func TestRunnerAutoModeFallsBackToPowerShellWhenDotNetProtocolVersionMissing(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
 	if dotNetCalls != 1 {
 		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1 (fallback expected)", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("expected powershell result with one process, got %v", env.Process)
-	}
-	first, ok := processes[0].(map[string]interface{})
-	if !ok || first["pid"] != float64(7777) {
-		t.Fatalf("unexpected process payload: %+v", processes[0])
+	if env.Error == nil || env.Error.Code != "bridge_protocol_mismatch" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
@@ -3005,6 +3061,35 @@ func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.
 	}
 }
 
+func TestRunnerPowerShellRunTimeoutAddsDeprecationWarning(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModePowerShell),
+			response: excelbridge.Response{TimedOut: true},
+			err:      context.DeadlineExceeded,
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "powershell"}.Run(config.Default(), RunOptions{
+		Macro:   "Module1.Main",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "macro_timeout" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
+		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	}
+}
+
 func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
@@ -3247,7 +3332,7 @@ func TestRunnerAutoBridgeUsesDotNetForRun(t *testing.T) {
 	}
 }
 
-func TestRunnerAutoBridgeFallsBackToPowerShellForBridgeCommandUnsupported(t *testing.T) {
+func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForBridgeCommandUnsupported(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -3275,91 +3360,59 @@ func TestRunnerAutoBridgeFallsBackToPowerShellForBridgeCommandUnsupported(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
 	}
 	if dotNetCalls != 1 {
 		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
 	}
-	if env.Source == nil {
-		t.Fatal("Source is nil, want powershell pull result")
-	}
-}
-
-func TestShouldAutoFallbackToPowerShellForDotNetBridgeFileNotOpenable(t *testing.T) {
-	t.Parallel()
-
-	execution := providerExecution{
-		provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
-		result: &ScriptResult{
-			ProtocolVersion: excelbridge.ProtocolVersion,
-			Status:          output.StatusFailed,
-			Error: &output.Error{
-				Code:    "bridge_file_not_openable",
-				Message: "failed to open workbook",
-			},
-		},
-	}
-
-	if !shouldAutoFallbackToPowerShell(execution) {
-		t.Fatal("shouldAutoFallbackToPowerShell() = false, want true")
+	if env.Error == nil || env.Error.Code != "BRIDGE_COMMAND_UNSUPPORTED" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
-func TestShouldAutoFallbackToPowerShellDoesNotTreatOtherBridgeFailuresAsOpenFallback(t *testing.T) {
-	t.Parallel()
+func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForDotNetBridgeFileNotOpenable(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
 
-	testCases := []struct {
-		name     string
-		provider excelbridge.Provider
-		result   *ScriptResult
-		want     bool
-	}{
-		{
-			name:     "powershell bridge file not openable does not trigger auto fallback",
-			provider: fakeBridgeProvider{name: string(excelbridge.ModePowerShell)},
-			result: &ScriptResult{
-				ProtocolVersion: excelbridge.ProtocolVersion,
-				Status:          output.StatusFailed,
-				Error: &output.Error{
-					Code:    "bridge_file_not_openable",
-					Message: "failed to open workbook",
-				},
-			},
-			want: false,
-		},
-		{
-			name:     "dotnet other failure stays on dotnet result",
-			provider: fakeBridgeProvider{name: string(excelbridge.ModeDotNet)},
-			result: &ScriptResult{
-				ProtocolVersion: excelbridge.ProtocolVersion,
-				Status:          output.StatusFailed,
-				Error: &output.Error{
-					Code:    "vbproject_access_denied",
-					Message: "VBIDE access denied",
-				},
-			},
-			want: false,
-		},
+	var dotNetCalls, powerShellCalls int
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		switch mode {
+		case excelbridge.ModeDotNet:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModeDotNet),
+				supports:  true,
+				callCount: &dotNetCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"failed","command":"pull","logs":[],"error":{"code":"bridge_file_not_openable","message":"failed to open workbook","source":"xlflow-excel-bridge","phase":"open_workbook"}}`)},
+			}
+		default:
+			return trackingBridgeProvider{
+				name:      string(excelbridge.ModePowerShell),
+				supports:  true,
+				callCount: &powerShellCalls,
+				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"pull","logs":[],"source":{"modules_dir":"C:\\temp\\src\\modules"}}`)},
+			}
+		}
 	}
 
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			execution := providerExecution{
-				provider: tc.provider,
-				result:   tc.result,
-			}
-
-			if got := shouldAutoFallbackToPowerShell(execution); got != tc.want {
-				t.Fatalf("shouldAutoFallbackToPowerShell() = %v, want %v", got, tc.want)
-			}
-		})
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.PullWithOptions(config.Default(), SessionCommandOptions{Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitEnvironment)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if powerShellCalls != 0 {
+		t.Fatalf("powershell calls = %d, want 0", powerShellCalls)
+	}
+	if env.Error == nil || env.Error.Code != "bridge_file_not_openable" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 

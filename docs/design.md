@@ -28,8 +28,8 @@ C# bridge:
   - process/window/clipboard control
 
 PowerShell bridge:
-  - legacy fallback
-  - unsupported .NET command fallback in auto mode only
+  - deprecated explicit opt-in in v0.15.0
+  - planned removal in v0.16.0
 ```
 
 狙いは、PowerShell 実行ポリシーに依存しない企業環境対応と、COM/VBIDE/Win32 周辺の制御品質向上である。
@@ -44,7 +44,7 @@ PowerShell bridge:
 
 - Go CLI の軽量性とクロスプラットフォーム性を保てる。
 - Excel COM/VBIDE 操作を STA 前提の C# process に閉じ込められる。
-- C# bridge が壊れても PowerShell fallback を残せる。
+- v0.15.0 以降は C# bridge の失敗を PowerShell fallback で隠さず structured error として返す。
 - bridge protocol を固定すれば段階移行できる。
 
 ### 2.2 stdin/stdout JSON protocol
@@ -86,7 +86,7 @@ bridge mode は `auto | dotnet | powershell`。
 --bridge auto:
   - 現段階では PowerShell first
   - .NET 対応 command が安定した段階で dotnet first に切り替える
-  - unsupported command は PowerShell fallback してよい
+  - unsupported command は structured error として返す
 ```
 
 明示指定時に fallback しない理由は、CI や企業環境検証で「PowerShell を使っていない」ことを証明できるようにするため。
@@ -291,7 +291,7 @@ Windows/       Win32, UI Automation, process, clipboard, dialogs
 1. ADR / bridge protocol docs
 2. Go bridge provider abstraction
 3. PowerShellProvider 化
-4. --bridge auto|powershell|dotnet
+4. --bridge auto|dotnet plus deprecated powershell opt-in
 5. .NET bridge skeleton
 6. --version-json / --capabilities-json
 7. doctor
@@ -524,7 +524,7 @@ scope:
 完了条件:
 
 - `xlflow <command> --bridge dotnet --json` が上記 command と sub-action で動く。
-- `xlflow <command> --bridge powershell --json` は互換用に維持される。
+- `xlflow <command> --bridge powershell --json` は v0.15.0 の deprecated opt-in としてのみ維持される。
 - Go unit test が全 bridge command key の .NET routing / strict dotnet / explicit powershell を確認する。
 - C# unit test が argument mapping、unsupported action、envelope shape を確認する。
 - Windows + Excel COM E2E で `new/init`、session start/status/save/stop、attach、list forms、ui button add/list/remove、edit cell/range/rows/columns、既存 pull/push/run/test workflow が通る。
@@ -563,14 +563,14 @@ before:
   auto -> PowerShell first
 
 after:
-  auto -> .NET first on Windows, PowerShell fallback for unsupported commands
+  auto -> .NET on Windows, no PowerShell fallback
 ```
 
 ### Phase 13: PowerShell legacy 化
 
 scope:
 
-- PowerShell bridge docs を legacy fallback として更新する。
+- PowerShell bridge docs を deprecated explicit opt-in として更新する。
 - doctor に selected bridge / fallback status を出す。
 - 新機能は原則 C# bridge first にする。
 

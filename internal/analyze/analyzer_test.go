@@ -463,6 +463,89 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateAllowsPushPopRestorePattern(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fastModeDepth As Long
+Private savedCalculation As XlCalculation
+Private savedEnableEvents As Boolean
+Private savedScreenUpdating As Boolean
+
+Private Sub PushFastMode()
+  If fastModeDepth = 0 Then
+    savedCalculation = Application.Calculation
+    savedEnableEvents = Application.EnableEvents
+    savedScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+  End If
+  fastModeDepth = fastModeDepth + 1
+End Sub
+
+Private Sub PopFastMode()
+  If fastModeDepth <= 0 Then Exit Sub
+  fastModeDepth = fastModeDepth - 1
+  If fastModeDepth = 0 Then
+    Application.Calculation = savedCalculation
+    Application.EnableEvents = savedEnableEvents
+    Application.ScreenUpdating = savedScreenUpdating
+  End If
+End Sub
+
+Public Sub Run()
+  Call PushFastMode
+  On Error GoTo Cleanup
+  Debug.Print "work"
+Cleanup:
+  Call PopFastMode
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should allow paired Push/Pop Application state restore: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.ScreenUpdating = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerErrorHandlerFallthroughSuggestsConcreteExitStatement(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error GoTo ExitSub
+  Debug.Print "work"
+ExitSub:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := findFinding(t, findings, "VBA204", 5)
+	if !containsAll(finding.Suggestion, "`Exit Sub`", "`ExitSub:`") {
+		t.Fatalf("unexpected VBA204 suggestion: %q", finding.Suggestion)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -585,6 +668,45 @@ End Sub
 	got := findingsByCode(findings, "VBA209")
 	if len(got) != 1 || got[0].Line != 7 {
 		t.Fatalf("expected only array comparison on line 7, got %+v", got)
+	}
+}
+
+func TestAnalyzerArrayComparisonIgnoresElementsAndProcedureHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fastModeDepth As Long
+Private Type DownloadItem
+  Filename As String
+End Type
+Private C_Down() As DownloadItem
+Private TestArray() As Variant
+
+Private Sub PopFastMode()
+  If fastModeDepth <= 0 Then Exit Sub
+  fastModeDepth = fastModeDepth - 1
+End Sub
+
+Public Sub Run()
+  Dim values() As Variant
+  Dim dataMatrix() As Variant
+  Dim stepData() As Variant
+  Dim columnIndex As Long
+  Dim stepIndex As Long
+  Dim outputColumn As Long
+  Dim rowIndex As Long
+  Dim i As Long
+  values(1, columnIndex) = i
+  dataMatrix(stepIndex, outputColumn) = stepData(rowIndex, 1)
+  C_Down(i).Filename = TestArray(i, 0)
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA209"); len(got) != 0 {
+		t.Fatalf("VBA209 should ignore array element and UDT-array member assignments: %+v", got)
 	}
 }
 
