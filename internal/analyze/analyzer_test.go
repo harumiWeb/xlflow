@@ -463,6 +463,69 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateAllowsPushPopRestorePattern(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fastModeDepth As Long
+Private savedCalculation As XlCalculation
+Private savedEnableEvents As Boolean
+Private savedScreenUpdating As Boolean
+
+Private Sub PushFastMode()
+  If fastModeDepth = 0 Then
+    savedCalculation = Application.Calculation
+    savedEnableEvents = Application.EnableEvents
+    savedScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+  End If
+  fastModeDepth = fastModeDepth + 1
+End Sub
+
+Private Sub PopFastMode()
+  If fastModeDepth <= 0 Then Exit Sub
+  fastModeDepth = fastModeDepth - 1
+  If fastModeDepth = 0 Then
+    Application.Calculation = savedCalculation
+    Application.EnableEvents = savedEnableEvents
+    Application.ScreenUpdating = savedScreenUpdating
+  End If
+End Sub
+
+Public Sub Run()
+  Call PushFastMode
+  On Error GoTo Cleanup
+  Debug.Print "work"
+Cleanup:
+  Call PopFastMode
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should allow paired Push/Pop Application state restore: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.ScreenUpdating = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
 func TestAnalyzerErrorHandlerFallthroughSuggestsConcreteExitStatement(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

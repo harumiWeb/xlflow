@@ -168,6 +168,11 @@ type sourceDeclaration struct {
 	Parameter     bool
 }
 
+type applicationStateProcedureSummary struct {
+	Disables map[string]bool
+	Restores map[string]bool
+}
+
 type withInfo struct {
 	Target string
 	Type   string
@@ -316,17 +321,18 @@ func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Find
 	var findings []Finding
 	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	appStateProcedures := applicationStateProcedureSummaries(file.Lines, procedures)
 	for _, proc := range procedures {
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, reportedMissingHelpers)...)
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, appStateProcedures, reportedMissingHelpers)...)
 	}
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, reportedMissingHelpers)...)
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, appStateProcedures, reportedMissingHelpers)...)
 	}
 	return findings
 }
 
-func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, reportedMissingHelpers map[string]bool) []Finding {
+func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, appStateProcedures map[string]applicationStateProcedureSummary, reportedMissingHelpers map[string]bool) []Finding {
 	decls := cloneDeclarations(moduleDecls)
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
@@ -439,7 +445,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		_ = lower
 	}
 	if a.Config.Analyze.DetectApplicationStateRestore {
-		findings = append(findings, a.applicationStateFindings(file, proc)...)
+		findings = append(findings, a.applicationStateFindings(file, proc, appStateProcedures)...)
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc, handlerLabels)...)
@@ -931,24 +937,20 @@ func nextNonSpace(text string, index int) byte {
 	return 0
 }
 
-func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure) []Finding {
-	props := []string{"enableevents", "displayalerts", "screenupdating", "calculation"}
+func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, summaries map[string]applicationStateProcedureSummary) []Finding {
 	var findings []Finding
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		stmt := normalizedCodeLine(file.Lines[i])
 		lower := compactStatement(strings.ToLower(stmt))
-		for _, prop := range props {
-			prefix := "application." + prop + "="
-			if !strings.Contains(lower, prefix) {
-				continue
-			}
-			if prop != "calculation" && !strings.Contains(lower, prefix+"false") {
-				continue
-			}
-			if prop == "calculation" && strings.Contains(lower, prefix+"xlcalculationautomatic") {
+		for _, prop := range applicationStateProperties() {
+			disables, _ := applicationStateAssignmentKind(lower, prop)
+			if !disables {
 				continue
 			}
 			if hasLaterApplicationRestore(file.Lines, proc, i+1, prop) {
+				continue
+			}
+			if hasPairedApplicationRestoreProcedure(proc.Name, prop, summaries) {
 				continue
 			}
 			name := applicationStateName(prop)
@@ -958,14 +960,77 @@ func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure
 	return findings
 }
 
-func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int, prop string) bool {
+func applicationStateProcedureSummaries(lines []string, procedures []sourceProcedure) map[string]applicationStateProcedureSummary {
+	summaries := map[string]applicationStateProcedureSummary{}
+	for _, proc := range procedures {
+		summary := applicationStateProcedureSummary{Disables: map[string]bool{}, Restores: map[string]bool{}}
+		for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
+			lower := compactStatement(strings.ToLower(normalizedCodeLine(lines[i])))
+			for _, prop := range applicationStateProperties() {
+				disables, restores := applicationStateAssignmentKind(lower, prop)
+				if disables {
+					summary.Disables[prop] = true
+				}
+				if restores {
+					summary.Restores[prop] = true
+				}
+			}
+		}
+		summaries[strings.ToLower(proc.Name)] = summary
+	}
+	return summaries
+}
+
+func applicationStateProperties() []string {
+	return []string{"enableevents", "displayalerts", "screenupdating", "calculation"}
+}
+
+func applicationStateAssignmentKind(lower, prop string) (bool, bool) {
 	prefix := "application." + prop + "="
+	if !strings.Contains(lower, prefix) {
+		return false, false
+	}
+	rhs := lower[strings.Index(lower, prefix)+len(prefix):]
+	if prop != "calculation" {
+		if strings.HasPrefix(rhs, "false") {
+			return true, false
+		}
+		return false, true
+	}
+	if strings.HasPrefix(rhs, "xlcalculationautomatic") {
+		return false, true
+	}
+	if strings.HasPrefix(rhs, "xlcalculationmanual") || strings.HasPrefix(rhs, "xlcalculationsemiautomatic") {
+		return true, false
+	}
+	return false, true
+}
+
+func hasPairedApplicationRestoreProcedure(procName, prop string, summaries map[string]applicationStateProcedureSummary) bool {
+	if procName == "" {
+		return false
+	}
+	lowerName := strings.ToLower(procName)
+	if !strings.HasPrefix(lowerName, "push") {
+		return false
+	}
+	current, ok := summaries[lowerName]
+	if !ok || !current.Disables[prop] {
+		return false
+	}
+	for _, restoreName := range []string{"pop" + strings.TrimPrefix(lowerName, "push"), "restore" + strings.TrimPrefix(lowerName, "push")} {
+		if summary, ok := summaries[restoreName]; ok && summary.Restores[prop] {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int, prop string) bool {
 	for i := start; i < proc.EndLine && i < len(lines); i++ {
 		lower := compactStatement(strings.ToLower(normalizedCodeLine(lines[i])))
-		if !strings.Contains(lower, prefix) {
-			continue
-		}
-		if prop == "calculation" || !strings.Contains(lower, prefix+"false") {
+		_, restores := applicationStateAssignmentKind(lower, prop)
+		if restores {
 			return true
 		}
 	}
