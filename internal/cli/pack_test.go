@@ -4,9 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -451,4 +453,119 @@ func errorCodeFromJSON(t *testing.T, stdout string) string {
 		t.Fatalf("expected error payload in %s", stdout)
 	}
 	return env.Error.Code
+}
+
+func TestCollectFormSourcesSidecarMergesBasIntoSource(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // code_source defaults to "sidecar"
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "VERSION 5.00\r\nBegin {GUID} UserForm1\r\n   Caption = \"x\"\r\nEnd\r\n" +
+		"Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Private Sub a()\r\n    Debug.Print \"OLD\"\r\nEnd Sub\r\n"
+	bas := "Private Sub a()\r\n    Debug.Print \"NEW\"\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bas), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "UserForm1" || got[0].Type != packpkg.ModuleTypeForm {
+		t.Fatalf("unexpected sources: %+v", got)
+	}
+	if !strings.Contains(got[0].Source, "NEW") {
+		t.Errorf("sidecar code not merged into source: %q", got[0].Source)
+	}
+	after, _ := os.ReadFile(filepath.Join(formsDir, "UserForm1.frm"))
+	if string(after) != frm {
+		t.Error("pack must not write the .frm on disk")
+	}
+}
+
+func TestCollectFormSourcesFrmModeReadsFrmVerbatim(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\n    Debug.Print \"FRM\"\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A stray sidecar must be ignored in frm mode.
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte("Private Sub a()\r\n    Debug.Print \"SIDE\"\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Source != frm {
+		t.Errorf("frm mode should read .frm verbatim, got %+v", got)
+	}
+}
+
+func TestCollectFormSourcesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // sidecar
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Source != frm {
+		t.Errorf("missing sidecar should fall back to .frm, got %+v", got)
+	}
+}
+
+func TestCollectFormSourcesSidecarWithAttributeHeaderFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte("Attribute VB_Name = \"UserForm1\"\r\ncode\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for attribute-bearing sidecar, got %v", err)
+	}
+}
+
+func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// sidecar with no matching .frm
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "Ghost.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for orphan sidecar, got %v", err)
+	}
 }

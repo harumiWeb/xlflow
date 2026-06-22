@@ -1264,6 +1264,9 @@ func (a *app) packCommand() *cobra.Command {
 
 			sources, err := collectPackSourceModules(a.cwd, cfg)
 			if err != nil {
+				if errors.Is(err, packpkg.ErrAmbiguousLayout) {
+					return a.writePackEngineFailure(err)
+				}
 				return a.writeFailure("pack", output.ExitEnvironment, "pack_source_read_failed", err)
 			}
 			templateBytes, err := os.ReadFile(resolvedTemplate)
@@ -4066,13 +4069,113 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 	if err := collect(cfg.Src.Workbook, packpkg.ModuleTypeDocument, ".bas", ".cls"); err != nil {
 		return nil, err
 	}
-	// .frm carries a UserForm's code-behind; the form's designer storage is carried from the
-	// template, so only the .frm (not the .frx) is read here. Forms not in the template are
-	// rejected downstream in applySources (pack updates existing form code-behind only).
-	if err := collect(cfg.Src.Forms, packpkg.ModuleTypeForm, ".frm"); err != nil {
+	formSources, err := collectFormSources(root, cfg)
+	if err != nil {
 		return nil, err
 	}
+	sources = append(sources, formSources...)
 	return sources, nil
+}
+
+// collectFormSources reads UserForm sources honoring [userform].code_source. In frm mode the .frm is the
+// code authority; in sidecar mode the authoritative code-behind is src/forms/code/<FormName>.bas and is
+// merged into the .frm text IN MEMORY (the on-disk .frm is never modified — pack must not dirty sources).
+// Mismatches (a sidecar carrying Attribute VB_* headers, or a sidecar with no matching .frm) fail loud as
+// ErrAmbiguousLayout. The canonical merge/validation live in internal/excel/forms (used by push/pull); pack
+// reuses them read-only rather than the disk-writing runUserFormCodeSourcePreflight.
+func collectFormSources(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
+	formsDir := workbookArgPath(root, cfg.Src.Forms)
+	if strings.TrimSpace(formsDir) == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(formsDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sidecar := strings.EqualFold(cfg.UserForm.CodeSource, "sidecar")
+	if sidecar {
+		issues, err := forms.ValidateUserFormCodeSidecars(formsDir, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(issues) > 0 {
+			return nil, fmt.Errorf("%w: %d UserForm sidecar(s) under %s carry Attribute VB_* header lines; a sidecar must hold code-behind only (starting at Option Explicit)", packpkg.ErrAmbiguousLayout, len(issues), filepath.Join(cfg.Src.Forms, "code"))
+		}
+		if err := rejectOrphanFormSidecars(formsDir); err != nil {
+			return nil, err
+		}
+	}
+	codeDir := filepath.Join(formsDir, "code")
+	var sources []packpkg.SourceModule
+	walkErr := filepath.WalkDir(formsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if samePath(path, codeDir) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
+			return nil
+		}
+		formName := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+		frmBody, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		source := string(frmBody)
+		if sidecar {
+			basBody, err := os.ReadFile(filepath.Join(codeDir, formName+".bas"))
+			switch {
+			case err == nil:
+				source = forms.MergeUserFormCodeIntoFRM(string(frmBody), string(basBody))
+			case errors.Is(err, os.ErrNotExist):
+				// no sidecar for this form: keep the .frm code as-is
+			default:
+				return err
+			}
+		}
+		sources = append(sources, packpkg.SourceModule{
+			Name:   formName,
+			Type:   packpkg.ModuleTypeForm,
+			Source: source,
+		})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return sources, nil
+}
+
+// rejectOrphanFormSidecars fails loud when src/forms/code/<X>.bas has no matching <X>.frm — a sidecar
+// pointing at a form pack cannot place is an ambiguous layout, not a silent skip.
+func rejectOrphanFormSidecars(formsDir string) error {
+	codeDir := filepath.Join(formsDir, "code")
+	entries, err := os.ReadDir(codeDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".bas") {
+			continue
+		}
+		formName := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+		if _, err := os.Stat(filepath.Join(formsDir, formName+".frm")); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%w: UserForm sidecar %q has no matching %s.frm", packpkg.ErrAmbiguousLayout, formName, formName)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func uniqueNonEmptyPaths(paths ...string) []string {
