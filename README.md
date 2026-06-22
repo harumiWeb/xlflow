@@ -131,7 +131,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 > Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
 > [!NOTE]
-> xlflow uses a .NET bridge for COM operations, so PowerShell is generally not required. However, a PowerShell bridge also exists as a legacy implementation, and if you use this, PowerShell 5.1 or later is required.
+> xlflow uses a .NET bridge for COM operations. The legacy PowerShell bridge is deprecated in v0.15.0, remains available only through explicit opt-in for compatibility, and is planned for removal in v0.16.0.
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
@@ -192,7 +192,7 @@ Download prebuilt Windows and Linux x64 binaries from:
 
 > [!IMPORTANT]
 > Commands that interact with workbooks still require **Microsoft Excel**, Excel COM automation, and **Trust access to the VBA project object model** on Windows.
-> The Windows release ZIP includes both `xlflow.exe` and `xlflow-excel-bridge.exe`. The Go CLI still embeds the runtime PowerShell bridge scripts, so workbook commands do not require sidecar `*.ps1` files.
+> The Windows release ZIP includes both `xlflow.exe` and `xlflow-excel-bridge.exe`. Workbook-backed commands use the bundled `.NET` bridge in `auto` mode.
 > The Linux x64 archive contains the WSL/frontend CLI only and does not include the Windows `.NET` bridge.
 > Release artifacts are built natively per OS because xlflow uses CGO for VBA source parsing: Windows releases use MSYS2 UCRT64 GCC, and Linux releases use the native Ubuntu GCC toolchain.
 
@@ -230,7 +230,7 @@ go install github.com/harumiWeb/xlflow/cmd/xlflow@latest
 
 > [!WARNING]
 > `go install` installs `xlflow` only. It does not install the packaged `.NET` bridge sidecar `xlflow-excel-bridge.exe` used by Windows release ZIPs.
-> If you want to use `--bridge dotnet`, install from the Windows release archive or build/install the bridge separately from a source checkout, for example with `task install`.
+> The Windows release archive includes the `.NET` bridge sidecar. From a source checkout, use `task install` so both `xlflow.exe` and `xlflow-excel-bridge.exe` are installed together.
 
 Verify the installation:
 
@@ -449,7 +449,7 @@ xlflow attach --active --json
 > [!NOTE]
 > `attach` is a safety check. It confirms that the active Excel workbook matches the configured `excel.path`; it does not change the target used by `pull`, `push`, or `run`.
 
-`attach`, `session`, `runner`, `list forms`, `ui button`, `edit`, and `new` also support explicit `--bridge dotnet` on Windows.
+`attach`, `session`, `runner`, `list forms`, `ui button`, `edit`, and `new` also use the `.NET` bridge in Windows `auto` mode.
 
 ### GUI-heavy macros
 
@@ -487,39 +487,39 @@ End If
 
 ## Command map
 
-| Command             | Purpose                                                              | Typical usage                                                                |
-| ------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `new`               | Create a new xlflow project and `.xlsm` workbook                     | `xlflow new Book.xlsm`                                                       |
-| `init`              | Initialize xlflow from an existing workbook                          | `xlflow init Book.xlsm`                                                      |
-| `doctor`            | Diagnose Excel, COM, PowerShell, VBIDE, and optional workbook access | `xlflow doctor --workbook --json`                                            |
-| `attach`            | Validate the workbook currently active in Excel                      | `xlflow attach --active --json`                                              |
-| `backup list`       | List rollback-capable workbook backups                               | `xlflow backup list --json`                                                  |
-| `pull`              | Export VBA components into `src/`                                    | `xlflow pull --json`                                                         |
-| `push`              | Import VBA source back into the workbook                             | `xlflow push --json`                                                         |
-| `rollback`          | Restore the workbook from a saved backup                             | `xlflow rollback --latest --json`                                            |
-| `session`           | Keep the configured workbook open for fast loops                     | `xlflow session start`                                                       |
-| `status`            | Show project, source, workbook, and session state                    | `xlflow status --json`                                                       |
-| `save`              | Save the workbook held by a session                                  | `xlflow save --session --json`                                               |
-| `runner`            | Manage the persistent xlflow runner marker module                    | `xlflow runner install --json`                                               |
-| `process`           | Manage local Excel processes (list, cleanup)                         | `xlflow process list --json`                                                 |
-| `macros`            | Discover runnable macro entrypoints                                  | `xlflow macros --json`                                                       |
-| `list forms`        | Discover workbook UserForms and expected source paths                | `xlflow list forms --json`                                                   |
-| `form snapshot`     | Persist Designer UserForm state as JSON or YAML spec                 | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
-| `form build`        | Create a Designer-backed UserForm from a saved spec                  | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
-| `form export-image` | Export a runtime UserForm to a PNG image                             | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
-| `run`               | Execute a macro from the CLI                                         | `xlflow run Main.Run --json`                                                 |
-| `export-image`      | Export a worksheet range to a PNG image                              | `xlflow export-image --sheet QR --range A1:AE31 --json`                      |
-| `edit`              | Mutate a live session workbook for setup and tuning                  | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`   |
-| `test`              | Run VBA tests                                                        | `xlflow test --json`                                                         |
-| `diff`              | Compare workbook content and optional VBA source                     | `xlflow diff before.xlsm after.xlsm --json`                                  |
-| `inspect`           | Inspect saved workbook snapshots or explicit live session state      | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
-| `lint`              | Lint VBA source                                                      | `xlflow lint --json`                                                         |
-| `fmt`               | Format VBA source conservatively                                     | `xlflow fmt --write --json`                                                  |
-| `analyze`           | Analyze runtime-risk patterns without opening Excel                  | `xlflow analyze --json`                                                      |
-| `check`             | Run `lint`, `analyze`, and `doctor` as a preflight                   | `xlflow check --keepalive --json`                                            |
-| `inspect-gui`       | Detect GUI interaction boundaries                                    | `xlflow inspect-gui --json`                                                  |
-| `skill install`     | Install the bundled xlflow Skill for AI agents                       | `xlflow skill install --agent codex`                                         |
-| `version`           | Show the installed xlflow build metadata                             | `xlflow version`                                                             |
+| Command             | Purpose                                                                 | Typical usage                                                                |
+| ------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `new`               | Create a new xlflow project and `.xlsm` workbook                        | `xlflow new Book.xlsm`                                                       |
+| `init`              | Initialize xlflow from an existing workbook                             | `xlflow init Book.xlsm`                                                      |
+| `doctor`            | Diagnose Excel, COM, `.NET` bridge, VBIDE, and optional workbook access | `xlflow doctor --workbook --json`                                            |
+| `attach`            | Validate the workbook currently active in Excel                         | `xlflow attach --active --json`                                              |
+| `backup list`       | List rollback-capable workbook backups                                  | `xlflow backup list --json`                                                  |
+| `pull`              | Export VBA components into `src/`                                       | `xlflow pull --json`                                                         |
+| `push`              | Import VBA source back into the workbook                                | `xlflow push --json`                                                         |
+| `rollback`          | Restore the workbook from a saved backup                                | `xlflow rollback --latest --json`                                            |
+| `session`           | Keep the configured workbook open for fast loops                        | `xlflow session start`                                                       |
+| `status`            | Show project, source, workbook, and session state                       | `xlflow status --json`                                                       |
+| `save`              | Save the workbook held by a session                                     | `xlflow save --session --json`                                               |
+| `runner`            | Manage the persistent xlflow runner marker module                       | `xlflow runner install --json`                                               |
+| `process`           | Manage local Excel processes (list, cleanup)                            | `xlflow process list --json`                                                 |
+| `macros`            | Discover runnable macro entrypoints                                     | `xlflow macros --json`                                                       |
+| `list forms`        | Discover workbook UserForms and expected source paths                   | `xlflow list forms --json`                                                   |
+| `form snapshot`     | Persist Designer UserForm state as JSON or YAML spec                    | `xlflow form snapshot UserForm1 --out src/forms/specs/UserForm1.yaml --json` |
+| `form build`        | Create a Designer-backed UserForm from a saved spec                     | `xlflow form build src/forms/specs/UserForm1.yaml --json`                    |
+| `form export-image` | Export a runtime UserForm to a PNG image                                | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
+| `run`               | Execute a macro from the CLI                                            | `xlflow run Main.Run --json`                                                 |
+| `export-image`      | Export a worksheet range to a PNG image                                 | `xlflow export-image --sheet QR --range A1:AE31 --json`                      |
+| `edit`              | Mutate a live session workbook for setup and tuning                     | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`   |
+| `test`              | Run VBA tests                                                           | `xlflow test --json`                                                         |
+| `diff`              | Compare workbook content and optional VBA source                        | `xlflow diff before.xlsm after.xlsm --json`                                  |
+| `inspect`           | Inspect saved workbook snapshots or explicit live session state         | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
+| `lint`              | Lint VBA source                                                         | `xlflow lint --json`                                                         |
+| `fmt`               | Format VBA source conservatively                                        | `xlflow fmt --write --json`                                                  |
+| `analyze`           | Analyze runtime-risk patterns without opening Excel                     | `xlflow analyze --json`                                                      |
+| `check`             | Run `lint`, `analyze`, and `doctor` as a preflight                      | `xlflow check --keepalive --json`                                            |
+| `inspect-gui`       | Detect GUI interaction boundaries                                       | `xlflow inspect-gui --json`                                                  |
+| `skill install`     | Install the bundled xlflow Skill for AI agents                          | `xlflow skill install --agent codex`                                         |
+| `version`           | Show the installed xlflow build metadata                                | `xlflow version`                                                             |
 
 ---
 
@@ -556,6 +556,8 @@ path = "build/Book.xlsm"
 visible = false
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = false
+# Excel bridge mode. Valid values: "auto", "dotnet". "powershell" is deprecated and will be removed in v0.16.0.
+bridge = "auto"
 
 # Source tree directories.
 [src]
@@ -696,12 +698,12 @@ On failure, `status` is `failed`, and `error.code` and `error.message` are retur
 
 ## Exit codes
 
-| Code | Meaning                                                             |
-| ---: | ------------------------------------------------------------------- |
-|  `0` | Success                                                             |
-|  `1` | Validation failure, such as lint, macro, or test failure            |
-|  `2` | CLI argument or configuration error                                 |
-|  `3` | Environment error, such as Excel, COM, VBIDE, or PowerShell failure |
+| Code | Meaning                                                         |
+| ---: | --------------------------------------------------------------- |
+|  `0` | Success                                                         |
+|  `1` | Validation failure, such as lint, macro, or test failure        |
+|  `2` | CLI argument or configuration error                             |
+|  `3` | Environment error, such as Excel, COM, VBIDE, or bridge failure |
 
 > [!NOTE]
 > `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.

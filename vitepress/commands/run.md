@@ -10,26 +10,26 @@ xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--i
 
 ## Options and Arguments
 
-| Option / argument              | Description                                                                                | Default             |
-| ------------------------------ | ------------------------------------------------------------------------------------------ | ------------------- |
-| `macro`                        | Macro entrypoint such as `Main.Run`. If omitted, config may provide the entry.             | config entry        |
-| `--arg <type:value>`           | Pass a typed macro argument. Repeat for multiple arguments.                                | -                   |
-| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat for multiple dialogs.                | -                   |
-| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat for multiple dialogs.              | -                   |
-| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat for multiple values or dialogs. | -                   |
-| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                         | false               |
-| `--headless`                   | Run without showing Excel when possible.                                                   | false               |
-| `--interactive`                | Allow visible Excel interaction for dialogs or UserForms.                                  | false               |
-| `--session`                    | Run in the managed live session workbook.                                                  | false               |
-| `--save`                       | Save the workbook after running.                                                           | false               |
-| `--save-as <path>`             | Save a copy to a different workbook path.                                                  | -                   |
-| `--diagnostic`                 | Use diagnostic execution with stronger compile-dialog visibility.                          | false               |
-| `--direct`                     | Run an argument-free macro without temporary harness injection.                            | false               |
-| `--fast`                       | Use development-oriented fast run defaults.                                                | false               |
-| `--gui-compile-errors`         | Let Excel/VBE compile dialogs surface instead of structured diagnostics.                   | false               |
-| `--input <path>`               | Override workbook path for this run.                                                       | configured workbook |
-| `--timeout <duration>`         | Maximum macro runtime before timeout.                                                      | 5m0s                |
-| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`).                         | auto                |
+| Option / argument              | Description                                                                                                         | Default             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `macro`                        | Macro entrypoint such as `Main.Run`. If omitted, config may provide the entry.                                      | config entry        |
+| `--arg <type:value>`           | Pass a typed macro argument. Repeat for multiple arguments.                                                         | -                   |
+| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat for multiple dialogs.                                         | -                   |
+| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat for multiple dialogs.                                       | -                   |
+| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat for multiple values or dialogs.                          | -                   |
+| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                                                  | false               |
+| `--headless`                   | Run without showing Excel when possible.                                                                            | false               |
+| `--interactive`                | Allow visible Excel interaction for dialogs or UserForms.                                                           | false               |
+| `--session`                    | Run in the managed live session workbook.                                                                           | false               |
+| `--save`                       | Save the workbook after running.                                                                                    | false               |
+| `--save-as <path>`             | Save a copy to a different workbook path.                                                                           | -                   |
+| `--diagnostic`                 | Use diagnostic execution with stronger compile-dialog visibility.                                                   | false               |
+| `--direct`                     | Run an argument-free macro without temporary harness injection.                                                     | false               |
+| `--fast`                       | Use development-oriented fast run defaults.                                                                         | false               |
+| `--gui-compile-errors`         | Let Excel/VBE compile dialogs surface instead of structured diagnostics.                                            | false               |
+| `--input <path>`               | Override workbook path for this run.                                                                                | configured workbook |
+| `--timeout <duration>`         | Maximum macro runtime before timeout.                                                                               | 5m0s                |
+| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`). Deprecated `powershell` remains explicit opt-in until v0.16.0. | auto                |
 
 ## Examples
 
@@ -67,7 +67,7 @@ Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `fold
 > For AI-agent debugging, prefer the default diagnostic mode and keep `--gui-compile-errors` off unless a human is watching Excel.
 
 ::: tip
-On Windows, `run` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
+On Windows, `run` uses the `.NET` bridge in `auto` mode with no implicit PowerShell fallback. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 :::
 
 ## JSON Output Example

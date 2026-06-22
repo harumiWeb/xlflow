@@ -37,7 +37,7 @@ Use sessions for fast AI-agent loops: `push --session --no-save`, `run --session
 A dirty session may report `save_required`. That warning means disk does not yet contain the live workbook changes.
 :::
 
-`session` supports explicit `--bridge dotnet` on Windows for `start`, `status`, `save`, and `stop`. In `auto` mode, bridge selection remains unchanged until the default bridge switch lands.
+`session` uses the `.NET` bridge on Windows in `auto` mode for `start`, `status`, `save`, and `stop`. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 
 ## JSON Output Example
 

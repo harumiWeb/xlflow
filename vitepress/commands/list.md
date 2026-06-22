@@ -32,7 +32,7 @@ Use `list forms` before `form snapshot`, `form build`, or `form export-image` to
 > [!IMPORTANT]
 > Listing forms is metadata-oriented; it does not execute UserForm runtime code.
 
-`list forms` supports explicit `--bridge dotnet` on Windows.
+`list forms` uses the `.NET` bridge on Windows in `auto` mode. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 
 ## JSON Output Example
 

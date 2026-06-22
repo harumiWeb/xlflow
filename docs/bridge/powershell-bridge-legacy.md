@@ -1,59 +1,29 @@
-# PowerShell Bridge Legacy Fallback
+# Deprecated PowerShell Bridge
 
-The PowerShell bridge is xlflow's supported legacy Excel automation fallback on Windows.
+The PowerShell bridge is deprecated in v0.15.0 and is planned for removal in v0.16.0.
 
-## Role
+## Role During v0.15.0
 
-PowerShell remains usable, but it is no longer the default Windows bridge. Windows `auto` mode now prefers `.NET`, and PowerShell is used only when selected explicitly or when `auto` must fall back.
+The `.NET` bridge is the supported Windows automation bridge for workbook-backed xlflow commands. Windows `auto` mode selects `.NET` and does not fall back to PowerShell.
 
-It should continue to support existing workbook-backed behavior, including:
-
-- `doctor`
-- `pull`
-- `push`
-- `run`
-- `test`
-- `session`
-- `macros`
-- `inspect`
-- `form`
-- `export-image`
-- `process`
-
-New Windows automation capabilities should be designed .NET-first unless they are required to keep legacy fallback behavior safe.
-
-## Selection
-
-Users can force the PowerShell bridge with:
+PowerShell remains available only as an explicit compatibility opt-in during the v0.15.0 deprecation window:
 
 ```powershell
 xlflow run Main.Run --bridge powershell --json
 ```
 
-In `auto` mode, PowerShell can be used when:
-
-- The .NET bridge executable is missing.
-- The .NET bridge protocol is incompatible.
-- The .NET bridge does not support the requested command.
-
-In explicit `--bridge dotnet` mode, xlflow must not fallback to PowerShell. That strictness is required so users can verify that PowerShell is not involved in locked-down environments.
-
-## stdout Contract
-
-The public xlflow stdout contract remains a single final human output or JSON envelope. PowerShell scripts must not emit stray stdout outside their structured JSON result when invoked by xlflow.
-
-Progress, debug, and UI stream data belong on stderr or inside final structured fields.
+The same deprecated opt-in can be selected through `XLFLOW_EXCEL_BRIDGE=powershell` or `[excel].bridge = "powershell"`. Any PowerShell bridge selection emits a `powershell_bridge_deprecated` warning that states the v0.16.0 removal target.
 
 ## Maintenance Policy
 
-During migration:
+During the deprecation window:
 
-- Fix regressions and security/safety problems in PowerShell.
-- Preserve existing command output and exit-code behavior.
-- Avoid expanding large shared PowerShell helpers for new .NET-first features.
-- Keep tests for legacy fallback and explicit `--bridge powershell` paths.
+- no new PowerShell bridge features are added;
+- no behavior changes are made except critical safety or regression fixes;
+- no new compatibility guarantees are added;
+- missing `.NET` bridge runtime, protocol, capability, transport, or workbook-open failures are reported directly instead of falling back to PowerShell.
 
-New feature work should not expand the PowerShell bridge unless it is required for fallback parity, safety, or bug fixes.
+Workflows that still require PowerShell should report the blocker so the missing behavior can be ported to the `.NET` bridge before v0.16.0.
 
 ## Known Limitations
 

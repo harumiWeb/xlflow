@@ -150,7 +150,7 @@ func (a *app) rootCommand() *cobra.Command {
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
-	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, powershell, dotnet")
+	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, dotnet; powershell is deprecated explicit opt-in until v0.16.0")
 	root.AddCommand(
 		a.newCommand(),
 		a.initCommand(),

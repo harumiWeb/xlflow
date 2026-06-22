@@ -1,20 +1,20 @@
 # xlflow doctor
 
-Diagnose Excel, COM, PowerShell, VBIDE access, systemprofile Desktop readiness, optional workbook access, and GUI-boundary prerequisites.
+Diagnose Excel, COM, `.NET` bridge, VBIDE access, systemprofile Desktop readiness, optional workbook access, and GUI-boundary prerequisites.
 
 ## Usage
 
 ```bash
-xlflow doctor [--bridge <auto|powershell|dotnet>] [--workbook]
+xlflow doctor [--bridge <auto|dotnet>] [--workbook]
 ```
 
 ## Options and Arguments
 
-| Option / argument     | Description                                                        | Default |
-| --------------------- | ------------------------------------------------------------------ | ------- |
-| `--json`              | Return structured diagnostics for agents and CI logs.              | false   |
-| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`). | `auto`  |
-| `--workbook`          | Open and close the configured workbook as part of diagnostics.     | false   |
+| Option / argument     | Description                                                                                                         | Default |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- | ------- |
+| `--json`              | Return structured diagnostics for agents and CI logs.                                                               | false   |
+| `--bridge <provider>` | Select the Excel bridge provider (`auto`, `dotnet`). Deprecated `powershell` remains explicit opt-in until v0.16.0. | `auto`  |
+| `--workbook`          | Open and close the configured workbook as part of diagnostics.                                                      | false   |
 
 ## Examples
 
@@ -42,7 +42,7 @@ VBIDE access must be enabled in Excel Trust Center before xlflow can import, exp
 
 Successful `--json` output uses the xlflow envelope plus the `diagnostics` object.
 
-On Windows, `doctor` prefers the `.NET` bridge in `auto` mode. The nested `diagnostics` object always reports the requested bridge mode, the selected provider, and whether `auto` fell back to the legacy PowerShell bridge.
+On Windows, `doctor` uses the `.NET` bridge in `auto` mode. The nested `diagnostics` object always reports the requested bridge mode, the selected provider, and `fallback=false` because automatic PowerShell fallback is disabled in v0.15.0.
 
 Under WSL, `doctor` invokes Windows xlflow and augments the Windows result with:
 
@@ -120,23 +120,30 @@ WSL output includes the same Windows diagnostics plus the delegation boundary:
 }
 ```
 
-When `--bridge powershell` is selected, or when `--bridge auto` falls back to PowerShell, the top-level `bridge` metadata uses the PowerShell provider shape and `diagnostics.legacy=true`:
+When deprecated `--bridge powershell` is selected explicitly, the top-level `bridge` metadata uses the PowerShell provider shape, `diagnostics.legacy=true`, and the response includes a `powershell_bridge_deprecated` warning:
 
 ```json
 {
   "status": "ok",
   "command": "doctor",
   "diagnostics": {
-    "requested_bridge": "auto",
+    "requested_bridge": "powershell",
     "selected_bridge": "powershell",
-    "fallback": true,
+    "fallback": false,
     "legacy": true
   },
   "bridge": {
     "host": "pwsh.exe",
     "edition": "Core",
     "version": "7.5.1"
-  }
+  },
+  "warnings": [
+    {
+      "code": "powershell_bridge_deprecated",
+      "message": "The PowerShell bridge is deprecated in v0.15.0 and will be removed in v0.16.0. Use the .NET bridge.",
+      "removal_version": "v0.16.0"
+    }
+  ]
 }
 ```
 

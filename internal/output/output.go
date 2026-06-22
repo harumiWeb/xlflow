@@ -585,7 +585,7 @@ func (r renderer) renderDoctor(env Envelope) string {
 	if _, ok := boolValueOK(diag, "legacy"); ok {
 		role := "primary"
 		if boolValue(diag, "legacy") {
-			role = "legacy fallback"
+			role = "deprecated legacy"
 		}
 		b.WriteString(kv("Bridge role", role))
 	}
