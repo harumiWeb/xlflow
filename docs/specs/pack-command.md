@@ -107,7 +107,21 @@ The backend identifier `pack.backend = "pure-go"` is deliberately distinct from 
 - **Source cross-checks**: decompress the regenerated module streams and compare against expected source text (and, where available, against `olevba` output) to confirm MS-OVBA correctness.
 - **Negative tests**: each unsupported case asserts the documented error code and exit code.
 
-These run on the existing Linux PR CI lane; no Windows runner is required for the `pack` path. Windows/Excel smoke tests that open the artifact and run a macro are a pre-stable milestone, not part of the MVP CI.
+These run on the existing Linux PR CI lane; no Windows runner is required for the `pack` path, and the automated PR path stays Linux/pure-Go only. Windows/Excel smoke tests that open the artifact and run a macro are a pre-stable milestone performed in the release gate, not in PR CI; see _Release-gate Excel smoke_ below.
+
+## Release-gate Excel smoke (pre-stable)
+
+The pure-Go path cannot tell whether a generated workbook actually compiles and runs (see _No VBE validation contract_). To close that gap before `pack` leaves experimental status, a representative packed artifact is smoke-tested in real Excel at the release gate — not in PR CI.
+
+This smoke is part of the repository's manual release-gate flow (the `xlflow-tmp-workspace-e2e` skill, "pack artifact smoke" section); the automated PR path remains Linux/pure-Go only. The procedure:
+
+1. Build a workspace with a known sentinel macro — a standard module that writes a fixed value to a cell.
+2. Produce the artifact at the file level: `xlflow pack --out dist/Book.xlsm --experimental`. Confirm the JSON reports `pack.vbe_validation = "not_performed"`.
+3. Open the produced `.xlsm` in Excel via COM, run the packed macro (which forces a VBE compile), and assert that the sentinel cell holds the expected value.
+
+The smoke passes only if `pack` exits `0`, the workbook opens without a compile error, and the macro's observable effect (the sentinel cell) matches. A compile error, a wrong sentinel value, or a non-zero exit blocks the release.
+
+This is release-gate evidence for a representative build. It does not change `pack`'s permanent `vbe_validation = "not_performed"` contract: `pack` itself never validates, and artifacts produced in the field remain unvalidated until opened in Excel.
 
 ## Staged UserForm plan
 
