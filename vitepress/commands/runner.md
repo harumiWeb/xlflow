@@ -32,7 +32,7 @@ xlflow runner install --json
 Most users can rely on `xlflow run`; use `runner` directly when debugging persistent runner state.
 :::
 
-`runner` supports explicit `--bridge dotnet` on Windows for `install`, `status`, and `remove`.
+`runner` uses the `.NET` bridge on Windows in `auto` mode for `install`, `status`, and `remove`. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 
 ## JSON Output Example
 

@@ -134,15 +134,15 @@ For runtime debugging sessions that need more than one workbook-backed command, 
 
 The bundled AI agent skill instructs agents to prefer `XlflowDebug.Log` plus structured `run` output for runtime debugging.
 
-## PowerShell Host Diagnostics
+## External PowerShell Host Diagnostics
 
-Excel COM-backed commands return top-level `bridge` metadata with `host`, `edition`, and `version`. This identifies the xlflow PowerShell bridge host only.
+Excel COM-backed commands return top-level provider-specific `bridge` metadata. The `.NET` bridge reports fields such as `name`, `version`, `protocol_version`, `runtime`, and `architecture`. Deprecated explicit PowerShell bridge runs report `host`, `edition`, and `version`.
 
-When workbook VBA launches its own external PowerShell process, agents should not assume that it matches `bridge.host`. They should inspect the VBA command string or log the resolved executable from workbook code.
+When workbook VBA launches its own external PowerShell process, agents should not assume that it matches xlflow's bridge process. They should inspect the VBA command string or log the resolved executable from workbook code.
 
 Windows review checklist:
 
-1. Check `bridge.host` to confirm which PowerShell xlflow itself used.
+1. Check top-level `bridge` metadata to confirm which xlflow bridge provider handled the command.
 2. Check the workbook-side command or resolved executable if VBA launches `powershell.exe`, `pwsh.exe`, or another shell.
 3. Prefer one host consistently when debugging encoding or environment differences across external-process VBA flows.
 

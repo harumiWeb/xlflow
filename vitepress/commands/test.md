@@ -11,18 +11,18 @@ xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=r
 
 ## Options and Arguments
 
-| Option / argument              | Description                                                           | Default |
-| ------------------------------ | --------------------------------------------------------------------- | ------- |
-| `--filter <pattern>`           | Run only the test whose procedure name exactly matches the filter.    | -       |
-| `--module <name>`              | Run only tests in the module whose name exactly matches the filter.   | -       |
-| `--tag <tag>`                  | Run only tests tagged with the given tag.                             | -       |
-| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.      | -       |
-| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.    | -       |
-| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed. | -       |
-| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.    | false   |
-| `--session`                    | Run tests in the managed live workbook.                               | false   |
-| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `powershell`, `dotnet`).    | auto    |
-| `--json`                       | Return structured test results.                                       | false   |
+| Option / argument              | Description                                                                                                         | Default |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------- |
+| `--filter <pattern>`           | Run only the test whose procedure name exactly matches the filter.                                                  | -       |
+| `--module <name>`              | Run only tests in the module whose name exactly matches the filter.                                                 | -       |
+| `--tag <tag>`                  | Run only tests tagged with the given tag.                                                                           | -       |
+| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.                                                    | -       |
+| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.                                                  | -       |
+| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed.                                               | -       |
+| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                                                  | false   |
+| `--session`                    | Run tests in the managed live workbook.                                                                             | false   |
+| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`). Deprecated `powershell` remains explicit opt-in until v0.16.0. | auto    |
+| `--json`                       | Return structured test results.                                                                                     | false   |
 
 ## Test Location
 
@@ -127,7 +127,7 @@ Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `fold
 :::
 
 ::: tip
-On Windows, `test` uses the `.NET` bridge by default in `auto` mode. `--bridge powershell` forces the legacy fallback path, and explicit `--bridge dotnet` stays strict with no implicit PowerShell fallback.
+On Windows, `test` uses the `.NET` bridge in `auto` mode with no implicit PowerShell fallback. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
 :::
 :::
 

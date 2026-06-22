@@ -13,7 +13,7 @@ import (
 
 const FileName = "xlflow.toml"
 
-var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, powershell, dotnet")
+var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
 
 type Config struct {
 	Project  ProjectConfig    `toml:"project"`
@@ -669,7 +669,7 @@ path = %q
 visible = %t
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = %t
-# Excel bridge mode. Valid values: "auto", "powershell", "dotnet".
+# Excel bridge mode. Valid values: "auto", "dotnet". "powershell" is deprecated and will be removed in v0.16.0.
 bridge = %q
 
 # Source tree directories.
