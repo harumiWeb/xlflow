@@ -1573,6 +1573,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
 			env.UI = mergeUIResult(nil, uiEvents)
+			addPowerShellBridgeDeprecationWarning(&env, provider)
 			return env, output.ExitValidation, nil
 		}
 		code := "script_failed"

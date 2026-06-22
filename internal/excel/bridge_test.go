@@ -3061,6 +3061,35 @@ func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.
 	}
 }
 
+func TestRunnerPowerShellRunTimeoutAddsDeprecationWarning(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModePowerShell),
+			response: excelbridge.Response{TimedOut: true},
+			err:      context.DeadlineExceeded,
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "powershell"}.Run(config.Default(), RunOptions{
+		Macro:   "Module1.Main",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	if env.Error == nil || env.Error.Code != "macro_timeout" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
+		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	}
+}
+
 func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
