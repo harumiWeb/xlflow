@@ -588,6 +588,45 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayComparisonIgnoresElementsAndProcedureHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fastModeDepth As Long
+Private Type DownloadItem
+  Filename As String
+End Type
+Private C_Down() As DownloadItem
+Private TestArray() As Variant
+
+Private Sub PopFastMode()
+  If fastModeDepth <= 0 Then Exit Sub
+  fastModeDepth = fastModeDepth - 1
+End Sub
+
+Public Sub Run()
+  Dim values() As Variant
+  Dim dataMatrix() As Variant
+  Dim stepData() As Variant
+  Dim columnIndex As Long
+  Dim stepIndex As Long
+  Dim outputColumn As Long
+  Dim rowIndex As Long
+  Dim i As Long
+  values(1, columnIndex) = i
+  dataMatrix(stepIndex, outputColumn) = stepData(rowIndex, 1)
+  C_Down(i).Filename = TestArray(i, 0)
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA209"); len(got) != 0 {
+		t.Fatalf("VBA209 should ignore array element and UDT-array member assignments: %+v", got)
+	}
+}
+
 func TestAnalyzerExpandedExcelMemberMismatch(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

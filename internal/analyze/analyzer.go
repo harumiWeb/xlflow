@@ -528,6 +528,9 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		lineNo := i + 1
 		stmt := normalizedCodeLine(lines[i])
 		lower := strings.ToLower(stmt)
+		if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
+			continue
+		}
 		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
 			continue
 		}
@@ -544,6 +547,16 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		}
 	}
 	return decls
+}
+
+func isProcedureHeaderLine(lower string) bool {
+	lower = strings.TrimSpace(lower)
+	for _, prefix := range []string{"sub ", "function ", "property ", "private sub ", "private function ", "private property ", "public sub ", "public function ", "public property ", "friend sub ", "friend function ", "friend property "} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func moduleDeclarations(lines []string, procedures []sourceProcedure) map[string]sourceDeclaration {
@@ -811,37 +824,111 @@ func identifierComparedAsOperand(stmt, name string) bool {
 	if name == "" {
 		return false
 	}
-	for _, op := range []string{"=", "<>", "<=", ">=", "<", ">"} {
-		parts := strings.Split(stmt, op)
-		if len(parts) < 2 {
+	for i := 0; i < len(stmt); i++ {
+		opLen := comparisonOperatorLength(stmt, i)
+		if opLen == 0 {
 			continue
 		}
-		for i := 0; i < len(parts)-1; i++ {
-			if operandIsIdentifier(parts[i], name) || operandIsIdentifier(parts[i+1], name) {
-				return true
-			}
+		left := stmt[:i]
+		right := stmt[i+opLen:]
+		if operandEndsWithBareIdentifier(left, name) || operandStartsWithBareIdentifier(right, name) {
+			return true
 		}
+		i += opLen - 1
 	}
 	return false
 }
 
-func operandIsIdentifier(text, name string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
+func comparisonOperatorLength(stmt string, index int) int {
+	if index < 0 || index >= len(stmt) {
+		return 0
 	}
-	fields := strings.FieldsFunc(text, func(r rune) bool {
-		return !isVBAIdentifierRune(r)
-	})
+	if index+1 < len(stmt) {
+		switch stmt[index : index+2] {
+		case "<>", "<=", ">=":
+			return 2
+		}
+	}
+	switch stmt[index] {
+	case '=', '<', '>':
+		return 1
+	default:
+		return 0
+	}
+}
+
+func operandEndsWithBareIdentifier(text, name string) bool {
+	fields := identifierFields(text)
 	if len(fields) == 0 {
 		return false
 	}
-	candidate := strings.ToLower(cleanIdentifier(fields[len(fields)-1]))
-	if candidate == name {
-		return true
+	return fieldMatchesBareIdentifier(text, fields[len(fields)-1], name)
+}
+
+func operandStartsWithBareIdentifier(text, name string) bool {
+	fields := identifierFields(text)
+	if len(fields) == 0 {
+		return false
 	}
-	candidate = strings.ToLower(cleanIdentifier(fields[0]))
-	return candidate == name
+	return fieldMatchesBareIdentifier(text, fields[0], name)
+}
+
+type identifierField struct {
+	Text       string
+	Start, End int
+}
+
+func identifierFields(text string) []identifierField {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	var fields []identifierField
+	start := -1
+	for i, r := range text {
+		if isVBAIdentifierRune(r) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			fields = append(fields, identifierField{Text: text[start:i], Start: start, End: i})
+			start = -1
+		}
+	}
+	if start >= 0 {
+		fields = append(fields, identifierField{Text: text[start:], Start: start, End: len(text)})
+	}
+	return fields
+}
+
+func fieldMatchesBareIdentifier(text string, field identifierField, name string) bool {
+	if strings.ToLower(cleanIdentifier(field.Text)) != name {
+		return false
+	}
+	if previousNonSpace(text, field.Start) == '.' {
+		return false
+	}
+	next := nextNonSpace(text, field.End)
+	return next != '(' && next != '.'
+}
+
+func previousNonSpace(text string, index int) byte {
+	for i := index - 1; i >= 0; i-- {
+		if text[i] != ' ' && text[i] != '\t' {
+			return text[i]
+		}
+	}
+	return 0
+}
+
+func nextNonSpace(text string, index int) byte {
+	for i := index; i < len(text); i++ {
+		if text[i] != ' ' && text[i] != '\t' {
+			return text[i]
+		}
+	}
+	return 0
 }
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure) []Finding {
