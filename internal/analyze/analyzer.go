@@ -986,7 +986,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 		}
 		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
 			if !isCleanupFallthroughLabel(label) && !terminatesNormalFlow(lastCode) {
-				findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA204", "warning", "Normal execution can fall through into error handler "+label+".", "Without Exit Sub, Exit Function, or Exit Property before the handler label, successful execution can run error handling code.", "Add an Exit statement before "+label+" or rename the label as a cleanup path if fallthrough is intentional."))
+				findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA204", "warning", "Normal execution can fall through into error handler "+label+".", "Without Exit Sub, Exit Function, or Exit Property before the handler label, successful execution can run error handling code.", errorHandlerFallthroughSuggestion(proc, label)))
 			}
 		}
 		lastCode = stmt
@@ -1225,6 +1225,17 @@ func isCleanupFallthroughLabel(label string) bool {
 	default:
 		return false
 	}
+}
+
+func errorHandlerFallthroughSuggestion(proc sourceProcedure, label string) string {
+	exitStmt := "Exit Sub"
+	switch strings.ToLower(proc.Kind) {
+	case "function":
+		exitStmt = "Exit Function"
+	case "property":
+		exitStmt = "Exit Property"
+	}
+	return "Add `" + exitStmt + "` before `" + label + ":`, or rename the label to Cleanup if normal fallthrough is intentional."
 }
 
 func terminatesNormalFlow(stmt string) bool {

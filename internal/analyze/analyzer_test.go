@@ -463,6 +463,26 @@ End Sub
 	}
 }
 
+func TestAnalyzerErrorHandlerFallthroughSuggestsConcreteExitStatement(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error GoTo ExitSub
+  Debug.Print "work"
+ExitSub:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := findFinding(t, findings, "VBA204", 5)
+	if !containsAll(finding.Suggestion, "`Exit Sub`", "`ExitSub:`") {
+		t.Fatalf("unexpected VBA204 suggestion: %q", finding.Suggestion)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
