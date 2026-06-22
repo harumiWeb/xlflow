@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Deprecated the legacy PowerShell bridge for v0.15.0. Windows `auto` bridge mode now uses the `.NET` bridge without falling back to PowerShell; explicit `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` remain available only as deprecated opt-ins and emit `powershell_bridge_deprecated`. PowerShell bridge removal is planned for v0.16.0.
+- Fixed `xlflow analyze` false positives for `VBA209` array element and UDT-array member assignments, clarified `VBA204` fallthrough guidance, and recognized paired Push/Pop `Application` state restore helpers for `VBA203`.
 
 ## v0.14.1
 
