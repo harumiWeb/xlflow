@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.
 - Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
 - Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
 - Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.

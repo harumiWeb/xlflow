@@ -105,6 +105,140 @@ func TestDiagnosticsConvertLintByteColumnsToUTF16AfterJapaneseText(t *testing.T)
 	}
 }
 
+func TestSignatureHelpResolvesBuiltinMembersAndActiveParameter(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim ws As Worksheet
+    ws.Range("A1",
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    ws.Range("A1",`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "Excel.Worksheet.Range(Cell1 As Variant, Optional Cell2 As Variant) As Excel.Range" {
+		t.Fatalf("signature label = %q", got)
+	}
+	if help.ActiveParameter != 1 {
+		t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpResolvesParenlessMemberCall(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim dict As Scripting.Dictionary
+    dict.Add "A",
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    dict.Add "A",`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "Scripting.Dictionary.Add(Key As Variant, Item As Variant) As void" {
+		t.Fatalf("signature label = %q", got)
+	}
+	if help.ActiveParameter != 1 {
+		t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpResolvesProjectFunctionAndNamedArgument(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Function Foo(name As String, count As Long) As Boolean
+End Function
+Sub Test()
+    Foo(name:=
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    Foo(name:=`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 4, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if !strings.Contains(help.Signatures[0].Label, "Foo(name As String, count As Long) As Boolean") {
+		t.Fatalf("signature label = %q", help.Signatures[0].Label)
+	}
+	if help.ActiveParameter != 0 {
+		t.Fatalf("active parameter = %d, want named argument index 0", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpResolvesExcelNamedArgument(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Application.Workbooks.Open(Filename:=path, ReadOnly:=
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    Application.Workbooks.Open(Filename:=path, ReadOnly:=`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 2, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "Excel.Workbooks.Open(Filename As String, Optional UpdateLinks As Variant, Optional ReadOnly As Variant) As Excel.Workbook" {
+		t.Fatalf("signature label = %q", got)
+	}
+	if help.ActiveParameter != 2 {
+		t.Fatalf("active parameter = %d, want named argument index 2", help.ActiveParameter)
+	}
+}
+
+func TestDiagnosticsIncludeArgumentCountAndNamedArgumentWarnings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim dict As Scripting.Dictionary
+    dict.Add "A"
+    Range()
+    dict.Add Key:="A", Value:=1
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vb030 := diagnosticsByCode(diagnostics, "VB030")
+	if len(vb030) < 3 {
+		t.Fatalf("expected argument diagnostics, got %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(vb030, "expects at least 2 argument") {
+		t.Fatalf("missing Dictionary.Add argument count diagnostic: %+v", vb030)
+	}
+	if !hasDiagnosticMessage(vb030, "Range expects at least 1 argument") {
+		t.Fatalf("missing Range argument count diagnostic: %+v", vb030)
+	}
+	if !hasDiagnosticMessage(vb030, "Unknown named argument: Value") {
+		t.Fatalf("missing unknown named argument diagnostic: %+v", vb030)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -552,6 +686,10 @@ func TestCompletionsReturnMemberAndGlobalCandidates(t *testing.T) {
 	}
 	if !hasCompletion(items, "Range") {
 		t.Fatalf("Range completion missing: %+v", items)
+	}
+	rangeCompletion, _ := findCompletion(items, "Range")
+	if rangeCompletion.Detail != "Excel.Worksheet.Range(Cell1 As Variant, Optional Cell2 As Variant) As Excel.Range" {
+		t.Fatalf("Range completion detail = %q", rangeCompletion.Detail)
 	}
 
 	fontSource := "Option Explicit\nSub Test()\n    Range(\"A1\").Font.Co\nEnd Sub\n"
@@ -1562,6 +1700,25 @@ func hasSymbol(symbols []Symbol, name string) bool {
 func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosticsByCode(diagnostics []Diagnostic, code string) []Diagnostic {
+	var out []Diagnostic
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
+			out = append(out, diagnostic)
+		}
+	}
+	return out
+}
+
+func hasDiagnosticMessage(diagnostics []Diagnostic, text string) bool {
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, text) {
 			return true
 		}
 	}

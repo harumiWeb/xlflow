@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -405,6 +406,11 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if initResult.Capabilities.DocumentFormattingProvider == nil {
 		t.Fatalf("documentFormattingProvider was not advertised: %+v", initResult.Capabilities)
 	}
+	if initResult.Capabilities.SignatureHelpProvider == nil ||
+		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, "(") ||
+		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, ",") {
+		t.Fatalf("signatureHelpProvider = %+v, want trigger characters", initResult.Capabilities.SignatureHelpProvider)
+	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
@@ -467,6 +473,94 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) {
 		t.Fatalf("expected publishDiagnostics notification, got %v", recorder.methods())
 	}
+}
+
+func TestSignatureHelpReturnsActiveParameter(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    Dim ws As Worksheet\n    ws.Range(\"A1\",\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	line := `    ws.Range("A1",`
+	help, err := s.signatureHelp(nil, &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 3, Character: protocol.UInteger(utf16Len(line))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if help.ActiveParameter == nil || *help.ActiveParameter != 1 {
+		t.Fatalf("active parameter = %+v, want 1", help.ActiveParameter)
+	}
+	if help.Signatures[0].Label != "Excel.Worksheet.Range(Cell1 As Variant, Optional Cell2 As Variant) As Excel.Range" {
+		t.Fatalf("signature label = %q", help.Signatures[0].Label)
+	}
+	if len(help.Signatures[0].Parameters) != 2 {
+		t.Fatalf("parameters = %+v", help.Signatures[0].Parameters)
+	}
+}
+
+func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        protocol.DocumentUri(uri),
+			LanguageID: "vba",
+			Version:    1,
+			Text:       "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \"A\"\nEnd Sub\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, params := range recorder.publishDiagnostics() {
+			for _, diag := range params.Diagnostics {
+				if strings.Contains(diag.Message, "Argument count mismatch") {
+					_ = serverConn.Close()
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = serverConn.Close()
+	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
 }
 
 func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {
@@ -534,11 +628,19 @@ func TestFormattingSkipsFrmDocuments(t *testing.T) {
 type rpcRecorder struct {
 	mu          sync.Mutex
 	methodsSeen []string
+	paramsSeen  map[string][]json.RawMessage
 }
 
 func (r *rpcRecorder) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
 	r.mu.Lock()
 	r.methodsSeen = append(r.methodsSeen, req.Method)
+	if r.paramsSeen == nil {
+		r.paramsSeen = map[string][]json.RawMessage{}
+	}
+	if req.Params != nil {
+		copied := append(json.RawMessage(nil), (*req.Params)...)
+		r.paramsSeen[req.Method] = append(r.paramsSeen[req.Method], copied)
+	}
 	r.mu.Unlock()
 	if !req.Notif {
 		_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "method not found"})
@@ -560,6 +662,19 @@ func (r *rpcRecorder) methods() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.methodsSeen...)
+}
+
+func (r *rpcRecorder) publishDiagnostics() []protocol.PublishDiagnosticsParams {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []protocol.PublishDiagnosticsParams
+	for _, raw := range r.paramsSeen[string(protocol.ServerTextDocumentPublishDiagnostics)] {
+		var params protocol.PublishDiagnosticsParams
+		if err := json.Unmarshal(raw, &params); err == nil {
+			out = append(out, params)
+		}
+	}
+	return out
 }
 
 func hasCompletionItem(items []protocol.CompletionItem, label string) bool {

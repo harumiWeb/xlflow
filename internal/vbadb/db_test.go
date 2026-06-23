@@ -46,6 +46,9 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || got.ReturnType != "Excel.Workbook" {
 		t.Fatalf("Workbooks.Open = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || len(got.Parameters) != 3 || got.Parameters[0].Name != "Filename" || !got.Parameters[2].Optional {
+		t.Fatalf("Workbooks.Open parameters = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("Excel.Worksheet", "Range"); !ok || got.ReturnType != "Excel.Range" {
 		t.Fatalf("Worksheet.Range = %+v, %v", got, ok)
 	}

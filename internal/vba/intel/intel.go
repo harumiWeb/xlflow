@@ -55,6 +55,8 @@ type Symbol struct {
 	Name       string
 	Kind       string
 	Detail     string
+	ReturnType string
+	Parameters []Parameter
 	File       string
 	Module     string
 	ModuleKind string
@@ -62,6 +64,12 @@ type Symbol struct {
 	Visibility string
 	Range      Range
 	Selection  Range
+}
+
+type Parameter struct {
+	Name     string
+	Type     string
+	Optional bool
 }
 
 type Location struct {
@@ -83,6 +91,18 @@ type Completion struct {
 	InsertText    string
 	Snippet       bool
 	ReplaceRange  *Range
+}
+
+type SignatureHelp struct {
+	Signatures      []Signature
+	ActiveSignature int
+	ActiveParameter int
+}
+
+type Signature struct {
+	Label         string
+	Parameters    []Parameter
+	Documentation string
 }
 
 func (a Analyzer) Check() error {
@@ -115,6 +135,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
 	}
+	out = append(out, a.argumentDiagnostics(doc)...)
 	return out
 }
 
@@ -503,6 +524,474 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
 	}
 	return uniqueCompletions(items), nil
+}
+
+func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*SignatureHelp, error) {
+	line := lineAt(doc.Source, pos.Line)
+	prefix := utf16Prefix(line, pos.Character)
+	call, ok := callContextFromPrefix(prefix)
+	if !ok {
+		return nil, nil
+	}
+	sig, ok, err := a.resolveCallSignature(doc, call.Target, pos, open)
+	if err != nil || !ok {
+		return nil, err
+	}
+	active := call.ActiveParameter(sig.Parameters)
+	return &SignatureHelp{
+		Signatures:      []Signature{sig},
+		ActiveSignature: 0,
+		ActiveParameter: active,
+	}, nil
+}
+
+type callContext struct {
+	Target     string
+	Arguments  []argument
+	ActiveName string
+	ActivePos  int
+}
+
+type argument struct {
+	Name string
+	Text string
+}
+
+func callContextFromPrefix(prefix string) (callContext, bool) {
+	open := lastUnclosedParen(prefix)
+	if open < 0 {
+		if call, ok := parenlessCallOnLine(prefix); ok {
+			activePos := max(0, len(call.Arguments)-1)
+			activeName := ""
+			if len(call.Arguments) > 0 {
+				activeName = call.Arguments[len(call.Arguments)-1].Name
+			}
+			return callContext{Target: call.Target, Arguments: call.Arguments, ActiveName: activeName, ActivePos: activePos}, true
+		}
+		return callContext{}, false
+	}
+	target := callTargetBeforeOpen(prefix[:open])
+	if target == "" {
+		return callContext{}, false
+	}
+	args := parseArguments(prefix[open+1:])
+	activePos := max(0, len(args)-1)
+	activeName := ""
+	if len(args) > 0 {
+		activeName = args[len(args)-1].Name
+	}
+	return callContext{Target: target, Arguments: args, ActiveName: activeName, ActivePos: activePos}, true
+}
+
+func (c callContext) ActiveParameter(params []Parameter) int {
+	if len(params) == 0 {
+		return 0
+	}
+	if c.ActiveName != "" {
+		for i, param := range params {
+			if strings.EqualFold(param.Name, c.ActiveName) {
+				return i
+			}
+		}
+	}
+	if c.ActivePos >= len(params) {
+		return len(params) - 1
+	}
+	return c.ActivePos
+}
+
+func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position, open []Document) (Signature, bool, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return Signature{}, false, nil
+	}
+	if receiver, memberName, ok := splitCallTarget(target); ok {
+		receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, pos))
+		if ok {
+			if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiver) {
+				receiverType = "Excel.Worksheet"
+			}
+			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
+				return a.signatureFromMember(receiverType, member, a.memberKind(receiverType, memberName)), true, nil
+			}
+		}
+		return Signature{}, false, nil
+	}
+	if member, found := a.DB.ResolveMember("Excel.Application", target); found {
+		return a.signatureFromMember("Excel.Application", member, a.memberKind("Excel.Application", target)), true, nil
+	}
+	syms, err := a.WorkspaceSymbols(open, target)
+	if err != nil {
+		return Signature{}, false, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, target) || !callableCompletionSymbol(sym) || !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
+			continue
+		}
+		return signatureFromSymbol(sym), true, nil
+	}
+	return Signature{}, false, nil
+}
+
+func splitCallTarget(target string) (receiver string, member string, ok bool) {
+	parts := splitMemberExpression(target)
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	member = strings.TrimSpace(parts[len(parts)-1])
+	receiver = strings.TrimSpace(strings.TrimSuffix(target, "."+member))
+	return receiver, member, receiver != "" && member != ""
+}
+
+func (a Analyzer) signatureFromMember(receiverType string, member vbadb.MemberInfo, kind string) Signature {
+	if dbType, ok := a.DB.ResolveType(receiverType); ok {
+		receiverType = dbType.Name
+	}
+	params := parametersFromDB(member.Parameters)
+	label := memberSignature(receiverType, member, kind)
+	return Signature{Label: label, Parameters: params, Documentation: member.Summary}
+}
+
+func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make([]Parameter, 0, len(params))
+	for _, param := range params {
+		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional})
+	}
+	return out
+}
+
+func signatureFromSymbol(sym Symbol) Signature {
+	params := sym.Parameters
+	label := strings.TrimSpace(sym.Detail)
+	if label == "" || !strings.Contains(label, "(") {
+		label = symbolSignatureLabel(sym)
+	}
+	return Signature{Label: label, Parameters: params}
+}
+
+func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		for _, call := range callsOnLine(code) {
+			sig, ok, err := a.resolveCallSignature(doc, call.Target, Position{Line: lineNo, Character: utf16Len(line)}, []Document{doc})
+			if err != nil || !ok || len(sig.Parameters) == 0 {
+				continue
+			}
+			out = append(out, diagnosticsForCallArguments(lineNo, call, sig)...)
+		}
+	}
+	return out
+}
+
+type parsedCall struct {
+	Target    string
+	Arguments []argument
+	Line      string
+	Start     int
+	End       int
+}
+
+func callsOnLine(line string) []parsedCall {
+	var out []parsedCall
+	out = append(out, parenCallsOnLine(line)...)
+	if call, ok := parenlessCallOnLine(line); ok {
+		out = append(out, call)
+	}
+	return out
+}
+
+func parenCallsOnLine(line string) []parsedCall {
+	var out []parsedCall
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if inString {
+				continue
+			}
+			target := callTargetBeforeOpen(line[:i])
+			if target == "" {
+				continue
+			}
+			close := matchingParen(line, i)
+			if close < 0 {
+				continue
+			}
+			out = append(out, parsedCall{
+				Target:    target,
+				Arguments: parseArguments(line[i+1 : close]),
+				Line:      line,
+				Start:     max(0, i-len(target)),
+				End:       close + 1,
+			})
+			i = close
+		}
+	}
+	return out
+}
+
+func parenlessCallOnLine(line string) (parsedCall, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return parsedCall{}, false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{"if ", "elseif ", "do ", "loop ", "for ", "dim ", "set ", "let ", "with ", "select ", "case ", "debug.print"} {
+		if strings.HasPrefix(lower, prefix) {
+			return parsedCall{}, false
+		}
+	}
+	re := regexp.MustCompile(`(?i)(?:^|[:\s])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|[A-Za-z_][A-Za-z0-9_]*)\s+(.+)$`)
+	m := re.FindStringSubmatchIndex(line)
+	if len(m) == 0 {
+		return parsedCall{}, false
+	}
+	target := strings.TrimSpace(line[m[2]:m[3]])
+	argsText := strings.TrimSpace(line[m[4]:m[5]])
+	if target == "" || argsText == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
+		return parsedCall{}, false
+	}
+	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: m[2], End: m[5]}, true
+}
+
+func matchingParen(line string, open int) int {
+	inString := false
+	depth := 0
+	for i := open; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
+func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []Diagnostic {
+	var out []Diagnostic
+	minArgs, maxArgs := signatureArity(sig.Parameters)
+	got := len(call.Arguments)
+	if got < minArgs {
+		out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Argument count mismatch: %s expects at least %d argument(s), got %d.", sigLabelName(sig.Label), minArgs, got)))
+	}
+	if maxArgs >= 0 && got > maxArgs {
+		out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Argument count mismatch: %s expects at most %d argument(s), got %d.", sigLabelName(sig.Label), maxArgs, got)))
+	}
+	for _, arg := range call.Arguments {
+		if arg.Name == "" {
+			continue
+		}
+		if !signatureHasParameter(sig.Parameters, arg.Name) {
+			out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Unknown named argument: %s.", arg.Name)))
+		}
+	}
+	return out
+}
+
+func signatureArity(params []Parameter) (min int, max int) {
+	max = len(params)
+	for _, param := range params {
+		if !param.Optional {
+			min++
+		}
+	}
+	return min, max
+}
+
+func signatureHasParameter(params []Parameter, name string) bool {
+	for _, param := range params {
+		if strings.EqualFold(param.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
+	return Diagnostic{
+		Code:     "VB030",
+		Severity: "warning",
+		Source:   "xlflow",
+		Message:  msg,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.Start, len(call.Line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.End, len(call.Line)))])},
+		},
+	}
+}
+
+func sigLabelName(label string) string {
+	name := strings.TrimSpace(label)
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if idx := strings.Index(name, "("); idx >= 0 {
+		name = name[:idx]
+	}
+	return strings.TrimSpace(name)
+}
+
+func symbolSignatureLabel(sym Symbol) string {
+	var b strings.Builder
+	b.WriteString(sym.Name)
+	b.WriteString("(")
+	for i, param := range sym.Parameters {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		writeParameterLabel(&b, param)
+	}
+	b.WriteString(")")
+	if sym.ReturnType != "" {
+		b.WriteString(" As ")
+		b.WriteString(sym.ReturnType)
+	}
+	return b.String()
+}
+
+func writeParameterLabel(b *strings.Builder, param Parameter) {
+	if param.Optional {
+		b.WriteString("Optional ")
+	}
+	b.WriteString(param.Name)
+	if param.Type != "" {
+		b.WriteString(" As ")
+		b.WriteString(param.Type)
+	}
+}
+
+func lastUnclosedParen(prefix string) int {
+	inString := false
+	var stack []int
+	for i := 0; i < len(prefix); i++ {
+		switch prefix[i] {
+		case '"':
+			if inString && i+1 < len(prefix) && prefix[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				stack = append(stack, i)
+			}
+		case ')':
+			if !inString && len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) == 0 {
+		return -1
+	}
+	return stack[len(stack)-1]
+}
+
+func callTargetBeforeOpen(prefix string) string {
+	target := expressionBefore(prefix)
+	target = strings.TrimSpace(target)
+	if strings.HasPrefix(strings.ToLower(target), "call ") {
+		target = strings.TrimSpace(target[len("call "):])
+	}
+	fields := strings.Fields(target)
+	if len(fields) > 1 {
+		target = fields[len(fields)-1]
+	}
+	return strings.TrimSpace(target)
+}
+
+func parseArguments(text string) []argument {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	parts := splitTopLevel(text, ',')
+	args := make([]argument, 0, len(parts))
+	for _, part := range parts {
+		argText := strings.TrimSpace(part)
+		arg := argument{Text: argText}
+		if name, value, ok := strings.Cut(argText, ":="); ok && isIdentifier(strings.TrimSpace(name)) {
+			arg.Name = strings.TrimSpace(name)
+			arg.Text = strings.TrimSpace(value)
+		}
+		args = append(args, arg)
+	}
+	return args
+}
+
+func splitTopLevel(text string, sep byte) []string {
+	inString := false
+	depth := 0
+	start := 0
+	var out []string
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		default:
+			if text[i] == sep && !inString && depth == 0 {
+				out = append(out, text[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, text[start:])
+	return out
+}
+
+func isIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 {
+			if !isIdentStartRune(r) {
+				return false
+			}
+			continue
+		}
+		if !isIdentRune(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Document, open []Document) ([]Completion, error) {
@@ -1545,7 +2034,7 @@ func (a Analyzer) memberCompletions(receiverType, prefix string) []Completion {
 		out = append(out, Completion{
 			Label:         member.Name,
 			Kind:          kind,
-			Detail:        memberDetail(member),
+			Detail:        a.signatureFromMember(receiverType, member, kind).Label,
 			Documentation: member.Summary,
 		})
 	}
@@ -2370,13 +2859,6 @@ func uniqueCompletions(items []Completion) []Completion {
 	return out
 }
 
-func memberDetail(member vbadb.MemberInfo) string {
-	if member.ReturnType == "" {
-		return member.Name
-	}
-	return member.Name + " As " + member.ReturnType
-}
-
 func completionKindForSymbol(kind string) string {
 	switch strings.ToLower(kind) {
 	case "sub", "function", "property", "property_get", "property_let", "property_set":
@@ -2417,6 +2899,8 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			Name:       sym.Name,
 			Kind:       sym.Kind,
 			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
+			ReturnType: sym.ReturnType,
+			Parameters: symbolParameters(sym.Parameters),
 			File:       firstNonEmpty(uri, file.Path, sym.File),
 			Module:     sym.Module,
 			ModuleKind: file.ModuleKind,
@@ -2435,6 +2919,21 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			converted.Selection = Range{Start: converted.Range.Start, End: converted.Range.Start}
 		}
 		out = append(out, converted)
+	}
+	return out
+}
+
+func symbolParameters(params []symbols.Parameter) []Parameter {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make([]Parameter, 0, len(params))
+	for _, param := range params {
+		out = append(out, Parameter{
+			Name:     param.Name,
+			Type:     firstNonEmpty(param.Type, "Variant"),
+			Optional: param.Optional,
+		})
 	}
 	return out
 }
@@ -2814,6 +3313,13 @@ func firstNonEmpty(values ...string) string {
 
 func max(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b

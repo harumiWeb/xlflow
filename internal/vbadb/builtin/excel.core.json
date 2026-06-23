@@ -72,7 +72,15 @@
       "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
       "methods": [
         { "name": "Item", "return_type": "Excel.Workbook", "default": true },
-        { "name": "Open", "return_type": "Excel.Workbook" },
+        {
+          "name": "Open",
+          "return_type": "Excel.Workbook",
+          "parameters": [
+            { "name": "Filename", "type": "String" },
+            { "name": "UpdateLinks", "type": "Variant", "optional": true },
+            { "name": "ReadOnly", "type": "Variant", "optional": true }
+          ]
+        },
         { "name": "Add", "return_type": "Excel.Workbook" }
       ],
       "confidence": "curated",

@@ -113,6 +113,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentReferences:     s.references,
 		TextDocumentHover:          s.hover,
 		TextDocumentCompletion:     s.completion,
+		TextDocumentSignatureHelp:  s.signatureHelp,
 		TextDocumentFormatting:     s.formatting,
 	}
 	return s, func() {
@@ -151,6 +152,10 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 	}
 	if capabilities.CompletionProvider != nil {
 		capabilities.CompletionProvider.TriggerCharacters = completionTriggerCharacters()
+	}
+	if capabilities.SignatureHelpProvider != nil {
+		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ","}
+		capabilities.SignatureHelpProvider.RetriggerCharacters = []string{","}
 	}
 	version := s.opts.Build.Version
 	if version == "" {
@@ -381,6 +386,37 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		items = append(items, item)
 	}
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+}
+
+func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	help, err := s.analyzer.SignatureHelp(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil || help == nil || len(help.Signatures) == 0 {
+		return nil, err
+	}
+	activeSignature := protocol.UInteger(max(0, help.ActiveSignature))
+	activeParameter := protocol.UInteger(max(0, help.ActiveParameter))
+	signatures := make([]protocol.SignatureInformation, 0, len(help.Signatures))
+	for _, sig := range help.Signatures {
+		info := protocol.SignatureInformation{Label: sig.Label}
+		if sig.Documentation != "" {
+			info.Documentation = protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: sig.Documentation}
+		}
+		for _, param := range sig.Parameters {
+			info.Parameters = append(info.Parameters, protocol.ParameterInformation{
+				Label: parameterLabel(param),
+			})
+		}
+		signatures = append(signatures, info)
+	}
+	return &protocol.SignatureHelp{
+		Signatures:      signatures,
+		ActiveSignature: &activeSignature,
+		ActiveParameter: &activeParameter,
+	}, nil
 }
 
 func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
@@ -916,6 +952,19 @@ func completionItemKind(kind string) protocol.CompletionItemKind {
 	default:
 		return protocol.CompletionItemKindText
 	}
+}
+
+func parameterLabel(param intel.Parameter) string {
+	var b strings.Builder
+	if param.Optional {
+		b.WriteString("Optional ")
+	}
+	b.WriteString(param.Name)
+	if param.Type != "" {
+		b.WriteString(" As ")
+		b.WriteString(param.Type)
+	}
+	return b.String()
 }
 
 func completionTriggerCharacters() []string {
