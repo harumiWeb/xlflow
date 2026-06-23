@@ -115,6 +115,7 @@ root: .
 
 - Windows + Excel COM / VBIDE access が関わる変更をリリースする前には、repo-local の `xlflow-tmp-workspace-e2e` skill を使って実機 E2E を実施すること
 - 少なくとも blank workbook、standard module round-trip、class module round-trip、UserForm + `.frx` round-trip、`init` の各経路を確認すること
+- `pack` を含むリリースでは、生成した `.xlsm` を実 Excel で開いて最小マクロを compile/run し、sentinel セル値などの観測可能な効果を確認する pack artifact smoke も実施すること（手順は `docs/specs/pack-command.md` の Release-gate Excel smoke と `xlflow-tmp-workspace-e2e` skill のセクション7）。自動 PR CI は Linux/pure-Go のみに保つこと
 - session-aware workflow を変更した場合は、`session start -> push --fast --session --no-save -> run/test -> save -> session stop` も release gate に含めること
 - Windows + Excel の実機 E2E で workbook-backed command を複数回組み合わせる場合は、session-aware workflow を変更していなくても、まず `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop` を優先すること
 - 検証に使った `tmp_workspaces` の絶対パス、実行コマンド、結果、未検証項目を最終報告へ残すこと
