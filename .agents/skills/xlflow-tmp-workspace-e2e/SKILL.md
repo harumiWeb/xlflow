@@ -244,6 +244,7 @@ try {
   if ($sentinel -ne 'xlflow ok') {            # the value Main.Run writes in section 3
     throw "pack smoke failed: A1 was '$sentinel', expected 'xlflow ok'"
   }
+  "pack smoke OK: A1 = $sentinel"             # surface the observed value for the release-gate report
 } finally {
   $wb.Close($false)
   $excel.Quit()
@@ -260,7 +261,7 @@ The smoke passes only when:
 - the packed workbook opens in Excel without a compile error
 - `Run` executes the packed macro and the sentinel cell holds the expected value
 
-A compile error on open, a missing or wrong sentinel value, or a non-zero `pack` exit is a release blocker. If `Run` appears to hang, bring the (visible) Excel window to the foreground — a VBE compile-error dialog is the usual hidden cause. Record the `pack` JSON output and the observed sentinel value in the release-gate report.
+A compile error on open, a missing or wrong sentinel value, or a non-zero `pack` exit is a release blocker. If `Run` appears to hang, a modal VBE compile-error dialog is the usual cause — bring the Excel window to the foreground to read and dismiss it. Record the `pack` JSON output and the observed sentinel value in the release-gate report.
 
 ## Failure Handling
 
