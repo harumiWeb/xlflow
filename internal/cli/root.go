@@ -4101,7 +4101,7 @@ func collectFormSources(root string, cfg config.Config) ([]packpkg.SourceModule,
 			return nil, err
 		}
 		if len(issues) > 0 {
-			return nil, fmt.Errorf("%w: %d UserForm sidecar(s) under %s carry Attribute VB_* header lines; a sidecar must hold code-behind only (starting at Option Explicit)", packpkg.ErrAmbiguousLayout, len(issues), filepath.Join(cfg.Src.Forms, "code"))
+			return nil, fmt.Errorf("%w: %d UserForm sidecar issue(s) under %s; first issue: %s", packpkg.ErrAmbiguousLayout, len(issues), filepath.Join(cfg.Src.Forms, "code"), issues[0].Error())
 		}
 		if err := rejectOrphanFormSidecars(formsDir); err != nil {
 			return nil, err

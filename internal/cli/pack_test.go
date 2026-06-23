@@ -570,6 +570,25 @@ func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
 	}
 }
 
+func TestCollectFormSourcesNestedSidecarFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte("Attribute VB_Name = \"UserForm1\"\r\ncode\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "nested", "Ghost.bas"), []byte("Option Explicit\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for nested sidecar directory, got %v", err)
+	}
+}
+
 func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default() // sidecar

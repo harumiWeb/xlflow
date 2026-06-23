@@ -33,7 +33,7 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 
 - **Standard modules** (`.bas`) and **class modules** (`.cls`): regenerated into `xl/vbaProject.bin` from source.
 - **Document modules**: supported only where they map safely against the template's existing document modules.
-- **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte and `.frx` is not read. `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
+- **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte and `.frx` is not read. `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
 - **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. `pack` does not generate or modify form layout.
 
 ## Unsupported cases (fail-loud)
@@ -73,7 +73,7 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
     "experimental": true,
     "vbe_validation": "not_performed",
     "template": "build/Book.xlsm",
-    "modules": { "standard": 3, "class": 2, "document": 1, "carried_streams": 4 }
+    "modules": { "standard": 3, "class": 2, "document": 1, "form": 1, "carried_streams": 4 }
   },
   "warnings": [
     {
