@@ -490,10 +490,15 @@ Private Sub Sample()
     Dim rng As Excel.Range
     With rng
         .Offset(
+        .Offset(1,0).
         .Font.Bold = Tr
         .Value = No
     End With
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
     lblStatus.Caption = CS
+    lblStatus.Caption = CStr(dict.
+    ts.WriteLine CStr(dict.
     Deb
 End Sub
 
@@ -508,11 +513,14 @@ End Function
 		want   string
 	}{
 		{3, `    Dim wb As Excel.`, "Workbook"},
-		{7, `        .Font.Bold = Tr`, "True"},
-		{8, `        .Value = No`, "Now"},
-		{10, `    lblStatus.Caption = CS`, "CStr"},
-		{11, `    Deb`, "Debug.Print"},
-		{14, `Private Function BuildMessage(ByVal title As String, By`, "ByVal"},
+		{7, `        .Offset(1,0).`, "Value"},
+		{8, `        .Font.Bold = Tr`, "True"},
+		{9, `        .Value = No`, "Now"},
+		{13, `    lblStatus.Caption = CS`, "CStr"},
+		{14, `    lblStatus.Caption = CStr(dict.`, "Item"},
+		{15, `    ts.WriteLine CStr(dict.`, "Count"},
+		{16, `    Deb`, "Debug.Print"},
+		{19, `Private Function BuildMessage(ByVal title As String, By`, "ByVal"},
 	}
 	for _, tc := range cases {
 		items, err := analyzer.Completions(doc, Position{Line: tc.lineNo, Character: utf16Len(tc.line)}, []Document{doc})

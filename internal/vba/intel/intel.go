@@ -474,7 +474,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		if items := a.namespaceCompletions(receiverExpr, memberPrefix); len(items) > 0 {
 			return items, nil
 		}
-		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
+		typ, ok := a.resolveMemberCompletionReceiverType(doc, pos, receiverExpr)
 		if ok {
 			if strings.EqualFold(typ, "Object") && sheetsDefaultExpression(receiverExpr) {
 				typ = "Excel.Worksheet"
@@ -2260,6 +2260,43 @@ func (a Analyzer) memberCompletions(receiverType, prefix string) []Completion {
 	return uniqueCompletions(out)
 }
 
+func (a Analyzer) resolveMemberCompletionReceiverType(doc Document, pos Position, receiverExpr string) (string, bool) {
+	offset := byteOffsetForPosition(doc.Source, pos)
+	if strings.HasPrefix(strings.TrimSpace(receiverExpr), ".") {
+		receiverType, ok := a.withBlockTypeAt(doc, pos, offset)
+		if !ok {
+			return "", false
+		}
+		return a.resolveRelativeMemberExpressionType(receiverType, receiverExpr)
+	}
+	return a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+}
+
+func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string) (string, bool) {
+	current := receiverType
+	if typ, ok := a.DB.ResolveType(current); ok {
+		current = typ.Name
+	}
+	for _, raw := range splitMemberExpression(strings.TrimPrefix(strings.TrimSpace(expr), ".")) {
+		member := strings.TrimSpace(raw)
+		if member == "" {
+			continue
+		}
+		if idx := strings.Index(member, "("); idx >= 0 {
+			member = strings.TrimSpace(member[:idx])
+		}
+		if member == "" {
+			continue
+		}
+		info, ok := a.DB.ResolveMember(current, member)
+		if !ok || info.ReturnType == "" {
+			return "", false
+		}
+		current = info.ReturnType
+	}
+	return current, true
+}
+
 func (a Analyzer) moduleMemberCompletions(open []Document, moduleName, prefix string) ([]Completion, error) {
 	moduleName = strings.TrimSpace(moduleName)
 	if moduleName == "" {
@@ -2753,6 +2790,7 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 		return "", "", false
 	}
 	receiver := expressionBefore(strings.TrimSuffix(beforeWord, "."))
+	receiver = trimUnclosedCallReceiver(receiver)
 	receiver = trimWithExpressionPrefix(receiver)
 	if fields := strings.Fields(receiver); len(fields) > 1 {
 		receiver = fields[len(fields)-1]
@@ -2761,6 +2799,18 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 		return "", "", false
 	}
 	return wordPrefix, receiver, true
+}
+
+func trimUnclosedCallReceiver(expr string) string {
+	open := lastUnclosedParen(expr)
+	if open < 0 {
+		return expr
+	}
+	inner := strings.TrimSpace(expr[open+1:])
+	if inner == "" {
+		return expr
+	}
+	return inner
 }
 
 func trimWithExpressionPrefix(expr string) string {
