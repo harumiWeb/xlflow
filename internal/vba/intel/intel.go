@@ -460,6 +460,9 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
 	line := lineAt(doc.Source, pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
+	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.Source, pos) && moduleHasContent(doc.Source) {
+		return nil, nil
+	}
 	if progIDPrefix, replaceRange, ok := createObjectProgIDCompletionContext(prefix, pos); ok {
 		return a.progIDCompletions(progIDPrefix, replaceRange), nil
 	}
@@ -2400,9 +2403,21 @@ func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) [
 		End:   pos,
 	}
 	if isModuleLevelPosition(doc.Source, pos) {
+		if typed == "" && moduleHasContent(doc.Source) {
+			return nil
+		}
 		return completionsFromSpecs(moduleCompletionSpecs(doc.Source), typed, replaceRange)
 	}
 	return completionsFromSpecs(procedureStatementCompletions, typed, replaceRange)
+}
+
+func moduleHasContent(source string) bool {
+	for _, line := range normalizedLines(source) {
+		if strings.TrimSpace(stripLineComment(line)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func moduleCompletionSpecs(source string) []syntaxCompletionSpec {

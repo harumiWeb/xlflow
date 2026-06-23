@@ -1696,8 +1696,20 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(items) != 0 {
+		t.Fatalf("blank line after Option Explicit should not offer module snippets: %+v", items)
+	}
 	if hasCompletion(items, "Option Explicit") {
 		t.Fatalf("line after Option Explicit should not offer Option Explicit again: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\n\n"
+	items, err = analyzer.Completions(doc, Position{Line: 2, Character: 0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("blank module line after existing content should not offer module snippets: %+v", items)
 	}
 
 	doc.Source = "Option Explicit\nSub Existing()\n    Pu\nEnd Sub\n"
