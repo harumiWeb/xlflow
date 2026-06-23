@@ -221,6 +221,14 @@
         { "name": "Value2", "return_type": "Variant" },
         { "name": "Text", "return_type": "String", "read_only": true },
         {
+          "name": "Cells",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "RowIndex", "type": "Variant", "optional": true },
+            { "name": "ColumnIndex", "type": "Variant", "optional": true }
+          ]
+        },
+        {
           "name": "Offset",
           "return_type": "Excel.Range",
           "parameters": [

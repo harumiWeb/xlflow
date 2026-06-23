@@ -136,6 +136,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 		})
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
+	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
 	return out
 }
 
@@ -470,6 +471,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	}
 	memberPrefix, receiverExpr, memberMode := memberCompletionContext(prefix)
 	if memberMode {
+		if items := a.namespaceCompletions(receiverExpr, memberPrefix); len(items) > 0 {
+			return items, nil
+		}
 		typ, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
 		if ok {
 			if strings.EqualFold(typ, "Object") && sheetsDefaultExpression(receiverExpr) {
@@ -481,6 +485,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	}
 	if typePrefix, replaceRange, ok := typeCompletionContext(prefix, pos); ok {
 		return a.typeCompletions(typePrefix, replaceRange, doc, open)
+	}
+	if paramPrefix, replaceRange, ok := procedureParameterCompletionContext(prefix, pos); ok {
+		return parameterModifierCompletions(paramPrefix, replaceRange), nil
 	}
 	if callPrefix, replaceRange, ok := callCompletionContext(prefix, pos); ok {
 		return a.callCompletions(callPrefix, replaceRange, doc, pos, open)
@@ -608,6 +615,17 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 	if target == "" {
 		return Signature{}, false, nil
 	}
+	if strings.HasPrefix(target, ".") {
+		memberName := strings.TrimPrefix(target, ".")
+		if idx := strings.Index(memberName, "."); idx >= 0 {
+			memberName = memberName[:idx]
+		}
+		if receiverType, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos)); ok {
+			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
+				return a.signatureFromMember(receiverType, member, a.memberKind(receiverType, memberName)), true, nil
+			}
+		}
+	}
 	if receiver, memberName, ok := splitCallTarget(target); ok {
 		receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, pos))
 		if ok {
@@ -693,6 +711,72 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 		}
 	}
 	return out
+}
+
+func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic {
+	if !hasOptionExplicit(doc.Source) {
+		return nil
+	}
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	seen := map[string]bool{}
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		for _, call := range callsOnLine(code) {
+			receiver, _, ok := splitCallTarget(call.Target)
+			if !ok || strings.TrimSpace(receiver) == "" || strings.HasPrefix(strings.TrimSpace(receiver), ".") {
+				continue
+			}
+			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+				continue
+			}
+			base := memberReceiverBase(receiver)
+			if base == "" || a.knownModuleOrNamespaceReceiver(doc, base) {
+				continue
+			}
+			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(base))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, undeclaredIdentifierDiagnostic(lineNo, line, base))
+		}
+	}
+	return out
+}
+
+func memberReceiverBase(receiver string) string {
+	parts := splitMemberExpression(receiver)
+	if len(parts) == 0 {
+		return ""
+	}
+	base := strings.TrimSpace(parts[0])
+	if idx := strings.Index(base, "("); idx >= 0 {
+		base = strings.TrimSpace(base[:idx])
+	}
+	return base
+}
+
+func (a Analyzer) knownModuleOrNamespaceReceiver(doc Document, receiver string) bool {
+	if receiver == "" {
+		return true
+	}
+	if _, ok := a.DB.ResolveType(receiver); ok {
+		return true
+	}
+	if _, ok := a.DB.ResolveGlobal(receiver); ok {
+		return true
+	}
+	syms, err := a.WorkspaceSymbols([]Document{doc}, receiver)
+	if err != nil {
+		return false
+	}
+	for _, sym := range syms {
+		if strings.EqualFold(sym.Name, receiver) && strings.EqualFold(sym.Kind, "module") {
+			return true
+		}
+	}
+	return false
 }
 
 type parsedCall struct {
@@ -882,6 +966,37 @@ func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
 			End:   Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.End, len(call.Line)))])},
 		},
 	}
+}
+
+func undeclaredIdentifierDiagnostic(lineNo int, line, name string) Diagnostic {
+	start := strings.Index(strings.ToLower(line), strings.ToLower(name))
+	if start < 0 {
+		start = 0
+	}
+	end := start + len(name)
+	return Diagnostic{
+		Code:     "VB029",
+		Severity: "warning",
+		Source:   "xlflow",
+		Message:  fmt.Sprintf("Undeclared identifier %q. Declare it or fix the name.", name),
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
+}
+
+func hasOptionExplicit(source string) bool {
+	for _, line := range normalizedLines(source) {
+		text := strings.TrimSpace(stripLineComment(line))
+		if text == "" {
+			continue
+		}
+		if strings.EqualFold(text, "Option Explicit") {
+			return true
+		}
+	}
+	return false
 }
 
 func sigLabelName(label string) string {
@@ -1091,6 +1206,26 @@ func (a Analyzer) progIDCompletions(prefix string, replaceRange Range) []Complet
 	return uniqueCompletions(out)
 }
 
+func (a Analyzer) namespaceCompletions(namespace, prefix string) []Completion {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" || strings.Contains(namespace, ".") {
+		return nil
+	}
+	var out []Completion
+	for _, name := range a.DB.TypeNames() {
+		library, short, ok := strings.Cut(name, ".")
+		if !ok || !strings.EqualFold(library, namespace) || !completionMatches(short, prefix) {
+			continue
+		}
+		out = append(out, Completion{
+			Label:  short,
+			Kind:   "type",
+			Detail: name,
+		})
+	}
+	return uniqueCompletions(out)
+}
+
 func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
 	syms, err := a.WorkspaceSymbols(open, prefix)
 	if err != nil {
@@ -1163,6 +1298,8 @@ func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Docum
 
 func (a Analyzer) valueRHSCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
 	var out []Completion
+	out = append(out, builtinLiteralCompletions(prefix, replaceRange)...)
+	out = append(out, a.vbaGlobalMemberCompletions(prefix, replaceRange)...)
 	for _, constant := range a.DB.ConstantsList() {
 		if !completionMatches(constant.Name, prefix) {
 			continue
@@ -1493,12 +1630,27 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 		return inferredType{Type: typ.Name, Source: "built-in global"}, true
 	}
 	var declared string
-	declRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b(?:\s*\([^)]*\))?\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
-	if typ, ok := bestTypeMatch(doc.Source, declRe, offset, 1); ok {
-		declared = typ
-		if !isObjectFallbackType(declared) {
-			return inferredType{Type: declared, Source: "declaration"}, true
+	if offset >= 0 {
+		if inferred, ok := a.visibleSymbolTypeInfoAt(doc, word, offset); ok {
+			declared = inferred.Type
+			if !isObjectFallbackType(inferred.Type) {
+				return inferred, true
+			}
+		} else if currentProcedureNameForDocument(doc, positionForByteOffset(doc.Source, offset)) != "" {
+			return inferredType{}, false
 		}
+	}
+	declRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b(?:\s*\([^)]*\))?\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
+	if declared == "" {
+		if typ, ok := bestTypeMatch(doc.Source, declRe, offset, 1); ok {
+			declared = typ
+			if !isObjectFallbackType(declared) {
+				return inferredType{Type: declared, Source: "declaration"}, true
+			}
+		}
+	}
+	if declared != "" && !isObjectFallbackType(declared) {
+		return inferredType{Type: declared, Source: "declaration"}, true
 	}
 	newRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*New\s+([A-Za-z_][A-Za-z0-9_.]*)`)
 	if typ, ok := bestTypeMatch(doc.Source, newRe, offset, 1); ok {
@@ -1517,6 +1669,32 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 	}
 	if declared != "" {
 		return inferredType{Type: declared, Source: "declaration"}, true
+	}
+	return inferredType{}, false
+}
+
+func (a Analyzer) visibleSymbolTypeInfoAt(doc Document, word string, offset int) (inferredType, bool) {
+	pos := positionForByteOffset(doc.Source, offset)
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return inferredType{}, false
+	}
+	var fallback inferredType
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, word) || sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
+			continue
+		}
+		inferred := inferredType{Type: sym.ReturnType, Source: "declaration"}
+		if isLocalSymbol(sym) {
+			return inferred, true
+		}
+		if fallback.Type == "" {
+			fallback = inferred
+		}
+	}
+	if fallback.Type != "" {
+		return fallback, true
 	}
 	return inferredType{}, false
 }
@@ -2192,6 +2370,8 @@ func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) [
 
 func (a Analyzer) globalCompletions(prefix string) []Completion {
 	var out []Completion
+	out = append(out, builtinLiteralCompletions(prefix, Range{})...)
+	out = append(out, a.vbaGlobalMemberCompletions(prefix, Range{})...)
 	for _, typ := range a.DB.TypeNames() {
 		if completionMatches(typ, prefix) {
 			out = append(out, Completion{Label: typ, Kind: "type", Detail: "type"})
@@ -2217,6 +2397,53 @@ func (a Analyzer) globalCompletions(prefix string) []Completion {
 		}
 	}
 	return uniqueCompletions(out)
+}
+
+func builtinLiteralCompletions(prefix string, replaceRange Range) []Completion {
+	literals := []struct {
+		label  string
+		detail string
+	}{
+		{"True", "Boolean literal"},
+		{"False", "Boolean literal"},
+		{"Nothing", "Object literal"},
+		{"Null", "Variant literal"},
+		{"Empty", "Variant literal"},
+	}
+	var out []Completion
+	for _, literal := range literals {
+		if !completionMatches(literal.label, prefix) {
+			continue
+		}
+		replace := replaceRange
+		item := Completion{Label: literal.label, Kind: "constant", Detail: literal.detail}
+		if replaceRange != (Range{}) {
+			item.ReplaceRange = &replace
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (a Analyzer) vbaGlobalMemberCompletions(prefix string, replaceRange Range) []Completion {
+	var out []Completion
+	for _, member := range a.DB.Members("VBA.Global") {
+		if !completionMatches(member.Name, prefix) {
+			continue
+		}
+		kind := "function"
+		replace := replaceRange
+		item := Completion{
+			Label:  member.Name,
+			Kind:   kind,
+			Detail: a.signatureFromMember("VBA.Global", member, "method").Label,
+		}
+		if replaceRange != (Range{}) {
+			item.ReplaceRange = &replace
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 type syntaxCompletionSpec struct {
@@ -2441,6 +2668,12 @@ var procedureStatementCompletions = []syntaxCompletionSpec{
 		documentation: "Assigns an object reference in a procedure.",
 	},
 	{
+		label:         "Debug.Print",
+		detail:        "Write to the Immediate window",
+		insertText:    "Debug.Print ${1:expression}",
+		documentation: "Writes an expression to the VBA Immediate window.",
+	},
+	{
 		label:         "If Then",
 		detail:        "Conditional block",
 		insertText:    "If ${1:condition} Then\n    $0\nEnd If",
@@ -2521,6 +2754,9 @@ func memberCompletionContext(prefix string) (memberPrefix string, receiverExpr s
 	}
 	receiver := expressionBefore(strings.TrimSuffix(beforeWord, "."))
 	receiver = trimWithExpressionPrefix(receiver)
+	if fields := strings.Fields(receiver); len(fields) > 1 {
+		receiver = fields[len(fields)-1]
+	}
 	if receiver == "" {
 		return "", "", false
 	}
@@ -2576,6 +2812,39 @@ func typeCompletionContext(prefix string, pos Position) (typePrefix string, repl
 		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
 		End:   pos,
 	}, true
+}
+
+func procedureParameterCompletionContext(prefix string, pos Position) (paramPrefix string, replaceRange Range, ok bool) {
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	lower := strings.ToLower(strings.TrimSpace(beforeWord))
+	if !procedureDeclarationParameterPrefix(lower) {
+		return "", Range{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, true
+}
+
+func procedureDeclarationParameterPrefix(lower string) bool {
+	open := strings.LastIndex(lower, "(")
+	if open < 0 || strings.LastIndex(lower, ")") > open {
+		return false
+	}
+	head := strings.TrimSpace(lower[:open])
+	return regexp.MustCompile(`(?i)\b(sub|function|property\s+(get|let|set))\s+[A-Za-z_][A-Za-z0-9_]*\s*$`).MatchString(head)
+}
+
+func parameterModifierCompletions(prefix string, replaceRange Range) []Completion {
+	specs := []syntaxCompletionSpec{
+		{label: "ByVal", detail: "Pass parameter by value", insertText: "ByVal "},
+		{label: "ByRef", detail: "Pass parameter by reference", insertText: "ByRef "},
+		{label: "Optional", detail: "Optional parameter", insertText: "Optional "},
+		{label: "ParamArray", detail: "Variable-length argument list", insertText: "ParamArray "},
+	}
+	return completionsFromSpecs(specs, prefix, replaceRange)
 }
 
 func callCompletionContext(prefix string, pos Position) (callPrefix string, replaceRange Range, ok bool) {
@@ -3090,6 +3359,26 @@ func byteOffsetForPosition(source string, pos Position) int {
 		offset += len(line) + 1
 	}
 	return len(source)
+}
+
+func positionForByteOffset(source string, offset int) Position {
+	if offset <= 0 {
+		return Position{}
+	}
+	lines := normalizedLines(source)
+	seen := 0
+	for lineNo, line := range lines {
+		lineEnd := seen + len(line)
+		if offset <= lineEnd {
+			return Position{Line: lineNo, Character: utf16Len(line[:max(0, min(offset-seen, len(line)))])}
+		}
+		seen = lineEnd + 1
+	}
+	if len(lines) == 0 {
+		return Position{}
+	}
+	last := lines[len(lines)-1]
+	return Position{Line: len(lines) - 1, Character: utf16Len(last)}
 }
 
 func byteIndexForUTF16(s string, character int) int {

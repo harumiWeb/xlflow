@@ -105,6 +105,26 @@
           "parameters": [{ "name": "Expression", "type": "Variant" }]
         },
         {
+          "name": "CInt",
+          "return_type": "Integer",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "CDbl",
+          "return_type": "Double",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "CDate",
+          "return_type": "Date",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "CBool",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
           "name": "DateSerial",
           "return_type": "Date",
           "parameters": [
@@ -112,10 +132,43 @@
             { "name": "Month", "type": "Integer" },
             { "name": "Day", "type": "Integer" }
           ]
+        },
+        { "name": "Now", "return_type": "Date" },
+        { "name": "Date", "return_type": "Date" },
+        { "name": "Time", "return_type": "Date" },
+        { "name": "Timer", "return_type": "Single" },
+        {
+          "name": "Trim",
+          "return_type": "String",
+          "parameters": [{ "name": "String", "type": "String" }]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "VBA.Debug",
+      "library": "VBA",
+      "kind": "class",
+      "summary": "VBA debug output object.",
+      "aliases": ["Debug"],
+      "methods": [
+        {
+          "name": "Print",
+          "parameters": [
+            { "name": "Expression1", "type": "Variant", "optional": true },
+            { "name": "Expression2", "type": "Variant", "optional": true },
+            { "name": "Expression3", "type": "Variant", "optional": true },
+            { "name": "Expression4", "type": "Variant", "optional": true },
+            { "name": "Expression5", "type": "Variant", "optional": true }
+          ]
         }
       ],
       "confidence": "curated",
       "source": "xlflow"
     }
-  ]
+  ],
+  "global_values": {
+    "Debug": "VBA.Debug"
+  }
 }

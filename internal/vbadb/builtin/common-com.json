@@ -128,8 +128,11 @@
       "kind": "class",
       "aliases": ["Recordset"],
       "properties": [
+        { "name": "BOF", "return_type": "Boolean" },
         { "name": "EOF", "return_type": "Boolean" },
-        { "name": "Fields", "return_type": "Object" }
+        { "name": "Fields", "return_type": "ADODB.Fields" },
+        { "name": "RecordCount", "return_type": "Long" },
+        { "name": "State", "return_type": "Long" }
       ],
       "methods": [
         {
@@ -143,7 +146,40 @@
           ]
         },
         { "name": "Close" },
+        { "name": "MoveFirst" },
+        { "name": "MoveLast" },
         { "name": "MoveNext" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Field",
+      "library": "ADODB",
+      "kind": "class",
+      "aliases": ["Field"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Fields",
+      "library": "ADODB",
+      "kind": "collection",
+      "aliases": ["Fields"],
+      "element_type": "ADODB.Field",
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "ADODB.Field",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"

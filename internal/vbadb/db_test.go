@@ -52,8 +52,14 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Range", "Find"); !ok || len(got.Parameters) != 9 || got.Parameters[0].Name != "What" || got.ReturnType != "Excel.Range" {
 		t.Fatalf("Range.Find parameters = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Excel.Range", "Cells"); !ok || len(got.Parameters) != 2 || got.ReturnType != "Excel.Range" {
+		t.Fatalf("Range.Cells parameters = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("Scripting.FileSystemObject", "OpenTextFile"); !ok || len(got.Parameters) != 4 || got.Parameters[0].Name != "Filename" || got.ReturnType != "Scripting.TextStream" {
 		t.Fatalf("FileSystemObject.OpenTextFile parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("ADODB.Recordset", "Fields"); !ok || got.ReturnType != "ADODB.Fields" {
+		t.Fatalf("Recordset.Fields = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
 		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)

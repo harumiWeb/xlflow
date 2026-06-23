@@ -405,6 +405,135 @@ End Sub
 	}
 }
 
+func TestE2ESmokeMemberCompletionsAfterInferredTypes(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+
+Private Sub Sample()
+    Dim wb As Excel.Workbook
+    Set wb = Application.Workbooks.Open("sample.txt")
+
+    Dim ws As Excel.Worksheet
+    Set ws = wb.Worksheets("Input")
+
+    Dim rng As Excel.Range
+    Set rng = ws.Range("A1").Resize(10,3)
+
+    Dim lo As Excel.ListObject
+    Set lo = ws.ListObjects("SalesTable")
+
+    Dim amountRange As Excel.Range
+    Set amountRange = lo.ListColumns("Amount").DataBodyRange
+
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    Dim rs As Object
+    Set rs = CreateObject("ADODB.Recordset")
+
+    dict.
+    amountRange.
+    rs.
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Smoke.bas"), Source: source}
+	cases := []struct {
+		lineNo int
+		line   string
+		want   string
+	}{
+		{24, `    dict.`, "Exists"},
+		{25, `    amountRange.`, "Cells"},
+		{26, `    rs.`, "Fields"},
+	}
+	for _, tc := range cases {
+		items, err := analyzer.Completions(doc, Position{Line: tc.lineNo, Character: utf16Len(tc.line)}, []Document{doc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasCompletion(items, tc.want) {
+			t.Fatalf("%s completion missing %s: %+v", strings.TrimSpace(tc.line), tc.want, items)
+		}
+	}
+}
+
+func TestDiagnosticsReportOutOfScopeMemberReceiver(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Smoke.bas"),
+		Source: `Option Explicit
+
+Private Sub Sample()
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.Add "Workbook", "Book1"
+End Sub
+
+Private Sub DiagnosticSmoke()
+    dict.Add "OnlyKey"
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029")
+	if !hasDiagnosticMessage(diagnostics, `Undeclared identifier "dict"`) {
+		t.Fatalf("missing out-of-scope dict diagnostic: %+v", diagnostics)
+	}
+}
+
+func TestE2ESmokeNamespaceBuiltinAndWithSignatureCompletions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+
+Private Sub Sample()
+    Dim wb As Excel.
+    Dim rng As Excel.Range
+    With rng
+        .Offset(
+        .Font.Bold = Tr
+        .Value = No
+    End With
+    lblStatus.Caption = CS
+    Deb
+End Sub
+
+Private Function BuildMessage(ByVal title As String, By
+End Function
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Smoke.bas"), Source: source}
+
+	cases := []struct {
+		lineNo int
+		line   string
+		want   string
+	}{
+		{3, `    Dim wb As Excel.`, "Workbook"},
+		{7, `        .Font.Bold = Tr`, "True"},
+		{8, `        .Value = No`, "Now"},
+		{10, `    lblStatus.Caption = CS`, "CStr"},
+		{11, `    Deb`, "Debug.Print"},
+		{14, `Private Function BuildMessage(ByVal title As String, By`, "ByVal"},
+	}
+	for _, tc := range cases {
+		items, err := analyzer.Completions(doc, Position{Line: tc.lineNo, Character: utf16Len(tc.line)}, []Document{doc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasCompletion(items, tc.want) {
+			t.Fatalf("%s completion missing %s: %+v", strings.TrimSpace(tc.line), tc.want, items)
+		}
+	}
+
+	offsetLine := `        .Offset(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 6, Character: utf16Len(offsetLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.Range.Offset(Optional RowOffset As Variant, Optional ColumnOffset As Variant)") {
+		t.Fatalf("Offset signature help = %+v", help)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
