@@ -2,7 +2,7 @@
 
 All notable changes to xlflow will be documented in this file.
 
-## Unreleased
+## v0.15.0
 
 - Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.
 - Improved VBA LSP signature help for parenless calls so typing a space after calls such as `dict.Add` can show argument hints and early argument-count diagnostics.
