@@ -5,9 +5,15 @@
       "library": "Scripting",
       "kind": "class",
       "aliases": ["Dictionary"],
+      "default_member": "Item",
       "properties": [
         { "name": "Count", "return_type": "Long", "read_only": true },
-        { "name": "Item", "return_type": "Variant" }
+        {
+          "name": "Item",
+          "return_type": "Variant",
+          "default": true,
+          "parameters": [{ "name": "Key", "type": "Variant" }]
+        }
       ],
       "methods": [
         {

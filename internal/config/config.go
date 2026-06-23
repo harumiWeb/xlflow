@@ -13,7 +13,10 @@ import (
 
 const FileName = "xlflow.toml"
 
-var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+var (
+	ErrConfigNotFound     = errors.New("config not found")
+	ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+)
 
 type Config struct {
 	Project  ProjectConfig    `toml:"project"`
@@ -265,7 +268,7 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	path := filepath.Join(cwd, FileName)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cfg, fmt.Errorf("%s not found", FileName)
+			return cfg, fmt.Errorf("%s not found: %w", FileName, ErrConfigNotFound)
 		}
 		return cfg, err
 	}

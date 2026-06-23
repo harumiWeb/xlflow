@@ -5,7 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.
-- Improved VBA LSP signature help for parenless calls so typing a space after calls such as `dict.Add ` can show argument hints and early argument-count diagnostics.
+- Improved VBA LSP signature help for parenless calls so typing a space after calls such as `dict.Add` can show argument hints and early argument-count diagnostics.
 - Expanded built-in VBA/COM signature metadata for common VBA functions, Excel range/workbook methods, WorksheetFunction calls, Scripting.FileSystemObject/TextStream, and ADODB calls used by LSP signature help and argument diagnostics.
 - Hardened LSP argument diagnostics to avoid declaration-line false positives, improved diagnostic method names for signatures with return types, and documented manual signature-help smoke checks for the VS Code dev client.
 - Improved VBA LSP completion and diagnostics for E2E smoke scenarios, including namespace type completion such as `Excel.`, scoped inferred member completion for `dict.`, `amountRange.`, and `rs.`, built-in completions such as `True`, `CStr`, `Now`, `Debug.Print`, and `ByVal`, With-block signature help for `.Offset(`, and out-of-scope member receiver diagnostics.

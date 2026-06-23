@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -399,6 +400,9 @@ func TestLoadMissingConfig(t *testing.T) {
 	_, err := Load(t.TempDir())
 	if err == nil {
 		t.Fatal("expected missing config error")
+	}
+	if !errors.Is(err, ErrConfigNotFound) {
+		t.Fatalf("expected ErrConfigNotFound, got %v", err)
 	}
 }
 

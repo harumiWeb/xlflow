@@ -32,7 +32,14 @@
       "aliases": ["Controls"],
       "element_type": "MSForms.Control",
       "default_member": "Item",
-      "methods": [{ "name": "Item", "return_type": "MSForms.Control", "default": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "MSForms.Control",
+          "default": true,
+          "parameters": [{ "name": "Index", "type": "Variant" }]
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },

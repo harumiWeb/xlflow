@@ -475,8 +475,15 @@ func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_
 			lineNo := i + 1
 			code := maskStringLiterals(gui.StripComment(lines[i]))
 			for _, statement := range splitStatements(code) {
-				name, ok := undeclaredAssignmentTarget(statement)
-				if !ok || declared[strings.ToLower(name)] {
+				name, hadParens, ok := undeclaredAssignmentTarget(statement)
+				if !ok {
+					continue
+				}
+				key := strings.ToLower(name)
+				if hadParens && !declared[key] {
+					continue
+				}
+				if declared[key] {
 					continue
 				}
 				issue := l.issue(path, lineNo, "VB029", "error", "Variable "+name+" is not declared. Add a Dim/Private/Public declaration or correct the identifier.")
@@ -577,20 +584,20 @@ func sourceHasOptionExplicit(source string) bool {
 	return false
 }
 
-func undeclaredAssignmentTarget(statement string) (string, bool) {
+func undeclaredAssignmentTarget(statement string) (string, bool, bool) {
 	stmt := strings.TrimSpace(statement)
 	if stmt == "" {
-		return "", false
+		return "", false, false
 	}
 	lower := strings.ToLower(stmt)
 	if skipUndeclaredAssignmentStatement(lower) {
-		return "", false
+		return "", false, false
 	}
 	if strings.HasPrefix(lower, "for each ") {
 		rest := strings.TrimSpace(stmt[len("for each "):])
 		fields := strings.Fields(rest)
 		if len(fields) == 0 {
-			return "", false
+			return "", false, false
 		}
 		return cleanUndeclaredTarget(fields[0])
 	}
@@ -599,16 +606,16 @@ func undeclaredAssignmentTarget(statement string) (string, bool) {
 		if before, ok := splitAssignmentLeft(rest); ok {
 			return cleanUndeclaredTarget(before)
 		}
-		return "", false
+		return "", false, false
 	}
 	left, ok := splitAssignmentLeft(stmt)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
 	left = stripAssignmentModifier(left, "Set")
 	left = stripAssignmentModifier(left, "Let")
 	if strings.Contains(left, ".") {
-		return "", false
+		return "", false, false
 	}
 	return cleanUndeclaredTarget(left)
 }
@@ -665,23 +672,25 @@ func stripAssignmentModifier(text string, modifier string) string {
 	return strings.TrimSpace(text[len(modifier):])
 }
 
-func cleanUndeclaredTarget(text string) (string, bool) {
+func cleanUndeclaredTarget(text string) (string, bool, bool) {
 	text = strings.TrimSpace(text)
+	hadParens := false
 	if idx := strings.Index(text, "("); idx >= 0 {
+		hadParens = true
 		text = strings.TrimSpace(text[:idx])
 	}
 	if strings.ContainsAny(text, " \t") {
-		return "", false
+		return "", false, false
 	}
 	name := cleanIdentifier(text)
 	if name == "" || isStatementKeyword(name) {
-		return "", false
+		return "", false, false
 	}
 	r := rune(name[0])
 	if r >= '0' && r <= '9' {
-		return "", false
+		return "", false, false
 	}
-	return name, true
+	return name, hadParens, true
 }
 
 func sourceColumnForName(line string, name string) int {

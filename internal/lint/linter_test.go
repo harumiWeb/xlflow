@@ -1230,6 +1230,7 @@ Public Function Build(ByVal inputValue As Long) As Long
   localValue = inputValue
   moduleValue = localValue
   Build = moduleValue
+  Range("A1") = moduleValue
   missingValue = 1
   For index = 1 To 3
   Next index
@@ -1244,15 +1245,15 @@ End Function
 	if len(vb029) != 2 {
 		t.Fatalf("expected two undeclared variable issues, got %+v", vb029)
 	}
-	missing := findIssue(t, vb029, "VB029", 9)
+	missing := findIssue(t, vb029, "VB029", 10)
 	if missing.Symbol != "missingValue" || missing.Kind != "undeclared_variable" || missing.Column != 3 {
 		t.Fatalf("unexpected missingValue issue: %+v", missing)
 	}
-	index := findIssue(t, vb029, "VB029", 10)
+	index := findIssue(t, vb029, "VB029", 11)
 	if index.Symbol != "index" || index.Column != 7 {
 		t.Fatalf("unexpected For index issue: %+v", index)
 	}
-	assertIssue(t, PushBlockingIssues(issues), "VB029", 9)
+	assertIssue(t, PushBlockingIssues(issues), "VB029", 10)
 }
 
 func TestLinterUndeclaredAssignmentsRequireOptionExplicit(t *testing.T) {

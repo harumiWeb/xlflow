@@ -54,6 +54,7 @@ type Server struct {
 
 	diagMu     sync.Mutex
 	diagTimers map[string]*time.Timer
+	diagGen    map[string]uint64
 }
 
 func Check(opts Options) error {
@@ -97,6 +98,7 @@ func New(opts Options) (*Server, func(), error) {
 		logger:     logger,
 		symbols:    newWorkspaceSymbolCache(),
 		diagTimers: make(map[string]*time.Timer),
+		diagGen:    make(map[string]uint64),
 	}
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.handler = protocol.Handler{
@@ -232,6 +234,7 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	if path, err := fileURIToPath(uri); err == nil {
 		s.symbols.invalidateOpen(intel.Document{URI: uri, Path: path})
 	}
+	s.symbols.invalidateBase()
 	s.docs.close(uri)
 	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentUri(uri),
@@ -448,11 +451,17 @@ func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
 		return
 	}
 	s.diagMu.Lock()
+	s.diagGen[doc.URI]++
+	gen := s.diagGen[doc.URI]
 	if timer := s.diagTimers[doc.URI]; timer != nil {
 		timer.Stop()
 	}
 	s.diagTimers[doc.URI] = time.AfterFunc(diagnosticsDebounce, func() {
 		s.diagMu.Lock()
+		if s.diagGen[doc.URI] != gen {
+			s.diagMu.Unlock()
+			return
+		}
 		delete(s.diagTimers, doc.URI)
 		s.diagMu.Unlock()
 		s.publishDiagnostics(ctx, doc)
@@ -463,6 +472,7 @@ func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
 func (s *Server) cancelDiagnostics(uri string) {
 	s.diagMu.Lock()
 	defer s.diagMu.Unlock()
+	s.diagGen[uri]++
 	if timer := s.diagTimers[uri]; timer != nil {
 		timer.Stop()
 		delete(s.diagTimers, uri)
@@ -475,6 +485,7 @@ func (s *Server) stopDiagnosticTimers() {
 	for uri, timer := range s.diagTimers {
 		timer.Stop()
 		delete(s.diagTimers, uri)
+		delete(s.diagGen, uri)
 	}
 }
 
@@ -597,6 +608,13 @@ func (c *workspaceSymbolCache) invalidateOpen(doc intel.Document) {
 		delete(c.openSymbols, key)
 		c.mu.Unlock()
 	}
+}
+
+func (c *workspaceSymbolCache) invalidateBase() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseSymbols = nil
+	c.baseOK = false
 }
 
 func documentSymbolKey(doc intel.Document) string {

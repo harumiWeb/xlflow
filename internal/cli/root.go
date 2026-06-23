@@ -5463,7 +5463,7 @@ func (a *app) loadLSPConfig() (config.Config, error) {
 		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
 	}
 	if err != nil {
-		if strings.Contains(err.Error(), config.FileName+" not found") {
+		if errors.Is(err, config.ErrConfigNotFound) {
 			return cfg, nil
 		}
 		return cfg, a.writeFailure("lsp", output.ExitConfig, "config_error", err)

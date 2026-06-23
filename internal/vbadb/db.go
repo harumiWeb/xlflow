@@ -187,7 +187,17 @@ func (db *DB) ResolveMember(receiverType, member string) (MemberInfo, bool) {
 	if !ok {
 		return MemberInfo{}, false
 	}
-	for _, m := range append(append([]MemberInfo{}, typ.Properties...), typ.Methods...) {
+	for _, m := range typ.Properties {
+		if strings.EqualFold(m.Name, member) {
+			return m, true
+		}
+	}
+	for _, m := range typ.Methods {
+		if strings.EqualFold(m.Name, member) {
+			return m, true
+		}
+	}
+	for _, m := range typ.Events {
 		if strings.EqualFold(m.Name, member) {
 			return m, true
 		}

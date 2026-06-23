@@ -40,8 +40,11 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if got, ok := db.ResolveMember("Excel.Worksheets", "Item"); !ok || got.ReturnType != "Excel.Worksheet" {
+	if got, ok := db.ResolveMember("Excel.Worksheets", "Item"); !ok || got.ReturnType != "Excel.Worksheet" || len(got.Parameters) != 1 {
 		t.Fatalf("Worksheets.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Workbooks", "Item"); !ok || got.ReturnType != "Excel.Workbook" || len(got.Parameters) != 1 {
+		t.Fatalf("Workbooks.Item = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || got.ReturnType != "Excel.Workbook" {
 		t.Fatalf("Workbooks.Open = %+v, %v", got, ok)
@@ -114,6 +117,29 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("Collection", "Item"); !ok || got.ReturnType != "Variant" {
 		t.Fatalf("Collection.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Scripting.Dictionary", "Item"); !ok || got.ReturnType != "Variant" || !got.Default || len(got.Parameters) != 1 {
+		t.Fatalf("Dictionary.Item = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("MSForms.Controls", "Item"); !ok || got.ReturnType != "MSForms.Control" || len(got.Parameters) != 1 {
+		t.Fatalf("Controls.Item = %+v, %v", got, ok)
+	}
+	for _, name := range []string{"Sum", "Average", "CountA"} {
+		if got, ok := db.ResolveMember("Excel.WorksheetFunction", name); !ok || len(got.Parameters) != 30 || !got.Parameters[29].Optional {
+			t.Fatalf("WorksheetFunction.%s parameters = %+v, %v", name, got, ok)
+		}
+	}
+}
+
+func TestResolveMemberIncludesEvents(t *testing.T) {
+	db := &DB{Types: map[string]TypeInfo{}, Aliases: map[string]string{}}
+	db.addType(TypeInfo{
+		Name:   "Test.Widget",
+		Events: []MemberInfo{{Name: "Changed", ReturnType: "Void"}},
+	})
+
+	if got, ok := db.ResolveMember("Test.Widget", "Changed"); !ok || got.Name != "Changed" {
+		t.Fatalf("ResolveMember event = %+v, %v", got, ok)
 	}
 }
 
