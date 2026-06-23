@@ -408,7 +408,8 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	}
 	if initResult.Capabilities.SignatureHelpProvider == nil ||
 		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, "(") ||
-		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, ",") {
+		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, ",") ||
+		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, " ") {
 		t.Fatalf("signatureHelpProvider = %+v, want trigger characters", initResult.Capabilities.SignatureHelpProvider)
 	}
 
@@ -510,6 +511,41 @@ func TestSignatureHelpReturnsActiveParameter(t *testing.T) {
 	}
 	if len(help.Signatures[0].Parameters) != 2 {
 		t.Fatalf("parameters = %+v", help.Signatures[0].Parameters)
+	}
+}
+
+func TestSignatureHelpReturnsParenlessCallAfterSpace(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	line := "    dict.Add "
+	help, err := s.signatureHelp(nil, &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 3, Character: protocol.UInteger(utf16Len(line))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if help.ActiveParameter == nil || *help.ActiveParameter != 0 {
+		t.Fatalf("active parameter = %+v, want 0", help.ActiveParameter)
+	}
+	if help.Signatures[0].Label != "Scripting.Dictionary.Add(Key As Variant, Item As Variant) As void" {
+		t.Fatalf("signature label = %q", help.Signatures[0].Label)
 	}
 }
 

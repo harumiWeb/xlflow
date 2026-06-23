@@ -748,22 +748,22 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 		return parsedCall{}, false
 	}
 	lower := strings.ToLower(trimmed)
-	for _, prefix := range []string{"if ", "elseif ", "do ", "loop ", "for ", "dim ", "set ", "let ", "with ", "select ", "case ", "debug.print"} {
+	for _, prefix := range []string{"if ", "elseif ", "do ", "loop ", "for ", "dim ", "set ", "let ", "with ", "select ", "case ", "option ", "end ", "debug.print"} {
 		if strings.HasPrefix(lower, prefix) {
 			return parsedCall{}, false
 		}
 	}
-	re := regexp.MustCompile(`(?i)(?:^|[:\s])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|[A-Za-z_][A-Za-z0-9_]*)\s+(.+)$`)
+	re := regexp.MustCompile(`(?i)(?:^|[:\s])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|[A-Za-z_][A-Za-z0-9_]*)(\s+)(.*)$`)
 	m := re.FindStringSubmatchIndex(line)
 	if len(m) == 0 {
 		return parsedCall{}, false
 	}
 	target := strings.TrimSpace(line[m[2]:m[3]])
-	argsText := strings.TrimSpace(line[m[4]:m[5]])
-	if target == "" || argsText == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
+	argsText := strings.TrimSpace(line[m[6]:m[7]])
+	if target == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
 		return parsedCall{}, false
 	}
-	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: m[2], End: m[5]}, true
+	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: m[2], End: m[7]}, true
 }
 
 func matchingParen(line string, open int) int {

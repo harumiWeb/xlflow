@@ -154,7 +154,7 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		capabilities.CompletionProvider.TriggerCharacters = completionTriggerCharacters()
 	}
 	if capabilities.SignatureHelpProvider != nil {
-		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ","}
+		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ",", " "}
 		capabilities.SignatureHelpProvider.RetriggerCharacters = []string{","}
 	}
 	version := s.opts.Build.Version

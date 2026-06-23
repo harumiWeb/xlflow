@@ -157,6 +157,27 @@ End Sub
 	}
 }
 
+func TestSignatureHelpResolvesParenlessMemberCallAfterSpace(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \nEnd Sub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := "    dict.Add "
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "Scripting.Dictionary.Add(Key As Variant, Item As Variant) As void" {
+		t.Fatalf("signature label = %q", got)
+	}
+	if help.ActiveParameter != 0 {
+		t.Fatalf("active parameter = %d, want 0", help.ActiveParameter)
+	}
+}
+
 func TestSignatureHelpResolvesProjectFunctionAndNamedArgument(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
@@ -236,6 +257,20 @@ End Sub
 	}
 	if !hasDiagnosticMessage(vb030, "Unknown named argument: Value") {
 		t.Fatalf("missing unknown named argument diagnostic: %+v", vb030)
+	}
+}
+
+func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \nEnd Sub\n",
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vb030 := diagnosticsByCode(diagnostics, "VB030")
+	if !hasDiagnosticMessage(vb030, "expects at least 2 argument") {
+		t.Fatalf("missing parenless empty argument diagnostic: %+v", diagnostics)
 	}
 }
 
