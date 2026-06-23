@@ -4156,6 +4156,28 @@ func collectFormSources(root string, cfg config.Config) ([]packpkg.SourceModule,
 // pointing at a form pack cannot place is an ambiguous layout, not a silent skip.
 func rejectOrphanFormSidecars(formsDir string) error {
 	codeDir := filepath.Join(formsDir, "code")
+	// Discover form names the same way collectFormSources does — every .frm under
+	// formsDir recursively, excluding the code/ sidecar dir — so a sidecar for a form
+	// kept in a subdirectory is matched, not mistaken for an orphan.
+	formNames := map[string]bool{}
+	walkErr := filepath.WalkDir(formsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if samePath(path, codeDir) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
+			formNames[strings.ToLower(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))] = true
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return walkErr
+	}
 	entries, err := os.ReadDir(codeDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -4168,11 +4190,8 @@ func rejectOrphanFormSidecars(formsDir string) error {
 			continue
 		}
 		formName := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if _, err := os.Stat(filepath.Join(formsDir, formName+".frm")); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("%w: UserForm sidecar %q has no matching %s.frm", packpkg.ErrAmbiguousLayout, formName, formName)
-			}
-			return err
+		if !formNames[strings.ToLower(formName)] {
+			return fmt.Errorf("%w: UserForm sidecar %q has no matching %s.frm", packpkg.ErrAmbiguousLayout, formName, formName)
 		}
 	}
 	return nil

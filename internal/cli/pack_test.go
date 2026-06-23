@@ -569,3 +569,37 @@ func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
 		t.Fatalf("want ErrAmbiguousLayout for orphan sidecar, got %v", err)
 	}
 }
+
+func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // sidecar
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A .frm kept in a subdirectory is discovered recursively by collectFormSources,
+	// so its sidecar must not be rejected as an orphan.
+	frm := "Attribute VB_Name = \"Nested\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "sub", "Nested.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "Nested.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("nested .frm with a matching sidecar must not be an orphan: %v", err)
+	}
+	var found bool
+	for _, m := range got {
+		if m.Name == "Nested" && m.Type == packpkg.ModuleTypeForm {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("nested Nested.frm should be collected as a form, got %+v", got)
+	}
+}
