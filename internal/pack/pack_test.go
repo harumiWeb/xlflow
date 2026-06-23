@@ -169,7 +169,9 @@ func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 			want: ErrSignedProject,
 		},
 		{
-			name: "form generation",
+			// UserForm1 is absent from p1_compiled.bin, so this is a new form: pack cannot
+			// author a form's designer storage, so it is rejected as UserForm generation.
+			name: "new form on form-less template",
 			bin:  template,
 			sources: []SourceModule{{
 				Name: "UserForm1", Type: ModuleTypeForm, Source: "VERSION 5.00\r\nBegin VB.UserForm UserForm1\r\nEnd\r\n",
@@ -344,4 +346,67 @@ func mustEntry(t *testing.T, data []byte, name string) []byte {
 	}
 	t.Fatalf("missing zip entry %s", name)
 	return nil
+}
+
+func TestGenerateVBAProjectUpdatesExistingFormCodeBehind(t *testing.T) {
+	template := readTestFile(t, "corpus", "p4_form.bin")
+	src := SourceModule{
+		Name: "UserForm1",
+		Type: ModuleTypeForm,
+		Source: "VERSION 5.00\r\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\r\n" +
+			"   Caption = \"x\"\r\nEnd\r\n" +
+			"Attribute VB_Name = \"UserForm1\"\r\n" +
+			"Attribute VB_GlobalNameSpace = False\r\n" +
+			"Attribute VB_Creatable = False\r\n" +
+			"Attribute VB_PredeclaredId = True\r\n" +
+			"Attribute VB_Exposed = False\r\n" +
+			"Private Sub CommandButton1_Click()\r\n    Debug.Print \"PACKED_EDIT\"\r\nEnd Sub\r\n",
+	}
+	out, err := GenerateVBAProject(template, []SourceModule{src})
+	if err != nil {
+		t.Fatalf("GenerateVBAProject: %v", err)
+	}
+	in, err := vbaproject.Read(template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := vbaproject.Read(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawEdit bool
+	for _, m := range got.Modules {
+		if m.Type == vbaproject.ModuleForm && strings.Contains(m.Source, "PACKED_EDIT") {
+			sawEdit = true
+		}
+	}
+	if !sawEdit {
+		t.Error("edited code-behind not found in output form module")
+	}
+	if len(in.RawStreams) != len(got.RawStreams) {
+		t.Fatalf("rawstream count changed: in=%d out=%d", len(in.RawStreams), len(got.RawStreams))
+	}
+	for key, a := range in.RawStreams {
+		b, ok := got.RawStreams[key]
+		if !ok || string(a) != string(b) {
+			t.Errorf("designer stream %q not carried byte-for-byte (present=%v)", key, ok)
+		}
+	}
+}
+
+func TestGenerateVBAProjectRejectsNewFormWithFormError(t *testing.T) {
+	template := readTestFile(t, "corpus", "p4_form.bin")
+	src := SourceModule{
+		Name: "BrandNewForm",
+		Type: ModuleTypeForm,
+		Source: "VERSION 5.00\r\nBegin {GUID} BrandNewForm\r\nEnd\r\n" +
+			"Attribute VB_Name = \"BrandNewForm\"\r\nPrivate Sub a()\r\nEnd Sub\r\n",
+	}
+	_, err := GenerateVBAProject(template, []SourceModule{src})
+	if !errors.Is(err, ErrUserFormGenerationUnsupported) {
+		t.Fatalf("want ErrUserFormGenerationUnsupported, got %v", err)
+	}
+	if errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatal("new form must not surface as ErrAmbiguousLayout")
+	}
 }

@@ -19,7 +19,10 @@ type UserFormCodeSourceIssue struct {
 	FormName string
 	Path     string
 	Line     int
+	Code     string
+	Symbol   string
 	Message  string
+	Suggest  string
 }
 
 func (i UserFormCodeSourceIssue) Error() string {
@@ -38,15 +41,27 @@ func (i UserFormCodeSourceIssue) LintIssue(formsDir string) lint.Issue {
 			relPath = filepath.ToSlash(i.Path)
 		}
 	}
+	code := i.Code
+	if code == "" {
+		code = "FRM202"
+	}
+	symbol := i.Symbol
+	if symbol == "" {
+		symbol = "Attribute VB_*"
+	}
+	suggestion := i.Suggest
+	if suggestion == "" {
+		suggestion = "Remove Attribute VB_* header lines from the sidecar. In sidecar mode, src/forms/code/<FormName>.bas must contain only code-behind text starting at Option Explicit."
+	}
 	return lint.Issue{
-		Code:       "FRM202",
+		Code:       code,
 		Severity:   "warning",
 		File:       relPath,
 		Line:       i.Line,
 		Message:    i.Message,
 		Kind:       "user_form",
-		Symbol:     "Attribute VB_*",
-		Suggestion: "Remove Attribute VB_* header lines from the sidecar. In sidecar mode, src/forms/code/<FormName>.bas must contain only code-behind text starting at Option Explicit.",
+		Symbol:     symbol,
+		Suggestion: suggestion,
 	}
 }
 
@@ -70,6 +85,16 @@ func ValidateUserFormCodeSidecars(formsDir string, targetForms map[string]bool) 
 			return walkErr
 		}
 		if d.IsDir() {
+			if !samePath(path, sidecarDir) {
+				issues = append(issues, UserFormCodeSourceIssue{
+					Path:    path,
+					Code:    "FRM203",
+					Symbol:  "src/forms/code",
+					Message: "UserForm sidecar subdirectories are not supported",
+					Suggest: "Move the sidecar to src/forms/code/<FormName>.bas. UserForm code sidecars are a flat 1:1 mapping by VBA component name.",
+				})
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(d.Name()), ".bas") {
