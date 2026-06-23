@@ -325,6 +325,86 @@ func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	}
 }
 
+func TestArgumentDiagnosticsIgnoreDeclarationsAndKeepControlFlowCalls(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Private Declare PtrSafe Function MessageBox Lib "user32" Alias "MessageBoxA" (ByVal hwnd As LongPtr, ByVal lpText As String, ByVal lpCaption As String, ByVal wType As Long) As Long
+
+Public Property Get Title() As String
+    Title = "ok"
+End Property
+
+Sub Run()
+    Dim rng As Range
+    If Len("abc") > 0 Then
+        rng.Find()
+    End If
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	if len(diagnostics) != 1 {
+		t.Fatalf("VB030 diagnostics = %+v, want only Range.Find argument warning", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "Find expects at least 1 argument") {
+		t.Fatalf("VB030 diagnostic = %+v, want Range.Find argument warning", diagnostics[0])
+	}
+	if diagnostics[0].Range.Start.Line != 10 {
+		t.Fatalf("VB030 range = %+v, want Range.Find line", diagnostics[0].Range)
+	}
+}
+
+func TestIDESmokeCoversCompletionHoverSignatureAndDiagnostics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Smoke()
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.Add "A"
+    Dim rng As Range
+    rng.Find()
+    rng.Find(What:="A", LookAt:=
+    rng.Font.Co
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Smoke.bas"), Source: source}
+
+	hoverLine := `    Set dict = CreateObject("Scripting.Dictionary")`
+	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(hoverLine[:strings.Index(hoverLine, "dict")+2])}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "dict As Scripting.Dictionary") {
+		t.Fatalf("unexpected dict hover: %+v", hover)
+	}
+
+	signatureLine := `    rng.Find(What:="A", LookAt:=`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 7, Character: utf16Len(signatureLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || help.ActiveParameter != 3 {
+		t.Fatalf("signature help = %+v, want Range.Find LookAt parameter", help)
+	}
+
+	completionLine := `    rng.Font.Co`
+	items, err := analyzer.Completions(doc, Position{Line: 8, Character: utf16Len(completionLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Color") {
+		t.Fatalf("Font.Color completion missing: %+v", items)
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	if !hasDiagnosticMessage(diagnostics, "Add expects at least 2 argument") || !hasDiagnosticMessage(diagnostics, "Find expects at least 1 argument") {
+		t.Fatalf("expected Dictionary.Add and Range.Find argument diagnostics, got %+v", diagnostics)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

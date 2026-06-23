@@ -7,6 +7,7 @@ All notable changes to xlflow will be documented in this file.
 - Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.
 - Improved VBA LSP signature help for parenless calls so typing a space after calls such as `dict.Add ` can show argument hints and early argument-count diagnostics.
 - Expanded built-in VBA/COM signature metadata for common VBA functions, Excel range/workbook methods, WorksheetFunction calls, Scripting.FileSystemObject/TextStream, and ADODB calls used by LSP signature help and argument diagnostics.
+- Hardened LSP argument diagnostics to avoid declaration-line false positives, improved diagnostic method names for signatures with return types, and documented manual signature-help smoke checks for the VS Code dev client.
 - Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
 - Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
 - Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.

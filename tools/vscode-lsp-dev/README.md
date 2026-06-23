@@ -114,8 +114,39 @@ Standard output is reserved for LSP JSON-RPC frames. Non-LSP server logs should 
 - [ ] Confirm server logs are written to `.xlflow/lsp.log`
 - [ ] Confirm diagnostics appear in Problems when server-side diagnostics are available
 - [ ] Confirm diagnostics clear after fixing the source
+- [ ] Confirm signature help appears after `(`, `,`, and a space in parenless calls
+- [ ] Confirm argument diagnostics appear for missing required arguments such as `dict.Add "A"` and `rng.Find()`
 - [ ] Confirm document symbols appear in Outline when implemented
 - [ ] Confirm hover works when implemented
 - [ ] Confirm go to definition works when implemented
 - [ ] Confirm Japanese paths do not break startup
 - [ ] Confirm Japanese comments / string literals do not break ranges
+
+Useful smoke source:
+
+```vb
+Option Explicit
+
+Sub Smoke()
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.Add "A",
+    dict.Add "A"
+
+    Dim rng As Range
+    rng.Find(What:="A", LookAt:=
+    rng.Find()
+    rng.Font.Co
+
+    MsgBox "Hello",
+End Sub
+```
+
+Expected checks:
+
+- `dict.Add "A",` shows `Item` as the active parameter.
+- `dict.Add "A"` reports a missing required argument.
+- `rng.Find(What:="A", LookAt:=` shows `LookAt` as the active parameter.
+- `rng.Find()` reports a missing `What` argument.
+- `rng.Font.Co` offers `Color`.
+- `MsgBox "Hello",` shows `Buttons` as the active parameter.

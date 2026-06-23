@@ -718,7 +718,25 @@ func callsOnLine(line string) []parsedCall {
 func isDeclarationCallPrefix(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	lower := strings.ToLower(trimmed)
-	for _, prefix := range []string{"sub ", "public sub ", "private sub ", "friend sub ", "function ", "public function ", "private function ", "friend function ", "property get ", "property let ", "property set ", "public property ", "private property ", "friend property ", "declare "} {
+	for _, prefix := range []string{
+		"sub ",
+		"public sub ",
+		"private sub ",
+		"friend sub ",
+		"function ",
+		"public function ",
+		"private function ",
+		"friend function ",
+		"property get ",
+		"property let ",
+		"property set ",
+		"public property ",
+		"private property ",
+		"friend property ",
+		"declare ",
+		"public declare ",
+		"private declare ",
+	} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
@@ -868,11 +886,14 @@ func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
 
 func sigLabelName(label string) string {
 	name := strings.TrimSpace(label)
-	if idx := strings.LastIndex(name, "."); idx >= 0 {
-		name = name[idx+1:]
-	}
 	if idx := strings.Index(name, "("); idx >= 0 {
 		name = name[:idx]
+	}
+	if idx := strings.Index(name, " As "); idx >= 0 {
+		name = name[:idx]
+	}
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		name = name[idx+1:]
 	}
 	return strings.TrimSpace(name)
 }
