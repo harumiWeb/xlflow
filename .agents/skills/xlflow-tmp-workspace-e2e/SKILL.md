@@ -234,13 +234,16 @@ Open the produced artifact, run the packed macro, and assert the sentinel cell:
 ```powershell
 $path = 'C:\dev\go\xlflow\tmp_workspaces\<topic>-e2e\dist\Book.xlsm'
 $excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
+$excel.Visible = $true   # keep Excel visible: a hidden VBE compile-error dialog otherwise looks like a hang
 $excel.DisplayAlerts = $false
 $excel.AutomationSecurity = 1  # msoAutomationSecurityLow: allow the packed macros to run
 $wb = $excel.Workbooks.Open($path)
 try {
   $excel.Run('Main.Run')                      # forces a VBE compile, then runs the packed macro
-  $wb.Worksheets.Item(1).Range('A1').Value2   # expect the sentinel written by Main.Run, e.g. "xlflow ok"
+  $sentinel = $wb.Worksheets.Item(1).Range('A1').Value2
+  if ($sentinel -ne 'xlflow ok') {            # the value Main.Run writes in section 3
+    throw "pack smoke failed: A1 was '$sentinel', expected 'xlflow ok'"
+  }
 } finally {
   $wb.Close($false)
   $excel.Quit()
@@ -257,7 +260,7 @@ The smoke passes only when:
 - the packed workbook opens in Excel without a compile error
 - `Run` executes the packed macro and the sentinel cell holds the expected value
 
-A compile error on open, a missing or wrong sentinel value, or a non-zero `pack` exit is a release blocker. Record the `pack` JSON output and the observed sentinel value in the release-gate report.
+A compile error on open, a missing or wrong sentinel value, or a non-zero `pack` exit is a release blocker. If `Run` appears to hang, bring the (visible) Excel window to the foreground — a VBE compile-error dialog is the usual hidden cause. Record the `pack` JSON output and the observed sentinel value in the release-gate report.
 
 ## Failure Handling
 
