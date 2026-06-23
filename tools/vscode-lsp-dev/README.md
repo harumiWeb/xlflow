@@ -64,10 +64,10 @@ The prelaunch task runs `pnpm --dir tools/vscode-lsp-dev compile`; on Windows it
 
 If you open `tools/vscode-lsp-dev` directly in VS Code, run `pnpm compile` before pressing `F5`.
 
-The client starts:
+The client starts xlflow with stdio transport:
 
 ```text
-xlflow lsp --stdio --log-file .xlflow/lsp.log
+xlflow lsp --stdio --log-file <resolved-log-file>
 ```
 
 The server working directory is the first VS Code workspace folder in the Extension Development Host.
@@ -93,11 +93,19 @@ Use VS Code's Output panel:
 - `xlflow LSP Dev Client` for client lifecycle logs.
 - `xlflow LSP Dev Client Trace` for Language Client trace logs. Set the channel log level to Trace when debugging protocol traffic.
 
-The server log file is written under the opened workspace:
+For xlflow projects, detected by `xlflow.toml` at the workspace root, the server log file is written under the opened workspace:
 
 ```text
 .xlflow/lsp.log
 ```
+
+For non-xlflow VBA folders, the dev client does not create `.xlflow` in the workspace. It writes the server log under VS Code's extension log storage instead:
+
+```text
+<extension log directory>/xlflow-lsp-<workspace-hash>.log
+```
+
+This mirrors the intended production-extension direction: do not write xlflow project files into folders that are only using the LSP, formatter, or linter features.
 
 Standard output is reserved for LSP JSON-RPC frames. Non-LSP server logs should appear in stderr or `.xlflow/lsp.log`, not stdout.
 
@@ -111,7 +119,8 @@ Standard output is reserved for LSP JSON-RPC frames. Non-LSP server logs should 
 - [ ] Confirm `(` and `"` insert their closing pair in VBA files
 - [ ] Confirm `xlflow lsp --stdio` starts
 - [ ] Confirm no non-LSP logs are printed to stdout
-- [ ] Confirm server logs are written to `.xlflow/lsp.log`
+- [ ] Confirm xlflow project logs are written to `.xlflow/lsp.log`
+- [ ] Confirm non-xlflow VBA folder logs are written under the extension log directory and no `.xlflow` folder is created
 - [ ] Confirm diagnostics appear in Problems when server-side diagnostics are available
 - [ ] Confirm diagnostics clear after fixing the source
 - [ ] Confirm signature help appears after `(`, `,`, and a space in parenless calls

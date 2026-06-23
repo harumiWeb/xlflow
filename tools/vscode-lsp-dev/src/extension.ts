@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as crypto from "crypto";
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -16,10 +17,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath;
+  const logFile = await resolveServerLogFile(context, workspaceFolder);
+  const serverArgs = ["lsp", "--stdio", "--log-file", logFile];
 
   const serverOptions: ServerOptions = {
     command: "xlflow",
-    args: ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
+    args: serverArgs,
     transport: TransportKind.stdio,
     options: cwd === undefined ? undefined : { cwd },
   };
@@ -58,7 +61,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   try {
     await client.start();
-    outputChannel.info(`Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`}`);
+    outputChannel.info(
+      `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`} with log file ${logFile}`,
+    );
   } catch (error) {
     outputChannel.error(`Failed to start xlflow lsp --stdio: ${String(error)}`);
     throw error;
@@ -70,6 +75,29 @@ export async function deactivate(): Promise<void> {
   const runningClient = client;
   client = undefined;
   await runningClient?.stop();
+}
+
+async function resolveServerLogFile(
+  context: vscode.ExtensionContext,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): Promise<string> {
+  if (workspaceFolder !== undefined && (await workspaceHasXlflowToml(workspaceFolder))) {
+    return ".xlflow/lsp.log";
+  }
+
+  await vscode.workspace.fs.createDirectory(context.logUri);
+  const workspaceKey = workspaceFolder?.uri.toString() ?? "no-workspace";
+  const workspaceHash = crypto.createHash("sha256").update(workspaceKey).digest("hex").slice(0, 12);
+  return vscode.Uri.joinPath(context.logUri, `xlflow-lsp-${workspaceHash}.log`).fsPath;
+}
+
+async function workspaceHasXlflowToml(workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.joinPath(workspaceFolder.uri, "xlflow.toml"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function scheduleDeclarationSuggest(document: vscode.TextDocument): void {

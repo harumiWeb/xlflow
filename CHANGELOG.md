@@ -12,6 +12,7 @@ All notable changes to xlflow will be documented in this file.
 - Fixed VBA LSP member completion inside nested call expressions such as `CStr(dict.` and after With-relative call chains such as `.Offset(1,0).`.
 - Fixed VBA LSP module declaration snippets so `Option Explicit` is not suggested again on the next line after it already exists.
 - Suppressed empty-prefix VBA LSP completions on blank module-level lines after existing content, preventing the completion list from reopening immediately after `Option Explicit`.
+- Updated the VS Code LSP dev client to write `.xlflow/lsp.log` only for workspaces with `xlflow.toml`; non-xlflow VBA folders now use VS Code extension log storage instead of creating `.xlflow`.
 - Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
 - Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
 - Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.
