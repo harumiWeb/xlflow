@@ -1,0 +1,264 @@
+{
+  "constants": [
+    {
+      "name": "xlUp",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4162",
+      "enum_group": "XlDirection",
+      "summary": "Up direction."
+    },
+    {
+      "name": "xlDown",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4121",
+      "enum_group": "XlDirection",
+      "summary": "Down direction."
+    },
+    {
+      "name": "xlToLeft",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4159",
+      "enum_group": "XlDirection",
+      "summary": "Left direction."
+    },
+    {
+      "name": "xlToRight",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4161",
+      "enum_group": "XlDirection",
+      "summary": "Right direction."
+    },
+    {
+      "name": "xlContinuous",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "XlLineStyle"
+    },
+    {
+      "name": "xlCalculationManual",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4135",
+      "enum_group": "XlCalculation"
+    },
+    {
+      "name": "xlCalculationAutomatic",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4105",
+      "enum_group": "XlCalculation"
+    },
+    {
+      "name": "xlCellTypeVisible",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "12",
+      "enum_group": "XlCellType"
+    },
+    {
+      "name": "xlPasteValues",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4163",
+      "enum_group": "XlPasteType"
+    },
+    {
+      "name": "xlYes",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "XlYesNoGuess"
+    },
+    {
+      "name": "xlNo",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "XlYesNoGuess"
+    },
+    {
+      "name": "xlAutomatic",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4105",
+      "enum_group": "XlColorIndex"
+    },
+    {
+      "name": "xlNone",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4142",
+      "enum_group": "XlConstants"
+    },
+    {
+      "name": "xlSolid",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "XlPattern"
+    },
+    {
+      "name": "xlThin",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "XlBorderWeight"
+    },
+    {
+      "name": "xlMedium",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4138",
+      "enum_group": "XlBorderWeight"
+    },
+    {
+      "name": "xlThick",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "XlBorderWeight"
+    },
+    {
+      "name": "xlEdgeLeft",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "7",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlEdgeTop",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "8",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlEdgeBottom",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "9",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlEdgeRight",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "10",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlInsideVertical",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "11",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlInsideHorizontal",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "12",
+      "enum_group": "XlBordersIndex"
+    },
+    {
+      "name": "xlLeft",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4131",
+      "enum_group": "XlHAlign"
+    },
+    {
+      "name": "xlCenter",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4108",
+      "enum_group": "XlHAlign"
+    },
+    {
+      "name": "xlRight",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4152",
+      "enum_group": "XlHAlign"
+    },
+    {
+      "name": "xlTop",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4160",
+      "enum_group": "XlVAlign"
+    },
+    {
+      "name": "xlBottom",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-4107",
+      "enum_group": "XlVAlign"
+    },
+    {
+      "name": "xlPortrait",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "XlPageOrientation"
+    },
+    {
+      "name": "xlLandscape",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "XlPageOrientation"
+    },
+    {
+      "name": "xlAscending",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "XlSortOrder"
+    },
+    {
+      "name": "xlDescending",
+      "library": "Excel",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "XlSortOrder"
+    }
+  ]
+}

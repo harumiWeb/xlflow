@@ -269,6 +269,37 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestLSPCheckUsesDefaultConfigWhenProjectConfigIsMissing(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            t.TempDir(),
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lsp", "--check"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lsp check error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status      string         `json:"status"`
+		Diagnostics map[string]any `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK {
+		t.Fatalf("status = %q, want %q", got.Status, output.StatusOK)
+	}
+	if got.Diagnostics["server"] != "xlflow-vba-lsp" {
+		t.Fatalf("unexpected diagnostics: %+v", got.Diagnostics)
+	}
+}
+
 func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
 	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
 	var stdout bytes.Buffer
@@ -3259,11 +3290,11 @@ code_source = "sidecar"
 	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"frm\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"sidecar\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -3381,11 +3412,11 @@ code_source = "sidecar"
 	if err := os.WriteFile(specPath, []byte(specBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"frm\"\nEnd Sub\n"
+	frmBody := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"frm\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(frmBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    version = \"sidecar\"\nEnd Sub\n"
+	sidecarBody := "Option Explicit\n\nPrivate Sub UserForm_Initialize()\n    Dim version As String\n    version = \"sidecar\"\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"), []byte(sidecarBody), 0o644); err != nil {
 		t.Fatal(err)
 	}

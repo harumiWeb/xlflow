@@ -376,20 +376,20 @@ func calleeFromNode(node *tree_sitter.Node, source []byte) Callee {
 	callee := Callee{Text: text}
 	switch node.Kind() {
 	case "qualified_member_expression":
-		object := node.ChildByFieldName("object")
-		property := node.ChildByFieldName("property")
-		if object != nil {
-			receiver := strings.TrimSpace(object.Utf8Text(source))
+		receiverNode := childByFieldNameAny(node, "receiver", "object")
+		memberNode := childByFieldNameAny(node, "member", "property")
+		if receiverNode != nil {
+			receiver := strings.TrimSpace(receiverNode.Utf8Text(source))
 			callee.Receiver = &receiver
 		}
-		if property != nil {
-			callee.Member = strings.TrimSpace(property.Utf8Text(source))
+		if memberNode != nil {
+			callee.Member = strings.TrimSpace(memberNode.Utf8Text(source))
 			callee.BaseName = cleanIdentifier(callee.Member)
 		}
 	case "implicit_member_expression":
-		property := node.ChildByFieldName("property")
-		if property != nil {
-			callee.Member = strings.TrimSpace(property.Utf8Text(source))
+		memberNode := childByFieldNameAny(node, "member", "property")
+		if memberNode != nil {
+			callee.Member = strings.TrimSpace(memberNode.Utf8Text(source))
 			callee.BaseName = cleanIdentifier(callee.Member)
 		}
 	default:
@@ -413,6 +413,9 @@ func argumentsFromCallNode(callNode, target *tree_sitter.Node, source []byte) Ar
 	if target != nil && target.Kind() == "call_expression" {
 		return argumentsFromCallExpression(target, source)
 	}
+	if list := callNode.ChildByFieldName("arguments"); list != nil {
+		return argumentsFromArgumentList(list, source)
+	}
 	for i := uint(0); i < callNode.NamedChildCount(); i++ {
 		child := callNode.NamedChild(i)
 		if child == nil || sameNode(child, target) {
@@ -427,6 +430,9 @@ func argumentsFromCallNode(callNode, target *tree_sitter.Node, source []byte) Ar
 
 func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Arguments {
 	args := Arguments{Named: []NamedArgument{}}
+	if list := node.ChildByFieldName("arguments"); list != nil {
+		return argumentsFromArgumentList(list, source)
+	}
 	fn := node.ChildByFieldName("function")
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
@@ -439,6 +445,18 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 		}
 	}
 	return args
+}
+
+func childByFieldNameAny(node *tree_sitter.Node, names ...string) *tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	for _, name := range names {
+		if child := node.ChildByFieldName(name); child != nil {
+			return child
+		}
+	}
+	return nil
 }
 
 func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments {

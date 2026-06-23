@@ -1,0 +1,93 @@
+{
+  "types": [
+    {
+      "name": "MSForms.UserForm",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["UserForm"],
+      "properties": [
+        { "name": "Controls", "return_type": "MSForms.Controls" },
+        { "name": "Caption", "return_type": "String" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.Control",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["Control"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Caption", "return_type": "String" },
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.Controls",
+      "library": "MSForms",
+      "kind": "collection",
+      "aliases": ["Controls"],
+      "element_type": "MSForms.Control",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "MSForms.Control",
+          "default": true,
+          "parameters": [{ "name": "Index", "type": "Variant" }]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.TextBox",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["TextBox"],
+      "properties": [
+        { "name": "Text", "return_type": "String" },
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.ComboBox",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["ComboBox"],
+      "properties": [
+        { "name": "Text", "return_type": "String" },
+        { "name": "Value", "return_type": "Variant" },
+        { "name": "ListIndex", "return_type": "Long" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.CommandButton",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["CommandButton"],
+      "properties": [
+        { "name": "Caption", "return_type": "String" },
+        { "name": "Value", "return_type": "Boolean" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "MSForms.Label",
+      "library": "MSForms",
+      "kind": "class",
+      "aliases": ["Label"],
+      "properties": [{ "name": "Caption", "return_type": "String" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,7 +204,7 @@ disabled_rules = ["VBA999"]
 }
 
 func TestLoadRejectsNonConfigurableDisabledLintRule(t *testing.T) {
-	for _, ruleID := range []string{"VB013", "VB028"} {
+	for _, ruleID := range []string{"VB013", "VB028", "VB029"} {
 		t.Run(ruleID, func(t *testing.T) {
 			dir := t.TempDir()
 			body := []byte(`[project]
@@ -399,6 +400,9 @@ func TestLoadMissingConfig(t *testing.T) {
 	_, err := Load(t.TempDir())
 	if err == nil {
 		t.Fatal("expected missing config error")
+	}
+	if !errors.Is(err, ErrConfigNotFound) {
+		t.Fatalf("expected ErrConfigNotFound, got %v", err)
 	}
 }
 

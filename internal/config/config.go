@@ -13,7 +13,10 @@ import (
 
 const FileName = "xlflow.toml"
 
-var ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+var (
+	ErrConfigNotFound     = errors.New("config not found")
+	ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+)
 
 type Config struct {
 	Project  ProjectConfig    `toml:"project"`
@@ -149,6 +152,7 @@ var (
 		"VB013":  true,
 		"VB014":  true,
 		"VB028":  true,
+		"VB029":  true,
 		"VBA101": true,
 		"VBA102": true,
 		"VBA103": true,
@@ -191,7 +195,7 @@ func AnalyzeDiagnosticID(id string) bool {
 func InlineSuppressibleDiagnosticID(id string) bool {
 	id = strings.ToUpper(strings.TrimSpace(id))
 	switch id {
-	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB028",
+	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB028", "VB029",
 		"VBA104", "VBA105", "VBA106", "VBA211":
 		return false
 	default:
@@ -264,7 +268,7 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	path := filepath.Join(cwd, FileName)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cfg, fmt.Errorf("%s not found", FileName)
+			return cfg, fmt.Errorf("%s not found: %w", FileName, ErrConfigNotFound)
 		}
 		return cfg, err
 	}

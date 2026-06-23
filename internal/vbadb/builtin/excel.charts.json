@@ -1,0 +1,102 @@
+{
+  "types": [
+    {
+      "name": "Excel.Chart",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Chart"],
+      "properties": [
+        { "name": "SeriesCollection", "return_type": "Excel.SeriesCollection" },
+        { "name": "ChartArea", "return_type": "Excel.ChartArea" },
+        { "name": "PlotArea", "return_type": "Excel.PlotArea" },
+        { "name": "Legend", "return_type": "Excel.Legend" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ChartObject",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["ChartObject"],
+      "properties": [{ "name": "Chart", "return_type": "Excel.Chart" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.ChartObjects",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["ChartObjects"],
+      "element_type": "Excel.ChartObject",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.ChartObject",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Shape",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Shape"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "TextFrame", "return_type": "Excel.TextFrame" },
+        { "name": "TopLeftCell", "return_type": "Excel.Range" },
+        { "name": "BottomRightCell", "return_type": "Excel.Range" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Shapes",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Shapes"],
+      "element_type": "Excel.Shape",
+      "default_member": "Item",
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Excel.Shape",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.TextFrame",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["TextFrame"],
+      "properties": [
+        { "name": "Characters", "return_type": "Excel.Characters" },
+        { "name": "HorizontalAlignment", "return_type": "Variant" },
+        { "name": "VerticalAlignment", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Characters",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Characters"],
+      "properties": [
+        { "name": "Text", "return_type": "String" },
+        { "name": "Font", "return_type": "Excel.Font" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

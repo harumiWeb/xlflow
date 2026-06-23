@@ -1,0 +1,317 @@
+{
+  "types": [
+    {
+      "name": "Excel.Font",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Font"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Size", "return_type": "Variant" },
+        { "name": "Bold", "return_type": "Variant" },
+        { "name": "Italic", "return_type": "Variant" },
+        { "name": "Underline", "return_type": "Variant" },
+        { "name": "Color", "return_type": "Variant" },
+        { "name": "ColorIndex", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Interior",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Interior"],
+      "properties": [
+        { "name": "Color", "return_type": "Variant" },
+        { "name": "ColorIndex", "return_type": "Variant" },
+        { "name": "Pattern", "return_type": "Variant" },
+        { "name": "TintAndShade", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Border",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Border"],
+      "properties": [
+        { "name": "LineStyle", "return_type": "Variant" },
+        { "name": "Weight", "return_type": "Variant" },
+        { "name": "Color", "return_type": "Variant" },
+        { "name": "ColorIndex", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Borders",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Borders"],
+      "element_type": "Excel.Border",
+      "default_member": "Item",
+      "methods": [{ "name": "Item", "return_type": "Excel.Border", "default": true }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.FormatCondition",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["FormatCondition"],
+      "properties": [
+        { "name": "Font", "return_type": "Excel.Font" },
+        { "name": "Interior", "return_type": "Excel.Interior" },
+        { "name": "Formula1", "return_type": "String" },
+        { "name": "Formula2", "return_type": "String" }
+      ],
+      "methods": [{ "name": "Delete" }, { "name": "Modify" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.FormatConditions",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["FormatConditions"],
+      "element_type": "Excel.FormatCondition",
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        { "name": "Item", "return_type": "Excel.FormatCondition", "default": true },
+        { "name": "Add", "return_type": "Excel.FormatCondition" },
+        { "name": "Delete" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Validation",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Validation"],
+      "properties": [
+        { "name": "Formula1", "return_type": "String" },
+        { "name": "Formula2", "return_type": "String" },
+        { "name": "IgnoreBlank", "return_type": "Boolean" },
+        { "name": "InCellDropdown", "return_type": "Boolean" }
+      ],
+      "methods": [{ "name": "Add" }, { "name": "Delete" }, { "name": "Modify" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Hyperlink",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Hyperlink"],
+      "properties": [
+        { "name": "Address", "return_type": "String" },
+        { "name": "SubAddress", "return_type": "String" },
+        { "name": "TextToDisplay", "return_type": "String" },
+        { "name": "Range", "return_type": "Excel.Range" }
+      ],
+      "methods": [{ "name": "Delete" }, { "name": "Follow" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Hyperlinks",
+      "library": "Excel",
+      "kind": "collection",
+      "aliases": ["Hyperlinks"],
+      "element_type": "Excel.Hyperlink",
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        { "name": "Item", "return_type": "Excel.Hyperlink", "default": true },
+        { "name": "Add", "return_type": "Excel.Hyperlink" },
+        { "name": "Delete" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.PageSetup",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["PageSetup"],
+      "properties": [
+        { "name": "Orientation", "return_type": "Variant" },
+        { "name": "Zoom", "return_type": "Variant" },
+        { "name": "FitToPagesWide", "return_type": "Variant" },
+        { "name": "FitToPagesTall", "return_type": "Variant" },
+        { "name": "PrintArea", "return_type": "String" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.Sort",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["Sort"],
+      "methods": [{ "name": "Apply" }, { "name": "SetRange" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.AutoFilter",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["AutoFilter"],
+      "properties": [{ "name": "Range", "return_type": "Excel.Range" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Excel.WorksheetFunction",
+      "library": "Excel",
+      "kind": "class",
+      "aliases": ["WorksheetFunction"],
+      "methods": [
+        {
+          "name": "Sum",
+          "return_type": "Double",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant", "optional": true },
+            { "name": "Arg3", "type": "Variant", "optional": true },
+            { "name": "Arg4", "type": "Variant", "optional": true },
+            { "name": "Arg5", "type": "Variant", "optional": true },
+            { "name": "Arg6", "type": "Variant", "optional": true },
+            { "name": "Arg7", "type": "Variant", "optional": true },
+            { "name": "Arg8", "type": "Variant", "optional": true },
+            { "name": "Arg9", "type": "Variant", "optional": true },
+            { "name": "Arg10", "type": "Variant", "optional": true },
+            { "name": "Arg11", "type": "Variant", "optional": true },
+            { "name": "Arg12", "type": "Variant", "optional": true },
+            { "name": "Arg13", "type": "Variant", "optional": true },
+            { "name": "Arg14", "type": "Variant", "optional": true },
+            { "name": "Arg15", "type": "Variant", "optional": true },
+            { "name": "Arg16", "type": "Variant", "optional": true },
+            { "name": "Arg17", "type": "Variant", "optional": true },
+            { "name": "Arg18", "type": "Variant", "optional": true },
+            { "name": "Arg19", "type": "Variant", "optional": true },
+            { "name": "Arg20", "type": "Variant", "optional": true },
+            { "name": "Arg21", "type": "Variant", "optional": true },
+            { "name": "Arg22", "type": "Variant", "optional": true },
+            { "name": "Arg23", "type": "Variant", "optional": true },
+            { "name": "Arg24", "type": "Variant", "optional": true },
+            { "name": "Arg25", "type": "Variant", "optional": true },
+            { "name": "Arg26", "type": "Variant", "optional": true },
+            { "name": "Arg27", "type": "Variant", "optional": true },
+            { "name": "Arg28", "type": "Variant", "optional": true },
+            { "name": "Arg29", "type": "Variant", "optional": true },
+            { "name": "Arg30", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Average",
+          "return_type": "Double",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant", "optional": true },
+            { "name": "Arg3", "type": "Variant", "optional": true },
+            { "name": "Arg4", "type": "Variant", "optional": true },
+            { "name": "Arg5", "type": "Variant", "optional": true },
+            { "name": "Arg6", "type": "Variant", "optional": true },
+            { "name": "Arg7", "type": "Variant", "optional": true },
+            { "name": "Arg8", "type": "Variant", "optional": true },
+            { "name": "Arg9", "type": "Variant", "optional": true },
+            { "name": "Arg10", "type": "Variant", "optional": true },
+            { "name": "Arg11", "type": "Variant", "optional": true },
+            { "name": "Arg12", "type": "Variant", "optional": true },
+            { "name": "Arg13", "type": "Variant", "optional": true },
+            { "name": "Arg14", "type": "Variant", "optional": true },
+            { "name": "Arg15", "type": "Variant", "optional": true },
+            { "name": "Arg16", "type": "Variant", "optional": true },
+            { "name": "Arg17", "type": "Variant", "optional": true },
+            { "name": "Arg18", "type": "Variant", "optional": true },
+            { "name": "Arg19", "type": "Variant", "optional": true },
+            { "name": "Arg20", "type": "Variant", "optional": true },
+            { "name": "Arg21", "type": "Variant", "optional": true },
+            { "name": "Arg22", "type": "Variant", "optional": true },
+            { "name": "Arg23", "type": "Variant", "optional": true },
+            { "name": "Arg24", "type": "Variant", "optional": true },
+            { "name": "Arg25", "type": "Variant", "optional": true },
+            { "name": "Arg26", "type": "Variant", "optional": true },
+            { "name": "Arg27", "type": "Variant", "optional": true },
+            { "name": "Arg28", "type": "Variant", "optional": true },
+            { "name": "Arg29", "type": "Variant", "optional": true },
+            { "name": "Arg30", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "CountA",
+          "return_type": "Double",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant", "optional": true },
+            { "name": "Arg3", "type": "Variant", "optional": true },
+            { "name": "Arg4", "type": "Variant", "optional": true },
+            { "name": "Arg5", "type": "Variant", "optional": true },
+            { "name": "Arg6", "type": "Variant", "optional": true },
+            { "name": "Arg7", "type": "Variant", "optional": true },
+            { "name": "Arg8", "type": "Variant", "optional": true },
+            { "name": "Arg9", "type": "Variant", "optional": true },
+            { "name": "Arg10", "type": "Variant", "optional": true },
+            { "name": "Arg11", "type": "Variant", "optional": true },
+            { "name": "Arg12", "type": "Variant", "optional": true },
+            { "name": "Arg13", "type": "Variant", "optional": true },
+            { "name": "Arg14", "type": "Variant", "optional": true },
+            { "name": "Arg15", "type": "Variant", "optional": true },
+            { "name": "Arg16", "type": "Variant", "optional": true },
+            { "name": "Arg17", "type": "Variant", "optional": true },
+            { "name": "Arg18", "type": "Variant", "optional": true },
+            { "name": "Arg19", "type": "Variant", "optional": true },
+            { "name": "Arg20", "type": "Variant", "optional": true },
+            { "name": "Arg21", "type": "Variant", "optional": true },
+            { "name": "Arg22", "type": "Variant", "optional": true },
+            { "name": "Arg23", "type": "Variant", "optional": true },
+            { "name": "Arg24", "type": "Variant", "optional": true },
+            { "name": "Arg25", "type": "Variant", "optional": true },
+            { "name": "Arg26", "type": "Variant", "optional": true },
+            { "name": "Arg27", "type": "Variant", "optional": true },
+            { "name": "Arg28", "type": "Variant", "optional": true },
+            { "name": "Arg29", "type": "Variant", "optional": true },
+            { "name": "Arg30", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "VLookup",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant" },
+            { "name": "Arg3", "type": "Variant" },
+            { "name": "Arg4", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Match",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant" },
+            { "name": "Arg3", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Index",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant" },
+            { "name": "Arg3", "type": "Variant", "optional": true },
+            { "name": "Arg4", "type": "Variant", "optional": true }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    }
+  ]
+}

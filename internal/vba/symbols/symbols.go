@@ -86,6 +86,14 @@ type fileCandidate struct {
 	moduleKind string
 }
 
+type SourceOptions struct {
+	RootDir        string
+	Path           string
+	ModuleKind     string
+	IncludePrivate bool
+	IncludeLabels  bool
+}
+
 type extractor struct {
 	opts       Options
 	rootDir    string
@@ -171,6 +179,60 @@ func Inspect(opts Options) (*Result, error) {
 	}
 	result.Summary.Files = len(result.Files)
 	return result, nil
+}
+
+func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return FileResult{}, err
+	}
+	path := opts.Path
+	if strings.TrimSpace(path) == "" {
+		path = "Untitled.bas"
+	}
+	moduleKind := opts.ModuleKind
+	if moduleKind == "" {
+		moduleKind = kindForPath(rootDir, config.Config{}, path)
+	}
+	parser, err := vbaast.NewParser()
+	if err != nil {
+		return FileResult{}, err
+	}
+	defer parser.Close()
+	parsed := parser.Parse(path, source)
+	defer parsed.Close()
+	rel := displayPath(rootDir, path)
+	if !filepath.IsAbs(path) {
+		rel = filepath.ToSlash(path)
+	}
+	moduleName, attrs := moduleMetadata(path, parsed.Source)
+	ext := extractor{
+		opts: Options{
+			RootDir:        rootDir,
+			IncludePrivate: opts.IncludePrivate,
+			IncludeLabels:  opts.IncludeLabels,
+		},
+		rootDir:    rootDir,
+		source:     parsed.Source,
+		file:       rel,
+		moduleName: moduleName,
+		moduleKind: moduleKind,
+		attrs:      attrs,
+	}
+	return FileResult{
+		Path:       rel,
+		ModuleName: moduleName,
+		ModuleKind: moduleKind,
+		Parse: ParseSummary{
+			HasError:   parsed.HasError,
+			HasMissing: parsed.HasMissing,
+		},
+		Symbols: ext.extract(parsed.Root),
+	}, nil
 }
 
 func discoverFiles(opts Options) ([]fileCandidate, error) {
@@ -348,6 +410,11 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
+		for _, param := range e.parameterSymbols(node, sym.Name) {
+			if e.includeSymbol(param) {
+				e.symbols = append(e.symbols, param)
+			}
+		}
 		parentProc = sym.Name
 	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		sym := e.simpleSymbol(node, "declare", "")
@@ -480,6 +547,56 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 	}
 }
 
+func (e *extractor) parameterSymbols(node *tree_sitter.Node, parentProc string) []Symbol {
+	list := node.ChildByFieldName("parameters")
+	if list == nil {
+		list = firstNamedChildKind(node, "parameter_list")
+	}
+	if list == nil {
+		return nil
+	}
+	out := make([]Symbol, 0, list.NamedChildCount())
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		child := list.NamedChild(i)
+		if child == nil || child.Kind() != "parameter" {
+			continue
+		}
+		sym := e.parameterSymbol(child, parentProc)
+		if strings.TrimSpace(sym.Name) != "" {
+			out = append(out, sym)
+		}
+	}
+	return out
+}
+
+func (e *extractor) parameterSymbol(node *tree_sitter.Node, parentProc string) Symbol {
+	r := vbaast.NodeRange(node)
+	nameNode := node.ChildByFieldName("name")
+	if nameNode == nil {
+		nameNode = firstNamedChildKind(node, "identifier")
+	}
+	if nameNode != nil {
+		r = vbaast.NodeRange(nameNode)
+	}
+	name := nodeName(node, e.source)
+	return Symbol{
+		Name:        name,
+		Kind:        "parameter",
+		Visibility:  "",
+		Module:      e.moduleName,
+		File:        e.file,
+		Parent:      parentProc,
+		StartLine:   r.StartLine,
+		StartColumn: r.StartColumn,
+		EndLine:     r.EndLine,
+		EndColumn:   r.EndColumn,
+		StartByte:   r.StartByte,
+		EndByte:     r.EndByte,
+		Signature:   firstLine(node.Utf8Text(e.source)),
+		ReturnType:  typeText(node, e.source),
+	}
+}
+
 func (e *extractor) implementsSymbol(node *tree_sitter.Node) Symbol {
 	name := ""
 	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
@@ -535,7 +652,7 @@ func (e *extractor) includeSymbol(sym Symbol) bool {
 	if sym.Kind == "module" || sym.Kind == "attribute" || sym.Kind == "implements" {
 		return true
 	}
-	if sym.Kind == "local_variable" || (sym.Kind == "const" && sym.Parent != "") {
+	if sym.Kind == "local_variable" || sym.Kind == "parameter" || (sym.Kind == "const" && sym.Parent != "") {
 		return e.opts.IncludePrivate
 	}
 	if e.opts.IncludePrivate {

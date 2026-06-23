@@ -2,8 +2,56 @@
 
 All notable changes to xlflow will be documented in this file.
 
-## Unreleased
+## v0.15.0
 
+- Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.
+- Improved VBA LSP signature help for parenless calls so typing a space after calls such as `dict.Add` can show argument hints and early argument-count diagnostics.
+- Expanded built-in VBA/COM signature metadata for common VBA functions, Excel range/workbook methods, WorksheetFunction calls, Scripting.FileSystemObject/TextStream, and ADODB calls used by LSP signature help and argument diagnostics.
+- Hardened LSP argument diagnostics to avoid declaration-line false positives, improved diagnostic method names for signatures with return types, and documented manual signature-help smoke checks for the VS Code dev client.
+- Improved VBA LSP completion and diagnostics for E2E smoke scenarios, including namespace type completion such as `Excel.`, scoped inferred member completion for `dict.`, `amountRange.`, and `rs.`, built-in completions such as `True`, `CStr`, `Now`, `Debug.Print`, and `ByVal`, With-block signature help for `.Offset(`, and out-of-scope member receiver diagnostics.
+- Fixed VBA LSP member completion inside nested call expressions such as `CStr(dict.` and after With-relative call chains such as `.Offset(1,0).`.
+- Fixed VBA LSP module declaration snippets so `Option Explicit` is not suggested again on the next line after it already exists.
+- Suppressed empty-prefix VBA LSP completions on blank module-level lines after existing content, preventing the completion list from reopening immediately after `Option Explicit`.
+- Updated the VS Code LSP dev client to write `.xlflow/lsp.log` only for workspaces with `xlflow.toml`; non-xlflow VBA folders now use VS Code extension log storage instead of creating `.xlflow`.
+- Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
+- Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
+- Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.
+- Added a VBA `Set` statement snippet and enabled VBA-specific auto-closing brackets and quotes in the VS Code LSP dev client.
+- Improved VBA hover display with member signatures, canonical receiver types, and source/provenance notes for declarations, inferred object types, built-in globals, UserForm controls, and built-in object model members.
+- Added context-aware ProgID completion inside `CreateObject("...")` while suppressing unrelated completions in ordinary string literals.
+- Added active `With` block receiver tracking for VBA hover and member completion, including nested `With .Member` blocks.
+- Fixed VBA statement snippets so an already completed declaration such as `Option Explicit` is not immediately suggested again.
+- Expanded VBA type inference so `Set target = <known expression>` propagates the right-hand expression type into hover and completion, including method-return chains such as `FileSystemObject.OpenTextFile`.
+- Strengthened Excel table collection metadata and resolution tests for `ListObjects(...).ListColumns(...).DataBodyRange` chains, including Japanese table and column names.
+- Added Excel PivotTable/PivotField and Shape/TextFrame metadata so LSP hover and completion can resolve chains such as `PivotTables(...).PivotFields(...).DataRange` and `Shapes(...).TextFrame.Characters.Text`.
+- Added practical `Sheets(...)` inference so worksheet-like member chains such as `Sheets("Input").Range("A1")` and `ThisWorkbook.Sheets("Input").ListObjects(...)` resolve as worksheet operations without changing the underlying `Excel.Sheets` database type.
+- Expanded practical chain coverage for `FileSystemObject.OpenTextFile`, `Application.Workbooks.Open`, workbook worksheet collections, table ranges, pivot fields, and shape text frames.
+- Added context-aware completion for `Call ...` and `Set x = ...`, limiting suggestions to callable symbols and object-producing expressions respectively.
+- Added reusable `xlflow lsp --stdio` VBA language server support with full-document synchronization, diagnostics, document/workspace symbols, definition lookup, references, hover, completion, and a practical built-in VBA/COM type database for common Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata.
+- Fixed LSP document symbols so incomplete VBA declarations do not return empty symbol names that VS Code rejects while editing.
+- Added `.` as an LSP completion trigger character so VS Code requests member completions such as `Range("A1").Font.Color` while typing.
+- Added built-in `VBA.Collection` metadata so LSP hover and member completions resolve `Dim result As Collection` and `Set result = New Collection` correctly.
+- Fixed LSP type inference to prefer the nearest in-scope VBA declaration before the cursor, avoiding stale same-name declarations such as `result As Boolean` overriding a local `result As Collection`.
+- Added LSP completions for module-qualified VBA procedure calls such as `Utils.BuildName` after typing `Utils.`.
+- Added module-level VBA declaration snippet completions such as `Public Sub`, `Public Function`, `Dim`, `Const`, `Type`, and `Enum` while typing at the top level of a module.
+- Fixed LSP document symbols for empty or incomplete VBA files so VS Code does not reject module symbols whose selection range exceeds the source range, and added identifier trigger characters so declaration snippets appear while typing.
+- Fixed module-level declaration snippets so multi-word prefixes such as `Public S` are completed by replacing the typed declaration prefix instead of disappearing after a modifier is typed.
+- Fixed LSP completion visibility so `Private` declarations from other modules, including `Private Const`, are not suggested as cross-module candidates.
+- Added a procedure-local `Dim` snippet completion and `VB029` diagnostics for undeclared assignment targets or loop control variables when `Option Explicit` is present.
+- Added VBA LSP type-position completions for declarations such as `Dim ws As Workbook`, `Function Foo() As String`, and `Set dict = New Dictionary`, including built-in VBA types, COM type aliases, and project class modules.
+- Tuned VBA LSP completion and editing behavior by limiting server-side trigger characters to `.`, keeping procedure-local completion candidates scoped to the current procedure, using UTF-16 symbol selection ranges, and debouncing diagnostics after document changes.
+- Added an LSP workspace symbol cache for saved source files plus open-document overlays, reducing repeated full-project symbol indexing during completion, hover, definition, and workspace symbol requests.
+- Improved VBA LSP definition and reference resolution for procedure-local variables and constants so same-name locals in other procedures are no longer returned for the current local scope.
+- Added VBA parameter symbols so LSP definition and reference lookup can resolve procedure arguments within the current procedure scope.
+- Improved VBA LSP hover for local symbols and parameters by reusing scoped definition lookup and avoiding type inference from later declarations.
+- Updated the VS Code LSP dev client to enable VBA quick suggestions and explicitly trigger suggestions for module declaration prefixes such as `Pu`, `Public S`, and `Dim`.
+- Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
+- Expanded the built-in Excel VBA/COM type database with common formatting and worksheet helper objects such as `Excel.Font`, `Excel.Interior`, `Excel.Borders`, `Excel.Validation`, `Excel.Hyperlinks`, `Excel.PageSetup`, `Excel.AutoFilter`, `Excel.Sort`, and `Excel.WorksheetFunction`.
+- Expanded built-in Excel constant metadata for common formatting, border, alignment, page orientation, and sort constants, and included enum group information in constant hover output.
+- Updated LSP diagnostics to reuse the same file-local VBA lint rules as `xlflow lint` for unsaved editor buffers, including stable `VB...` diagnostic codes and diagnostic clearing when issues are fixed.
+- Hardened LSP file URI and range handling for Windows paths, UNC paths, escaped Japanese paths, and UTF-16 diagnostic positions after non-ASCII text.
+- Fixed LSP workspace symbols so an open editor buffer hides stale filesystem symbols for the same module, preserving the in-memory document priority used by definition and reference features.
+- Updated `tree-sitter-vba` to v0.8.1 and adapted call extraction and lint member-access checks to the new stable `receiver` / `member` / `arguments` AST fields.
 - Deprecated the legacy PowerShell bridge for v0.15.0. Windows `auto` bridge mode now uses the `.NET` bridge without falling back to PowerShell; explicit `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` remain available only as deprecated opt-ins and emit `powershell_bridge_deprecated`. PowerShell bridge removal is planned for v0.16.0.
 - Fixed `xlflow analyze` false positives for `VBA209` array element and UDT-array member assignments, clarified `VBA204` fallthrough guidance, and recognized paired Push/Pop `Application` state restore helpers for `VBA203`.
 - Extended experimental `xlflow pack` to update an existing UserForm's code-behind when the form already exists in the template (ADR-0012 Stage 2), honoring `[userform].code_source`: `frm` reads the code from the `.frm`, while `sidecar` (the default) reads it from `src/forms/code/<FormName>.bas` and merges it in memory without writing the source tree. The form's designer storage is carried through from the template byte-for-byte and `.frx` is not read, so layout is preserved but not authored; a `.frm` whose form is not in the template fails loudly with `pack_userform_generation_unsupported`, and a sidecar carrying `Attribute VB_*` headers or with no matching `.frm` fails with `pack_ambiguous_layout`. See `docs/specs/pack-command.md`.

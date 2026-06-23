@@ -95,6 +95,14 @@ End Sub
 	if !localCache.Static {
 		t.Fatalf("LocalCache static = false, want true")
 	}
+	jsonString := assertSymbol(t, privateFile.Symbols, "JsonString", "parameter")
+	if jsonString.Parent != "ParseJson" || jsonString.ReturnType != "String" {
+		t.Fatalf("JsonString parameter = %+v, want parent ParseJson and type String", jsonString)
+	}
+	strict := assertSymbol(t, privateFile.Symbols, "Strict", "parameter")
+	if strict.StartLine != 14 || strict.StartColumn <= 0 || strict.ReturnType != "Boolean" {
+		t.Fatalf("Strict parameter = %+v, want identifier range and Boolean type", strict)
+	}
 	assertSymbol(t, privateFile.Symbols, "Hidden", "sub")
 	assertSymbol(t, privateFile.Symbols, "Start", "label")
 	assertSymbol(t, privateFile.Symbols, "10", "line_number_label")

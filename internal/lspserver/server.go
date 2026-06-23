@@ -1,0 +1,1058 @@
+package lspserver
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf16"
+
+	"github.com/sourcegraph/jsonrpc2"
+	"github.com/tliron/glsp"
+	protocol "github.com/tliron/glsp/protocol_3_16"
+
+	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
+	"github.com/harumiWeb/xlflow/internal/vbafmt"
+)
+
+const serverName = "xlflow-vba-lsp"
+
+const diagnosticsDebounce = 300 * time.Millisecond
+
+type BuildInfo struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
+type Options struct {
+	RootDir string
+	Config  config.Config
+	Build   BuildInfo
+	LogFile string
+	Stderr  io.Writer
+}
+
+type Server struct {
+	opts     Options
+	db       *vbadb.DB
+	analyzer intel.Analyzer
+	handler  protocol.Handler
+	docs     *documents
+	logger   *log.Logger
+	symbols  *workspaceSymbolCache
+
+	diagMu     sync.Mutex
+	diagTimers map[string]*time.Timer
+	diagGen    map[string]uint64
+}
+
+func Check(opts Options) error {
+	db, err := vbadb.LoadBuiltin()
+	if err != nil {
+		return err
+	}
+	return intel.Analyzer{RootDir: opts.RootDir, Config: opts.Config, DB: db}.Check()
+}
+
+func RunStdio(opts Options) error {
+	s, cleanup, err := New(opts)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	stream := jsonrpc2.NewBufferedStream(stdioReadWriteCloser{}, jsonrpc2.VSCodeObjectCodec{})
+	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler})
+	<-conn.DisconnectNotify()
+	return conn.Close()
+}
+
+func New(opts Options) (*Server, func(), error) {
+	db, err := vbadb.LoadBuiltin()
+	if err != nil {
+		return nil, nil, err
+	}
+	logger, cleanup, err := newLogger(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	s := &Server{
+		opts: opts,
+		db:   db,
+		analyzer: intel.Analyzer{
+			RootDir: opts.RootDir,
+			Config:  opts.Config,
+			DB:      db,
+		},
+		docs:       newDocuments(opts.RootDir),
+		logger:     logger,
+		symbols:    newWorkspaceSymbolCache(),
+		diagTimers: make(map[string]*time.Timer),
+		diagGen:    make(map[string]uint64),
+	}
+	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
+	s.handler = protocol.Handler{
+		Initialize:                 s.initialize,
+		Initialized:                s.initialized,
+		Shutdown:                   s.shutdown,
+		Exit:                       s.exit,
+		TextDocumentDidOpen:        s.didOpen,
+		TextDocumentDidChange:      s.didChange,
+		TextDocumentDidClose:       s.didClose,
+		TextDocumentDocumentSymbol: s.documentSymbol,
+		WorkspaceSymbol:            s.workspaceSymbol,
+		TextDocumentDefinition:     s.definition,
+		TextDocumentReferences:     s.references,
+		TextDocumentHover:          s.hover,
+		TextDocumentCompletion:     s.completion,
+		TextDocumentSignatureHelp:  s.signatureHelp,
+		TextDocumentFormatting:     s.formatting,
+	}
+	return s, func() {
+		s.stopDiagnosticTimers()
+		cleanup()
+	}, nil
+}
+
+func newLogger(opts Options) (*log.Logger, func(), error) {
+	if strings.TrimSpace(opts.LogFile) != "" {
+		path := opts.LogFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(opts.RootDir, path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, nil, err
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return nil, nil, err
+		}
+		return log.New(file, "xlflow-lsp: ", log.LstdFlags), func() { _ = file.Close() }, nil
+	}
+	w := opts.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	return log.New(w, "xlflow-lsp: ", log.LstdFlags), func() {}, nil
+}
+
+func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
+	capabilities := s.handler.CreateServerCapabilities()
+	if syncOptions, ok := capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions); ok {
+		kind := protocol.TextDocumentSyncKindFull
+		syncOptions.Change = &kind
+	}
+	if capabilities.CompletionProvider != nil {
+		capabilities.CompletionProvider.TriggerCharacters = completionTriggerCharacters()
+	}
+	if capabilities.SignatureHelpProvider != nil {
+		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ",", " "}
+		capabilities.SignatureHelpProvider.RetriggerCharacters = []string{","}
+	}
+	version := s.opts.Build.Version
+	if version == "" {
+		version = "dev"
+	}
+	return protocol.InitializeResult{
+		Capabilities: capabilities,
+		ServerInfo: &protocol.InitializeResultServerInfo{
+			Name:    serverName,
+			Version: &version,
+		},
+	}, nil
+}
+
+func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
+	s.logger.Printf("initialized")
+	return nil
+}
+
+func (s *Server) shutdown(_ *glsp.Context) error {
+	s.logger.Printf("shutdown")
+	return nil
+}
+
+func (s *Server) exit(_ *glsp.Context) error {
+	s.logger.Printf("exit")
+	return nil
+}
+
+func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+	doc, err := s.docs.open(string(params.TextDocument.URI), params.TextDocument.Text)
+	if err != nil {
+		return err
+	}
+	s.symbols.invalidateOpen(doc)
+	s.publishDiagnostics(ctx, doc)
+	return nil
+}
+
+func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
+	if len(params.ContentChanges) == 0 {
+		return nil
+	}
+	text, ok := fullChangeText(params.ContentChanges[len(params.ContentChanges)-1])
+	if !ok {
+		return fmt.Errorf("textDocument/didChange expected full document synchronization")
+	}
+	doc, err := s.docs.change(string(params.TextDocument.URI), text)
+	if err != nil {
+		return err
+	}
+	s.symbols.invalidateOpen(doc)
+	s.scheduleDiagnostics(ctx, doc)
+	return nil
+}
+
+func fullChangeText(change any) (string, bool) {
+	switch typed := change.(type) {
+	case protocol.TextDocumentContentChangeEventWhole:
+		return typed.Text, true
+	case protocol.TextDocumentContentChangeEvent:
+		if typed.Range == nil {
+			return typed.Text, true
+		}
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+	uri := string(params.TextDocument.URI)
+	s.cancelDiagnostics(uri)
+	if path, err := fileURIToPath(uri); err == nil {
+		s.symbols.invalidateOpen(intel.Document{URI: uri, Path: path})
+	}
+	s.symbols.invalidateBase()
+	s.docs.close(uri)
+	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
+		URI:         protocol.DocumentUri(uri),
+		Diagnostics: []protocol.Diagnostic{},
+	})
+	return nil
+}
+
+func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	syms, err := s.analyzer.DocumentSymbols(doc)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.DocumentSymbol, 0, len(syms))
+	for _, sym := range syms {
+		detail := sym.Detail
+		out = append(out, protocol.DocumentSymbol{
+			Name:           sym.Name,
+			Detail:         &detail,
+			Kind:           symbolKind(sym.Kind),
+			Range:          toProtocolRange(sym.Range),
+			SelectionRange: toProtocolRange(sym.Selection),
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) workspaceSymbol(_ *glsp.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
+	syms, err := s.analyzer.WorkspaceSymbols(s.docs.openDocuments(), params.Query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.SymbolInformation, 0, len(syms))
+	for _, sym := range syms {
+		uri := sym.File
+		if !strings.HasPrefix(uri, "file:") {
+			uri = s.docs.uriForDisplayPath(sym.File)
+		}
+		out = append(out, protocol.SymbolInformation{
+			Name: sym.Name,
+			Kind: symbolKind(sym.Kind),
+			Location: protocol.Location{
+				URI:   protocol.DocumentUri(uri),
+				Range: toProtocolRange(sym.Selection),
+			},
+			ContainerName: &sym.Module,
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	locs, err := s.analyzer.Definition(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), s.docs.uriForDisplayPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.Location, 0, len(locs))
+	for _, loc := range locs {
+		uri := loc.URI
+		if !strings.HasPrefix(uri, "file:") {
+			uri = s.docs.uriForDisplayPath(loc.Path)
+		}
+		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
+	}
+	return out, nil
+}
+
+func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	locs, err := s.analyzer.References(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), params.Context.IncludeDeclaration, s.docs.uriForDisplayPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.Location, 0, len(locs))
+	for _, loc := range locs {
+		uri := loc.URI
+		if !strings.HasPrefix(uri, "file:") {
+			uri = s.docs.uriForDisplayPath(loc.Path)
+		}
+		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
+	}
+	return out, nil
+}
+
+func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	hover, err := s.analyzer.Hover(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil || hover == nil {
+		return nil, err
+	}
+	return &protocol.Hover{
+		Contents: protocol.MarkupContent{
+			Kind:  protocol.MarkupKindMarkdown,
+			Value: hover.Contents,
+		},
+		Range: toProtocolRangePtr(hover.Range),
+	}, nil
+}
+
+func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	completions, err := s.analyzer.Completions(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil {
+		return nil, err
+	}
+	items := make([]protocol.CompletionItem, 0, len(completions))
+	for _, completion := range completions {
+		kind := completionItemKind(completion.Kind)
+		item := protocol.CompletionItem{
+			Label: completion.Label,
+			Kind:  &kind,
+		}
+		if completion.InsertText != "" {
+			item.InsertText = &completion.InsertText
+		}
+		if completion.ReplaceRange != nil {
+			item.TextEdit = protocol.TextEdit{
+				Range:   toProtocolRange(*completion.ReplaceRange),
+				NewText: firstNonEmpty(completion.InsertText, completion.Label),
+			}
+		}
+		if completion.Snippet {
+			format := protocol.InsertTextFormatSnippet
+			item.InsertTextFormat = &format
+		}
+		if completion.Detail != "" {
+			item.Detail = &completion.Detail
+		}
+		if completion.Documentation != "" {
+			item.Documentation = protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
+				Value: completion.Documentation,
+			}
+		}
+		items = append(items, item)
+	}
+	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+}
+
+func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	help, err := s.analyzer.SignatureHelp(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil || help == nil || len(help.Signatures) == 0 {
+		return nil, err
+	}
+	activeSignature := protocol.UInteger(max(0, help.ActiveSignature))
+	activeParameter := protocol.UInteger(max(0, help.ActiveParameter))
+	signatures := make([]protocol.SignatureInformation, 0, len(help.Signatures))
+	for _, sig := range help.Signatures {
+		info := protocol.SignatureInformation{Label: sig.Label}
+		if sig.Documentation != "" {
+			info.Documentation = protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: sig.Documentation}
+		}
+		for _, param := range sig.Parameters {
+			info.Parameters = append(info.Parameters, protocol.ParameterInformation{
+				Label: parameterLabel(param),
+			})
+		}
+		signatures = append(signatures, info)
+	}
+	return &protocol.SignatureHelp{
+		Signatures:      signatures,
+		ActiveSignature: &activeSignature,
+		ActiveParameter: &activeParameter,
+	}, nil
+}
+
+func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	if !documentSupportsFormatting(doc) {
+		return []protocol.TextEdit{}, nil
+	}
+	formatted, err := vbafmt.FormatTextWithOptions(doc.Source, documentIsClass(doc), vbafmt.FormatConfig{
+		LineNumbers: vbafmt.LineNumberModePreserve,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if formatted == doc.Source {
+		return []protocol.TextEdit{}, nil
+	}
+	return []protocol.TextEdit{{
+		Range:   fullDocumentRange(doc.Source),
+		NewText: formatted,
+	}}, nil
+}
+
+func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
+	if doc.URI == "" {
+		s.publishDiagnostics(ctx, doc)
+		return
+	}
+	s.diagMu.Lock()
+	s.diagGen[doc.URI]++
+	gen := s.diagGen[doc.URI]
+	if timer := s.diagTimers[doc.URI]; timer != nil {
+		timer.Stop()
+	}
+	s.diagTimers[doc.URI] = time.AfterFunc(diagnosticsDebounce, func() {
+		s.diagMu.Lock()
+		if s.diagGen[doc.URI] != gen {
+			s.diagMu.Unlock()
+			return
+		}
+		delete(s.diagTimers, doc.URI)
+		s.diagMu.Unlock()
+		s.publishDiagnostics(ctx, doc)
+	})
+	s.diagMu.Unlock()
+}
+
+func (s *Server) cancelDiagnostics(uri string) {
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	s.diagGen[uri]++
+	if timer := s.diagTimers[uri]; timer != nil {
+		timer.Stop()
+		delete(s.diagTimers, uri)
+	}
+}
+
+func (s *Server) stopDiagnosticTimers() {
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	for uri, timer := range s.diagTimers {
+		timer.Stop()
+		delete(s.diagTimers, uri)
+		delete(s.diagGen, uri)
+	}
+}
+
+func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
+	diagnostics := s.analyzer.Diagnostics(doc)
+	out := make([]protocol.Diagnostic, 0, len(diagnostics))
+	for _, diag := range diagnostics {
+		severity := diagnosticSeverity(diag.Severity)
+		source := diag.Source
+		code := protocol.IntegerOrString{Value: diag.Code}
+		out = append(out, protocol.Diagnostic{
+			Range:    toProtocolRange(diag.Range),
+			Severity: &severity,
+			Code:     &code,
+			Source:   &source,
+			Message:  diag.Message,
+		})
+	}
+	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
+		URI:         protocol.DocumentUri(doc.URI),
+		Diagnostics: out,
+	})
+}
+
+func (s *Server) baseAnalyzer() intel.Analyzer {
+	return intel.Analyzer{RootDir: s.opts.RootDir, Config: s.opts.Config, DB: s.db}
+}
+
+func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]intel.Symbol, error) {
+	analyzer := s.baseAnalyzer()
+	base, err := s.symbols.base(analyzer)
+	if err != nil {
+		return nil, err
+	}
+	openKeys := make(map[string]bool, len(open))
+	for _, doc := range open {
+		for _, key := range s.symbolPathKeys(doc.Path) {
+			openKeys[key] = true
+		}
+	}
+	out := make([]intel.Symbol, 0, len(base))
+	for _, sym := range base {
+		if hasSymbolPathKey(openKeys, s.symbolPathKeys(sym.File)) {
+			continue
+		}
+		out = append(out, sym)
+	}
+	for _, doc := range open {
+		syms, err := s.symbols.open(analyzer, doc)
+		if err != nil {
+			continue
+		}
+		out = append(out, syms...)
+	}
+	return filterWorkspaceSymbols(out, query), nil
+}
+
+type workspaceSymbolCache struct {
+	mu          sync.RWMutex
+	baseSymbols []intel.Symbol
+	baseOK      bool
+	openSymbols map[string]cachedOpenSymbols
+}
+
+type cachedOpenSymbols struct {
+	source  string
+	symbols []intel.Symbol
+}
+
+func newWorkspaceSymbolCache() *workspaceSymbolCache {
+	return &workspaceSymbolCache{openSymbols: map[string]cachedOpenSymbols{}}
+}
+
+func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, error) {
+	c.mu.RLock()
+	if c.baseOK {
+		out := cloneSymbols(c.baseSymbols)
+		c.mu.RUnlock()
+		return out, nil
+	}
+	c.mu.RUnlock()
+
+	syms, err := analyzer.WorkspaceSymbols(nil, "")
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.baseSymbols = cloneSymbols(syms)
+	c.baseOK = true
+	c.mu.Unlock()
+	return cloneSymbols(syms), nil
+}
+
+func (c *workspaceSymbolCache) open(analyzer intel.Analyzer, doc intel.Document) ([]intel.Symbol, error) {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return analyzer.DocumentSymbols(doc)
+	}
+	c.mu.RLock()
+	if cached, ok := c.openSymbols[key]; ok && cached.source == doc.Source {
+		out := cloneSymbols(cached.symbols)
+		c.mu.RUnlock()
+		return out, nil
+	}
+	c.mu.RUnlock()
+
+	syms, err := analyzer.DocumentSymbols(doc)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.openSymbols[key] = cachedOpenSymbols{source: doc.Source, symbols: cloneSymbols(syms)}
+	c.mu.Unlock()
+	return cloneSymbols(syms), nil
+}
+
+func (c *workspaceSymbolCache) invalidateOpen(doc intel.Document) {
+	if key := documentSymbolKey(doc); key != "" {
+		c.mu.Lock()
+		delete(c.openSymbols, key)
+		c.mu.Unlock()
+	}
+}
+
+func (c *workspaceSymbolCache) invalidateBase() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseSymbols = nil
+	c.baseOK = false
+}
+
+func documentSymbolKey(doc intel.Document) string {
+	if doc.Path != "" {
+		return symbolFileKey(doc.Path)
+	}
+	if doc.URI != "" {
+		if path, err := fileURIToPath(doc.URI); err == nil {
+			return symbolFileKey(path)
+		}
+		return strings.ToLower(doc.URI)
+	}
+	return ""
+}
+
+func symbolFileKey(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "file:") {
+		if decoded, err := fileURIToPath(path); err == nil {
+			path = decoded
+		}
+	}
+	return normalizePathKey(path)
+}
+
+func (s *Server) symbolPathKeys(path string) []string {
+	var keys []string
+	if key := symbolFileKey(path); key != "" {
+		keys = append(keys, key)
+	}
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(s.opts.RootDir) == "" {
+		return keys
+	}
+	if filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(s.opts.RootDir, path); err == nil {
+			if key := symbolFileKey(rel); key != "" {
+				keys = append(keys, key)
+			}
+		}
+		return keys
+	}
+	if key := symbolFileKey(filepath.Join(s.opts.RootDir, filepath.FromSlash(path))); key != "" {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func hasSymbolPathKey(set map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if set[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneSymbols(syms []intel.Symbol) []intel.Symbol {
+	out := make([]intel.Symbol, len(syms))
+	copy(out, syms)
+	return out
+}
+
+func filterWorkspaceSymbols(syms []intel.Symbol, query string) []intel.Symbol {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query != "" {
+		filtered := syms[:0]
+		for _, sym := range syms {
+			if strings.Contains(strings.ToLower(sym.Name), query) || strings.Contains(strings.ToLower(sym.Module+"."+sym.Name), query) {
+				filtered = append(filtered, sym)
+			}
+		}
+		syms = filtered
+	}
+	sort.SliceStable(syms, func(i, j int) bool {
+		if syms[i].File != syms[j].File {
+			return syms[i].File < syms[j].File
+		}
+		if syms[i].Range.Start.Line != syms[j].Range.Start.Line {
+			return syms[i].Range.Start.Line < syms[j].Range.Start.Line
+		}
+		if syms[i].Range.Start.Character != syms[j].Range.Start.Character {
+			return syms[i].Range.Start.Character < syms[j].Range.Start.Character
+		}
+		return syms[i].Name < syms[j].Name
+	})
+	return syms
+}
+
+type documents struct {
+	root string
+	mu   sync.RWMutex
+	docs map[string]intel.Document
+	keys map[string]string
+}
+
+func newDocuments(root string) *documents {
+	return &documents{root: root, docs: map[string]intel.Document{}, keys: map[string]string{}}
+}
+
+func (d *documents) open(uri, text string) (intel.Document, error) {
+	doc, err := d.docFromURI(uri, text)
+	if err != nil {
+		return intel.Document{}, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := normalizePathKey(doc.Path)
+	d.docs[key] = doc
+	d.keys[uri] = key
+	return doc, nil
+}
+
+func (d *documents) change(uri, text string) (intel.Document, error) {
+	d.mu.RLock()
+	key := d.keys[uri]
+	current, ok := d.docs[key]
+	d.mu.RUnlock()
+	if !ok {
+		return d.open(uri, text)
+	}
+	current.Source = text
+	d.mu.Lock()
+	d.docs[key] = current
+	d.mu.Unlock()
+	return current, nil
+}
+
+func (d *documents) close(uri string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if key := d.keys[uri]; key != "" {
+		delete(d.docs, key)
+		delete(d.keys, uri)
+	}
+}
+
+func (d *documents) getOrRead(uri string) (intel.Document, error) {
+	path, err := fileURIToPath(uri)
+	if err != nil {
+		return intel.Document{}, err
+	}
+	key := normalizePathKey(path)
+	d.mu.RLock()
+	if doc, ok := d.docs[key]; ok {
+		d.mu.RUnlock()
+		return doc, nil
+	}
+	d.mu.RUnlock()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return intel.Document{}, err
+	}
+	return intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)}, nil
+}
+
+func (d *documents) openDocuments() []intel.Document {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]intel.Document, 0, len(d.docs))
+	for _, doc := range d.docs {
+		out = append(out, doc)
+	}
+	return out
+}
+
+func (d *documents) docFromURI(uri, text string) (intel.Document, error) {
+	path, err := fileURIToPath(uri)
+	if err != nil {
+		return intel.Document{}, err
+	}
+	return intel.Document{URI: uri, Path: path, Source: text, ModuleKind: moduleKindForPath(path)}, nil
+}
+
+func (d *documents) uriForDisplayPath(path string) string {
+	if strings.HasPrefix(path, "file:") {
+		return path
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(d.root, filepath.FromSlash(path))
+	}
+	return pathToFileURI(path)
+}
+
+func fileURIToPath(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "file" {
+		return "", fmt.Errorf("unsupported URI scheme %q", u.Scheme)
+	}
+	path, err := url.PathUnescape(u.EscapedPath())
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" {
+		if u.Host != "" {
+			path = `\\` + u.Host + filepath.FromSlash(path)
+		} else {
+			path = strings.TrimPrefix(path, "/")
+			path = filepath.FromSlash(path)
+		}
+	} else {
+		path = filepath.FromSlash(path)
+	}
+	return filepath.Clean(path), nil
+}
+
+func pathToFileURI(path string) string {
+	path = filepath.Clean(path)
+	host := ""
+	if runtime.GOOS == "windows" {
+		vol := filepath.VolumeName(path)
+		if strings.HasPrefix(vol, `\\`) {
+			rest := strings.TrimPrefix(path, vol)
+			hostShare := strings.TrimPrefix(vol, `\\`)
+			parts := strings.SplitN(hostShare, `\`, 2)
+			if len(parts) == 2 {
+				host = parts[0]
+				path = "/" + parts[1] + filepath.ToSlash(rest)
+			} else {
+				path = "/" + filepath.ToSlash(path)
+			}
+		} else {
+			path = "/" + filepath.ToSlash(path)
+		}
+	} else {
+		path = filepath.ToSlash(path)
+	}
+	return (&url.URL{Scheme: "file", Host: host, Path: path}).String()
+}
+
+func normalizePathKey(path string) string {
+	clean := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		clean = strings.ToLower(clean)
+	}
+	return clean
+}
+
+func moduleKindForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cls":
+		return "class"
+	case ".frm":
+		return "form"
+	default:
+		return "standard"
+	}
+}
+
+func documentSupportsFormatting(doc intel.Document) bool {
+	ext := strings.ToLower(filepath.Ext(doc.Path))
+	return ext == ".bas" || ext == ".cls"
+}
+
+func documentIsClass(doc intel.Document) bool {
+	return strings.EqualFold(doc.ModuleKind, "class") || strings.EqualFold(filepath.Ext(doc.Path), ".cls")
+}
+
+func fullDocumentRange(source string) protocol.Range {
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	source = strings.ReplaceAll(source, "\r", "\n")
+	lines := strings.Split(source, "\n")
+	lastLine := len(lines) - 1
+	lastChar := 0
+	if lastLine >= 0 {
+		lastChar = utf16Len(lines[lastLine])
+	}
+	return protocol.Range{
+		Start: protocol.Position{Line: 0, Character: 0},
+		End:   protocol.Position{Line: protocol.UInteger(max(0, lastLine)), Character: protocol.UInteger(max(0, lastChar))},
+	}
+}
+
+func toProtocolRange(r intel.Range) protocol.Range {
+	return protocol.Range{Start: toProtocolPosition(r.Start), End: toProtocolPosition(r.End)}
+}
+
+func toProtocolRangePtr(r intel.Range) *protocol.Range {
+	out := toProtocolRange(r)
+	return &out
+}
+
+func toProtocolPosition(pos intel.Position) protocol.Position {
+	return protocol.Position{Line: protocol.UInteger(max(0, pos.Line)), Character: protocol.UInteger(max(0, pos.Character))}
+}
+
+func fromProtocolPosition(pos protocol.Position) intel.Position {
+	return intel.Position{Line: int(pos.Line), Character: int(pos.Character)}
+}
+
+func utf16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
+
+func diagnosticSeverity(severity string) protocol.DiagnosticSeverity {
+	switch strings.ToLower(severity) {
+	case "error":
+		return protocol.DiagnosticSeverityError
+	case "info":
+		return protocol.DiagnosticSeverityInformation
+	case "hint":
+		return protocol.DiagnosticSeverityHint
+	default:
+		return protocol.DiagnosticSeverityWarning
+	}
+}
+
+func symbolKind(kind string) protocol.SymbolKind {
+	switch strings.ToLower(kind) {
+	case "module":
+		return protocol.SymbolKindModule
+	case "class":
+		return protocol.SymbolKindClass
+	case "sub", "function", "property", "property_get", "property_let", "property_set":
+		return protocol.SymbolKindFunction
+	case "const":
+		return protocol.SymbolKindConstant
+	case "field", "module_variable":
+		return protocol.SymbolKindField
+	case "local_variable":
+		return protocol.SymbolKindVariable
+	case "enum":
+		return protocol.SymbolKindEnum
+	case "event":
+		return protocol.SymbolKindEvent
+	default:
+		return protocol.SymbolKindObject
+	}
+}
+
+func completionItemKind(kind string) protocol.CompletionItemKind {
+	switch strings.ToLower(kind) {
+	case "method":
+		return protocol.CompletionItemKindMethod
+	case "function":
+		return protocol.CompletionItemKindFunction
+	case "property":
+		return protocol.CompletionItemKindProperty
+	case "variable":
+		return protocol.CompletionItemKindVariable
+	case "type":
+		return protocol.CompletionItemKindClass
+	case "constant":
+		return protocol.CompletionItemKindConstant
+	case "keyword":
+		return protocol.CompletionItemKindKeyword
+	case "snippet":
+		return protocol.CompletionItemKindSnippet
+	default:
+		return protocol.CompletionItemKindText
+	}
+}
+
+func parameterLabel(param intel.Parameter) string {
+	var b strings.Builder
+	if param.Optional {
+		b.WriteString("Optional ")
+	}
+	b.WriteString(param.Name)
+	if param.Type != "" {
+		b.WriteString(" As ")
+		b.WriteString(param.Type)
+	}
+	return b.String()
+}
+
+func completionTriggerCharacters() []string {
+	return []string{".", "\""}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type stdioReadWriteCloser struct{}
+
+func (stdioReadWriteCloser) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdioReadWriteCloser) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+func (stdioReadWriteCloser) Close() error                { return nil }
+
+type rpcHandler struct {
+	handler glsp.Handler
+}
+
+func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
+	params := []byte("{}")
+	if req.Params != nil {
+		params = *req.Params
+	}
+	glspCtx := &glsp.Context{
+		Method: req.Method,
+		Params: params,
+		Notify: func(method string, params any) {
+			_ = conn.Notify(ctx, method, params)
+		},
+		Call: func(method string, params any, result any) {
+			_ = conn.Call(ctx, method, params, result)
+		},
+	}
+	result, validMethod, validParams, err := h.handler.Handle(glspCtx)
+	if !validMethod {
+		if !req.Notif {
+			_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "method not found"})
+		}
+		return
+	}
+	if !validParams {
+		if !req.Notif {
+			_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeInvalidParams, Message: "invalid params"})
+		}
+		return
+	}
+	if err != nil {
+		if !req.Notif {
+			_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeInternalError, Message: err.Error()})
+		}
+		return
+	}
+	if !req.Notif {
+		_ = conn.Reply(ctx, req.ID, result)
+	}
+	if req.Method == "exit" {
+		_ = conn.Close()
+	}
+}

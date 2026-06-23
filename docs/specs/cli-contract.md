@@ -50,6 +50,7 @@ xlflow [--json] inspect calls [--path <dir-or-file>] [--from <module-or-procedur
 xlflow [--json] inspect symbols [--path <dir-or-file>] [--include-private] [--include-labels] [--module <name>] [--format text|json|markdown]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
+xlflow lsp (--stdio | --check | --version) [--log-file <path>]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
 xlflow [--json] analyze
 xlflow [--json] check
@@ -67,7 +68,7 @@ xlflow [--json] version [--verbose]
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported primary values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge and does not fall back to PowerShell. Explicit `--bridge dotnet` is strict and also does not fall back. The deprecated explicit value `powershell` remains accepted in v0.15.0 only as a compatibility opt-in; when selected through the CLI, environment, or config, xlflow emits `powershell_bridge_deprecated` and reports that the bridge will be removed in v0.16.0.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -110,6 +111,12 @@ Interactive `new` and `init` runs may show a welcome banner that checks the late
 For GitHub Copilot, use `agents` because Copilot reads repository instructions from `.agents`. `--target <dir>` installs to `<dir>/xlflow` instead of a provider default. `--agent` and `--target` cannot be combined. Existing skill directories are not overwritten unless `--force` is set. If neither `--agent` nor `--target` is provided, interactive terminals use the Bubble Tea provider selector; `--json` and non-interactive runs return a configuration error instead.
 
 `version` reports build metadata. `version --verbose` additionally includes the resolved executable path, Go/build information when available, embedded-versus-override PowerShell script resolution details, and a supported-feature list. This command does not require Excel COM.
+
+`lsp --stdio` starts the reusable VBA language server over Language Server Protocol JSON-RPC using standard input and standard output. While the server is running, stdout is reserved exclusively for framed LSP messages; normal logging goes to stderr by default or to `--log-file <path>` when supplied. The initial MVP supports `initialize`, `initialized`, `shutdown`, `exit`, full-document `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`, diagnostic publication, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, `textDocument/references`, `textDocument/hover`, and `textDocument/completion`. Open editor buffers are authoritative over filesystem content until `didClose`. Diagnostics use `source="xlflow"` and xlflow rule IDs such as `VB001`, `VB005`, and `VB014`. LSP diagnostics reuse the file-local lint rules used by `xlflow lint` against the current in-memory buffer; project-wide and filesystem-only lint checks remain CLI-only.
+
+For UserForm modules, the LSP reads tracked `.frm` text without opening Excel and extracts design-time controls declared by `Begin MSForms.<Control> <name>` blocks. Those controls participate in document symbols, definition lookup, hover, and completion for code such as `Me.txtName.Text` and `Me.Controls("txtName").Text`. In sidecar mode, code-behind files under `src/forms/code` resolve controls from the sibling `src/forms/<FormName>.frm` artifact.
+
+`lsp --check` performs server preflight without starting JSON-RPC transport. It loads the built-in VBA/COM type database and validates that parser initialization succeeds. If `xlflow.toml` is absent, `lsp --check` uses the default configuration because the preflight does not need a workbook project. `lsp --version` prints LSP server build metadata. Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `list forms` opens the configured workbook through the same session-aware Excel bridge as other workbook-backed read commands and lists `VBProject.VBComponents` entries whose type is `3` (`vbext_ct_MSForm`). Each returned form includes `name`, `component_type="MSForm"`, `has_frx`, `source_path`, and optional `frx_path`. The source paths are project-relative expected source-tree locations resolved with the same folder-aware path logic as `pull`, not proof that a `.frm` export already exists. `list forms` does not load UserForms at runtime and therefore does not execute `UserForm_Initialize`. When VBProject access is blocked, the command returns `vbproject_access_denied` with guidance to enable Trust Center access.
 
@@ -458,16 +465,17 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
+- `VB029`: `Option Explicit` is present and an assignment target or loop control variable is not declared
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB014` and `VB028` are always enabled and block source preflight before `push` or `run` opens Excel.
+Compile-dialog prevention findings `VB008` through `VB014`, `VB028`, and `VB029` are always enabled and block source preflight before `push` or `run` opens Excel.
 
 Projects should disable configurable lint rules with `[lint].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VB002", "VB006"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB014`, `VB028`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VBA211` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB014`, `VB028`, `VB029`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VBA211` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 

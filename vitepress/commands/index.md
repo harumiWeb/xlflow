@@ -34,6 +34,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [inspect](./inspect)           | Inspect saved workbook state or UserForm state.                                  |
 | [inspect-gui](./inspect-gui)   | Scan source for automation-hostile GUI boundaries without opening Excel.         |
 | [lint](./lint)                 | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.       |
+| [lsp](./lsp)                   | Start the reusable VBA language server for editor integrations.                  |
 | [fmt](./fmt)                   | Format VBA source files with a conservative, non-destructive formatter.          |
 | [analyze](./analyze)           | Analyze VBA source for runtime-risk patterns without Excel COM.                  |
 | [check](./check)               | Run lint, analyze, and doctor as a combined preflight.                           |
