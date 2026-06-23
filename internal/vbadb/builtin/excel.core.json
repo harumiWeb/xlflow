@@ -41,7 +41,20 @@
           "parameters": [{ "name": "Index", "type": "Variant", "optional": true }]
         }
       ],
-      "methods": [{ "name": "Run", "return_type": "Variant" }],
+      "methods": [
+        {
+          "name": "Run",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Macro", "type": "Variant" },
+            { "name": "Arg1", "type": "Variant", "optional": true },
+            { "name": "Arg2", "type": "Variant", "optional": true },
+            { "name": "Arg3", "type": "Variant", "optional": true },
+            { "name": "Arg4", "type": "Variant", "optional": true },
+            { "name": "Arg5", "type": "Variant", "optional": true }
+          ]
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
@@ -57,7 +70,17 @@
         { "name": "Names", "return_type": "Excel.Names" },
         { "name": "Application", "return_type": "Excel.Application" }
       ],
-      "methods": [{ "name": "Save" }, { "name": "Close" }],
+      "methods": [
+        { "name": "Save" },
+        {
+          "name": "Close",
+          "parameters": [
+            { "name": "SaveChanges", "type": "Variant", "optional": true },
+            { "name": "Filename", "type": "Variant", "optional": true },
+            { "name": "RouteWorkbook", "type": "Variant", "optional": true }
+          ]
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
@@ -78,10 +101,26 @@
           "parameters": [
             { "name": "Filename", "type": "String" },
             { "name": "UpdateLinks", "type": "Variant", "optional": true },
-            { "name": "ReadOnly", "type": "Variant", "optional": true }
+            { "name": "ReadOnly", "type": "Variant", "optional": true },
+            { "name": "Format", "type": "Variant", "optional": true },
+            { "name": "Password", "type": "Variant", "optional": true },
+            { "name": "WriteResPassword", "type": "Variant", "optional": true },
+            { "name": "IgnoreReadOnlyRecommended", "type": "Variant", "optional": true },
+            { "name": "Origin", "type": "Variant", "optional": true },
+            { "name": "Delimiter", "type": "Variant", "optional": true },
+            { "name": "Editable", "type": "Variant", "optional": true },
+            { "name": "Notify", "type": "Variant", "optional": true },
+            { "name": "Converter", "type": "Variant", "optional": true },
+            { "name": "AddToMru", "type": "Variant", "optional": true },
+            { "name": "Local", "type": "Variant", "optional": true },
+            { "name": "CorruptLoad", "type": "Variant", "optional": true }
           ]
         },
-        { "name": "Add", "return_type": "Excel.Workbook" }
+        {
+          "name": "Add",
+          "return_type": "Excel.Workbook",
+          "parameters": [{ "name": "Template", "type": "Variant", "optional": true }]
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -131,7 +170,16 @@
         { "name": "AutoFilter", "return_type": "Excel.AutoFilter" },
         { "name": "Application", "return_type": "Excel.Application" }
       ],
-      "methods": [{ "name": "Activate" }, { "name": "Copy" }],
+      "methods": [
+        { "name": "Activate" },
+        {
+          "name": "Copy",
+          "parameters": [
+            { "name": "Before", "type": "Variant", "optional": true },
+            { "name": "After", "type": "Variant", "optional": true }
+          ]
+        }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },
@@ -172,9 +220,27 @@
         { "name": "Value", "return_type": "Variant" },
         { "name": "Value2", "return_type": "Variant" },
         { "name": "Text", "return_type": "String", "read_only": true },
-        { "name": "Offset", "return_type": "Excel.Range" },
-        { "name": "Resize", "return_type": "Excel.Range" },
-        { "name": "End", "return_type": "Excel.Range" },
+        {
+          "name": "Offset",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "RowOffset", "type": "Variant", "optional": true },
+            { "name": "ColumnOffset", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Resize",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "RowSize", "type": "Variant", "optional": true },
+            { "name": "ColumnSize", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "End",
+          "return_type": "Excel.Range",
+          "parameters": [{ "name": "Direction", "type": "Variant" }]
+        },
         { "name": "Rows", "return_type": "Excel.Range" },
         { "name": "Columns", "return_type": "Excel.Range" },
         { "name": "Worksheet", "return_type": "Excel.Worksheet", "read_only": true },
@@ -189,9 +255,40 @@
       ],
       "methods": [
         { "name": "Select" },
-        { "name": "Copy" },
+        {
+          "name": "Copy",
+          "parameters": [{ "name": "Destination", "type": "Variant", "optional": true }]
+        },
         { "name": "ClearContents" },
-        { "name": "Find", "return_type": "Excel.Range" }
+        {
+          "name": "Find",
+          "return_type": "Excel.Range",
+          "parameters": [
+            { "name": "What", "type": "Variant" },
+            { "name": "After", "type": "Variant", "optional": true },
+            { "name": "LookIn", "type": "Variant", "optional": true },
+            { "name": "LookAt", "type": "Variant", "optional": true },
+            { "name": "SearchOrder", "type": "Variant", "optional": true },
+            { "name": "SearchDirection", "type": "Variant", "optional": true },
+            { "name": "MatchCase", "type": "Variant", "optional": true },
+            { "name": "MatchByte", "type": "Variant", "optional": true },
+            { "name": "SearchFormat", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Replace",
+          "return_type": "Boolean",
+          "parameters": [
+            { "name": "What", "type": "Variant" },
+            { "name": "Replacement", "type": "Variant" },
+            { "name": "LookAt", "type": "Variant", "optional": true },
+            { "name": "SearchOrder", "type": "Variant", "optional": true },
+            { "name": "MatchCase", "type": "Variant", "optional": true },
+            { "name": "MatchByte", "type": "Variant", "optional": true },
+            { "name": "SearchFormat", "type": "Variant", "optional": true },
+            { "name": "ReplaceFormat", "type": "Variant", "optional": true }
+          ]
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"

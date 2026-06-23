@@ -570,6 +570,9 @@ func callContextFromPrefix(prefix string) (callContext, bool) {
 		}
 		return callContext{}, false
 	}
+	if isDeclarationCallPrefix(prefix[:open]) {
+		return callContext{}, false
+	}
 	target := callTargetBeforeOpen(prefix[:open])
 	if target == "" {
 		return callContext{}, false
@@ -619,6 +622,9 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 	}
 	if member, found := a.DB.ResolveMember("Excel.Application", target); found {
 		return a.signatureFromMember("Excel.Application", member, a.memberKind("Excel.Application", target)), true, nil
+	}
+	if member, found := a.DB.ResolveMember("VBA.Global", target); found {
+		return a.signatureFromMember("VBA.Global", member, a.memberKind("VBA.Global", target)), true, nil
 	}
 	syms, err := a.WorkspaceSymbols(open, target)
 	if err != nil {
@@ -698,12 +704,26 @@ type parsedCall struct {
 }
 
 func callsOnLine(line string) []parsedCall {
+	if isDeclarationCallPrefix(line) {
+		return nil
+	}
 	var out []parsedCall
 	out = append(out, parenCallsOnLine(line)...)
 	if call, ok := parenlessCallOnLine(line); ok {
 		out = append(out, call)
 	}
 	return out
+}
+
+func isDeclarationCallPrefix(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{"sub ", "public sub ", "private sub ", "friend sub ", "function ", "public function ", "private function ", "friend function ", "property get ", "property let ", "property set ", "public property ", "private property ", "friend property ", "declare "} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func parenCallsOnLine(line string) []parsedCall {

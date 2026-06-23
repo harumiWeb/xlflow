@@ -46,8 +46,17 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || got.ReturnType != "Excel.Workbook" {
 		t.Fatalf("Workbooks.Open = %+v, %v", got, ok)
 	}
-	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || len(got.Parameters) != 3 || got.Parameters[0].Name != "Filename" || !got.Parameters[2].Optional {
+	if got, ok := db.ResolveMember("Excel.Workbooks", "Open"); !ok || len(got.Parameters) != 15 || got.Parameters[0].Name != "Filename" || !got.Parameters[14].Optional {
 		t.Fatalf("Workbooks.Open parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Range", "Find"); !ok || len(got.Parameters) != 9 || got.Parameters[0].Name != "What" || got.ReturnType != "Excel.Range" {
+		t.Fatalf("Range.Find parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Scripting.FileSystemObject", "OpenTextFile"); !ok || len(got.Parameters) != 4 || got.Parameters[0].Name != "Filename" || got.ReturnType != "Scripting.TextStream" {
+		t.Fatalf("FileSystemObject.OpenTextFile parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
+		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("Excel.Worksheet", "Range"); !ok || got.ReturnType != "Excel.Range" {
 		t.Fatalf("Worksheet.Range = %+v, %v", got, ok)

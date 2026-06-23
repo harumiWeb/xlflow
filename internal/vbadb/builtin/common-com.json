@@ -17,8 +17,15 @@
             { "name": "Item", "type": "Variant" }
           ]
         },
-        { "name": "Exists", "return_type": "Boolean" },
-        { "name": "Remove" },
+        {
+          "name": "Exists",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Key", "type": "Variant" }]
+        },
+        {
+          "name": "Remove",
+          "parameters": [{ "name": "Key", "type": "Variant" }]
+        },
         { "name": "RemoveAll" },
         { "name": "Keys", "return_type": "Variant" },
         { "name": "Items", "return_type": "Variant" }
@@ -32,10 +39,35 @@
       "kind": "class",
       "aliases": ["FileSystemObject"],
       "methods": [
-        { "name": "OpenTextFile", "return_type": "Scripting.TextStream" },
-        { "name": "CreateTextFile", "return_type": "Scripting.TextStream" },
-        { "name": "FileExists", "return_type": "Boolean" },
-        { "name": "FolderExists", "return_type": "Boolean" }
+        {
+          "name": "OpenTextFile",
+          "return_type": "Scripting.TextStream",
+          "parameters": [
+            { "name": "Filename", "type": "String" },
+            { "name": "IOMode", "type": "Variant", "optional": true },
+            { "name": "Create", "type": "Boolean", "optional": true },
+            { "name": "Format", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "CreateTextFile",
+          "return_type": "Scripting.TextStream",
+          "parameters": [
+            { "name": "Filename", "type": "String" },
+            { "name": "Overwrite", "type": "Boolean", "optional": true },
+            { "name": "Unicode", "type": "Boolean", "optional": true }
+          ]
+        },
+        {
+          "name": "FileExists",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "FileSpec", "type": "String" }]
+        },
+        {
+          "name": "FolderExists",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "FolderSpec", "type": "String" }]
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -48,8 +80,14 @@
       "methods": [
         { "name": "ReadLine", "return_type": "String" },
         { "name": "ReadAll", "return_type": "String" },
-        { "name": "Write" },
-        { "name": "WriteLine" },
+        {
+          "name": "Write",
+          "parameters": [{ "name": "Text", "type": "String" }]
+        },
+        {
+          "name": "WriteLine",
+          "parameters": [{ "name": "Text", "type": "String", "optional": true }]
+        },
         { "name": "Close" }
       ],
       "confidence": "curated",
@@ -61,9 +99,25 @@
       "kind": "class",
       "aliases": ["Connection"],
       "methods": [
-        { "name": "Open" },
+        {
+          "name": "Open",
+          "parameters": [
+            { "name": "ConnectionString", "type": "String", "optional": true },
+            { "name": "UserID", "type": "String", "optional": true },
+            { "name": "Password", "type": "String", "optional": true },
+            { "name": "Options", "type": "Long", "optional": true }
+          ]
+        },
         { "name": "Close" },
-        { "name": "Execute", "return_type": "ADODB.Recordset" }
+        {
+          "name": "Execute",
+          "return_type": "ADODB.Recordset",
+          "parameters": [
+            { "name": "CommandText", "type": "String" },
+            { "name": "RecordsAffected", "type": "Variant", "optional": true },
+            { "name": "Options", "type": "Long", "optional": true }
+          ]
+        }
       ],
       "confidence": "curated",
       "source": "xlflow"
@@ -77,7 +131,20 @@
         { "name": "EOF", "return_type": "Boolean" },
         { "name": "Fields", "return_type": "Object" }
       ],
-      "methods": [{ "name": "Open" }, { "name": "Close" }, { "name": "MoveNext" }],
+      "methods": [
+        {
+          "name": "Open",
+          "parameters": [
+            { "name": "Source", "type": "Variant", "optional": true },
+            { "name": "ActiveConnection", "type": "Variant", "optional": true },
+            { "name": "CursorType", "type": "Long", "optional": true },
+            { "name": "LockType", "type": "Long", "optional": true },
+            { "name": "Options", "type": "Long", "optional": true }
+          ]
+        },
+        { "name": "Close" },
+        { "name": "MoveNext" }
+      ],
       "confidence": "curated",
       "source": "xlflow"
     },

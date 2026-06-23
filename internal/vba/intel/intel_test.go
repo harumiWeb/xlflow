@@ -205,6 +205,57 @@ End Sub
 	}
 }
 
+func TestSignatureHelpResolvesVBABuiltinFunction(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    MsgBox "Hello",
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    MsgBox "Hello",`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 2, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "VBA.Global.MsgBox(Prompt As Variant, Optional Buttons As VbMsgBoxStyle, Optional Title As Variant, Optional HelpFile As Variant, Optional Context As Variant) As VbMsgBoxResult" {
+		t.Fatalf("signature label = %q", got)
+	}
+	if help.ActiveParameter != 1 {
+		t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpResolvesRangeFindNamedArgument(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim rng As Range
+    rng.Find(What:="A", LookAt:=
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    rng.Find(What:="A", LookAt:=`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one signature", help)
+	}
+	if !strings.Contains(help.Signatures[0].Label, "Excel.Range.Find(What As Variant, Optional After As Variant, Optional LookIn As Variant, Optional LookAt As Variant") {
+		t.Fatalf("signature label = %q", help.Signatures[0].Label)
+	}
+	if help.ActiveParameter != 3 {
+		t.Fatalf("active parameter = %d, want named argument index 3", help.ActiveParameter)
+	}
+}
+
 func TestSignatureHelpResolvesExcelNamedArgument(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
@@ -222,8 +273,8 @@ End Sub
 	if help == nil || len(help.Signatures) != 1 {
 		t.Fatalf("signature help = %+v, want one signature", help)
 	}
-	if got := help.Signatures[0].Label; got != "Excel.Workbooks.Open(Filename As String, Optional UpdateLinks As Variant, Optional ReadOnly As Variant) As Excel.Workbook" {
-		t.Fatalf("signature label = %q", got)
+	if !strings.Contains(help.Signatures[0].Label, "Excel.Workbooks.Open(Filename As String, Optional UpdateLinks As Variant, Optional ReadOnly As Variant") {
+		t.Fatalf("signature label = %q", help.Signatures[0].Label)
 	}
 	if help.ActiveParameter != 2 {
 		t.Fatalf("active parameter = %d, want named argument index 2", help.ActiveParameter)

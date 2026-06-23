@@ -32,6 +32,90 @@
       ],
       "confidence": "curated",
       "source": "xlflow"
+    },
+    {
+      "name": "VBA.Global",
+      "library": "VBA",
+      "kind": "module",
+      "summary": "Common VBA standard library functions.",
+      "aliases": ["VBA"],
+      "methods": [
+        {
+          "name": "MsgBox",
+          "return_type": "VbMsgBoxResult",
+          "parameters": [
+            { "name": "Prompt", "type": "Variant" },
+            { "name": "Buttons", "type": "VbMsgBoxStyle", "optional": true },
+            { "name": "Title", "type": "Variant", "optional": true },
+            { "name": "HelpFile", "type": "Variant", "optional": true },
+            { "name": "Context", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "InputBox",
+          "return_type": "String",
+          "parameters": [
+            { "name": "Prompt", "type": "String" },
+            { "name": "Title", "type": "String", "optional": true },
+            { "name": "Default", "type": "String", "optional": true },
+            { "name": "XPos", "type": "Long", "optional": true },
+            { "name": "YPos", "type": "Long", "optional": true },
+            { "name": "HelpFile", "type": "String", "optional": true },
+            { "name": "Context", "type": "Long", "optional": true }
+          ]
+        },
+        {
+          "name": "Left",
+          "return_type": "String",
+          "parameters": [
+            { "name": "String", "type": "String" },
+            { "name": "Length", "type": "Long" }
+          ]
+        },
+        {
+          "name": "Right",
+          "return_type": "String",
+          "parameters": [
+            { "name": "String", "type": "String" },
+            { "name": "Length", "type": "Long" }
+          ]
+        },
+        {
+          "name": "Mid",
+          "return_type": "String",
+          "parameters": [
+            { "name": "String", "type": "String" },
+            { "name": "Start", "type": "Long" },
+            { "name": "Length", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Len",
+          "return_type": "Long",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "CStr",
+          "return_type": "String",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "CLng",
+          "return_type": "Long",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "DateSerial",
+          "return_type": "Date",
+          "parameters": [
+            { "name": "Year", "type": "Integer" },
+            { "name": "Month", "type": "Integer" },
+            { "name": "Day", "type": "Integer" }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
     }
   ]
 }
