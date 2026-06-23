@@ -33,6 +33,7 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 
 - **Standard modules** (`.bas`) and **class modules** (`.cls`): regenerated into `xl/vbaProject.bin` from source.
 - **Document modules**: supported only where they map safely against the template's existing document modules.
+- **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte and `.frx` is not read. `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
 - **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. `pack` does not generate or modify form layout.
 
 ## Unsupported cases (fail-loud)
@@ -45,7 +46,7 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | in-place overwrite of the template/source workbook | `pack_in_place_overwrite`              | 2    |
 | protected VBA project                              | `pack_protected_project`               | 1    |
 | signed VBA project                                 | `pack_signed_project`                  | 1    |
-| full UserForm / `.frx` generation                  | `pack_userform_generation_unsupported` | 1    |
+| creating a new UserForm / `.frx` generation        | `pack_userform_generation_unsupported` | 1    |
 | unknown or ambiguous VBA project layout            | `pack_ambiguous_layout`                | 1    |
 | missing `--out`, bad extension, other arg errors   | `pack_args_invalid`                    | 2    |
 | missing `--experimental`                           | `pack_experimental_required`           | 2    |
@@ -72,7 +73,7 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
     "experimental": true,
     "vbe_validation": "not_performed",
     "template": "build/Book.xlsm",
-    "modules": { "standard": 3, "class": 2, "document": 1, "carried_streams": 4 }
+    "modules": { "standard": 3, "class": 2, "document": 1, "form": 1, "carried_streams": 4 }
   },
   "warnings": [
     {
@@ -127,8 +128,8 @@ This is release-gate evidence for a representative build. It does not change `pa
 
 See ADR-0012 for the rationale. Summary:
 
-- **Stage 1 (MVP-compatible)**: carry existing template designer streams through untouched; never generate forms.
-- **Stage 2**: update form code-behind while keeping the template's designer state.
+- **Stage 1 (implemented)**: carry existing template designer streams through untouched; never generate forms.
+- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A `.frm` whose form is not in the template returns `pack_userform_generation_unsupported` (creating a form is Stage 3); `.frx` is not read.
 - **Stage 3**: full reconstruction from exported `.frm`/`.frx` — a separate, higher-risk phase.
 
 The reference implementation has demonstrated the Stage 1 / Stage 2 round-trip against real Excel, including a nested Frame/MultiPage form whose designer sub-storages round-trip byte-for-byte. That informs the staging but is not part of the MVP.

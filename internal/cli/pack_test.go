@@ -4,9 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -146,7 +148,7 @@ func TestPackCommandActiveSessionMetadata(t *testing.T) {
 	}
 }
 
-func TestCollectPackSourceModulesIgnoresForms(t *testing.T) {
+func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	dir := t.TempDir()
 	writePackSourceTree(t, dir, true)
 	cfg := config.Default()
@@ -156,20 +158,26 @@ func TestCollectPackSourceModulesIgnoresForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := map[packpkg.ModuleType]int{}
+	var sawForm bool
 	for _, source := range sources {
 		counts[source.Type]++
-		if source.Name == "UserForm1" {
-			t.Fatal("forms must not be passed to the pack engine as source modules")
+		if source.Name == "UserForm1" && source.Type == packpkg.ModuleTypeForm {
+			sawForm = true
 		}
 	}
-	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 {
+	if !sawForm {
+		t.Fatal("UserForm1.frm should be collected as a ModuleTypeForm source")
+	}
+	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 || counts[packpkg.ModuleTypeForm] != 1 {
 		t.Fatalf("source counts = %v", counts)
 	}
 }
 
 func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	dir := t.TempDir()
-	writePackProject(t, dir, true)
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	writePackSourceTree(t, dir, false) // std/class/document only; the form path has its own E2E
 
 	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
 	if err != nil {
@@ -219,6 +227,44 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	}
 	if len(env.Warnings) != 1 || env.Warnings[0].Code != "vbe_validation_skipped" {
 		t.Fatalf("unexpected warnings: %#v", env.Warnings)
+	}
+}
+
+func TestPackCommandEndToEndUpdatesFormCodeBehind(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+	frm := "VERSION 5.00\r\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\r\n" +
+		"   Caption = \"x\"\r\nEnd\r\n" +
+		"Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Attribute VB_GlobalNameSpace = False\r\n" +
+		"Attribute VB_Creatable = False\r\n" +
+		"Attribute VB_PredeclaredId = True\r\n" +
+		"Attribute VB_Exposed = False\r\n" +
+		"Private Sub CommandButton1_Click()\r\n    Debug.Print \"CLI_PACKED_FORM\"\r\nEnd Sub\r\n"
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "UserForm1.frm"), []byte(frm))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err != nil {
+		t.Fatalf("pack command error = %v, exit = %d\n%s", err, output.ExitCode(err), stdout)
+	}
+	bin := zipEntryBytes(t, readFileForTest(t, filepath.Join(dir, "dist", "Book.xlsm")), "xl/vbaProject.bin")
+	project, err := vbaproject.Read(bin)
+	if err != nil {
+		t.Fatalf("output vbaProject.bin is not readable: %v", err)
+	}
+	if got := moduleSourceForTest(project, "UserForm1"); !bytes.Contains([]byte(got), []byte(`Debug.Print "CLI_PACKED_FORM"`)) {
+		t.Fatalf("UserForm1 code-behind was not packed from source:\n%s", got)
+	}
+	var env struct {
+		Pack map[string]any `json:"pack"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout)
+	}
+	modules, _ := env.Pack["modules"].(map[string]any)
+	if modules["form"] != float64(1) {
+		t.Fatalf("expected form count 1, got %#v", modules)
 	}
 }
 
@@ -407,4 +453,172 @@ func errorCodeFromJSON(t *testing.T, stdout string) string {
 		t.Fatalf("expected error payload in %s", stdout)
 	}
 	return env.Error.Code
+}
+
+func TestCollectFormSourcesSidecarMergesBasIntoSource(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // code_source defaults to "sidecar"
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "VERSION 5.00\r\nBegin {GUID} UserForm1\r\n   Caption = \"x\"\r\nEnd\r\n" +
+		"Attribute VB_Name = \"UserForm1\"\r\n" +
+		"Private Sub a()\r\n    Debug.Print \"OLD\"\r\nEnd Sub\r\n"
+	bas := "Private Sub a()\r\n    Debug.Print \"NEW\"\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bas), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "UserForm1" || got[0].Type != packpkg.ModuleTypeForm {
+		t.Fatalf("unexpected sources: %+v", got)
+	}
+	if !strings.Contains(got[0].Source, "NEW") {
+		t.Errorf("sidecar code not merged into source: %q", got[0].Source)
+	}
+	after, _ := os.ReadFile(filepath.Join(formsDir, "UserForm1.frm"))
+	if string(after) != frm {
+		t.Error("pack must not write the .frm on disk")
+	}
+}
+
+func TestCollectFormSourcesFrmModeReadsFrmVerbatim(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\n    Debug.Print \"FRM\"\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A stray sidecar must be ignored in frm mode.
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte("Private Sub a()\r\n    Debug.Print \"SIDE\"\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Source != frm {
+		t.Errorf("frm mode should read .frm verbatim, got %+v", got)
+	}
+}
+
+func TestCollectFormSourcesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // sidecar
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("collectFormSources: %v", err)
+	}
+	if len(got) != 1 || got[0].Source != frm {
+		t.Errorf("missing sidecar should fall back to .frm, got %+v", got)
+	}
+}
+
+func TestCollectFormSourcesSidecarWithAttributeHeaderFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte("Attribute VB_Name = \"UserForm1\"\r\ncode\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for attribute-bearing sidecar, got %v", err)
+	}
+}
+
+func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// sidecar with no matching .frm
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "Ghost.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for orphan sidecar, got %v", err)
+	}
+}
+
+func TestCollectFormSourcesNestedSidecarFailsLoud(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "code", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte("Attribute VB_Name = \"UserForm1\"\r\ncode\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "nested", "Ghost.bas"), []byte("Option Explicit\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectFormSources(root, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
+		t.Fatalf("want ErrAmbiguousLayout for nested sidecar directory, got %v", err)
+	}
+}
+
+func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default() // sidecar
+	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
+	if err := os.MkdirAll(filepath.Join(formsDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A .frm kept in a subdirectory is discovered recursively by collectFormSources,
+	// so its sidecar must not be rejected as an orphan.
+	frm := "Attribute VB_Name = \"Nested\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "sub", "Nested.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "Nested.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectFormSources(root, cfg)
+	if err != nil {
+		t.Fatalf("nested .frm with a matching sidecar must not be an orphan: %v", err)
+	}
+	var found bool
+	for _, m := range got {
+		if m.Name == "Nested" && m.Type == packpkg.ModuleTypeForm {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("nested Nested.frm should be collected as a form, got %+v", got)
+	}
 }

@@ -106,6 +106,30 @@ func TestValidateUserFormCodeSidecarsRejectsAttributeHeaders(t *testing.T) {
 	}
 }
 
+func TestValidateUserFormCodeSidecarsRejectsSubdirectories(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "nested", "CustomerForm.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := ValidateUserFormCodeSidecars(formsDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one", issues)
+	}
+	if issues[0].Code != "FRM203" || issues[0].Path != filepath.Join(formsDir, "code", "nested") {
+		t.Fatalf("unexpected issue = %#v", issues[0])
+	}
+	if got := issues[0].LintIssue(formsDir); got.Code != "FRM203" || got.File != "src/forms/code/nested" {
+		t.Fatalf("unexpected lint issue = %#v", got)
+	}
+}
+
 func TestUserFormCodeSourceIssueLintPathDoesNotDuplicateCodeSegment(t *testing.T) {
 	root := t.TempDir()
 	issue := UserFormCodeSourceIssue{
