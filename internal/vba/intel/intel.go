@@ -2400,9 +2400,23 @@ func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) [
 		End:   pos,
 	}
 	if isModuleLevelPosition(doc.Source, pos) {
-		return completionsFromSpecs(moduleDeclarationCompletions, typed, replaceRange)
+		return completionsFromSpecs(moduleCompletionSpecs(doc.Source), typed, replaceRange)
 	}
 	return completionsFromSpecs(procedureStatementCompletions, typed, replaceRange)
+}
+
+func moduleCompletionSpecs(source string) []syntaxCompletionSpec {
+	if !hasOptionExplicit(source) {
+		return moduleDeclarationCompletions
+	}
+	out := make([]syntaxCompletionSpec, 0, len(moduleDeclarationCompletions))
+	for _, spec := range moduleDeclarationCompletions {
+		if strings.EqualFold(spec.label, "Option Explicit") {
+			continue
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 func (a Analyzer) globalCompletions(prefix string) []Completion {

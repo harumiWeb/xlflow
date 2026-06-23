@@ -10,6 +10,7 @@ All notable changes to xlflow will be documented in this file.
 - Hardened LSP argument diagnostics to avoid declaration-line false positives, improved diagnostic method names for signatures with return types, and documented manual signature-help smoke checks for the VS Code dev client.
 - Improved VBA LSP completion and diagnostics for E2E smoke scenarios, including namespace type completion such as `Excel.`, scoped inferred member completion for `dict.`, `amountRange.`, and `rs.`, built-in completions such as `True`, `CStr`, `Now`, `Debug.Print`, and `ByVal`, With-block signature help for `.Offset(`, and out-of-scope member receiver diagnostics.
 - Fixed VBA LSP member completion inside nested call expressions such as `CStr(dict.` and after With-relative call chains such as `.Offset(1,0).`.
+- Fixed VBA LSP module declaration snippets so `Option Explicit` is not suggested again on the next line after it already exists.
 - Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
 - Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
 - Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.

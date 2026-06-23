@@ -1691,6 +1691,15 @@ End Sub
 		t.Fatalf("completed Option Explicit should not be offered again: %+v", items)
 	}
 
+	doc.Source = "Option Explicit\n"
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: 0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "Option Explicit") {
+		t.Fatalf("line after Option Explicit should not offer Option Explicit again: %+v", items)
+	}
+
 	doc.Source = "Option Explicit\nSub Existing()\n    Pu\nEnd Sub\n"
 	items, err = analyzer.Completions(doc, Position{Line: 2, Character: utf16Len("    Pu")}, nil)
 	if err != nil {
