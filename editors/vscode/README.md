@@ -44,11 +44,19 @@ The command palette includes:
 
 - `xlflow: Restart Language Server`
 - `xlflow: Check Environment`
+- `xlflow: New Project`
+- `xlflow: Initialize Project`
 - `xlflow: Pull Workbook`
 - `xlflow: Push Sources`
 - `xlflow: Run Macro`
+- `xlflow: Save Workbook`
+- `xlflow: Start Session`
+- `xlflow: Session Status`
+- `xlflow: Stop Session`
 
-`Pull Workbook`, `Push Sources`, and `Run Macro` run `xlflow pull`, `xlflow push`, and `xlflow run` from the resolved workspace folder.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, and `Save Workbook` runs `xlflow save`.
+
+Session commands run `xlflow session start`, `xlflow session status`, and `xlflow session stop` from the resolved workspace folder.
 
 ## Output
 
@@ -58,5 +66,6 @@ Use the `xlflow` output channel for CLI command output and language client messa
 
 - The extension does not install or bundle `xlflow`.
 - Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro.
-- There are no webviews, workbook previews, Test Explorer integration, or Excel session management UI.
+- There are no webviews, workbook previews, Test Explorer integration, or rich Excel session management UI.
+- `xlflow: New Project` and `xlflow: Initialize Project` expose only the base CLI workflow, without option pickers for `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - The extension does not implement VBA parsing, diagnostics, formatting, completion candidates, symbol analysis, or type inference in TypeScript.

@@ -16,9 +16,15 @@ export async function run(): Promise<void> {
   for (const command of [
     "xlflow.restartLanguageServer",
     "xlflow.checkEnvironment",
+    "xlflow.newProject",
+    "xlflow.initProject",
     "xlflow.pull",
     "xlflow.push",
     "xlflow.runMacro",
+    "xlflow.saveWorkbook",
+    "xlflow.sessionStart",
+    "xlflow.sessionStatus",
+    "xlflow.sessionStop",
   ]) {
     assert.ok(commands.includes(command), `${command} should be registered`);
   }

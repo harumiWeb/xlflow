@@ -111,6 +111,16 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.newProject",
+        "title": "xlflow: New Project",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.initProject",
+        "title": "xlflow: Initialize Project",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.pull",
         "title": "xlflow: Pull Workbook",
         "category": "xlflow"
@@ -123,6 +133,26 @@
       {
         "command": "xlflow.runMacro",
         "title": "xlflow: Run Macro",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.saveWorkbook",
+        "title": "xlflow: Save Workbook",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStart",
+        "title": "xlflow: Start Session",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStatus",
+        "title": "xlflow: Session Status",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStop",
+        "title": "xlflow: Stop Session",
         "category": "xlflow"
       }
     ],
@@ -220,10 +250,16 @@
   },
   "activationEvents": [
     "onCommand:xlflow.checkEnvironment",
+    "onCommand:xlflow.initProject",
+    "onCommand:xlflow.newProject",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.runMacro",
+    "onCommand:xlflow.saveWorkbook",
+    "onCommand:xlflow.sessionStart",
+    "onCommand:xlflow.sessionStatus",
+    "onCommand:xlflow.sessionStop",
     "onLanguage:vba"
   ],
   "icon": "images/icon.png",
