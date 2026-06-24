@@ -171,8 +171,18 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.sessionRestart",
+        "title": "xlflow: Restart Session",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.sessionStop",
         "title": "xlflow: Stop Session",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openOutput",
+        "title": "xlflow: Open Output",
         "category": "xlflow"
       }
     ],
@@ -275,11 +285,14 @@
     "onCommand:xlflow.initProject",
     "onCommand:xlflow.lintWorkspace",
     "onCommand:xlflow.newProject",
+    "onCommand:xlflow.openOutput",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.runMacro",
     "onCommand:xlflow.saveWorkbook",
+    "onCommand:xlflow.sessionActions",
+    "onCommand:xlflow.sessionRestart",
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",
     "onCommand:xlflow.sessionStop",

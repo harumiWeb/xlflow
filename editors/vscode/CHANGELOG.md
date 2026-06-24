@@ -11,3 +11,4 @@
 - Added a command palette action for running workbook tests with `xlflow test` and showing results in the output channel.
 - Added VS Code Test Explorer integration backed by `xlflow test list --json` and `xlflow test --json`.
 - Added command palette actions for linting the workspace and formatting the active document or full project.
+- Added a Status Bar session indicator with QuickPick actions for starting, stopping, restarting, inspecting, and diagnosing xlflow sessions.

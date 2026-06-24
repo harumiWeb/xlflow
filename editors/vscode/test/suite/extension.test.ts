@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 
 export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
@@ -28,10 +29,24 @@ export async function run(): Promise<void> {
     "xlflow.saveWorkbook",
     "xlflow.sessionStart",
     "xlflow.sessionStatus",
+    "xlflow.sessionRestart",
     "xlflow.sessionStop",
+    "xlflow.sessionActions",
+    "xlflow.openOutput",
   ]) {
     assert.ok(commands.includes(command), `${command} should be registered`);
   }
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
+  assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow");
+  assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session");
+  assert.strictEqual(
+    sessionStateFromEnvelope({ status: "ok", session: { active: true } }),
+    "active",
+  );
+  assert.strictEqual(
+    sessionStateFromEnvelope({ status: "ok", session: { active: false } }),
+    "inactive",
+  );
+  assert.strictEqual(sessionStateFromEnvelope({ status: "failed" }), "error");
 }

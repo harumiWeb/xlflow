@@ -40,12 +40,19 @@ export async function runXlflowCommand(
   args: string[],
   label: string,
   outputChannel: vscode.OutputChannel,
-  options: { requireWorkspace: boolean },
+  options: {
+    requireWorkspace: boolean;
+    notify?: boolean;
+    showOutput?: boolean;
+    workspaceFolder?: vscode.WorkspaceFolder;
+  },
 ): Promise<number> {
-  const folder = await resolveWorkspaceRoot({
-    prompt: options.requireWorkspace,
-    fallbackToFirst: !options.requireWorkspace,
-  });
+  const folder =
+    options.workspaceFolder ??
+    (await resolveWorkspaceRoot({
+      prompt: options.requireWorkspace,
+      fallbackToFirst: !options.requireWorkspace,
+    }));
   if (options.requireWorkspace && folder === undefined) {
     vscode.window.showWarningMessage(`${label} requires an open workspace folder.`);
     return -1;
@@ -53,10 +60,13 @@ export async function runXlflowCommand(
 
   const config = readConfig();
   const cwd = folder?.uri.fsPath;
-  outputChannel.show(true);
+  if (options.showOutput !== false) {
+    outputChannel.show(true);
+  }
   outputChannel.appendLine(
     `> ${config.path} ${args.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
   );
+  const notify = options.notify !== false;
 
   return new Promise((resolve) => {
     const child = childProcess.spawn(config.path, args, {
@@ -74,6 +84,10 @@ export async function runXlflowCommand(
     child.on("close", (code) => {
       const exitCode = code ?? -1;
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
+      if (!notify) {
+        resolve(exitCode);
+        return;
+      }
       if (exitCode === 0) {
         vscode.window.showInformationMessage(`${label} completed.`);
       } else {

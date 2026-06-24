@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "./client";
 import { XlflowChannels } from "./logging";
+import { SessionManager } from "./session";
 import { runXlflowCommand } from "./xlflow";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
   clientManager: XlflowLanguageClientManager,
   channels: XlflowChannels,
+  sessionManager: SessionManager,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("xlflow.restartLanguageServer", async () => {
@@ -84,19 +86,22 @@ export function registerCommands(
       await runXlflowCommand(["save"], "xlflow save", channels.output, { requireWorkspace: true });
     }),
     vscode.commands.registerCommand("xlflow.sessionStart", async () => {
-      await runXlflowCommand(["session", "start"], "xlflow session start", channels.output, {
-        requireWorkspace: true,
-      });
+      await sessionManager.start();
     }),
     vscode.commands.registerCommand("xlflow.sessionStatus", async () => {
-      await runXlflowCommand(["session", "status"], "xlflow session status", channels.output, {
-        requireWorkspace: true,
-      });
+      await sessionManager.showStatus();
     }),
     vscode.commands.registerCommand("xlflow.sessionStop", async () => {
-      await runXlflowCommand(["session", "stop"], "xlflow session stop", channels.output, {
-        requireWorkspace: true,
-      });
+      await sessionManager.stop();
+    }),
+    vscode.commands.registerCommand("xlflow.sessionRestart", async () => {
+      await sessionManager.restart();
+    }),
+    vscode.commands.registerCommand("xlflow.sessionActions", async () => {
+      await sessionManager.showActions();
+    }),
+    vscode.commands.registerCommand("xlflow.openOutput", () => {
+      sessionManager.openOutput();
     }),
   );
 }

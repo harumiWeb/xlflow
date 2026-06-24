@@ -56,13 +56,26 @@ The command palette includes:
 - `xlflow: Save Workbook`
 - `xlflow: Start Session`
 - `xlflow: Session Status`
+- `xlflow: Restart Session`
 - `xlflow: Stop Session`
+- `xlflow: Open Output`
 
 Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
 
 `Format Document` invokes VS Code document formatting for the active editor. For VBA files, formatting is provided by `xlflow lsp --stdio`.
 
-Session commands run `xlflow session start`, `xlflow session status`, and `xlflow session stop` from the resolved workspace folder.
+Session commands run `xlflow session start`, `xlflow --json session status`, `xlflow session stop`, and restart from the resolved workspace folder.
+
+## Session Status
+
+The extension shows a lightweight xlflow session indicator in the Status Bar:
+
+- `$(circle-slash) xlflow`: no active session.
+- `$(check) xlflow: Session`: an active session is available.
+- `$(sync~spin) xlflow`: session start or stop is running.
+- `$(warning) xlflow`: session status or operation failed.
+
+Click the Status Bar item to start, stop, restart, inspect the session, open the output channel, or run `xlflow doctor`. Active sessions use a green status color. Session details and command output are written to the `xlflow` output channel.
 
 ## Testing
 
