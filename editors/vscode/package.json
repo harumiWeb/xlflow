@@ -1,0 +1,164 @@
+{
+  "name": "xlflow-vscode",
+  "displayName": "xlflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
+  "categories": [
+    "Formatters",
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "excel",
+    "language server",
+    "lsp",
+    "macro",
+    "vba",
+    "xlflow"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harumiWeb/xlflow.git",
+    "directory": "editors/vscode"
+  },
+  "publisher": "harumiweb",
+  "main": "./dist/extension.js",
+  "scripts": {
+    "compile": "pnpm run check && pnpm run bundle",
+    "watch": "tsc -watch -p ./",
+    "check": "tsc -p ./ --noEmit",
+    "bundle": "node esbuild.js",
+    "package": "vsce package --no-dependencies",
+    "test": "pnpm run compile && node ./dist/test/runTest.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.0"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "xlflow",
+      "properties": {
+        "xlflow.path": {
+          "type": "string",
+          "default": "xlflow",
+          "description": "Path to the xlflow executable."
+        },
+        "xlflow.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start xlflow lsp --stdio for VBA files."
+        },
+        "xlflow.lsp.logFile": {
+          "type": "string",
+          "default": ".xlflow/lsp.log",
+          "description": "Log file passed to xlflow lsp --stdio."
+        },
+        "xlflow.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "messages",
+          "description": "Trace verbosity for the xlflow language server output channel."
+        },
+        "xlflow.completion.triggerSuggestInStatements": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger VS Code suggestions while typing likely VBA statement and declaration prefixes."
+        },
+        "xlflow.completion.progIdsInStrings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger VS Code suggestions inside CreateObject and GetObject ProgID string literals."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[vba]": {
+        "editor.quickSuggestions": {
+          "other": "on",
+          "comments": "off",
+          "strings": "on"
+        },
+        "editor.autoClosingBrackets": "always",
+        "editor.autoClosingQuotes": "always",
+        "editor.snippetSuggestions": "top",
+        "editor.suggest.snippetsPreventQuickSuggestions": false
+      }
+    },
+    "commands": [
+      {
+        "command": "xlflow.restartLanguageServer",
+        "title": "xlflow: Restart Language Server",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.checkEnvironment",
+        "title": "xlflow: Check Environment",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.pull",
+        "title": "xlflow: Pull Workbook",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.push",
+        "title": "xlflow: Push Sources",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runMacro",
+        "title": "xlflow: Run Macro",
+        "category": "xlflow"
+      }
+    ],
+    "languages": [
+      {
+        "id": "vba",
+        "aliases": [
+          "VBA",
+          "Visual Basic for Applications"
+        ],
+        "extensions": [
+          ".bas",
+          ".cls",
+          ".frm"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vba",
+        "scopeName": "source.vba",
+        "path": "./syntaxes/vba.tmLanguage.json"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onCommand:xlflow.checkEnvironment",
+    "onCommand:xlflow.pull",
+    "onCommand:xlflow.push",
+    "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.runMacro",
+    "onLanguage:vba"
+  ],
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "packageManager": "pnpm@10.28.1"
+}

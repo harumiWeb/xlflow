@@ -1,0 +1,5 @@
+dist/
+dist-types/
+.vscode-test/
+out/
+*.vsix

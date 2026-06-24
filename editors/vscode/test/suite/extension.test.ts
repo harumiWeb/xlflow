@@ -1,0 +1,27 @@
+import * as assert from "assert";
+import * as vscode from "vscode";
+
+export async function run(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("xlflow");
+  await config.update("lsp.enabled", false, vscode.ConfigurationTarget.Global);
+
+  const extension = vscode.extensions.getExtension("harumiweb.xlflow-vscode");
+  assert.ok(extension, "extension should be discoverable");
+  await extension.activate();
+
+  const languages = await vscode.languages.getLanguages();
+  assert.ok(languages.includes("vba"), "vba language should be registered");
+
+  const commands = await vscode.commands.getCommands(true);
+  for (const command of [
+    "xlflow.restartLanguageServer",
+    "xlflow.checkEnvironment",
+    "xlflow.pull",
+    "xlflow.push",
+    "xlflow.runMacro",
+  ]) {
+    assert.ok(commands.includes(command), `${command} should be registered`);
+  }
+
+  assert.strictEqual(config.get<string>("path"), "xlflow");
+}
