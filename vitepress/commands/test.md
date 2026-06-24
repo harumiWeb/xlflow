@@ -6,6 +6,7 @@ Discover and run workbook VBA test procedures.
 
 ```bash
 xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
+xlflow test list [--module <name>] [--path <path>] --json
 
 ```
 
@@ -23,6 +24,38 @@ xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=r
 | `--session`                    | Run tests in the managed live workbook.                                                                             | false   |
 | `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`). Deprecated `powershell` remains explicit opt-in until v0.16.0. | auto    |
 | `--json`                       | Return structured test results.                                                                                     | false   |
+
+## Source Test Discovery
+
+`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
+
+The JSON envelope uses `command: "test list"` and returns discovery data under `tests`:
+
+```json
+{
+  "status": "ok",
+  "command": "test list",
+  "tests": {
+    "root": "src",
+    "summary": {
+      "files": 1,
+      "tests": 1
+    },
+    "items": [
+      {
+        "module": "SmokeTests",
+        "name": "TestSmoke",
+        "qualified_name": "SmokeTests.TestSmoke",
+        "source_path": "src/modules/SmokeTests.bas",
+        "line": 5,
+        "tags": ["smoke"]
+      }
+    ]
+  }
+}
+```
+
+This command is intended for editor integrations such as VS Code Testing API discovery. Running tests remains the responsibility of `xlflow test`.
 
 ## Test Location
 
@@ -101,6 +134,7 @@ Best-effort hook cleanup with `On Error Resume Next` can reduce cascading failur
 ## Examples
 
 ```bash
+xlflow test list --json
 xlflow test --json
 xlflow test --filter TestSmoke --session --json
 xlflow test --module SmokeTests --session --json
