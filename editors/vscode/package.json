@@ -136,6 +136,11 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.test",
+        "title": "xlflow: Run Tests",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.saveWorkbook",
         "title": "xlflow: Save Workbook",
         "category": "xlflow"
@@ -260,6 +265,7 @@
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",
     "onCommand:xlflow.sessionStop",
+    "onCommand:xlflow.test",
     "onLanguage:vba"
   ],
   "icon": "images/icon.png",

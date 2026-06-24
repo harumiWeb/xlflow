@@ -21,6 +21,7 @@ export async function run(): Promise<void> {
     "xlflow.pull",
     "xlflow.push",
     "xlflow.runMacro",
+    "xlflow.test",
     "xlflow.saveWorkbook",
     "xlflow.sessionStart",
     "xlflow.sessionStatus",

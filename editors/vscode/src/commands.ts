@@ -61,6 +61,9 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
       await runXlflowCommand(["run"], "xlflow run", channels.output, { requireWorkspace: true });
     }),
+    vscode.commands.registerCommand("xlflow.test", async () => {
+      await runXlflowCommand(["test"], "xlflow test", channels.output, { requireWorkspace: true });
+    }),
     vscode.commands.registerCommand("xlflow.saveWorkbook", async () => {
       await runXlflowCommand(["save"], "xlflow save", channels.output, { requireWorkspace: true });
     }),
