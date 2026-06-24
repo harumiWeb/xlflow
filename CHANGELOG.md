@@ -2,6 +2,11 @@
 
 All notable changes to xlflow will be documented in this file.
 
+## Unreleased
+
+- Added non-configurable `VB031` lint/preflight validation requiring standard `.bas` modules to include `Attribute VB_Name`.
+- Fixed VBA LSP diagnostics so the built-in `Err` object is recognized as a global, preventing false `VBA029` undeclared warnings for calls such as `Err.Raise`.
+
 ## v0.15.0
 
 - Added initial VBA LSP signature help and argument diagnostics for common project procedures and built-in VBA/COM members, including active parameter tracking and argument-count warnings.

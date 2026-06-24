@@ -58,6 +58,7 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                             |
 | `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.         |
 | `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                            |
+| `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                     |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
@@ -81,7 +82,7 @@ Range("A2").Select ' xlflow:disable-line VB002
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match a lint diagnostic are reported as warnings.
 
-Safety diagnostics `VB008` through `VB014`, `VB028`, and `VB029` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+Safety diagnostics `VB008` through `VB014`, `VB028`, `VB029`, and `VB031` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 Rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide rules stay conservative opt-ins through legacy `[lint]` settings. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.
 

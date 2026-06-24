@@ -56,7 +56,7 @@ func TestDirectivesForFilesReportsUnknownIDs(t *testing.T) {
 func TestDirectivesForFilesRejectsPreflightBlockingIDs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
-	body := `' xlflow:disable-next-line VB008 VBA104 VBA211
+	body := `' xlflow:disable-next-line VB008 VB031 VBA104 VBA211
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestDirectivesForFilesRejectsPreflightBlockingIDs(t *testing.T) {
 	if len(directives) != 0 {
 		t.Fatalf("directives = %+v, want none", directives)
 	}
-	for _, rule := range []string{"VB008", "VBA104", "VBA211"} {
+	for _, rule := range []string{"VB008", "VB031", "VBA104", "VBA211"} {
 		if !hasWarning(warnings, "unsupported_inline_suppression_rule", rule) {
 			t.Fatalf("missing unsupported warning for %s in %+v", rule, warnings)
 		}

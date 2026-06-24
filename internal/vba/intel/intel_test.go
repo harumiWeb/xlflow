@@ -64,11 +64,14 @@ Public Sub Run()
     missingValue = 1
 End Sub
 `
+	doc.Source = `Attribute VB_Name = "Main"
+` + doc.Source
 	if diagnostics := analyzer.Diagnostics(doc); len(diagnostics) != 0 {
 		t.Fatalf("expected undeclared diagnostic to clear, got %+v", diagnostics)
 	}
 
-	doc.Source = `Option Explicit
+	doc.Source = `Attribute VB_Name = "Main"
+Option Explicit
 Public Sub Run()
     Range("A1").Value = 1
 End Sub
@@ -227,6 +230,37 @@ End Sub
 	}
 	if help.ActiveParameter != 1 {
 		t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+	}
+}
+
+func TestDiagnosticsTreatErrAsBuiltinGlobal(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test(expected As Variant, actual As Variant)
+    If IsObject(expected) Or IsObject(actual) Then
+        Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals", "AssertEquals supports scalar values only. Compare object properties such as Range.Value2."
+    End If
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	if hasDiagnosticMessage(diagnostics, `Undeclared identifier "Err"`) {
+		t.Fatalf("Err should be treated as a built-in global, got %+v", diagnostics)
+	}
+
+	line := `        Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals",`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one Err.Raise signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "VBA.ErrObject.Raise(Number As Long, Optional Source As String, Optional Description As String, Optional HelpFile As String, Optional HelpContext As Long) As void" {
+		t.Fatalf("signature label = %q", got)
 	}
 }
 

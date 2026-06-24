@@ -231,7 +231,8 @@ End Sub
 
 func TestLinterReportsUnknownAndUnusedInlineSuppressionsAsWarnings(t *testing.T) {
 	dir := t.TempDir()
-	writeLintModule(t, dir, "Main.bas", `Option Explicit
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
 Public Sub Run()
   ' xlflow:disable-next-line VB999
   Debug.Print "ok"
@@ -653,7 +654,7 @@ End Sub
 			t.Fatalf("VB028 should explain both supported remedies: %+v", issue)
 		}
 	}
-	blocking := PushBlockingIssues(issues)
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB028")
 	assertIssue(t, blocking, "VB028", 5)
 	assertIssue(t, blocking, "VB028", 6)
 	assertIssue(t, blocking, "VB028", 8)
@@ -737,7 +738,7 @@ func TestLinterFindsTypographicQuotesThatTriggerVBECompileDialogs(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocking := PushBlockingIssues(issues)
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB008")
 	if len(blocking) != 1 {
 		t.Fatalf("expected one push-blocking typographic quote issue, got %+v", blocking)
 	}
@@ -760,7 +761,7 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocking := PushBlockingIssues(issues)
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB009")
 	if len(blocking) != 1 {
 		t.Fatalf("expected one push-blocking C-style escape issue, got %+v", blocking)
 	}
@@ -1167,7 +1168,8 @@ End Sub
 
 func TestLinterNewASTRulesIgnoreCommentsAndStrings(t *testing.T) {
 	dir := t.TempDir()
-	writeLintModule(t, dir, "Main.bas", `Option Explicit
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
 Public Sub Run()
   Debug.Print "Range(""A1"") On Error GoTo ErrHandler"
   ' Range("A1").Value = 1
@@ -1269,6 +1271,92 @@ End Sub
 	}
 	if got := issuesByCode(issues, "VB029"); len(got) != 0 {
 		t.Fatalf("VB029 should require Option Explicit in the source, got %+v", got)
+	}
+}
+
+func TestLinterRequiresVBNameAttributeForStandardModules(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb031 := issuesByCode(issues, "VB031")
+	if len(vb031) != 1 {
+		t.Fatalf("expected one missing VB_Name issue, got %+v", vb031)
+	}
+	issue := vb031[0]
+	if issue.Line != 1 || issue.Kind != "missing_module_attribute" || issue.Symbol != "VB_Name" || !strings.Contains(issue.Suggestion, `Attribute VB_Name = "Main"`) {
+		t.Fatalf("unexpected VB031 issue: %+v", issue)
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB031", 1)
+}
+
+func TestLinterAcceptsVBNameAttributeForStandardModules(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB031"); len(got) != 0 {
+		t.Fatalf("VB031 should not be reported when Attribute VB_Name is present: %+v", got)
+	}
+}
+
+func TestLinterRejectsEmptyVBNameAttributeForStandardModules(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = ""
+Option Explicit
+Public Sub Run()
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB031"); len(got) != 1 {
+		t.Fatalf("VB031 should be reported for empty Attribute VB_Name: %+v", got)
+	}
+}
+
+func TestLinterVBNameAttributeOnlyAppliesToStandardModules(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	classes := filepath.Join(dir, "src", "classes")
+	forms := filepath.Join(dir, "src", "forms")
+	sidecars := filepath.Join(forms, "code")
+	for _, path := range []string{classes, forms, sidecars} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(classes, "Class1.cls"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(forms, "UserForm1.frm"), []byte("VERSION 5.00\nBegin VB.Form UserForm1\nEnd\nOption Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sidecars, "UserForm1.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB031"); len(got) != 0 {
+		t.Fatalf("VB031 should not apply to class modules, forms, or UserForm sidecars: %+v", got)
 	}
 }
 

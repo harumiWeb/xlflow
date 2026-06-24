@@ -516,7 +516,7 @@ func scanNumberEnd(line string, start int) int {
 	i := start
 	for i < len(line) {
 		r, size := firstRune(line[i:])
-		if !(unicode.IsDigit(r) || unicode.IsLetter(r) || r == '.' || r == '&' || r == '_' || r == '+' || r == '-') {
+		if !unicode.IsDigit(r) && !unicode.IsLetter(r) && r != '.' && r != '&' && r != '_' && r != '+' && r != '-' {
 			break
 		}
 		i += max(1, size)

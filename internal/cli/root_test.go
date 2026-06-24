@@ -498,7 +498,7 @@ func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	body := `[project]
@@ -521,6 +521,9 @@ func writeCLIInlineSuppressionProject(t *testing.T, command string, moduleBody s
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(moduleBody), "attribute vb_name") {
+		moduleBody = "Attribute VB_Name = \"Main\"\n" + moduleBody
 	}
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(moduleBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -4632,7 +4635,7 @@ func TestPushDoesNotSuppressBlockingLintDiagnosticsInline(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n"
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4672,7 +4675,7 @@ func TestPushDoesNotSuppressBlockingAnalyzeDiagnosticsInline(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ' xlflow:disable-next-line VBA104\n  ws.DisplayGridlines = False\nEnd Sub\n"
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ' xlflow:disable-next-line VBA104\n  ws.DisplayGridlines = False\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
