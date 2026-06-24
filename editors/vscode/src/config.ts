@@ -9,6 +9,7 @@ export interface XlflowConfig {
   lspTraceServer: TraceServer;
   completionTriggerSuggestInStatements: boolean;
   completionProgIdsInStrings: boolean;
+  testingAutoDiscover: boolean;
 }
 
 export function readConfig(): XlflowConfig {
@@ -23,6 +24,7 @@ export function readConfig(): XlflowConfig {
       true,
     ),
     completionProgIdsInStrings: config.get<boolean>("completion.progIdsInStrings", true),
+    testingAutoDiscover: config.get<boolean>("testing.autoDiscover", true),
   };
 }
 

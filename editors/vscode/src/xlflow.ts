@@ -69,6 +69,14 @@ export async function runXlflowCommand(
   const notify = options.notify !== false;
 
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (exitCode: number): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(exitCode);
+    };
     const child = childProcess.spawn(config.path, args, {
       cwd,
       windowsHide: true,
@@ -79,13 +87,16 @@ export async function runXlflowCommand(
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
       vscode.window.showErrorMessage(`${label} failed: ${error.message}`);
-      resolve(-1);
+      settle(-1);
     });
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
       const exitCode = code ?? -1;
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
       if (!notify) {
-        resolve(exitCode);
+        settle(exitCode);
         return;
       }
       if (exitCode === 0) {
@@ -93,7 +104,7 @@ export async function runXlflowCommand(
       } else {
         vscode.window.showErrorMessage(`${label} failed with exit code ${exitCode}.`);
       }
-      resolve(exitCode);
+      settle(exitCode);
     });
   });
 }
@@ -129,6 +140,14 @@ export async function runXlflowJsonCommand<T>(
   );
 
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: XlflowJsonCommandResult<T>): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const child = childProcess.spawn(config.path, args, {
@@ -146,9 +165,12 @@ export async function runXlflowJsonCommand<T>(
     });
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
-      resolve({ exitCode: -1, stdout: "", stderr: error.message });
+      settle({ exitCode: -1, stdout: "", stderr: error.message });
     });
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
       const exitCode = code ?? -1;
       const stdout = Buffer.concat(stdoutChunks).toString("utf8");
       const stderr = Buffer.concat(stderrChunks).toString("utf8");
@@ -162,7 +184,7 @@ export async function runXlflowJsonCommand<T>(
         }
       }
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
-      resolve({ exitCode, stdout, stderr, json });
+      settle({ exitCode, stdout, stderr, json });
     });
   });
 }

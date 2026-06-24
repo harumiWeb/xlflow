@@ -3,9 +3,10 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  Trace,
   TransportKind,
 } from "vscode-languageclient/node";
-import { readConfig } from "./config";
+import { readConfig, TraceServer } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
 
@@ -50,6 +51,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
 
     try {
       await client.start();
+      await client.setTrace(toProtocolTrace(config.lspTraceServer));
       this.channels.output.info(
         `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`} with log file ${config.lspLogFile}`,
       );
@@ -108,6 +110,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       clearTimeout(this.suggestTimer);
       this.suggestTimer = undefined;
     }
+  }
+}
+
+function toProtocolTrace(trace: TraceServer): Trace {
+  switch (trace) {
+    case "off":
+      return Trace.Off;
+    case "verbose":
+      return Trace.Verbose;
+    case "messages":
+      return Trace.Messages;
   }
 }
 

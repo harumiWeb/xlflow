@@ -12,3 +12,4 @@
 - Added VS Code Test Explorer integration backed by `xlflow test list --json` and `xlflow test --json`.
 - Added command palette actions for linting the workspace and formatting the active document or full project.
 - Added a Status Bar session indicator with QuickPick actions for starting, stopping, restarting, inspecting, and diagnosing xlflow sessions.
+- Tightened v0.1 review feedback by wiring LSP trace settings, gating startup test discovery, documenting Node 22 development requirements, and hardening xlflow process handling.

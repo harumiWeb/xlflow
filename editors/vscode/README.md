@@ -11,6 +11,8 @@ The extension is a thin client for `xlflow lsp --stdio` and the xlflow CLI. Diag
 
 ## Development
 
+Use Node.js 22 or newer. The extension test runner uses `@vscode/test-electron` 3.x.
+
 From this directory:
 
 ```bash
@@ -37,6 +39,7 @@ Common settings:
 - `xlflow.lsp.trace.server`: trace verbosity for the language server trace output channel.
 - `xlflow.completion.triggerSuggestInStatements`: trigger VS Code suggestions in likely VBA statement contexts.
 - `xlflow.completion.progIdsInStrings`: trigger VS Code suggestions inside `CreateObject("...")` and `GetObject("...")` strings.
+- `xlflow.testing.autoDiscover`: automatically discover VBA tests when an xlflow workspace opens.
 
 ## Commands
 
@@ -80,6 +83,8 @@ Click the Status Bar item to start, stop, restart, inspect the session, open the
 ## Testing
 
 The extension registers a VS Code Test Explorer controller for VBA tests. Discovery runs `xlflow test list --json` and execution runs `xlflow test --json --module <module> --filter <name>` from the selected workspace folder. The TypeScript extension does not parse VBA or generate test cases itself.
+
+When `xlflow.testing.autoDiscover` is enabled, startup discovery runs only for workspace folders that contain `xlflow.toml`. Manual Test Explorer refresh remains available regardless of this setting.
 
 `xlflow: Run Tests` remains available as a command palette escape hatch that runs `xlflow test` and writes the CLI output to the `xlflow` output channel.
 

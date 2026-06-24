@@ -25,7 +25,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerCommands(context, clientManager, channels, sessionManager);
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void testController?.refresh();
+      void testController?.refreshAuto();
       void sessionManager?.refreshStatus();
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
@@ -35,11 +35,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (event.affectsConfiguration("xlflow.path") || event.affectsConfiguration("xlflow.lsp")) {
         await clientManager?.restart();
       }
+      if (event.affectsConfiguration("xlflow.testing.autoDiscover")) {
+        await testController?.refreshAuto();
+      }
     }),
   );
 
   await clientManager.start();
-  void testController.refresh();
+  void testController.refreshAuto();
   void sessionManager.refreshStatus();
 }
 

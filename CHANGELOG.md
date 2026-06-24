@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added `xlflow test list --json` for source-only VBA test discovery, enabling editor integrations to discover tests without parsing VBA in TypeScript or opening Excel.
+- Clarified the CLI JSON contract for editor integrations, including single-document stdout output and inactive `session status --json` payloads with `session.active=false`.
 - Added non-configurable `VB031` lint/preflight validation requiring standard `.bas` modules to include `Attribute VB_Name`.
 - Fixed VBA LSP diagnostics so the built-in `Err` object is recognized as a global, preventing false `VBA029` undeclared warnings for calls such as `Err.Raise`.
 

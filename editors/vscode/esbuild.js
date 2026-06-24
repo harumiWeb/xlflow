@@ -6,7 +6,7 @@ const common = {
   bundle: true,
   platform: "node",
   format: "cjs",
-  target: "node18",
+  target: "node20",
   external: ["vscode"],
   sourcemap: !production,
   minify: production,

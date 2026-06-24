@@ -37,7 +37,7 @@
     "vscode-languageclient": "^10.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "@types/vscode": "1.91.0",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
@@ -82,6 +82,11 @@
           "type": "boolean",
           "default": true,
           "description": "Trigger VS Code suggestions inside CreateObject and GetObject ProgID string literals."
+        },
+        "xlflow.testing.autoDiscover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically discover VBA tests for VS Code Test Explorer when an xlflow workspace opens."
         }
       }
     },
@@ -291,7 +296,6 @@
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.runMacro",
     "onCommand:xlflow.saveWorkbook",
-    "onCommand:xlflow.sessionActions",
     "onCommand:xlflow.sessionRestart",
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",

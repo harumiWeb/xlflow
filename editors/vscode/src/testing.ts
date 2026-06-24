@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { runXlflowJsonCommand } from "./xlflow";
 
@@ -90,9 +91,16 @@ export class XlflowTestController implements vscode.Disposable {
     await this.discoverAll();
   }
 
-  private async discoverAll(): Promise<void> {
+  async refreshAuto(): Promise<void> {
+    if (!readConfig().testingAutoDiscover) {
+      return;
+    }
+    await this.discoverAll({ xlflowWorkspacesOnly: true });
+  }
+
+  private async discoverAll(options: { xlflowWorkspacesOnly?: boolean } = {}): Promise<void> {
     this.metadata.clear();
-    const folders = vscode.workspace.workspaceFolders ?? [];
+    const folders = await discoverableWorkspaceFolders(options.xlflowWorkspacesOnly === true);
     if (folders.length === 0) {
       this.controller.items.replace([]);
       return;
@@ -236,6 +244,31 @@ export class XlflowTestController implements vscode.Disposable {
       return;
     }
     run.failed(item, message, runItem?.duration_ms);
+  }
+}
+
+async function discoverableWorkspaceFolders(
+  xlflowWorkspacesOnly: boolean,
+): Promise<readonly vscode.WorkspaceFolder[]> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (!xlflowWorkspacesOnly) {
+    return folders;
+  }
+  const result: vscode.WorkspaceFolder[] = [];
+  for (const folder of folders) {
+    if (await hasXlflowConfig(folder)) {
+      result.push(folder);
+    }
+  }
+  return result;
+}
+
+async function hasXlflowConfig(folder: vscode.WorkspaceFolder): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.joinPath(folder.uri, "xlflow.toml"));
+    return true;
+  } catch {
+    return false;
   }
 }
 
