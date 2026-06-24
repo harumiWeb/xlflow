@@ -1989,6 +1989,94 @@ End Sub
 	}
 }
 
+func TestSemanticTokensCoverDeclarationsBuiltinsMembersAndUTF16(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+' 日本語コメント
+Public Type Customer
+    Name As String
+End Type
+Public Enum Status
+    StatusReady = 1
+End Enum
+Public Sub Run(ByVal value As String)
+    Dim ws As Worksheet
+    Set ws = Worksheets("Input")
+    Debug.Print value, xlLandscape
+    ws.Range("A1").Value = 1
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasSemanticToken(tokens, SemanticTokenFunction, "Run", source) {
+		t.Fatalf("function token for Run missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenParameter, "value", source) {
+		t.Fatalf("parameter token for value missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenClass, "Worksheet", source) {
+		t.Fatalf("default-library class token for Worksheet missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenFunction, "Debug", source) && !hasSemanticToken(tokens, SemanticTokenMethod, "Print", source) {
+		t.Fatalf("VBA global function/member token missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenEnumMember, "xlLandscape", source) {
+		t.Fatalf("enum member token for xlLandscape missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenProperty, "Value", source) {
+		t.Fatalf("member property token for Value missing: %+v", tokens)
+	}
+	commentLine := lineIndex(source, "' 日本語コメント")
+	if !hasSemanticTokenAtLine(tokens, SemanticTokenComment, commentLine) {
+		t.Fatalf("comment token after Japanese text missing: %+v", tokens)
+	}
+}
+
+func TestSemanticTokensCoverUserFormControlsAndMalformedSource(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `VERSION 5.00
+Begin VB.Form UserForm1
+   Caption = "UserForm1"
+   Begin MSForms.TextBox txtName
+      Left = 12
+   End
+End
+Attribute VB_Name = "UserForm1"
+Private Sub UserForm_Initialize()
+    Me.txtName.Text = "ready"
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "UserForm1.frm"),
+		ModuleKind: "form",
+		Source:     source,
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenVariable, "txtName", source) {
+		t.Fatalf("UserForm control token missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenEvent, "Initialize", source) && !hasSemanticToken(tokens, SemanticTokenFunction, "UserForm_Initialize", source) {
+		t.Fatalf("UserForm event/function token missing: %+v", tokens)
+	}
+
+	malformed := doc
+	malformed.Source = "Public Sub Broken(\n    Debug.Print \"unterminated\n"
+	if _, err := analyzer.SemanticTokens(malformed, []Document{malformed}); err != nil {
+		t.Fatalf("semantic tokens should be best-effort on malformed source: %v", err)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()
@@ -2047,4 +2135,41 @@ func hasDiagnosticMessage(diagnostics []Diagnostic, text string) bool {
 		}
 	}
 	return false
+}
+
+func hasSemanticToken(tokens []SemanticToken, tokenType, text, source string) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && rangeText(source, token.Range) == text {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSemanticTokenAtLine(tokens []SemanticToken, tokenType string, line int) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && token.Range.Start.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeText(source string, r Range) string {
+	line := lineAt(source, r.Start.Line)
+	start := byteIndexForUTF16(line, r.Start.Character)
+	end := byteIndexForUTF16(line, r.End.Character)
+	if start < 0 || end < start || end > len(line) {
+		return ""
+	}
+	return line[start:end]
+}
+
+func lineIndex(source, contains string) int {
+	for i, line := range normalizedLines(source) {
+		if strings.Contains(line, contains) {
+			return i
+		}
+	}
+	return -1
 }

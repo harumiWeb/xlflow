@@ -102,21 +102,22 @@ func New(opts Options) (*Server, func(), error) {
 	}
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.handler = protocol.Handler{
-		Initialize:                 s.initialize,
-		Initialized:                s.initialized,
-		Shutdown:                   s.shutdown,
-		Exit:                       s.exit,
-		TextDocumentDidOpen:        s.didOpen,
-		TextDocumentDidChange:      s.didChange,
-		TextDocumentDidClose:       s.didClose,
-		TextDocumentDocumentSymbol: s.documentSymbol,
-		WorkspaceSymbol:            s.workspaceSymbol,
-		TextDocumentDefinition:     s.definition,
-		TextDocumentReferences:     s.references,
-		TextDocumentHover:          s.hover,
-		TextDocumentCompletion:     s.completion,
-		TextDocumentSignatureHelp:  s.signatureHelp,
-		TextDocumentFormatting:     s.formatting,
+		Initialize:                     s.initialize,
+		Initialized:                    s.initialized,
+		Shutdown:                       s.shutdown,
+		Exit:                           s.exit,
+		TextDocumentDidOpen:            s.didOpen,
+		TextDocumentDidChange:          s.didChange,
+		TextDocumentDidClose:           s.didClose,
+		TextDocumentDocumentSymbol:     s.documentSymbol,
+		WorkspaceSymbol:                s.workspaceSymbol,
+		TextDocumentDefinition:         s.definition,
+		TextDocumentReferences:         s.references,
+		TextDocumentHover:              s.hover,
+		TextDocumentCompletion:         s.completion,
+		TextDocumentSignatureHelp:      s.signatureHelp,
+		TextDocumentFormatting:         s.formatting,
+		TextDocumentSemanticTokensFull: s.semanticTokensFull,
 	}
 	return s, func() {
 		s.stopDiagnosticTimers()
@@ -158,6 +159,14 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 	if capabilities.SignatureHelpProvider != nil {
 		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ",", " "}
 		capabilities.SignatureHelpProvider.RetriggerCharacters = []string{","}
+	}
+	if semantic, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions); ok {
+		semantic.Legend = protocol.SemanticTokensLegend{
+			TokenTypes:     intel.SemanticTokenTypes,
+			TokenModifiers: intel.SemanticTokenModifiers,
+		}
+		semantic.Full = true
+		semantic.Range = nil
 	}
 	version := s.opts.Build.Version
 	if version == "" {
@@ -443,6 +452,18 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 		Range:   fullDocumentRange(doc.Source),
 		NewText: formatted,
 	}}, nil
+}
+
+func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	tokens, err := s.analyzer.SemanticTokens(doc, s.docs.openDocuments())
+	if err != nil {
+		return nil, err
+	}
+	return &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}, nil
 }
 
 func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
@@ -924,6 +945,62 @@ func diagnosticSeverity(severity string) protocol.DiagnosticSeverity {
 	default:
 		return protocol.DiagnosticSeverityWarning
 	}
+}
+
+func encodeSemanticTokens(tokens []intel.SemanticToken) []protocol.UInteger {
+	out := make([]protocol.UInteger, 0, len(tokens)*5)
+	prevLine, prevStart := 0, 0
+	for _, token := range tokens {
+		line := max(0, token.Range.Start.Line)
+		start := max(0, token.Range.Start.Character)
+		length := max(0, token.Range.End.Character-token.Range.Start.Character)
+		if length == 0 || token.Range.End.Line != token.Range.Start.Line {
+			continue
+		}
+		deltaLine := line - prevLine
+		deltaStart := start
+		if deltaLine == 0 {
+			deltaStart = start - prevStart
+		}
+		if deltaStart < 0 {
+			continue
+		}
+		typeIndex := semanticTokenTypeIndex(token.Type)
+		if typeIndex < 0 {
+			continue
+		}
+		out = append(out,
+			protocol.UInteger(deltaLine),
+			protocol.UInteger(deltaStart),
+			protocol.UInteger(length),
+			protocol.UInteger(typeIndex),
+			protocol.UInteger(semanticTokenModifierMask(token.Modifiers)),
+		)
+		prevLine = line
+		prevStart = start
+	}
+	return out
+}
+
+func semanticTokenTypeIndex(tokenType string) int {
+	for i, candidate := range intel.SemanticTokenTypes {
+		if candidate == tokenType {
+			return i
+		}
+	}
+	return -1
+}
+
+func semanticTokenModifierMask(modifiers []string) int {
+	mask := 0
+	for _, modifier := range modifiers {
+		for i, candidate := range intel.SemanticTokenModifiers {
+			if modifier == candidate {
+				mask |= 1 << i
+			}
+		}
+	}
+	return mask
 }
 
 func symbolKind(kind string) protocol.SymbolKind {

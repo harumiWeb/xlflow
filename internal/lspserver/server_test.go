@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/sourcegraph/jsonrpc2"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -661,6 +662,76 @@ func TestFormattingSkipsFrmDocuments(t *testing.T) {
 	}
 }
 
+func TestInitializeAdvertisesSemanticTokensProvider(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	result, err := s.initialize(nil, &protocol.InitializeParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, ok := result.(protocol.InitializeResult)
+	if !ok {
+		t.Fatalf("initialize result = %T, want InitializeResult", result)
+	}
+	provider, ok := init.Capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)
+	if !ok {
+		t.Fatalf("semanticTokensProvider = %T, want *SemanticTokensOptions", init.Capabilities.SemanticTokensProvider)
+	}
+	if provider.Full != true {
+		t.Fatalf("semantic full provider = %+v, want true", provider.Full)
+	}
+	if provider.Range != nil {
+		t.Fatalf("semantic range provider = %+v, want nil", provider.Range)
+	}
+	if !containsString(provider.Legend.TokenTypes, "function") || !containsString(provider.Legend.TokenTypes, "property") {
+		t.Fatalf("semantic token legend missing expected types: %+v", provider.Legend.TokenTypes)
+	}
+	if !containsString(provider.Legend.TokenModifiers, "defaultLibrary") {
+		t.Fatalf("semantic token modifiers missing defaultLibrary: %+v", provider.Legend.TokenModifiers)
+	}
+}
+
+func TestSemanticTokensFullUsesOpenDocumentAndValidEncoding(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub OpenName()\n    Range(\"A1\").Value = xlLandscape\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := s.semanticTokensFull(nil, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens.Data) == 0 || len(tokens.Data)%5 != 0 {
+		t.Fatalf("semantic token data length = %d, want non-empty multiple of 5: %+v", len(tokens.Data), tokens.Data)
+	}
+	decoded := decodeSemanticTokenTypes(tokens.Data)
+	if !containsString(decoded, "function") {
+		t.Fatalf("semantic token data missing function token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	if !containsString(decoded, "property") {
+		t.Fatalf("semantic token data missing property token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	if !containsString(decoded, "enumMember") {
+		t.Fatalf("semantic token data missing enum member token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	assertSemanticTokenDeltasValid(t, tokens.Data)
+}
+
 type rpcRecorder struct {
 	mu          sync.Mutex
 	methodsSeen []string
@@ -743,4 +814,40 @@ func containsString(items []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func decodeSemanticTokenTypes(data []protocol.UInteger) []string {
+	var out []string
+	for i := 0; i+4 < len(data); i += 5 {
+		typeIndex := int(data[i+3])
+		if typeIndex >= 0 && typeIndex < len(intel.SemanticTokenTypes) {
+			out = append(out, intel.SemanticTokenTypes[typeIndex])
+		}
+	}
+	return out
+}
+
+func assertSemanticTokenDeltasValid(t *testing.T, data []protocol.UInteger) {
+	t.Helper()
+	line, character := 0, 0
+	for i := 0; i+4 < len(data); i += 5 {
+		deltaLine := int(data[i])
+		deltaStart := int(data[i+1])
+		length := int(data[i+2])
+		if length <= 0 {
+			t.Fatalf("semantic token at %d has non-positive length: %+v", i, data[i:i+5])
+		}
+		if deltaLine == 0 {
+			if deltaStart < 0 {
+				t.Fatalf("semantic token at %d has negative delta start: %+v", i, data[i:i+5])
+			}
+			character += deltaStart
+		} else {
+			line += deltaLine
+			character = deltaStart
+		}
+		if line < 0 || character < 0 {
+			t.Fatalf("semantic token at %d decoded to negative position: line=%d character=%d", i, line, character)
+		}
+	}
 }

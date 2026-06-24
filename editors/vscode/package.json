@@ -94,6 +94,7 @@
         },
         "editor.autoClosingBrackets": "always",
         "editor.autoClosingQuotes": "always",
+        "editor.semanticHighlighting.enabled": true,
         "editor.snippetSuggestions": "top",
         "editor.suggest.snippetsPreventQuickSuggestions": false
       }
@@ -145,6 +146,75 @@
         "language": "vba",
         "scopeName": "source.vba",
         "path": "./syntaxes/vba.tmLanguage.json"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "vba",
+        "scopes": {
+          "namespace": [
+            "entity.name.namespace.vba"
+          ],
+          "type": [
+            "entity.name.type.vba",
+            "support.type.vba"
+          ],
+          "class": [
+            "entity.name.type.class.vba",
+            "support.type.excel.vba",
+            "support.type.com.vba"
+          ],
+          "enum": [
+            "entity.name.type.enum.vba"
+          ],
+          "interface": [
+            "entity.name.type.interface.vba"
+          ],
+          "function": [
+            "entity.name.function.vba",
+            "support.function.builtin.vba"
+          ],
+          "method": [
+            "entity.name.function.vba",
+            "variable.other.member.vba"
+          ],
+          "property": [
+            "entity.name.function.property.vba",
+            "variable.other.property.vba"
+          ],
+          "enumMember": [
+            "constant.other.vba"
+          ],
+          "event": [
+            "entity.name.function.event.vba"
+          ],
+          "variable": [
+            "variable.other.local.vba",
+            "variable.other.vba"
+          ],
+          "parameter": [
+            "variable.parameter.vba"
+          ],
+          "keyword": [
+            "keyword.control.vba",
+            "keyword.other.vba"
+          ],
+          "modifier": [
+            "storage.modifier.vba"
+          ],
+          "operator": [
+            "keyword.operator.vba"
+          ],
+          "string": [
+            "string.quoted.double.vba"
+          ],
+          "number": [
+            "constant.numeric.vba"
+          ],
+          "comment": [
+            "comment.line.vba"
+          ]
+        }
       }
     ]
   },
