@@ -266,7 +266,8 @@
     "onCommand:xlflow.sessionStatus",
     "onCommand:xlflow.sessionStop",
     "onCommand:xlflow.test",
-    "onLanguage:vba"
+    "onLanguage:vba",
+    "workspaceContains:xlflow.toml"
   ],
   "icon": "images/icon.png",
   "engines": {

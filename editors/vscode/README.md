@@ -59,6 +59,12 @@ Workbook commands run from the resolved workspace folder. `New Project` runs `xl
 
 Session commands run `xlflow session start`, `xlflow session status`, and `xlflow session stop` from the resolved workspace folder.
 
+## Testing
+
+The extension registers a VS Code Test Explorer controller for VBA tests. Discovery runs `xlflow test list --json` and execution runs `xlflow test --json --module <module> --filter <name>` from the selected workspace folder. The TypeScript extension does not parse VBA or generate test cases itself.
+
+`xlflow: Run Tests` remains available as a command palette escape hatch that runs `xlflow test` and writes the CLI output to the `xlflow` output channel.
+
 ## Output
 
 Use the `xlflow` output channel for CLI command output and language client messages. Use `xlflow Language Server Trace` for LSP trace output.
@@ -67,7 +73,6 @@ Use the `xlflow` output channel for CLI command output and language client messa
 
 - The extension does not install or bundle `xlflow`.
 - Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro.
-- VS Code Testing API integration is not implemented yet; `xlflow: Run Tests` writes CLI results to the `xlflow` output channel.
-- There are no webviews, workbook previews, Test Explorer integration, or rich Excel session management UI.
+- There are no webviews, workbook previews, or rich Excel session management UI.
 - `xlflow: New Project` and `xlflow: Initialize Project` expose only the base CLI workflow, without option pickers for `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - The extension does not implement VBA parsing, diagnostics, formatting, completion candidates, symbol analysis, or type inference in TypeScript.

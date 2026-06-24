@@ -9,3 +9,4 @@
 - Added command palette actions for creating projects, initializing projects from existing workbooks, and starting, checking, or stopping workbook sessions.
 - Added a command palette action for saving the managed workbook with `xlflow save`.
 - Added a command palette action for running workbook tests with `xlflow test` and showing results in the output channel.
+- Added VS Code Test Explorer integration backed by `xlflow test list --json` and `xlflow test --json`.

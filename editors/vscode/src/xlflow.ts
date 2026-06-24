@@ -83,3 +83,72 @@ export async function runXlflowCommand(
     });
   });
 }
+
+export interface XlflowJsonCommandResult<T> {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  json?: T;
+}
+
+export async function runXlflowJsonCommand<T>(
+  args: string[],
+  label: string,
+  outputChannel: vscode.OutputChannel,
+  options: { requireWorkspace: boolean; workspaceFolder?: vscode.WorkspaceFolder },
+): Promise<XlflowJsonCommandResult<T>> {
+  const folder =
+    options.workspaceFolder ??
+    (await resolveWorkspaceRoot({
+      prompt: options.requireWorkspace,
+      fallbackToFirst: !options.requireWorkspace,
+    }));
+  if (options.requireWorkspace && folder === undefined) {
+    vscode.window.showWarningMessage(`${label} requires an open workspace folder.`);
+    return { exitCode: -1, stdout: "", stderr: "" };
+  }
+
+  const config = readConfig();
+  const cwd = folder?.uri.fsPath;
+  outputChannel.appendLine(
+    `> ${config.path} ${args.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
+  );
+
+  return new Promise((resolve) => {
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    const child = childProcess.spawn(config.path, args, {
+      cwd,
+      windowsHide: true,
+    });
+
+    child.stdout.on("data", (data: Buffer) => {
+      stdoutChunks.push(data);
+      appendProcessOutput(outputChannel, "stdout", data);
+    });
+    child.stderr.on("data", (data: Buffer) => {
+      stderrChunks.push(data);
+      appendProcessOutput(outputChannel, "stderr", data);
+    });
+    child.on("error", (error) => {
+      outputChannel.appendLine(`[error] ${error.message}`);
+      resolve({ exitCode: -1, stdout: "", stderr: error.message });
+    });
+    child.on("close", (code) => {
+      const exitCode = code ?? -1;
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+      let json: T | undefined;
+      if (stdout.trim() !== "") {
+        try {
+          json = JSON.parse(stdout) as T;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          outputChannel.appendLine(`[error] Failed to parse ${label} JSON: ${message}`);
+        }
+      }
+      outputChannel.appendLine(`${label} exited with code ${exitCode}`);
+      resolve({ exitCode, stdout, stderr, json });
+    });
+  });
+}
