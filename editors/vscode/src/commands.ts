@@ -64,6 +64,22 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.test", async () => {
       await runXlflowCommand(["test"], "xlflow test", channels.output, { requireWorkspace: true });
     }),
+    vscode.commands.registerCommand("xlflow.lintWorkspace", async () => {
+      await runXlflowCommand(["lint"], "xlflow lint", channels.output, { requireWorkspace: true });
+    }),
+    vscode.commands.registerCommand("xlflow.formatDocument", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (editor === undefined) {
+        vscode.window.showWarningMessage("xlflow format document requires an active editor.");
+        return;
+      }
+      await vscode.commands.executeCommand("editor.action.formatDocument");
+    }),
+    vscode.commands.registerCommand("xlflow.formatProject", async () => {
+      await runXlflowCommand(["fmt", "--write"], "xlflow fmt", channels.output, {
+        requireWorkspace: true,
+      });
+    }),
     vscode.commands.registerCommand("xlflow.saveWorkbook", async () => {
       await runXlflowCommand(["save"], "xlflow save", channels.output, { requireWorkspace: true });
     }),

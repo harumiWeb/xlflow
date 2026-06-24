@@ -50,12 +50,17 @@ The command palette includes:
 - `xlflow: Push Sources`
 - `xlflow: Run Macro`
 - `xlflow: Run Tests`
+- `xlflow: Lint Workspace`
+- `xlflow: Format Document`
+- `xlflow: Format Project`
 - `xlflow: Save Workbook`
 - `xlflow: Start Session`
 - `xlflow: Session Status`
 - `xlflow: Stop Session`
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, and `Save Workbook` runs `xlflow save`.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+
+`Format Document` invokes VS Code document formatting for the active editor. For VBA files, formatting is provided by `xlflow lsp --stdio`.
 
 Session commands run `xlflow session start`, `xlflow session status`, and `xlflow session stop` from the resolved workspace folder.
 

@@ -67,10 +67,7 @@ export class XlflowTestController implements vscode.Disposable {
   private readonly runProfile: vscode.TestRunProfile;
 
   constructor(private readonly channels: XlflowChannels) {
-    this.controller = vscode.tests.createTestController(
-      "xlflow-vba-tests",
-      "xlflow VBA Tests",
-    );
+    this.controller = vscode.tests.createTestController("xlflow-vba-tests", "xlflow VBA Tests");
     this.controller.refreshHandler = async () => {
       await this.discoverAll();
     };
@@ -129,9 +126,7 @@ export class XlflowTestController implements vscode.Disposable {
     const tests = listDiscoveredTests(result.json);
     if (result.exitCode !== 0 || tests.length === 0) {
       if (result.exitCode !== 0) {
-        this.channels.output.appendLine(
-          `[error] xlflow test list failed for ${folder.uri.fsPath}`,
-        );
+        this.channels.output.appendLine(`[error] xlflow test list failed for ${folder.uri.fsPath}`);
       }
       return [];
     }
@@ -159,7 +154,8 @@ export class XlflowTestController implements vscode.Disposable {
       );
       const line = typeof test.line === "number" && test.line > 0 ? test.line - 1 : 0;
       item.range = new vscode.Range(line, 0, line, 0);
-      item.description = Array.isArray(test.tags) && test.tags.length > 0 ? test.tags.join(", ") : undefined;
+      item.description =
+        Array.isArray(test.tags) && test.tags.length > 0 ? test.tags.join(", ") : undefined;
       this.metadata.set(item.id, { workspaceFolder: folder, module, name, qualifiedName });
       moduleItem.children.add(item);
     }
@@ -269,7 +265,8 @@ function testFailureMessage(
 ): vscode.TestMessage {
   const error = item?.error ?? result.json?.error;
   const code = readNonEmpty(error?.code);
-  const detail = readNonEmpty(error?.message) ?? readNonEmpty(result.stderr) ?? "xlflow test failed";
+  const detail =
+    readNonEmpty(error?.message) ?? readNonEmpty(result.stderr) ?? "xlflow test failed";
   return new vscode.TestMessage(code === undefined ? detail : `${code}: ${detail}`);
 }
 

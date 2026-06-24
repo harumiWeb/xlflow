@@ -141,6 +141,21 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.lintWorkspace",
+        "title": "xlflow: Lint Workspace",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.formatDocument",
+        "title": "xlflow: Format Document",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.formatProject",
+        "title": "xlflow: Format Project",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.saveWorkbook",
         "title": "xlflow: Save Workbook",
         "category": "xlflow"
@@ -255,7 +270,10 @@
   },
   "activationEvents": [
     "onCommand:xlflow.checkEnvironment",
+    "onCommand:xlflow.formatDocument",
+    "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",
+    "onCommand:xlflow.lintWorkspace",
     "onCommand:xlflow.newProject",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
