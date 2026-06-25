@@ -44,6 +44,14 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       },
       outputChannel: this.channels.output,
       traceOutputChannel: this.channels.trace,
+      initializationOptions: {
+        codeLens: {
+          enabled: config.codeLensEnabled,
+          runProcedure: config.codeLensRunProcedure,
+          runTests: config.codeLensRunTests,
+          userFormEvents: config.codeLensUserFormEvents,
+        },
+      },
     };
 
     const client = new LanguageClient("xlflow-vscode", "xlflow", serverOptions, clientOptions);

@@ -44,13 +44,14 @@ type Options struct {
 }
 
 type Server struct {
-	opts     Options
-	db       *vbadb.DB
-	analyzer intel.Analyzer
-	handler  protocol.Handler
-	docs     *documents
-	logger   *log.Logger
-	symbols  *workspaceSymbolCache
+	opts           Options
+	db             *vbadb.DB
+	analyzer       intel.Analyzer
+	handler        protocol.Handler
+	docs           *documents
+	logger         *log.Logger
+	symbols        *workspaceSymbolCache
+	codeLensConfig intel.CodeLensConfig
 
 	diagMu     sync.Mutex
 	diagTimers map[string]*time.Timer
@@ -94,11 +95,12 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      db,
 		},
-		docs:       newDocuments(opts.RootDir),
-		logger:     logger,
-		symbols:    newWorkspaceSymbolCache(),
-		diagTimers: make(map[string]*time.Timer),
-		diagGen:    make(map[string]uint64),
+		docs:           newDocuments(opts.RootDir),
+		logger:         logger,
+		symbols:        newWorkspaceSymbolCache(),
+		codeLensConfig: intel.DefaultCodeLensConfig(),
+		diagTimers:     make(map[string]*time.Timer),
+		diagGen:        make(map[string]uint64),
 	}
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.handler = protocol.Handler{
@@ -118,6 +120,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentSignatureHelp:      s.signatureHelp,
 		TextDocumentFormatting:         s.formatting,
 		TextDocumentSemanticTokensFull: s.semanticTokensFull,
+		TextDocumentCodeLens:           s.codeLens,
 	}
 	return s, func() {
 		s.stopDiagnosticTimers()
@@ -147,8 +150,13 @@ func newLogger(opts Options) (*log.Logger, func(), error) {
 	return log.New(w, "xlflow-lsp: ", log.LstdFlags), func() {}, nil
 }
 
-func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
+func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
+	s.codeLensConfig = codeLensConfigFromInitialize(params)
 	capabilities := s.handler.CreateServerCapabilities()
+	if capabilities.CodeLensProvider != nil {
+		resolveProvider := false
+		capabilities.CodeLensProvider.ResolveProvider = &resolveProvider
+	}
 	if syncOptions, ok := capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions); ok {
 		kind := protocol.TextDocumentSyncKindFull
 		syncOptions.Change = &kind
@@ -184,6 +192,34 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
 	s.logger.Printf("initialized")
 	return nil
+}
+
+func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeLensConfig {
+	cfg := intel.DefaultCodeLensConfig()
+	if params == nil {
+		return cfg
+	}
+	options, ok := params.InitializationOptions.(map[string]any)
+	if !ok {
+		return cfg
+	}
+	codeLens, ok := options["codeLens"].(map[string]any)
+	if !ok {
+		return cfg
+	}
+	if value, ok := codeLens["enabled"].(bool); ok {
+		cfg.Enabled = value
+	}
+	if value, ok := codeLens["runProcedure"].(bool); ok {
+		cfg.RunProcedure = value
+	}
+	if value, ok := codeLens["runTests"].(bool); ok {
+		cfg.RunTests = value
+	}
+	if value, ok := codeLens["userFormEvents"].(bool); ok {
+		cfg.UserFormEvents = value
+	}
+	return cfg
 }
 
 func (s *Server) shutdown(_ *glsp.Context) error {
@@ -464,6 +500,45 @@ func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 		return nil, err
 	}
 	return &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}, nil
+}
+
+func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	procedures, err := s.analyzer.RunnableProcedures(doc, s.codeLensConfig)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.CodeLens, 0, len(procedures))
+	for _, procedure := range procedures {
+		title := "$(play) Run"
+		command := "xlflow.runProcedure"
+		if procedure.Kind == "test" {
+			title = "$(beaker) Run Test"
+			command = "xlflow.runTestProcedure"
+		}
+		pos := protocol.Position{Line: protocol.UInteger(max(0, procedure.Line)), Character: protocol.UInteger(max(0, procedure.Character))}
+		out = append(out, protocol.CodeLens{
+			Range: protocol.Range{Start: pos, End: pos},
+			Command: &protocol.Command{
+				Title:   title,
+				Command: command,
+				Arguments: []any{map[string]any{
+					"uri":           procedure.URI,
+					"name":          procedure.Name,
+					"moduleName":    procedure.ModuleName,
+					"qualifiedName": procedure.QualifiedName,
+					"kind":          procedure.Kind,
+					"moduleKind":    procedure.ModuleKind,
+					"line":          procedure.Line,
+					"character":     procedure.Character,
+				}},
+			},
+		})
+	}
+	return out, nil
 }
 
 func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {

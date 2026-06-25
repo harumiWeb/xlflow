@@ -1,8 +1,18 @@
 import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "./client";
+import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { SessionManager } from "./session";
-import { runXlflowCommand } from "./xlflow";
+import { resolveWorkspaceRoot, runXlflowCommand } from "./xlflow";
+
+type RunProcedureArgs = {
+  uri: string;
+  name: string;
+  moduleName?: string;
+  qualifiedName?: string;
+  kind?: "sub" | "test";
+  line?: number;
+};
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -63,6 +73,12 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
       await runXlflowCommand(["run"], "xlflow run", channels.output, { requireWorkspace: true });
     }),
+    vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
+      await runProcedureFromCodeLens(args, channels);
+    }),
+    vscode.commands.registerCommand("xlflow.runTestProcedure", async (args: unknown) => {
+      await runTestProcedureFromCodeLens(args, channels);
+    }),
     vscode.commands.registerCommand("xlflow.test", async () => {
       await runXlflowCommand(["test"], "xlflow test", channels.output, { requireWorkspace: true });
     }),
@@ -104,4 +120,99 @@ export function registerCommands(
       sessionManager.openOutput();
     }),
   );
+}
+
+async function runProcedureFromCodeLens(value: unknown, channels: XlflowChannels): Promise<void> {
+  if (!isRunProcedureArgs(value)) {
+    vscode.window.showWarningMessage("xlflow CodeLens received invalid run arguments.");
+    return;
+  }
+  const uri = vscode.Uri.parse(value.uri);
+  if (!(await saveDirtyDocumentIfNeeded(uri))) {
+    return;
+  }
+  const workspaceFolder = await workspaceFolderForUri(uri);
+  const target = readNonEmpty(value.qualifiedName) ?? value.name;
+  await runXlflowCommand(["run", target], `xlflow run ${target}`, channels.output, {
+    requireWorkspace: true,
+    workspaceFolder,
+  });
+}
+
+async function runTestProcedureFromCodeLens(
+  value: unknown,
+  channels: XlflowChannels,
+): Promise<void> {
+  if (!isRunProcedureArgs(value)) {
+    vscode.window.showWarningMessage("xlflow CodeLens received invalid test arguments.");
+    return;
+  }
+  const moduleName = readNonEmpty(value.moduleName);
+  if (moduleName === undefined) {
+    vscode.window.showWarningMessage("xlflow CodeLens received invalid test arguments.");
+    return;
+  }
+  const uri = vscode.Uri.parse(value.uri);
+  if (!(await saveDirtyDocumentIfNeeded(uri))) {
+    return;
+  }
+  const workspaceFolder = await workspaceFolderForUri(uri);
+  await runXlflowCommand(
+    ["--json", "test", "--module", moduleName, "--filter", value.name],
+    `xlflow test ${moduleName}.${value.name}`,
+    channels.output,
+    { requireWorkspace: true, workspaceFolder },
+  );
+}
+
+function isRunProcedureArgs(value: unknown): value is RunProcedureArgs {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  const kind = obj.kind;
+  return (
+    typeof obj.uri === "string" &&
+    obj.uri.trim().length > 0 &&
+    typeof obj.name === "string" &&
+    obj.name.trim().length > 0 &&
+    (obj.moduleName === undefined || typeof obj.moduleName === "string") &&
+    (obj.qualifiedName === undefined || typeof obj.qualifiedName === "string") &&
+    (kind === undefined || kind === "sub" || kind === "test") &&
+    (obj.line === undefined || typeof obj.line === "number")
+  );
+}
+
+async function saveDirtyDocumentIfNeeded(uri: vscode.Uri): Promise<boolean> {
+  if (!readConfig().runSaveBeforeRun) {
+    return true;
+  }
+  const document = vscode.workspace.textDocuments.find(
+    (candidate) => candidate.uri.toString() === uri.toString(),
+  );
+  if (document === undefined || !document.isDirty) {
+    return true;
+  }
+  const saved = await document.save();
+  if (!saved) {
+    vscode.window.showWarningMessage(
+      "xlflow run was cancelled because the VBA document was not saved.",
+    );
+  }
+  return saved;
+}
+
+async function workspaceFolderForUri(uri: vscode.Uri): Promise<vscode.WorkspaceFolder | undefined> {
+  return (
+    vscode.workspace.getWorkspaceFolder(uri) ??
+    (await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true }))
+  );
+}
+
+function readNonEmpty(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }

@@ -3,6 +3,7 @@ package intel
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -594,6 +595,106 @@ End Sub
 	}
 	if !hasSymbol(symbols, "RunReport") {
 		t.Fatalf("RunReport not found in symbols: %+v", symbols)
+	}
+}
+
+func TestRunnableProceduresFiltersCodeLensTargets(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		URI:        "file:///C:/work/src/modules/Main.bas",
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub RunReport()
+End Sub
+Private Sub HiddenRunner()
+End Sub
+Public Sub WithArg(ByVal value As Long)
+End Sub
+Public Function Build() As String
+End Function
+Public Property Get Title() As String
+End Property
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As Long)
+Public Sub Test_RunReport()
+End Sub
+Public Sub Totals_Test()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub", "Test_RunReport:test", "Totals_Test:test"}) {
+		t.Fatalf("runnable procedures = %#v", got)
+	}
+	for _, procedure := range procedures {
+		if procedure.URI != doc.URI || procedure.ModuleName != "Main" || !strings.HasPrefix(procedure.QualifiedName, "Main.") {
+			t.Fatalf("unexpected runnable procedure metadata: %+v", procedure)
+		}
+	}
+
+	noTestsCfg := DefaultCodeLensConfig()
+	noTestsCfg.RunTests = false
+	procedures, err = analyzer.RunnableProcedures(doc, noTestsCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub"}) {
+		t.Fatalf("runnable procedures without tests = %#v", got)
+	}
+
+	disabledCfg := DefaultCodeLensConfig()
+	disabledCfg.Enabled = false
+	procedures, err = analyzer.RunnableProcedures(doc, disabledCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(procedures) != 0 {
+		t.Fatalf("disabled runnable procedures = %+v, want none", procedures)
+	}
+}
+
+func TestRunnableProceduresUserFormEventsAreConfigurable(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "CustomerForm.frm"),
+		ModuleKind: "form",
+		Source: `VERSION 5.00
+Begin VB.UserForm CustomerForm
+End
+Attribute VB_Name = "CustomerForm"
+Option Explicit
+Private Sub UserForm_Initialize()
+End Sub
+Private Sub cmdOK_Click()
+End Sub
+Public Sub ShowForTest()
+End Sub
+Public Sub Test_Form()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"ShowForTest:sub", "Test_Form:test"}) {
+		t.Fatalf("default form runnable procedures = %#v", got)
+	}
+
+	cfg := DefaultCodeLensConfig()
+	cfg.UserFormEvents = true
+	procedures, err = analyzer.RunnableProcedures(doc, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"UserForm_Initialize:sub", "cmdOK_Click:sub", "ShowForTest:sub", "Test_Form:test"}) {
+		t.Fatalf("form runnable procedures with events = %#v", got)
 	}
 }
 
@@ -2141,6 +2242,14 @@ func hasSymbol(symbols []Symbol, name string) bool {
 		}
 	}
 	return false
+}
+
+func runnableProcedureNames(procedures []RunnableProcedure) []string {
+	out := make([]string, 0, len(procedures))
+	for _, procedure := range procedures {
+		out = append(out, procedure.Name+":"+procedure.Kind)
+	}
+	return out
 }
 
 func hasDiagnostic(diagnostics []Diagnostic, code string) bool {

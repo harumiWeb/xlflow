@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added CodeLens commands for running no-argument VBA procedures and tests through `xlflow.runProcedure` and `xlflow.runTestProcedure`.
+- Added CodeLens and save-before-run settings forwarded to `xlflow lsp --stdio` at startup.
+
 ## 0.1.0
 
 - Added the initial production VS Code extension for xlflow.

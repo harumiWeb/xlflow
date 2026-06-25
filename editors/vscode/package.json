@@ -23,7 +23,7 @@
     "url": "https://github.com/harumiWeb/xlflow.git",
     "directory": "editors/vscode"
   },
-  "publisher": "harumiweb",
+  "publisher": "ed2c27e6-6563-6407-a650-31eef08e0f25",
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "pnpm run check && pnpm run bundle",
@@ -72,6 +72,31 @@
           ],
           "default": "messages",
           "description": "Trace verbosity for the xlflow language server output channel."
+        },
+        "xlflow.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show xlflow CodeLens actions above runnable VBA procedures."
+        },
+        "xlflow.codeLens.runProcedure": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run actions above runnable VBA procedures."
+        },
+        "xlflow.codeLens.runTests": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run Test actions above VBA test procedures."
+        },
+        "xlflow.codeLens.userFormEvents": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show Run actions above UserForm event handlers."
+        },
+        "xlflow.run.saveBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save dirty VBA documents before running a procedure."
         },
         "xlflow.completion.triggerSuggestInStatements": {
           "type": "boolean",
@@ -138,6 +163,16 @@
       {
         "command": "xlflow.runMacro",
         "title": "xlflow: Run Macro",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runProcedure",
+        "title": "xlflow: Run Procedure",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runTestProcedure",
+        "title": "xlflow: Run Test Procedure",
         "category": "xlflow"
       },
       {
@@ -295,6 +330,8 @@
     "onCommand:xlflow.push",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.runMacro",
+    "onCommand:xlflow.runProcedure",
+    "onCommand:xlflow.runTestProcedure",
     "onCommand:xlflow.saveWorkbook",
     "onCommand:xlflow.sessionRestart",
     "onCommand:xlflow.sessionStart",

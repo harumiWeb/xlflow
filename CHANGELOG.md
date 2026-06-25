@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added LSP CodeLens support for runnable no-argument VBA `Sub` procedures, including `Run` and `Run Test` actions backed by in-memory editor buffers.
 - Added `xlflow test list --json` for source-only VBA test discovery, enabling editor integrations to discover tests without parsing VBA in TypeScript or opening Excel.
 - Clarified the CLI JSON contract for editor integrations, including single-document stdout output and inactive `session status --json` payloads with `session.active=false`.
 - Added non-configurable `VB031` lint/preflight validation requiring standard `.bas` modules to include `Attribute VB_Name`.

@@ -1336,7 +1336,8 @@ func TestLinterVBNameAttributeOnlyAppliesToStandardModules(t *testing.T) {
 	classes := filepath.Join(dir, "src", "classes")
 	forms := filepath.Join(dir, "src", "forms")
 	sidecars := filepath.Join(forms, "code")
-	for _, path := range []string{classes, forms, sidecars} {
+	workbook := filepath.Join(dir, "src", "workbook")
+	for _, path := range []string{classes, forms, sidecars, workbook} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1350,13 +1351,19 @@ func TestLinterVBNameAttributeOnlyAppliesToStandardModules(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sidecars, "UserForm1.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(workbook, "ThisWorkbook.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.bas"), []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := issuesByCode(issues, "VB031"); len(got) != 0 {
-		t.Fatalf("VB031 should not apply to class modules, forms, or UserForm sidecars: %+v", got)
+		t.Fatalf("VB031 should not apply to class modules, forms, UserForm sidecars, or document modules: %+v", got)
 	}
 }
 

@@ -247,6 +247,10 @@ func (l Linter) isStandardModulePath(path string) bool {
 	if cleanPath == codeRoot || strings.HasPrefix(cleanPath, codeRoot+strings.ToLower(string(os.PathSeparator))) {
 		return false
 	}
+	workbookRoot := strings.ToLower(filepath.Clean(filepath.Join(l.RootDir, l.Config.Src.Workbook)))
+	if cleanPath == workbookRoot || strings.HasPrefix(cleanPath, workbookRoot+strings.ToLower(string(os.PathSeparator))) {
+		return false
+	}
 	return true
 }
 

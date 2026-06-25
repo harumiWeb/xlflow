@@ -2,7 +2,7 @@
 
 This extension adds VS Code support for source-controlled Excel VBA projects powered by `xlflow`.
 
-The extension is a thin client for `xlflow lsp --stdio` and the xlflow CLI. Diagnostics, hover, completion, signature help, symbols, definition and reference lookup, formatting, and VBA/COM type inference are provided by the Go-based xlflow language server.
+The extension is a thin client for `xlflow lsp --stdio` and the xlflow CLI. Diagnostics, hover, completion, signature help, symbols, definition and reference lookup, formatting, CodeLens, and VBA/COM type inference are provided by the Go-based xlflow language server.
 
 ## Requirements
 
@@ -37,6 +37,11 @@ Common settings:
 - `xlflow.lsp.enabled`: start `xlflow lsp --stdio` for VBA files.
 - `xlflow.lsp.logFile`: log file passed to the language server. The default is `.xlflow/lsp.log`.
 - `xlflow.lsp.trace.server`: trace verbosity for the language server trace output channel.
+- `xlflow.codeLens.enabled`: show xlflow CodeLens actions above runnable VBA procedures.
+- `xlflow.codeLens.runProcedure`: show `Run` actions above runnable VBA procedures.
+- `xlflow.codeLens.runTests`: show `Run Test` actions above VBA test procedures.
+- `xlflow.codeLens.userFormEvents`: show `Run` actions above UserForm event handlers.
+- `xlflow.run.saveBeforeRun`: save dirty VBA documents before running a procedure from CodeLens.
 - `xlflow.completion.triggerSuggestInStatements`: trigger VS Code suggestions in likely VBA statement contexts.
 - `xlflow.completion.progIdsInStrings`: trigger VS Code suggestions inside `CreateObject("...")` and `GetObject("...")` strings.
 - `xlflow.testing.autoDiscover`: automatically discover VBA tests when an xlflow workspace opens.
@@ -52,6 +57,8 @@ The command palette includes:
 - `xlflow: Pull Workbook`
 - `xlflow: Push Sources`
 - `xlflow: Run Macro`
+- `xlflow: Run Procedure`
+- `xlflow: Run Test Procedure`
 - `xlflow: Run Tests`
 - `xlflow: Lint Workspace`
 - `xlflow: Format Document`
@@ -64,6 +71,8 @@ The command palette includes:
 - `xlflow: Open Output`
 
 Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+
+The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
 
 `Format Document` invokes VS Code document formatting for the active editor. For VBA files, formatting is provided by `xlflow lsp --stdio`.
 
@@ -95,7 +104,7 @@ Use the `xlflow` output channel for CLI command output and language client messa
 ## Known Limitations
 
 - The extension does not install or bundle `xlflow`.
-- Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro.
+- Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro. Runnable no-argument `Sub` procedures can be launched from CodeLens.
 - There are no webviews, workbook previews, or rich Excel session management UI.
 - `xlflow: New Project` and `xlflow: Initialize Project` expose only the base CLI workflow, without option pickers for `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - The extension does not implement VBA parsing, diagnostics, formatting, completion candidates, symbol analysis, or type inference in TypeScript.
