@@ -64,6 +64,12 @@ export function registerCommands(
         requireWorkspace: true,
       });
     }),
+    vscode.commands.registerCommand("xlflow.skillInstall", async () => {
+      await installAgentSkill(channels);
+    }),
+    vscode.commands.registerCommand("xlflow.moduleInstall", async () => {
+      await installHelperModules(channels);
+    }),
     vscode.commands.registerCommand("xlflow.pull", async () => {
       await runXlflowCommand(["pull"], "xlflow pull", channels.output, { requireWorkspace: true });
     }),
@@ -120,6 +126,94 @@ export function registerCommands(
       sessionManager.openOutput();
     }),
   );
+}
+
+async function installAgentSkill(channels: XlflowChannels): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage("xlflow skill install requires an open workspace folder.");
+    return;
+  }
+  const provider = await vscode.window.showQuickPick(
+    [
+      { label: "codex", description: "Install for Codex" },
+      { label: "claude", description: "Install for Claude Code" },
+      { label: "cursor", description: "Install for Cursor" },
+      { label: "gemini", description: "Install for Gemini CLI" },
+      { label: "agents", description: "Install shared .agents instructions" },
+    ],
+    {
+      title: "xlflow: Install Agent Skill",
+      placeHolder: "Select the agent provider target",
+    },
+  );
+  if (provider === undefined) {
+    return;
+  }
+
+  const overwrite = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Install without overwrite",
+        description: "Fail if the xlflow skill already exists",
+        force: false,
+      },
+      {
+        label: "Overwrite existing installation",
+        description: "Pass --force to replace an existing xlflow skill",
+        force: true,
+      },
+    ],
+    {
+      title: "xlflow: Install Agent Skill",
+      placeHolder: "Choose overwrite behavior",
+    },
+  );
+  if (overwrite === undefined) {
+    return;
+  }
+
+  const args = ["skill", "install", "--agent", provider.label];
+  if (overwrite.force) {
+    args.push("--force");
+  }
+  await runXlflowCommand(args, `xlflow skill install --agent ${provider.label}`, channels.output, {
+    requireWorkspace: true,
+    workspaceFolder,
+  });
+}
+
+async function installHelperModules(channels: XlflowChannels): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage("xlflow module install requires an open workspace folder.");
+    return;
+  }
+  const mode = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Install to source only",
+        description: "Run xlflow module install",
+        args: ["module", "install"],
+      },
+      {
+        label: "Install and push to workbook",
+        description: "Run xlflow module install --push",
+        args: ["module", "install", "--push"],
+      },
+    ],
+    {
+      title: "xlflow: Install Helper Modules",
+      placeHolder: "Choose how to install bundled helper modules",
+    },
+  );
+  if (mode === undefined) {
+    return;
+  }
+  await runXlflowCommand(mode.args, `xlflow ${mode.args.join(" ")}`, channels.output, {
+    requireWorkspace: true,
+    workspaceFolder,
+  });
 }
 
 async function runProcedureFromCodeLens(value: unknown, channels: XlflowChannels): Promise<void> {

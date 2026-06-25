@@ -6,7 +6,9 @@ export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
   await config.update("lsp.enabled", false, vscode.ConfigurationTarget.Global);
 
-  const extension = vscode.extensions.getExtension("harumiweb.xlflow-vscode");
+  const extension =
+    vscode.extensions.getExtension("ed2c27e6-6563-6407-a650-31eef08e0f25.xlflow-vscode") ??
+    vscode.extensions.getExtension("harumiweb.xlflow-vscode");
   assert.ok(extension, "extension should be discoverable");
   await extension.activate();
 
@@ -19,6 +21,8 @@ export async function run(): Promise<void> {
     "xlflow.checkEnvironment",
     "xlflow.newProject",
     "xlflow.initProject",
+    "xlflow.skillInstall",
+    "xlflow.moduleInstall",
     "xlflow.pull",
     "xlflow.push",
     "xlflow.runMacro",

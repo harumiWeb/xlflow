@@ -151,6 +151,16 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.skillInstall",
+        "title": "xlflow: Install Agent Skill",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.moduleInstall",
+        "title": "xlflow: Install Helper Modules",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.pull",
         "title": "xlflow: Pull Workbook",
         "category": "xlflow"
@@ -324,6 +334,7 @@
     "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",
     "onCommand:xlflow.lintWorkspace",
+    "onCommand:xlflow.moduleInstall",
     "onCommand:xlflow.newProject",
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.pull",
@@ -337,6 +348,7 @@
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",
     "onCommand:xlflow.sessionStop",
+    "onCommand:xlflow.skillInstall",
     "onCommand:xlflow.test",
     "onLanguage:vba",
     "workspaceContains:xlflow.toml"
