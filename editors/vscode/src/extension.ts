@@ -41,7 +41,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  await clientManager.start();
+  try {
+    await clientManager.start();
+  } catch (error) {
+    channels.output.error(`xlflow language server startup failed: ${String(error)}`);
+    vscode.window.showWarningMessage(
+      "xlflow language server failed to start. Command palette actions remain available; check xlflow.path or run xlflow: Check Environment.",
+    );
+  }
   void testController.refreshAuto();
   void sessionManager.refreshStatus();
 }

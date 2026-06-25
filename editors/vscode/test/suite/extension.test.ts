@@ -4,8 +4,16 @@ import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 
 export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
+  const previousLspEnabled = config.get<boolean>("lsp.enabled");
   await config.update("lsp.enabled", false, vscode.ConfigurationTarget.Global);
+  try {
+    await runAssertions(config);
+  } finally {
+    await config.update("lsp.enabled", previousLspEnabled, vscode.ConfigurationTarget.Global);
+  }
+}
 
+async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<void> {
   const extension =
     vscode.extensions.getExtension("ed2c27e6-6563-6407-a650-31eef08e0f25.xlflow-vscode") ??
     vscode.extensions.getExtension("harumiweb.xlflow-vscode");

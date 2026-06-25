@@ -621,6 +621,10 @@ Public Sub Test_RunReport()
 End Sub
 Public Sub Totals_Test()
 End Sub
+Public Sub totals_test()
+End Sub
+Public Sub TEST_Total()
+End Sub
 `,
 	}
 
@@ -628,7 +632,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub", "Test_RunReport:test", "Totals_Test:test"}) {
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub", "Test_RunReport:test", "Totals_Test:test", "totals_test:test", "TEST_Total:test"}) {
 		t.Fatalf("runnable procedures = %#v", got)
 	}
 	for _, procedure := range procedures {
@@ -672,6 +676,8 @@ Private Sub UserForm_Initialize()
 End Sub
 Private Sub cmdOK_Click()
 End Sub
+Private Sub cmd_OK_Click()
+End Sub
 Public Sub ShowForTest()
 End Sub
 Public Sub Test_Form()
@@ -693,7 +699,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"UserForm_Initialize:sub", "cmdOK_Click:sub", "ShowForTest:sub", "Test_Form:test"}) {
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"UserForm_Initialize:sub", "cmdOK_Click:sub", "cmd_OK_Click:sub", "ShowForTest:sub", "Test_Form:test"}) {
 		t.Fatalf("form runnable procedures with events = %#v", got)
 	}
 }
@@ -2209,6 +2215,24 @@ End Sub
 	malformed.Source = "Public Sub Broken(\n    Debug.Print \"unterminated\n"
 	if _, err := analyzer.SemanticTokens(malformed, []Document{malformed}); err != nil {
 		t.Fatalf("semantic tokens should be best-effort on malformed source: %v", err)
+	}
+}
+
+func TestSemanticTokensTolerateNilDatabaseForMemberTokens(t *testing.T) {
+	analyzer := Analyzer{}
+	source := `Option Explicit
+Public Sub Run()
+    Range("A1").Font.Color = 1
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+
+	if _, err := analyzer.SemanticTokens(doc, []Document{doc}); err != nil {
+		t.Fatalf("semantic tokens should tolerate nil database: %v", err)
 	}
 }
 

@@ -252,7 +252,7 @@ async function runTestProcedureFromCodeLens(
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
   await runXlflowCommand(
-    ["--json", "test", "--module", moduleName, "--filter", value.name],
+    ["test", "--module", moduleName, "--filter", value.name],
     `xlflow test ${moduleName}.${value.name}`,
     channels.output,
     { requireWorkspace: true, workspaceFolder },

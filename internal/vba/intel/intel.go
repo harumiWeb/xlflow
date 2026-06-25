@@ -3781,7 +3781,8 @@ func lastRune(s string) (rune, int) {
 }
 
 func isTestProcedureName(name string) bool {
-	return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "test") || strings.HasSuffix(name, "_Test")
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(name, "test") || strings.HasSuffix(name, "_test")
 }
 
 func isUserFormEventProcedure(sym Symbol) bool {
@@ -3795,8 +3796,8 @@ func isUserFormEventProcedure(sym Symbol) bool {
 	if isTestProcedureName(name) {
 		return false
 	}
-	parts := strings.Split(name, "_")
-	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+	idx := strings.LastIndex(name, "_")
+	return idx > 0 && idx < len(name)-1
 }
 
 func moduleNameForDocument(doc Document) string {

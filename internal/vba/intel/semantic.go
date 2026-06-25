@@ -266,6 +266,9 @@ func (b *semanticBuilder) addKnownIdentifierTokens(open []Document) {
 }
 
 func (b *semanticBuilder) addMemberTokens() {
+	if b.analyzer.DB == nil {
+		return
+	}
 	for lineNo, line := range normalizedLines(b.doc.Source) {
 		limit := codeLimit(line)
 		for _, match := range memberExprRe.FindAllStringSubmatchIndex(line[:limit], -1) {
