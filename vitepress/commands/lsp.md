@@ -28,13 +28,17 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `xlflow lsp --check` works even before a project has an `xlflow.toml`; it validates the parser and built-in type database using default configuration.
 
-The MVP server supports full document synchronization, diagnostics, document symbols, workspace symbols, definition lookup, references, hover, completion, signature help, and document formatting. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
+The MVP server supports full document synchronization, diagnostics, semantic tokens, document symbols, workspace symbols, definition lookup, references, hover, completion, signature help, document formatting, and CodeLens. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
 
 Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
 
 The LSP also publishes editor-first argument diagnostics such as `VB030` for missing required arguments, excessive arguments, and unknown named arguments when the target signature is known from project symbols or the built-in VBA/COM database. These diagnostics are intentionally LSP-only for now and are not yet part of the `xlflow lint` CLI contract.
 
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
+
+Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Range and delta semantic token requests are not advertised yet.
+
+CodeLens is provided through `textDocument/codeLens` with `resolveProvider=false`. The server returns `$(play) Run` for runnable no-argument `Sub` procedures and `$(beaker) Run Test` for no-argument test procedures named `Test*`, `test*`, or `*_Test`; VS Code renders those `$(...)` prefixes as codicons. Function, Property, Declare, and argument-bearing procedures are intentionally excluded. UserForm event-style procedures are hidden by default unless the editor passes `initializationOptions.codeLens.userFormEvents=true`.
 
 For UserForms, xlflow reads tracked `.frm` files and extracts design-time controls for code intelligence. Controls such as `txtName` in `Me.txtName.Text` and `Me.Controls("txtName").Text` can participate in hover, completion, and definition lookup without opening Excel.
 

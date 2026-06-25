@@ -3,6 +3,7 @@ package intel
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -64,11 +65,14 @@ Public Sub Run()
     missingValue = 1
 End Sub
 `
+	doc.Source = `Attribute VB_Name = "Main"
+` + doc.Source
 	if diagnostics := analyzer.Diagnostics(doc); len(diagnostics) != 0 {
 		t.Fatalf("expected undeclared diagnostic to clear, got %+v", diagnostics)
 	}
 
-	doc.Source = `Option Explicit
+	doc.Source = `Attribute VB_Name = "Main"
+Option Explicit
 Public Sub Run()
     Range("A1").Value = 1
 End Sub
@@ -227,6 +231,37 @@ End Sub
 	}
 	if help.ActiveParameter != 1 {
 		t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+	}
+}
+
+func TestDiagnosticsTreatErrAsBuiltinGlobal(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test(expected As Variant, actual As Variant)
+    If IsObject(expected) Or IsObject(actual) Then
+        Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals", "AssertEquals supports scalar values only. Compare object properties such as Range.Value2."
+    End If
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	if hasDiagnosticMessage(diagnostics, `Undeclared identifier "Err"`) {
+		t.Fatalf("Err should be treated as a built-in global, got %+v", diagnostics)
+	}
+
+	line := `        Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals",`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 3, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one Err.Raise signature", help)
+	}
+	if got := help.Signatures[0].Label; got != "VBA.ErrObject.Raise(Number As Long, Optional Source As String, Optional Description As String, Optional HelpFile As String, Optional HelpContext As Long) As void" {
+		t.Fatalf("signature label = %q", got)
 	}
 }
 
@@ -560,6 +595,112 @@ End Sub
 	}
 	if !hasSymbol(symbols, "RunReport") {
 		t.Fatalf("RunReport not found in symbols: %+v", symbols)
+	}
+}
+
+func TestRunnableProceduresFiltersCodeLensTargets(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		URI:        "file:///C:/work/src/modules/Main.bas",
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub RunReport()
+End Sub
+Private Sub HiddenRunner()
+End Sub
+Public Sub WithArg(ByVal value As Long)
+End Sub
+Public Function Build() As String
+End Function
+Public Property Get Title() As String
+End Property
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As Long)
+Public Sub Test_RunReport()
+End Sub
+Public Sub Totals_Test()
+End Sub
+Public Sub totals_test()
+End Sub
+Public Sub TEST_Total()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub", "Test_RunReport:test", "Totals_Test:test", "totals_test:test", "TEST_Total:test"}) {
+		t.Fatalf("runnable procedures = %#v", got)
+	}
+	for _, procedure := range procedures {
+		if procedure.URI != doc.URI || procedure.ModuleName != "Main" || !strings.HasPrefix(procedure.QualifiedName, "Main.") {
+			t.Fatalf("unexpected runnable procedure metadata: %+v", procedure)
+		}
+	}
+
+	noTestsCfg := DefaultCodeLensConfig()
+	noTestsCfg.RunTests = false
+	procedures, err = analyzer.RunnableProcedures(doc, noTestsCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"RunReport:sub", "HiddenRunner:sub"}) {
+		t.Fatalf("runnable procedures without tests = %#v", got)
+	}
+
+	disabledCfg := DefaultCodeLensConfig()
+	disabledCfg.Enabled = false
+	procedures, err = analyzer.RunnableProcedures(doc, disabledCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(procedures) != 0 {
+		t.Fatalf("disabled runnable procedures = %+v, want none", procedures)
+	}
+}
+
+func TestRunnableProceduresUserFormEventsAreConfigurable(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "CustomerForm.frm"),
+		ModuleKind: "form",
+		Source: `VERSION 5.00
+Begin VB.UserForm CustomerForm
+End
+Attribute VB_Name = "CustomerForm"
+Option Explicit
+Private Sub UserForm_Initialize()
+End Sub
+Private Sub cmdOK_Click()
+End Sub
+Private Sub cmd_OK_Click()
+End Sub
+Public Sub ShowForTest()
+End Sub
+Public Sub Test_Form()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"ShowForTest:sub", "Test_Form:test"}) {
+		t.Fatalf("default form runnable procedures = %#v", got)
+	}
+
+	cfg := DefaultCodeLensConfig()
+	cfg.UserFormEvents = true
+	procedures, err = analyzer.RunnableProcedures(doc, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"UserForm_Initialize:sub", "cmdOK_Click:sub", "cmd_OK_Click:sub", "ShowForTest:sub", "Test_Form:test"}) {
+		t.Fatalf("form runnable procedures with events = %#v", got)
 	}
 }
 
@@ -1989,6 +2130,112 @@ End Sub
 	}
 }
 
+func TestSemanticTokensCoverDeclarationsBuiltinsMembersAndUTF16(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+' 日本語コメント
+Public Type Customer
+    Name As String
+End Type
+Public Enum Status
+    StatusReady = 1
+End Enum
+Public Sub Run(ByVal value As String)
+    Dim ws As Worksheet
+    Set ws = Worksheets("Input")
+    Debug.Print value, xlLandscape
+    ws.Range("A1").Value = 1
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasSemanticToken(tokens, SemanticTokenFunction, "Run", source) {
+		t.Fatalf("function token for Run missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenParameter, "value", source) {
+		t.Fatalf("parameter token for value missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenClass, "Worksheet", source) {
+		t.Fatalf("default-library class token for Worksheet missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenFunction, "Debug", source) && !hasSemanticToken(tokens, SemanticTokenMethod, "Print", source) {
+		t.Fatalf("VBA global function/member token missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenEnumMember, "xlLandscape", source) {
+		t.Fatalf("enum member token for xlLandscape missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenProperty, "Value", source) {
+		t.Fatalf("member property token for Value missing: %+v", tokens)
+	}
+	commentLine := lineIndex(source, "' 日本語コメント")
+	if !hasSemanticTokenAtLine(tokens, SemanticTokenComment, commentLine) {
+		t.Fatalf("comment token after Japanese text missing: %+v", tokens)
+	}
+}
+
+func TestSemanticTokensCoverUserFormControlsAndMalformedSource(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `VERSION 5.00
+Begin VB.Form UserForm1
+   Caption = "UserForm1"
+   Begin MSForms.TextBox txtName
+      Left = 12
+   End
+End
+Attribute VB_Name = "UserForm1"
+Private Sub UserForm_Initialize()
+    Me.txtName.Text = "ready"
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "UserForm1.frm"),
+		ModuleKind: "form",
+		Source:     source,
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenVariable, "txtName", source) {
+		t.Fatalf("UserForm control token missing: %+v", tokens)
+	}
+	if !hasSemanticToken(tokens, SemanticTokenEvent, "Initialize", source) && !hasSemanticToken(tokens, SemanticTokenFunction, "UserForm_Initialize", source) {
+		t.Fatalf("UserForm event/function token missing: %+v", tokens)
+	}
+
+	malformed := doc
+	malformed.Source = "Public Sub Broken(\n    Debug.Print \"unterminated\n"
+	if _, err := analyzer.SemanticTokens(malformed, []Document{malformed}); err != nil {
+		t.Fatalf("semantic tokens should be best-effort on malformed source: %v", err)
+	}
+}
+
+func TestSemanticTokensTolerateNilDatabaseForMemberTokens(t *testing.T) {
+	analyzer := Analyzer{}
+	source := `Option Explicit
+Public Sub Run()
+    Range("A1").Font.Color = 1
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+
+	if _, err := analyzer.SemanticTokens(doc, []Document{doc}); err != nil {
+		t.Fatalf("semantic tokens should tolerate nil database: %v", err)
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()
@@ -2021,6 +2268,14 @@ func hasSymbol(symbols []Symbol, name string) bool {
 	return false
 }
 
+func runnableProcedureNames(procedures []RunnableProcedure) []string {
+	out := make([]string, 0, len(procedures))
+	for _, procedure := range procedures {
+		out = append(out, procedure.Name+":"+procedure.Kind)
+	}
+	return out
+}
+
 func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == code {
@@ -2047,4 +2302,41 @@ func hasDiagnosticMessage(diagnostics []Diagnostic, text string) bool {
 		}
 	}
 	return false
+}
+
+func hasSemanticToken(tokens []SemanticToken, tokenType, text, source string) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && rangeText(source, token.Range) == text {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSemanticTokenAtLine(tokens []SemanticToken, tokenType string, line int) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && token.Range.Start.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeText(source string, r Range) string {
+	line := lineAt(source, r.Start.Line)
+	start := byteIndexForUTF16(line, r.Start.Character)
+	end := byteIndexForUTF16(line, r.End.Character)
+	if start < 0 || end < start || end > len(line) {
+		return ""
+	}
+	return line[start:end]
+}
+
+func lineIndex(source, contains string) int {
+	for i, line := range normalizedLines(source) {
+		if strings.Contains(line, contains) {
+			return i
+		}
+	}
+	return -1
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/sourcegraph/jsonrpc2"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -412,6 +413,11 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		!containsString(initResult.Capabilities.SignatureHelpProvider.TriggerCharacters, " ") {
 		t.Fatalf("signatureHelpProvider = %+v, want trigger characters", initResult.Capabilities.SignatureHelpProvider)
 	}
+	if initResult.Capabilities.CodeLensProvider == nil ||
+		initResult.Capabilities.CodeLensProvider.ResolveProvider == nil ||
+		*initResult.Capabilities.CodeLensProvider.ResolveProvider {
+		t.Fatalf("codeLensProvider = %+v, want resolveProvider=false", initResult.Capabilities.CodeLensProvider)
+	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
@@ -461,6 +467,40 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	}
 	if !hasCompletionItem(fontList.Items, "Color") {
 		t.Fatalf("Font.Color completion missing: %+v", fontList.Items)
+	}
+
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Version:                3,
+		},
+		ContentChanges: []any{
+			map[string]any{"text": "Option Explicit\nPublic Sub UnsavedRun()\nEnd Sub\nPublic Sub Test_UnsavedRun()\nEnd Sub\nPublic Sub WithArg(value As String)\nEnd Sub\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var lenses []protocol.CodeLens
+	if err := clientConn.Call(ctx, string(protocol.MethodTextDocumentCodeLens), protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	}, &lenses); err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 2 {
+		t.Fatalf("code lenses = %+v, want Run and Run Test", lenses)
+	}
+	if lenses[0].Command == nil || lenses[0].Command.Command != "xlflow.runProcedure" || lenses[0].Command.Title != "$(play) Run" {
+		t.Fatalf("first code lens = %+v, want run procedure", lenses[0])
+	}
+	if lenses[1].Command == nil || lenses[1].Command.Command != "xlflow.runTestProcedure" || lenses[1].Command.Title != "$(beaker) Run Test" {
+		t.Fatalf("second code lens = %+v, want run test procedure", lenses[1])
+	}
+	if lenses[0].Range.Start.Line != 1 || lenses[1].Range.Start.Line != 3 {
+		t.Fatalf("code lens ranges = %+v, %+v", lenses[0].Range, lenses[1].Range)
+	}
+	args, ok := lenses[0].Command.Arguments[0].(map[string]any)
+	if !ok || args["name"] != "UnsavedRun" || args["moduleName"] != "Main" || args["qualifiedName"] != "Main.UnsavedRun" || args["kind"] != "sub" {
+		t.Fatalf("code lens args = %#v", lenses[0].Command.Arguments)
 	}
 
 	var shutdown any
@@ -661,6 +701,159 @@ func TestFormattingSkipsFrmDocuments(t *testing.T) {
 	}
 }
 
+func TestInitializeAdvertisesSemanticTokensProvider(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	result, err := s.initialize(nil, &protocol.InitializeParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, ok := result.(protocol.InitializeResult)
+	if !ok {
+		t.Fatalf("initialize result = %T, want InitializeResult", result)
+	}
+	provider, ok := init.Capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)
+	if !ok {
+		t.Fatalf("semanticTokensProvider = %T, want *SemanticTokensOptions", init.Capabilities.SemanticTokensProvider)
+	}
+	if provider.Full != true {
+		t.Fatalf("semantic full provider = %+v, want true", provider.Full)
+	}
+	if provider.Range != nil {
+		t.Fatalf("semantic range provider = %+v, want nil", provider.Range)
+	}
+	if !containsString(provider.Legend.TokenTypes, "function") || !containsString(provider.Legend.TokenTypes, "property") {
+		t.Fatalf("semantic token legend missing expected types: %+v", provider.Legend.TokenTypes)
+	}
+	if !containsString(provider.Legend.TokenModifiers, "defaultLibrary") {
+		t.Fatalf("semantic token modifiers missing defaultLibrary: %+v", provider.Legend.TokenModifiers)
+	}
+}
+
+func TestInitializeAdvertisesCodeLensProviderAndParsesConfig(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	result, err := s.initialize(nil, &protocol.InitializeParams{
+		InitializationOptions: map[string]any{
+			"codeLens": map[string]any{
+				"enabled":        true,
+				"runProcedure":   false,
+				"runTests":       true,
+				"userFormEvents": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, ok := result.(protocol.InitializeResult)
+	if !ok {
+		t.Fatalf("initialize result = %T, want InitializeResult", result)
+	}
+	if init.Capabilities.CodeLensProvider == nil || init.Capabilities.CodeLensProvider.ResolveProvider == nil || *init.Capabilities.CodeLensProvider.ResolveProvider {
+		t.Fatalf("codeLensProvider = %+v, want resolveProvider=false", init.Capabilities.CodeLensProvider)
+	}
+	if s.codeLensConfig.RunProcedure || !s.codeLensConfig.RunTests || !s.codeLensConfig.UserFormEvents {
+		t.Fatalf("codeLensConfig = %+v", s.codeLensConfig)
+	}
+}
+
+func TestCodeLensHonorsConfiguration(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if _, err := s.docs.open(uri, "Option Explicit\nPublic Sub RunReport()\nEnd Sub\nPublic Sub Test_RunReport()\nEnd Sub\n"); err != nil {
+		t.Fatal(err)
+	}
+	s.codeLensConfig = intel.DefaultCodeLensConfig()
+	s.codeLensConfig.RunProcedure = false
+	lenses, err := s.codeLens(nil, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 1 || lenses[0].Command == nil || lenses[0].Command.Command != "xlflow.runTestProcedure" {
+		t.Fatalf("lenses with runProcedure=false = %+v", lenses)
+	}
+
+	s.codeLensConfig = intel.DefaultCodeLensConfig()
+	s.codeLensConfig.RunTests = false
+	lenses, err = s.codeLens(nil, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 1 || lenses[0].Command == nil || lenses[0].Command.Command != "xlflow.runProcedure" {
+		t.Fatalf("lenses with runTests=false = %+v", lenses)
+	}
+
+	s.codeLensConfig = intel.DefaultCodeLensConfig()
+	s.codeLensConfig.Enabled = false
+	lenses, err = s.codeLens(nil, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 0 {
+		t.Fatalf("lenses with enabled=false = %+v", lenses)
+	}
+}
+
+func TestSemanticTokensFullUsesOpenDocumentAndValidEncoding(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub OpenName()\n    Range(\"A1\").Value = xlLandscape\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := s.semanticTokensFull(nil, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens.Data) == 0 || len(tokens.Data)%5 != 0 {
+		t.Fatalf("semantic token data length = %d, want non-empty multiple of 5: %+v", len(tokens.Data), tokens.Data)
+	}
+	decoded := decodeSemanticTokenTypes(tokens.Data)
+	if !containsString(decoded, "function") {
+		t.Fatalf("semantic token data missing function token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	if !containsString(decoded, "property") {
+		t.Fatalf("semantic token data missing property token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	if !containsString(decoded, "enumMember") {
+		t.Fatalf("semantic token data missing enum member token: decoded=%+v data=%+v", decoded, tokens.Data)
+	}
+	assertSemanticTokenDeltasValid(t, tokens.Data)
+}
+
 type rpcRecorder struct {
 	mu          sync.Mutex
 	methodsSeen []string
@@ -743,4 +936,40 @@ func containsString(items []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func decodeSemanticTokenTypes(data []protocol.UInteger) []string {
+	var out []string
+	for i := 0; i+4 < len(data); i += 5 {
+		typeIndex := int(data[i+3])
+		if typeIndex >= 0 && typeIndex < len(intel.SemanticTokenTypes) {
+			out = append(out, intel.SemanticTokenTypes[typeIndex])
+		}
+	}
+	return out
+}
+
+func assertSemanticTokenDeltasValid(t *testing.T, data []protocol.UInteger) {
+	t.Helper()
+	line, character := 0, 0
+	for i := 0; i+4 < len(data); i += 5 {
+		deltaLine := int(data[i])
+		deltaStart := int(data[i+1])
+		length := int(data[i+2])
+		if length <= 0 {
+			t.Fatalf("semantic token at %d has non-positive length: %+v", i, data[i:i+5])
+		}
+		if deltaLine == 0 {
+			if deltaStart < 0 {
+				t.Fatalf("semantic token at %d has negative delta start: %+v", i, data[i:i+5])
+			}
+			character += deltaStart
+		} else {
+			line += deltaLine
+			character = deltaStart
+		}
+		if line < 0 || character < 0 {
+			t.Fatalf("semantic token at %d decoded to negative position: line=%d character=%d", i, line, character)
+		}
+	}
 }

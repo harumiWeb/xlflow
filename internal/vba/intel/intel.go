@@ -93,6 +93,24 @@ type Completion struct {
 	ReplaceRange  *Range
 }
 
+type CodeLensConfig struct {
+	Enabled        bool
+	RunProcedure   bool
+	RunTests       bool
+	UserFormEvents bool
+}
+
+type RunnableProcedure struct {
+	URI           string
+	Name          string
+	ModuleName    string
+	QualifiedName string
+	Kind          string
+	ModuleKind    string
+	Line          int
+	Character     int
+}
+
 type SignatureHelp struct {
 	Signatures      []Signature
 	ActiveSignature int
@@ -153,6 +171,57 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	}
 	out := symbolsFromFile(file, doc.URI)
 	out = append(out, a.formControlSymbols(doc)...)
+	return out, nil
+}
+
+func DefaultCodeLensConfig() CodeLensConfig {
+	return CodeLensConfig{
+		Enabled:        true,
+		RunProcedure:   true,
+		RunTests:       true,
+		UserFormEvents: false,
+	}
+}
+
+func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]RunnableProcedure, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RunnableProcedure, 0)
+	for _, sym := range syms {
+		if strings.TrimSpace(sym.Name) == "" || !strings.EqualFold(sym.Kind, "sub") || len(sym.Parameters) != 0 {
+			continue
+		}
+		isTest := isTestProcedureName(sym.Name)
+		if isTest && !cfg.RunTests {
+			continue
+		}
+		if !isTest && !cfg.RunProcedure {
+			continue
+		}
+		if isUserFormEventProcedure(sym) && !cfg.UserFormEvents {
+			continue
+		}
+		moduleName := firstNonEmpty(sym.Module, moduleNameForDocument(doc))
+		kind := "sub"
+		if isTest {
+			kind = "test"
+		}
+		out = append(out, RunnableProcedure{
+			URI:           firstNonEmpty(doc.URI, sym.File),
+			Name:          sym.Name,
+			ModuleName:    moduleName,
+			QualifiedName: qualifiedName(moduleName, sym.Name),
+			Kind:          kind,
+			ModuleKind:    firstNonEmpty(sym.ModuleKind, doc.ModuleKind),
+			Line:          sym.Selection.Start.Line,
+			Character:     sym.Selection.Start.Character,
+		})
+	}
 	return out, nil
 }
 
@@ -3709,6 +3778,40 @@ func firstRune(s string) (rune, int) {
 
 func lastRune(s string) (rune, int) {
 	return utf8.DecodeLastRuneInString(s)
+}
+
+func isTestProcedureName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(name, "test") || strings.HasSuffix(name, "_test")
+}
+
+func isUserFormEventProcedure(sym Symbol) bool {
+	if !strings.EqualFold(sym.ModuleKind, "form") {
+		return false
+	}
+	name := strings.TrimSpace(sym.Name)
+	if name == "" || !strings.Contains(name, "_") {
+		return false
+	}
+	if isTestProcedureName(name) {
+		return false
+	}
+	idx := strings.LastIndex(name, "_")
+	return idx > 0 && idx < len(name)-1
+}
+
+func moduleNameForDocument(doc Document) string {
+	if strings.TrimSpace(doc.Path) == "" {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+}
+
+func qualifiedName(moduleName, name string) string {
+	if strings.TrimSpace(moduleName) == "" {
+		return name
+	}
+	return moduleName + "." + name
 }
 
 func firstNonEmpty(values ...string) string {

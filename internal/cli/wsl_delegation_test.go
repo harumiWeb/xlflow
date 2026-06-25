@@ -80,6 +80,21 @@ func TestShouldDelegateInspectCommand(t *testing.T) {
 	}
 }
 
+func TestShouldDelegateTestListCommand(t *testing.T) {
+	root := &cobra.Command{Use: "xlflow"}
+	testCmd := &cobra.Command{Use: "test"}
+	listCmd := &cobra.Command{Use: "list"}
+	root.AddCommand(testCmd)
+	testCmd.AddCommand(listCmd)
+
+	if shouldDelegateCommand(listCmd, topLevelCommandName(listCmd)) {
+		t.Fatal("test list should remain local because it only inspects source files")
+	}
+	if !shouldDelegateCommand(testCmd, topLevelCommandName(testCmd)) {
+		t.Fatal("test should remain delegated because it runs workbook-backed tests")
+	}
+}
+
 func TestTopLevelCommandName(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	form := &cobra.Command{Use: "form"}

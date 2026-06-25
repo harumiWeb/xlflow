@@ -498,7 +498,7 @@ func writeCLIWarningLintProject(t *testing.T, lintConfig string) string {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte("Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	body := `[project]
@@ -521,6 +521,9 @@ func writeCLIInlineSuppressionProject(t *testing.T, command string, moduleBody s
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(moduleBody), "attribute vb_name") {
+		moduleBody = "Attribute VB_Name = \"Main\"\n" + moduleBody
 	}
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(moduleBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -3500,6 +3503,58 @@ func TestInspectSymbolsJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestTestListJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	writeTestListFixture(t, dir)
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "test", "list"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("test list json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Tests   struct {
+			Root    string `json:"root"`
+			Summary struct {
+				Files int `json:"files"`
+				Tests int `json:"tests"`
+			} `json:"summary"`
+			Items []struct {
+				Module        string   `json:"module"`
+				Name          string   `json:"name"`
+				QualifiedName string   `json:"qualified_name"`
+				SourcePath    string   `json:"source_path"`
+				Line          int      `json:"line"`
+				Tags          []string `json:"tags"`
+			} `json:"items"`
+		} `json:"tests"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse test list output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "test list" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Tests.Root != "src" || got.Tests.Summary.Files != 1 || got.Tests.Summary.Tests != 2 || len(got.Tests.Items) != 2 {
+		t.Fatalf("unexpected test payload: %+v", got.Tests)
+	}
+	first := got.Tests.Items[0]
+	if first.Module != "SmokeTests" || first.Name != "TestAlpha" || first.QualifiedName != "SmokeTests.TestAlpha" {
+		t.Fatalf("unexpected first test: %+v", first)
+	}
+	if first.SourcePath != "src/modules/SmokeTests.bas" || first.Line <= 0 {
+		t.Fatalf("unexpected first test location: %+v", first)
+	}
+	if strings.Join(first.Tags, ",") != "fast,smoke" {
+		t.Fatalf("unexpected tags: %+v", first.Tags)
+	}
+}
+
 func TestInspectSymbolsStandaloneFormatJSON(t *testing.T) {
 	dir := t.TempDir()
 	writeInspectSymbolsFixture(t, dir, filepath.Join("src", "modules"))
@@ -3646,6 +3701,42 @@ Public Sub Run()
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(dir, sourceDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTestListFixture(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := `[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+`
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "SmokeTests"
+Option Explicit
+
+'@Tag("smoke")
+'@Tag("fast")
+Public Sub TestAlpha()
+End Sub
+
+Public Sub Beta_Test()
+End Sub
+
+Private Sub TestPrivate()
+End Sub
+
+Public Sub TestWithArg(ByVal value As Long)
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "SmokeTests.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -4632,7 +4723,7 @@ func TestPushDoesNotSuppressBlockingLintDiagnosticsInline(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n"
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4672,7 +4763,7 @@ func TestPushDoesNotSuppressBlockingAnalyzeDiagnosticsInline(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ' xlflow:disable-next-line VBA104\n  ws.DisplayGridlines = False\nEnd Sub\n"
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ' xlflow:disable-next-line VBA104\n  ws.DisplayGridlines = False\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

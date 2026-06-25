@@ -184,6 +184,7 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 	if err != nil {
 		return nil, err
 	}
+	issues = append(issues, l.standardModuleAttributeIssues(path, string(source))...)
 
 	parser, err := vbaast.NewParser()
 	if err != nil {
@@ -221,6 +222,62 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 		}
 	}
 	return issues, nil
+}
+
+func (l Linter) standardModuleAttributeIssues(path string, source string) []Issue {
+	if !l.isStandardModulePath(path) || hasVBNameAttribute(source) {
+		return nil
+	}
+	issue := l.issue(path, 1, "VB031", "error", `Standard modules must include Attribute VB_Name = "<ModuleName>". Pull/export the module from Excel or add the exported module attribute before push.`)
+	issue.Kind = "missing_module_attribute"
+	issue.Symbol = "VB_Name"
+	issue.Suggestion = `Add Attribute VB_Name = "` + strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)) + `".`
+	return []Issue{issue}
+}
+
+func (l Linter) isStandardModulePath(path string) bool {
+	if !strings.EqualFold(filepath.Ext(path), ".bas") {
+		return false
+	}
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(l.RootDir) == "" {
+		return true
+	}
+	codeRoot := strings.ToLower(filepath.Clean(filepath.Join(l.RootDir, l.Config.Src.Forms, "code")))
+	cleanPath := strings.ToLower(filepath.Clean(path))
+	if cleanPath == codeRoot || strings.HasPrefix(cleanPath, codeRoot+strings.ToLower(string(os.PathSeparator))) {
+		return false
+	}
+	workbookRoot := strings.ToLower(filepath.Clean(filepath.Join(l.RootDir, l.Config.Src.Workbook)))
+	if cleanPath == workbookRoot || strings.HasPrefix(cleanPath, workbookRoot+strings.ToLower(string(os.PathSeparator))) {
+		return false
+	}
+	return true
+}
+
+func hasVBNameAttribute(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		code := strings.TrimSpace(gui.StripComment(line))
+		if code == "" {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(code), "attribute") {
+			continue
+		}
+		rest := strings.TrimSpace(code[len("Attribute"):])
+		if len(rest) < len("VB_Name") || !strings.EqualFold(rest[:len("VB_Name")], "VB_Name") {
+			continue
+		}
+		rest = strings.TrimSpace(rest[len("VB_Name"):])
+		if !strings.HasPrefix(rest, "=") {
+			continue
+		}
+		value := strings.TrimSpace(rest[1:])
+		if len(value) < 2 || value[0] != '"' {
+			continue
+		}
+		return strings.Index(value[1:], `"`) > 0
+	}
+	return false
 }
 
 func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
@@ -961,7 +1018,7 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" {
 			blocking = append(blocking, issue)
 		}
 	}

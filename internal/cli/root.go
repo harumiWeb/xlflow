@@ -40,6 +40,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/project"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
+	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 
@@ -2981,6 +2982,44 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	cmd.AddCommand(a.testListCommand())
+	return cmd
+}
+
+func (a *app) testListCommand() *cobra.Command {
+	var path string
+	var module string
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List source-defined VBA tests",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("test list")
+			if err != nil {
+				return err
+			}
+			result, err := testdiscover.Discover(testdiscover.Options{
+				RootDir: a.cwd,
+				Config:  cfg,
+				Path:    path,
+				Module:  module,
+			})
+			if err != nil {
+				return a.writeFailure("test list", output.ExitEnvironment, "test_discovery_failed", err)
+			}
+			env := output.New("test list")
+			env.Target = map[string]any{
+				"kind":        "source",
+				"path":        result.Root,
+				"description": "VBA source tests",
+			}
+			env.Tests = result
+			env.Logs = []string{fmt.Sprintf("discovered %d VBA test(s) in %d source file(s)", result.Summary.Tests, result.Summary.Files)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
+	cmd.Flags().StringVar(&module, "module", "", "list only tests in the module whose name exactly matches filter")
 	return cmd
 }
 

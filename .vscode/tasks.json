@@ -2,6 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "compile xlflow VS Code Extension",
+      "type": "process",
+      "command": "pnpm",
+      "windows": {
+        "command": "pnpm.cmd"
+      },
+      "args": [
+        "--dir",
+        "editors/vscode",
+        "compile"
+      ],
+      "problemMatcher": "$tsc",
+      "group": "build"
+    },
+    {
       "label": "compile xlflow LSP Dev Client",
       "type": "process",
       "command": "pnpm",

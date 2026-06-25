@@ -2,6 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run xlflow VS Code Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/editors/vscode/dist/**/*.js"
+      ],
+      "preLaunchTask": "compile xlflow VS Code Extension"
+    },
+    {
       "name": "Run xlflow LSP Dev Client",
       "type": "extensionHost",
       "request": "launch",

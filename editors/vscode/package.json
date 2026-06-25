@@ -1,0 +1,361 @@
+{
+  "name": "xlflow-vscode",
+  "displayName": "Xlflow - VBA Dev Tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
+  "categories": [
+    "Formatters",
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "excel",
+    "language server",
+    "lsp",
+    "macro",
+    "vba",
+    "xlflow"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harumiWeb/xlflow.git",
+    "directory": "editors/vscode"
+  },
+  "publisher": "ed2c27e6-6563-6407-a650-31eef08e0f25",
+  "main": "./dist/extension.js",
+  "scripts": {
+    "compile": "pnpm run check && pnpm run bundle",
+    "watch": "tsc -watch -p ./",
+    "check": "tsc -p ./ --noEmit",
+    "bundle": "node esbuild.js",
+    "package": "vsce package --no-dependencies",
+    "test": "pnpm run compile && node ./dist/test/runTest.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.0"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "xlflow",
+      "properties": {
+        "xlflow.path": {
+          "type": "string",
+          "default": "xlflow",
+          "description": "Path to the xlflow executable."
+        },
+        "xlflow.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start xlflow lsp --stdio for VBA files."
+        },
+        "xlflow.lsp.logFile": {
+          "type": "string",
+          "default": ".xlflow/lsp.log",
+          "description": "Log file passed to xlflow lsp --stdio."
+        },
+        "xlflow.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "messages",
+          "description": "Trace verbosity for the xlflow language server output channel."
+        },
+        "xlflow.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show xlflow CodeLens actions above runnable VBA procedures."
+        },
+        "xlflow.codeLens.runProcedure": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run actions above runnable VBA procedures."
+        },
+        "xlflow.codeLens.runTests": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run Test actions above VBA test procedures."
+        },
+        "xlflow.codeLens.userFormEvents": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show Run actions above UserForm event handlers."
+        },
+        "xlflow.run.saveBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save dirty VBA documents before running a procedure."
+        },
+        "xlflow.completion.triggerSuggestInStatements": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger VS Code suggestions while typing likely VBA statement and declaration prefixes."
+        },
+        "xlflow.completion.progIdsInStrings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger VS Code suggestions inside CreateObject and GetObject ProgID string literals."
+        },
+        "xlflow.testing.autoDiscover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically discover VBA tests for VS Code Test Explorer when an xlflow workspace opens."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[vba]": {
+        "editor.quickSuggestions": {
+          "other": "on",
+          "comments": "off",
+          "strings": "on"
+        },
+        "editor.autoClosingBrackets": "always",
+        "editor.autoClosingQuotes": "always",
+        "editor.semanticHighlighting.enabled": true,
+        "editor.snippetSuggestions": "top",
+        "editor.suggest.snippetsPreventQuickSuggestions": false
+      }
+    },
+    "commands": [
+      {
+        "command": "xlflow.restartLanguageServer",
+        "title": "xlflow: Restart Language Server",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.checkEnvironment",
+        "title": "xlflow: Check Environment",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.newProject",
+        "title": "xlflow: New Project",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.initProject",
+        "title": "xlflow: Initialize Project",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.skillInstall",
+        "title": "xlflow: Install Agent Skill",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.moduleInstall",
+        "title": "xlflow: Install Helper Modules",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.pull",
+        "title": "xlflow: Pull Workbook",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.push",
+        "title": "xlflow: Push Sources",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runMacro",
+        "title": "xlflow: Run Macro",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runProcedure",
+        "title": "xlflow: Run Procedure",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.runTestProcedure",
+        "title": "xlflow: Run Test Procedure",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.test",
+        "title": "xlflow: Run Tests",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.lintWorkspace",
+        "title": "xlflow: Lint Workspace",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.formatDocument",
+        "title": "xlflow: Format Document",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.formatProject",
+        "title": "xlflow: Format Project",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.saveWorkbook",
+        "title": "xlflow: Save Workbook",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStart",
+        "title": "xlflow: Start Session",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStatus",
+        "title": "xlflow: Session Status",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionRestart",
+        "title": "xlflow: Restart Session",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionStop",
+        "title": "xlflow: Stop Session",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openOutput",
+        "title": "xlflow: Open Output",
+        "category": "xlflow"
+      }
+    ],
+    "languages": [
+      {
+        "id": "vba",
+        "aliases": [
+          "VBA",
+          "Visual Basic for Applications"
+        ],
+        "extensions": [
+          ".bas",
+          ".cls",
+          ".frm"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vba",
+        "scopeName": "source.vba",
+        "path": "./syntaxes/vba.tmLanguage.json"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "vba",
+        "scopes": {
+          "namespace": [
+            "entity.name.namespace.vba"
+          ],
+          "type": [
+            "entity.name.type.vba",
+            "support.type.vba"
+          ],
+          "class": [
+            "entity.name.type.class.vba",
+            "support.type.excel.vba",
+            "support.type.com.vba"
+          ],
+          "enum": [
+            "entity.name.type.enum.vba"
+          ],
+          "interface": [
+            "entity.name.type.interface.vba"
+          ],
+          "function": [
+            "entity.name.function.vba",
+            "support.function.builtin.vba"
+          ],
+          "method": [
+            "entity.name.function.vba",
+            "variable.other.member.vba"
+          ],
+          "property": [
+            "entity.name.function.property.vba",
+            "variable.other.property.vba"
+          ],
+          "enumMember": [
+            "constant.other.vba"
+          ],
+          "event": [
+            "entity.name.function.event.vba"
+          ],
+          "variable": [
+            "variable.other.local.vba",
+            "variable.other.vba"
+          ],
+          "parameter": [
+            "variable.parameter.vba"
+          ],
+          "keyword": [
+            "keyword.control.vba",
+            "keyword.other.vba"
+          ],
+          "modifier": [
+            "storage.modifier.vba"
+          ],
+          "operator": [
+            "keyword.operator.vba"
+          ],
+          "string": [
+            "string.quoted.double.vba"
+          ],
+          "number": [
+            "constant.numeric.vba"
+          ],
+          "comment": [
+            "comment.line.vba"
+          ]
+        }
+      }
+    ]
+  },
+  "activationEvents": [
+    "onCommand:xlflow.checkEnvironment",
+    "onCommand:xlflow.formatDocument",
+    "onCommand:xlflow.formatProject",
+    "onCommand:xlflow.initProject",
+    "onCommand:xlflow.lintWorkspace",
+    "onCommand:xlflow.moduleInstall",
+    "onCommand:xlflow.newProject",
+    "onCommand:xlflow.openOutput",
+    "onCommand:xlflow.pull",
+    "onCommand:xlflow.push",
+    "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.runMacro",
+    "onCommand:xlflow.runProcedure",
+    "onCommand:xlflow.runTestProcedure",
+    "onCommand:xlflow.saveWorkbook",
+    "onCommand:xlflow.sessionRestart",
+    "onCommand:xlflow.sessionStart",
+    "onCommand:xlflow.sessionStatus",
+    "onCommand:xlflow.sessionStop",
+    "onCommand:xlflow.skillInstall",
+    "onCommand:xlflow.test",
+    "onLanguage:vba",
+    "workspaceContains:xlflow.toml"
+  ],
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "packageManager": "pnpm@10.28.1"
+}

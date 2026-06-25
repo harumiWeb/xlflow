@@ -166,9 +166,40 @@
       ],
       "confidence": "curated",
       "source": "xlflow"
+    },
+    {
+      "name": "VBA.ErrObject",
+      "library": "VBA",
+      "kind": "class",
+      "summary": "Built-in VBA runtime error object.",
+      "aliases": ["ErrObject"],
+      "properties": [
+        { "name": "Number", "return_type": "Long" },
+        { "name": "Source", "return_type": "String" },
+        { "name": "Description", "return_type": "String" },
+        { "name": "HelpFile", "return_type": "String" },
+        { "name": "HelpContext", "return_type": "Long" },
+        { "name": "LastDllError", "return_type": "Long", "read_only": true }
+      ],
+      "methods": [
+        { "name": "Clear" },
+        {
+          "name": "Raise",
+          "parameters": [
+            { "name": "Number", "type": "Long" },
+            { "name": "Source", "type": "String", "optional": true },
+            { "name": "Description", "type": "String", "optional": true },
+            { "name": "HelpFile", "type": "String", "optional": true },
+            { "name": "HelpContext", "type": "Long", "optional": true }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
     }
   ],
   "global_values": {
-    "Debug": "VBA.Debug"
+    "Debug": "VBA.Debug",
+    "Err": "VBA.ErrObject"
   }
 }

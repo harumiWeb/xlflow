@@ -32,6 +32,9 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveGlobal("Worksheets"); !ok || typ.Name != "Excel.Worksheets" {
 		t.Fatalf("ResolveGlobal(Worksheets) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveGlobal("Err"); !ok || typ.Name != "VBA.ErrObject" {
+		t.Fatalf("ResolveGlobal(Err) = %+v, %v", typ, ok)
+	}
 }
 
 func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) {
@@ -66,6 +69,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
 		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.ErrObject", "Raise"); !ok || len(got.Parameters) != 5 || got.Parameters[0].Name != "Number" {
+		t.Fatalf("Err.Raise parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.ErrObject", "Description"); !ok || got.ReturnType != "String" {
+		t.Fatalf("Err.Description = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("Excel.Worksheet", "Range"); !ok || got.ReturnType != "Excel.Range" {
 		t.Fatalf("Worksheet.Range = %+v, %v", got, ok)
@@ -193,6 +202,9 @@ func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
 
 	if !hasGlobal(db.GlobalsList(), "ThisWorkbook", "Excel.Workbook") {
 		t.Fatalf("ThisWorkbook global missing: %+v", db.GlobalsList())
+	}
+	if !hasGlobal(db.GlobalsList(), "Err", "VBA.ErrObject") {
+		t.Fatalf("Err global missing: %+v", db.GlobalsList())
 	}
 	if !hasConstant(db.ConstantsList(), "xlUp") {
 		t.Fatal("xlUp constant missing")

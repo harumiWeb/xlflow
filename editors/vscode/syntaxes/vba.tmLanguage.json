@@ -1,0 +1,401 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "VBA",
+  "scopeName": "source.vba",
+  "patterns": [
+    { "include": "#attribute" },
+    { "include": "#module-metadata" },
+    { "include": "#userform-designer" },
+    { "include": "#preprocessor" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#line-continuation" },
+    { "include": "#declarations" },
+    { "include": "#labels" },
+    { "include": "#numbers" },
+    { "include": "#dates" },
+    { "include": "#constants" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#operators" },
+    { "include": "#members" }
+  ],
+  "repository": {
+    "module-metadata": {
+      "patterns": [
+        {
+          "name": "meta.module.header.vba",
+          "match": "(?i)^\\s*(VERSION)\\s+([0-9.]+)(?:\\s+(CLASS))?\\b",
+          "captures": {
+            "1": { "name": "keyword.other.version.vba" },
+            "2": { "name": "constant.numeric.version.vba" },
+            "3": { "name": "storage.modifier.class.vba" }
+          }
+        },
+        {
+          "name": "meta.module.header.vba",
+          "match": "(?i)^\\s*(MultiUse)\\s*=\\s*(-?\\d+)\\b",
+          "captures": {
+            "1": { "name": "variable.other.property.module.vba" },
+            "2": { "name": "constant.numeric.integer.vba" }
+          }
+        }
+      ]
+    },
+    "userform-designer": {
+      "patterns": [
+        {
+          "name": "meta.userform.begin.vba",
+          "match": "(?i)^\\s*(Begin)\\s+((?:VB|MSForms)\\.[A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.begin.vba" },
+            "2": { "name": "support.type.userform-control.vba" },
+            "3": { "name": "entity.name.type.userform-control.vba" }
+          }
+        },
+        {
+          "name": "meta.userform.end.vba",
+          "match": "(?i)^\\s*(End)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.end.vba" }
+          }
+        },
+        {
+          "name": "meta.userform.property.vba",
+          "match": "(?i)^\\s*(Accelerator|Alignment|AutoSize|BackColor|BorderColor|BorderStyle|BoundColumn|Caption|ClientHeight|ClientLeft|ClientTop|ClientWidth|ColumnCount|ColumnHeads|ColumnWidths|ControlSource|Cycle|Default|Enabled|EnterFieldBehavior|Font|ForeColor|Height|HelpContextID|IMEMode|KeepScrollBarsVisible|Left|ListRows|ListStyle|Locked|MaxLength|MousePointer|MultiLine|MultiSelect|Picture|PictureAlignment|PictureSizeMode|PictureTiling|RowSource|ScrollBars|ScrollHeight|ScrollLeft|ScrollTop|ScrollWidth|ShowDropButtonWhen|SpecialEffect|StartUpPosition|Style|TabIndex|TabStop|Tag|Text|TextAlign|Top|Value|Visible|Width|WordWrap|Zoom)\\s*(=)",
+          "captures": {
+            "1": { "name": "variable.other.property.userform.vba" },
+            "2": { "name": "keyword.operator.assignment.vba" }
+          }
+        }
+      ]
+    },
+    "attribute": {
+      "name": "meta.attribute.vba",
+      "begin": "^\\s*(Attribute)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.attribute.vba" },
+        "2": { "name": "variable.other.attribute-name.vba" },
+        "3": { "name": "keyword.operator.assignment.vba" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#constants" },
+        { "include": "#numbers" }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.conditional.vba",
+          "match": "(?i)^\\s*(#(?:If|ElseIf|Else|End\\s+If)\\b)(.*)$",
+          "captures": {
+            "1": { "name": "keyword.control.preprocessor.vba" },
+            "2": { "name": "meta.preprocessor.expression.vba" }
+          }
+        },
+        {
+          "name": "meta.preprocessor.constant.vba",
+          "match": "^\\s*(#Const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
+          "captures": {
+            "1": { "name": "keyword.control.preprocessor.vba" },
+            "2": { "name": "variable.other.constant.preprocessor.vba" },
+            "3": { "name": "keyword.operator.assignment.vba" }
+          }
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.apostrophe.vba",
+          "match": "'.*$"
+        },
+        {
+          "name": "comment.line.rem.vba",
+          "match": "(?i)(^|:)\\s*\\bRem\\b.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.vba",
+          "begin": "\"",
+          "end": "\"(?!\")",
+          "patterns": [
+            {
+              "name": "constant.character.escape.quote.vba",
+              "match": "\"\""
+            }
+          ]
+        }
+      ]
+    },
+    "line-continuation": {
+      "name": "punctuation.separator.continuation.line.vba",
+      "match": "_\\s*$"
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "meta.option.vba",
+          "match": "(?i)^\\s*(Option)\\s+(Explicit|Base|Compare\\s+(?:Binary|Text|Database)|Private\\s+Module)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.option.vba" },
+            "2": { "name": "keyword.other.option.value.vba" }
+          }
+        },
+        {
+          "name": "meta.procedure.event.vba",
+          "match": "(?i)\\b(?:(Public|Private|Friend|Static)\\s+)?(Sub)\\s+([A-Za-z_][A-Za-z0-9_]*)_([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.visibility.vba" },
+            "2": { "name": "storage.type.procedure.vba" },
+            "3": { "name": "variable.language.event-source.vba" },
+            "4": { "name": "entity.name.function.event.vba" }
+          }
+        },
+        {
+          "name": "meta.procedure.vba",
+          "match": "(?i)\\b(?:(Public|Private|Friend|Static)\\s+)?(Sub|Function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.visibility.vba" },
+            "2": { "name": "storage.type.procedure.vba" },
+            "3": { "name": "entity.name.function.vba" }
+          }
+        },
+        {
+          "name": "meta.property.vba",
+          "match": "(?i)\\b(?:(Public|Private|Friend|Static)\\s+)?(Property)\\s+(Get|Let|Set)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.visibility.vba" },
+            "2": { "name": "storage.type.property.vba" },
+            "3": { "name": "storage.type.property.accessor.vba" },
+            "4": { "name": "entity.name.function.property.vba" }
+          }
+        },
+        {
+          "name": "meta.declare.vba",
+          "match": "(?i)\\b(?:(Public|Private)\\s+)?(Declare)\\s+(PtrSafe\\s+)?(Sub|Function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.visibility.vba" },
+            "2": { "name": "storage.type.declare.vba" },
+            "3": { "name": "storage.modifier.ptrsafe.vba" },
+            "4": { "name": "storage.type.procedure.vba" },
+            "5": { "name": "entity.name.function.external.vba" }
+          }
+        },
+        {
+          "name": "meta.type.vba",
+          "match": "(?i)\\b(?:(Public|Private)\\s+)?(Type|Enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.visibility.vba" },
+            "2": { "name": "storage.type.user-defined.vba" },
+            "3": { "name": "entity.name.type.user-defined.vba" }
+          }
+        },
+        {
+          "name": "meta.implements.vba",
+          "match": "(?i)^\\s*(Implements)\\s+([A-Za-z_][A-Za-z0-9_.]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.implements.vba" },
+            "2": { "name": "entity.name.type.interface.vba" }
+          }
+        },
+        {
+          "name": "meta.variable.declaration.typed.vba",
+          "match": "(?i)\\b(Dim|Static|Public|Private|Friend|Global|Const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\([^)]*\\))?\\s*(As)\\s+(New\\s+)?([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "storage.type.variable.vba" },
+            "2": { "name": "variable.other.declaration.vba" },
+            "3": { "name": "keyword.other.as.vba" },
+            "4": { "name": "keyword.other.new.vba" },
+            "5": { "name": "support.type.vba" }
+          }
+        },
+        {
+          "name": "meta.parameter.typed.vba",
+          "match": "(?i)\\b(ByVal|ByRef|Optional|ParamArray)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\([^)]*\\))?\\s*(As)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.parameter.vba" },
+            "2": { "name": "variable.parameter.vba" },
+            "3": { "name": "keyword.other.as.vba" },
+            "4": { "name": "support.type.vba" }
+          }
+        },
+        {
+          "name": "meta.variable.declaration.vba",
+          "match": "(?i)\\b(Public|Private|Friend|Dim|Static|Const|Global)\\b",
+          "captures": {
+            "1": { "name": "storage.type.variable.vba" }
+          }
+        },
+        {
+          "name": "storage.modifier.parameter.vba",
+          "match": "(?i)\\b(ByVal|ByRef|Optional|ParamArray)\\b"
+        },
+        {
+          "name": "keyword.other.as-new.vba",
+          "match": "(?i)\\b(As|New|Lib|Alias|Implements)\\b"
+        }
+      ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "name": "entity.name.label.line-number.vba",
+          "match": "^\\s*\\d+(?=\\s|$)"
+        },
+        {
+          "name": "entity.name.label.vba",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:",
+          "captures": {
+            "1": { "name": "entity.name.label.vba" }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.vba",
+          "match": "(?i)\\b&H[0-9A-F]+(?:[&!#@]|\\^)?\\b"
+        },
+        {
+          "name": "constant.numeric.octal.vba",
+          "match": "(?i)\\b&O[0-7]+(?:[&!#@]|\\^)?\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.vba",
+          "match": "(?i)(?:\\b\\d+(?:\\.\\d+)?|\\.\\d+)(?:E[+-]?\\d+)?(?:[%&!#@]|\\^)?\\b"
+        }
+      ]
+    },
+    "dates": {
+      "name": "constant.other.date.vba",
+      "match": "#[^#\\r\\n]+#"
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.vba",
+          "match": "(?i)\\b(True|False|Nothing|Null|Empty|Missing|Me)\\b"
+        },
+        {
+          "name": "constant.other.excel.vba",
+          "match": "\\bxl[A-Za-z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "constant.other.office.vba",
+          "match": "\\bmso[A-Za-z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "constant.other.msforms.vba",
+          "match": "\\bfm[A-Za-z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "constant.other.vb.vba",
+          "match": "\\bvb[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "support.constant.error.vba",
+          "match": "(?i)\\b(vbObjectError)\\b"
+        },
+        {
+          "name": "constant.other.named-argument.vba",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*:=)"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.conditional.vba",
+          "match": "(?i)\\b(If|Then|Else|ElseIf|End\\s+If|Select\\s+Case|Select|Case|End\\s+Select)\\b"
+        },
+        {
+          "name": "keyword.control.loop.vba",
+          "match": "(?i)\\b(For\\s+Each|For|Each|In|To|Step|Next|Do|Loop|While|Wend|Until|Exit\\s+For|Exit\\s+Do)\\b"
+        },
+        {
+          "name": "keyword.control.flow.vba",
+          "match": "(?i)\\b(Exit\\s+Sub|Exit\\s+Function|Exit\\s+Property|Exit|GoTo|GoSub|Return|Stop|End)\\b"
+        },
+        {
+          "name": "keyword.control.error.vba",
+          "match": "(?i)\\b(On\\s+Error|Resume\\s+Next|Resume|Err|Error)\\b"
+        },
+        {
+          "name": "keyword.control.with.vba",
+          "match": "(?i)\\b(With|End\\s+With)\\b"
+        },
+        {
+          "name": "keyword.operator.word.vba",
+          "match": "(?i)\\b(And|Or|Not|Xor|Eqv|Imp|Is|Like|Mod)\\b"
+        },
+        {
+          "name": "keyword.other.vba",
+          "match": "(?i)\\b(Call|Set|Let|Get|RaiseEvent|Event|Load|Unload|ReDim|Preserve|Erase|Open|Close|Input|Print|Write|Lock|Unlock|Name|Kill|MkDir|RmDir|ChDir|ChDrive|Declare|Lib|Alias|PtrSafe|WithEvents)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.vba",
+          "match": "(?i)\\b(Boolean|Byte|Currency|Date|Decimal|Double|Integer|Long|LongLong|LongPtr|Object|Single|String|Variant|Any)\\b"
+        },
+        {
+          "name": "support.type.excel.vba",
+          "match": "\\b(?:Excel\\.)?(Application|Workbook|Workbooks|Worksheet|Worksheets|Sheets|Range|Chart|ChartObject|ChartObjects|ListObject|ListObjects|PivotTable|PivotTables|Shape|Shapes|Window|Windows|Name|Names|QueryTable|QueryTables|TableObject|Hyperlink|Hyperlinks|Comment|Interior|Font|Borders|Validation|PageSetup|AutoFilter|Sort|Series|Axis|Legend)\\b"
+        },
+        {
+          "name": "support.type.com.vba",
+          "match": "\\b(?:Scripting\\.)?(Dictionary|FileSystemObject|TextStream|Folder|File|Drive)\\b|\\b(?:ADODB\\.)?(Connection|Recordset|Command|Parameter|Field|Fields)\\b|\\b(?:MSForms\\.)?(UserForm|Control|TextBox|ComboBox|CommandButton|Label|CheckBox|OptionButton|Frame|ListBox|MultiPage|Page|ToggleButton|SpinButton|ScrollBar|Image)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.vba",
+          "match": "<=|>=|<>|=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.vba",
+          "match": "\\+|-|\\*\\*|\\*|/|\\\\|\\^|&"
+        }
+      ]
+    },
+    "members": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.vba",
+          "match": "(?i)\\b(CreateObject|GetObject|MsgBox|InputBox|Debug\\.Print|Debug|CStr|CLng|CLngLng|CLngPtr|CInt|CBool|CDate|CDbl|CSng|CVar|CCur|CByte|Val|Len|LenB|Left|LeftB|Right|RightB|Mid|MidB|Trim|LTrim|RTrim|InStr|InStrRev|Replace|Split|Join|Array|UBound|LBound|IsNull|IsEmpty|IsNumeric|IsDate|IsObject|TypeName|VarType|IIf|Choose|Switch|Format|FormatDateTime|Date|Now|Time|Timer|DateSerial|TimeSerial|DateValue|TimeValue|Year|Month|Day|Hour|Minute|Second|Weekday|DateAdd|DateDiff|DatePart|Abs|Sgn|Int|Fix|Round|Rnd|Randomize|Sin|Cos|Tan|Atn|Sqr|Log|Exp|RGB|Hex|Oct|Chr|ChrW|Asc|AscW|Str|StrComp|StrConv|StrReverse|LCase|UCase|Space|String|Environ|Dir|FreeFile|EOF|LOF|Seek|FileLen|FileDateTime|CurDir|Shell)\\b"
+        },
+        {
+          "name": "variable.language.excel.vba",
+          "match": "\\b(Application|ThisWorkbook|ActiveWorkbook|ActiveSheet|ActiveCell|Selection|Workbooks|Worksheets|Sheets|Range|Cells|Rows|Columns|Names|Charts)\\b"
+        },
+        {
+          "name": "variable.other.property.vba",
+          "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)(?=\\s*=)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.dot.vba" },
+            "2": { "name": "variable.other.property.vba" }
+          }
+        },
+        {
+          "name": "variable.other.member.vba",
+          "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.dot.vba" },
+            "2": { "name": "variable.other.member.vba" }
+          }
+        }
+      ]
+    }
+  }
+}
