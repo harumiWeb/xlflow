@@ -1,6 +1,6 @@
 {
   "name": "xlflow-vscode",
-  "displayName": "xlflow",
+  "displayName": "Xlflow - VBA Dev Tools",
   "version": "0.1.0",
   "private": true,
   "description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
