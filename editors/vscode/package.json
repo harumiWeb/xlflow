@@ -250,7 +250,9 @@
       {
         "command": "xlflow.sessionStart",
         "title": "xlflow: Start Session",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(play)",
+        "enablement": "xlflow.sessionStartEnabled"
       },
       {
         "command": "xlflow.sessionStatus",
@@ -265,7 +267,9 @@
       {
         "command": "xlflow.sessionStop",
         "title": "xlflow: Stop Session",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(debug-stop)",
+        "enablement": "xlflow.sessionStopEnabled"
       },
       {
         "command": "xlflow.openOutput",
@@ -304,8 +308,7 @@
       {
         "command": "xlflow.sessionToggle",
         "title": "xlflow: Toggle Session",
-        "category": "xlflow",
-        "icon": "$(debug-start)"
+        "category": "xlflow"
       },
       {
         "command": "xlflow.setupActions",
@@ -346,9 +349,14 @@
           "group": "navigation@3"
         },
         {
-          "command": "xlflow.sessionToggle",
+          "command": "xlflow.sessionStart",
           "when": "view == xlflow.project",
           "group": "navigation@4"
+        },
+        {
+          "command": "xlflow.sessionStop",
+          "when": "view == xlflow.project",
+          "group": "navigation@5"
         },
         {
           "command": "xlflow.refreshModules",

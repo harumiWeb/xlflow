@@ -299,6 +299,29 @@ export class SessionManager implements vscode.Disposable {
       this.snapshot.state === "error"
         ? new vscode.ThemeColor("statusBarItem.warningBackground")
         : undefined;
+    this.updateSessionContext();
+  }
+
+  private updateSessionContext(): void {
+    const projectReady = this.projectKind === "ready";
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionActive",
+      projectReady && this.snapshot.state === "active",
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionStartEnabled",
+      projectReady &&
+        (this.snapshot.state === "unknown" ||
+          this.snapshot.state === "inactive" ||
+          this.snapshot.state === "error"),
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionStopEnabled",
+      projectReady && this.snapshot.state === "active",
+    );
   }
 }
 
