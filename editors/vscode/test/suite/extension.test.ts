@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
+import { readExcelPathFromToml } from "../../src/sidebar";
 
 export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
@@ -47,13 +48,27 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.sessionStop",
     "xlflow.sessionActions",
     "xlflow.openOutput",
+    "xlflow.refreshProject",
+    "xlflow.refreshModules",
+    "xlflow.refreshTests",
+    "xlflow.runAllTests",
+    "xlflow.runDoctor",
+    "xlflow.sessionToggle",
+    "xlflow.setupActions",
+    "xlflow.openDocumentation",
+    "xlflow.openModule",
+    "xlflow.openProcedure",
   ]) {
     assert.ok(commands.includes(command), `${command} should be registered`);
   }
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
-  assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow");
-  assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session");
+  assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow: No Session");
+  assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session Active");
+  assert.strictEqual(
+    sessionStatusText("inactive", "notInitialized"),
+    "$(circle-slash) xlflow: No Project",
+  );
   assert.strictEqual(
     sessionStateFromEnvelope({ status: "ok", session: { active: true } }),
     "active",
@@ -63,4 +78,8 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "inactive",
   );
   assert.strictEqual(sessionStateFromEnvelope({ status: "failed" }), "error");
+  assert.strictEqual(
+    readExcelPathFromToml('[project]\nname = "sample"\n[excel]\npath = "build/Book.xlsm"\n'),
+    "build/Book.xlsm",
+  );
 }

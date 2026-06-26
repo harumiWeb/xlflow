@@ -129,6 +129,39 @@
         "editor.suggest.snippetsPreventQuickSuggestions": false
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "xlflow",
+          "title": "xlflow",
+          "icon": "images/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "xlflow": [
+        {
+          "id": "xlflow.setup",
+          "name": "Project Setup",
+          "when": "!xlflow.projectReady"
+        },
+        {
+          "id": "xlflow.project",
+          "name": "Project",
+          "when": "xlflow.projectReady"
+        },
+        {
+          "id": "xlflow.modules",
+          "name": "Modules",
+          "when": "xlflow.projectReady"
+        },
+        {
+          "id": "xlflow.tests",
+          "name": "Tests",
+          "when": "xlflow.projectReady"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "xlflow.restartLanguageServer",
@@ -163,12 +196,14 @@
       {
         "command": "xlflow.pull",
         "title": "xlflow: Pull Workbook",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "xlflow.push",
         "title": "xlflow: Push Sources",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "xlflow.runMacro",
@@ -178,12 +213,14 @@
       {
         "command": "xlflow.runProcedure",
         "title": "xlflow: Run Procedure",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(play)"
       },
       {
         "command": "xlflow.runTestProcedure",
         "title": "xlflow: Run Test Procedure",
-        "category": "xlflow"
+        "category": "xlflow",
+        "icon": "$(beaker)"
       },
       {
         "command": "xlflow.test",
@@ -234,8 +271,119 @@
         "command": "xlflow.openOutput",
         "title": "xlflow: Open Output",
         "category": "xlflow"
+      },
+      {
+        "command": "xlflow.refreshProject",
+        "title": "xlflow: Refresh Project",
+        "category": "xlflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "xlflow.refreshModules",
+        "title": "xlflow: Refresh Modules",
+        "category": "xlflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "xlflow.refreshTests",
+        "title": "xlflow: Refresh Tests",
+        "category": "xlflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "xlflow.runAllTests",
+        "title": "xlflow: Run All Tests",
+        "category": "xlflow",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "xlflow.runDoctor",
+        "title": "xlflow: Run Doctor",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.sessionToggle",
+        "title": "xlflow: Toggle Session",
+        "category": "xlflow",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "xlflow.setupActions",
+        "title": "xlflow: Project Setup Actions",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openDocumentation",
+        "title": "xlflow: Open Documentation",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openModule",
+        "title": "xlflow: Open Module",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openProcedure",
+        "title": "xlflow: Open Procedure",
+        "category": "xlflow"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "xlflow.refreshProject",
+          "when": "view == xlflow.project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.pull",
+          "when": "view == xlflow.project",
+          "group": "navigation@2"
+        },
+        {
+          "command": "xlflow.push",
+          "when": "view == xlflow.project",
+          "group": "navigation@3"
+        },
+        {
+          "command": "xlflow.sessionToggle",
+          "when": "view == xlflow.project",
+          "group": "navigation@4"
+        },
+        {
+          "command": "xlflow.refreshModules",
+          "when": "view == xlflow.modules",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.runAllTests",
+          "when": "view == xlflow.tests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.refreshTests",
+          "when": "view == xlflow.tests",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "xlflow.runProcedure",
+          "when": "view == xlflow.modules && viewItem == xlflow.procedure",
+          "group": "inline@1"
+        },
+        {
+          "command": "xlflow.runTestProcedure",
+          "when": "view == xlflow.modules && viewItem == xlflow.testProcedure",
+          "group": "inline@1"
+        },
+        {
+          "command": "xlflow.runTestProcedure",
+          "when": "view == xlflow.tests && viewItem == xlflow.testWithSource",
+          "group": "inline@1"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "vba",
@@ -336,21 +484,36 @@
     "onCommand:xlflow.lintWorkspace",
     "onCommand:xlflow.moduleInstall",
     "onCommand:xlflow.newProject",
+    "onCommand:xlflow.openDocumentation",
+    "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",
+    "onCommand:xlflow.openProcedure",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
+    "onCommand:xlflow.refreshModules",
+    "onCommand:xlflow.refreshProject",
+    "onCommand:xlflow.refreshTests",
     "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.runAllTests",
+    "onCommand:xlflow.runDoctor",
     "onCommand:xlflow.runMacro",
     "onCommand:xlflow.runProcedure",
     "onCommand:xlflow.runTestProcedure",
     "onCommand:xlflow.saveWorkbook",
+    "onCommand:xlflow.sessionActions",
     "onCommand:xlflow.sessionRestart",
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",
     "onCommand:xlflow.sessionStop",
+    "onCommand:xlflow.sessionToggle",
+    "onCommand:xlflow.setupActions",
     "onCommand:xlflow.skillInstall",
     "onCommand:xlflow.test",
     "onLanguage:vba",
+    "onView:xlflow.modules",
+    "onView:xlflow.project",
+    "onView:xlflow.setup",
+    "onView:xlflow.tests",
     "workspaceContains:xlflow.toml"
   ],
   "icon": "images/icon.png",

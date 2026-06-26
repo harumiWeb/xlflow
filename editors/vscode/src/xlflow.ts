@@ -68,7 +68,7 @@ export async function runXlflowCommand(
   );
   const notify = options.notify !== false;
 
-  return new Promise((resolve) => {
+  const run = new Promise<number>((resolve) => {
     let settled = false;
     const settle = (exitCode: number): void => {
       if (settled) {
@@ -107,6 +107,14 @@ export async function runXlflowCommand(
       settle(exitCode);
     });
   });
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: label,
+      cancellable: false,
+    },
+    () => run,
+  );
 }
 
 export interface XlflowJsonCommandResult<T> {

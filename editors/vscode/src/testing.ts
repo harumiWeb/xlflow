@@ -1,59 +1,15 @@
 import * as vscode from "vscode";
 import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
+import {
+  discoverTests,
+  isTestRunPayload,
+  readNonEmpty,
+  sourceUri,
+  XlflowEnvelope,
+  XlflowTestRunItem,
+} from "./testDiscovery";
 import { runXlflowJsonCommand } from "./xlflow";
-
-interface XlflowEnvelope {
-  status?: string;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-  tests?: XlflowTestListPayload | XlflowTestRunPayload | XlflowTestRunItem[];
-  logs?: string[];
-}
-
-interface XlflowTestListPayload {
-  root?: string;
-  summary?: {
-    files?: number;
-    tests?: number;
-  };
-  items?: XlflowDiscoveredTest[];
-}
-
-interface XlflowDiscoveredTest {
-  module?: string;
-  name?: string;
-  qualified_name?: string;
-  source_path?: string;
-  line?: number;
-  tags?: string[];
-}
-
-interface XlflowTestRunPayload {
-  summary?: {
-    total?: number;
-    passed?: number;
-    failed?: number;
-    inconclusive?: number;
-  };
-  items?: XlflowTestRunItem[];
-}
-
-interface XlflowTestRunItem {
-  module?: string;
-  name?: string;
-  status?: string;
-  duration_ms?: number;
-  error?: {
-    code?: string;
-    message?: string;
-    source?: string;
-    number?: number;
-    line?: number;
-  };
-}
 
 interface TestMetadata {
   workspaceFolder: vscode.WorkspaceFolder;
@@ -125,13 +81,8 @@ export class XlflowTestController implements vscode.Disposable {
   }
 
   private async discoverFolder(folder: vscode.WorkspaceFolder): Promise<vscode.TestItem[]> {
-    const result = await runXlflowJsonCommand<XlflowEnvelope>(
-      ["--json", "test", "list"],
-      "xlflow test list",
-      this.channels.output,
-      { requireWorkspace: true, workspaceFolder: folder },
-    );
-    const tests = listDiscoveredTests(result.json);
+    const result = await discoverTests(folder, this.channels);
+    const tests = result.tests;
     if (result.exitCode !== 0 || tests.length === 0) {
       if (result.exitCode !== 0) {
         this.channels.output.appendLine(`[error] xlflow test list failed for ${folder.uri.fsPath}`);
@@ -272,14 +223,6 @@ async function hasXlflowConfig(folder: vscode.WorkspaceFolder): Promise<boolean>
   }
 }
 
-function listDiscoveredTests(env: XlflowEnvelope | undefined): XlflowDiscoveredTest[] {
-  const tests = env?.tests;
-  if (isTestListPayload(tests) && Array.isArray(tests.items)) {
-    return tests.items;
-  }
-  return [];
-}
-
 function findRunResult(
   env: XlflowEnvelope | undefined,
   metadata: TestMetadata,
@@ -311,31 +254,4 @@ function collectionItems(collection: vscode.TestItemCollection): vscode.TestItem
 
 function workspaceItemId(folder: vscode.WorkspaceFolder): string {
   return `${folder.uri.toString()}::workspace`;
-}
-
-function sourceUri(
-  folder: vscode.WorkspaceFolder,
-  sourcePath: string | undefined,
-): vscode.Uri | undefined {
-  const path = readNonEmpty(sourcePath);
-  if (path === undefined) {
-    return undefined;
-  }
-  return vscode.Uri.joinPath(folder.uri, ...path.replace(/\\/g, "/").split("/"));
-}
-
-function readNonEmpty(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
-}
-
-function isTestListPayload(value: unknown): value is XlflowTestListPayload {
-  return typeof value === "object" && value !== null && "items" in value;
-}
-
-function isTestRunPayload(value: unknown): value is XlflowTestRunPayload {
-  return typeof value === "object" && value !== null && "items" in value;
 }
