@@ -29,7 +29,11 @@ When `xlflow.toml` exists, the sidebar switches to project mode:
 
 Project view title actions refresh state, pull workbook source, push source changes, and start or stop the managed session. `Push Sources` asks for confirmation before running.
 
-Modules view title actions can create standard or class modules through `xlflow module new`, then refresh discovered symbols. UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts.
+Modules view title actions can create standard or class modules through `xlflow module new`, then refresh discovered symbols. Module item context menus can open, rename, delete, reveal, and copy source details for standard and class modules. Document modules can be opened, revealed, and copied, but destructive actions are hidden. Rename and delete delegate to `xlflow module rename` and `xlflow module remove`; the extension does not delete or rename source files directly.
+
+Procedure item context menus can open runnable procedures, run no-argument procedures through `xlflow run <ModuleName.ProcedureName>`, and copy procedure or qualified names.
+
+UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts. UserForm item context menus can open the primary source artifact, rename, delete, reveal, and copy source details. Rename and delete delegate to `xlflow module rename` and `xlflow module remove` because UserForms may include `.frm`, `.frx`, sidecar code, and designer spec artifacts. Artifact item context menus can open, reveal, and copy paths for existing artifacts; missing artifacts do not expose file actions.
 
 `UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
 
@@ -107,14 +111,26 @@ The command palette includes:
 - `xlflow: Run Doctor`
 - `xlflow: Toggle Session`
 - `xlflow: Open Documentation`
+- `xlflow: Rename Module`
+- `xlflow: Delete Module`
+- `xlflow: Reveal Source File`
+- `xlflow: Copy Module Name`
+- `xlflow: Copy Relative Path`
+- `xlflow: Copy Procedure Name`
+- `xlflow: Copy Qualified Name`
+- `xlflow: Rename UserForm`
+- `xlflow: Delete UserForm`
+- `xlflow: Reveal UserForm Source`
+- `xlflow: Copy UserForm Name`
+- `xlflow: Copy UserForm Relative Path`
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `Rename Module` and `Rename UserForm` run `xlflow --json module rename <old> <new>`, `Delete Module` and `Delete UserForm` run `xlflow --json module remove <name>`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
 
 `Install Agent Skill` prompts for one of the bundled provider targets: `codex`, `claude`, `cursor`, `gemini`, or `agents`. It also asks whether to pass `--force` before replacing an existing skill installation. `Install Helper Modules` prompts before using `--push` because that mode imports the helper modules into the configured workbook.
 
 `New UserForm` delegates sidecar validation to the CLI. It works for projects with `[userform].code_source = "sidecar"`; `frm` mode projects should use the existing snapshot/build workflow or migrate intentionally.
 
-The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
+The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. The Modules TreeView uses the same run commands for procedure items. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
 
 `Format Document` invokes VS Code document formatting for the active editor. For VBA files, formatting is provided by `xlflow lsp --stdio`.
 
