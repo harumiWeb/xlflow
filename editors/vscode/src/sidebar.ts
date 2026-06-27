@@ -274,7 +274,9 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
       return [];
     }
     const snapshot = this.sessionManager.currentSnapshot();
-    const workbook = workbookDisplayName(snapshot.session) ?? (await configuredWorkbook(state));
+    const configuredWorkbookPath = await configuredWorkbook(state);
+    const workbookPath = workbookPathFromSession(snapshot.session) ?? configuredWorkbookPath;
+    const workbookLabel = workbookDisplayName(snapshot.session) ?? configuredWorkbookPath;
     const nodes: ProjectNode[] = [
       {
         kind: "project",
@@ -290,15 +292,15 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
       {
         kind: "project",
         label: "Workbook",
-        description: workbook ?? "Unknown",
+        description: workbookLabel ?? "Unknown",
         icon: new vscode.ThemeIcon("file-binary"),
         command:
-          workbook === undefined
+          workbookPath === undefined
             ? undefined
             : {
                 command: "vscode.open",
                 title: "Open Workbook",
-                arguments: [workbookUri(state.workspaceFolder, workbook)],
+                arguments: [workbookUri(state.workspaceFolder, workbookPath)],
               },
       },
       {
@@ -566,7 +568,7 @@ export function readUserFormCodeSourceFromToml(text: string): UserFormCodeSource
 function readTomlStringKey(text: string, sectionName: string, keyName: string): string | undefined {
   let inSection = false;
   for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*/, "").trim();
+    const line = stripTomlComment(rawLine).trim();
     if (line === "") {
       continue;
     }
@@ -578,9 +580,63 @@ function readTomlStringKey(text: string, sectionName: string, keyName: string): 
     if (!inSection) {
       continue;
     }
-    const match = line.match(/^([A-Za-z0-9_]+)\s*=\s*"([^"]+)"\s*$/);
+    const match = line.match(/^([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$/);
     if (match !== null && match[1].trim() === keyName) {
-      return match[2].trim();
+      return parseTomlStringValue(match[2]);
+    }
+  }
+  return undefined;
+}
+
+function stripTomlComment(line: string): string {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (quote === '"') {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote === "'") {
+      if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === "#") {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function parseTomlStringValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return undefined;
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).trim();
+  }
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return (JSON.parse(trimmed) as string).trim();
+    } catch {
+      return trimmed.slice(1, -1).trim();
     }
   }
   return undefined;
@@ -624,12 +680,7 @@ async function discoverUserForms(
 
 async function userFormSourceFiles(rootUri: vscode.Uri, formsRoot: string): Promise<string[]> {
   const files: string[] = [];
-  const rootEntries = await readDirectorySafe(rootUri);
-  for (const [name, type] of rootEntries) {
-    if ((type & vscode.FileType.File) !== 0 && name.toLowerCase().endsWith(".frm")) {
-      files.push(joinSlash(formsRoot, name));
-    }
-  }
+  await collectFrmFiles(rootUri, formsRoot, files);
 
   for (const childDir of ["code", "specs"]) {
     const entries = await readDirectorySafe(vscode.Uri.joinPath(rootUri, childDir));
@@ -640,6 +691,28 @@ async function userFormSourceFiles(rootUri: vscode.Uri, formsRoot: string): Prom
     }
   }
   return files;
+}
+
+async function collectFrmFiles(
+  dirUri: vscode.Uri,
+  relativeDir: string,
+  files: string[],
+): Promise<void> {
+  const entries = await readDirectorySafe(dirUri);
+  for (const [name, type] of entries) {
+    const lowerName = name.toLowerCase();
+    if (lowerName === "code" || lowerName === "specs") {
+      continue;
+    }
+    const relativePath = joinSlash(relativeDir, name);
+    if ((type & vscode.FileType.File) !== 0 && lowerName.endsWith(".frm")) {
+      files.push(relativePath);
+      continue;
+    }
+    if ((type & vscode.FileType.Directory) !== 0) {
+      await collectFrmFiles(vscode.Uri.joinPath(dirUri, name), relativePath, files);
+    }
+  }
 }
 
 async function readDirectorySafe(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
@@ -656,7 +729,7 @@ export function buildUserFormModels(
   files: string[],
 ): UserFormModel[] {
   const normalizedRoot = trimSlashes(formsRoot);
-  const frmNames = new Set<string>();
+  const frmByName = new Map<string, string>();
   const codeNames = new Set<string>();
   const specByName = new Map<string, string>();
 
@@ -666,15 +739,21 @@ export function buildUserFormModels(
       continue;
     }
     const parts = relative.split("/");
-    if (parts.length === 1 && parts[0].toLowerCase().endsWith(".frm")) {
-      frmNames.add(basenameWithoutExtension(parts[0]));
+    const firstPart = parts[0].toLowerCase();
+    if (
+      parts.length >= 1 &&
+      firstPart !== "code" &&
+      firstPart !== "specs" &&
+      parts[parts.length - 1].toLowerCase().endsWith(".frm")
+    ) {
+      frmByName.set(basenameWithoutExtension(parts[parts.length - 1]), file);
       continue;
     }
-    if (parts.length === 2 && parts[0] === "code" && parts[1].toLowerCase().endsWith(".bas")) {
+    if (parts.length === 2 && firstPart === "code" && parts[1].toLowerCase().endsWith(".bas")) {
       codeNames.add(basenameWithoutExtension(parts[1]));
       continue;
     }
-    if (parts.length === 2 && parts[0] === "specs" && isUserFormSpec(parts[1])) {
+    if (parts.length === 2 && firstPart === "specs" && isUserFormSpec(parts[1])) {
       const name = basenameWithoutExtension(parts[1]);
       const current = specByName.get(name);
       if (current === undefined || parts[1].toLowerCase().endsWith(".yaml")) {
@@ -685,22 +764,27 @@ export function buildUserFormModels(
 
   const names =
     codeSource === "frm"
-      ? [...frmNames]
-      : [...new Set([...frmNames, ...codeNames, ...specByName.keys()])];
+      ? [...frmByName.keys()]
+      : [...new Set([...frmByName.keys(), ...codeNames, ...specByName.keys()])];
 
   return names
     .sort((a, b) => a.localeCompare(b))
     .map((name) => {
       if (codeSource === "frm") {
+        const frmPath = frmByName.get(name);
+        const frmLabel =
+          frmPath === undefined
+            ? `${name}.frm`
+            : (relativeToFormsRoot(normalizedRoot, frmPath) ?? `${name}.frm`);
         return {
           name,
           codeSource,
           artifacts: [
             {
               kind: "frm",
-              label: `${name}.frm`,
-              relativePath: joinSlash(normalizedRoot, `${name}.frm`),
-              missing: false,
+              label: frmLabel,
+              relativePath: frmPath,
+              missing: frmPath === undefined,
             },
           ],
         };
@@ -739,6 +823,10 @@ function workbookDisplayName(session: XlflowSessionPayload | undefined): string 
   }
   const workbookPath = readNonEmpty(session?.workbook_path ?? session?.metadata?.workbook_path);
   return workbookPath === undefined ? undefined : path.basename(workbookPath);
+}
+
+function workbookPathFromSession(session: XlflowSessionPayload | undefined): string | undefined {
+  return readNonEmpty(session?.workbook_path ?? session?.metadata?.workbook_path);
 }
 
 function workbookUri(folder: vscode.WorkspaceFolder, workbook: string): vscode.Uri {

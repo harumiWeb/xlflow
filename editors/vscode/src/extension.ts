@@ -30,16 +30,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     projectState,
     sidebar,
   );
+  const refreshSelectedProject = async (): Promise<void> => {
+    await projectState?.refresh();
+    await sessionManager?.refreshStatus();
+    await testController?.refreshAuto();
+    await Promise.all([
+      sidebar?.refreshModules(),
+      sidebar?.refreshUserForms(),
+      sidebar?.refreshTests(),
+    ]);
+  };
+
   registerCommands(context, clientManager, channels, sessionManager, projectState, {
-    refreshAll: async () => {
-      await projectState?.refresh();
-      await sessionManager?.refreshStatus();
-      await Promise.all([
-        sidebar?.refreshModules(),
-        sidebar?.refreshUserForms(),
-        sidebar?.refreshTests(),
-      ]);
-    },
+    refreshAll: refreshSelectedProject,
     refreshProject: () => {
       sidebar?.refreshProjectViews();
     },
@@ -58,22 +61,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const configWatcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void projectState?.refresh();
-      void testController?.refreshAuto();
-      void sessionManager?.refreshStatus();
+      void refreshSelectedProject();
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
-      void projectState?.refresh();
+      void refreshSelectedProject();
     }),
     configWatcher,
     configWatcher.onDidCreate(() => {
-      void projectState?.refresh();
+      void refreshSelectedProject();
     }),
     configWatcher.onDidChange(() => {
-      void projectState?.refresh();
+      void refreshSelectedProject();
     }),
     configWatcher.onDidDelete(() => {
-      void projectState?.refresh();
+      void refreshSelectedProject();
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       clientManager?.scheduleSuggest(event.document);

@@ -277,6 +277,7 @@ async function showSetupActions(): Promise<void> {
       { label: "New Project", command: "xlflow.newProject" },
       { label: "Init Existing Workbook", command: "xlflow.initProject" },
       { label: "Run Doctor", command: "xlflow.runDoctor" },
+      { label: "Open Documentation", command: "xlflow.openDocumentation" },
     ],
     { title: "xlflow Project Setup", placeHolder: "Select a setup action" },
   );

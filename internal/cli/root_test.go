@@ -2796,6 +2796,38 @@ func TestModuleNewCommandReturnsArgsInvalid(t *testing.T) {
 	}
 }
 
+func TestModuleNewCommandReturnsValidationForExistingComponent(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "Duplicate.bas"), []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "module", "new", "Duplicate", "--type", "class"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected module new to fail for duplicate component")
+	}
+	if code := output.ExitCode(err); code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("invalid JSON: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "module_new_failed" {
+		t.Fatalf("unexpected error payload: %+v", env.Error)
+	}
+}
+
 func TestFormNewCommandCreatesSidecarSourceAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
@@ -2850,6 +2882,38 @@ func TestFormNewCommandRequiresSidecar(t *testing.T) {
 		t.Fatalf("invalid JSON: %v\n%s", decodeErr, stdout.String())
 	}
 	if env.Error == nil || env.Error.Code != "form_new_requires_sidecar" {
+		t.Fatalf("unexpected error payload: %+v", env.Error)
+	}
+}
+
+func TestFormNewCommandReturnsValidationForExistingArtifact(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "code", "CustomerForm.bas"), []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "new", "CustomerForm"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected form new to fail for existing artifact")
+	}
+	if code := output.ExitCode(err); code != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("invalid JSON: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "form_new_failed" {
 		t.Fatalf("unexpected error payload: %+v", env.Error)
 	}
 }

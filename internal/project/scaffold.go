@@ -39,6 +39,7 @@ type NewFormResult struct {
 var (
 	ErrInvalidComponentName    = errors.New("invalid component name")
 	ErrInvalidModuleType       = errors.New("invalid module type")
+	ErrScaffoldExists          = errors.New("scaffold target already exists")
 	ErrUserFormRequiresSidecar = errors.New(`form new requires [userform].code_source = "sidecar"`)
 )
 
@@ -250,9 +251,12 @@ func NewModule(cwd, name, kind string, src config.SourceConfig) (NewModuleResult
 		return result, fmt.Errorf("%w: module type must be one of standard, class", ErrInvalidModuleType)
 	}
 
+	if err := rejectComponentNameCollision(cwd, src, cleanName); err != nil {
+		return result, err
+	}
 	path := filepath.Join(root, cleanName+ext)
 	if _, err := os.Stat(path); err == nil {
-		return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
+		return result, fmt.Errorf("%w: refusing to overwrite existing file: %s", ErrScaffoldExists, path)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return result, err
 	}
@@ -279,6 +283,9 @@ func NewUserForm(cwd, name string, cfg config.Config) (NewFormResult, error) {
 	if err != nil {
 		return result, err
 	}
+	if err := rejectComponentNameCollision(cwd, cfg.Src, cleanName); err != nil {
+		return result, err
+	}
 	formRoot := ResolveFormRoot(cwd, cfg.Src)
 	codeDir := filepath.Join(formRoot, "code")
 	specDir := filepath.Join(formRoot, "specs")
@@ -286,7 +293,7 @@ func NewUserForm(cwd, name string, cfg config.Config) (NewFormResult, error) {
 	specPath := filepath.Join(specDir, cleanName+".yaml")
 	for _, path := range []string{codePath, specPath} {
 		if _, err := os.Stat(path); err == nil {
-			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
+			return result, fmt.Errorf("%w: refusing to overwrite existing file: %s", ErrScaffoldExists, path)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return result, err
 		}
@@ -301,6 +308,7 @@ func NewUserForm(cwd, name string, cfg config.Config) (NewFormResult, error) {
 		return result, err
 	}
 	if err := writeExclusive(specPath, userFormSpecTemplate(cleanName)); err != nil {
+		_ = os.Remove(codePath)
 		return result, err
 	}
 
@@ -310,6 +318,64 @@ func NewUserForm(cwd, name string, cfg config.Config) (NewFormResult, error) {
 	result.Created = []string{result.CodePath, result.SpecPath}
 	result.CodeSource = "sidecar"
 	return result, nil
+}
+
+func rejectComponentNameCollision(cwd string, src config.SourceConfig, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	roots := []struct {
+		root             string
+		exts             map[string]bool
+		skipFormSidecars bool
+	}{
+		{root: ResolveModuleRoot(cwd, src), exts: map[string]bool{".bas": true}},
+		{root: ResolveClassRoot(cwd, src), exts: map[string]bool{".cls": true}},
+		{root: ResolveFormRoot(cwd, src), exts: map[string]bool{".frm": true}, skipFormSidecars: true},
+	}
+	for _, entry := range roots {
+		if err := filepath.WalkDir(entry.root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				base := strings.ToLower(d.Name())
+				if entry.skipFormSidecars && (base == "code" || base == "specs") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if !entry.exts[ext] {
+				return nil
+			}
+			if strings.EqualFold(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), name) {
+				return fmt.Errorf("%w: VBA component name %q already exists at %s", ErrScaffoldExists, name, path)
+			}
+			return nil
+		}); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	formRoot := ResolveFormRoot(cwd, src)
+	for _, path := range []string{
+		filepath.Join(formRoot, "code", name+".bas"),
+		filepath.Join(formRoot, "specs", name+".yaml"),
+		filepath.Join(formRoot, "specs", name+".yml"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%w: VBA component name %q already exists at %s", ErrScaffoldExists, name, path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func cleanComponentName(name string) (string, error) {

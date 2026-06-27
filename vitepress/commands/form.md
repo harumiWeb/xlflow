@@ -27,7 +27,7 @@ xlflow form export-image <name> --out <png>
 
 `form snapshot` reads the design-time Designer state without loading the form at runtime or running workbook VBA. Controls created only by runtime code are visible through runtime inspection or image export, not through snapshot.
 
-`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `src/forms/code/<Name>.bas` and `src/forms/specs/<Name>.yaml`; it does not create `.frm` or `.frx` artifacts.
+`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); it does not create `.frm` or `.frx` artifacts.
 
 ## Examples
 
@@ -45,7 +45,7 @@ xlflow form export-image CalendarForm --out artifacts/CalendarForm.png --json
 
 > [!WARNING]
 > `form new` refuses to overwrite an existing sidecar code or spec file. In `frm` code-source mode, use `form snapshot` / `form build` workflows or switch the project to sidecar mode intentionally.
-
+>
 > [!WARNING]
 > `form export-image` depends on desktop Excel GUI behavior and may execute `UserForm_Initialize` depending on initializer settings.
 

@@ -100,6 +100,11 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     readFormsRootFromToml('[src]\nforms = "custom/forms"\n[userform]\ncode_source = "frm"\n'),
     "custom/forms",
   );
+  assert.strictEqual(readFormsRootFromToml("[src]\nforms = 'custom/forms'\n"), "custom/forms");
+  assert.strictEqual(
+    readFormsRootFromToml('[src]\nforms = "custom/#forms" # comment\n'),
+    "custom/#forms",
+  );
   assert.strictEqual(readFormsRootFromToml('[src]\nmodules = "src/modules"\n'), "src/forms");
   assert.strictEqual(readUserFormCodeSourceFromToml('[userform]\ncode_source = "frm"\n'), "frm");
   assert.strictEqual(readUserFormCodeSourceFromToml('[project]\nname = "sample"\n'), "sidecar");
@@ -145,6 +150,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.deepStrictEqual(
     buildUserFormModels("src/forms", "frm", [
       "src/forms/Legacy.frm",
+      "src/forms/Sales/OrderForm.frm",
       "src/forms/code/Legacy.bas",
       "src/forms/specs/Legacy.yaml",
     ]),
@@ -157,6 +163,18 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
             kind: "frm",
             label: "Legacy.frm",
             relativePath: "src/forms/Legacy.frm",
+            missing: false,
+          },
+        ],
+      },
+      {
+        name: "OrderForm",
+        codeSource: "frm",
+        artifacts: [
+          {
+            kind: "frm",
+            label: "Sales/OrderForm.frm",
+            relativePath: "src/forms/Sales/OrderForm.frm",
             missing: false,
           },
         ],

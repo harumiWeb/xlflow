@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,6 +197,20 @@ func TestNewModuleRejectsInvalidTypeNameAndOverwrite(t *testing.T) {
 	}
 	if _, err := NewModule(dir, "Duplicate", "standard", config.SourceConfig{}); err == nil {
 		t.Fatal("expected overwrite error")
+	} else if !errors.Is(err, ErrScaffoldExists) {
+		t.Fatalf("expected ErrScaffoldExists, got %v", err)
+	}
+}
+
+func TestNewModuleRejectsDuplicateNameAcrossRoots(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := NewModule(dir, "Duplicate", "standard", config.SourceConfig{}); err != nil {
+		t.Fatalf("first NewModule() error = %v", err)
+	}
+	if _, err := NewModule(dir, "Duplicate", "class", config.SourceConfig{}); err == nil {
+		t.Fatal("expected duplicate component name error")
+	} else if !errors.Is(err, ErrScaffoldExists) {
+		t.Fatalf("expected ErrScaffoldExists, got %v", err)
 	}
 }
 
@@ -254,6 +269,34 @@ func TestNewUserFormRejectsFrmModeInvalidNameAndOverwrite(t *testing.T) {
 	}
 	if _, err := NewUserForm(dir, "CustomerForm", cfg); err == nil {
 		t.Fatal("expected overwrite error")
+	} else if !errors.Is(err, ErrScaffoldExists) {
+		t.Fatalf("expected ErrScaffoldExists, got %v", err)
+	}
+}
+
+func TestNewUserFormRejectsDuplicateNameAcrossRoots(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if _, err := NewModule(dir, "CustomerForm", "class", cfg.Src); err != nil {
+		t.Fatalf("NewModule() error = %v", err)
+	}
+	if _, err := NewUserForm(dir, "CustomerForm", cfg); err == nil {
+		t.Fatal("expected duplicate component name error")
+	} else if !errors.Is(err, ErrScaffoldExists) {
+		t.Fatalf("expected ErrScaffoldExists, got %v", err)
+	}
+}
+
+func TestNewModuleRejectsExistingSidecarUserFormName(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if _, err := NewUserForm(dir, "CustomerForm", cfg); err != nil {
+		t.Fatalf("NewUserForm() error = %v", err)
+	}
+	if _, err := NewModule(dir, "CustomerForm", "standard", cfg.Src); err == nil {
+		t.Fatal("expected duplicate sidecar form name error")
+	} else if !errors.Is(err, ErrScaffoldExists) {
+		t.Fatalf("expected ErrScaffoldExists, got %v", err)
 	}
 }
 

@@ -71,7 +71,7 @@ export function selectedWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
     return undefined;
   }
   const activeDocument = vscode.window.activeTextEditor?.document;
-  if (activeDocument?.uri.scheme === "file") {
+  if (activeDocument !== undefined) {
     const containing = vscode.workspace.getWorkspaceFolder(activeDocument.uri);
     if (containing !== undefined) {
       return containing;

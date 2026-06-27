@@ -20,7 +20,7 @@ export async function resolveWorkspaceRoot(
   }
 
   const activeDocument = vscode.window.activeTextEditor?.document;
-  if (activeDocument?.uri.scheme === "file") {
+  if (activeDocument !== undefined) {
     const containingFolder = vscode.workspace.getWorkspaceFolder(activeDocument.uri);
     if (containingFolder !== undefined) {
       return containingFolder;
@@ -107,6 +107,9 @@ export async function runXlflowCommand(
       settle(exitCode);
     });
   });
+  if (!notify) {
+    return run;
+  }
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,

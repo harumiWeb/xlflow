@@ -499,7 +499,10 @@ func (a *app) formNewCommand() *cobra.Command {
 				if errors.Is(err, project.ErrInvalidComponentName) {
 					return a.writeFailure("form new", output.ExitConfig, "form_new_args_invalid", err)
 				}
-				return a.writeFailure("form new", output.ExitConfig, "form_new_failed", err)
+				if errors.Is(err, project.ErrScaffoldExists) {
+					return a.writeFailure("form new", output.ExitValidation, "form_new_failed", err)
+				}
+				return a.writeFailure("form new", output.ExitEnvironment, "form_new_failed", err)
 			}
 			env := output.New("form new")
 			env.Source = map[string]any{
@@ -1469,7 +1472,10 @@ func (a *app) moduleNewCommand() *cobra.Command {
 				if errors.Is(err, project.ErrInvalidComponentName) || errors.Is(err, project.ErrInvalidModuleType) {
 					return a.writeFailure("module new", output.ExitConfig, "module_new_args_invalid", err)
 				}
-				return a.writeFailure("module new", output.ExitConfig, "module_new_failed", err)
+				if errors.Is(err, project.ErrScaffoldExists) {
+					return a.writeFailure("module new", output.ExitValidation, "module_new_failed", err)
+				}
+				return a.writeFailure("module new", output.ExitEnvironment, "module_new_failed", err)
 			}
 			env := output.New("module new")
 			env.Source = map[string]any{
