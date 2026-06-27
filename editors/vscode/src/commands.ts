@@ -461,10 +461,9 @@ async function installHelperModules(channels: XlflowChannels): Promise<void> {
   }
   await runXlflowCommand(mode.args, `xlflow ${mode.args.join(" ")}`, channels.output, {
     requireWorkspace: true,
-    uiLabel:
-      mode.args.includes("--push")
-        ? vscode.l10n.t("xlflow module install --push")
-        : vscode.l10n.t("xlflow module install"),
+    uiLabel: mode.args.includes("--push")
+      ? vscode.l10n.t("xlflow module install --push")
+      : vscode.l10n.t("xlflow module install"),
     workspaceFolder,
   });
 }

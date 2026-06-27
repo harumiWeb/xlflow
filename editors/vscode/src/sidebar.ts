@@ -160,11 +160,6 @@ export class XlflowSidebar implements vscode.Disposable {
       projectState.onDidChangeState((state) => {
         sessionManager.setProjectKind(state.kind);
         this.refreshProjectViews();
-        if (state.kind === "ready") {
-          void this.refreshModules();
-          void this.refreshUserForms();
-          void this.refreshTests();
-        }
       }),
       sessionManager.onDidChangeSnapshot(() => this.projectProvider.refresh()),
     );

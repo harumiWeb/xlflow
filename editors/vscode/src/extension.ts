@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "./client";
 import { registerCommands } from "./commands";
 import { createChannels } from "./logging";
-import { XlflowProjectStateService } from "./projectState";
+import { selectedWorkspaceFolder, XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowSidebar } from "./sidebar";
 import { XlflowTestController } from "./testing";
@@ -30,15 +30,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     projectState,
     sidebar,
   );
-  const refreshSelectedProject = async (): Promise<void> => {
+  let lastSelectedWorkspaceKey = selectedWorkspaceKey();
+
+  const refreshProjectStatus = async (options: { restartLsp?: boolean } = {}): Promise<void> => {
     await projectState?.refresh();
+    if (options.restartLsp === true) {
+      await clientManager?.restartIfWorkspaceChanged();
+    }
     await sessionManager?.refreshStatus();
+    sidebar?.refreshProjectViews();
+  };
+  const refreshProjectDetails = async (): Promise<void> => {
     await testController?.refreshAuto();
     await Promise.all([
       sidebar?.refreshModules(),
       sidebar?.refreshUserForms(),
       sidebar?.refreshTests(),
     ]);
+  };
+  const refreshSelectedProject = async (
+    options: { restartLsp?: boolean; details?: boolean } = {},
+  ): Promise<void> => {
+    await refreshProjectStatus({ restartLsp: options.restartLsp });
+    if (options.details !== false) {
+      await refreshProjectDetails();
+    }
   };
 
   registerCommands(context, clientManager, channels, sessionManager, projectState, {
@@ -61,10 +77,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const configWatcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void refreshSelectedProject();
+      lastSelectedWorkspaceKey = selectedWorkspaceKey();
+      void refreshSelectedProject({ restartLsp: true });
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
-      void refreshSelectedProject();
+      const key = selectedWorkspaceKey();
+      if (key === lastSelectedWorkspaceKey) {
+        return;
+      }
+      lastSelectedWorkspaceKey = key;
+      void refreshSelectedProject({ restartLsp: true });
     }),
     configWatcher,
     configWatcher.onDidCreate(() => {
@@ -99,9 +121,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ),
     );
   }
-  await projectState.refresh();
-  void testController.refreshAuto();
-  void sessionManager.refreshStatus();
+  await refreshSelectedProject({ restartLsp: false });
 }
 
 export async function deactivate(): Promise<void> {
@@ -120,4 +140,8 @@ export async function deactivate(): Promise<void> {
   tests?.dispose();
   sessions?.dispose();
   await manager?.stop();
+}
+
+function selectedWorkspaceKey(): string | undefined {
+  return selectedWorkspaceFolder()?.uri.toString();
 }

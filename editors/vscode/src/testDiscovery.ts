@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { XlflowChannels } from "./logging";
 import { runXlflowJsonCommand } from "./xlflow";
@@ -89,11 +90,14 @@ export function sourceUri(
   folder: vscode.WorkspaceFolder,
   sourcePath: string | undefined,
 ): vscode.Uri | undefined {
-  const path = readNonEmpty(sourcePath);
-  if (path === undefined) {
+  const source = readNonEmpty(sourcePath);
+  if (source === undefined) {
     return undefined;
   }
-  return vscode.Uri.joinPath(folder.uri, ...path.replace(/\\/g, "/").split("/"));
+  if (path.isAbsolute(source)) {
+    return vscode.Uri.file(source);
+  }
+  return vscode.Uri.joinPath(folder.uri, ...source.replace(/\\/g, "/").split("/"));
 }
 
 export function readNonEmpty(value: unknown): string | undefined {

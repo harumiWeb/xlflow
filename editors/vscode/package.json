@@ -465,12 +465,12 @@
         },
         {
           "command": "xlflow.sessionStart",
-          "when": "view == xlflow.project",
+          "when": "view == xlflow.project && xlflow.sessionStartEnabled",
           "group": "navigation@4"
         },
         {
           "command": "xlflow.sessionStop",
-          "when": "view == xlflow.project",
+          "when": "view == xlflow.project && xlflow.sessionStopEnabled",
           "group": "navigation@5"
         },
         {

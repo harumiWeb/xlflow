@@ -149,7 +149,11 @@ export async function runXlflowJsonCommand<T>(
   args: string[],
   label: string,
   outputChannel: vscode.OutputChannel,
-  options: { requireWorkspace: boolean; uiLabel?: string; workspaceFolder?: vscode.WorkspaceFolder },
+  options: {
+    requireWorkspace: boolean;
+    uiLabel?: string;
+    workspaceFolder?: vscode.WorkspaceFolder;
+  },
 ): Promise<XlflowJsonCommandResult<T>> {
   const uiLabel = options.uiLabel ?? label;
   const folder =

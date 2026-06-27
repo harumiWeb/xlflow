@@ -13,6 +13,7 @@ import {
   userFormArtifactContextValue,
   userFormContextValue,
 } from "../../src/sidebar";
+import { sourceUri } from "../../src/testDiscovery";
 
 export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
@@ -204,6 +205,18 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     name: "xlflow",
     index: 0,
   };
+  assert.strictEqual(
+    comparableFsPath(sourceUri(fakeFolder, "src/modules/Main.bas")),
+    comparableFsPath("C:/tmp/xlflow/src/modules/Main.bas"),
+  );
+  assert.strictEqual(
+    comparableFsPath(sourceUri(fakeFolder, "src\\classes\\Invoice.cls")),
+    comparableFsPath("C:/tmp/xlflow/src/classes/Invoice.cls"),
+  );
+  assert.strictEqual(
+    comparableFsPath(sourceUri(fakeFolder, "C:\\work\\project\\src\\modules\\Main.bas")),
+    comparableFsPath("C:\\work\\project\\src\\modules\\Main.bas"),
+  );
   assert.deepStrictEqual(
     moduleGroups(fakeFolder, {
       inspect: {
@@ -252,6 +265,14 @@ function assertLocalizationResources(extensionPath: string): void {
   assert.strictEqual(
     readPath(manifest, ["contributes", "views", "xlflow", 0, "name"]),
     "%view.setup.name%",
+  );
+  assert.strictEqual(
+    menuWhen(manifest, "view/title", "xlflow.sessionStart"),
+    "view == xlflow.project && xlflow.sessionStartEnabled",
+  );
+  assert.strictEqual(
+    menuWhen(manifest, "view/title", "xlflow.sessionStop"),
+    "view == xlflow.project && xlflow.sessionStopEnabled",
   );
   const placeholders = collectManifestPlaceholders(manifest);
   for (const key of placeholders) {
@@ -316,4 +337,25 @@ function readPath(value: unknown, parts: Array<string | number>): unknown {
     current = (current as Record<string | number, unknown>)[part];
   }
   return current;
+}
+
+function menuWhen(manifest: Record<string, unknown>, menu: string, command: string): unknown {
+  const items = readPath(manifest, ["contributes", "menus", menu]);
+  assert.ok(Array.isArray(items), `${menu} should be an array`);
+  const item = items.find(
+    (candidate) =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      (candidate as Record<string, unknown>).command === command,
+  );
+  assert.ok(item, `${command} should be contributed to ${menu}`);
+  return (item as Record<string, unknown>).when;
+}
+
+function comparableFsPath(value: vscode.Uri | string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const fsPath = typeof value === "string" ? value : value.fsPath;
+  return path.normalize(fsPath).toLowerCase();
 }
