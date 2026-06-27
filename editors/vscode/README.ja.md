@@ -4,7 +4,13 @@
 
 **xlflow for Visual Studio Code**は、Excel VBAマクロ開発支援ツール [xlflow](https://github.com/harumiWeb/xlflow) を VSCode から扱いやすくするための拡張機能です。
 
-xlflowプロジェクトの状態確認、VBAモジュールの取り込み・反映、セッション管理、各種コマンド実行を VSCode 上から行えるようにし、Excel VBAマクロをより安全に、Git管理しやすく、AIエージェントとも連携しやすい形で開発できるようにします。
+- xlflowプロジェクトのステータス確認が可能
+- VBAモジュールのインポートとエクスポート機能を実装
+- 高速に各種操作を行うセッション管理機能を搭載
+- LSP機能により、VSCode上でVBA向けの補完、診断、シンボル解析などを利用できます。
+- 各種コマンドを直接VSCode上から実行可能
+
+これにより、Excel VBAマクロ開発がよりセキュアになり、Gitバージョン管理システムとの連携が容易になるとともに、AIエージェントとの連携も簡素化されます。
 
 ![Demo](./images/demo.gif)
 
