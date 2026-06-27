@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
+  moduleContextValue,
   moduleGroups,
   readExcelPathFromToml,
   readFormsRootFromToml,
@@ -47,6 +48,13 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.runMacro",
     "xlflow.runProcedure",
     "xlflow.runTestProcedure",
+    "xlflow.renameModule",
+    "xlflow.deleteModule",
+    "xlflow.revealSourceFile",
+    "xlflow.copyModuleName",
+    "xlflow.copyRelativePath",
+    "xlflow.copyProcedureName",
+    "xlflow.copyQualifiedName",
     "xlflow.test",
     "xlflow.lintWorkspace",
     "xlflow.formatDocument",
@@ -192,9 +200,18 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
         files: [
           { path: "src/forms/code/Form1.bas", moduleName: "Form1", moduleKind: "form" },
           { path: "src/modules/Main.bas", moduleName: "Main", moduleKind: "standard" },
+          { path: "src/classes/Invoice.cls", moduleName: "Invoice", moduleKind: "class" },
+          {
+            path: "src/workbook/ThisWorkbook.cls",
+            moduleName: "ThisWorkbook",
+            moduleKind: "document",
+          },
         ],
       },
     }).map((group) => group.label),
-    ["Standard Modules"],
+    ["Standard Modules", "Class Modules", "Document Modules"],
   );
+  assert.strictEqual(moduleContextValue("standard"), "xlflow.module.standard");
+  assert.strictEqual(moduleContextValue("class"), "xlflow.module.class");
+  assert.strictEqual(moduleContextValue("document"), "xlflow.module.document");
 }

@@ -373,6 +373,41 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.renameModule",
+        "title": "xlflow: Rename Module",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.deleteModule",
+        "title": "xlflow: Delete Module",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.revealSourceFile",
+        "title": "xlflow: Reveal Source File",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyModuleName",
+        "title": "xlflow: Copy Module Name",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyRelativePath",
+        "title": "xlflow: Copy Relative Path",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyProcedureName",
+        "title": "xlflow: Copy Procedure Name",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyQualifiedName",
+        "title": "xlflow: Copy Qualified Name",
+        "category": "xlflow"
+      },
+      {
         "command": "xlflow.openProcedure",
         "title": "xlflow: Open Procedure",
         "category": "xlflow"
@@ -471,6 +506,36 @@
       ],
       "view/item/context": [
         {
+          "command": "xlflow.openModule",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.renameModule",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class)$/",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "xlflow.deleteModule",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class)$/",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "xlflow.revealSourceFile",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "3_file@1"
+        },
+        {
+          "command": "xlflow.copyModuleName",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "4_copy@1"
+        },
+        {
+          "command": "xlflow.copyRelativePath",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "4_copy@2"
+        },
+        {
           "command": "xlflow.runProcedure",
           "when": "view == xlflow.modules && viewItem == xlflow.procedure",
           "group": "inline@1"
@@ -484,6 +549,31 @@
           "command": "xlflow.runTestProcedure",
           "when": "view == xlflow.tests && viewItem == xlflow.testWithSource",
           "group": "inline@1"
+        },
+        {
+          "command": "xlflow.openProcedure",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.(procedure|testProcedure|procedureStatic)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.runProcedure",
+          "when": "view == xlflow.modules && viewItem == xlflow.procedure",
+          "group": "2_run@1"
+        },
+        {
+          "command": "xlflow.runTestProcedure",
+          "when": "view == xlflow.modules && viewItem == xlflow.testProcedure",
+          "group": "2_run@1"
+        },
+        {
+          "command": "xlflow.copyProcedureName",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.(procedure|testProcedure|procedureStatic)$/",
+          "group": "4_copy@1"
+        },
+        {
+          "command": "xlflow.copyQualifiedName",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.(procedure|testProcedure|procedureStatic)$/",
+          "group": "4_copy@2"
         }
       ]
     },
@@ -583,6 +673,11 @@
     "onCommand:xlflow.checkEnvironment",
     "onCommand:xlflow.collapseModules",
     "onCommand:xlflow.collapseUserForms",
+    "onCommand:xlflow.copyModuleName",
+    "onCommand:xlflow.copyProcedureName",
+    "onCommand:xlflow.copyQualifiedName",
+    "onCommand:xlflow.copyRelativePath",
+    "onCommand:xlflow.deleteModule",
     "onCommand:xlflow.formatDocument",
     "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",
@@ -604,7 +699,9 @@
     "onCommand:xlflow.refreshProject",
     "onCommand:xlflow.refreshTests",
     "onCommand:xlflow.refreshUserForms",
+    "onCommand:xlflow.renameModule",
     "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.revealSourceFile",
     "onCommand:xlflow.runAllTests",
     "onCommand:xlflow.runDoctor",
     "onCommand:xlflow.runMacro",

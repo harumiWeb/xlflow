@@ -365,7 +365,7 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Collapsed);
         item.iconPath = new vscode.ThemeIcon(moduleIcon(element.moduleKind));
         item.resourceUri = element.uri;
-        item.contextValue = "xlflow.module";
+        item.contextValue = moduleContextValue(element.moduleKind);
         item.command = {
           command: "xlflow.openModule",
           title: "Open Module",
@@ -877,6 +877,9 @@ export function moduleGroups(
       continue;
     }
     const moduleKind = normalizeModuleKind(file.moduleKind);
+    if (moduleKind === "form") {
+      continue;
+    }
     const uri = sourceUri(folder, sourcePath) ?? vscode.Uri.joinPath(folder.uri, sourcePath);
     const module: ModuleNode = {
       kind: "module",
@@ -896,6 +899,17 @@ export function moduleGroups(
       return { kind: "moduleGroup" as const, label: moduleGroupLabel(kind), children: modules };
     })
     .filter((group) => group.children.length > 0);
+}
+
+export function moduleContextValue(kind: string): string {
+  switch (kind) {
+    case "class":
+      return "xlflow.module.class";
+    case "document":
+      return "xlflow.module.document";
+    default:
+      return "xlflow.module.standard";
+  }
 }
 
 function procedureNodes(
