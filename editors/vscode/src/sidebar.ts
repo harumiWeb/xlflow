@@ -82,6 +82,9 @@ export interface UserFormModel {
 interface UserFormNode {
   kind: "userForm";
   name: string;
+  codeSource: UserFormCodeSource;
+  primaryUri?: vscode.Uri;
+  primaryRelativePath?: string;
   children: UserFormArtifactNode[];
 }
 
@@ -89,6 +92,7 @@ interface UserFormArtifactNode {
   kind: "userFormArtifact";
   label: string;
   uri?: vscode.Uri;
+  relativePath?: string;
   missing: boolean;
   artifactKind: UserFormArtifactModel["kind"];
 }
@@ -424,11 +428,9 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     const forms = await discoverUserForms(state.workspaceFolder, state.configPath);
-    this.nodes = forms.map((form) => ({
-      kind: "userForm",
-      name: form.name,
-      children: form.artifacts.map((artifact) => ({
-        kind: "userFormArtifact",
+    this.nodes = forms.map((form) => {
+      const children: UserFormArtifactNode[] = form.artifacts.map((artifact) => ({
+        kind: "userFormArtifact" as const,
         label: artifact.label,
         uri:
           artifact.relativePath === undefined
@@ -437,10 +439,20 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
                 state.workspaceFolder.uri,
                 ...artifact.relativePath.replace(/\\/g, "/").split("/"),
               ),
+        relativePath: artifact.relativePath,
         missing: artifact.missing,
         artifactKind: artifact.kind,
-      })),
-    }));
+      }));
+      const primary = primaryUserFormArtifact(form.codeSource, children);
+      return {
+        kind: "userForm",
+        name: form.name,
+        codeSource: form.codeSource,
+        primaryUri: primary?.uri,
+        primaryRelativePath: primary?.relativePath,
+        children,
+      };
+    });
     this.emitter.fire(undefined);
   }
 
@@ -448,15 +460,15 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (element.kind === "userForm") {
       const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Collapsed);
       item.iconPath = new vscode.ThemeIcon("window");
-      item.contextValue = "xlflow.userForm";
+      item.contextValue = userFormContextValue(element.codeSource);
+      item.resourceUri = element.primaryUri;
+      item.tooltip = element.primaryUri?.fsPath;
       return item;
     }
     if (element.kind === "userFormArtifact") {
       const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
       item.iconPath = new vscode.ThemeIcon(userFormArtifactIcon(element));
-      item.contextValue = element.missing
-        ? "xlflow.userFormMissingArtifact"
-        : "xlflow.userFormArtifact";
+      item.contextValue = userFormArtifactContextValue(element);
       item.description = element.missing ? "missing" : undefined;
       item.tooltip = element.uri?.fsPath;
       item.resourceUri = element.uri;
@@ -482,6 +494,29 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
     return [];
   }
+}
+
+function primaryUserFormArtifact(
+  codeSource: UserFormCodeSource,
+  artifacts: UserFormArtifactNode[],
+): UserFormArtifactNode | undefined {
+  const preferredKind: UserFormArtifactModel["kind"] = codeSource === "frm" ? "frm" : "code";
+  return (
+    artifacts.find((artifact) => !artifact.missing && artifact.artifactKind === preferredKind) ??
+    artifacts.find((artifact) => !artifact.missing)
+  );
+}
+
+export function userFormContextValue(codeSource: UserFormCodeSource): string {
+  return `xlflow.userForm.${codeSource}`;
+}
+
+export function userFormArtifactContextValue(node: {
+  artifactKind: UserFormArtifactModel["kind"];
+  missing: boolean;
+}): string {
+  const prefix = node.missing ? "xlflow.userFormMissingArtifact" : "xlflow.userFormArtifact";
+  return `${prefix}.${node.artifactKind}`;
 }
 
 class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {

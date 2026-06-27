@@ -6,6 +6,7 @@
 - Added CodeLens and save-before-run settings forwarded to `xlflow lsp --stdio` at startup.
 - Added command palette actions for `xlflow skill install` and `xlflow module install`.
 - Added Modules TreeView context menu actions for opening, renaming, deleting, revealing, copying, and running module/procedure items.
+- Added UserForms TreeView context menu actions for opening, renaming, deleting, revealing, and copying UserForm source artifacts.
 
 ## 0.1.0
 

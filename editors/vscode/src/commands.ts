@@ -283,6 +283,24 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.copyQualifiedName", async (value: unknown) => {
       await copyText("Qualified name", treeQualifiedName(value));
     }),
+    vscode.commands.registerCommand("xlflow.renameUserForm", async (value: unknown) => {
+      await renameUserForm(value, channels, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.deleteUserForm", async (value: unknown) => {
+      await deleteUserForm(value, channels, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.revealUserFormSource", async (value: unknown) => {
+      const uri = treeUri(value);
+      if (uri !== undefined) {
+        await vscode.commands.executeCommand("revealInExplorer", uri);
+      }
+    }),
+    vscode.commands.registerCommand("xlflow.copyUserFormName", async (value: unknown) => {
+      await copyText("UserForm name", treeName(value));
+    }),
+    vscode.commands.registerCommand("xlflow.copyUserFormRelativePath", async (value: unknown) => {
+      await copyText("Relative path", treeRelativePath(value) ?? relativePathFromTreeUri(value));
+    }),
     vscode.commands.registerCommand("xlflow.openProcedure", async (value: unknown) => {
       const uri = treeUri(value);
       if (uri === undefined) {
@@ -490,6 +508,88 @@ async function newUserForm(channels: XlflowChannels, hooks: CommandRefreshHooks)
   }
 }
 
+async function renameUserForm(
+  value: unknown,
+  channels: XlflowChannels,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
+  const name = treeName(value);
+  const uri = treeUri(value);
+  if (name === undefined) {
+    vscode.window.showWarningMessage("xlflow rename UserForm received invalid UserForm arguments.");
+    return;
+  }
+  const newName = await promptComponentName("xlflow: Rename UserForm", name);
+  if (newName === undefined || newName.trim() === name) {
+    return;
+  }
+
+  const workspaceFolder =
+    uri === undefined
+      ? await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true })
+      : await workspaceFolderForUri(uri);
+  const wasOpen =
+    uri !== undefined &&
+    vscode.workspace.textDocuments.some((document) => document.uri.toString() === uri.toString());
+  const result = await runModuleMutation(
+    ["rename", name, newName.trim()],
+    `xlflow module rename ${name} ${newName.trim()}`,
+    channels.output,
+    workspaceFolder,
+  );
+  if (result.exitCode !== 0) {
+    showMutationFailure("rename", name, result, "UserForm");
+    return;
+  }
+
+  await Promise.all([hooks.refreshUserForms(), hooks.refreshModules(), hooks.refreshTests()]);
+  if (wasOpen && workspaceFolder !== undefined) {
+    const renamedUri = renamedModuleUri(workspaceFolder, result.json, newName.trim());
+    if (renamedUri !== undefined) {
+      await vscode.window.showTextDocument(renamedUri);
+    }
+  }
+}
+
+async function deleteUserForm(
+  value: unknown,
+  channels: XlflowChannels,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
+  const name = treeName(value);
+  const uri = treeUri(value);
+  if (name === undefined) {
+    vscode.window.showWarningMessage("xlflow delete UserForm received invalid UserForm arguments.");
+    return;
+  }
+
+  const confirmed = await vscode.window.showWarningMessage(
+    `Delete UserForm "${name}" from the xlflow project?\n\nThis may remove the .frm, .frx, sidecar code, and designer spec artifacts. The workbook will be updated on the next xlflow push.`,
+    { modal: true },
+    "Delete",
+  );
+  if (confirmed !== "Delete") {
+    return;
+  }
+
+  const workspaceFolder =
+    uri === undefined
+      ? await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true })
+      : await workspaceFolderForUri(uri);
+  const result = await runModuleMutation(
+    ["remove", name],
+    `xlflow module remove ${name}`,
+    channels.output,
+    workspaceFolder,
+  );
+  if (result.exitCode !== 0) {
+    showMutationFailure("delete", name, result, "UserForm");
+    return;
+  }
+
+  await Promise.all([hooks.refreshUserForms(), hooks.refreshModules(), hooks.refreshTests()]);
+}
+
 async function renameModule(
   value: unknown,
   channels: XlflowChannels,
@@ -517,12 +617,11 @@ async function renameModule(
   const wasOpen = vscode.workspace.textDocuments.some(
     (document) => document.uri.toString() === uri.toString(),
   );
-  const label = `xlflow module rename ${moduleName} ${newName.trim()}`;
-  const result = await runXlflowJsonCommand<XlflowMutationEnvelope>(
-    ["--json", "module", "rename", moduleName, newName.trim()],
-    label,
+  const result = await runModuleMutation(
+    ["rename", moduleName, newName.trim()],
+    `xlflow module rename ${moduleName} ${newName.trim()}`,
     channels.output,
-    { requireWorkspace: true, workspaceFolder },
+    workspaceFolder,
   );
   if (result.exitCode !== 0) {
     showMutationFailure("rename", moduleName, result);
@@ -566,12 +665,11 @@ async function deleteModule(
   }
 
   const workspaceFolder = await workspaceFolderForUri(uri);
-  const label = `xlflow module remove ${moduleName}`;
-  const result = await runXlflowJsonCommand<XlflowMutationEnvelope>(
-    ["--json", "module", "remove", moduleName],
-    label,
+  const result = await runModuleMutation(
+    ["remove", moduleName],
+    `xlflow module remove ${moduleName}`,
     channels.output,
-    { requireWorkspace: true, workspaceFolder },
+    workspaceFolder,
   );
   if (result.exitCode !== 0) {
     showMutationFailure("delete", moduleName, result);
@@ -736,6 +834,20 @@ async function workspaceFolderForUri(uri: vscode.Uri): Promise<vscode.WorkspaceF
   );
 }
 
+async function runModuleMutation(
+  args: string[],
+  label: string,
+  outputChannel: vscode.OutputChannel,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): Promise<{ exitCode: number; stderr: string; json?: XlflowMutationEnvelope }> {
+  return runXlflowJsonCommand<XlflowMutationEnvelope>(
+    ["--json", "module", ...args],
+    label,
+    outputChannel,
+    { requireWorkspace: true, workspaceFolder },
+  );
+}
+
 function renamedModuleUri(
   workspaceFolder: vscode.WorkspaceFolder,
   envelope: XlflowMutationEnvelope | undefined,
@@ -763,12 +875,15 @@ function showMutationFailure(
   operation: "rename" | "delete",
   moduleName: string,
   result: { exitCode: number; stderr: string; json?: XlflowMutationEnvelope },
+  targetKind = "module",
 ): void {
   const message =
     readNonEmpty(result.json?.error?.message) ??
     readNonEmpty(result.stderr.split(/\r?\n/).find((line) => line.trim().length > 0)) ??
     `xlflow exited with code ${result.exitCode}.`;
-  vscode.window.showErrorMessage(`Failed to ${operation} module "${moduleName}": ${message}`);
+  vscode.window.showErrorMessage(
+    `Failed to ${operation} ${targetKind} "${moduleName}": ${message}`,
+  );
 }
 
 async function copyText(label: string, value: string | undefined): Promise<void> {
@@ -786,6 +901,11 @@ function relativePathForUri(uri: vscode.Uri): string {
     return vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/");
   }
   return path.relative(folder.uri.fsPath, uri.fsPath).replace(/\\/g, "/");
+}
+
+function relativePathFromTreeUri(value: unknown): string | undefined {
+  const uri = treeUri(value);
+  return uri === undefined ? undefined : relativePathForUri(uri);
 }
 
 function readNonEmpty(value: unknown): string | undefined {
@@ -808,6 +928,13 @@ function treeQualifiedName(value: unknown): string | undefined {
     return undefined;
   }
   return readNonEmpty((value as Record<string, unknown>).qualifiedName);
+}
+
+function treeRelativePath(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  return readNonEmpty((value as Record<string, unknown>).relativePath);
 }
 
 function treeModuleKind(value: unknown): string | undefined {

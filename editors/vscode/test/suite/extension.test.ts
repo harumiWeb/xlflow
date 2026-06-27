@@ -8,6 +8,8 @@ import {
   readExcelPathFromToml,
   readFormsRootFromToml,
   readUserFormCodeSourceFromToml,
+  userFormArtifactContextValue,
+  userFormContextValue,
 } from "../../src/sidebar";
 
 export async function run(): Promise<void> {
@@ -55,6 +57,11 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.copyRelativePath",
     "xlflow.copyProcedureName",
     "xlflow.copyQualifiedName",
+    "xlflow.renameUserForm",
+    "xlflow.deleteUserForm",
+    "xlflow.revealUserFormSource",
+    "xlflow.copyUserFormName",
+    "xlflow.copyUserFormRelativePath",
     "xlflow.test",
     "xlflow.lintWorkspace",
     "xlflow.formatDocument",
@@ -214,4 +221,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(moduleContextValue("standard"), "xlflow.module.standard");
   assert.strictEqual(moduleContextValue("class"), "xlflow.module.class");
   assert.strictEqual(moduleContextValue("document"), "xlflow.module.document");
+  assert.strictEqual(userFormContextValue("sidecar"), "xlflow.userForm.sidecar");
+  assert.strictEqual(userFormContextValue("frm"), "xlflow.userForm.frm");
+  assert.strictEqual(
+    userFormArtifactContextValue({ artifactKind: "code", missing: false }),
+    "xlflow.userFormArtifact.code",
+  );
+  assert.strictEqual(
+    userFormArtifactContextValue({ artifactKind: "spec", missing: true }),
+    "xlflow.userFormMissingArtifact.spec",
+  );
 }

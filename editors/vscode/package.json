@@ -416,6 +416,31 @@
         "command": "xlflow.openUserFormArtifact",
         "title": "xlflow: Open UserForm Artifact",
         "category": "xlflow"
+      },
+      {
+        "command": "xlflow.renameUserForm",
+        "title": "xlflow: Rename UserForm",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.deleteUserForm",
+        "title": "xlflow: Delete UserForm",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.revealUserFormSource",
+        "title": "xlflow: Reveal UserForm Source",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyUserFormName",
+        "title": "xlflow: Copy UserForm Name",
+        "category": "xlflow"
+      },
+      {
+        "command": "xlflow.copyUserFormRelativePath",
+        "title": "xlflow: Copy UserForm Relative Path",
+        "category": "xlflow"
       }
     ],
     "menus": {
@@ -574,6 +599,46 @@
           "command": "xlflow.copyQualifiedName",
           "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.(procedure|testProcedure|procedureStatic)$/",
           "group": "4_copy@2"
+        },
+        {
+          "command": "xlflow.renameUserForm",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "xlflow.deleteUserForm",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "xlflow.revealUserFormSource",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "3_file@1"
+        },
+        {
+          "command": "xlflow.copyUserFormName",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "4_copy@1"
+        },
+        {
+          "command": "xlflow.copyUserFormRelativePath",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "4_copy@2"
+        },
+        {
+          "command": "xlflow.openUserFormArtifact",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userFormArtifact\\./",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.revealUserFormSource",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userFormArtifact\\./",
+          "group": "3_file@1"
+        },
+        {
+          "command": "xlflow.copyUserFormRelativePath",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userFormArtifact\\./",
+          "group": "4_copy@1"
         }
       ]
     },
@@ -677,7 +742,10 @@
     "onCommand:xlflow.copyProcedureName",
     "onCommand:xlflow.copyQualifiedName",
     "onCommand:xlflow.copyRelativePath",
+    "onCommand:xlflow.copyUserFormName",
+    "onCommand:xlflow.copyUserFormRelativePath",
     "onCommand:xlflow.deleteModule",
+    "onCommand:xlflow.deleteUserForm",
     "onCommand:xlflow.formatDocument",
     "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",
@@ -700,8 +768,10 @@
     "onCommand:xlflow.refreshTests",
     "onCommand:xlflow.refreshUserForms",
     "onCommand:xlflow.renameModule",
+    "onCommand:xlflow.renameUserForm",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.revealSourceFile",
+    "onCommand:xlflow.revealUserFormSource",
     "onCommand:xlflow.runAllTests",
     "onCommand:xlflow.runDoctor",
     "onCommand:xlflow.runMacro",

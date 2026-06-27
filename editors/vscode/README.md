@@ -33,7 +33,7 @@ Modules view title actions can create standard or class modules through `xlflow 
 
 Procedure item context menus can open runnable procedures, run no-argument procedures through `xlflow run <ModuleName.ProcedureName>`, and copy procedure or qualified names.
 
-UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts. UserForms are managed in the UserForms view, not the Modules view.
+UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts. UserForm item context menus can open the primary source artifact, rename, delete, reveal, and copy source details. Rename and delete delegate to `xlflow module rename` and `xlflow module remove` because UserForms may include `.frm`, `.frx`, sidecar code, and designer spec artifacts. Artifact item context menus can open, reveal, and copy paths for existing artifacts; missing artifacts do not expose file actions.
 
 `UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
 
@@ -118,8 +118,13 @@ The command palette includes:
 - `xlflow: Copy Relative Path`
 - `xlflow: Copy Procedure Name`
 - `xlflow: Copy Qualified Name`
+- `xlflow: Rename UserForm`
+- `xlflow: Delete UserForm`
+- `xlflow: Reveal UserForm Source`
+- `xlflow: Copy UserForm Name`
+- `xlflow: Copy UserForm Relative Path`
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `Rename Module` runs `xlflow --json module rename <old> <new>`, `Delete Module` runs `xlflow --json module remove <name>`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `Rename Module` and `Rename UserForm` run `xlflow --json module rename <old> <new>`, `Delete Module` and `Delete UserForm` run `xlflow --json module remove <name>`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
 
 `Install Agent Skill` prompts for one of the bundled provider targets: `codex`, `claude`, `cursor`, `gemini`, or `agents`. It also asks whether to pass `--force` before replacing an existing skill installation. `Install Helper Modules` prompts before using `--push` because that mode imports the helper modules into the configured workbook.
 
