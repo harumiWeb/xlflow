@@ -125,7 +125,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     ok: false,
     reason: "failed",
     executable: "xlflow",
-    message: "xlflow --version timed out.",
+    message: "xlflow version timed out.",
   });
   assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { stderr: "boom" }), {
     ok: false,

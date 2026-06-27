@@ -65,7 +65,7 @@ export class XlflowCliAvailabilityService implements vscode.Disposable {
 export async function checkXlflowAvailability(): Promise<XlflowCliAvailability> {
   const executable = readConfig().path;
   try {
-    const result = await execFileWithTimeout(executable, ["--version"], checkTimeoutMs);
+    const result = await execFileWithTimeout(executable, ["version"], checkTimeoutMs);
     if (result.exitCode === 0) {
       return normalizeAvailabilitySuccess(executable, result.stdout, result.stderr);
     }
@@ -73,7 +73,7 @@ export async function checkXlflowAvailability(): Promise<XlflowCliAvailability> 
       code: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
-      message: vscode.l10n.t("xlflow --version exited with code {exitCode}.", {
+      message: vscode.l10n.t("xlflow version exited with code {exitCode}.", {
         exitCode: result.exitCode,
       }),
     });
@@ -111,7 +111,7 @@ export function normalizeAvailabilityFailure(
       ok: false,
       reason: "failed",
       executable,
-      message: vscode.l10n.t("xlflow --version timed out."),
+      message: vscode.l10n.t("xlflow version timed out."),
     };
   }
   const detail =
