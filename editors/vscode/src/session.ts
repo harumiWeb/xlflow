@@ -78,7 +78,7 @@ export class SessionManager implements vscode.Disposable {
     if (folder === undefined) {
       this.snapshot = {
         state: "unknown",
-        lastError: "No workspace folder is open.",
+        lastError: vscode.l10n.t("No workspace folder is open."),
       };
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
@@ -160,7 +160,7 @@ export class SessionManager implements vscode.Disposable {
       await this.handleSessionFailure();
       return;
     }
-    vscode.window.showInformationMessage("xlflow session restarted.");
+    vscode.window.showInformationMessage(vscode.l10n.t("xlflow session restarted."));
     await this.refreshStatus();
   }
 
@@ -179,16 +179,16 @@ export class SessionManager implements vscode.Disposable {
       notify: false,
     });
     if (code === 0) {
-      vscode.window.showInformationMessage("xlflow doctor completed.");
+      vscode.window.showInformationMessage(vscode.l10n.t("xlflow doctor completed."));
     } else {
-      vscode.window.showErrorMessage("xlflow doctor failed. See xlflow output.");
+      vscode.window.showErrorMessage(vscode.l10n.t("xlflow doctor failed. See xlflow output."));
     }
   }
 
   async showActions(): Promise<void> {
     const action = await vscode.window.showQuickPick(this.quickPickItems(), {
-      title: "xlflow Session",
-      placeHolder: "Select a session action",
+      title: vscode.l10n.t("xlflow Session"),
+      placeHolder: vscode.l10n.t("Select a session action"),
     });
     if (action === undefined) {
       return;
@@ -221,28 +221,28 @@ export class SessionManager implements vscode.Disposable {
 
   private quickPickItems(): Array<vscode.QuickPickItem & { action: SessionAction }> {
     const common: Array<vscode.QuickPickItem & { action: SessionAction }> = [
-      { label: "Show Session Status", action: "status" },
-      { label: "Open xlflow Output", action: "output" },
+      { label: vscode.l10n.t("Show Session Status"), action: "status" },
+      { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
     ];
     switch (this.snapshot.state) {
       case "active":
         return [
-          { label: "Stop Session", action: "stop" },
-          { label: "Restart Session", action: "restart" },
+          { label: vscode.l10n.t("Stop Session"), action: "stop" },
+          { label: vscode.l10n.t("Restart Session"), action: "restart" },
           ...common,
         ];
       case "error":
         return [
-          { label: "Show Session Status", action: "status" },
-          { label: "Run Doctor", action: "doctor" },
-          { label: "Open xlflow Output", action: "output" },
-          { label: "Start Session", action: "start" },
+          { label: vscode.l10n.t("Show Session Status"), action: "status" },
+          { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
+          { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
+          { label: vscode.l10n.t("Start Session"), action: "start" },
         ];
       default:
         return [
-          { label: "Start Session", action: "start" },
+          { label: vscode.l10n.t("Start Session"), action: "start" },
           ...common,
-          { label: "Run Doctor", action: "doctor" },
+          { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
         ];
     }
   }
@@ -262,18 +262,22 @@ export class SessionManager implements vscode.Disposable {
       await this.handleSessionFailure();
       return;
     }
-    vscode.window.showInformationMessage(`xlflow session ${successVerb}.`);
+    vscode.window.showInformationMessage(
+      vscode.l10n.t("xlflow session {successVerb}.", {
+        successVerb: vscode.l10n.t(successVerb),
+      }),
+    );
     await this.refreshStatus();
   }
 
   private async handleSessionFailure(): Promise<void> {
-    vscode.window.showErrorMessage("xlflow session failed. See xlflow output.");
+    vscode.window.showErrorMessage(vscode.l10n.t("xlflow session failed. See xlflow output."));
     await this.refreshStatus();
     if (this.snapshot.state !== "error") {
       this.snapshot = {
         ...this.snapshot,
         state: "error",
-        lastError: "Session command failed. See xlflow output.",
+        lastError: vscode.l10n.t("Session command failed. See xlflow output."),
       };
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
@@ -330,27 +334,27 @@ export function sessionStatusText(
   projectKind: "noWorkspace" | "notInitialized" | "ready" | "invalid" = "ready",
 ): string {
   if (projectKind === "noWorkspace") {
-    return "$(circle-slash) xlflow: No Workspace";
+    return vscode.l10n.t("$(circle-slash) xlflow: No Workspace");
   }
   if (projectKind === "notInitialized") {
-    return "$(circle-slash) xlflow: No Project";
+    return vscode.l10n.t("$(circle-slash) xlflow: No Project");
   }
   if (projectKind === "invalid") {
-    return "$(warning) xlflow: Project Error";
+    return vscode.l10n.t("$(warning) xlflow: Project Error");
   }
   switch (state) {
     case "unknown":
-      return "$(question) xlflow: Session Unknown";
+      return vscode.l10n.t("$(question) xlflow: Session Unknown");
     case "inactive":
-      return "$(circle-slash) xlflow: No Session";
+      return vscode.l10n.t("$(circle-slash) xlflow: No Session");
     case "starting":
-      return "$(sync~spin) xlflow: Starting";
+      return vscode.l10n.t("$(sync~spin) xlflow: Starting");
     case "active":
-      return "$(check) xlflow: Session Active";
+      return vscode.l10n.t("$(check) xlflow: Session Active");
     case "stopping":
-      return "$(sync~spin) xlflow: Stopping";
+      return vscode.l10n.t("$(sync~spin) xlflow: Stopping");
     case "error":
-      return "$(warning) xlflow: Session Error";
+      return vscode.l10n.t("$(warning) xlflow: Session Error");
   }
 }
 
@@ -365,47 +369,53 @@ function sessionStatusTooltip(snapshot: SessionSnapshot): string {
   const lines: string[] = [];
   switch (snapshot.state) {
     case "active":
-      lines.push("xlflow session active");
+      lines.push(vscode.l10n.t("xlflow session active"));
       break;
     case "inactive":
-      lines.push("No active xlflow session.");
+      lines.push(vscode.l10n.t("No active xlflow session."));
       break;
     case "starting":
-      lines.push("xlflow session starting...");
+      lines.push(vscode.l10n.t("xlflow session starting..."));
       break;
     case "stopping":
-      lines.push("xlflow session stopping...");
+      lines.push(vscode.l10n.t("xlflow session stopping..."));
       break;
     case "error":
-      lines.push("xlflow session error");
+      lines.push(vscode.l10n.t("xlflow session error"));
       break;
     case "unknown":
-      lines.push("xlflow session status unknown");
+      lines.push(vscode.l10n.t("xlflow session status unknown"));
       break;
   }
   if (snapshot.workspaceFolder !== undefined) {
-    lines.push(`Workspace: ${snapshot.workspaceFolder.uri.fsPath}`);
+    lines.push(
+      vscode.l10n.t("Workspace: {workspace}", { workspace: snapshot.workspaceFolder.uri.fsPath }),
+    );
   }
   const workbook = workbookDisplayName(snapshot.session);
   if (workbook !== undefined) {
-    lines.push(`Workbook: ${workbook}`);
+    lines.push(vscode.l10n.t("Workbook: {workbook}", { workbook }));
   }
   if (snapshot.session?.save_required === true) {
-    lines.push("Save required");
+    lines.push(vscode.l10n.t("Save required"));
   } else if (snapshot.session?.dirty === true) {
-    lines.push("Workbook dirty");
+    lines.push(vscode.l10n.t("Workbook dirty"));
   }
   const startedAt = readNonEmpty(snapshot.session?.metadata?.started_at);
   if (startedAt !== undefined) {
-    lines.push(`Started: ${startedAt}`);
+    lines.push(vscode.l10n.t("Started: {startedAt}", { startedAt }));
   }
   if (snapshot.lastCheckedAt !== undefined) {
-    lines.push(`Last check: ${snapshot.lastCheckedAt.toLocaleTimeString()}`);
+    lines.push(
+      vscode.l10n.t("Last check: {lastCheck}", {
+        lastCheck: snapshot.lastCheckedAt.toLocaleTimeString(),
+      }),
+    );
   }
   if (snapshot.lastError !== undefined) {
-    lines.push(`Error: ${snapshot.lastError}`);
+    lines.push(vscode.l10n.t("Error: {error}", { error: snapshot.lastError }));
   }
-  lines.push("Click for session actions.");
+  lines.push(vscode.l10n.t("Click for session actions."));
   return lines.join("\n");
 }
 
@@ -422,7 +432,7 @@ function statusErrorMessage(env: XlflowStatusEnvelope | undefined, stderr: strin
   return (
     readNonEmpty(env?.error?.message) ??
     readNonEmpty(stderr) ??
-    "xlflow session status did not return a valid session payload."
+    vscode.l10n.t("xlflow session status did not return a valid session payload.")
   );
 }
 

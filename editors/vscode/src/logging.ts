@@ -8,7 +8,9 @@ export interface XlflowChannels {
 export function createChannels(): XlflowChannels {
   return {
     output: vscode.window.createOutputChannel("xlflow", { log: true }),
-    trace: vscode.window.createOutputChannel("xlflow Language Server Trace", { log: true }),
+    trace: vscode.window.createOutputChannel(vscode.l10n.t("xlflow Language Server Trace"), {
+      log: true,
+    }),
   };
 }
 

@@ -94,7 +94,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch (error) {
     channels.output.error(`xlflow language server startup failed: ${String(error)}`);
     vscode.window.showWarningMessage(
-      "xlflow language server failed to start. Command palette actions remain available; check xlflow.path or run xlflow: Check Environment.",
+      vscode.l10n.t(
+        "xlflow language server failed to start. Command palette actions remain available; check xlflow.path or run xlflow: Check Environment.",
+      ),
     );
   }
   await projectState.refresh();

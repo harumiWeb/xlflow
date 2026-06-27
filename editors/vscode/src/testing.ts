@@ -24,12 +24,15 @@ export class XlflowTestController implements vscode.Disposable {
   private readonly runProfile: vscode.TestRunProfile;
 
   constructor(private readonly channels: XlflowChannels) {
-    this.controller = vscode.tests.createTestController("xlflow-vba-tests", "xlflow VBA Tests");
+    this.controller = vscode.tests.createTestController(
+      "xlflow-vba-tests",
+      vscode.l10n.t("xlflow VBA Tests"),
+    );
     this.controller.refreshHandler = async () => {
       await this.discoverAll();
     };
     this.runProfile = this.controller.createRunProfile(
-      "Run Tests",
+      vscode.l10n.t("Run Tests"),
       vscode.TestRunProfileKind.Run,
       async (request, token) => {
         await this.runTests(request, token);
@@ -242,7 +245,9 @@ function testFailureMessage(
   const error = item?.error ?? result.json?.error;
   const code = readNonEmpty(error?.code);
   const detail =
-    readNonEmpty(error?.message) ?? readNonEmpty(result.stderr) ?? "xlflow test failed";
+    readNonEmpty(error?.message) ??
+    readNonEmpty(result.stderr) ??
+    vscode.l10n.t("xlflow test failed");
   return new vscode.TestMessage(code === undefined ? detail : `${code}: ${detail}`);
 }
 

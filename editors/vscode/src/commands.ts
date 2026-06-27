@@ -55,8 +55,10 @@ export function registerCommands(
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {
       const workbook = await vscode.window.showInputBox({
-        title: "xlflow: New Project",
-        prompt: "Workbook filename or project name. Leave empty to use xlflow's default.",
+        title: vscode.l10n.t("xlflow: New Project"),
+        prompt: vscode.l10n.t(
+          "Workbook filename or project name. Leave empty to use xlflow's default.",
+        ),
         placeHolder: "Book.xlsm",
         value: "Book.xlsm",
       });
@@ -76,13 +78,13 @@ export function registerCommands(
     }),
     vscode.commands.registerCommand("xlflow.initProject", async () => {
       const workbooks = await vscode.window.showOpenDialog({
-        title: "xlflow: Initialize Project",
+        title: vscode.l10n.t("xlflow: Initialize Project"),
         canSelectFiles: true,
         canSelectFolders: false,
         canSelectMany: false,
         filters: {
-          "Excel workbooks": ["xlsm", "xlsb", "xlsx", "xls"],
-          "All files": ["*"],
+          [vscode.l10n.t("Excel workbooks")]: ["xlsm", "xlsb", "xlsx", "xls"],
+          [vscode.l10n.t("All files")]: ["*"],
         },
       });
       const workbook = workbooks?.[0];
@@ -133,12 +135,13 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.push", async () => {
+      const pushLabel = vscode.l10n.t("Push");
       const confirmed = await vscode.window.showWarningMessage(
-        "Push sources to workbook?",
+        vscode.l10n.t("Push sources to workbook?"),
         { modal: true },
-        "Push",
+        pushLabel,
       );
-      if (confirmed !== "Push") {
+      if (confirmed !== pushLabel) {
         return;
       }
       const code = await runXlflowCommand(["push"], "xlflow push", channels.output, {
@@ -176,7 +179,9 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.formatDocument", async () => {
       const editor = vscode.window.activeTextEditor;
       if (editor === undefined) {
-        vscode.window.showWarningMessage("xlflow format document requires an active editor.");
+        vscode.window.showWarningMessage(
+          vscode.l10n.t("xlflow format document requires an active editor."),
+        );
         return;
       }
       await vscode.commands.executeCommand("editor.action.formatDocument");
@@ -271,17 +276,21 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.copyModuleName", async (value: unknown) => {
-      await copyText("Module name", treeName(value));
+      await copyText("Module name", vscode.l10n.t("Module name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyRelativePath", async (value: unknown) => {
       const uri = treeUri(value);
-      await copyText("Relative path", uri === undefined ? undefined : relativePathForUri(uri));
+      await copyText(
+        "relative path",
+        vscode.l10n.t("Relative path"),
+        uri === undefined ? undefined : relativePathForUri(uri),
+      );
     }),
     vscode.commands.registerCommand("xlflow.copyProcedureName", async (value: unknown) => {
-      await copyText("Procedure name", treeName(value));
+      await copyText("Procedure name", vscode.l10n.t("Procedure name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyQualifiedName", async (value: unknown) => {
-      await copyText("Qualified name", treeQualifiedName(value));
+      await copyText("Qualified name", vscode.l10n.t("Qualified name"), treeQualifiedName(value));
     }),
     vscode.commands.registerCommand("xlflow.renameUserForm", async (value: unknown) => {
       await renameUserForm(value, channels, hooks);
@@ -296,11 +305,12 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.copyUserFormName", async (value: unknown) => {
-      await copyText("UserForm name", treeName(value));
+      await copyText("UserForm name", vscode.l10n.t("UserForm name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyUserFormRelativePath", async (value: unknown) => {
       await copyText(
-        "Relative path",
+        "relative path",
+        vscode.l10n.t("Relative path"),
         userFormRelativePath(value) ?? relativePathFromUri(userFormSourceUri(value)),
       );
     }),
@@ -333,12 +343,15 @@ export function registerCommands(
 async function showSetupActions(): Promise<void> {
   const action = await vscode.window.showQuickPick(
     [
-      { label: "New Project", command: "xlflow.newProject" },
-      { label: "Init Existing Workbook", command: "xlflow.initProject" },
-      { label: "Run Doctor", command: "xlflow.runDoctor" },
-      { label: "Open Documentation", command: "xlflow.openDocumentation" },
+      { label: vscode.l10n.t("New Project"), command: "xlflow.newProject" },
+      { label: vscode.l10n.t("Init Existing Workbook"), command: "xlflow.initProject" },
+      { label: vscode.l10n.t("Run Doctor"), command: "xlflow.runDoctor" },
+      { label: vscode.l10n.t("Open Documentation"), command: "xlflow.openDocumentation" },
     ],
-    { title: "xlflow Project Setup", placeHolder: "Select a setup action" },
+    {
+      title: vscode.l10n.t("xlflow Project Setup"),
+      placeHolder: vscode.l10n.t("Select a setup action"),
+    },
   );
   if (action !== undefined) {
     await vscode.commands.executeCommand(action.command);
@@ -348,20 +361,22 @@ async function showSetupActions(): Promise<void> {
 async function installAgentSkill(channels: XlflowChannels): Promise<void> {
   const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
   if (workspaceFolder === undefined) {
-    vscode.window.showWarningMessage("xlflow skill install requires an open workspace folder.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow skill install requires an open workspace folder."),
+    );
     return;
   }
   const provider = await vscode.window.showQuickPick(
     [
-      { label: "codex", description: "Install for Codex" },
-      { label: "claude", description: "Install for Claude Code" },
-      { label: "cursor", description: "Install for Cursor" },
-      { label: "gemini", description: "Install for Gemini CLI" },
-      { label: "agents", description: "Install shared .agents instructions" },
+      { label: "codex", description: vscode.l10n.t("Install for Codex") },
+      { label: "claude", description: vscode.l10n.t("Install for Claude Code") },
+      { label: "cursor", description: vscode.l10n.t("Install for Cursor") },
+      { label: "gemini", description: vscode.l10n.t("Install for Gemini CLI") },
+      { label: "agents", description: vscode.l10n.t("Install shared .agents instructions") },
     ],
     {
-      title: "xlflow: Install Agent Skill",
-      placeHolder: "Select the agent provider target",
+      title: vscode.l10n.t("xlflow: Install Agent Skill"),
+      placeHolder: vscode.l10n.t("Select the agent provider target"),
     },
   );
   if (provider === undefined) {
@@ -371,19 +386,19 @@ async function installAgentSkill(channels: XlflowChannels): Promise<void> {
   const overwrite = await vscode.window.showQuickPick(
     [
       {
-        label: "Install without overwrite",
-        description: "Fail if the xlflow skill already exists",
+        label: vscode.l10n.t("Install without overwrite"),
+        description: vscode.l10n.t("Fail if the xlflow skill already exists"),
         force: false,
       },
       {
-        label: "Overwrite existing installation",
-        description: "Pass --force to replace an existing xlflow skill",
+        label: vscode.l10n.t("Overwrite existing installation"),
+        description: vscode.l10n.t("Pass --force to replace an existing xlflow skill"),
         force: true,
       },
     ],
     {
-      title: "xlflow: Install Agent Skill",
-      placeHolder: "Choose overwrite behavior",
+      title: vscode.l10n.t("xlflow: Install Agent Skill"),
+      placeHolder: vscode.l10n.t("Choose overwrite behavior"),
     },
   );
   if (overwrite === undefined) {
@@ -403,25 +418,27 @@ async function installAgentSkill(channels: XlflowChannels): Promise<void> {
 async function installHelperModules(channels: XlflowChannels): Promise<void> {
   const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
   if (workspaceFolder === undefined) {
-    vscode.window.showWarningMessage("xlflow module install requires an open workspace folder.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow module install requires an open workspace folder."),
+    );
     return;
   }
   const mode = await vscode.window.showQuickPick(
     [
       {
-        label: "Install to source only",
-        description: "Run xlflow module install",
+        label: vscode.l10n.t("Install to source only"),
+        description: vscode.l10n.t("Run xlflow module install"),
         args: ["module", "install"],
       },
       {
-        label: "Install and push to workbook",
-        description: "Run xlflow module install --push",
+        label: vscode.l10n.t("Install and push to workbook"),
+        description: vscode.l10n.t("Run xlflow module install --push"),
         args: ["module", "install", "--push"],
       },
     ],
     {
-      title: "xlflow: Install Helper Modules",
-      placeHolder: "Choose how to install bundled helper modules",
+      title: vscode.l10n.t("xlflow: Install Helper Modules"),
+      placeHolder: vscode.l10n.t("Choose how to install bundled helper modules"),
     },
   );
   if (mode === undefined) {
@@ -437,21 +454,21 @@ async function newModule(channels: XlflowChannels, hooks: CommandRefreshHooks): 
   const moduleType = await vscode.window.showQuickPick(
     [
       {
-        label: "Standard Module",
-        description: "Run xlflow module new --type standard",
+        label: vscode.l10n.t("Standard Module"),
+        description: vscode.l10n.t("Run xlflow module new --type standard"),
         moduleType: "standard" as const,
         placeholder: "InvoiceProcessor",
       },
       {
-        label: "Class Module",
-        description: "Run xlflow module new --type class",
+        label: vscode.l10n.t("Class Module"),
+        description: vscode.l10n.t("Run xlflow module new --type class"),
         moduleType: "class" as const,
         placeholder: "InvoiceService",
       },
     ],
     {
-      title: "xlflow: New Module",
-      placeHolder: "Select the module type",
+      title: vscode.l10n.t("xlflow: New Module"),
+      placeHolder: vscode.l10n.t("Select the module type"),
     },
   );
   if (moduleType === undefined) {
@@ -468,11 +485,15 @@ async function newModuleOfType(
 ): Promise<void> {
   const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
   if (workspaceFolder === undefined) {
-    vscode.window.showWarningMessage("xlflow module new requires an open workspace folder.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow module new requires an open workspace folder."),
+    );
     return;
   }
   const title =
-    moduleType === "standard" ? "xlflow: New Standard Module" : "xlflow: New Class Module";
+    moduleType === "standard"
+      ? vscode.l10n.t("xlflow: New Standard Module")
+      : vscode.l10n.t("xlflow: New Class Module");
   const name = await promptComponentName(title, placeholder ?? "InvoiceProcessor");
   if (name === undefined) {
     return;
@@ -490,10 +511,12 @@ async function newModuleOfType(
 async function newUserForm(channels: XlflowChannels, hooks: CommandRefreshHooks): Promise<void> {
   const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
   if (workspaceFolder === undefined) {
-    vscode.window.showWarningMessage("xlflow form new requires an open workspace folder.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow form new requires an open workspace folder."),
+    );
     return;
   }
-  const name = await promptComponentName("xlflow: New UserForm", "CustomerForm");
+  const name = await promptComponentName(vscode.l10n.t("xlflow: New UserForm"), "CustomerForm");
   if (name === undefined) {
     return;
   }
@@ -519,10 +542,12 @@ async function renameUserForm(
   const name = treeName(value);
   const uri = userFormSourceUri(value);
   if (name === undefined) {
-    vscode.window.showWarningMessage("xlflow rename UserForm received invalid UserForm arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow rename UserForm received invalid UserForm arguments."),
+    );
     return;
   }
-  const newName = await promptComponentName("xlflow: Rename UserForm", name);
+  const newName = await promptComponentName(vscode.l10n.t("xlflow: Rename UserForm"), name);
   if (newName === undefined || newName.trim() === name) {
     return;
   }
@@ -559,16 +584,22 @@ async function deleteUserForm(
   const name = treeName(value);
   const uri = userFormSourceUri(value);
   if (name === undefined) {
-    vscode.window.showWarningMessage("xlflow delete UserForm received invalid UserForm arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow delete UserForm received invalid UserForm arguments."),
+    );
     return;
   }
 
+  const deleteLabel = vscode.l10n.t("Delete");
   const confirmed = await vscode.window.showWarningMessage(
-    `Delete UserForm "${name}" from the xlflow project?\n\nThis may remove the .frm, .frx, sidecar code, and designer spec artifacts. The workbook will be updated on the next xlflow push.`,
+    vscode.l10n.t(
+      'Delete UserForm "{name}" from the xlflow project?\n\nThis may remove the .frm, .frx, sidecar code, and designer spec artifacts. The workbook will be updated on the next xlflow push.',
+      { name },
+    ),
     { modal: true },
-    "Delete",
+    deleteLabel,
   );
-  if (confirmed !== "Delete") {
+  if (confirmed !== deleteLabel) {
     return;
   }
 
@@ -595,17 +626,21 @@ async function renameModule(
   const moduleName = treeName(value);
   const uri = treeUri(value);
   if (moduleName === undefined || uri === undefined) {
-    vscode.window.showWarningMessage("xlflow rename module received invalid module arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow rename module received invalid module arguments."),
+    );
     return;
   }
   if (treeModuleKind(value) === "document") {
     vscode.window.showErrorMessage(
-      `Failed to rename module "${moduleName}": document modules cannot be renamed.`,
+      vscode.l10n.t('Failed to rename module "{moduleName}": document modules cannot be renamed.', {
+        moduleName,
+      }),
     );
     return;
   }
 
-  const newName = await promptComponentName("xlflow: Rename Module", moduleName);
+  const newName = await promptComponentName(vscode.l10n.t("xlflow: Rename Module"), moduleName);
   if (newName === undefined || newName.trim() === moduleName) {
     return;
   }
@@ -642,22 +677,30 @@ async function deleteModule(
   const moduleName = treeName(value);
   const uri = treeUri(value);
   if (moduleName === undefined || uri === undefined) {
-    vscode.window.showWarningMessage("xlflow delete module received invalid module arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow delete module received invalid module arguments."),
+    );
     return;
   }
   if (treeModuleKind(value) === "document") {
     vscode.window.showErrorMessage(
-      `Failed to delete module "${moduleName}": document modules cannot be removed.`,
+      vscode.l10n.t('Failed to delete module "{moduleName}": document modules cannot be removed.', {
+        moduleName,
+      }),
     );
     return;
   }
 
+  const deleteLabel = vscode.l10n.t("Delete");
   const confirmed = await vscode.window.showWarningMessage(
-    `Delete module "${moduleName}" from the xlflow project?\n\nThis removes the source file. The workbook will be updated on the next xlflow push.`,
+    vscode.l10n.t(
+      'Delete module "{moduleName}" from the xlflow project?\n\nThis removes the source file. The workbook will be updated on the next xlflow push.',
+      { moduleName },
+    ),
     { modal: true },
-    "Delete",
+    deleteLabel,
   );
-  if (confirmed !== "Delete") {
+  if (confirmed !== deleteLabel) {
     return;
   }
 
@@ -682,7 +725,7 @@ async function promptComponentName(
 ): Promise<string | undefined> {
   return vscode.window.showInputBox({
     title,
-    prompt: "Enter a VBA component name without a file extension or path.",
+    prompt: vscode.l10n.t("Enter a VBA component name without a file extension or path."),
     placeHolder,
     validateInput: validateComponentNameInput,
   });
@@ -691,13 +734,13 @@ async function promptComponentName(
 function validateComponentNameInput(value: string): string | undefined {
   const name = value.trim();
   if (name.length === 0) {
-    return "Name is required.";
+    return vscode.l10n.t("Name is required.");
   }
   if (/[\\/]/.test(name) || name.includes("..")) {
-    return "Use a component name, not a path.";
+    return vscode.l10n.t("Use a component name, not a path.");
   }
   if (/\.(bas|cls|frm)$/i.test(name)) {
-    return "Do not include a file extension.";
+    return vscode.l10n.t("Do not include a file extension.");
   }
   return undefined;
 }
@@ -705,7 +748,9 @@ function validateComponentNameInput(value: string): string | undefined {
 async function runProcedure(value: unknown, channels: XlflowChannels): Promise<void> {
   const args = normalizeRunProcedureArgs(value);
   if (args === undefined) {
-    vscode.window.showWarningMessage("xlflow received invalid run procedure arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow received invalid run procedure arguments."),
+    );
     return;
   }
   const uri = vscode.Uri.parse(args.uri);
@@ -726,12 +771,16 @@ async function runTestProcedureFromCodeLens(
 ): Promise<void> {
   const args = normalizeRunProcedureArgs(value);
   if (args === undefined) {
-    vscode.window.showWarningMessage("xlflow CodeLens received invalid test arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow CodeLens received invalid test arguments."),
+    );
     return;
   }
   const moduleName = readNonEmpty(args.moduleName);
   if (moduleName === undefined) {
-    vscode.window.showWarningMessage("xlflow CodeLens received invalid test arguments.");
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow CodeLens received invalid test arguments."),
+    );
     return;
   }
   const uri = vscode.Uri.parse(args.uri);
@@ -818,7 +867,7 @@ async function saveDirtyDocumentIfNeeded(uri: vscode.Uri): Promise<boolean> {
   const saved = await document.save();
   if (!saved) {
     vscode.window.showWarningMessage(
-      "xlflow run was cancelled because the VBA document was not saved.",
+      vscode.l10n.t("xlflow run was cancelled because the VBA document was not saved."),
     );
   }
   return saved;
@@ -894,19 +943,32 @@ function showMutationFailure(
   const message =
     readNonEmpty(result.json?.error?.message) ??
     readNonEmpty(result.stderr.split(/\r?\n/).find((line) => line.trim().length > 0)) ??
-    `xlflow exited with code ${result.exitCode}.`;
+    vscode.l10n.t("xlflow exited with code {exitCode}.", { exitCode: result.exitCode });
   vscode.window.showErrorMessage(
-    `Failed to ${operation} ${targetKind} "${moduleName}": ${message}`,
+    vscode.l10n.t('Failed to {operation} {targetKind} "{moduleName}": {message}', {
+      operation: vscode.l10n.t(operation),
+      targetKind: vscode.l10n.t(targetKind),
+      moduleName,
+      message,
+    }),
   );
 }
 
-async function copyText(label: string, value: string | undefined): Promise<void> {
+async function copyText(
+  labelKey: string,
+  localizedLabel: string,
+  value: string | undefined,
+): Promise<void> {
   if (value === undefined) {
-    vscode.window.showWarningMessage(`xlflow could not determine the ${label.toLowerCase()}.`);
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow could not determine the {label}.", {
+        label: vscode.l10n.t(labelKey.toLowerCase()),
+      }),
+    );
     return;
   }
   await vscode.env.clipboard.writeText(value);
-  vscode.window.showInformationMessage(`${label} copied.`);
+  vscode.window.showInformationMessage(vscode.l10n.t("{label} copied.", { label: localizedLabel }));
 }
 
 function relativePathForUri(uri: vscode.Uri): string {

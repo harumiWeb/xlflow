@@ -1,9 +1,9 @@
 {
   "name": "xlflow-vscode",
-  "displayName": "Xlflow - VBA Dev Tools",
+  "displayName": "%extension.displayName%",
   "version": "0.1.0",
   "private": true,
-  "description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
+  "description": "%extension.description%",
   "categories": [
     "Formatters",
     "Linters",
@@ -46,24 +46,25 @@
     "oxlint": "^1.71.0",
     "typescript": "^5.9.0"
   },
+  "l10n": "./l10n",
   "contributes": {
     "configuration": {
-      "title": "xlflow",
+      "title": "%configuration.title%",
       "properties": {
         "xlflow.path": {
           "type": "string",
           "default": "xlflow",
-          "description": "Path to the xlflow executable."
+          "description": "%configuration.xlflow.path.description%"
         },
         "xlflow.lsp.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Start xlflow lsp --stdio for VBA files."
+          "description": "%configuration.xlflow.lsp.enabled.description%"
         },
         "xlflow.lsp.logFile": {
           "type": "string",
           "default": ".xlflow/lsp.log",
-          "description": "Log file passed to xlflow lsp --stdio."
+          "description": "%configuration.xlflow.lsp.logFile.description%"
         },
         "xlflow.lsp.trace.server": {
           "type": "string",
@@ -73,47 +74,47 @@
             "verbose"
           ],
           "default": "messages",
-          "description": "Trace verbosity for the xlflow language server output channel."
+          "description": "%configuration.xlflow.lsp.trace.server.description%"
         },
         "xlflow.codeLens.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show xlflow CodeLens actions above runnable VBA procedures."
+          "description": "%configuration.xlflow.codeLens.enabled.description%"
         },
         "xlflow.codeLens.runProcedure": {
           "type": "boolean",
           "default": true,
-          "description": "Show Run actions above runnable VBA procedures."
+          "description": "%configuration.xlflow.codeLens.runProcedure.description%"
         },
         "xlflow.codeLens.runTests": {
           "type": "boolean",
           "default": true,
-          "description": "Show Run Test actions above VBA test procedures."
+          "description": "%configuration.xlflow.codeLens.runTests.description%"
         },
         "xlflow.codeLens.userFormEvents": {
           "type": "boolean",
           "default": false,
-          "description": "Show Run actions above UserForm event handlers."
+          "description": "%configuration.xlflow.codeLens.userFormEvents.description%"
         },
         "xlflow.run.saveBeforeRun": {
           "type": "boolean",
           "default": true,
-          "description": "Save dirty VBA documents before running a procedure."
+          "description": "%configuration.xlflow.run.saveBeforeRun.description%"
         },
         "xlflow.completion.triggerSuggestInStatements": {
           "type": "boolean",
           "default": true,
-          "description": "Trigger VS Code suggestions while typing likely VBA statement and declaration prefixes."
+          "description": "%configuration.xlflow.completion.triggerSuggestInStatements.description%"
         },
         "xlflow.completion.progIdsInStrings": {
           "type": "boolean",
           "default": true,
-          "description": "Trigger VS Code suggestions inside CreateObject and GetObject ProgID string literals."
+          "description": "%configuration.xlflow.completion.progIdsInStrings.description%"
         },
         "xlflow.testing.autoDiscover": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically discover VBA tests for VS Code Test Explorer when an xlflow workspace opens."
+          "description": "%configuration.xlflow.testing.autoDiscover.description%"
         }
       }
     },
@@ -135,7 +136,7 @@
       "activitybar": [
         {
           "id": "xlflow",
-          "title": "xlflow",
+          "title": "%viewsContainer.xlflow.title%",
           "icon": "images/activity-icon.svg"
         }
       ]
@@ -144,27 +145,27 @@
       "xlflow": [
         {
           "id": "xlflow.setup",
-          "name": "Project Setup",
+          "name": "%view.setup.name%",
           "when": "!xlflow.projectReady"
         },
         {
           "id": "xlflow.project",
-          "name": "Project",
+          "name": "%view.project.name%",
           "when": "xlflow.projectReady"
         },
         {
           "id": "xlflow.modules",
-          "name": "Modules",
+          "name": "%view.modules.name%",
           "when": "xlflow.projectReady"
         },
         {
           "id": "xlflow.userForms",
-          "name": "UserForms",
+          "name": "%view.userForms.name%",
           "when": "xlflow.projectReady"
         },
         {
           "id": "xlflow.tests",
-          "name": "Tests",
+          "name": "%view.tests.name%",
           "when": "xlflow.projectReady"
         }
       ]
@@ -172,277 +173,277 @@
     "commands": [
       {
         "command": "xlflow.restartLanguageServer",
-        "title": "xlflow: Restart Language Server",
-        "category": "xlflow"
+        "title": "%command.restartLanguageServer.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.checkEnvironment",
-        "title": "xlflow: Check Environment",
-        "category": "xlflow"
+        "title": "%command.checkEnvironment.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.newProject",
-        "title": "xlflow: New Project",
-        "category": "xlflow"
+        "title": "%command.newProject.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.initProject",
-        "title": "xlflow: Initialize Project",
-        "category": "xlflow"
+        "title": "%command.initProject.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.skillInstall",
-        "title": "xlflow: Install Agent Skill",
-        "category": "xlflow"
+        "title": "%command.skillInstall.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.moduleInstall",
-        "title": "xlflow: Install Helper Modules",
-        "category": "xlflow"
+        "title": "%command.moduleInstall.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.newModule",
-        "title": "xlflow: New Module",
-        "category": "xlflow",
+        "title": "%command.newModule.title%",
+        "category": "%command.category%",
         "icon": "$(new-file)"
       },
       {
         "command": "xlflow.newStandardModule",
-        "title": "xlflow: New Standard Module",
-        "category": "xlflow",
+        "title": "%command.newStandardModule.title%",
+        "category": "%command.category%",
         "icon": "$(new-file)"
       },
       {
         "command": "xlflow.newClassModule",
-        "title": "xlflow: New Class Module",
-        "category": "xlflow",
+        "title": "%command.newClassModule.title%",
+        "category": "%command.category%",
         "icon": "$(new-file)"
       },
       {
         "command": "xlflow.newUserForm",
-        "title": "xlflow: New UserForm",
-        "category": "xlflow",
+        "title": "%command.newUserForm.title%",
+        "category": "%command.category%",
         "icon": "$(new-file)"
       },
       {
         "command": "xlflow.pull",
-        "title": "xlflow: Pull Workbook",
-        "category": "xlflow",
+        "title": "%command.pull.title%",
+        "category": "%command.category%",
         "icon": "$(cloud-download)"
       },
       {
         "command": "xlflow.push",
-        "title": "xlflow: Push Sources",
-        "category": "xlflow",
+        "title": "%command.push.title%",
+        "category": "%command.category%",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "xlflow.runMacro",
-        "title": "xlflow: Run Macro",
-        "category": "xlflow"
+        "title": "%command.runMacro.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.runProcedure",
-        "title": "xlflow: Run Procedure",
-        "category": "xlflow",
+        "title": "%command.runProcedure.title%",
+        "category": "%command.category%",
         "icon": "$(play)"
       },
       {
         "command": "xlflow.runTestProcedure",
-        "title": "xlflow: Run Test Procedure",
-        "category": "xlflow",
+        "title": "%command.runTestProcedure.title%",
+        "category": "%command.category%",
         "icon": "$(beaker)"
       },
       {
         "command": "xlflow.test",
-        "title": "xlflow: Run Tests",
-        "category": "xlflow"
+        "title": "%command.test.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.lintWorkspace",
-        "title": "xlflow: Lint Workspace",
-        "category": "xlflow"
+        "title": "%command.lintWorkspace.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.formatDocument",
-        "title": "xlflow: Format Document",
-        "category": "xlflow"
+        "title": "%command.formatDocument.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.formatProject",
-        "title": "xlflow: Format Project",
-        "category": "xlflow"
+        "title": "%command.formatProject.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.saveWorkbook",
-        "title": "xlflow: Save Workbook",
-        "category": "xlflow"
+        "title": "%command.saveWorkbook.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.sessionStart",
-        "title": "xlflow: Start Session",
-        "category": "xlflow",
+        "title": "%command.sessionStart.title%",
+        "category": "%command.category%",
         "icon": "$(play)",
         "enablement": "xlflow.sessionStartEnabled"
       },
       {
         "command": "xlflow.sessionStatus",
-        "title": "xlflow: Session Status",
-        "category": "xlflow"
+        "title": "%command.sessionStatus.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.sessionRestart",
-        "title": "xlflow: Restart Session",
-        "category": "xlflow"
+        "title": "%command.sessionRestart.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.sessionStop",
-        "title": "xlflow: Stop Session",
-        "category": "xlflow",
+        "title": "%command.sessionStop.title%",
+        "category": "%command.category%",
         "icon": "$(debug-stop)",
         "enablement": "xlflow.sessionStopEnabled"
       },
       {
         "command": "xlflow.openOutput",
-        "title": "xlflow: Open Output",
-        "category": "xlflow"
+        "title": "%command.openOutput.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.refreshProject",
-        "title": "xlflow: Refresh Project",
-        "category": "xlflow",
+        "title": "%command.refreshProject.title%",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "xlflow.refreshModules",
-        "title": "xlflow: Refresh Modules",
-        "category": "xlflow",
+        "title": "%command.refreshModules.title%",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "xlflow.collapseModules",
-        "title": "xlflow: Collapse Modules",
-        "category": "xlflow",
+        "title": "%command.collapseModules.title%",
+        "category": "%command.category%",
         "icon": "$(collapse-all)"
       },
       {
         "command": "xlflow.refreshUserForms",
-        "title": "xlflow: Refresh UserForms",
-        "category": "xlflow",
+        "title": "%command.refreshUserForms.title%",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "xlflow.collapseUserForms",
-        "title": "xlflow: Collapse UserForms",
-        "category": "xlflow",
+        "title": "%command.collapseUserForms.title%",
+        "category": "%command.category%",
         "icon": "$(collapse-all)"
       },
       {
         "command": "xlflow.refreshTests",
-        "title": "xlflow: Refresh Tests",
-        "category": "xlflow",
+        "title": "%command.refreshTests.title%",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "xlflow.runAllTests",
-        "title": "xlflow: Run All Tests",
-        "category": "xlflow",
+        "title": "%command.runAllTests.title%",
+        "category": "%command.category%",
         "icon": "$(beaker)"
       },
       {
         "command": "xlflow.runDoctor",
-        "title": "xlflow: Run Doctor",
-        "category": "xlflow"
+        "title": "%command.runDoctor.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.sessionToggle",
-        "title": "xlflow: Toggle Session",
-        "category": "xlflow"
+        "title": "%command.sessionToggle.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.setupActions",
-        "title": "xlflow: Project Setup Actions",
-        "category": "xlflow"
+        "title": "%command.setupActions.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.openDocumentation",
-        "title": "xlflow: Open Documentation",
-        "category": "xlflow"
+        "title": "%command.openDocumentation.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.openModule",
-        "title": "xlflow: Open Module",
-        "category": "xlflow"
+        "title": "%command.openModule.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.renameModule",
-        "title": "xlflow: Rename Module",
-        "category": "xlflow"
+        "title": "%command.renameModule.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.deleteModule",
-        "title": "xlflow: Delete Module",
-        "category": "xlflow"
+        "title": "%command.deleteModule.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.revealSourceFile",
-        "title": "xlflow: Reveal Source File",
-        "category": "xlflow"
+        "title": "%command.revealSourceFile.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyModuleName",
-        "title": "xlflow: Copy Module Name",
-        "category": "xlflow"
+        "title": "%command.copyModuleName.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyRelativePath",
-        "title": "xlflow: Copy Relative Path",
-        "category": "xlflow"
+        "title": "%command.copyRelativePath.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyProcedureName",
-        "title": "xlflow: Copy Procedure Name",
-        "category": "xlflow"
+        "title": "%command.copyProcedureName.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyQualifiedName",
-        "title": "xlflow: Copy Qualified Name",
-        "category": "xlflow"
+        "title": "%command.copyQualifiedName.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.openProcedure",
-        "title": "xlflow: Open Procedure",
-        "category": "xlflow"
+        "title": "%command.openProcedure.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.openUserFormArtifact",
-        "title": "xlflow: Open UserForm Artifact",
-        "category": "xlflow"
+        "title": "%command.openUserFormArtifact.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.renameUserForm",
-        "title": "xlflow: Rename UserForm",
-        "category": "xlflow"
+        "title": "%command.renameUserForm.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.deleteUserForm",
-        "title": "xlflow: Delete UserForm",
-        "category": "xlflow"
+        "title": "%command.deleteUserForm.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.revealUserFormSource",
-        "title": "xlflow: Reveal UserForm Source",
-        "category": "xlflow"
+        "title": "%command.revealUserFormSource.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyUserFormName",
-        "title": "xlflow: Copy UserForm Name",
-        "category": "xlflow"
+        "title": "%command.copyUserFormName.title%",
+        "category": "%command.category%"
       },
       {
         "command": "xlflow.copyUserFormRelativePath",
-        "title": "xlflow: Copy UserForm Relative Path",
-        "category": "xlflow"
+        "title": "%command.copyUserFormRelativePath.title%",
+        "category": "%command.category%"
       }
     ],
     "menus": {
