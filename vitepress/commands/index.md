@@ -16,7 +16,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [attach](./attach)             | Validate that the active Excel workbook matches the configured workbook.         |
 | [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.              |
 | [list](./list)                 | List workbook resources. The public subcommand is `list forms`.                  |
-| [form](./form)                 | Manage UserForms through snapshot, build, and image export workflows.            |
+| [form](./form)                 | Manage UserForms through source scaffolds, snapshot, build, and image export.    |
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
 | [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
@@ -38,7 +38,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [fmt](./fmt)                   | Format VBA source files with a conservative, non-destructive formatter.          |
 | [analyze](./analyze)           | Analyze VBA source for runtime-risk patterns without Excel COM.                  |
 | [check](./check)               | Run lint, analyze, and doctor as a combined preflight.                           |
-| [module](./module)             | Install bundled xlflow helper modules into an existing project.                  |
+| [module](./module)             | Create module source files and install bundled xlflow helper modules.            |
 | [completion](./completion)     | Generate shell completion scripts through Cobra.                                 |
 | [process](./process)           | List and manage local Excel processes.                                           |
 | [skill](./skill)               | Install the bundled xlflow skill for AI agent tools.                             |

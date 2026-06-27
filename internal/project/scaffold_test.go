@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/lint"
 )
 
@@ -139,6 +140,120 @@ func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
 		t.Fatal("expected overwrite refusal")
 	} else if !strings.Contains(err.Error(), "refusing to overwrite existing file") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewModuleCreatesStandardModule(t *testing.T) {
+	dir := t.TempDir()
+	result, err := NewModule(dir, "InvoiceProcessor", "standard", config.SourceConfig{Modules: filepath.ToSlash(filepath.Join("custom", "modules"))})
+	if err != nil {
+		t.Fatalf("NewModule() error = %v", err)
+	}
+	if result.Kind != "standard" || result.Name != "InvoiceProcessor" || result.Path != "custom/modules/InvoiceProcessor.bas" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "custom", "modules", "InvoiceProcessor.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Attribute VB_Name = \"InvoiceProcessor\"\nOption Explicit\n"
+	if string(body) != want {
+		t.Fatalf("module body = %q, want %q", string(body), want)
+	}
+}
+
+func TestNewModuleCreatesClassModule(t *testing.T) {
+	dir := t.TempDir()
+	result, err := NewModule(dir, "InvoiceService", "class", config.SourceConfig{Classes: filepath.ToSlash(filepath.Join("custom", "classes"))})
+	if err != nil {
+		t.Fatalf("NewModule() error = %v", err)
+	}
+	if result.Kind != "class" || result.Name != "InvoiceService" || result.Path != "custom/classes/InvoiceService.cls" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "custom", "classes", "InvoiceService.cls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1\nEND\nAttribute VB_Name = \"InvoiceService\"\nOption Explicit\n"
+	if string(body) != want {
+		t.Fatalf("class body = %q, want %q", string(body), want)
+	}
+}
+
+func TestNewModuleRejectsInvalidTypeNameAndOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := NewModule(dir, "InvoiceProcessor", "form", config.SourceConfig{}); err == nil {
+		t.Fatal("expected invalid type error")
+	}
+	for _, name := range []string{"", "../Escape", "foo/bar", "foo\\bar", "1Bad", "Bad Name"} {
+		if _, err := NewModule(dir, name, "standard", config.SourceConfig{}); err == nil {
+			t.Fatalf("expected invalid name error for %q", name)
+		}
+	}
+	if _, err := NewModule(dir, "Duplicate", "standard", config.SourceConfig{}); err != nil {
+		t.Fatalf("first NewModule() error = %v", err)
+	}
+	if _, err := NewModule(dir, "Duplicate", "standard", config.SourceConfig{}); err == nil {
+		t.Fatal("expected overwrite error")
+	}
+}
+
+func TestNewUserFormCreatesSidecarArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Src.Forms = filepath.ToSlash(filepath.Join("custom", "forms"))
+	result, err := NewUserForm(dir, "CustomerForm", cfg)
+	if err != nil {
+		t.Fatalf("NewUserForm() error = %v", err)
+	}
+	if result.Name != "CustomerForm" || result.CodeSource != "sidecar" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.CodePath != "custom/forms/code/CustomerForm.bas" || result.SpecPath != "custom/forms/specs/CustomerForm.yaml" {
+		t.Fatalf("unexpected paths: %+v", result)
+	}
+	codePath := filepath.Join(dir, "custom", "forms", "code", "CustomerForm.bas")
+	codeBody, err := os.ReadFile(codePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(codeBody) != "Option Explicit\n" {
+		t.Fatalf("code body = %q", string(codeBody))
+	}
+	specPath := filepath.Join(dir, "custom", "forms", "specs", "CustomerForm.yaml")
+	input, err := forms.ResolveSpecInput(dir, specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := forms.LoadFormSpec(input)
+	if err != nil {
+		t.Fatalf("generated spec should load: %v", err)
+	}
+	if spec.Form.Name != "CustomerForm" || spec.Kind != "xlflow.userform" || spec.Basis != "designer" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "custom", "forms", "CustomerForm.frm")); !os.IsNotExist(err) {
+		t.Fatalf("form new should not create .frm, stat err = %v", err)
+	}
+}
+
+func TestNewUserFormRejectsFrmModeInvalidNameAndOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	if _, err := NewUserForm(dir, "CustomerForm", cfg); err == nil {
+		t.Fatal("expected frm mode error")
+	}
+	cfg.UserForm.CodeSource = "sidecar"
+	if _, err := NewUserForm(dir, "Bad Name", cfg); err == nil {
+		t.Fatal("expected invalid name error")
+	}
+	if _, err := NewUserForm(dir, "CustomerForm", cfg); err != nil {
+		t.Fatalf("first NewUserForm() error = %v", err)
+	}
+	if _, err := NewUserForm(dir, "CustomerForm", cfg); err == nil {
+		t.Fatal("expected overwrite error")
 	}
 }
 

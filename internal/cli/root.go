@@ -477,7 +477,43 @@ func (a *app) formCommand() *cobra.Command {
 		Use:   "form",
 		Short: "Manage workbook UserForms",
 	}
-	cmd.AddCommand(a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	cmd.AddCommand(a.formNewCommand(), a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	return cmd
+}
+
+func (a *app) formNewCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "new <name>",
+		Short: "Create source files for a sidecar UserForm",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("form new")
+			if err != nil {
+				return err
+			}
+			result, err := project.NewUserForm(a.cwd, args[0], cfg)
+			if err != nil {
+				if errors.Is(err, project.ErrUserFormRequiresSidecar) {
+					return a.writeFailure("form new", output.ExitConfig, "form_new_requires_sidecar", err)
+				}
+				if errors.Is(err, project.ErrInvalidComponentName) {
+					return a.writeFailure("form new", output.ExitConfig, "form_new_args_invalid", err)
+				}
+				return a.writeFailure("form new", output.ExitConfig, "form_new_failed", err)
+			}
+			env := output.New("form new")
+			env.Source = map[string]any{
+				"created":     result.Created,
+				"kind":        "form",
+				"name":        result.Name,
+				"code_path":   result.CodePath,
+				"spec_path":   result.SpecPath,
+				"code_source": result.CodeSource,
+			}
+			env.Logs = []string{fmt.Sprintf("created UserForm source: %s", result.Name)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 	return cmd
 }
 
@@ -1410,7 +1446,43 @@ func (a *app) moduleCommand() *cobra.Command {
 		Use:   "module",
 		Short: "Manage bundled xlflow helper modules",
 	}
-	cmd.AddCommand(a.moduleInstallCommand())
+	cmd.AddCommand(a.moduleNewCommand(), a.moduleInstallCommand())
+	return cmd
+}
+
+func (a *app) moduleNewCommand() *cobra.Command {
+	var moduleType string
+	cmd := &cobra.Command{
+		Use:   "new <name>",
+		Short: "Create a new standard or class module source file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(moduleType) == "" {
+				return a.writeFailure("module new", output.ExitConfig, "module_new_args_invalid", errors.New("--type is required"))
+			}
+			cfg, err := a.loadConfig("module new")
+			if err != nil {
+				return err
+			}
+			result, err := project.NewModule(a.cwd, args[0], moduleType, cfg.Src)
+			if err != nil {
+				if errors.Is(err, project.ErrInvalidComponentName) || errors.Is(err, project.ErrInvalidModuleType) {
+					return a.writeFailure("module new", output.ExitConfig, "module_new_args_invalid", err)
+				}
+				return a.writeFailure("module new", output.ExitConfig, "module_new_failed", err)
+			}
+			env := output.New("module new")
+			env.Source = map[string]any{
+				"created": result.Created,
+				"kind":    result.Kind,
+				"name":    result.Name,
+				"path":    result.Path,
+			}
+			env.Logs = []string{fmt.Sprintf("created %s module source: %s", result.Kind, result.Path)}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&moduleType, "type", "", "module type: standard or class")
 	return cmd
 }
 
