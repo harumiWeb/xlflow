@@ -23,7 +23,7 @@
     "url": "https://github.com/harumiWeb/xlflow.git",
     "directory": "editors/vscode"
   },
-  "publisher": "ed2c27e6-6563-6407-a650-31eef08e0f25",
+  "publisher": "harumiweb",
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "pnpm run check && pnpm run bundle",
