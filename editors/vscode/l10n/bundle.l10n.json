@@ -20,6 +20,7 @@
   "CLI": "CLI",
   "Checking": "Checking",
   "Not found": "Not found",
+  "OK": "OK",
   "xlflow new": "xlflow new",
   "xlflow init": "xlflow init",
   "xlflow pull": "xlflow pull",

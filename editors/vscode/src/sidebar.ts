@@ -726,11 +726,12 @@ function cliProjectNode(availability: XlflowCliAvailability | undefined): Projec
     };
   }
   if (availability.ok) {
+    const versionSummary = cliVersionSummary(availability.version);
     return {
       kind: "project",
       label: vscode.l10n.t("CLI"),
-      description: availability.version ?? availability.executable,
-      tooltip: availability.executable,
+      description: versionSummary ?? vscode.l10n.t("OK"),
+      tooltip: cliVersionTooltip(availability),
       icon: new vscode.ThemeIcon("check"),
     };
   }
@@ -746,6 +747,33 @@ function cliProjectNode(availability: XlflowCliAvailability | undefined): Projec
       title: vscode.l10n.t("Retry"),
     },
   };
+}
+
+export function cliVersionSummary(version: string | undefined): string | undefined {
+  const text = readNonEmpty(version);
+  if (text === undefined) {
+    return undefined;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*Version:\s*(.+?)\s*$/);
+    if (match !== null) {
+      return match[1].trim();
+    }
+  }
+  const firstUsefulLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !/^OK\b/i.test(line));
+  const xlflowVersion = firstUsefulLine?.match(/^xlflow\s+(.+)$/i);
+  return xlflowVersion?.[1]?.trim() ?? firstUsefulLine;
+}
+
+function cliVersionTooltip(availability: Extract<XlflowCliAvailability, { ok: true }>): string {
+  const version = readNonEmpty(availability.version);
+  if (version === undefined) {
+    return availability.executable;
+  }
+  return `${availability.executable}\n\n${version}`;
 }
 
 function cliUnavailableDescription(

@@ -10,6 +10,7 @@ import {
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
+  cliVersionSummary,
   moduleContextValue,
   moduleGroups,
   readExcelPathFromToml,
@@ -115,6 +116,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     executable: "xlflow",
     version: "xlflow 0.1.0",
   });
+  assert.strictEqual(
+    cliVersionSummary(
+      "OK xlflow version\n\nVersion:       dev\nCommit:        none\nDate:          unknown",
+    ),
+    "dev",
+  );
+  assert.strictEqual(cliVersionSummary("xlflow 0.1.0\n"), "0.1.0");
+  assert.strictEqual(cliVersionSummary(undefined), undefined);
   assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { code: "ENOENT" }), {
     ok: false,
     reason: "notFound",
