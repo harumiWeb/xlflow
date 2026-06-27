@@ -94,7 +94,7 @@ export function sourceUri(
   if (source === undefined) {
     return undefined;
   }
-  if (path.isAbsolute(source)) {
+  if (path.isAbsolute(source) || path.win32.isAbsolute(source)) {
     return vscode.Uri.file(source);
   }
   return vscode.Uri.joinPath(folder.uri, ...source.replace(/\\/g, "/").split("/"));

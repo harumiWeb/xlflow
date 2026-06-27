@@ -234,7 +234,10 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
       return [
         {
           kind: "setup",
-          label: vscode.l10n.t("xlflow CLI not found"),
+          label:
+            availability.reason === "notFound"
+              ? vscode.l10n.t("xlflow CLI not found")
+              : vscode.l10n.t("xlflow CLI unavailable"),
           description: cliUnavailableDescription(availability),
           icon: new vscode.ThemeIcon("warning"),
         },

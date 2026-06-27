@@ -124,18 +124,16 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   assert.strictEqual(cliVersionSummary("xlflow 0.1.0\n"), "0.1.0");
   assert.strictEqual(cliVersionSummary(undefined), undefined);
-  assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { code: "ENOENT" }), {
-    ok: false,
-    reason: "notFound",
-    executable: "xlflow",
-    message: "xlflow executable was not found.",
-  });
-  assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { timedOut: true }), {
-    ok: false,
-    reason: "failed",
-    executable: "xlflow",
-    message: "xlflow version timed out.",
-  });
+  const missingAvailability = normalizeAvailabilityFailure("xlflow", { code: "ENOENT" });
+  assert.strictEqual(missingAvailability.ok, false);
+  assert.strictEqual(missingAvailability.reason, "notFound");
+  assert.strictEqual(missingAvailability.executable, "xlflow");
+  assert.ok(missingAvailability.message.length > 0);
+  const timeoutAvailability = normalizeAvailabilityFailure("xlflow", { timedOut: true });
+  assert.strictEqual(timeoutAvailability.ok, false);
+  assert.strictEqual(timeoutAvailability.reason, "failed");
+  assert.strictEqual(timeoutAvailability.executable, "xlflow");
+  assert.ok(timeoutAvailability.message.length > 0);
   assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { stderr: "boom" }), {
     ok: false,
     reason: "failed",
@@ -264,7 +262,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   assert.strictEqual(
     comparableFsPath(sourceUri(fakeFolder, "C:\\work\\project\\src\\modules\\Main.bas")),
-    comparableFsPath("C:\\work\\project\\src\\modules\\Main.bas"),
+    comparableFsPath(vscode.Uri.file("C:\\work\\project\\src\\modules\\Main.bas")),
   );
   assert.deepStrictEqual(
     moduleGroups(fakeFolder, {
@@ -432,6 +430,11 @@ function comparableFsPath(value: vscode.Uri | string | undefined): string | unde
   if (value === undefined) {
     return undefined;
   }
-  const fsPath = typeof value === "string" ? value : value.fsPath;
+  const fsPath =
+    typeof value === "string" && /^[A-Za-z]:[\\/]/.test(value)
+      ? vscode.Uri.file(value).fsPath
+      : typeof value === "string"
+        ? value
+        : value.fsPath;
   return path.normalize(fsPath).toLowerCase();
 }

@@ -26,7 +26,7 @@ In **xlflow for VSCode**, we **GUI-ify these functionalities while also providin
 
 - This extension is only compatible with **Windows operating systems**.
 - You must install `xlflow` beforehand.
-- Either add `xlflow` to your system path or set the `xlflow.path` environment variable to the full path to the executable file.
+- Either add `xlflow` to your system path or set the VS Code setting `xlflow.path` to the full path to the executable file.
 - In Excel settings, enable "**Trust access to the VBA Project Object Model**".
   ![Trust Setting](./images/trust_setting.png)
 
@@ -134,6 +134,9 @@ The command palette includes the following features:
 | ------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `xlflow: Restart Language Server`     | Reloads the VBA Language Server when completion, diagnostics, or jumps become misaligned. |
 | `xlflow: Check Environment`           | Verifies availability of xlflow, Excel integration, and the current workspace.            |
+| `xlflow: Open Install Guide`          | Opens the xlflow installation guide.                                                      |
+| `xlflow: Configure Path`              | Opens the VS Code setting for the xlflow executable path.                                 |
+| `xlflow: Retry CLI Detection`         | Rechecks xlflow CLI availability and refreshes extension views.                           |
 | `xlflow: New Project`                 | Creates a template for a new xlflow project.                                              |
 | `xlflow: Initialize Project`          | Adds xlflow configuration to an existing workbook project.                                |
 | `xlflow: Install Agent Skill`         | Installs the AI agent skill for xlflow.                                                   |

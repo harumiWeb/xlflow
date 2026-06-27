@@ -67,8 +67,10 @@ export function registerCommands(
       await configureXlflowPath();
     }),
     vscode.commands.registerCommand("xlflow.retryCliDetection", async () => {
-      await cliAvailability.refresh();
-      await clientManager.restart();
+      const availability = await cliAvailability.refresh();
+      if (availability.ok) {
+        await clientManager.restart();
+      }
       await hooks.refreshAll();
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {

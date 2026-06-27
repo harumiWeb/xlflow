@@ -47,7 +47,7 @@ export class XlflowCliAvailabilityService implements vscode.Disposable {
   }
 
   async ensureAvailable(options: { showActions?: boolean } = {}): Promise<boolean> {
-    const availability = await this.refresh();
+    const availability = this.availability ?? (await this.refresh());
     if (availability.ok) {
       return true;
     }

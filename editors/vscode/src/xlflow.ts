@@ -187,7 +187,7 @@ export async function runXlflowJsonCommand<T>(
   }
 
   if (!(await ensureCliAvailable(options.showCliUnavailable !== false))) {
-    return { exitCode: -1, stdout: "", stderr: "xlflow CLI is unavailable." };
+    return { exitCode: -1, stdout: "", stderr: vscode.l10n.t("xlflow CLI is unavailable.") };
   }
 
   const config = readConfig();

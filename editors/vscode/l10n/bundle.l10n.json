@@ -16,6 +16,8 @@
   "xlflow CLI was not found. Install xlflow or configure xlflow.path to use this extension.": "xlflow CLI was not found. Install xlflow or configure xlflow.path to use this extension.",
   "xlflow CLI check failed: {message}": "xlflow CLI check failed: {message}",
   "xlflow CLI not found": "xlflow CLI not found",
+  "xlflow CLI unavailable": "xlflow CLI unavailable",
+  "xlflow CLI is unavailable.": "xlflow CLI is unavailable.",
   "Install xlflow to create or manage Excel VBA projects.": "Install xlflow to create or manage Excel VBA projects.",
   "CLI": "CLI",
   "Checking": "Checking",

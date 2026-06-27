@@ -120,14 +120,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       clientManager?.scheduleSuggest(event.document);
     }),
     vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (event.affectsConfiguration("xlflow.path")) {
+      const pathChanged = event.affectsConfiguration("xlflow.path");
+      const lspChanged = event.affectsConfiguration("xlflow.lsp");
+      if (pathChanged) {
         await cliAvailability?.refresh();
-        await clientManager?.restart();
-        await refreshSelectedProject();
-        return;
       }
-      if (event.affectsConfiguration("xlflow.lsp")) {
+      if (pathChanged || lspChanged) {
         await clientManager?.restart();
+      }
+      if (pathChanged) {
+        await refreshSelectedProject();
       }
       if (event.affectsConfiguration("xlflow.testing.autoDiscover")) {
         await testController?.refreshAuto();

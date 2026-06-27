@@ -30,7 +30,7 @@
 `.xlsm` ブックに閉じ込められがちな VBA を、ソース管理しやすく、CLI から扱いやすい開発ワークフローに変換します。
 VBA のエクスポート、編集、lint、インポート、テスト、デバッギング、実行、差分確認をコマンドラインから行えます。
 
-![Ai-Driven Development](/docs/images/ai-drive-develop.gif)
+![Ai-Driven Development](docs/images/ai-drive-develop.gif)
 
 > [!TIP]
 > xlflow は Excel を置き換えるツールではありません。Excel VBA の周囲に CLI ベースの開発ハーネスを用意し、人間・スクリプト・AIエージェントが扱いやすい形にするためのツールです。
