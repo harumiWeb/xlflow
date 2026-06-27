@@ -199,6 +199,30 @@
         "category": "xlflow"
       },
       {
+        "command": "xlflow.newModule",
+        "title": "xlflow: New Module",
+        "category": "xlflow",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "xlflow.newStandardModule",
+        "title": "xlflow: New Standard Module",
+        "category": "xlflow",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "xlflow.newClassModule",
+        "title": "xlflow: New Class Module",
+        "category": "xlflow",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "xlflow.newUserForm",
+        "title": "xlflow: New UserForm",
+        "category": "xlflow",
+        "icon": "$(new-file)"
+      },
+      {
         "command": "xlflow.pull",
         "title": "xlflow: Pull Workbook",
         "category": "xlflow",
@@ -387,24 +411,34 @@
           "group": "navigation@5"
         },
         {
-          "command": "xlflow.refreshModules",
+          "command": "xlflow.newModule",
           "when": "view == xlflow.modules",
           "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.refreshModules",
+          "when": "view == xlflow.modules",
+          "group": "navigation@2"
         },
         {
           "command": "xlflow.collapseModules",
           "when": "view == xlflow.modules",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
-          "command": "xlflow.refreshUserForms",
+          "command": "xlflow.newUserForm",
           "when": "view == xlflow.userForms",
           "group": "navigation@1"
         },
         {
-          "command": "xlflow.collapseUserForms",
+          "command": "xlflow.refreshUserForms",
           "when": "view == xlflow.userForms",
           "group": "navigation@2"
+        },
+        {
+          "command": "xlflow.collapseUserForms",
+          "when": "view == xlflow.userForms",
+          "group": "navigation@3"
         },
         {
           "command": "xlflow.runAllTests",
@@ -415,6 +449,24 @@
           "command": "xlflow.refreshTests",
           "when": "view == xlflow.tests",
           "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "xlflow.newModule",
+          "when": "xlflow.projectReady"
+        },
+        {
+          "command": "xlflow.newStandardModule",
+          "when": "xlflow.projectReady"
+        },
+        {
+          "command": "xlflow.newClassModule",
+          "when": "xlflow.projectReady"
+        },
+        {
+          "command": "xlflow.newUserForm",
+          "when": "xlflow.projectReady"
         }
       ],
       "view/item/context": [
@@ -536,7 +588,11 @@
     "onCommand:xlflow.initProject",
     "onCommand:xlflow.lintWorkspace",
     "onCommand:xlflow.moduleInstall",
+    "onCommand:xlflow.newClassModule",
+    "onCommand:xlflow.newModule",
     "onCommand:xlflow.newProject",
+    "onCommand:xlflow.newStandardModule",
+    "onCommand:xlflow.newUserForm",
     "onCommand:xlflow.openDocumentation",
     "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",

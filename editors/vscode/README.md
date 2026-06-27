@@ -29,6 +29,8 @@ When `xlflow.toml` exists, the sidebar switches to project mode:
 
 Project view title actions refresh state, pull workbook source, push source changes, and start or stop the managed session. `Push Sources` asks for confirmation before running.
 
+Modules view title actions can create standard or class modules through `xlflow module new`, then refresh discovered symbols. UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts.
+
 `UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
 
 ## Development
@@ -78,6 +80,10 @@ The command palette includes:
 - `xlflow: Initialize Project`
 - `xlflow: Install Agent Skill`
 - `xlflow: Install Helper Modules`
+- `xlflow: New Module`
+- `xlflow: New Standard Module`
+- `xlflow: New Class Module`
+- `xlflow: New UserForm`
 - `xlflow: Pull Workbook`
 - `xlflow: Push Sources`
 - `xlflow: Run Macro`
@@ -102,9 +108,11 @@ The command palette includes:
 - `xlflow: Toggle Session`
 - `xlflow: Open Documentation`
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
 
 `Install Agent Skill` prompts for one of the bundled provider targets: `codex`, `claude`, `cursor`, `gemini`, or `agents`. It also asks whether to pass `--force` before replacing an existing skill installation. `Install Helper Modules` prompts before using `--push` because that mode imports the helper modules into the configured workbook.
+
+`New UserForm` delegates sidecar validation to the CLI. It works for projects with `[userform].code_source = "sidecar"`; `frm` mode projects should use the existing snapshot/build workflow or migrate intentionally.
 
 The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
 

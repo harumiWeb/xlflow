@@ -94,6 +94,18 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.moduleInstall", async () => {
       await installHelperModules(channels);
     }),
+    vscode.commands.registerCommand("xlflow.newModule", async () => {
+      await newModule(channels, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.newStandardModule", async () => {
+      await newModuleOfType("standard", channels, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.newClassModule", async () => {
+      await newModuleOfType("class", channels, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.newUserForm", async () => {
+      await newUserForm(channels, hooks);
+    }),
     vscode.commands.registerCommand("xlflow.pull", async () => {
       const code = await runXlflowCommand(["pull"], "xlflow pull", channels.output, {
         requireWorkspace: true,
@@ -359,6 +371,110 @@ async function installHelperModules(channels: XlflowChannels): Promise<void> {
     requireWorkspace: true,
     workspaceFolder,
   });
+}
+
+async function newModule(channels: XlflowChannels, hooks: CommandRefreshHooks): Promise<void> {
+  const moduleType = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Standard Module",
+        description: "Run xlflow module new --type standard",
+        moduleType: "standard" as const,
+        placeholder: "InvoiceProcessor",
+      },
+      {
+        label: "Class Module",
+        description: "Run xlflow module new --type class",
+        moduleType: "class" as const,
+        placeholder: "InvoiceService",
+      },
+    ],
+    {
+      title: "xlflow: New Module",
+      placeHolder: "Select the module type",
+    },
+  );
+  if (moduleType === undefined) {
+    return;
+  }
+  await newModuleOfType(moduleType.moduleType, channels, hooks, moduleType.placeholder);
+}
+
+async function newModuleOfType(
+  moduleType: "standard" | "class",
+  channels: XlflowChannels,
+  hooks: CommandRefreshHooks,
+  placeholder?: string,
+): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage("xlflow module new requires an open workspace folder.");
+    return;
+  }
+  const title =
+    moduleType === "standard" ? "xlflow: New Standard Module" : "xlflow: New Class Module";
+  const name = await promptComponentName(title, placeholder ?? "InvoiceProcessor");
+  if (name === undefined) {
+    return;
+  }
+  const args = ["module", "new", name, "--type", moduleType];
+  const code = await runXlflowCommand(args, `xlflow module new ${name}`, channels.output, {
+    requireWorkspace: true,
+    workspaceFolder,
+  });
+  if (code === 0) {
+    await hooks.refreshModules();
+  }
+}
+
+async function newUserForm(channels: XlflowChannels, hooks: CommandRefreshHooks): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage("xlflow form new requires an open workspace folder.");
+    return;
+  }
+  const name = await promptComponentName("xlflow: New UserForm", "CustomerForm");
+  if (name === undefined) {
+    return;
+  }
+  const code = await runXlflowCommand(
+    ["form", "new", name],
+    `xlflow form new ${name}`,
+    channels.output,
+    {
+      requireWorkspace: true,
+      workspaceFolder,
+    },
+  );
+  if (code === 0) {
+    await hooks.refreshUserForms();
+  }
+}
+
+async function promptComponentName(
+  title: string,
+  placeHolder: string,
+): Promise<string | undefined> {
+  return vscode.window.showInputBox({
+    title,
+    prompt: "Enter a VBA component name without a file extension or path.",
+    placeHolder,
+    validateInput: validateComponentNameInput,
+  });
+}
+
+function validateComponentNameInput(value: string): string | undefined {
+  const name = value.trim();
+  if (name.length === 0) {
+    return "Name is required.";
+  }
+  if (/[\\/]/.test(name) || name.includes("..")) {
+    return "Use a component name, not a path.";
+  }
+  if (/\.(bas|cls|frm)$/i.test(name)) {
+    return "Do not include a file extension.";
+  }
+  return undefined;
 }
 
 async function runProcedureFromCodeLens(value: unknown, channels: XlflowChannels): Promise<void> {
