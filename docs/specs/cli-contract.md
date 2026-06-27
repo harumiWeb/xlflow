@@ -57,6 +57,8 @@ xlflow [--json] analyze
 xlflow [--json] check
 xlflow [--json] generate test <module-name>
 xlflow [--json] module new <name> --type standard|class
+xlflow [--json] module remove <module-name>
+xlflow [--json] module rename <old-name> <new-name>
 xlflow [--json] module install [--push]
 xlflow [--json] process list
 xlflow [--json] process cleanup <pid>
@@ -97,6 +99,10 @@ Excel COM-backed commands also include top-level `bridge` metadata identifying t
 `new` and `init` create or update a project-local `.gitignore`. The managed entries ignore Excel temporary files (`~$*.xls*`, `*.tmp`) and xlflow-generated state (`.xlflow/`, `build/`). Existing `.gitignore` content is preserved; missing managed entries are appended without duplicating entries that are already present.
 
 `module new <name> --type standard|class` is a source-only scaffold command. It requires an initialized project, validates `<name>` as a bare VBA component name without path separators or extensions, and refuses to overwrite existing files. `--type standard` writes `[src].modules/<Name>.bas` with `Attribute VB_Name = "<Name>"` and `Option Explicit`. `--type class` writes `[src].classes/<Name>.cls` with the minimal exported class header, `Attribute VB_Name = "<Name>"`, and `Option Explicit`. `--type` is required; missing or unsupported values fail with `module_new_args_invalid`, and filesystem/configuration failures use `module_new_failed`. Successful JSON uses `command="module new"` and `source.created[]`, `source.kind`, `source.name`, and `source.path`.
+
+`module remove <module-name>` is a source-only mutation command. It resolves source modules case-insensitively by basename across configured standard-module, class, form, and workbook document-module roots. Standard modules remove the matching `.bas`; class modules remove the matching `.cls`; UserForms remove the matching `.frm` plus any same-name `.frx`, `src/forms/code/<Name>.bas`, and `src/forms/specs/<Name>.yaml|yml|json` artifacts. Document modules under `[src].workbook` are protected and fail with `protected_module`. Missing, ambiguous, invalid, duplicate, or unsafe targets fail explicitly and return a non-zero status. Successful text output states that `xlflow push` is required to apply the source deletion to the workbook. Successful JSON uses `command="module remove"` and `source.operation="module.remove"`, `source.module`, `source.kind`, `source.removed[]`, and `source.requires_push=true`.
+
+`module rename <old-name> <new-name>` is a source-only mutation command. It validates `<new-name>` as a bare VBA component name, rejects collisions across all configured source roots, refuses document modules under `[src].workbook`, renames the source file, and updates `Attribute VB_Name` where present. UserForm renames also update the top-level `.frm` `Begin ... <Name>` declaration and move same-name `.frx`, sidecar code, and persisted spec artifacts; for specs, `form.name` is updated while other spec fields such as captions and controls are preserved. Successful text output states that `xlflow push` is required to apply the source rename to the workbook. Successful JSON uses `command="module rename"` and `source.operation="module.rename"`, `source.old_name`, `source.new_name`, `source.kind`, `source.renamed[]`, and `source.requires_push=true`.
 
 `module install` installs the bundled helper modules `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules` root of an existing xlflow project without changing the workbook by default. `module install --push` additionally imports those helper modules into the configured workbook through the normal `push` path. The command refuses to overwrite any existing target helper source file.
 

@@ -1507,9 +1507,9 @@ func (a *app) generateTestCommand() *cobra.Command {
 func (a *app) moduleCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "module",
-		Short: "Manage bundled xlflow helper modules",
+		Short: "Manage VBA source modules",
 	}
-	cmd.AddCommand(a.moduleNewCommand(), a.moduleInstallCommand())
+	cmd.AddCommand(a.moduleNewCommand(), a.moduleRemoveCommand(), a.moduleRenameCommand(), a.moduleInstallCommand())
 	return cmd
 }
 
@@ -1550,6 +1550,88 @@ func (a *app) moduleNewCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&moduleType, "type", "", "module type: standard or class")
 	return cmd
+}
+
+func (a *app) moduleRemoveCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove <module-name>",
+		Short: "Remove a source module from the project",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("module remove")
+			if err != nil {
+				return err
+			}
+			result, err := project.RemoveModule(a.cwd, args[0], cfg.Src)
+			if err != nil {
+				return a.writeModuleMutationFailure("module remove", err)
+			}
+			env := output.New("module remove")
+			env.Source = map[string]any{
+				"operation":     result.Operation,
+				"module":        result.Module,
+				"kind":          result.Kind,
+				"removed":       result.Removed,
+				"requires_push": result.RequiresPush,
+			}
+			env.Logs = []string{
+				fmt.Sprintf("Removed module %q.", result.Module),
+				`Run "xlflow push" to apply the change to the workbook.`,
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	return cmd
+}
+
+func (a *app) moduleRenameCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rename <old-name> <new-name>",
+		Short: "Rename a source module in the project",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("module rename")
+			if err != nil {
+				return err
+			}
+			result, err := project.RenameModule(a.cwd, args[0], args[1], cfg.Src)
+			if err != nil {
+				return a.writeModuleMutationFailure("module rename", err)
+			}
+			env := output.New("module rename")
+			env.Source = map[string]any{
+				"operation":     result.Operation,
+				"old_name":      result.OldName,
+				"new_name":      result.NewName,
+				"kind":          result.Kind,
+				"renamed":       result.Renamed,
+				"requires_push": result.RequiresPush,
+			}
+			env.Logs = []string{
+				fmt.Sprintf("Renamed module %q to %q.", result.OldName, result.NewName),
+				`Run "xlflow push" to apply the change to the workbook.`,
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	return cmd
+}
+
+func (a *app) writeModuleMutationFailure(command string, err error) error {
+	switch {
+	case errors.Is(err, project.ErrInvalidComponentName):
+		return a.writeFailure(command, output.ExitValidation, "module_name_invalid", err)
+	case errors.Is(err, project.ErrProtectedModule):
+		return a.writeFailure(command, output.ExitValidation, "protected_module", err)
+	case errors.Is(err, project.ErrModuleNotFound):
+		return a.writeFailure(command, output.ExitValidation, "module_not_found", err)
+	case errors.Is(err, project.ErrModuleAlreadyExists):
+		return a.writeFailure(command, output.ExitValidation, "module_already_exists", err)
+	case errors.Is(err, project.ErrModuleAmbiguous):
+		return a.writeFailure(command, output.ExitValidation, "module_ambiguous", err)
+	default:
+		return a.writeFailure(command, output.ExitEnvironment, "module_mutation_failed", err)
+	}
 }
 
 func (a *app) moduleInstallCommand() *cobra.Command {
