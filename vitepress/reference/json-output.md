@@ -26,6 +26,21 @@ Failures set `status` to `failed` and populate `error`:
 }
 ```
 
+Unknown commands are also structured when `--json` appears before the invalid command:
+
+```json
+{
+  "status": "failed",
+  "command": "xlflow",
+  "error": {
+    "code": "unknown_command",
+    "message": "unknown command \"pussh\"",
+    "suggestions": ["push"]
+  },
+  "logs": []
+}
+```
+
 Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
 
 `xlflow run --json` uses a compact failure payload by default. This keeps the fields that are usually relevant for fixing user VBA code and hides xlflow-internal diagnostic detail unless `--verbose` is specified.

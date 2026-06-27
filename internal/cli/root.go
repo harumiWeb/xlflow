@@ -114,7 +114,7 @@ func ExecuteWithBuildInfo(info BuildInfo) error {
 	}
 	a := &app{cwd: cwd, rawArgs: append([]string{}, os.Args[1:]...), buildInfo: info.withDefaults()}
 	root := a.rootCommand()
-	return root.Execute()
+	return a.executeRoot(root)
 }
 
 func (info BuildInfo) withDefaults() BuildInfo {
@@ -183,6 +183,109 @@ func (a *app) rootCommand() *cobra.Command {
 		a.processCommand(),
 	)
 	return root
+}
+
+func (a *app) executeRoot(root *cobra.Command) error {
+	err := root.Execute()
+	if err == nil {
+		return nil
+	}
+	if name, ok := unknownCommandName(err); ok {
+		return a.writeUnknownCommandFailure(root, name, err)
+	}
+	return err
+}
+
+func unknownCommandName(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	const prefix = "unknown command "
+	message := err.Error()
+	if !strings.HasPrefix(message, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(message, prefix)
+	quoted, _, ok := strings.Cut(rest, " for ")
+	if !ok {
+		return "", false
+	}
+	name, quoteErr := strconv.Unquote(quoted)
+	if quoteErr != nil || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+func (a *app) writeUnknownCommandFailure(root *cobra.Command, name string, err error) error {
+	suggestions := root.SuggestionsFor(name)
+	env := output.Failure("xlflow", output.Error{
+		Code:        "unknown_command",
+		Message:     fmt.Sprintf("unknown command %q", name),
+		Suggestions: suggestions,
+	})
+	if jsonOutput := a.json || rawArgsRequestJSON(a.rawArgs); jsonOutput {
+		opts := a.outputOptions()
+		opts.JSON = true
+		if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, opts); writeErr != nil {
+			return output.WithExitCode(output.ExitConfig, writeErr)
+		}
+		return output.WithExitCode(output.ExitConfig, err)
+	}
+	if writeErr := writeUnknownCommandText(a.stderrWriter(), root.CommandPath(), name, suggestions); writeErr != nil {
+		return output.WithExitCode(output.ExitConfig, writeErr)
+	}
+	return output.WithExitCode(output.ExitConfig, err)
+}
+
+func writeUnknownCommandText(w io.Writer, commandPath string, name string, suggestions []string) error {
+	if commandPath == "" {
+		commandPath = "xlflow"
+	}
+	if _, err := fmt.Fprintf(w, "Error: unknown command %q for %q\n", name, commandPath); err != nil {
+		return err
+	}
+	if len(suggestions) > 0 {
+		if _, err := fmt.Fprintln(w, "\nDid you mean this?"); err != nil {
+			return err
+		}
+		for _, suggestion := range suggestions {
+			if _, err := fmt.Fprintf(w, "  %s\n", suggestion); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(w, "Run %q for usage.\n", commandPath+" --help")
+	return err
+}
+
+func rawArgsRequestJSON(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--json" {
+			return true
+		}
+		if strings.HasPrefix(arg, "--json=") {
+			value := strings.TrimPrefix(arg, "--json=")
+			parsed, err := strconv.ParseBool(value)
+			return err == nil && parsed
+		}
+		if arg == "--bridge" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--bridge=") {
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return false
+	}
+	return false
 }
 
 func (a *app) versionCommand() *cobra.Command {
