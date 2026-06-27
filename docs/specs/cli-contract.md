@@ -68,6 +68,8 @@ xlflow [--json] version [--verbose]
 
 `--json` is a persistent global flag and can be used with every command, including `new` and `init`. With `--json`, stdout must contain exactly one complete JSON document for the final command result. Progress, human-readable logs, UI/debug streams, and warnings that are not part of the final JSON payload must go to stderr so editor integrations and agents can safely parse stdout with a single JSON decoder.
 
+Unknown top-level commands fail loudly before any workbook or project configuration is loaded. In text mode, `xlflow <unknown-command>` writes an error to stderr, includes close command suggestions when Cobra finds them, points to `xlflow --help`, and exits with code `2`. With `xlflow --json <unknown-command>`, stdout contains a structured failure envelope with `error.code = "unknown_command"` and optional `error.suggestions`.
+
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge. Explicit `--bridge dotnet` is strict. The removed value `powershell` is rejected with a bridge-mode/configuration error.
 
 Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
@@ -282,7 +284,7 @@ All JSON output uses a stable top-level envelope.
 }
 ```
 
-`status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure. Error objects contain `code`, `message`, `source`, `number`, `line`, `phase`, `h_result`, and `details`. `h_result` is a hex string (e.g. `"0x80040154"`) populated for COM-origin failures. `details` is an object with additional context such as `source` and `stack_trace`. All error fields except `message` are optional and omitted when empty or zero.
+`status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure. Error objects contain `code`, `message`, `source`, `number`, `line`, `phase`, `h_result`, `details`, and `suggestions`. `h_result` is a hex string (e.g. `"0x80040154"`) populated for COM-origin failures. `details` is an object with additional context such as `source` and `stack_trace`. `suggestions` is an array of command names for CLI parse failures such as `unknown_command`. All error fields except `message` are optional and omitted when empty or zero.
 
 Command-specific fields are added at the top level:
 

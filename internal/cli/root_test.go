@@ -791,6 +791,171 @@ func TestRootCommandRejectsRemovedTraceCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteRootUnknownCommandWritesTextErrorToStderr(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		stdout:         &stdout,
+		stderr:         &stderr,
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"pussh"})
+
+	err := a.executeRoot(root)
+	if err == nil {
+		t.Fatal("expected unknown command error")
+	}
+	if code := output.ExitCode(err); code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	got := stderr.String()
+	for _, want := range []string{
+		`Error: unknown command "pussh" for "xlflow"`,
+		"Did you mean this?",
+		"  push",
+		`Run "xlflow --help" for usage.`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestExecuteRootUnknownCommandWithoutSuggestionOmitsSuggestionBlock(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		stdout:         &stdout,
+		stderr:         &stderr,
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"xyznotclose"})
+
+	err := a.executeRoot(root)
+	if err == nil {
+		t.Fatal("expected unknown command error")
+	}
+	if code := output.ExitCode(err); code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	got := stderr.String()
+	for _, want := range []string{
+		`Error: unknown command "xyznotclose" for "xlflow"`,
+		`Run "xlflow --help" for usage.`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Did you mean this?") {
+		t.Fatalf("stderr should not include suggestion block:\n%s", got)
+	}
+}
+
+func TestExecuteRootUnknownCommandJSONWritesStructuredError(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		stdout:         &stdout,
+		stderr:         &stderr,
+		cwd:            t.TempDir(),
+		rawArgs:        []string{"--json", "pussh"},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "pussh"})
+
+	err := a.executeRoot(root)
+	if err == nil {
+		t.Fatal("expected unknown command error")
+	}
+	if code := output.ExitCode(err); code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Status != output.StatusFailed || env.Command != "xlflow" {
+		t.Fatalf("unexpected envelope: %+v", env)
+	}
+	if env.Error == nil {
+		t.Fatal("expected structured error")
+	}
+	if env.Error.Code != "unknown_command" {
+		t.Fatalf("error code = %q, want unknown_command", env.Error.Code)
+	}
+	if env.Error.Message != `unknown command "pussh"` {
+		t.Fatalf("error message = %q", env.Error.Message)
+	}
+	if !reflect.DeepEqual(env.Error.Suggestions, []string{"push"}) {
+		t.Fatalf("suggestions = %#v, want push", env.Error.Suggestions)
+	}
+}
+
+func TestExecuteRootHelpStillSucceeds(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		stdout:         &stdout,
+		stderr:         &stderr,
+		cwd:            t.TempDir(),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--help"})
+
+	if err := a.executeRoot(root); err != nil {
+		t.Fatalf("help returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Agent-ready VBA development framework") {
+		t.Fatalf("help output missing root summary:\n%s", stdout.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRawArgsRequestJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "json before command", args: []string{"--json", "pussh"}, want: true},
+		{name: "json true before command", args: []string{"--json=true", "pussh"}, want: true},
+		{name: "json false before command", args: []string{"--json=false", "pussh"}, want: false},
+		{name: "bridge value before json", args: []string{"--bridge", "dotnet", "--json", "pussh"}, want: true},
+		{name: "json after command ignored", args: []string{"pussh", "--json"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rawArgsRequestJSON(tt.args); got != tt.want {
+				t.Fatalf("rawArgsRequestJSON(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRootCommandIncludesAnalyzeAndCheckCommands(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

@@ -23,14 +23,15 @@ const (
 )
 
 type Error struct {
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message"`
-	Source  string `json:"source,omitempty"`
-	Number  int    `json:"number,omitempty"`
-	Line    int    `json:"line,omitempty"`
-	Phase   string `json:"phase,omitempty"`
-	HResult string `json:"h_result,omitempty"`
-	Details any    `json:"details,omitempty"`
+	Code        string   `json:"code,omitempty"`
+	Message     string   `json:"message"`
+	Source      string   `json:"source,omitempty"`
+	Number      int      `json:"number,omitempty"`
+	Line        int      `json:"line,omitempty"`
+	Phase       string   `json:"phase,omitempty"`
+	HResult     string   `json:"h_result,omitempty"`
+	Details     any      `json:"details,omitempty"`
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type Envelope struct {
