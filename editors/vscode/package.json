@@ -31,7 +31,8 @@
     "check": "tsc -p ./ --noEmit",
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/runTest.js"
+    "test": "pnpm run compile && node ./dist/test/runTest.js",
+    "lint": "oxlint ."
   },
   "dependencies": {
     "vscode-languageclient": "^10.0.0"
@@ -42,6 +43,7 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
+    "oxlint": "^1.71.0",
     "typescript": "^5.9.0"
   },
   "contributes": {
