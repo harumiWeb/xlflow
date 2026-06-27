@@ -205,15 +205,8 @@ export function registerCommands(
         uiLabel: vscode.l10n.t("xlflow lint"),
       });
     }),
-    vscode.commands.registerCommand("xlflow.formatDocument", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor === undefined) {
-        vscode.window.showWarningMessage(
-          vscode.l10n.t("xlflow format document requires an active editor."),
-        );
-        return;
-      }
-      await vscode.commands.executeCommand("editor.action.formatDocument");
+    vscode.commands.registerCommand("xlflow.formatDocument", async (value: unknown) => {
+      await formatDocument(value);
     }),
     vscode.commands.registerCommand("xlflow.formatProject", async () => {
       await runXlflowCommand(["fmt", "--write"], "xlflow fmt", channels.output, {
@@ -390,6 +383,25 @@ async function showSetupActions(): Promise<void> {
   if (action !== undefined) {
     await vscode.commands.executeCommand(action.command);
   }
+}
+
+async function formatDocument(value: unknown): Promise<void> {
+  const uri = treeUri(value);
+  if (uri !== undefined) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand("editor.action.formatDocument");
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (editor === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow format document requires an active editor."),
+    );
+    return;
+  }
+  await vscode.commands.executeCommand("editor.action.formatDocument");
 }
 
 async function installAgentSkill(channels: XlflowChannels): Promise<void> {

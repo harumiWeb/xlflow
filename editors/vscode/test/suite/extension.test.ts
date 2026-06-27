@@ -323,6 +323,13 @@ function assertLocalizationResources(extensionPath: string): void {
     menuWhen(manifest, "view/title", "xlflow.sessionStop"),
     "view == xlflow.project && xlflow.sessionStopEnabled",
   );
+  assert.ok(
+    hasMenuItem(manifest, "view/item/context", "xlflow.formatDocument", {
+      when: "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+      group: "2_workspace@0",
+    }),
+    "module context menu should contribute xlflow.formatDocument",
+  );
   const placeholders = collectManifestPlaceholders(manifest);
   for (const key of placeholders) {
     assert.ok(packageNls[key], `package.nls.json should define ${key}`);
@@ -399,6 +406,26 @@ function menuWhen(manifest: Record<string, unknown>, menu: string, command: stri
   );
   assert.ok(item, `${command} should be contributed to ${menu}`);
   return (item as Record<string, unknown>).when;
+}
+
+function hasMenuItem(
+  manifest: Record<string, unknown>,
+  menu: string,
+  command: string,
+  expected: Record<string, unknown>,
+): boolean {
+  const items = readPath(manifest, ["contributes", "menus", menu]);
+  assert.ok(Array.isArray(items), `${menu} should be an array`);
+  return items.some((candidate) => {
+    if (typeof candidate !== "object" || candidate === null) {
+      return false;
+    }
+    const item = candidate as Record<string, unknown>;
+    return (
+      item.command === command &&
+      Object.entries(expected).every(([key, value]) => item[key] === value)
+    );
+  });
 }
 
 function comparableFsPath(value: vscode.Uri | string | undefined): string | undefined {

@@ -554,6 +554,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "xlflow.formatDocument",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "2_workspace@0"
+        },
+        {
           "command": "xlflow.renameModule",
           "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class)$/",
           "group": "2_workspace@1"
