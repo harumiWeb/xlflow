@@ -51,6 +51,7 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.checkEnvironment", async () => {
       await runXlflowCommand(["lsp", "--check"], "xlflow environment check", channels.output, {
         requireWorkspace: false,
+        uiLabel: vscode.l10n.t("xlflow environment check"),
       });
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {
@@ -71,6 +72,7 @@ export function registerCommands(
       }
       const code = await runXlflowCommand(args, "xlflow new", channels.output, {
         requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow new"),
       });
       if (code === 0) {
         await hooks.refreshAll();
@@ -97,6 +99,7 @@ export function registerCommands(
         channels.output,
         {
           requireWorkspace: true,
+          uiLabel: vscode.l10n.t("xlflow init"),
         },
       );
       if (code === 0) {
@@ -124,6 +127,7 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.pull", async () => {
       const code = await runXlflowCommand(["pull"], "xlflow pull", channels.output, {
         requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow pull"),
       });
       if (code === 0) {
         await Promise.all([
@@ -146,6 +150,7 @@ export function registerCommands(
       }
       const code = await runXlflowCommand(["push"], "xlflow push", channels.output, {
         requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow push"),
       });
       if (code === 0) {
         await Promise.all([
@@ -157,7 +162,10 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
-      await runXlflowCommand(["run"], "xlflow run", channels.output, { requireWorkspace: true });
+      await runXlflowCommand(["run"], "xlflow run", channels.output, {
+        requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow run"),
+      });
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
       await runProcedure(args, channels);
@@ -168,13 +176,17 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.test", async () => {
       const code = await runXlflowCommand(["test"], "xlflow test", channels.output, {
         requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow test"),
       });
       if (code === 0) {
         await hooks.refreshTests();
       }
     }),
     vscode.commands.registerCommand("xlflow.lintWorkspace", async () => {
-      await runXlflowCommand(["lint"], "xlflow lint", channels.output, { requireWorkspace: true });
+      await runXlflowCommand(["lint"], "xlflow lint", channels.output, {
+        requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow lint"),
+      });
     }),
     vscode.commands.registerCommand("xlflow.formatDocument", async () => {
       const editor = vscode.window.activeTextEditor;
@@ -189,10 +201,14 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.formatProject", async () => {
       await runXlflowCommand(["fmt", "--write"], "xlflow fmt", channels.output, {
         requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow fmt"),
       });
     }),
     vscode.commands.registerCommand("xlflow.saveWorkbook", async () => {
-      await runXlflowCommand(["save"], "xlflow save", channels.output, { requireWorkspace: true });
+      await runXlflowCommand(["save"], "xlflow save", channels.output, {
+        requireWorkspace: true,
+        uiLabel: vscode.l10n.t("xlflow save"),
+      });
     }),
     vscode.commands.registerCommand("xlflow.sessionStart", async () => {
       await sessionManager.start();
@@ -276,21 +292,20 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.copyModuleName", async (value: unknown) => {
-      await copyText("Module name", vscode.l10n.t("Module name"), treeName(value));
+      await copyText(vscode.l10n.t("Module name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyRelativePath", async (value: unknown) => {
       const uri = treeUri(value);
       await copyText(
-        "relative path",
         vscode.l10n.t("Relative path"),
         uri === undefined ? undefined : relativePathForUri(uri),
       );
     }),
     vscode.commands.registerCommand("xlflow.copyProcedureName", async (value: unknown) => {
-      await copyText("Procedure name", vscode.l10n.t("Procedure name"), treeName(value));
+      await copyText(vscode.l10n.t("Procedure name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyQualifiedName", async (value: unknown) => {
-      await copyText("Qualified name", vscode.l10n.t("Qualified name"), treeQualifiedName(value));
+      await copyText(vscode.l10n.t("Qualified name"), treeQualifiedName(value));
     }),
     vscode.commands.registerCommand("xlflow.renameUserForm", async (value: unknown) => {
       await renameUserForm(value, channels, hooks);
@@ -305,11 +320,10 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.copyUserFormName", async (value: unknown) => {
-      await copyText("UserForm name", vscode.l10n.t("UserForm name"), treeName(value));
+      await copyText(vscode.l10n.t("UserForm name"), treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyUserFormRelativePath", async (value: unknown) => {
       await copyText(
-        "relative path",
         vscode.l10n.t("Relative path"),
         userFormRelativePath(value) ?? relativePathFromUri(userFormSourceUri(value)),
       );
@@ -411,6 +425,7 @@ async function installAgentSkill(channels: XlflowChannels): Promise<void> {
   }
   await runXlflowCommand(args, `xlflow skill install --agent ${provider.label}`, channels.output, {
     requireWorkspace: true,
+    uiLabel: vscode.l10n.t("xlflow skill install for {provider}", { provider: provider.label }),
     workspaceFolder,
   });
 }
@@ -446,6 +461,10 @@ async function installHelperModules(channels: XlflowChannels): Promise<void> {
   }
   await runXlflowCommand(mode.args, `xlflow ${mode.args.join(" ")}`, channels.output, {
     requireWorkspace: true,
+    uiLabel:
+      mode.args.includes("--push")
+        ? vscode.l10n.t("xlflow module install --push")
+        : vscode.l10n.t("xlflow module install"),
     workspaceFolder,
   });
 }
@@ -501,6 +520,7 @@ async function newModuleOfType(
   const args = ["module", "new", name, "--type", moduleType];
   const code = await runXlflowCommand(args, `xlflow module new ${name}`, channels.output, {
     requireWorkspace: true,
+    uiLabel: vscode.l10n.t("xlflow module new {name}", { name }),
     workspaceFolder,
   });
   if (code === 0) {
@@ -526,6 +546,7 @@ async function newUserForm(channels: XlflowChannels, hooks: CommandRefreshHooks)
     channels.output,
     {
       requireWorkspace: true,
+      uiLabel: vscode.l10n.t("xlflow form new {name}", { name }),
       workspaceFolder,
     },
   );
@@ -761,6 +782,7 @@ async function runProcedure(value: unknown, channels: XlflowChannels): Promise<v
   const target = readNonEmpty(args.qualifiedName) ?? args.name;
   await runXlflowCommand(["run", target], `xlflow run ${target}`, channels.output, {
     requireWorkspace: true,
+    uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
     workspaceFolder,
   });
 }
@@ -792,7 +814,11 @@ async function runTestProcedureFromCodeLens(
     ["test", "--module", moduleName, "--filter", args.name],
     `xlflow test ${moduleName}.${args.name}`,
     channels.output,
-    { requireWorkspace: true, workspaceFolder },
+    {
+      requireWorkspace: true,
+      uiLabel: vscode.l10n.t("xlflow test {target}", { target: `${moduleName}.${args.name}` }),
+      workspaceFolder,
+    },
   );
 }
 
@@ -946,23 +972,27 @@ function showMutationFailure(
     vscode.l10n.t("xlflow exited with code {exitCode}.", { exitCode: result.exitCode });
   vscode.window.showErrorMessage(
     vscode.l10n.t('Failed to {operation} {targetKind} "{moduleName}": {message}', {
-      operation: vscode.l10n.t(operation),
-      targetKind: vscode.l10n.t(targetKind),
+      operation: mutationOperationLabel(operation),
+      targetKind: mutationTargetKindLabel(targetKind),
       moduleName,
       message,
     }),
   );
 }
 
-async function copyText(
-  labelKey: string,
-  localizedLabel: string,
-  value: string | undefined,
-): Promise<void> {
+function mutationOperationLabel(operation: "rename" | "delete"): string {
+  return operation === "rename" ? vscode.l10n.t("rename") : vscode.l10n.t("delete");
+}
+
+function mutationTargetKindLabel(targetKind: string): string {
+  return targetKind === "UserForm" ? vscode.l10n.t("UserForm") : vscode.l10n.t("module");
+}
+
+async function copyText(localizedLabel: string, value: string | undefined): Promise<void> {
   if (value === undefined) {
     vscode.window.showWarningMessage(
       vscode.l10n.t("xlflow could not determine the {label}.", {
-        label: vscode.l10n.t(labelKey.toLowerCase()),
+        label: localizedLabel,
       }),
     );
     return;

@@ -44,9 +44,11 @@ export async function runXlflowCommand(
     requireWorkspace: boolean;
     notify?: boolean;
     showOutput?: boolean;
+    uiLabel?: string;
     workspaceFolder?: vscode.WorkspaceFolder;
   },
 ): Promise<number> {
+  const uiLabel = options.uiLabel ?? label;
   const folder =
     options.workspaceFolder ??
     (await resolveWorkspaceRoot({
@@ -56,7 +58,7 @@ export async function runXlflowCommand(
   if (options.requireWorkspace && folder === undefined) {
     vscode.window.showWarningMessage(
       vscode.l10n.t("{label} requires an open workspace folder.", {
-        label: vscode.l10n.t(label),
+        label: uiLabel,
       }),
     );
     return -1;
@@ -92,7 +94,7 @@ export async function runXlflowCommand(
       outputChannel.appendLine(`[error] ${error.message}`);
       vscode.window.showErrorMessage(
         vscode.l10n.t("{label} failed: {message}", {
-          label: vscode.l10n.t(label),
+          label: uiLabel,
           message: error.message,
         }),
       );
@@ -110,12 +112,12 @@ export async function runXlflowCommand(
       }
       if (exitCode === 0) {
         vscode.window.showInformationMessage(
-          vscode.l10n.t("{label} completed.", { label: vscode.l10n.t(label) }),
+          vscode.l10n.t("{label} completed.", { label: uiLabel }),
         );
       } else {
         vscode.window.showErrorMessage(
           vscode.l10n.t("{label} failed with exit code {exitCode}.", {
-            label: vscode.l10n.t(label),
+            label: uiLabel,
             exitCode,
           }),
         );
@@ -129,7 +131,7 @@ export async function runXlflowCommand(
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: vscode.l10n.t(label),
+      title: uiLabel,
       cancellable: false,
     },
     () => run,
@@ -147,8 +149,9 @@ export async function runXlflowJsonCommand<T>(
   args: string[],
   label: string,
   outputChannel: vscode.OutputChannel,
-  options: { requireWorkspace: boolean; workspaceFolder?: vscode.WorkspaceFolder },
+  options: { requireWorkspace: boolean; uiLabel?: string; workspaceFolder?: vscode.WorkspaceFolder },
 ): Promise<XlflowJsonCommandResult<T>> {
+  const uiLabel = options.uiLabel ?? label;
   const folder =
     options.workspaceFolder ??
     (await resolveWorkspaceRoot({
@@ -158,7 +161,7 @@ export async function runXlflowJsonCommand<T>(
   if (options.requireWorkspace && folder === undefined) {
     vscode.window.showWarningMessage(
       vscode.l10n.t("{label} requires an open workspace folder.", {
-        label: vscode.l10n.t(label),
+        label: uiLabel,
       }),
     );
     return { exitCode: -1, stdout: "", stderr: "" };

@@ -171,10 +171,12 @@
   "module": "モジュール",
   "UserForm": "UserForm",
   "xlflow could not determine the {label}.": "xlflowは{label}を特定できませんでした。",
-  "module name": "モジュール名",
-  "relative path": "相対パス",
-  "procedure name": "プロシージャ名",
-  "qualified name": "修飾名",
-  "userform name": "UserForm名",
-  "{label} copied.": "{label}をコピーしました。"
+  "{label} copied.": "{label}をコピーしました。",
+  "xlflow skill install for {provider}": "{provider}向けxlflow skill install",
+  "xlflow module install --push": "xlflow module install --push",
+  "xlflow module install": "xlflow module install",
+  "xlflow module new {name}": "xlflow module new {name}",
+  "xlflow form new {name}": "xlflow form new {name}",
+  "xlflow run {target}": "xlflow run {target}",
+  "xlflow test {target}": "xlflow test {target}"
 }

@@ -171,10 +171,12 @@
   "module": "module",
   "UserForm": "UserForm",
   "xlflow could not determine the {label}.": "xlflow could not determine the {label}.",
-  "module name": "module name",
-  "relative path": "relative path",
-  "procedure name": "procedure name",
-  "qualified name": "qualified name",
-  "userform name": "UserForm name",
-  "{label} copied.": "{label} copied."
+  "{label} copied.": "{label} copied.",
+  "xlflow skill install for {provider}": "xlflow skill install for {provider}",
+  "xlflow module install --push": "xlflow module install --push",
+  "xlflow module install": "xlflow module install",
+  "xlflow module new {name}": "xlflow module new {name}",
+  "xlflow form new {name}": "xlflow form new {name}",
+  "xlflow run {target}": "xlflow run {target}",
+  "xlflow test {target}": "xlflow test {target}"
 }

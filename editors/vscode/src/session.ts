@@ -123,12 +123,21 @@ export class SessionManager implements vscode.Disposable {
       "starting",
       ["session", "start"],
       "xlflow session start",
+      vscode.l10n.t("xlflow session start"),
       "started",
+      vscode.l10n.t("started"),
     );
   }
 
   async stop(): Promise<void> {
-    await this.runSessionCommand("stopping", ["session", "stop"], "xlflow session stop", "stopped");
+    await this.runSessionCommand(
+      "stopping",
+      ["session", "stop"],
+      "xlflow session stop",
+      vscode.l10n.t("xlflow session stop"),
+      "stopped",
+      vscode.l10n.t("stopped"),
+    );
   }
 
   async restart(): Promise<void> {
@@ -140,6 +149,7 @@ export class SessionManager implements vscode.Disposable {
       {
         requireWorkspace: true,
         notify: false,
+        uiLabel: vscode.l10n.t("xlflow session stop"),
       },
     );
     if (stopCode !== 0) {
@@ -154,6 +164,7 @@ export class SessionManager implements vscode.Disposable {
       {
         requireWorkspace: true,
         notify: false,
+        uiLabel: vscode.l10n.t("xlflow session start"),
       },
     );
     if (startCode !== 0) {
@@ -177,6 +188,7 @@ export class SessionManager implements vscode.Disposable {
     const code = await runXlflowCommand(["doctor"], "xlflow doctor", this.channels.output, {
       requireWorkspace: true,
       notify: false,
+      uiLabel: vscode.l10n.t("xlflow doctor"),
     });
     if (code === 0) {
       vscode.window.showInformationMessage(vscode.l10n.t("xlflow doctor completed."));
@@ -251,12 +263,15 @@ export class SessionManager implements vscode.Disposable {
     transientState: SessionState,
     args: string[],
     label: string,
+    uiLabel: string,
     successVerb: string,
+    successVerbLabel: string,
   ): Promise<void> {
     this.setTransientState(transientState);
     const code = await runXlflowCommand(args, label, this.channels.output, {
       requireWorkspace: true,
       notify: false,
+      uiLabel,
     });
     if (code !== 0) {
       await this.handleSessionFailure();
@@ -264,7 +279,7 @@ export class SessionManager implements vscode.Disposable {
     }
     vscode.window.showInformationMessage(
       vscode.l10n.t("xlflow session {successVerb}.", {
-        successVerb: vscode.l10n.t(successVerb),
+        successVerb: successVerbLabel,
       }),
     );
     await this.refreshStatus();
