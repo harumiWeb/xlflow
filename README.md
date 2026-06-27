@@ -29,6 +29,8 @@
 
 It turns `.xlsm` workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
 
+![Ai-Driven Development](/docs/images/ai-drive-develop.gif)
+
 > [!TIP]
 > Think of xlflow as a development harness around Excel VBA: it does not replace Excel, but it makes Excel VBA projects much easier to operate from terminals, scripts, CI-like local checks, and AI coding agents.
 
