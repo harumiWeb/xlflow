@@ -95,6 +95,22 @@ func TestShouldDelegateTestListCommand(t *testing.T) {
 	}
 }
 
+func TestShouldDelegateFormNewCommand(t *testing.T) {
+	root := &cobra.Command{Use: "xlflow"}
+	formCmd := &cobra.Command{Use: "form"}
+	newCmd := &cobra.Command{Use: "new"}
+	buildCmd := &cobra.Command{Use: "build"}
+	root.AddCommand(formCmd)
+	formCmd.AddCommand(newCmd, buildCmd)
+
+	if shouldDelegateCommand(newCmd, topLevelCommandName(newCmd)) {
+		t.Fatal("form new should remain local because it only creates source files")
+	}
+	if !shouldDelegateCommand(buildCmd, topLevelCommandName(buildCmd)) {
+		t.Fatal("form build should remain delegated because it writes workbook UserForms")
+	}
+}
+
 func TestTopLevelCommandName(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	form := &cobra.Command{Use: "form"}

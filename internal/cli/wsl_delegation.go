@@ -101,6 +101,9 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 	if topLevel == "test" && cmd != nil && cmd.Name() == "list" {
 		return false
 	}
+	if topLevel == "form" && cmd != nil && cmd.Name() == "new" {
+		return false
+	}
 	if topLevel == "inspect" {
 		return shouldDelegateInspectCommand(cmd)
 	}

@@ -5,7 +5,7 @@ import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./
 
 export type SessionState = "unknown" | "inactive" | "starting" | "active" | "stopping" | "error";
 
-interface XlflowStatusEnvelope {
+export interface XlflowStatusEnvelope {
   status?: string;
   error?: {
     code?: string;
@@ -14,7 +14,7 @@ interface XlflowStatusEnvelope {
   session?: XlflowSessionPayload;
 }
 
-interface XlflowSessionPayload {
+export interface XlflowSessionPayload {
   active?: boolean;
   workbook_path?: string;
   workbook_name?: string;
@@ -31,7 +31,7 @@ interface XlflowSessionPayload {
   } | null;
 }
 
-interface SessionSnapshot {
+export interface SessionSnapshot {
   state: SessionState;
   session?: XlflowSessionPayload;
   workspaceFolder?: vscode.WorkspaceFolder;
@@ -43,7 +43,11 @@ type SessionAction = "start" | "stop" | "restart" | "status" | "output" | "docto
 
 export class SessionManager implements vscode.Disposable {
   private readonly statusBarItem: vscode.StatusBarItem;
+  private readonly emitter = new vscode.EventEmitter<SessionSnapshot>();
   private snapshot: SessionSnapshot = { state: "unknown" };
+  private projectKind: "noWorkspace" | "notInitialized" | "ready" | "invalid" = "noWorkspace";
+
+  readonly onDidChangeSnapshot = this.emitter.event;
 
   constructor(private readonly channels: XlflowChannels) {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
@@ -53,7 +57,17 @@ export class SessionManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.emitter.dispose();
     this.statusBarItem.dispose();
+  }
+
+  currentSnapshot(): SessionSnapshot {
+    return this.snapshot;
+  }
+
+  setProjectKind(kind: "noWorkspace" | "notInitialized" | "ready" | "invalid"): void {
+    this.projectKind = kind;
+    this.updateStatusBar();
   }
 
   async refreshStatus(options: { prompt?: boolean; showOutput?: boolean } = {}): Promise<void> {
@@ -67,6 +81,7 @@ export class SessionManager implements vscode.Disposable {
         lastError: "No workspace folder is open.",
       };
       this.updateStatusBar();
+      this.emitter.fire(this.snapshot);
       return;
     }
 
@@ -88,6 +103,7 @@ export class SessionManager implements vscode.Disposable {
         lastError: statusErrorMessage(result.json, result.stderr),
       };
       this.updateStatusBar();
+      this.emitter.fire(this.snapshot);
       return;
     }
 
@@ -99,6 +115,7 @@ export class SessionManager implements vscode.Disposable {
       lastCheckedAt,
     };
     this.updateStatusBar();
+    this.emitter.fire(this.snapshot);
   }
 
   async start(): Promise<void> {
@@ -259,40 +276,81 @@ export class SessionManager implements vscode.Disposable {
         lastError: "Session command failed. See xlflow output.",
       };
       this.updateStatusBar();
+      this.emitter.fire(this.snapshot);
     }
   }
 
   private setTransientState(state: SessionState): void {
     this.snapshot = { ...this.snapshot, state };
     this.updateStatusBar();
+    this.emitter.fire(this.snapshot);
   }
 
   private updateStatusBar(): void {
-    this.statusBarItem.text = sessionStatusText(this.snapshot.state);
+    this.statusBarItem.text = sessionStatusText(this.snapshot.state, this.projectKind);
     this.statusBarItem.tooltip = sessionStatusTooltip(this.snapshot);
+    this.statusBarItem.command =
+      this.projectKind === "ready" || this.projectKind === "invalid"
+        ? "xlflow.sessionActions"
+        : "xlflow.setupActions";
     this.statusBarItem.color =
       this.snapshot.state === "active" ? new vscode.ThemeColor("testing.iconPassed") : undefined;
     this.statusBarItem.backgroundColor =
       this.snapshot.state === "error"
         ? new vscode.ThemeColor("statusBarItem.warningBackground")
         : undefined;
+    this.updateSessionContext();
+  }
+
+  private updateSessionContext(): void {
+    const projectReady = this.projectKind === "ready";
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionActive",
+      projectReady && this.snapshot.state === "active",
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionStartEnabled",
+      projectReady &&
+        (this.snapshot.state === "unknown" ||
+          this.snapshot.state === "inactive" ||
+          this.snapshot.state === "error"),
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.sessionStopEnabled",
+      projectReady && this.snapshot.state === "active",
+    );
   }
 }
 
-export function sessionStatusText(state: SessionState): string {
+export function sessionStatusText(
+  state: SessionState,
+  projectKind: "noWorkspace" | "notInitialized" | "ready" | "invalid" = "ready",
+): string {
+  if (projectKind === "noWorkspace") {
+    return "$(circle-slash) xlflow: No Workspace";
+  }
+  if (projectKind === "notInitialized") {
+    return "$(circle-slash) xlflow: No Project";
+  }
+  if (projectKind === "invalid") {
+    return "$(warning) xlflow: Project Error";
+  }
   switch (state) {
     case "unknown":
-      return "$(question) xlflow";
+      return "$(question) xlflow: Session Unknown";
     case "inactive":
-      return "$(circle-slash) xlflow";
+      return "$(circle-slash) xlflow: No Session";
     case "starting":
-      return "$(sync~spin) xlflow";
+      return "$(sync~spin) xlflow: Starting";
     case "active":
-      return "$(check) xlflow: Session";
+      return "$(check) xlflow: Session Active";
     case "stopping":
-      return "$(sync~spin) xlflow";
+      return "$(sync~spin) xlflow: Stopping";
     case "error":
-      return "$(warning) xlflow";
+      return "$(warning) xlflow: Session Error";
   }
 }
 

@@ -21,6 +21,28 @@ type InstallModulesResult struct {
 	Created []string `json:"created"`
 }
 
+type NewModuleResult struct {
+	Kind    string   `json:"kind"`
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	Created []string `json:"created"`
+}
+
+type NewFormResult struct {
+	Name       string   `json:"name"`
+	CodePath   string   `json:"code_path"`
+	SpecPath   string   `json:"spec_path"`
+	Created    []string `json:"created"`
+	CodeSource string   `json:"code_source"`
+}
+
+var (
+	ErrInvalidComponentName    = errors.New("invalid component name")
+	ErrInvalidModuleType       = errors.New("invalid module type")
+	ErrScaffoldExists          = errors.New("scaffold target already exists")
+	ErrUserFormRequiresSidecar = errors.New(`form new requires [userform].code_source = "sidecar"`)
+)
+
 type bundledModuleTemplate struct {
 	fileName string
 	body     string
@@ -181,6 +203,243 @@ func ResolveModuleRoot(cwd string, src config.SourceConfig) string {
 		moduleRoot = filepath.Join(cwd, filepath.FromSlash(moduleRoot))
 	}
 	return moduleRoot
+}
+
+func ResolveClassRoot(cwd string, src config.SourceConfig) string {
+	classRoot := strings.TrimSpace(src.Classes)
+	if classRoot == "" {
+		classRoot = config.Default().Src.Classes
+	}
+	if !filepath.IsAbs(classRoot) {
+		classRoot = filepath.Join(cwd, filepath.FromSlash(classRoot))
+	}
+	return classRoot
+}
+
+func ResolveFormRoot(cwd string, src config.SourceConfig) string {
+	formRoot := strings.TrimSpace(src.Forms)
+	if formRoot == "" {
+		formRoot = config.Default().Src.Forms
+	}
+	if !filepath.IsAbs(formRoot) {
+		formRoot = filepath.Join(cwd, filepath.FromSlash(formRoot))
+	}
+	return formRoot
+}
+
+func NewModule(cwd, name, kind string, src config.SourceConfig) (NewModuleResult, error) {
+	var result NewModuleResult
+	cleanName, err := cleanComponentName(name)
+	if err != nil {
+		return result, err
+	}
+	kind = strings.TrimSpace(strings.ToLower(kind))
+
+	var root string
+	var ext string
+	var body string
+	switch kind {
+	case "standard":
+		root = ResolveModuleRoot(cwd, src)
+		ext = ".bas"
+		body = standardModuleTemplate(cleanName)
+	case "class":
+		root = ResolveClassRoot(cwd, src)
+		ext = ".cls"
+		body = classModuleTemplate(cleanName)
+	default:
+		return result, fmt.Errorf("%w: module type must be one of standard, class", ErrInvalidModuleType)
+	}
+
+	if err := rejectComponentNameCollision(cwd, src, cleanName); err != nil {
+		return result, err
+	}
+	path := filepath.Join(root, cleanName+ext)
+	if _, err := os.Stat(path); err == nil {
+		return result, fmt.Errorf("%w: refusing to overwrite existing file: %s", ErrScaffoldExists, path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return result, err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return result, err
+	}
+	if err := writeExclusive(path, body); err != nil {
+		return result, err
+	}
+
+	result.Kind = kind
+	result.Name = cleanName
+	result.Path = filepath.ToSlash(rel(cwd, path))
+	result.Created = []string{result.Path}
+	return result, nil
+}
+
+func NewUserForm(cwd, name string, cfg config.Config) (NewFormResult, error) {
+	var result NewFormResult
+	if cfg.UserForm.CodeSource != "sidecar" {
+		return result, ErrUserFormRequiresSidecar
+	}
+	cleanName, err := cleanComponentName(name)
+	if err != nil {
+		return result, err
+	}
+	if err := rejectComponentNameCollision(cwd, cfg.Src, cleanName); err != nil {
+		return result, err
+	}
+	formRoot := ResolveFormRoot(cwd, cfg.Src)
+	codeDir := filepath.Join(formRoot, "code")
+	specDir := filepath.Join(formRoot, "specs")
+	codePath := filepath.Join(codeDir, cleanName+".bas")
+	specPath := filepath.Join(specDir, cleanName+".yaml")
+	for _, path := range []string{codePath, specPath} {
+		if _, err := os.Stat(path); err == nil {
+			return result, fmt.Errorf("%w: refusing to overwrite existing file: %s", ErrScaffoldExists, path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return result, err
+		}
+	}
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		return result, err
+	}
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		return result, err
+	}
+	if err := writeExclusive(codePath, userFormCodeTemplate()); err != nil {
+		return result, err
+	}
+	if err := writeExclusive(specPath, userFormSpecTemplate(cleanName)); err != nil {
+		_ = os.Remove(codePath)
+		return result, err
+	}
+
+	result.Name = cleanName
+	result.CodePath = filepath.ToSlash(rel(cwd, codePath))
+	result.SpecPath = filepath.ToSlash(rel(cwd, specPath))
+	result.Created = []string{result.CodePath, result.SpecPath}
+	result.CodeSource = "sidecar"
+	return result, nil
+}
+
+func rejectComponentNameCollision(cwd string, src config.SourceConfig, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	roots := []struct {
+		root             string
+		exts             map[string]bool
+		skipFormSidecars bool
+	}{
+		{root: ResolveModuleRoot(cwd, src), exts: map[string]bool{".bas": true}},
+		{root: ResolveClassRoot(cwd, src), exts: map[string]bool{".cls": true}},
+		{root: ResolveFormRoot(cwd, src), exts: map[string]bool{".frm": true}, skipFormSidecars: true},
+	}
+	for _, entry := range roots {
+		if err := filepath.WalkDir(entry.root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				base := strings.ToLower(d.Name())
+				if entry.skipFormSidecars && (base == "code" || base == "specs") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if !entry.exts[ext] {
+				return nil
+			}
+			if strings.EqualFold(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), name) {
+				return fmt.Errorf("%w: VBA component name %q already exists at %s", ErrScaffoldExists, name, path)
+			}
+			return nil
+		}); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	formRoot := ResolveFormRoot(cwd, src)
+	for _, path := range []string{
+		filepath.Join(formRoot, "code", name+".bas"),
+		filepath.Join(formRoot, "specs", name+".yaml"),
+		filepath.Join(formRoot, "specs", name+".yml"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%w: VBA component name %q already exists at %s", ErrScaffoldExists, name, path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanComponentName(name string) (string, error) {
+	cleanName := strings.TrimSpace(name)
+	cleanName = strings.TrimSuffix(cleanName, ".bas")
+	cleanName = strings.TrimSuffix(cleanName, ".cls")
+	cleanName = strings.TrimSuffix(cleanName, ".frm")
+	if cleanName == "" {
+		return "", fmt.Errorf("%w: component name is required", ErrInvalidComponentName)
+	}
+	if cleanName != filepath.Base(cleanName) ||
+		strings.Contains(cleanName, "..") ||
+		strings.Contains(cleanName, "/") ||
+		strings.Contains(cleanName, `\`) {
+		return "", ErrInvalidComponentName
+	}
+	for i, r := range cleanName {
+		if i == 0 {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' {
+				continue
+			}
+			return "", fmt.Errorf("%w: component name must start with an ASCII letter or underscore", ErrInvalidComponentName)
+		}
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return "", fmt.Errorf("%w: component name may contain only ASCII letters, digits, and underscores", ErrInvalidComponentName)
+	}
+	return cleanName, nil
+}
+
+func standardModuleTemplate(name string) string {
+	return fmt.Sprintf("Attribute VB_Name = %q\nOption Explicit\n", name)
+}
+
+func classModuleTemplate(name string) string {
+	return fmt.Sprintf("VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1\nEND\nAttribute VB_Name = %q\nOption Explicit\n", name)
+}
+
+func userFormCodeTemplate() string {
+	return "Option Explicit\n"
+}
+
+func userFormSpecTemplate(name string) string {
+	return fmt.Sprintf(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: %s
+  caption: %s
+controls: []
+warnings: []
+
+# Example controls:
+# controls:
+#   - id: lblTitle
+#     name: lblTitle
+#     type: Label
+#     caption: Title
+#     left: 12
+#     top: 12
+#     width: 120
+#     height: 18
+`, name, name)
 }
 
 func installBundledModules(cwd, moduleDir string, templates []bundledModuleTemplate) (InstallModulesResult, error) {

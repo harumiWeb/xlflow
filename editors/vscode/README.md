@@ -9,6 +9,30 @@ The extension is a thin client for `xlflow lsp --stdio` and the xlflow CLI. Diag
 - Install `xlflow`.
 - Make `xlflow` available on `PATH`, or set `xlflow.path` to the executable path.
 
+## Sidebar
+
+The extension contributes an `xlflow` Activity Bar container with native TreeViews. It does not use a Webview.
+
+When the selected workspace folder does not contain `xlflow.toml`, the sidebar shows setup actions only:
+
+- `New Project`
+- `Init Existing Workbook`
+- `Run Doctor`
+- `Open Documentation`
+
+When `xlflow.toml` exists, the sidebar switches to project mode:
+
+- `Project`: workspace, configured workbook, `xlflow.toml`, session state, and save-required state.
+- `Modules`: standard, class, and document modules discovered from `xlflow inspect symbols --json`.
+- `UserForms`: UserForm source artifacts discovered from the configured forms source tree.
+- `Tests`: tests discovered from `xlflow test list --json`, with shortcuts for run all and single-test execution.
+
+Project view title actions refresh state, pull workbook source, push source changes, and start or stop the managed session. `Push Sources` asks for confirmation before running.
+
+Modules view title actions can create standard or class modules through `xlflow module new`, then refresh discovered symbols. UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts.
+
+`UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
+
 ## Development
 
 Use Node.js 22 or newer. The extension test runner uses `@vscode/test-electron` 3.x.
@@ -56,6 +80,10 @@ The command palette includes:
 - `xlflow: Initialize Project`
 - `xlflow: Install Agent Skill`
 - `xlflow: Install Helper Modules`
+- `xlflow: New Module`
+- `xlflow: New Standard Module`
+- `xlflow: New Class Module`
+- `xlflow: New UserForm`
 - `xlflow: Pull Workbook`
 - `xlflow: Push Sources`
 - `xlflow: Run Macro`
@@ -71,10 +99,20 @@ The command palette includes:
 - `xlflow: Restart Session`
 - `xlflow: Stop Session`
 - `xlflow: Open Output`
+- `xlflow: Refresh Project`
+- `xlflow: Refresh Modules`
+- `xlflow: Refresh UserForms`
+- `xlflow: Refresh Tests`
+- `xlflow: Run All Tests`
+- `xlflow: Run Doctor`
+- `xlflow: Toggle Session`
+- `xlflow: Open Documentation`
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
 
 `Install Agent Skill` prompts for one of the bundled provider targets: `codex`, `claude`, `cursor`, `gemini`, or `agents`. It also asks whether to pass `--force` before replacing an existing skill installation. `Install Helper Modules` prompts before using `--push` because that mode imports the helper modules into the configured workbook.
+
+`New UserForm` delegates sidecar validation to the CLI. It works for projects with `[userform].code_source = "sidecar"`; `frm` mode projects should use the existing snapshot/build workflow or migrate intentionally.
 
 The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
 
@@ -86,12 +124,13 @@ Session commands run `xlflow session start`, `xlflow --json session status`, `xl
 
 The extension shows a lightweight xlflow session indicator in the Status Bar:
 
-- `$(circle-slash) xlflow`: no active session.
-- `$(check) xlflow: Session`: an active session is available.
-- `$(sync~spin) xlflow`: session start or stop is running.
-- `$(warning) xlflow`: session status or operation failed.
+- `$(circle-slash) xlflow: No Project`: the selected workspace folder has no `xlflow.toml`.
+- `$(circle-slash) xlflow: No Session`: no active session.
+- `$(check) xlflow: Session Active`: an active session is available.
+- `$(sync~spin) xlflow: Starting` or `$(sync~spin) xlflow: Stopping`: session start or stop is running.
+- `$(warning) xlflow: Session Error`: session status or operation failed.
 
-Click the Status Bar item to start, stop, restart, inspect the session, open the output channel, or run `xlflow doctor`. Active sessions use a green status color. Session details and command output are written to the `xlflow` output channel.
+Click the Status Bar item to start, stop, restart, inspect the session, open the output channel, or run `xlflow doctor`. In setup mode, it opens setup actions instead. Active sessions use a green status color. Session details and command output are written to the `xlflow` output channel.
 
 ## Testing
 
@@ -109,6 +148,6 @@ Use the `xlflow` output channel for CLI command output and language client messa
 
 - The extension does not install or bundle `xlflow`.
 - Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro. Runnable no-argument `Sub` procedures can be launched from CodeLens.
-- There are no webviews, workbook previews, or rich Excel session management UI.
+- The sidebar is native TreeView UI only. There are no webviews, workbook previews, or rich HTML dashboards.
 - `xlflow: New Project` and `xlflow: Initialize Project` expose only the base CLI workflow, without option pickers for `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - The extension does not implement VBA parsing, diagnostics, formatting, completion candidates, symbol analysis, or type inference in TypeScript.
