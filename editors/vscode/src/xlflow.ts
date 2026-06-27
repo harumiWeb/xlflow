@@ -29,7 +29,7 @@ export async function resolveWorkspaceRoot(
 
   if (options.prompt) {
     return vscode.window.showWorkspaceFolderPick({
-      placeHolder: "Select the workspace folder for xlflow commands",
+      placeHolder: vscode.l10n.t("Select the workspace folder for xlflow commands"),
     });
   }
 
@@ -44,9 +44,11 @@ export async function runXlflowCommand(
     requireWorkspace: boolean;
     notify?: boolean;
     showOutput?: boolean;
+    uiLabel?: string;
     workspaceFolder?: vscode.WorkspaceFolder;
   },
 ): Promise<number> {
+  const uiLabel = options.uiLabel ?? label;
   const folder =
     options.workspaceFolder ??
     (await resolveWorkspaceRoot({
@@ -54,7 +56,11 @@ export async function runXlflowCommand(
       fallbackToFirst: !options.requireWorkspace,
     }));
   if (options.requireWorkspace && folder === undefined) {
-    vscode.window.showWarningMessage(`${label} requires an open workspace folder.`);
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: uiLabel,
+      }),
+    );
     return -1;
   }
 
@@ -86,7 +92,12 @@ export async function runXlflowCommand(
     child.stderr.on("data", (data: Buffer) => appendProcessOutput(outputChannel, "stderr", data));
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
-      vscode.window.showErrorMessage(`${label} failed: ${error.message}`);
+      vscode.window.showErrorMessage(
+        vscode.l10n.t("{label} failed: {message}", {
+          label: uiLabel,
+          message: error.message,
+        }),
+      );
       settle(-1);
     });
     child.on("close", (code) => {
@@ -100,9 +111,16 @@ export async function runXlflowCommand(
         return;
       }
       if (exitCode === 0) {
-        vscode.window.showInformationMessage(`${label} completed.`);
+        vscode.window.showInformationMessage(
+          vscode.l10n.t("{label} completed.", { label: uiLabel }),
+        );
       } else {
-        vscode.window.showErrorMessage(`${label} failed with exit code ${exitCode}.`);
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("{label} failed with exit code {exitCode}.", {
+            label: uiLabel,
+            exitCode,
+          }),
+        );
       }
       settle(exitCode);
     });
@@ -113,7 +131,7 @@ export async function runXlflowCommand(
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: label,
+      title: uiLabel,
       cancellable: false,
     },
     () => run,
@@ -131,8 +149,9 @@ export async function runXlflowJsonCommand<T>(
   args: string[],
   label: string,
   outputChannel: vscode.OutputChannel,
-  options: { requireWorkspace: boolean; workspaceFolder?: vscode.WorkspaceFolder },
+  options: { requireWorkspace: boolean; uiLabel?: string; workspaceFolder?: vscode.WorkspaceFolder },
 ): Promise<XlflowJsonCommandResult<T>> {
+  const uiLabel = options.uiLabel ?? label;
   const folder =
     options.workspaceFolder ??
     (await resolveWorkspaceRoot({
@@ -140,7 +159,11 @@ export async function runXlflowJsonCommand<T>(
       fallbackToFirst: !options.requireWorkspace,
     }));
   if (options.requireWorkspace && folder === undefined) {
-    vscode.window.showWarningMessage(`${label} requires an open workspace folder.`);
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: uiLabel,
+      }),
+    );
     return { exitCode: -1, stdout: "", stderr: "" };
   }
 

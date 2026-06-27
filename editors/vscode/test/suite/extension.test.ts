@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
@@ -29,6 +31,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     vscode.extensions.getExtension("harumiweb.xlflow-vscode");
   assert.ok(extension, "extension should be discoverable");
   await extension.activate();
+  assertLocalizationResources(extension.extensionPath);
 
   const languages = await vscode.languages.getLanguages();
   assert.ok(languages.includes("vba"), "vba language should be registered");
@@ -231,4 +234,86 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     userFormArtifactContextValue({ artifactKind: "spec", missing: true }),
     "xlflow.userFormMissingArtifact.spec",
   );
+}
+
+function assertLocalizationResources(extensionPath: string): void {
+  const manifest = readJson<Record<string, unknown>>(path.join(extensionPath, "package.json"));
+  const packageNls = readJson<Record<string, string>>(path.join(extensionPath, "package.nls.json"));
+  const packageNlsJa = readJson<Record<string, string>>(
+    path.join(extensionPath, "package.nls.ja.json"),
+  );
+  assert.strictEqual(manifest.l10n, "./l10n");
+  assert.strictEqual(manifest.displayName, "%extension.displayName%");
+  assert.strictEqual(manifest.description, "%extension.description%");
+  assert.strictEqual(
+    readPath(manifest, ["contributes", "commands", 0, "title"]),
+    "%command.restartLanguageServer.title%",
+  );
+  assert.strictEqual(
+    readPath(manifest, ["contributes", "views", "xlflow", 0, "name"]),
+    "%view.setup.name%",
+  );
+  const placeholders = collectManifestPlaceholders(manifest);
+  for (const key of placeholders) {
+    assert.ok(packageNls[key], `package.nls.json should define ${key}`);
+    assert.ok(packageNlsJa[key], `package.nls.ja.json should define ${key}`);
+  }
+  assert.deepStrictEqual(
+    Object.keys(packageNlsJa).sort(),
+    Object.keys(packageNls).sort(),
+    "package nls key sets should match",
+  );
+
+  const bundle = readJson<Record<string, string>>(
+    path.join(extensionPath, "l10n", "bundle.l10n.json"),
+  );
+  const bundleJa = readJson<Record<string, string>>(
+    path.join(extensionPath, "l10n", "bundle.l10n.ja.json"),
+  );
+  assert.deepStrictEqual(
+    Object.keys(bundleJa).sort(),
+    Object.keys(bundle).sort(),
+    "runtime l10n bundle key sets should match",
+  );
+}
+
+function readJson<T>(filePath: string): T {
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+}
+
+function collectManifestPlaceholders(value: unknown): string[] {
+  const keys = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (typeof candidate === "string") {
+      const match = candidate.match(/^%([^%]+)%$/);
+      if (match !== null) {
+        keys.add(match[1]);
+      }
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        visit(item);
+      }
+      return;
+    }
+    if (typeof candidate === "object" && candidate !== null) {
+      for (const item of Object.values(candidate)) {
+        visit(item);
+      }
+    }
+  };
+  visit(value);
+  return [...keys].sort();
+}
+
+function readPath(value: unknown, parts: Array<string | number>): unknown {
+  let current = value;
+  for (const part of parts) {
+    if (typeof current !== "object" || current === null) {
+      return undefined;
+    }
+    current = (current as Record<string | number, unknown>)[part];
+  }
+  return current;
 }

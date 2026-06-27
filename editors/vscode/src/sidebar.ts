@@ -228,24 +228,24 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
       return [
         {
           kind: "setup",
-          label: "Project configuration error",
+          label: vscode.l10n.t("Project configuration error"),
           description: state.error,
           icon: new vscode.ThemeIcon("warning"),
         },
-        setupAction("Run Doctor", "stethoscope", "xlflow.runDoctor"),
-        setupAction("Open Documentation", "book", "xlflow.openDocumentation"),
+        setupAction(vscode.l10n.t("Run Doctor"), "stethoscope", "xlflow.runDoctor"),
+        setupAction(vscode.l10n.t("Open Documentation"), "book", "xlflow.openDocumentation"),
       ];
     }
     const status =
       state.kind === "noWorkspace"
-        ? "Open a workspace folder to use xlflow."
-        : "No xlflow project detected";
+        ? vscode.l10n.t("Open a workspace folder to use xlflow.")
+        : vscode.l10n.t("No xlflow project detected");
     return [
       { kind: "setup", label: status, icon: new vscode.ThemeIcon("info") },
-      setupAction("New Project", "new-file", "xlflow.newProject"),
-      setupAction("Init Existing Workbook", "file-add", "xlflow.initProject"),
-      setupAction("Run Doctor", "stethoscope", "xlflow.runDoctor"),
-      setupAction("Open Documentation", "book", "xlflow.openDocumentation"),
+      setupAction(vscode.l10n.t("New Project"), "new-file", "xlflow.newProject"),
+      setupAction(vscode.l10n.t("Init Existing Workbook"), "file-add", "xlflow.initProject"),
+      setupAction(vscode.l10n.t("Run Doctor"), "stethoscope", "xlflow.runDoctor"),
+      setupAction(vscode.l10n.t("Open Documentation"), "book", "xlflow.openDocumentation"),
     ];
   }
 }
@@ -290,44 +290,50 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
         icon: new vscode.ThemeIcon("folder"),
         command: {
           command: "revealFileInOS",
-          title: "Reveal Workspace",
+          title: vscode.l10n.t("Reveal Workspace"),
           arguments: [state.workspaceFolder.uri],
         },
       },
       {
         kind: "project",
-        label: "Workbook",
-        description: workbookLabel ?? "Unknown",
+        label: vscode.l10n.t("Workbook"),
+        description: workbookLabel ?? vscode.l10n.t("Unknown"),
         icon: new vscode.ThemeIcon("file-binary"),
         command:
           workbookPath === undefined
             ? undefined
             : {
                 command: "vscode.open",
-                title: "Open Workbook",
+                title: vscode.l10n.t("Open Workbook"),
                 arguments: [workbookUri(state.workspaceFolder, workbookPath)],
               },
       },
       {
         kind: "project",
-        label: "Config",
+        label: vscode.l10n.t("Config"),
         description: "xlflow.toml",
         icon: new vscode.ThemeIcon("settings-gear"),
-        command: { command: "vscode.open", title: "Open Config", arguments: [state.configPath] },
+        command: {
+          command: "vscode.open",
+          title: vscode.l10n.t("Open Config"),
+          arguments: [state.configPath],
+        },
       },
       {
         kind: "project",
-        label: "Session",
+        label: vscode.l10n.t("Session"),
         description: sessionDescription(snapshot.state),
         tooltip: snapshot.lastError,
         icon: sessionIcon(snapshot.state),
-        command: { command: "xlflow.sessionActions", title: "Session Actions" },
+        command: { command: "xlflow.sessionActions", title: vscode.l10n.t("Session Actions") },
       },
       {
         kind: "project",
-        label: "Save required",
+        label: vscode.l10n.t("Save required"),
         description: String(snapshot.session?.save_required === true),
-        tooltip: "Whether the managed session workbook has unsaved changes that should be saved.",
+        tooltip: vscode.l10n.t(
+          "Whether the managed session workbook has unsaved changes that should be saved.",
+        ),
         icon: new vscode.ThemeIcon(snapshot.session?.save_required === true ? "warning" : "check"),
       },
     ];
@@ -373,7 +379,7 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         item.contextValue = moduleContextValue(element.moduleKind);
         item.command = {
           command: "xlflow.openModule",
-          title: "Open Module",
+          title: vscode.l10n.t("Open Module"),
           arguments: [element],
         };
         return item;
@@ -389,7 +395,7 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           : "xlflow.procedureStatic";
         item.command = {
           command: "xlflow.openProcedure",
-          title: "Open Procedure",
+          title: vscode.l10n.t("Open Procedure"),
           arguments: [element],
         };
         return item;
@@ -471,7 +477,7 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
       item.iconPath = new vscode.ThemeIcon(userFormArtifactIcon(element));
       item.contextValue = userFormArtifactContextValue(element);
-      item.description = element.missing ? "missing" : undefined;
+      item.description = element.missing ? vscode.l10n.t("missing") : undefined;
       item.tooltip = element.uri?.fsPath;
       item.resourceUri = element.uri;
       item.command =
@@ -479,7 +485,7 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           ? undefined
           : {
               command: "xlflow.openUserFormArtifact",
-              title: "Open UserForm Artifact",
+              title: vscode.l10n.t("Open UserForm Artifact"),
               arguments: [element],
             };
       return item;
@@ -550,7 +556,7 @@ class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       )
       .sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
     this.nodes = [
-      { kind: "testCount", label: `${tests.length} tests` },
+      { kind: "testCount", label: vscode.l10n.t("{count} tests", { count: tests.length }) },
       ...tests.map((test) => ({
         kind: "test" as const,
         test,
@@ -567,7 +573,7 @@ class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       return item;
     }
     if (element.kind === "test") {
-      const name = readNonEmpty(element.test.name) ?? "Unknown test";
+      const name = readNonEmpty(element.test.name) ?? vscode.l10n.t("Unknown test");
       const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.None);
       item.description = readNonEmpty(element.test.module);
       item.iconPath = new vscode.ThemeIcon("beaker");
@@ -575,7 +581,7 @@ class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       if (element.uri !== undefined) {
         item.command = {
           command: "xlflow.openProcedure",
-          title: "Open Test",
+          title: vscode.l10n.t("Open Test"),
           arguments: [testProcedureNode(element)],
         };
       }
@@ -837,13 +843,19 @@ export function buildUserFormModels(
         artifacts: [
           {
             kind: "code",
-            label: codePath === undefined ? "Code" : `Code: code/${name}.bas`,
+            label:
+              codePath === undefined
+                ? vscode.l10n.t("Code")
+                : vscode.l10n.t("Code: code/{name}.bas", { name }),
             relativePath: codePath,
             missing: codePath === undefined,
           },
           {
             kind: "spec",
-            label: specFile === undefined ? "Spec" : `Spec: specs/${specFile}`,
+            label:
+              specFile === undefined
+                ? vscode.l10n.t("Spec")
+                : vscode.l10n.t("Spec: specs/{specFile}", { specFile }),
             relativePath:
               specFile === undefined ? undefined : joinSlash(normalizedRoot, "specs", specFile),
             missing: specFile === undefined,
@@ -876,17 +888,17 @@ function workbookUri(folder: vscode.WorkspaceFolder, workbook: string): vscode.U
 function sessionDescription(state: SessionState): string {
   switch (state) {
     case "active":
-      return "Active";
+      return vscode.l10n.t("Active");
     case "inactive":
-      return "Inactive";
+      return vscode.l10n.t("Inactive");
     case "error":
-      return "Error";
+      return vscode.l10n.t("Error");
     case "starting":
-      return "Starting";
+      return vscode.l10n.t("Starting");
     case "stopping":
-      return "Stopping";
+      return vscode.l10n.t("Stopping");
     case "unknown":
-      return "Unknown";
+      return vscode.l10n.t("Unknown");
   }
 }
 
@@ -957,7 +969,7 @@ function procedureNodes(
   return (file.symbols ?? [])
     .filter((symbol) => isProcedureKind(symbol.kind))
     .map((symbol) => {
-      const name = readNonEmpty(symbol.name) ?? "Unknown";
+      const name = readNonEmpty(symbol.name) ?? vscode.l10n.t("Unknown");
       const line =
         typeof symbol.startLine === "number" && symbol.startLine > 0 ? symbol.startLine : 1;
       const parameters = Array.isArray(symbol.parameters) ? symbol.parameters : [];
@@ -1010,11 +1022,11 @@ function normalizeModuleKind(value: unknown): string {
 function moduleGroupLabel(kind: string): string {
   switch (kind) {
     case "class":
-      return "Class Modules";
+      return vscode.l10n.t("Class Modules");
     case "document":
-      return "Document Modules";
+      return vscode.l10n.t("Document Modules");
     default:
-      return "Standard Modules";
+      return vscode.l10n.t("Standard Modules");
   }
 }
 
