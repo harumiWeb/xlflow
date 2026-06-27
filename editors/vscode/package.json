@@ -30,6 +30,7 @@
     "check": "tsc -p ./ --noEmit",
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies",
     "test": "pnpm run compile && node ./dist/test/runTest.js",
     "lint": "oxlint ."
   },
