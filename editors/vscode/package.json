@@ -4,22 +4,22 @@
   "version": "0.1.1",
   "description": "%extension.description%",
   "categories": [
-    "Programming Languages",
-    "Linters",
     "Formatters",
+    "Linters",
+    "Programming Languages",
     "Testing"
   ],
   "keywords": [
     "excel",
-    "vba",
-    "macro",
-    "xlsm",
-    "language server",
-    "lsp",
-    "lint",
     "formatter",
+    "language server",
+    "lint",
+    "lsp",
+    "macro",
     "testing",
-    "xlflow"
+    "vba",
+    "xlflow",
+    "xlsm"
   ],
   "license": "MIT",
   "repository": {
