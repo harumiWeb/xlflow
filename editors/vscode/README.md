@@ -110,53 +110,53 @@ Common configuration options include:
 
 The command palette includes the following functionalities:
 
-| Command | Description |
-| --- | --- |
-| `xlflow: Restart Language Server` | Restarts the VBA language server when completions, diagnostics, or navigation get out of sync. |
-| `xlflow: Check Environment` | Verifies that xlflow, Excel integration, and the current workspace are ready to use. |
-| `xlflow: New Project` | Creates a new xlflow project scaffold. |
-| `xlflow: Initialize Project` | Adds xlflow configuration to an existing workbook project. |
-| `xlflow: Install Agent Skill` | Installs the AI-agent skill package for xlflow workflows. |
-| `xlflow: Install Helper Modules` | Adds helper VBA modules used by xlflow features and samples. |
-| `xlflow: New Module` | Creates a new VBA module with type selection. |
-| `xlflow: New Standard Module` | Creates a new standard VBA module. |
-| `xlflow: New Class Module` | Creates a new class module. |
-| `xlflow: New UserForm` | Creates a new UserForm source set. |
-| `xlflow: Pull Workbook` | Imports the current workbook's VBA assets into the workspace. |
-| `xlflow: Push Sources` | Applies workspace source changes back into the workbook. |
-| `xlflow: Run Macro` | Runs the configured entry macro. |
-| `xlflow: Run Procedure` | Runs a selected VBA procedure. |
-| `xlflow: Run Test Procedure` | Runs a selected VBA test procedure directly. |
-| `xlflow: Run Tests` | Executes the project's VBA test suite. |
-| `xlflow: Lint Workspace` | Runs lint checks on the workspace sources. |
-| `xlflow: Format Document` | Formats the active VBA document. |
-| `xlflow: Format Project` | Formats all supported source files in the project. |
-| `xlflow: Save Workbook` | Saves the connected Excel workbook. |
-| `xlflow: Start Session` | Starts a reusable Excel session for faster repeated commands. |
-| `xlflow: Session Status` | Shows the current xlflow session state. |
-| `xlflow: Restart Session` | Reopens the managed Excel session. |
-| `xlflow: Stop Session` | Stops the active xlflow session. |
-| `xlflow: Open Output` | Opens the xlflow output channel in VS Code. |
-| `xlflow: Refresh Project` | Reloads the project tree and related workspace state. |
-| `xlflow: Refresh Modules` | Reloads the module list in the sidebar. |
-| `xlflow: Refresh UserForms` | Reloads the UserForm list in the sidebar. |
-| `xlflow: Refresh Tests` | Reloads discovered tests in the test explorer. |
-| `xlflow: Run All Tests` | Runs every discovered VBA test from the sidebar/test view. |
-| `xlflow: Run Doctor` | Runs `xlflow doctor` for detailed environment diagnostics. |
-| `xlflow: Toggle Session` | Turns session mode on or off for the current workspace. |
-| `xlflow: Open Documentation` | Opens the xlflow documentation. |
-| `xlflow: Rename Module` | Renames a VBA module and its backing source file. |
-| `xlflow: Delete Module` | Deletes a module from the workspace. |
-| `xlflow: Reveal Source File` | Opens the file location for the selected module source. |
-| `xlflow: Copy Module Name` | Copies the selected module name to the clipboard. |
-| `xlflow: Copy Relative Path` | Copies the selected source file path relative to the project root. |
-| `xlflow: Copy Procedure Name` | Copies the selected procedure name. |
-| `xlflow: Copy Qualified Name` | Copies the fully qualified module and procedure name. |
-| `xlflow: Rename UserForm` | Renames a UserForm and its related artifacts. |
-| `xlflow: Delete UserForm` | Deletes a UserForm from the workspace. |
-| `xlflow: Reveal UserForm Source` | Opens the source location for the selected UserForm. |
-| `xlflow: Copy UserForm Name` | Copies the selected UserForm name. |
-| `xlflow: Copy UserForm Relative Path` | Copies the selected UserForm source path relative to the project root. |
+| Command                               | Description                                                                                    |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `xlflow: Restart Language Server`     | Restarts the VBA language server when completions, diagnostics, or navigation get out of sync. |
+| `xlflow: Check Environment`           | Verifies that xlflow, Excel integration, and the current workspace are ready to use.           |
+| `xlflow: New Project`                 | Creates a new xlflow project scaffold.                                                         |
+| `xlflow: Initialize Project`          | Adds xlflow configuration to an existing workbook project.                                     |
+| `xlflow: Install Agent Skill`         | Installs the AI-agent skill package for xlflow workflows.                                      |
+| `xlflow: Install Helper Modules`      | Adds helper VBA modules used by xlflow features and samples.                                   |
+| `xlflow: New Module`                  | Creates a new VBA module with type selection.                                                  |
+| `xlflow: New Standard Module`         | Creates a new standard VBA module.                                                             |
+| `xlflow: New Class Module`            | Creates a new class module.                                                                    |
+| `xlflow: New UserForm`                | Creates a new UserForm source set.                                                             |
+| `xlflow: Pull Workbook`               | Imports the current workbook's VBA assets into the workspace.                                  |
+| `xlflow: Push Sources`                | Applies workspace source changes back into the workbook.                                       |
+| `xlflow: Run Macro`                   | Runs the configured entry macro.                                                               |
+| `xlflow: Run Procedure`               | Runs a selected VBA procedure.                                                                 |
+| `xlflow: Run Test Procedure`          | Runs a selected VBA test procedure directly.                                                   |
+| `xlflow: Run Tests`                   | Executes the project's VBA test suite.                                                         |
+| `xlflow: Lint Workspace`              | Runs lint checks on the workspace sources.                                                     |
+| `xlflow: Format Document`             | Formats the active VBA document.                                                               |
+| `xlflow: Format Project`              | Formats all supported source files in the project.                                             |
+| `xlflow: Save Workbook`               | Saves the connected Excel workbook.                                                            |
+| `xlflow: Start Session`               | Starts a reusable Excel session for faster repeated commands.                                  |
+| `xlflow: Session Status`              | Shows the current xlflow session state.                                                        |
+| `xlflow: Restart Session`             | Reopens the managed Excel session.                                                             |
+| `xlflow: Stop Session`                | Stops the active xlflow session.                                                               |
+| `xlflow: Open Output`                 | Opens the xlflow output channel in VS Code.                                                    |
+| `xlflow: Refresh Project`             | Reloads the project tree and related workspace state.                                          |
+| `xlflow: Refresh Modules`             | Reloads the module list in the sidebar.                                                        |
+| `xlflow: Refresh UserForms`           | Reloads the UserForm list in the sidebar.                                                      |
+| `xlflow: Refresh Tests`               | Reloads discovered tests in the test explorer.                                                 |
+| `xlflow: Run All Tests`               | Runs every discovered VBA test from the sidebar/test view.                                     |
+| `xlflow: Run Doctor`                  | Runs `xlflow doctor` for detailed environment diagnostics.                                     |
+| `xlflow: Toggle Session`              | Turns session mode on or off for the current workspace.                                        |
+| `xlflow: Open Documentation`          | Opens the xlflow documentation.                                                                |
+| `xlflow: Rename Module`               | Renames a VBA module and its backing source file.                                              |
+| `xlflow: Delete Module`               | Deletes a module from the workspace.                                                           |
+| `xlflow: Reveal Source File`          | Opens the file location for the selected module source.                                        |
+| `xlflow: Copy Module Name`            | Copies the selected module name to the clipboard.                                              |
+| `xlflow: Copy Relative Path`          | Copies the selected source file path relative to the project root.                             |
+| `xlflow: Copy Procedure Name`         | Copies the selected procedure name.                                                            |
+| `xlflow: Copy Qualified Name`         | Copies the fully qualified module and procedure name.                                          |
+| `xlflow: Rename UserForm`             | Renames a UserForm and its related artifacts.                                                  |
+| `xlflow: Delete UserForm`             | Deletes a UserForm from the workspace.                                                         |
+| `xlflow: Reveal UserForm Source`      | Opens the source location for the selected UserForm.                                           |
+| `xlflow: Copy UserForm Name`          | Copies the selected UserForm name.                                                             |
+| `xlflow: Copy UserForm Relative Path` | Copies the selected UserForm source path relative to the project root.                         |
 
 ## Integration with AI Agents
 
