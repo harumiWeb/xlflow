@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-ADR-0008 introduces a .NET bridge, but xlflow already has a working PowerShell bridge and many workbook-backed commands depend on established JSON envelope and exit-code behavior. A safe migration requires a stable provider contract so commands can move to .NET incrementally while unsupported commands keep working through PowerShell in `auto` mode.
+ADR-0008 introduced a .NET bridge, but xlflow already had a working PowerShell bridge and many workbook-backed commands depended on established JSON envelope and exit-code behavior. A safe migration required a stable provider contract so commands could move to .NET incrementally while unsupported commands kept working through PowerShell in `auto` mode.
 
 The contract must also let CI and users prove that a command did or did not use PowerShell. Silent fallback from an explicit `.NET` request would hide corporate execution-policy problems and weaken validation.
 
@@ -30,9 +30,9 @@ CLI option --bridge
 Fallback rules:
 
 - `--bridge dotnet` is strict. If `xlflow-excel-bridge.exe` is missing, incompatible, or does not support the command, the command fails with a structured bridge error. It must not silently invoke PowerShell.
-- `--bridge powershell` always uses the PowerShell bridge.
-- `--bridge auto` may fallback to PowerShell when the .NET bridge is missing, incompatible, or does not support the command.
-- During early migration, `auto` may prefer PowerShell to preserve current behavior. After the major command set is stable in .NET, `auto` may change to prefer .NET on Windows while retaining PowerShell fallback for unsupported commands.
+- `--bridge powershell` originally used the PowerShell bridge during migration. ADR-0014 later removed this mode.
+- `--bridge auto` originally allowed fallback to PowerShell during migration. ADR-0014 later changed `auto` to select `.NET` only.
+- During early migration, `auto` could prefer PowerShell to preserve current behavior. After the major command set became stable in .NET, ADR-0014 removed PowerShell fallback.
 
 The provider contract includes:
 
@@ -67,6 +67,5 @@ Every bridge request and response includes `protocol_version` and `request_id`. 
 - `docs/adr/ADR-0008-dotnet-excel-bridge.md`
 - `docs/bridge/bridge-protocol.md`
 - `docs/bridge/dotnet-bridge.md`
-- `docs/bridge/powershell-bridge-legacy.md`
 - `docs/specs/cli-contract.md`
 - `docs/design.md`

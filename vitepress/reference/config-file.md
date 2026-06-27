@@ -22,7 +22,7 @@ path = "build/Book.xlsm"
 visible = false
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = false
-# Excel bridge mode. Valid values: "auto", "dotnet". "powershell" is deprecated and will be removed in v0.16.0.
+# Excel bridge mode. Valid values: "auto", "dotnet".
 bridge = "auto"
 
 # Source tree directories.
@@ -79,12 +79,12 @@ disabled_rules = []
 
 ### `[excel]`
 
-| Key              | Type   | Required | Default           | Description                                                                                                                        |
-| ---------------- | ------ | -------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `path`           | string | **yes**  | `build/Book.xlsm` | Workbook path. May be relative to the project root or absolute.                                                                    |
-| `visible`        | bool   | no       | `false`           | Whether the Excel application window is shown during automation.                                                                   |
-| `display_alerts` | bool   | no       | `false`           | Whether Excel shows its own alert dialogs (e.g. overwrite confirmation).                                                           |
-| `bridge`         | string | no       | `"auto"`          | Excel bridge mode. Valid values are `"auto"` and `"dotnet"`. Deprecated `"powershell"` remains explicit opt-in only until v0.16.0. |
+| Key              | Type   | Required | Default           | Description                                                              |
+| ---------------- | ------ | -------- | ----------------- | ------------------------------------------------------------------------ |
+| `path`           | string | **yes**  | `build/Book.xlsm` | Workbook path. May be relative to the project root or absolute.          |
+| `visible`        | bool   | no       | `false`           | Whether the Excel application window is shown during automation.         |
+| `display_alerts` | bool   | no       | `false`           | Whether Excel shows its own alert dialogs (e.g. overwrite confirmation). |
+| `bridge`         | string | no       | `"auto"`          | Excel bridge mode. Valid values are `"auto"` and `"dotnet"`.             |
 
 ### `[src]`
 

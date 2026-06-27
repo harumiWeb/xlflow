@@ -23,13 +23,13 @@ Responsibility split:
 
 - Go core owns CLI command routing, config loading, source tree management, lint/format/static analysis, output envelope mapping, release packaging, and bridge provider selection.
 - The .NET bridge owns Excel COM automation, VBIDE automation, workbook/session handling, macro execution, UserForm import/export, Win32 dialog watching, runtime/compile error capture, image export fallback, process/window control, and clipboard control.
-- The existing PowerShell bridge remains a legacy fallback while the .NET bridge reaches parity.
+- The existing PowerShell bridge remains a legacy fallback while the .NET bridge reaches parity. ADR-0014 later removed this fallback after parity was reached.
 
 The .NET bridge runs as a separate process beside `xlflow.exe`. The Go CLI invokes it through the bridge provider contract described in ADR-0009. Windows release archives will eventually include both `xlflow.exe` and `xlflow-excel-bridge.exe`; non-Windows archives keep the Go CLI only.
 
 The .NET bridge must treat Excel COM as STA-bound. COM automation must run on an STA entrypoint or dedicated STA dispatcher. Handler code must not `await` and then resume Excel COM calls on a ThreadPool/MTA thread. Initial COM-facing command handlers should be synchronous unless a dedicated STA dispatcher is introduced.
 
-PowerShell is not removed by this decision. It remains available through explicit bridge selection and as `auto` fallback for commands the .NET bridge does not yet support.
+PowerShell was not removed by this decision. ADR-0014 later removed PowerShell bridge selection and fallback after the .NET bridge reached parity.
 
 ## Consequences
 
@@ -56,5 +56,4 @@ PowerShell is not removed by this decision. It remains available through explici
 - `docs/adr/ADR-0009-bridge-provider-contract.md`
 - `docs/bridge/bridge-protocol.md`
 - `docs/bridge/dotnet-bridge.md`
-- `docs/bridge/powershell-bridge-legacy.md`
 - `docs/design.md`

@@ -131,7 +131,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 > Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
 > [!NOTE]
-> xlflow uses a .NET bridge for COM operations. The legacy PowerShell bridge is deprecated in v0.15.0, remains available only through explicit opt-in for compatibility, and is planned for removal in v0.16.0.
+> xlflow uses the .NET bridge for Excel COM operations. The legacy PowerShell bridge was removed in v0.16.0; supported bridge modes are `auto` and `dotnet`.
 
 > [!WARNING]
 > In Excel, enable **Trust access to the VBA project object model** before using commands that read or write VBA code. Without it, `pull`, `push`, `run`, and related commands may fail even when Excel itself is installed.
@@ -556,7 +556,7 @@ path = "build/Book.xlsm"
 visible = false
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = false
-# Excel bridge mode. Valid values: "auto", "dotnet". "powershell" is deprecated and will be removed in v0.16.0.
+# Excel bridge mode. Valid values: "auto", "dotnet".
 bridge = "auto"
 
 # Source tree directories.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,78 +76,6 @@ func (p trackingBridgeProvider) Execute(_ context.Context, req excelbridge.Reque
 	return p.response, p.err
 }
 
-func hasWarningCode(value any, code string) bool {
-	switch warnings := value.(type) {
-	case []map[string]any:
-		for _, warning := range warnings {
-			if warning["code"] == code {
-				return true
-			}
-		}
-	case []any:
-		for _, raw := range warnings {
-			if warning, ok := raw.(map[string]any); ok && warning["code"] == code {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func TestExternalScriptPathFindsRepositoryScripts(t *testing.T) {
-	path, ok := externalScriptPath(t.TempDir(), "run")
-	if !ok {
-		t.Fatal("expected repository script path")
-	}
-	if path == "" {
-		t.Fatal("expected script path")
-	}
-}
-
-func TestScriptPathPrefersRootScriptsDirectory(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(scriptsDir, "run.ps1")
-	if err := os.WriteFile(want, []byte("Write-Output 'override'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	path, cleanup, err := scriptPath(root, "run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		t.Fatal("expected on-disk override without cleanup")
-	}
-	if path != want {
-		t.Fatalf("script path = %q, want %q", path, want)
-	}
-}
-
-func TestMaterializeBundledScriptWritesCompleteBundle(t *testing.T) {
-	path, cleanup, err := materializeBundledScript("ui")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup == nil {
-		t.Fatal("expected cleanup for materialized bundle")
-	}
-	dir := filepath.Dir(path)
-	if filepath.Base(path) != "ui.ps1" {
-		t.Fatalf("script path = %q, want bundled ui.ps1", path)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "common.ps1")); err != nil {
-		t.Fatalf("expected bundled common.ps1: %v", err)
-	}
-	cleanup()
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("expected cleanup to remove %q, got %v", dir, err)
-	}
-}
-
 func TestScriptResultAcceptsScalarLogString(t *testing.T) {
 	var result ScriptResult
 	body := []byte(`{"status":"ok","command":"session","logs":"stopped xlflow Excel session"}`)
@@ -160,107 +87,27 @@ func TestScriptResultAcceptsScalarLogString(t *testing.T) {
 	}
 }
 
-func TestHasExternalScriptOverride(t *testing.T) {
-	root := t.TempDir()
-	if hasExternalScriptOverride(root, "process") {
-		t.Fatal("expected no override before script exists")
-	}
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte("Write-Output '{}'"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !hasExternalScriptOverride(root, "process") {
-		t.Fatal("expected process override to be detected")
-	}
-}
-
-func TestPowerShellExecutableForWindows(t *testing.T) {
-	calls := []string{}
-	got, err := powerShellExecutableFor("windows", func(file string) (string, error) {
-		calls = append(calls, file)
-		if file == "powershell" {
-			return "/usr/bin/powershell", nil
-		}
-		return "", errors.New("not found")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "powershell" {
-		t.Fatalf("executable = %q, want powershell", got)
-	}
-	if len(calls) != 1 || calls[0] != "powershell" {
-		t.Fatalf("lookPath calls = %v, want [powershell]", calls)
-	}
-}
-
-func TestPowerShellExecutableForNonWindowsPrefersPwsh(t *testing.T) {
-	calls := []string{}
-	got, err := powerShellExecutableFor("linux", func(file string) (string, error) {
-		calls = append(calls, file)
-		if file == "pwsh" {
-			return "/usr/bin/pwsh", nil
-		}
-		return "", errors.New("not found")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "pwsh" {
-		t.Fatalf("executable = %q, want pwsh", got)
-	}
-	if len(calls) != 1 || calls[0] != "pwsh" {
-		t.Fatalf("lookPath calls = %v, want [pwsh]", calls)
-	}
-}
-
-func TestPowerShellExecutableForNonWindowsFallsBackToPowerShell(t *testing.T) {
-	calls := []string{}
-	got, err := powerShellExecutableFor("linux", func(file string) (string, error) {
-		calls = append(calls, file)
-		if file == "powershell" {
-			return "/usr/bin/powershell", nil
-		}
-		return "", errors.New("not found")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "powershell" {
-		t.Fatalf("executable = %q, want powershell", got)
-	}
-	if len(calls) != 2 || calls[0] != "pwsh" || calls[1] != "powershell" {
-		t.Fatalf("lookPath calls = %v, want [pwsh powershell]", calls)
-	}
-}
-
-func TestPowerShellExecutableForReturnsErrorWhenUnavailable(t *testing.T) {
-	_, err := powerShellExecutableFor("linux", func(file string) (string, error) {
-		return "", errors.New("not found")
-	})
-	if err == nil {
-		t.Fatal("expected missing PowerShell error")
-	}
-}
-
 func TestResolveBridgeModePrecedence(t *testing.T) {
-	mode, source, err := excelbridge.ResolveMode("", "powershell", "dotnet")
+	mode, source, err := excelbridge.ResolveMode("", "auto", "dotnet")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode != excelbridge.ModePowerShell || source != "env" {
-		t.Fatalf("ResolveMode env precedence = (%q, %q), want (powershell, env)", mode, source)
+	if mode != excelbridge.ModeAuto || source != "env" {
+		t.Fatalf("ResolveMode env precedence = (%q, %q), want (auto, env)", mode, source)
 	}
 
-	mode, source, err = excelbridge.ResolveMode("dotnet", "powershell", "auto")
+	mode, source, err = excelbridge.ResolveMode("dotnet", "auto", "auto")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mode != excelbridge.ModeDotNet || source != "cli" {
 		t.Fatalf("ResolveMode cli precedence = (%q, %q), want (dotnet, cli)", mode, source)
+	}
+}
+
+func TestResolveBridgeModeRejectsPowerShell(t *testing.T) {
+	if _, _, err := excelbridge.ResolveMode("", "powershell", "dotnet"); err == nil {
+		t.Fatal("expected powershell bridge mode to be rejected")
 	}
 }
 
@@ -317,7 +164,7 @@ func TestRunnerAutoBridgeUsesDotNetWhenSupported(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":9999,"has_workbook":false}]}`)},
@@ -368,7 +215,7 @@ func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForUnsupportedDotNetInspectT
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				requests:  &powerShellRequests,
@@ -640,7 +487,7 @@ func TestRunnerDotNetSessionUsesDotNetProviderAndPreservesEnvelopeFields(t *test
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -686,7 +533,7 @@ func TestRunnerDotNetAttachUsesDotNetProviderAndPreservesEnvelopeFields(t *testi
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -732,7 +579,7 @@ func TestRunnerDotNetListFormsUsesDotNetProviderAndPreservesEnvelopeFields(t *te
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -778,7 +625,7 @@ func TestRunnerDotNetUIButtonAddUsesDotNetProviderAndPreservesEnvelopeFields(t *
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -837,7 +684,7 @@ func TestRunnerDotNetEditCellUsesDotNetProviderAndPreservesEnvelopeFields(t *tes
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -1093,7 +940,7 @@ func TestRunnerDoctorAutoDoesNotFallbackWhenDotNetMissing(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"doctor","logs":[],"bridge":{"host":"powershell.exe","edition":"Desktop","version":"5.1.22621.2506"}}`)},
@@ -1116,16 +963,16 @@ func TestRunnerDoctorAutoDoesNotFallbackWhenDotNetMissing(t *testing.T) {
 	}
 }
 
-func TestRunnerDoctorAddsLegacyDiagnosticsForExplicitPowerShell(t *testing.T) {
+func TestRunnerRejectsExplicitPowerShellBridgeMode(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
-	var powerShellCalls int
+	var calls int
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return trackingBridgeProvider{
-			name:      string(excelbridge.ModePowerShell),
+			name:      string(mode),
 			supports:  true,
-			callCount: &powerShellCalls,
+			callCount: &calls,
 			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"doctor","logs":[],"bridge":{"host":"powershell.exe","edition":"Desktop","version":"5.1.22621.2506"}}`)},
 		}
 	}
@@ -1134,44 +981,28 @@ func TestRunnerDoctorAddsLegacyDiagnosticsForExplicitPowerShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", calls)
 	}
-	diagnostics, ok := env.Diagnostics.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected diagnostics map, got %#v", env.Diagnostics)
-	}
-	if diagnostics["requested_bridge"] != "powershell" {
-		t.Fatalf("Diagnostics.requested_bridge = %v, want powershell", diagnostics["requested_bridge"])
-	}
-	if diagnostics["selected_bridge"] != "powershell" {
-		t.Fatalf("Diagnostics.selected_bridge = %v, want powershell", diagnostics["selected_bridge"])
-	}
-	if diagnostics["fallback"] != false {
-		t.Fatalf("Diagnostics.fallback = %v, want false", diagnostics["fallback"])
-	}
-	if diagnostics["legacy"] != true {
-		t.Fatalf("Diagnostics.legacy = %v, want true", diagnostics["legacy"])
-	}
-	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
-		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	if env.Error == nil || env.Error.Code != "bridge_mode_invalid" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
-func TestRunnerEnvPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
+func TestRunnerRejectsEnvPowerShellBridgeMode(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 	t.Setenv(excelbridge.EnvBridge, "powershell")
 
-	var powerShellCalls int
+	var calls int
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return trackingBridgeProvider{
 			name:      string(mode),
 			supports:  true,
-			callCount: &powerShellCalls,
+			callCount: &calls,
 			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
 		}
 	}
@@ -1180,27 +1011,27 @@ func TestRunnerEnvPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", calls)
 	}
-	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
-		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	if env.Error == nil || env.Error.Code != "bridge_mode_invalid" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
-func TestRunnerConfigPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
+func TestRunnerRejectsConfigPowerShellBridgeMode(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
-	var powerShellCalls int
+	var calls int
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return trackingBridgeProvider{
 			name:      string(mode),
 			supports:  true,
-			callCount: &powerShellCalls,
+			callCount: &calls,
 			response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
 		}
 	}
@@ -1209,14 +1040,14 @@ func TestRunnerConfigPowerShellBridgeAddsDeprecationWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	if code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
 	}
-	if powerShellCalls != 1 {
-		t.Fatalf("powershell calls = %d, want 1", powerShellCalls)
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", calls)
 	}
-	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
-		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
+	if env.Error == nil || env.Error.Code != "bridge_mode_invalid" {
+		t.Fatalf("unexpected error: %+v", env.Error)
 	}
 }
 
@@ -1236,7 +1067,7 @@ func TestRunnerDotNetExplicitModeDoesNotFallBackOnDecodeError(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[]}`)},
@@ -1278,7 +1109,7 @@ func TestRunnerAutoModeAttemptsDotNetForUnsupportedCommand(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"run","logs":[],"result":{"stdout":"","stderr":"","exit_code":0,"duration_ms":1}}`)},
@@ -1322,7 +1153,7 @@ func TestRunnerAutoModeDoesNotFallBackToPowerShellOnDecodeError(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":9999,"has_workbook":false}]}`)},
@@ -1364,7 +1195,7 @@ func TestRunnerAutoModeDoesNotFallBackToPowerShellWhenDotNetProtocolVersionMissi
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"process","logs":[],"process":[{"pid":7777,"has_workbook":true}]}`)},
@@ -2433,357 +2264,6 @@ func TestProcessEnvironmentFailureCodesAreEnvironmentFailures(t *testing.T) {
 	}
 }
 
-func TestProcessListSerializesActionArg(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action)
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{Action: "list"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env.Command != "process list" {
-		t.Fatalf("Command = %q, want process list", env.Command)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok || m["action"] != "list" {
-		t.Fatalf("Process[0].action = %v, want list", m["action"])
-	}
-}
-
-func TestProcessListDefaultsActionArg(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action)
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok || m["action"] != "list" {
-		t.Fatalf("Process[0].action = %v, want list", m["action"])
-	}
-}
-
-func TestProcessCleanupSerializesPidModeArgs(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 1234})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env.Command != "process cleanup" {
-		t.Fatalf("Command = %q, want process cleanup", env.Command)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process[0] is not a map: %T", processes[0])
-	}
-	if m["action"] != "cleanup" {
-		t.Fatalf("action = %v, want cleanup", m["action"])
-	}
-	if m["targetPid"] != "1234" {
-		t.Fatalf("targetPid = %v, want 1234", m["targetPid"])
-	}
-	if m["auto"] != "false" {
-		t.Fatalf("auto = %v, want false", m["auto"])
-	}
-	if m["all"] != "false" {
-		t.Fatalf("all = %v, want false", m["all"])
-	}
-}
-
-func TestProcessCleanupDefaultsActionArg(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{PID: 1234})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process[0] is not a map: %T", processes[0])
-	}
-	if m["action"] != "cleanup" {
-		t.Fatalf("action = %v, want cleanup", m["action"])
-	}
-	if m["targetPid"] != "1234" {
-		t.Fatalf("targetPid = %v, want 1234", m["targetPid"])
-	}
-}
-
-func TestProcessCleanupSerializesAutoModeArgs(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", Auto: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process[0] is not a map: %T", processes[0])
-	}
-	if m["auto"] != "true" {
-		t.Fatalf("auto = %v, want true", m["auto"])
-	}
-	if m["all"] != "false" {
-		t.Fatalf("all = %v, want false", m["all"])
-	}
-	if m["targetPid"] != "" {
-		t.Fatalf("targetPid = %v, want empty string", m["targetPid"])
-	}
-}
-
-func TestProcessCleanupSerializesAllModeArgs(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-$result = @{ status="ok"; command="process"; error=$null; logs=@(); process=@(@{action=$Action;targetPid=$TargetPid;auto=$Auto;all=$All}) }
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, _, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok || len(processes) != 1 {
-		t.Fatalf("Process = %v, want one-element array", env.Process)
-	}
-	m, ok := processes[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process[0] is not a map: %T", processes[0])
-	}
-	if m["all"] != "true" {
-		t.Fatalf("all = %v, want true", m["all"])
-	}
-	if m["auto"] != "false" {
-		t.Fatalf("auto = %v, want false", m["auto"])
-	}
-}
-
-func TestProcessListDecodesListResult(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action)
-$result = @{
-	status="ok"
-	command="process"
-	error=$null
-	logs=@("found 2 Excel process(es)")
-	process=@(
-		@{pid=1234;has_workbook=$true}
-		@{pid=5678;has_workbook=$false}
-		@{pid=9012;has_workbook=$null}
-	)
-}
-$result | ConvertTo-Json -Compress
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessList(ProcessListOptions{Action: "list"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
-	}
-	if env.Status != output.StatusOK {
-		t.Fatalf("Status = %q, want ok", env.Status)
-	}
-	if env.Command != "process list" {
-		t.Fatalf("Command = %q", env.Command)
-	}
-	processes, ok := env.Process.([]interface{})
-	if !ok {
-		t.Fatalf("Process is not an array: %T", env.Process)
-	}
-	if len(processes) != 3 {
-		t.Fatalf("len(Process) = %d, want 3", len(processes))
-	}
-	p0, ok := processes[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process[0] is not a map: %T", processes[0])
-	}
-	if pid, ok := p0["pid"]; !ok || pid.(float64) != 1234 {
-		t.Fatalf("Process[0].pid = %v", p0["pid"])
-	}
-	if hw, ok := p0["has_workbook"]; !ok || hw != true {
-		t.Fatalf("Process[0].has_workbook = %v", p0["has_workbook"])
-	}
-}
-
-func TestProcessCleanupDecodesCleanupResult(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-'{"status":"ok","command":"process","error":null,"logs":["terminated 1 Excel process(es)"],"process":{"action":"cleanup","mode":"pid","total":1,"results":[{"pid":5678,"terminated":true,"method":"graceful"}]}}'
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", PID: 5678})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
-	}
-	if env.Status != output.StatusOK {
-		t.Fatalf("Status = %q, want ok", env.Status)
-	}
-	if env.Command != "process cleanup" {
-		t.Fatalf("Command = %q", env.Command)
-	}
-	p, ok := env.Process.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process is not a map: %T", env.Process)
-	}
-	if p["action"] != "cleanup" {
-		t.Fatalf("action = %v, want cleanup", p["action"])
-	}
-	if p["mode"] != "pid" {
-		t.Fatalf("mode = %v, want pid", p["mode"])
-	}
-	if total, ok := p["total"]; !ok || total.(float64) != 1 {
-		t.Fatalf("total = %v", p["total"])
-	}
-	results, ok := p["results"].([]interface{})
-	if !ok || len(results) != 1 {
-		t.Fatalf("results = %v", p["results"])
-	}
-	r0, ok := results[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("results[0] is not a map: %T", results[0])
-	}
-	if r0["method"] != "graceful" {
-		t.Fatalf("method = %v, want graceful", r0["method"])
-	}
-}
-
-func TestProcessCleanupDecodesTerminationFailedResult(t *testing.T) {
-	root := t.TempDir()
-	scriptsDir := filepath.Join(root, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := `param([string]$Action,[string]$TargetPid="",[string]$Auto="false",[string]$All="false")
-'{"status":"failed","command":"process","error":{"code":"process_termination_failed","message":"1 of 3 Excel process(es) failed to terminate","source":"","number":0,"line":0,"phase":""},"logs":null,"process":{"action":"cleanup","mode":"all","total":3,"results":[{"pid":1234,"terminated":true,"method":"force"},{"pid":5678,"terminated":true,"method":"force"},{"pid":9012,"terminated":false,"method":"none"}]}}'
-`
-	if err := os.WriteFile(filepath.Join(scriptsDir, "process.ps1"), []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env, code, err := Runner{RootDir: root, BridgeMode: "powershell"}.ProcessCleanup(ProcessCleanupOptions{Action: "cleanup", All: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != output.ExitEnvironment {
-		t.Fatalf("exit code = %d, want ExitEnvironment (%d)", code, output.ExitEnvironment)
-	}
-	if env.Status != output.StatusFailed {
-		t.Fatalf("Status = %q, want failed", env.Status)
-	}
-	if env.Command != "process cleanup" {
-		t.Fatalf("Command = %q", env.Command)
-	}
-	if env.Error == nil {
-		t.Fatal("Error is nil, want process_termination_failed")
-	}
-	if env.Error.Code != "process_termination_failed" {
-		t.Fatalf("Error.Code = %q, want process_termination_failed", env.Error.Code)
-	}
-	p, ok := env.Process.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process is not a map: %T", env.Process)
-	}
-	if p["mode"] != "all" {
-		t.Fatalf("mode = %v, want all", p["mode"])
-	}
-	results, ok := p["results"].([]interface{})
-	if !ok || len(results) != 3 {
-		t.Fatalf("results = %v", p["results"])
-	}
-}
-
 func TestRunnerDotNetPullResponsePreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
@@ -2902,7 +2382,7 @@ func TestRunnerDotNetMacrosUsesDotNetProviderAndPreservesEnvelopeFields(t *testi
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -2974,7 +2454,7 @@ func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -3061,35 +2541,6 @@ func TestRunnerDotNetRunUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.
 	}
 }
 
-func TestRunnerPowerShellRunTimeoutAddsDeprecationWarning(t *testing.T) {
-	original := bridgeProviderForMode
-	t.Cleanup(func() { bridgeProviderForMode = original })
-	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
-		return fakeBridgeProvider{
-			name:     string(excelbridge.ModePowerShell),
-			response: excelbridge.Response{TimedOut: true},
-			err:      context.DeadlineExceeded,
-		}
-	}
-
-	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "powershell"}.Run(config.Default(), RunOptions{
-		Macro:   "Module1.Main",
-		Timeout: time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != output.ExitValidation {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitValidation)
-	}
-	if env.Error == nil || env.Error.Code != "macro_timeout" {
-		t.Fatalf("unexpected error: %+v", env.Error)
-	}
-	if !hasWarningCode(env.Warnings, "powershell_bridge_deprecated") {
-		t.Fatalf("expected PowerShell deprecation warning, got %+v", env.Warnings)
-	}
-}
-
 func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
@@ -3109,7 +2560,7 @@ func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -3221,7 +2672,7 @@ func TestRunnerAutoBridgeUsesDotNetForPull(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
@@ -3263,7 +2714,7 @@ func TestRunnerAutoBridgeUsesDotNetForPush(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"push","logs":["imported 2 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","save_required":true},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true},"backup":{"id":"push_20260101","path":"C:\\temp\\.xlflow\\backups\\Book_20260101.xlsm","reason":"before-push","mode":"always"},"source":{"changed_only":false,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
@@ -3305,7 +2756,7 @@ func TestRunnerAutoBridgeUsesDotNetForRun(t *testing.T) {
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"run","logs":["unexpected powershell execution"]}`)},
@@ -3348,7 +2799,7 @@ func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForBridgeCommandUnsupported(
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"pull","logs":["exported 1 VBA component(s)"],"target":{"kind":"saved_workbook","path":"C:\\temp\\Book.xlsm"},"session":{"active":false},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false},"source":{"modules_dir":"C:\\temp\\src\\modules","classes_dir":"C:\\temp\\src\\classes","forms_dir":"C:\\temp\\src\\forms","workbook_dir":"C:\\temp\\src\\workbook"}}`)},
@@ -3390,7 +2841,7 @@ func TestRunnerAutoBridgeDoesNotFallBackToPowerShellForDotNetBridgeFileNotOpenab
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 				response:  excelbridge.Response{Stdout: []byte(`{"status":"ok","command":"pull","logs":[],"source":{"modules_dir":"C:\\temp\\src\\modules"}}`)},
@@ -3434,7 +2885,7 @@ func TestRunnerDotNetPullUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}
@@ -3539,7 +2990,7 @@ func TestRunnerDotNetPushUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 			}
 		default:
 			return trackingBridgeProvider{
-				name:      string(excelbridge.ModePowerShell),
+				name:      "powershell",
 				supports:  true,
 				callCount: &powerShellCalls,
 			}

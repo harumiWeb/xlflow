@@ -21,9 +21,8 @@ var dotNetLookPath = exec.LookPath
 var dotNetBridgeCandidatesFunc = dotNetBridgeCandidates
 var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
 
-// dotNetSupportedCommands is the Go-side source of truth for Windows auto-mode provider
-// selection. It lists the command keys that should prefer the .NET bridge before falling
-// back to PowerShell when auto mode is selected.
+// dotNetSupportedCommands is the Go-side source of truth for Windows auto-mode
+// provider support.
 var dotNetSupportedCommands = map[string]struct{}{
 	"attach":            {},
 	"doctor":            {},

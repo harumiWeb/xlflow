@@ -136,7 +136,7 @@ The bundled AI agent skill instructs agents to prefer `XlflowDebug.Log` plus str
 
 ## External PowerShell Host Diagnostics
 
-Excel COM-backed commands return top-level provider-specific `bridge` metadata. The `.NET` bridge reports fields such as `name`, `version`, `protocol_version`, `runtime`, and `architecture`. Deprecated explicit PowerShell bridge runs report `host`, `edition`, and `version`.
+Excel COM-backed commands return top-level `.NET` bridge metadata such as `name`, `version`, `protocol_version`, `runtime`, and `architecture`.
 
 When workbook VBA launches its own external PowerShell process, agents should not assume that it matches xlflow's bridge process. They should inspect the VBA command string or log the resolved executable from workbook code.
 

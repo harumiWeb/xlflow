@@ -137,15 +137,16 @@ xlflow-excel-bridge.exe --capabilities-json
 
 `--version-json` reports bridge name, version, protocol version, commit, runtime, and architecture.
 
-`--capabilities-json` reports supported command keys. In v0.15.0, `auto` selects the .NET bridge and does not fall back to PowerShell.
+`--capabilities-json` reports supported command keys. `auto` selects the .NET bridge.
 
 ## Selection Semantics
 
 Bridge selection is owned by the Go resolver, not by the bridge executable.
 
-- `dotnet`: strict mode; no implicit PowerShell fallback.
-- `auto`: selects the .NET bridge and does not fall back to PowerShell.
-- `powershell`: deprecated explicit opt-in retained only for v0.15.0 compatibility. It emits `powershell_bridge_deprecated` and is planned for removal in v0.16.0.
+- `dotnet`: strict .NET bridge mode.
+- `auto`: selects the .NET bridge.
+
+The legacy `powershell` mode was removed in v0.16.0 and is rejected by the Go resolver before a bridge request is sent.
 
 Unsupported commands should return `BRIDGE_COMMAND_UNSUPPORTED` when `.NET` is selected explicitly or through `auto`.
 
