@@ -13,7 +13,7 @@ It enables developers to:
 
 This makes Excel VBA macro development more secure while simplifying integration with Git version control systems and AI agents.
 
-![Demo](./images/demo.gif)
+![Demo](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/demo.gif)
 
 ## What is xlflow?
 
@@ -28,7 +28,7 @@ In **xlflow for VSCode**, we **GUI-ify these functionalities while also providin
 - You must install `xlflow` beforehand.
 - Either add `xlflow` to your system path or set the VS Code setting `xlflow.path` to the full path to the executable file.
 - In Excel settings, enable "**Trust access to the VBA Project Object Model**".
-  ![Trust Setting](./images/trust_setting.png)
+  ![Trust Setting](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/trust_setting.png)
 
 ### Installation Commands for xlflow Proper
 
@@ -91,16 +91,16 @@ This extension is designed for Excel VBA development scenarios such as:
 ### Project Setup
 
 - To create a new xlflow project, click `New Project` from the extension sidebar, enter a file name, and press Enter.
-  ![New Project](./images/new_proj.png)
+  ![New Project](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/new_proj.png)
 - To convert an existing macro workbook into an xlflow project, click `Init Existing Workbook` from the extension sidebar and select the macro book.
-  ![Init Project](./images/init_proj.png)
+  ![Init Project](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/init_proj.png)
 
 ### Workflow Operations
 
 - For importing source code from workbooks, execute the `Pull Workbook` button.
-  ![Pull](./images/pull.png)
+  ![Pull](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/pull.png)
 - For applying source code changes to workbooks, run the `Push Sources` button.
-  ![Push](./images/push.png)
+  ![Push](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/push.png)
 
 ## Configuration Settings
 
@@ -198,7 +198,7 @@ xlflow: Install Agent Skill
 
 you can install the **Agent Skill** for AI agents, which helps coding assistants like Codex / Claude Code / GitHub Copilot / Cursor better understand how to interact with `xlflow`. This enables autonomous macro implementation, testing, and modification processes for VBA scripts in Excel.
 As a result, it becomes easier to incorporate test-driven development and automated correction workflows into Excel VBA development.
-![Ai-Driven Development](./images/ai-drive-develop.gif)
+![Ai-Driven Development](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/ai-drive-develop.gif)
 
 ## WSL Integration Notes
 

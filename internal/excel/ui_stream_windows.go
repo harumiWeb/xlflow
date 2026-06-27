@@ -73,11 +73,6 @@ func (s *uiStreamSession) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 		_ = s.listener.Close()
-		s.mu.Lock()
-		if s.activeConn != nil {
-			_ = s.activeConn.Close()
-		}
-		s.mu.Unlock()
 	})
 	<-s.done
 	return s.closeErr

@@ -1,20 +1,25 @@
 {
   "name": "xlflow-vscode",
   "displayName": "%extension.displayName%",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "%extension.description%",
   "categories": [
     "Formatters",
     "Linters",
-    "Programming Languages"
+    "Programming Languages",
+    "Testing"
   ],
   "keywords": [
     "excel",
+    "formatter",
     "language server",
+    "lint",
     "lsp",
     "macro",
+    "testing",
     "vba",
-    "xlflow"
+    "xlflow",
+    "xlsm"
   ],
   "license": "MIT",
   "repository": {
@@ -30,6 +35,7 @@
     "check": "tsc -p ./ --noEmit",
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies",
     "test": "pnpm run compile && node ./dist/test/runTest.js",
     "lint": "oxlint ."
   },

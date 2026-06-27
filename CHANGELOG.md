@@ -26,11 +26,7 @@ All notable changes to xlflow will be documented in this file.
 - Fixed VBA LSP member completion inside nested call expressions such as `CStr(dict.` and after With-relative call chains such as `.Offset(1,0).`.
 - Fixed VBA LSP module declaration snippets so `Option Explicit` is not suggested again on the next line after it already exists.
 - Suppressed empty-prefix VBA LSP completions on blank module-level lines after existing content, preventing the completion list from reopening immediately after `Option Explicit`.
-- Updated the VS Code LSP dev client to write `.xlflow/lsp.log` only for workspaces with `xlflow.toml`; non-xlflow VBA folders now use VS Code extension log storage instead of creating `.xlflow`.
 - Added LSP document formatting support so VS Code Format Document can call the same VBA formatter engine used by `xlflow fmt` and receive full-document `TextEdit` results for `.bas` and `.cls` buffers.
-- Added a development-only VS Code LSP smoke client under `tools/vscode-lsp-dev` for manually verifying `xlflow lsp --stdio` against `.bas`, `.cls`, and `.frm` files.
-- Added development-only VBA syntax highlighting to the VS Code LSP dev client, including TextMate scopes for comments, strings, declarations, preprocessor directives, labels, keywords, types, constants, and member access.
-- Added a VBA `Set` statement snippet and enabled VBA-specific auto-closing brackets and quotes in the VS Code LSP dev client.
 - Improved VBA hover display with member signatures, canonical receiver types, and source/provenance notes for declarations, inferred object types, built-in globals, UserForm controls, and built-in object model members.
 - Added context-aware ProgID completion inside `CreateObject("...")` while suppressing unrelated completions in ordinary string literals.
 - Added active `With` block receiver tracking for VBA hover and member completion, including nested `With .Member` blocks.
@@ -58,7 +54,6 @@ All notable changes to xlflow will be documented in this file.
 - Improved VBA LSP definition and reference resolution for procedure-local variables and constants so same-name locals in other procedures are no longer returned for the current local scope.
 - Added VBA parameter symbols so LSP definition and reference lookup can resolve procedure arguments within the current procedure scope.
 - Improved VBA LSP hover for local symbols and parameters by reusing scoped definition lookup and avoiding type inference from later declarations.
-- Updated the VS Code LSP dev client to enable VBA quick suggestions and explicitly trigger suggestions for module declaration prefixes such as `Pu`, `Public S`, and `Dim`.
 - Added UserForm `.frm` control extraction for VBA LSP intelligence, enabling hover, completion, and definition support for controls such as `Me.txtName.Text` and `Me.Controls("txtName").Text` without opening Excel.
 - Expanded the built-in Excel VBA/COM type database with common formatting and worksheet helper objects such as `Excel.Font`, `Excel.Interior`, `Excel.Borders`, `Excel.Validation`, `Excel.Hyperlinks`, `Excel.PageSetup`, `Excel.AutoFilter`, `Excel.Sort`, and `Excel.WorksheetFunction`.
 - Expanded built-in Excel constant metadata for common formatting, border, alignment, page orientation, and sort constants, and included enum group information in constant hover output.

@@ -13,3 +13,8 @@ esbuild.js
 pnpm-lock.yaml
 pnpm-workspace.yaml
 *.vsix
+
+# Demo images used only from README via external URLs
+images/*
+!images/icon.png
+!images/activity-icon.svg
