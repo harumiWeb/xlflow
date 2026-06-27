@@ -182,6 +182,21 @@
         "category": "%command.category%"
       },
       {
+        "command": "xlflow.openInstallGuide",
+        "title": "%command.openInstallGuide.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.configurePath",
+        "title": "%command.configurePath.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.retryCliDetection",
+        "title": "%command.retryCliDetection.title%",
+        "category": "%command.category%"
+      },
+      {
         "command": "xlflow.newProject",
         "title": "%command.newProject.title%",
         "category": "%command.category%"
@@ -741,6 +756,7 @@
     "onCommand:xlflow.checkEnvironment",
     "onCommand:xlflow.collapseModules",
     "onCommand:xlflow.collapseUserForms",
+    "onCommand:xlflow.configurePath",
     "onCommand:xlflow.copyModuleName",
     "onCommand:xlflow.copyProcedureName",
     "onCommand:xlflow.copyQualifiedName",
@@ -760,6 +776,7 @@
     "onCommand:xlflow.newStandardModule",
     "onCommand:xlflow.newUserForm",
     "onCommand:xlflow.openDocumentation",
+    "onCommand:xlflow.openInstallGuide",
     "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.openProcedure",
@@ -773,6 +790,7 @@
     "onCommand:xlflow.renameModule",
     "onCommand:xlflow.renameUserForm",
     "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.retryCliDetection",
     "onCommand:xlflow.revealSourceFile",
     "onCommand:xlflow.revealUserFormSource",
     "onCommand:xlflow.runAllTests",

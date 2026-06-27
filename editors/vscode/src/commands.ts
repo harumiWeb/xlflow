@@ -1,5 +1,10 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import {
+  configureXlflowPath,
+  openInstallGuide,
+  XlflowCliAvailabilityService,
+} from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
@@ -39,6 +44,7 @@ interface CommandRefreshHooks {
 export function registerCommands(
   context: vscode.ExtensionContext,
   clientManager: XlflowLanguageClientManager,
+  cliAvailability: XlflowCliAvailabilityService,
   channels: XlflowChannels,
   sessionManager: SessionManager,
   projectState: XlflowProjectStateService,
@@ -53,6 +59,17 @@ export function registerCommands(
         requireWorkspace: false,
         uiLabel: vscode.l10n.t("xlflow environment check"),
       });
+    }),
+    vscode.commands.registerCommand("xlflow.openInstallGuide", async () => {
+      await openInstallGuide();
+    }),
+    vscode.commands.registerCommand("xlflow.configurePath", async () => {
+      await configureXlflowPath();
+    }),
+    vscode.commands.registerCommand("xlflow.retryCliDetection", async () => {
+      await cliAvailability.refresh();
+      await clientManager.restart();
+      await hooks.refreshAll();
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {
       const workbook = await vscode.window.showInputBox({
@@ -357,6 +374,9 @@ export function registerCommands(
 async function showSetupActions(): Promise<void> {
   const action = await vscode.window.showQuickPick(
     [
+      { label: vscode.l10n.t("Install Guide"), command: "xlflow.openInstallGuide" },
+      { label: vscode.l10n.t("Configure Path"), command: "xlflow.configurePath" },
+      { label: vscode.l10n.t("Retry"), command: "xlflow.retryCliDetection" },
       { label: vscode.l10n.t("New Project"), command: "xlflow.newProject" },
       { label: vscode.l10n.t("Init Existing Workbook"), command: "xlflow.initProject" },
       { label: vscode.l10n.t("Run Doctor"), command: "xlflow.runDoctor" },

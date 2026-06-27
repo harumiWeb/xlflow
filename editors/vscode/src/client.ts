@@ -6,6 +6,7 @@ import {
   Trace,
   TransportKind,
 } from "vscode-languageclient/node";
+import { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig, TraceServer } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
@@ -15,7 +16,10 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
   private workspaceFolderKey: string | undefined;
   private suggestTimer: NodeJS.Timeout | undefined;
 
-  public constructor(private readonly channels: XlflowChannels) {}
+  public constructor(
+    private readonly channels: XlflowChannels,
+    private readonly cliAvailability: XlflowCliAvailabilityService,
+  ) {}
 
   public async start(): Promise<void> {
     const config = readConfig();
@@ -24,6 +28,13 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       return;
     }
     if (this.client !== undefined) {
+      return;
+    }
+    const availability = await this.cliAvailability.refresh();
+    if (!availability.ok) {
+      this.channels.output.info(
+        `Skipping xlflow lsp --stdio startup because ${availability.executable} is unavailable: ${availability.message}`,
+      );
       return;
     }
 

@@ -68,7 +68,7 @@ export async function discoverTests(
     ["--json", "test", "list"],
     "xlflow test list",
     channels.output,
-    { requireWorkspace: true, workspaceFolder: folder },
+    { requireWorkspace: true, showCliUnavailable: false, workspaceFolder: folder },
   );
   return {
     exitCode: result.exitCode,

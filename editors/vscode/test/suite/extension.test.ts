@@ -2,6 +2,11 @@ import * as assert from "assert";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import {
+  cliNotificationSuppressionKey,
+  normalizeAvailabilityFailure,
+  normalizeAvailabilitySuccess,
+} from "../../src/cliAvailability";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
@@ -41,6 +46,9 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   for (const command of [
     "xlflow.restartLanguageServer",
     "xlflow.checkEnvironment",
+    "xlflow.openInstallGuide",
+    "xlflow.configurePath",
+    "xlflow.retryCliDetection",
     "xlflow.newProject",
     "xlflow.initProject",
     "xlflow.skillInstall",
@@ -102,6 +110,29 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     sessionStatusText("inactive", "notInitialized"),
     "$(circle-slash) xlflow: No Project",
   );
+  assert.deepStrictEqual(normalizeAvailabilitySuccess("xlflow", "xlflow 0.1.0\n", ""), {
+    ok: true,
+    executable: "xlflow",
+    version: "xlflow 0.1.0",
+  });
+  assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { code: "ENOENT" }), {
+    ok: false,
+    reason: "notFound",
+    executable: "xlflow",
+    message: "xlflow executable was not found.",
+  });
+  assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { timedOut: true }), {
+    ok: false,
+    reason: "failed",
+    executable: "xlflow",
+    message: "xlflow --version timed out.",
+  });
+  assert.deepStrictEqual(normalizeAvailabilityFailure("xlflow", { stderr: "boom" }), {
+    ok: false,
+    reason: "failed",
+    executable: "xlflow",
+    message: "boom",
+  });
   assert.strictEqual(
     sessionStateFromEnvelope({ status: "ok", session: { active: true } }),
     "active",
@@ -205,6 +236,15 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     name: "xlflow",
     index: 0,
   };
+  assert.strictEqual(
+    cliNotificationSuppressionKey(fakeFolder.uri, {
+      ok: false,
+      reason: "notFound",
+      executable: "xlflow",
+      message: "missing",
+    }),
+    `${"xlflow.cliMissingNotice"}.${fakeFolder.uri.toString()}.xlflow`,
+  );
   assert.strictEqual(
     comparableFsPath(sourceUri(fakeFolder, "src/modules/Main.bas")),
     comparableFsPath("C:/tmp/xlflow/src/modules/Main.bas"),
