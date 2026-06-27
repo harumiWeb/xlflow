@@ -13,7 +13,7 @@ It enables developers to:
 
 This makes Excel VBA macro development more secure while simplifying integration with Git version control systems and AI agents.
 
-  ![Demo](./images/demo.gif)
+![Demo](./images/demo.gif)
 
 ## What is xlflow?
 
