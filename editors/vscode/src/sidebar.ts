@@ -336,7 +336,11 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
         item.description = element.procedureKind;
         item.iconPath = new vscode.ThemeIcon(element.test ? "beaker" : "symbol-method");
-        item.contextValue = element.test ? "xlflow.testProcedure" : "xlflow.procedure";
+        item.contextValue = element.runnable
+          ? element.test
+            ? "xlflow.testProcedure"
+            : "xlflow.procedure"
+          : "xlflow.procedureStatic";
         item.command = {
           command: "xlflow.openProcedure",
           title: "Open Procedure",
