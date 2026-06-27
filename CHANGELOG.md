@@ -6,6 +6,7 @@ All notable changes to xlflow will be documented in this file.
 
 - Removed the legacy PowerShell Excel bridge for v0.16.0. The only supported bridge modes are now `auto` and `dotnet`; `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` now fail with bridge-mode/configuration errors instead of emitting a deprecation warning.
 - Added source-only `xlflow module new` and `xlflow form new` scaffolding commands for standard modules, class modules, and sidecar UserForms.
+- Added source-only `xlflow module remove` and `xlflow module rename` commands for safe standard-module, class-module, and UserForm source mutations before the next `xlflow push`.
 - Added explicit unknown-command reporting so mistyped commands print a stderr error with help/suggestions, and `xlflow --json <unknown-command>` returns a structured `unknown_command` failure.
 - Added LSP CodeLens support for runnable no-argument VBA `Sub` procedures, including `Run` and `Run Test` actions backed by in-memory editor buffers.
 - Added `xlflow test list --json` for source-only VBA test discovery, enabling editor integrations to discover tests without parsing VBA in TypeScript or opening Excel.

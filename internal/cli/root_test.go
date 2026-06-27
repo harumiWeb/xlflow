@@ -535,6 +535,28 @@ path = "build/Book.xlsm"
 	return dir
 }
 
+func writeCLIModuleMutationProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCLIModuleFile(t *testing.T, root string, relPath string, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeCLIWarningAnalyzeProject(t *testing.T, analyzeConfig string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2348,6 +2370,143 @@ func TestRootCommandIncludesModuleNewCommand(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("type") == nil {
 		t.Fatal("expected module new command to define --type")
+	}
+}
+
+func TestRootCommandIncludesModuleRemoveAndRenameCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	removeCmd, _, err := root.Find([]string{"module", "remove", "InvoiceProcessor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removeCmd == nil || removeCmd.Name() != "remove" {
+		t.Fatalf("expected module remove command, got %#v", removeCmd)
+	}
+
+	renameCmd, _, err := root.Find([]string{"module", "rename", "OldName", "NewName"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renameCmd == nil || renameCmd.Name() != "rename" {
+		t.Fatalf("expected module rename command, got %#v", renameCmd)
+	}
+}
+
+func TestModuleRemoveCommandWritesTextPushInstruction(t *testing.T) {
+	dir := writeCLIModuleMutationProject(t)
+	writeCLIModuleFile(t, dir, "src/modules/InvoiceProcessor.bas", `Attribute VB_Name = "InvoiceProcessor"`+"\n")
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"module", "remove", "InvoiceProcessor"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("module remove command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	text := stdout.String()
+	for _, want := range []string{`Removed module "InvoiceProcessor".`, `Run "xlflow push" to apply the change to the workbook.`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected output to contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestModuleRenameCommandWritesJSON(t *testing.T) {
+	dir := writeCLIModuleMutationProject(t)
+	writeCLIModuleFile(t, dir, "src/modules/OldName.bas", `Attribute VB_Name = "OldName"`+"\n")
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "module", "rename", "OldName", "NewName"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("module rename command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var env output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout.String())
+	}
+	source := env.Source.(map[string]any)
+	if env.Command != "module rename" || source["operation"] != "module.rename" || source["old_name"] != "OldName" || source["new_name"] != "NewName" || source["requires_push"] != true {
+		t.Fatalf("unexpected module rename payload: command=%q source=%#v", env.Command, source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "modules", "NewName.bas")); err != nil {
+		t.Fatalf("expected renamed module file: %v", err)
+	}
+}
+
+func TestModuleRemoveCommandReturnsProtectedModuleCode(t *testing.T) {
+	dir := writeCLIModuleMutationProject(t)
+	writeCLIModuleFile(t, dir, "src/workbook/ThisWorkbook.bas", "Option Explicit\n")
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "module", "remove", "ThisWorkbook"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected module remove to fail for protected document module")
+	}
+	if output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", output.ExitCode(err), output.ExitValidation)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "protected_module" {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+}
+
+func TestModuleRenameCommandReturnsStableValidationCodes(t *testing.T) {
+	dir := writeCLIModuleMutationProject(t)
+	writeCLIModuleFile(t, dir, "src/modules/Existing.bas", `Attribute VB_Name = "Existing"`+"\n")
+	writeCLIModuleFile(t, dir, "src/classes/Collision.cls", `Attribute VB_Name = "Collision"`+"\n")
+
+	tests := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{name: "invalid", args: []string{"--json", "module", "rename", "Existing", "123Bad"}, code: "module_name_invalid"},
+		{name: "missing", args: []string{"--json", "module", "rename", "Missing", "NewName"}, code: "module_not_found"},
+		{name: "duplicate", args: []string{"--json", "module", "rename", "Existing", "Collision"}, code: "module_already_exists"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+			root := a.rootCommand()
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("expected command to fail")
+			}
+			if output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("exit code = %d, want %d", output.ExitCode(err), output.ExitValidation)
+			}
+			var env output.Envelope
+			if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+				t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+			}
+			if env.Error == nil || env.Error.Code != tt.code {
+				t.Fatalf("error code = %+v, want %s", env.Error, tt.code)
+			}
+		})
 	}
 }
 
