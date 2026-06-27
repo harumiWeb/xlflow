@@ -182,6 +182,9 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.refreshModules", async () => {
       await hooks.refreshModules();
     }),
+    vscode.commands.registerCommand("xlflow.collapseModules", async () => {
+      await vscode.commands.executeCommand("workbench.actions.treeView.xlflow.modules.collapseAll");
+    }),
     vscode.commands.registerCommand("xlflow.refreshTests", async () => {
       await hooks.refreshTests();
     }),

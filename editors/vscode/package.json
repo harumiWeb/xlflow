@@ -289,6 +289,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "xlflow.collapseModules",
+        "title": "xlflow: Collapse Modules",
+        "category": "xlflow",
+        "icon": "$(collapse-all)"
+      },
+      {
         "command": "xlflow.refreshTests",
         "title": "xlflow: Refresh Tests",
         "category": "xlflow",
@@ -362,6 +368,11 @@
           "command": "xlflow.refreshModules",
           "when": "view == xlflow.modules",
           "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.collapseModules",
+          "when": "view == xlflow.modules",
+          "group": "navigation@2"
         },
         {
           "command": "xlflow.runAllTests",
@@ -486,6 +497,7 @@
   },
   "activationEvents": [
     "onCommand:xlflow.checkEnvironment",
+    "onCommand:xlflow.collapseModules",
     "onCommand:xlflow.formatDocument",
     "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",

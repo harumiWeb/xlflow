@@ -50,6 +50,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.openOutput",
     "xlflow.refreshProject",
     "xlflow.refreshModules",
+    "xlflow.collapseModules",
     "xlflow.refreshTests",
     "xlflow.runAllTests",
     "xlflow.runDoctor",
