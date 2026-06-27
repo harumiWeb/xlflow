@@ -498,8 +498,8 @@ bridge = " PowerShell "
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
-	if err == nil {
-		t.Fatal("expected removed powershell bridge value to be rejected")
+	if !errors.Is(err, ErrInvalidExcelBridge) {
+		t.Fatalf("Load error = %v, want %v", err, ErrInvalidExcelBridge)
 	}
 }
 
