@@ -6,7 +6,7 @@ import {
   XlflowProjectState,
   XlflowProjectStateService,
 } from "./projectState";
-import { SessionManager, SessionSnapshot, SessionState, XlflowSessionPayload } from "./session";
+import { SessionManager, SessionState, XlflowSessionPayload } from "./session";
 import { discoverTests, readNonEmpty, sourceUri, XlflowDiscoveredTest } from "./testDiscovery";
 import { runXlflowJsonCommand } from "./xlflow";
 
