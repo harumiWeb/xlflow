@@ -290,7 +290,7 @@ export function registerCommands(
       await deleteUserForm(value, channels, hooks);
     }),
     vscode.commands.registerCommand("xlflow.revealUserFormSource", async (value: unknown) => {
-      const uri = treeUri(value);
+      const uri = userFormSourceUri(value);
       if (uri !== undefined) {
         await vscode.commands.executeCommand("revealInExplorer", uri);
       }
@@ -299,7 +299,10 @@ export function registerCommands(
       await copyText("UserForm name", treeName(value));
     }),
     vscode.commands.registerCommand("xlflow.copyUserFormRelativePath", async (value: unknown) => {
-      await copyText("Relative path", treeRelativePath(value) ?? relativePathFromTreeUri(value));
+      await copyText(
+        "Relative path",
+        userFormRelativePath(value) ?? relativePathFromUri(userFormSourceUri(value)),
+      );
     }),
     vscode.commands.registerCommand("xlflow.openProcedure", async (value: unknown) => {
       const uri = treeUri(value);
@@ -514,7 +517,7 @@ async function renameUserForm(
   hooks: CommandRefreshHooks,
 ): Promise<void> {
   const name = treeName(value);
-  const uri = treeUri(value);
+  const uri = userFormSourceUri(value);
   if (name === undefined) {
     vscode.window.showWarningMessage("xlflow rename UserForm received invalid UserForm arguments.");
     return;
@@ -524,10 +527,7 @@ async function renameUserForm(
     return;
   }
 
-  const workspaceFolder =
-    uri === undefined
-      ? await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true })
-      : await workspaceFolderForUri(uri);
+  const workspaceFolder = await workspaceFolderForUserForm(value, uri);
   const wasOpen =
     uri !== undefined &&
     vscode.workspace.textDocuments.some((document) => document.uri.toString() === uri.toString());
@@ -557,7 +557,7 @@ async function deleteUserForm(
   hooks: CommandRefreshHooks,
 ): Promise<void> {
   const name = treeName(value);
-  const uri = treeUri(value);
+  const uri = userFormSourceUri(value);
   if (name === undefined) {
     vscode.window.showWarningMessage("xlflow delete UserForm received invalid UserForm arguments.");
     return;
@@ -572,10 +572,7 @@ async function deleteUserForm(
     return;
   }
 
-  const workspaceFolder =
-    uri === undefined
-      ? await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true })
-      : await workspaceFolderForUri(uri);
+  const workspaceFolder = await workspaceFolderForUserForm(value, uri);
   const result = await runModuleMutation(
     ["remove", name],
     `xlflow module remove ${name}`,
@@ -834,6 +831,23 @@ async function workspaceFolderForUri(uri: vscode.Uri): Promise<vscode.WorkspaceF
   );
 }
 
+async function workspaceFolderForUserForm(
+  value: unknown,
+  sourceUri: vscode.Uri | undefined,
+): Promise<vscode.WorkspaceFolder | undefined> {
+  if (sourceUri !== undefined) {
+    return workspaceFolderForUri(sourceUri);
+  }
+  const workspaceUri = treeWorkspaceUri(value);
+  if (workspaceUri !== undefined) {
+    const folder = vscode.workspace.getWorkspaceFolder(workspaceUri);
+    if (folder !== undefined) {
+      return folder;
+    }
+  }
+  return resolveWorkspaceRoot({ prompt: true, fallbackToFirst: true });
+}
+
 async function runModuleMutation(
   args: string[],
   label: string,
@@ -903,8 +917,7 @@ function relativePathForUri(uri: vscode.Uri): string {
   return path.relative(folder.uri.fsPath, uri.fsPath).replace(/\\/g, "/");
 }
 
-function relativePathFromTreeUri(value: unknown): string | undefined {
-  const uri = treeUri(value);
+function relativePathFromUri(uri: vscode.Uri | undefined): string | undefined {
   return uri === undefined ? undefined : relativePathForUri(uri);
 }
 
@@ -930,11 +943,32 @@ function treeQualifiedName(value: unknown): string | undefined {
   return readNonEmpty((value as Record<string, unknown>).qualifiedName);
 }
 
-function treeRelativePath(value: unknown): string | undefined {
+function userFormRelativePath(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }
-  return readNonEmpty((value as Record<string, unknown>).relativePath);
+  const obj = value as Record<string, unknown>;
+  return readNonEmpty(obj.primaryRelativePath) ?? readNonEmpty(obj.relativePath);
+}
+
+function userFormSourceUri(value: unknown): vscode.Uri | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  const primaryUri = obj.primaryUri;
+  if (primaryUri instanceof vscode.Uri) {
+    return primaryUri;
+  }
+  return treeUri(value);
+}
+
+function treeWorkspaceUri(value: unknown): vscode.Uri | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const workspaceUri = (value as Record<string, unknown>).workspaceUri;
+  return workspaceUri instanceof vscode.Uri ? workspaceUri : undefined;
 }
 
 function treeModuleKind(value: unknown): string | undefined {

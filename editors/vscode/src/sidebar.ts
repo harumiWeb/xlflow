@@ -83,6 +83,7 @@ interface UserFormNode {
   kind: "userForm";
   name: string;
   codeSource: UserFormCodeSource;
+  workspaceUri: vscode.Uri;
   primaryUri?: vscode.Uri;
   primaryRelativePath?: string;
   children: UserFormArtifactNode[];
@@ -448,6 +449,7 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         kind: "userForm",
         name: form.name,
         codeSource: form.codeSource,
+        workspaceUri: state.workspaceFolder.uri,
         primaryUri: primary?.uri,
         primaryRelativePath: primary?.relativePath,
         children,
