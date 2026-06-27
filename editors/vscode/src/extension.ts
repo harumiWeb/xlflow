@@ -34,13 +34,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshAll: async () => {
       await projectState?.refresh();
       await sessionManager?.refreshStatus();
-      await Promise.all([sidebar?.refreshModules(), sidebar?.refreshTests()]);
+      await Promise.all([
+        sidebar?.refreshModules(),
+        sidebar?.refreshUserForms(),
+        sidebar?.refreshTests(),
+      ]);
     },
     refreshProject: () => {
       sidebar?.refreshProjectViews();
     },
     refreshModules: async () => {
       await sidebar?.refreshModules();
+    },
+    refreshUserForms: async () => {
+      await sidebar?.refreshUserForms();
     },
     refreshTests: async () => {
       await testController?.refreshAuto();

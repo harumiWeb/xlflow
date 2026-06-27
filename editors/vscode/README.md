@@ -23,10 +23,13 @@ When the selected workspace folder does not contain `xlflow.toml`, the sidebar s
 When `xlflow.toml` exists, the sidebar switches to project mode:
 
 - `Project`: workspace, configured workbook, `xlflow.toml`, session state, and save-required state.
-- `Modules`: standard, class, document, and UserForm modules discovered from `xlflow inspect symbols --json`.
+- `Modules`: standard, class, and document modules discovered from `xlflow inspect symbols --json`.
+- `UserForms`: UserForm source artifacts discovered from the configured forms source tree.
 - `Tests`: tests discovered from `xlflow test list --json`, with shortcuts for run all and single-test execution.
 
-Project view title actions refresh state, pull workbook source, push source changes, and toggle the managed session. `Push Sources` asks for confirmation before running.
+Project view title actions refresh state, pull workbook source, push source changes, and start or stop the managed session. `Push Sources` asks for confirmation before running.
+
+`UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
 
 ## Development
 
@@ -92,6 +95,7 @@ The command palette includes:
 - `xlflow: Open Output`
 - `xlflow: Refresh Project`
 - `xlflow: Refresh Modules`
+- `xlflow: Refresh UserForms`
 - `xlflow: Refresh Tests`
 - `xlflow: Run All Tests`
 - `xlflow: Run Doctor`

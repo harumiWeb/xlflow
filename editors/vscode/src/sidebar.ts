@@ -16,6 +16,8 @@ type TreeNode =
   | ModuleGroupNode
   | ModuleNode
   | ProcedureNode
+  | UserFormNode
+  | UserFormArtifactNode
   | TestCountNode
   | TestNode;
 
@@ -62,6 +64,35 @@ interface ProcedureNode {
   test: boolean;
 }
 
+export type UserFormCodeSource = "sidecar" | "frm";
+
+export interface UserFormArtifactModel {
+  kind: "code" | "spec" | "frm";
+  label: string;
+  relativePath?: string;
+  missing: boolean;
+}
+
+export interface UserFormModel {
+  name: string;
+  codeSource: UserFormCodeSource;
+  artifacts: UserFormArtifactModel[];
+}
+
+interface UserFormNode {
+  kind: "userForm";
+  name: string;
+  children: UserFormArtifactNode[];
+}
+
+interface UserFormArtifactNode {
+  kind: "userFormArtifact";
+  label: string;
+  uri?: vscode.Uri;
+  missing: boolean;
+  artifactKind: UserFormArtifactModel["kind"];
+}
+
 interface TestCountNode {
   kind: "testCount";
   label: string;
@@ -100,6 +131,7 @@ export class XlflowSidebar implements vscode.Disposable {
   private readonly setupProvider: SetupTreeProvider;
   private readonly projectProvider: ProjectTreeProvider;
   private readonly modulesProvider: ModulesTreeProvider;
+  private readonly userFormsProvider: UserFormsTreeProvider;
   private readonly testsProvider: TestsTreeProvider;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -111,18 +143,21 @@ export class XlflowSidebar implements vscode.Disposable {
     this.setupProvider = new SetupTreeProvider(projectState);
     this.projectProvider = new ProjectTreeProvider(projectState, sessionManager);
     this.modulesProvider = new ModulesTreeProvider(projectState, channels);
+    this.userFormsProvider = new UserFormsTreeProvider(projectState);
     this.testsProvider = new TestsTreeProvider(projectState, channels);
 
     this.disposables.push(
       vscode.window.registerTreeDataProvider("xlflow.setup", this.setupProvider),
       vscode.window.registerTreeDataProvider("xlflow.project", this.projectProvider),
       vscode.window.registerTreeDataProvider("xlflow.modules", this.modulesProvider),
+      vscode.window.registerTreeDataProvider("xlflow.userForms", this.userFormsProvider),
       vscode.window.registerTreeDataProvider("xlflow.tests", this.testsProvider),
       projectState.onDidChangeState((state) => {
         sessionManager.setProjectKind(state.kind);
         this.refreshProjectViews();
         if (state.kind === "ready") {
           void this.refreshModules();
+          void this.refreshUserForms();
           void this.refreshTests();
         }
       }),
@@ -145,6 +180,10 @@ export class XlflowSidebar implements vscode.Disposable {
     await this.modulesProvider.refresh();
   }
 
+  async refreshUserForms(): Promise<void> {
+    await this.userFormsProvider.refresh();
+  }
+
   async refreshTests(): Promise<void> {
     await this.testsProvider.refresh();
   }
@@ -152,7 +191,7 @@ export class XlflowSidebar implements vscode.Disposable {
   async refreshAll(): Promise<void> {
     await this.projectState.refresh();
     this.refreshProjectViews();
-    await Promise.all([this.refreshModules(), this.refreshTests()]);
+    await Promise.all([this.refreshModules(), this.refreshUserForms(), this.refreshTests()]);
   }
 }
 
@@ -367,6 +406,82 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 }
 
+class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
+  private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  private nodes: UserFormNode[] = [];
+
+  constructor(private readonly projectState: XlflowProjectStateService) {}
+
+  async refresh(): Promise<void> {
+    const state = this.projectState.current();
+    if (state.kind !== "ready") {
+      this.nodes = [];
+      this.emitter.fire(undefined);
+      return;
+    }
+
+    const forms = await discoverUserForms(state.workspaceFolder, state.configPath);
+    this.nodes = forms.map((form) => ({
+      kind: "userForm",
+      name: form.name,
+      children: form.artifacts.map((artifact) => ({
+        kind: "userFormArtifact",
+        label: artifact.label,
+        uri:
+          artifact.relativePath === undefined
+            ? undefined
+            : vscode.Uri.joinPath(
+                state.workspaceFolder.uri,
+                ...artifact.relativePath.replace(/\\/g, "/").split("/"),
+              ),
+        missing: artifact.missing,
+        artifactKind: artifact.kind,
+      })),
+    }));
+    this.emitter.fire(undefined);
+  }
+
+  getTreeItem(element: TreeNode): vscode.TreeItem {
+    if (element.kind === "userForm") {
+      const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Collapsed);
+      item.iconPath = new vscode.ThemeIcon("window");
+      item.contextValue = "xlflow.userForm";
+      return item;
+    }
+    if (element.kind === "userFormArtifact") {
+      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon(userFormArtifactIcon(element));
+      item.contextValue = element.missing
+        ? "xlflow.userFormMissingArtifact"
+        : "xlflow.userFormArtifact";
+      item.description = element.missing ? "missing" : undefined;
+      item.tooltip = element.uri?.fsPath;
+      item.resourceUri = element.uri;
+      item.command =
+        element.uri === undefined
+          ? undefined
+          : {
+              command: "xlflow.openUserFormArtifact",
+              title: "Open UserForm Artifact",
+              arguments: [element],
+            };
+      return item;
+    }
+    return new vscode.TreeItem("");
+  }
+
+  getChildren(element?: TreeNode): TreeNode[] {
+    if (element === undefined) {
+      return this.nodes;
+    }
+    if (element.kind === "userForm") {
+      return element.children;
+    }
+    return [];
+  }
+}
+
 class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
@@ -436,7 +551,20 @@ class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 }
 
 export function readExcelPathFromToml(text: string): string | undefined {
-  let inExcel = false;
+  return readTomlStringKey(text, "excel", "path");
+}
+
+export function readFormsRootFromToml(text: string): string {
+  return readTomlStringKey(text, "src", "forms") ?? "src/forms";
+}
+
+export function readUserFormCodeSourceFromToml(text: string): UserFormCodeSource {
+  const value = readTomlStringKey(text, "userform", "code_source");
+  return value === "frm" ? "frm" : "sidecar";
+}
+
+function readTomlStringKey(text: string, sectionName: string, keyName: string): string | undefined {
+  let inSection = false;
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*/, "").trim();
     if (line === "") {
@@ -444,15 +572,15 @@ export function readExcelPathFromToml(text: string): string | undefined {
     }
     const section = line.match(/^\[([^\]]+)\]$/);
     if (section !== null) {
-      inExcel = section[1].trim() === "excel";
+      inSection = section[1].trim() === sectionName;
       continue;
     }
-    if (!inExcel) {
+    if (!inSection) {
       continue;
     }
-    const match = line.match(/^path\s*=\s*"([^"]+)"\s*$/);
-    if (match !== null && match[1].trim() !== "") {
-      return match[1].trim();
+    const match = line.match(/^([A-Za-z0-9_]+)\s*=\s*"([^"]+)"\s*$/);
+    if (match !== null && match[1].trim() === keyName) {
+      return match[2].trim();
     }
   }
   return undefined;
@@ -474,6 +602,134 @@ async function configuredWorkbook(state: Extract<XlflowProjectState, { kind: "re
   } catch {
     return undefined;
   }
+}
+
+async function discoverUserForms(
+  folder: vscode.WorkspaceFolder,
+  configPath: vscode.Uri,
+): Promise<UserFormModel[]> {
+  let configText = "";
+  try {
+    const bytes = await vscode.workspace.fs.readFile(configPath);
+    configText = Buffer.from(bytes).toString("utf8");
+  } catch {
+    return [];
+  }
+  const formsRoot = readFormsRootFromToml(configText);
+  const codeSource = readUserFormCodeSourceFromToml(configText);
+  const rootUri = vscode.Uri.joinPath(folder.uri, ...formsRoot.replace(/\\/g, "/").split("/"));
+  const files = await userFormSourceFiles(rootUri, formsRoot);
+  return buildUserFormModels(formsRoot, codeSource, files);
+}
+
+async function userFormSourceFiles(rootUri: vscode.Uri, formsRoot: string): Promise<string[]> {
+  const files: string[] = [];
+  const rootEntries = await readDirectorySafe(rootUri);
+  for (const [name, type] of rootEntries) {
+    if ((type & vscode.FileType.File) !== 0 && name.toLowerCase().endsWith(".frm")) {
+      files.push(joinSlash(formsRoot, name));
+    }
+  }
+
+  for (const childDir of ["code", "specs"]) {
+    const entries = await readDirectorySafe(vscode.Uri.joinPath(rootUri, childDir));
+    for (const [name, type] of entries) {
+      if ((type & vscode.FileType.File) !== 0) {
+        files.push(joinSlash(formsRoot, childDir, name));
+      }
+    }
+  }
+  return files;
+}
+
+async function readDirectorySafe(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+  try {
+    return await vscode.workspace.fs.readDirectory(uri);
+  } catch {
+    return [];
+  }
+}
+
+export function buildUserFormModels(
+  formsRoot: string,
+  codeSource: UserFormCodeSource,
+  files: string[],
+): UserFormModel[] {
+  const normalizedRoot = trimSlashes(formsRoot);
+  const frmNames = new Set<string>();
+  const codeNames = new Set<string>();
+  const specByName = new Map<string, string>();
+
+  for (const file of files.map((value) => value.replace(/\\/g, "/"))) {
+    const relative = relativeToFormsRoot(normalizedRoot, file);
+    if (relative === undefined) {
+      continue;
+    }
+    const parts = relative.split("/");
+    if (parts.length === 1 && parts[0].toLowerCase().endsWith(".frm")) {
+      frmNames.add(basenameWithoutExtension(parts[0]));
+      continue;
+    }
+    if (parts.length === 2 && parts[0] === "code" && parts[1].toLowerCase().endsWith(".bas")) {
+      codeNames.add(basenameWithoutExtension(parts[1]));
+      continue;
+    }
+    if (parts.length === 2 && parts[0] === "specs" && isUserFormSpec(parts[1])) {
+      const name = basenameWithoutExtension(parts[1]);
+      const current = specByName.get(name);
+      if (current === undefined || parts[1].toLowerCase().endsWith(".yaml")) {
+        specByName.set(name, parts[1]);
+      }
+    }
+  }
+
+  const names =
+    codeSource === "frm"
+      ? [...frmNames]
+      : [...new Set([...frmNames, ...codeNames, ...specByName.keys()])];
+
+  return names
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => {
+      if (codeSource === "frm") {
+        return {
+          name,
+          codeSource,
+          artifacts: [
+            {
+              kind: "frm",
+              label: `${name}.frm`,
+              relativePath: joinSlash(normalizedRoot, `${name}.frm`),
+              missing: false,
+            },
+          ],
+        };
+      }
+
+      const codePath = codeNames.has(name)
+        ? joinSlash(normalizedRoot, "code", `${name}.bas`)
+        : undefined;
+      const specFile = specByName.get(name);
+      return {
+        name,
+        codeSource,
+        artifacts: [
+          {
+            kind: "code",
+            label: codePath === undefined ? "Code" : `Code: code/${name}.bas`,
+            relativePath: codePath,
+            missing: codePath === undefined,
+          },
+          {
+            kind: "spec",
+            label: specFile === undefined ? "Spec" : `Spec: specs/${specFile}`,
+            relativePath:
+              specFile === undefined ? undefined : joinSlash(normalizedRoot, "specs", specFile),
+            missing: specFile === undefined,
+          },
+        ],
+      };
+    });
 }
 
 function workbookDisplayName(session: XlflowSessionPayload | undefined): string | undefined {
@@ -546,7 +802,7 @@ export function moduleGroups(
     byKind.set(moduleKind, modules);
   }
 
-  return ["standard", "class", "document", "form"]
+  return ["standard", "class", "document"]
     .map((kind) => {
       const modules = (byKind.get(kind) ?? []).sort((a, b) => a.name.localeCompare(b.name));
       return { kind: "moduleGroup" as const, label: moduleGroupLabel(kind), children: modules };
@@ -618,8 +874,6 @@ function moduleGroupLabel(kind: string): string {
       return "Class Modules";
     case "document":
       return "Document Modules";
-    case "form":
-      return "UserForm Modules";
     default:
       return "Standard Modules";
   }
@@ -631,11 +885,54 @@ function moduleIcon(kind: string): string {
       return "symbol-class";
     case "document":
       return "file-code";
-    case "form":
-      return "window";
     default:
       return "symbol-module";
   }
+}
+
+function userFormArtifactIcon(node: UserFormArtifactNode): string {
+  if (node.missing) {
+    return "warning";
+  }
+  switch (node.artifactKind) {
+    case "code":
+      return "file-code";
+    case "spec":
+      return "symbol-struct";
+    case "frm":
+      return "window";
+  }
+}
+
+function isUserFormSpec(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return lower.endsWith(".yaml") || lower.endsWith(".yml");
+}
+
+function basenameWithoutExtension(fileName: string): string {
+  const base = fileName.split("/").pop() ?? fileName;
+  const dot = base.lastIndexOf(".");
+  return dot === -1 ? base : base.slice(0, dot);
+}
+
+function relativeToFormsRoot(formsRoot: string, file: string): string | undefined {
+  const normalizedFile = trimSlashes(file);
+  if (normalizedFile === formsRoot) {
+    return "";
+  }
+  const prefix = `${formsRoot}/`;
+  return normalizedFile.startsWith(prefix) ? normalizedFile.slice(prefix.length) : undefined;
+}
+
+function joinSlash(...parts: string[]): string {
+  return parts
+    .flatMap((part) => part.split(/[\\/]+/))
+    .filter((part) => part.length > 0)
+    .join("/");
+}
+
+function trimSlashes(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
 function isProcedureKind(kind: unknown): boolean {

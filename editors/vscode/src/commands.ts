@@ -19,6 +19,7 @@ interface CommandRefreshHooks {
   refreshAll(): Promise<void>;
   refreshProject(): Promise<void> | void;
   refreshModules(): Promise<void>;
+  refreshUserForms(): Promise<void>;
   refreshTests(): Promise<void>;
 }
 
@@ -98,7 +99,12 @@ export function registerCommands(
         requireWorkspace: true,
       });
       if (code === 0) {
-        await Promise.all([hooks.refreshProject(), hooks.refreshModules(), hooks.refreshTests()]);
+        await Promise.all([
+          hooks.refreshProject(),
+          hooks.refreshModules(),
+          hooks.refreshUserForms(),
+          hooks.refreshTests(),
+        ]);
       }
     }),
     vscode.commands.registerCommand("xlflow.push", async () => {
@@ -114,7 +120,12 @@ export function registerCommands(
         requireWorkspace: true,
       });
       if (code === 0) {
-        await Promise.all([hooks.refreshProject(), hooks.refreshModules(), hooks.refreshTests()]);
+        await Promise.all([
+          hooks.refreshProject(),
+          hooks.refreshModules(),
+          hooks.refreshUserForms(),
+          hooks.refreshTests(),
+        ]);
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
@@ -185,6 +196,14 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.collapseModules", async () => {
       await vscode.commands.executeCommand("workbench.actions.treeView.xlflow.modules.collapseAll");
     }),
+    vscode.commands.registerCommand("xlflow.refreshUserForms", async () => {
+      await hooks.refreshUserForms();
+    }),
+    vscode.commands.registerCommand("xlflow.collapseUserForms", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.actions.treeView.xlflow.userForms.collapseAll",
+      );
+    }),
     vscode.commands.registerCommand("xlflow.refreshTests", async () => {
       await hooks.refreshTests();
     }),
@@ -229,6 +248,12 @@ export function registerCommands(
           new vscode.Range(position, position),
           vscode.TextEditorRevealType.InCenter,
         );
+      }
+    }),
+    vscode.commands.registerCommand("xlflow.openUserFormArtifact", async (value: unknown) => {
+      const uri = treeUri(value);
+      if (uri !== undefined) {
+        await vscode.window.showTextDocument(uri);
       }
     }),
   );

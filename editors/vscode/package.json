@@ -156,6 +156,11 @@
           "when": "xlflow.projectReady"
         },
         {
+          "id": "xlflow.userForms",
+          "name": "UserForms",
+          "when": "xlflow.projectReady"
+        },
+        {
           "id": "xlflow.tests",
           "name": "Tests",
           "when": "xlflow.projectReady"
@@ -295,6 +300,18 @@
         "icon": "$(collapse-all)"
       },
       {
+        "command": "xlflow.refreshUserForms",
+        "title": "xlflow: Refresh UserForms",
+        "category": "xlflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "xlflow.collapseUserForms",
+        "title": "xlflow: Collapse UserForms",
+        "category": "xlflow",
+        "icon": "$(collapse-all)"
+      },
+      {
         "command": "xlflow.refreshTests",
         "title": "xlflow: Refresh Tests",
         "category": "xlflow",
@@ -335,6 +352,11 @@
         "command": "xlflow.openProcedure",
         "title": "xlflow: Open Procedure",
         "category": "xlflow"
+      },
+      {
+        "command": "xlflow.openUserFormArtifact",
+        "title": "xlflow: Open UserForm Artifact",
+        "category": "xlflow"
       }
     ],
     "menus": {
@@ -372,6 +394,16 @@
         {
           "command": "xlflow.collapseModules",
           "when": "view == xlflow.modules",
+          "group": "navigation@2"
+        },
+        {
+          "command": "xlflow.refreshUserForms",
+          "when": "view == xlflow.userForms",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.collapseUserForms",
+          "when": "view == xlflow.userForms",
           "group": "navigation@2"
         },
         {
@@ -498,6 +530,7 @@
   "activationEvents": [
     "onCommand:xlflow.checkEnvironment",
     "onCommand:xlflow.collapseModules",
+    "onCommand:xlflow.collapseUserForms",
     "onCommand:xlflow.formatDocument",
     "onCommand:xlflow.formatProject",
     "onCommand:xlflow.initProject",
@@ -508,11 +541,13 @@
     "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.openProcedure",
+    "onCommand:xlflow.openUserFormArtifact",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
     "onCommand:xlflow.refreshModules",
     "onCommand:xlflow.refreshProject",
     "onCommand:xlflow.refreshTests",
+    "onCommand:xlflow.refreshUserForms",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.runAllTests",
     "onCommand:xlflow.runDoctor",
@@ -534,6 +569,7 @@
     "onView:xlflow.project",
     "onView:xlflow.setup",
     "onView:xlflow.tests",
+    "onView:xlflow.userForms",
     "workspaceContains:xlflow.toml"
   ],
   "icon": "images/icon.png",
