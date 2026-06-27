@@ -2,7 +2,6 @@
   "name": "xlflow-vscode",
   "displayName": "%extension.displayName%",
   "version": "0.1.0",
-  "private": true,
   "description": "%extension.description%",
   "categories": [
     "Formatters",
@@ -23,7 +22,7 @@
     "url": "https://github.com/harumiWeb/xlflow.git",
     "directory": "editors/vscode"
   },
-  "publisher": "ed2c27e6-6563-6407-a650-31eef08e0f25",
+  "publisher": "harumiweb",
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "pnpm run check && pnpm run bundle",
@@ -179,6 +178,21 @@
       {
         "command": "xlflow.checkEnvironment",
         "title": "%command.checkEnvironment.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.openInstallGuide",
+        "title": "%command.openInstallGuide.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.configurePath",
+        "title": "%command.configurePath.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.retryCliDetection",
+        "title": "%command.retryCliDetection.title%",
         "category": "%command.category%"
       },
       {
@@ -465,12 +479,12 @@
         },
         {
           "command": "xlflow.sessionStart",
-          "when": "view == xlflow.project",
+          "when": "view == xlflow.project && xlflow.sessionStartEnabled",
           "group": "navigation@4"
         },
         {
           "command": "xlflow.sessionStop",
-          "when": "view == xlflow.project",
+          "when": "view == xlflow.project && xlflow.sessionStopEnabled",
           "group": "navigation@5"
         },
         {
@@ -537,6 +551,11 @@
           "command": "xlflow.openModule",
           "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
           "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.formatDocument",
+          "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
+          "group": "2_workspace@0"
         },
         {
           "command": "xlflow.renameModule",
@@ -741,6 +760,7 @@
     "onCommand:xlflow.checkEnvironment",
     "onCommand:xlflow.collapseModules",
     "onCommand:xlflow.collapseUserForms",
+    "onCommand:xlflow.configurePath",
     "onCommand:xlflow.copyModuleName",
     "onCommand:xlflow.copyProcedureName",
     "onCommand:xlflow.copyQualifiedName",
@@ -760,6 +780,7 @@
     "onCommand:xlflow.newStandardModule",
     "onCommand:xlflow.newUserForm",
     "onCommand:xlflow.openDocumentation",
+    "onCommand:xlflow.openInstallGuide",
     "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.openProcedure",
@@ -773,6 +794,7 @@
     "onCommand:xlflow.renameModule",
     "onCommand:xlflow.renameUserForm",
     "onCommand:xlflow.restartLanguageServer",
+    "onCommand:xlflow.retryCliDetection",
     "onCommand:xlflow.revealSourceFile",
     "onCommand:xlflow.revealUserFormSource",
     "onCommand:xlflow.runAllTests",

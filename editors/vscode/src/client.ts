@@ -6,15 +6,20 @@ import {
   Trace,
   TransportKind,
 } from "vscode-languageclient/node";
+import { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig, TraceServer } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
 
 export class XlflowLanguageClientManager implements vscode.Disposable {
   private client: LanguageClient | undefined;
+  private workspaceFolderKey: string | undefined;
   private suggestTimer: NodeJS.Timeout | undefined;
 
-  public constructor(private readonly channels: XlflowChannels) {}
+  public constructor(
+    private readonly channels: XlflowChannels,
+    private readonly cliAvailability: XlflowCliAvailabilityService,
+  ) {}
 
   public async start(): Promise<void> {
     const config = readConfig();
@@ -25,9 +30,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     if (this.client !== undefined) {
       return;
     }
+    const availability = await this.cliAvailability.refresh();
+    if (!availability.ok) {
+      this.channels.output.info(
+        `Skipping xlflow lsp --stdio startup because ${availability.executable} is unavailable: ${availability.message}`,
+      );
+      return;
+    }
 
     const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
     const cwd = folder?.uri.fsPath;
+    const workspaceFolderKey = folder?.uri.toString();
     const serverOptions: ServerOptions = {
       command: config.path,
       args: ["lsp", "--stdio", "--log-file", config.lspLogFile],
@@ -59,12 +72,14 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
 
     try {
       await client.start();
+      this.workspaceFolderKey = workspaceFolderKey;
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
       this.channels.output.info(
         `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`} with log file ${config.lspLogFile}`,
       );
     } catch (error) {
       this.client = undefined;
+      this.workspaceFolderKey = undefined;
       this.channels.output.error(`Failed to start xlflow lsp --stdio: ${String(error)}`);
       throw error;
     }
@@ -73,12 +88,27 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
   public async stop(): Promise<void> {
     const client = this.client;
     this.client = undefined;
+    this.workspaceFolderKey = undefined;
     this.clearPendingSuggest();
     await client?.stop();
   }
 
   public async restart(): Promise<void> {
     this.channels.output.info("Restarting xlflow language server.");
+    await this.stop();
+    await this.start();
+  }
+
+  public async restartIfWorkspaceChanged(): Promise<void> {
+    if (this.client === undefined) {
+      return;
+    }
+    const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
+    const nextWorkspaceFolderKey = folder?.uri.toString();
+    if (nextWorkspaceFolderKey === this.workspaceFolderKey) {
+      return;
+    }
+    this.channels.output.info("Restarting xlflow language server for selected workspace change.");
     await this.stop();
     await this.start();
   }

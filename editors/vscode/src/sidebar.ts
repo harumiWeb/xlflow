@@ -1,5 +1,10 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import {
+  cliUnavailableMessage,
+  XlflowCliAvailability,
+  XlflowCliAvailabilityService,
+} from "./cliAvailability";
 import { XlflowChannels } from "./logging";
 import {
   readyWorkspaceFolder,
@@ -143,10 +148,11 @@ export class XlflowSidebar implements vscode.Disposable {
   constructor(
     private readonly projectState: XlflowProjectStateService,
     private readonly sessionManager: SessionManager,
+    private readonly cliAvailability: XlflowCliAvailabilityService,
     channels: XlflowChannels,
   ) {
-    this.setupProvider = new SetupTreeProvider(projectState);
-    this.projectProvider = new ProjectTreeProvider(projectState, sessionManager);
+    this.setupProvider = new SetupTreeProvider(projectState, cliAvailability);
+    this.projectProvider = new ProjectTreeProvider(projectState, sessionManager, cliAvailability);
     this.modulesProvider = new ModulesTreeProvider(projectState, channels);
     this.userFormsProvider = new UserFormsTreeProvider(projectState);
     this.testsProvider = new TestsTreeProvider(projectState, channels);
@@ -160,13 +166,9 @@ export class XlflowSidebar implements vscode.Disposable {
       projectState.onDidChangeState((state) => {
         sessionManager.setProjectKind(state.kind);
         this.refreshProjectViews();
-        if (state.kind === "ready") {
-          void this.refreshModules();
-          void this.refreshUserForms();
-          void this.refreshTests();
-        }
       }),
       sessionManager.onDidChangeSnapshot(() => this.projectProvider.refresh()),
+      cliAvailability.onDidChangeAvailability(() => this.refreshProjectViews()),
     );
   }
 
@@ -204,7 +206,10 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
   private readonly emitter = new vscode.EventEmitter<SetupNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
 
-  constructor(private readonly projectState: XlflowProjectStateService) {}
+  constructor(
+    private readonly projectState: XlflowProjectStateService,
+    private readonly cliAvailability: XlflowCliAvailabilityService,
+  ) {}
 
   refresh(): void {
     this.emitter.fire(undefined);
@@ -223,6 +228,23 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
     const state = this.projectState.current();
     if (state.kind === "ready") {
       return [];
+    }
+    const availability = this.cliAvailability.current();
+    if (availability !== undefined && !availability.ok) {
+      return [
+        {
+          kind: "setup",
+          label:
+            availability.reason === "notFound"
+              ? vscode.l10n.t("xlflow CLI not found")
+              : vscode.l10n.t("xlflow CLI unavailable"),
+          description: cliUnavailableDescription(availability),
+          icon: new vscode.ThemeIcon("warning"),
+        },
+        setupAction(vscode.l10n.t("Install Guide"), "book", "xlflow.openInstallGuide"),
+        setupAction(vscode.l10n.t("Configure Path"), "settings-gear", "xlflow.configurePath"),
+        setupAction(vscode.l10n.t("Retry"), "refresh", "xlflow.retryCliDetection"),
+      ];
     }
     if (state.kind === "invalid") {
       return [
@@ -257,6 +279,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
   constructor(
     private readonly projectState: XlflowProjectStateService,
     private readonly sessionManager: SessionManager,
+    private readonly cliAvailability: XlflowCliAvailabilityService,
   ) {}
 
   refresh(): void {
@@ -279,6 +302,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
       return [];
     }
     const snapshot = this.sessionManager.currentSnapshot();
+    const availability = this.cliAvailability.current();
     const configuredWorkbookPath = await configuredWorkbook(state);
     const workbookPath = workbookPathFromSession(snapshot.session) ?? configuredWorkbookPath;
     const workbookLabel = workbookDisplayName(snapshot.session) ?? configuredWorkbookPath;
@@ -319,6 +343,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
           arguments: [state.configPath],
         },
       },
+      cliProjectNode(availability),
       {
         kind: "project",
         label: vscode.l10n.t("Session"),
@@ -362,7 +387,7 @@ class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       ["--json", "inspect", "symbols"],
       "xlflow inspect symbols",
       this.channels.output,
-      { requireWorkspace: true, workspaceFolder: folder },
+      { requireWorkspace: true, showCliUnavailable: false, workspaceFolder: folder },
     );
     this.groups = result.exitCode === 0 ? moduleGroups(folder, result.json) : [];
     this.emitter.fire(undefined);
@@ -692,6 +717,75 @@ function setupAction(label: string, icon: string, command: string): SetupNode {
     icon: new vscode.ThemeIcon(icon),
     command: { command, title: label },
   };
+}
+
+function cliProjectNode(availability: XlflowCliAvailability | undefined): ProjectNode {
+  if (availability === undefined) {
+    return {
+      kind: "project",
+      label: vscode.l10n.t("CLI"),
+      description: vscode.l10n.t("Checking"),
+      icon: new vscode.ThemeIcon("sync~spin"),
+    };
+  }
+  if (availability.ok) {
+    const versionSummary = cliVersionSummary(availability.version);
+    return {
+      kind: "project",
+      label: vscode.l10n.t("CLI"),
+      description: versionSummary ?? vscode.l10n.t("OK"),
+      tooltip: cliVersionTooltip(availability),
+      icon: new vscode.ThemeIcon("check"),
+    };
+  }
+  return {
+    kind: "project",
+    label: vscode.l10n.t("CLI"),
+    description:
+      availability.reason === "notFound" ? vscode.l10n.t("Not found") : vscode.l10n.t("Error"),
+    tooltip: cliUnavailableMessage(availability),
+    icon: new vscode.ThemeIcon("warning"),
+    command: {
+      command: "xlflow.retryCliDetection",
+      title: vscode.l10n.t("Retry"),
+    },
+  };
+}
+
+export function cliVersionSummary(version: string | undefined): string | undefined {
+  const text = readNonEmpty(version);
+  if (text === undefined) {
+    return undefined;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*Version:\s*(.+?)\s*$/);
+    if (match !== null) {
+      return match[1].trim();
+    }
+  }
+  const firstUsefulLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !/^OK\b/i.test(line));
+  const xlflowVersion = firstUsefulLine?.match(/^xlflow\s+(.+)$/i);
+  return xlflowVersion?.[1]?.trim() ?? firstUsefulLine;
+}
+
+function cliVersionTooltip(availability: Extract<XlflowCliAvailability, { ok: true }>): string {
+  const version = readNonEmpty(availability.version);
+  if (version === undefined) {
+    return availability.executable;
+  }
+  return `${availability.executable}\n\n${version}`;
+}
+
+function cliUnavailableDescription(
+  availability: Extract<XlflowCliAvailability, { ok: false }>,
+): string {
+  if (availability.reason === "notFound") {
+    return vscode.l10n.t("Install xlflow to create or manage Excel VBA projects.");
+  }
+  return availability.message;
 }
 
 async function configuredWorkbook(state: Extract<XlflowProjectState, { kind: "ready" }>) {

@@ -1,5 +1,10 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import {
+  configureXlflowPath,
+  openInstallGuide,
+  XlflowCliAvailabilityService,
+} from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
@@ -39,6 +44,7 @@ interface CommandRefreshHooks {
 export function registerCommands(
   context: vscode.ExtensionContext,
   clientManager: XlflowLanguageClientManager,
+  cliAvailability: XlflowCliAvailabilityService,
   channels: XlflowChannels,
   sessionManager: SessionManager,
   projectState: XlflowProjectStateService,
@@ -53,6 +59,19 @@ export function registerCommands(
         requireWorkspace: false,
         uiLabel: vscode.l10n.t("xlflow environment check"),
       });
+    }),
+    vscode.commands.registerCommand("xlflow.openInstallGuide", async () => {
+      await openInstallGuide();
+    }),
+    vscode.commands.registerCommand("xlflow.configurePath", async () => {
+      await configureXlflowPath();
+    }),
+    vscode.commands.registerCommand("xlflow.retryCliDetection", async () => {
+      const availability = await cliAvailability.refresh();
+      if (availability.ok) {
+        await clientManager.restart();
+      }
+      await hooks.refreshAll();
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {
       const workbook = await vscode.window.showInputBox({
@@ -188,15 +207,8 @@ export function registerCommands(
         uiLabel: vscode.l10n.t("xlflow lint"),
       });
     }),
-    vscode.commands.registerCommand("xlflow.formatDocument", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor === undefined) {
-        vscode.window.showWarningMessage(
-          vscode.l10n.t("xlflow format document requires an active editor."),
-        );
-        return;
-      }
-      await vscode.commands.executeCommand("editor.action.formatDocument");
+    vscode.commands.registerCommand("xlflow.formatDocument", async (value: unknown) => {
+      await formatDocument(value);
     }),
     vscode.commands.registerCommand("xlflow.formatProject", async () => {
       await runXlflowCommand(["fmt", "--write"], "xlflow fmt", channels.output, {
@@ -357,6 +369,9 @@ export function registerCommands(
 async function showSetupActions(): Promise<void> {
   const action = await vscode.window.showQuickPick(
     [
+      { label: vscode.l10n.t("Install Guide"), command: "xlflow.openInstallGuide" },
+      { label: vscode.l10n.t("Configure Path"), command: "xlflow.configurePath" },
+      { label: vscode.l10n.t("Retry"), command: "xlflow.retryCliDetection" },
       { label: vscode.l10n.t("New Project"), command: "xlflow.newProject" },
       { label: vscode.l10n.t("Init Existing Workbook"), command: "xlflow.initProject" },
       { label: vscode.l10n.t("Run Doctor"), command: "xlflow.runDoctor" },
@@ -370,6 +385,25 @@ async function showSetupActions(): Promise<void> {
   if (action !== undefined) {
     await vscode.commands.executeCommand(action.command);
   }
+}
+
+async function formatDocument(value: unknown): Promise<void> {
+  const uri = treeUri(value);
+  if (uri !== undefined) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand("editor.action.formatDocument");
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (editor === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("xlflow format document requires an active editor."),
+    );
+    return;
+  }
+  await vscode.commands.executeCommand("editor.action.formatDocument");
 }
 
 async function installAgentSkill(channels: XlflowChannels): Promise<void> {
@@ -461,10 +495,9 @@ async function installHelperModules(channels: XlflowChannels): Promise<void> {
   }
   await runXlflowCommand(mode.args, `xlflow ${mode.args.join(" ")}`, channels.output, {
     requireWorkspace: true,
-    uiLabel:
-      mode.args.includes("--push")
-        ? vscode.l10n.t("xlflow module install --push")
-        : vscode.l10n.t("xlflow module install"),
+    uiLabel: mode.args.includes("--push")
+      ? vscode.l10n.t("xlflow module install --push")
+      : vscode.l10n.t("xlflow module install"),
     workspaceFolder,
   });
 }

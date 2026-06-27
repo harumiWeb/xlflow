@@ -1,7 +1,16 @@
 import * as childProcess from "child_process";
 import * as vscode from "vscode";
+import { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig } from "./config";
 import { appendProcessOutput } from "./logging";
+
+let cliAvailabilityService: XlflowCliAvailabilityService | undefined;
+
+export function setXlflowCliAvailabilityService(
+  service: XlflowCliAvailabilityService | undefined,
+): void {
+  cliAvailabilityService = service;
+}
 
 export interface WorkspaceRootOptions {
   prompt: boolean;
@@ -44,6 +53,7 @@ export async function runXlflowCommand(
     requireWorkspace: boolean;
     notify?: boolean;
     showOutput?: boolean;
+    showCliUnavailable?: boolean;
     uiLabel?: string;
     workspaceFolder?: vscode.WorkspaceFolder;
   },
@@ -61,6 +71,10 @@ export async function runXlflowCommand(
         label: uiLabel,
       }),
     );
+    return -1;
+  }
+
+  if (!(await ensureCliAvailable(options.showCliUnavailable !== false))) {
     return -1;
   }
 
@@ -149,7 +163,12 @@ export async function runXlflowJsonCommand<T>(
   args: string[],
   label: string,
   outputChannel: vscode.OutputChannel,
-  options: { requireWorkspace: boolean; uiLabel?: string; workspaceFolder?: vscode.WorkspaceFolder },
+  options: {
+    requireWorkspace: boolean;
+    showCliUnavailable?: boolean;
+    uiLabel?: string;
+    workspaceFolder?: vscode.WorkspaceFolder;
+  },
 ): Promise<XlflowJsonCommandResult<T>> {
   const uiLabel = options.uiLabel ?? label;
   const folder =
@@ -165,6 +184,10 @@ export async function runXlflowJsonCommand<T>(
       }),
     );
     return { exitCode: -1, stdout: "", stderr: "" };
+  }
+
+  if (!(await ensureCliAvailable(options.showCliUnavailable !== false))) {
+    return { exitCode: -1, stdout: "", stderr: vscode.l10n.t("xlflow CLI is unavailable.") };
   }
 
   const config = readConfig();
@@ -221,4 +244,11 @@ export async function runXlflowJsonCommand<T>(
       settle({ exitCode, stdout, stderr, json });
     });
   });
+}
+
+async function ensureCliAvailable(showActions: boolean): Promise<boolean> {
+  if (cliAvailabilityService === undefined) {
+    return true;
+  }
+  return cliAvailabilityService.ensureAvailable({ showActions });
 }

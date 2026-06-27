@@ -1,6 +1,6 @@
 {
-  "extension.displayName": "Xlflow - VBA開発ツール",
-  "extension.description": "xlflowによるソース管理されたExcel VBAプロジェクト向けのVS Codeサポートです。",
+  "extension.displayName": "Xlflow - VBA Dev Tools",
+  "extension.description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
   "configuration.title": "xlflow",
   "configuration.xlflow.path.description": "xlflow実行ファイルのパスです。",
   "configuration.xlflow.lsp.enabled.description": "VBAファイルで xlflow lsp --stdio を開始します。",
@@ -21,6 +21,9 @@
   "view.userForms.name": "UserForms",
   "view.tests.name": "テスト",
   "command.category": "xlflow",
+  "command.openInstallGuide.title": "インストールガイドを開く",
+  "command.configurePath.title": "xlflowパスを設定",
+  "command.retryCliDetection.title": "CLI検出を再試行",
   "command.restartLanguageServer.title": "Language Serverを再起動",
   "command.checkEnvironment.title": "環境を確認",
   "command.newProject.title": "新しいプロジェクト",

@@ -1,38 +1,56 @@
 import * as vscode from "vscode";
+import { showProjectCliUnavailableNotice, XlflowCliAvailabilityService } from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { registerCommands } from "./commands";
 import { createChannels } from "./logging";
-import { XlflowProjectStateService } from "./projectState";
+import { selectedWorkspaceFolder, XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowSidebar } from "./sidebar";
 import { XlflowTestController } from "./testing";
+import { setXlflowCliAvailabilityService } from "./xlflow";
 
 let clientManager: XlflowLanguageClientManager | undefined;
 let testController: XlflowTestController | undefined;
 let sessionManager: SessionManager | undefined;
 let projectState: XlflowProjectStateService | undefined;
 let sidebar: XlflowSidebar | undefined;
+let cliAvailability: XlflowCliAvailabilityService | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const channels = createChannels();
-  clientManager = new XlflowLanguageClientManager(channels);
+  cliAvailability = new XlflowCliAvailabilityService();
+  setXlflowCliAvailabilityService(cliAvailability);
+  clientManager = new XlflowLanguageClientManager(channels, cliAvailability);
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);
   projectState = new XlflowProjectStateService();
-  sidebar = new XlflowSidebar(projectState, sessionManager, channels);
+  sidebar = new XlflowSidebar(projectState, sessionManager, cliAvailability, channels);
 
   context.subscriptions.push(
     channels.output,
     channels.trace,
+    cliAvailability,
     clientManager,
     testController,
     sessionManager,
     projectState,
     sidebar,
   );
-  const refreshSelectedProject = async (): Promise<void> => {
-    await projectState?.refresh();
+  let lastSelectedWorkspaceKey = selectedWorkspaceKey();
+
+  const refreshProjectStatus = async (options: { restartLsp?: boolean } = {}): Promise<void> => {
+    const state = await projectState?.refresh();
+    if (options.restartLsp === true) {
+      await clientManager?.restartIfWorkspaceChanged();
+    }
     await sessionManager?.refreshStatus();
+    sidebar?.refreshProjectViews();
+    const availability = cliAvailability?.current();
+    if (state?.kind === "ready" && availability !== undefined) {
+      await showProjectCliUnavailableNotice(context, state.workspaceFolder, availability);
+    }
+  };
+  const refreshProjectDetails = async (): Promise<void> => {
     await testController?.refreshAuto();
     await Promise.all([
       sidebar?.refreshModules(),
@@ -40,31 +58,53 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       sidebar?.refreshTests(),
     ]);
   };
+  const refreshSelectedProject = async (
+    options: { restartLsp?: boolean; details?: boolean } = {},
+  ): Promise<void> => {
+    await refreshProjectStatus({ restartLsp: options.restartLsp });
+    if (options.details !== false) {
+      await refreshProjectDetails();
+    }
+  };
 
-  registerCommands(context, clientManager, channels, sessionManager, projectState, {
-    refreshAll: refreshSelectedProject,
-    refreshProject: () => {
-      sidebar?.refreshProjectViews();
+  registerCommands(
+    context,
+    clientManager,
+    cliAvailability,
+    channels,
+    sessionManager,
+    projectState,
+    {
+      refreshAll: refreshSelectedProject,
+      refreshProject: () => {
+        sidebar?.refreshProjectViews();
+      },
+      refreshModules: async () => {
+        await sidebar?.refreshModules();
+      },
+      refreshUserForms: async () => {
+        await sidebar?.refreshUserForms();
+      },
+      refreshTests: async () => {
+        await testController?.refreshAuto();
+        await sidebar?.refreshTests();
+      },
     },
-    refreshModules: async () => {
-      await sidebar?.refreshModules();
-    },
-    refreshUserForms: async () => {
-      await sidebar?.refreshUserForms();
-    },
-    refreshTests: async () => {
-      await testController?.refreshAuto();
-      await sidebar?.refreshTests();
-    },
-  });
+  );
 
   const configWatcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void refreshSelectedProject();
+      lastSelectedWorkspaceKey = selectedWorkspaceKey();
+      void refreshSelectedProject({ restartLsp: true });
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
-      void refreshSelectedProject();
+      const key = selectedWorkspaceKey();
+      if (key === lastSelectedWorkspaceKey) {
+        return;
+      }
+      lastSelectedWorkspaceKey = key;
+      void refreshSelectedProject({ restartLsp: true });
     }),
     configWatcher,
     configWatcher.onDidCreate(() => {
@@ -80,8 +120,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       clientManager?.scheduleSuggest(event.document);
     }),
     vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (event.affectsConfiguration("xlflow.path") || event.affectsConfiguration("xlflow.lsp")) {
+      const pathChanged = event.affectsConfiguration("xlflow.path");
+      const lspChanged = event.affectsConfiguration("xlflow.lsp");
+      if (pathChanged) {
+        await cliAvailability?.refresh();
+      }
+      if (pathChanged || lspChanged) {
         await clientManager?.restart();
+      }
+      if (pathChanged) {
+        await refreshSelectedProject();
       }
       if (event.affectsConfiguration("xlflow.testing.autoDiscover")) {
         await testController?.refreshAuto();
@@ -99,9 +147,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ),
     );
   }
-  await projectState.refresh();
-  void testController.refreshAuto();
-  void sessionManager.refreshStatus();
+  await cliAvailability.refresh();
+  await refreshSelectedProject({ restartLsp: false });
 }
 
 export async function deactivate(): Promise<void> {
@@ -110,14 +157,22 @@ export async function deactivate(): Promise<void> {
   const sessions = sessionManager;
   const states = projectState;
   const bars = sidebar;
+  const availability = cliAvailability;
   clientManager = undefined;
   testController = undefined;
   sessionManager = undefined;
   projectState = undefined;
   sidebar = undefined;
+  cliAvailability = undefined;
+  setXlflowCliAvailabilityService(undefined);
   bars?.dispose();
   states?.dispose();
   tests?.dispose();
   sessions?.dispose();
+  availability?.dispose();
   await manager?.stop();
+}
+
+function selectedWorkspaceKey(): string | undefined {
+  return selectedWorkspaceFolder()?.uri.toString();
 }

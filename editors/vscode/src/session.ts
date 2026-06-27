@@ -89,7 +89,11 @@ export class SessionManager implements vscode.Disposable {
       ["--json", "session", "status"],
       "xlflow session status",
       this.channels.output,
-      { requireWorkspace: false, workspaceFolder: folder },
+      {
+        requireWorkspace: false,
+        showCliUnavailable: options.prompt === true || options.showOutput === true,
+        workspaceFolder: folder,
+      },
     );
     if (options.showOutput === true) {
       this.channels.output.show(true);

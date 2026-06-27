@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { XlflowChannels } from "./logging";
 import { runXlflowJsonCommand } from "./xlflow";
@@ -67,7 +68,7 @@ export async function discoverTests(
     ["--json", "test", "list"],
     "xlflow test list",
     channels.output,
-    { requireWorkspace: true, workspaceFolder: folder },
+    { requireWorkspace: true, showCliUnavailable: false, workspaceFolder: folder },
   );
   return {
     exitCode: result.exitCode,
@@ -89,11 +90,14 @@ export function sourceUri(
   folder: vscode.WorkspaceFolder,
   sourcePath: string | undefined,
 ): vscode.Uri | undefined {
-  const path = readNonEmpty(sourcePath);
-  if (path === undefined) {
+  const source = readNonEmpty(sourcePath);
+  if (source === undefined) {
     return undefined;
   }
-  return vscode.Uri.joinPath(folder.uri, ...path.replace(/\\/g, "/").split("/"));
+  if (path.isAbsolute(source) || path.win32.isAbsolute(source)) {
+    return vscode.Uri.file(source);
+  }
+  return vscode.Uri.joinPath(folder.uri, ...source.replace(/\\/g, "/").split("/"));
 }
 
 export function readNonEmpty(value: unknown): string | undefined {

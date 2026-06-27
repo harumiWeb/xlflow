@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.16.0
+
 - Removed the legacy PowerShell Excel bridge for v0.16.0. The only supported bridge modes are now `auto` and `dotnet`; `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` now fail with bridge-mode/configuration errors instead of emitting a deprecation warning.
 - Added source-only `xlflow module new` and `xlflow form new` scaffolding commands for standard modules, class modules, and sidecar UserForms.
 - Added source-only `xlflow module remove` and `xlflow module rename` commands for safe standard-module, class-module, and UserForm source mutations before the next `xlflow push`.

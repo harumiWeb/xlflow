@@ -1,58 +1,110 @@
-# xlflow for VS Code
+# xlflow for Visual Studio Code
 
-This extension adds VS Code support for source-controlled Excel VBA projects powered by `xlflow`.
+[English](README.md) | [日本語](https://github.com/harumiWeb/xlflow/blob/main/editors/vscode/README.ja.md)
 
-The extension is a thin client for `xlflow lsp --stdio` and the xlflow CLI. Diagnostics, hover, completion, signature help, symbols, definition and reference lookup, formatting, CodeLens, and VBA/COM type inference are provided by the Go-based xlflow language server.
+**xlflow for Visual Studio Code** is an extension that enhances usability of the Excel VBA macro development support tool [xlflow](https://github.com/harumiWeb/xlflow) within VSCode.
+It enables developers to:
 
-## Requirements
+- Ability to check the status of xlflow projects
+- Implemented import/export functionality for VBA modules
+- Features session management capabilities for performing various operations quickly
+- LSP integration enables VSCode users to access VBA-specific features including code completion, diagnostics, and symbol analysis
+- Direct execution of various commands from within VSCode itself
 
-- Install `xlflow`.
-- Make `xlflow` available on `PATH`, or set `xlflow.path` to the executable path.
+This makes Excel VBA macro development more secure while simplifying integration with Git version control systems and AI agents.
 
-## Sidebar
+![Demo](./images/demo.gif)
 
-The extension contributes an `xlflow` Activity Bar container with native TreeViews. It does not use a Webview.
+## What is xlflow?
 
-When the selected workspace folder does not contain `xlflow.toml`, the sidebar shows setup actions only:
+[xlflow](https://github.com/harumiWeb/xlflow) is a development support CLI tool originally created to enable AI agents to autonomously develop Excel VBA macros.
+It extracts VBA code from Excel workbooks as individual files (such as .bas, .cls, and .frm), allows them to be managed via Git, and then reapplied back to the workbook after editing.
+Additionally, it supports running VBA macro execution, testing, linting, formatting, and static analysis directly from the CLI, making it equally suitable for both human development and AI agent-assisted Excel VBA development.
+In **xlflow for VSCode**, we **GUI-ify these functionalities while also providing a Language Server Protocol (LSP) server to deliver an exceptionally streamlined development experience for humans.**
 
-- `New Project`
-- `Init Existing Workbook`
-- `Run Doctor`
-- `Open Documentation`
+## System Requirements
 
-When `xlflow.toml` exists, the sidebar switches to project mode:
+- This extension is only compatible with **Windows operating systems**.
+- You must install `xlflow` beforehand.
+- Either add `xlflow` to your system path or set the VS Code setting `xlflow.path` to the full path to the executable file.
+- In Excel settings, enable "**Trust access to the VBA Project Object Model**".
+  ![Trust Setting](./images/trust_setting.png)
 
-- `Project`: workspace, configured workbook, `xlflow.toml`, session state, and save-required state.
-- `Modules`: standard, class, and document modules discovered from `xlflow inspect symbols --json`.
-- `UserForms`: UserForm source artifacts discovered from the configured forms source tree.
-- `Tests`: tests discovered from `xlflow test list --json`, with shortcuts for run all and single-test execution.
+### Installation Commands for xlflow Proper
 
-Project view title actions refresh state, pull workbook source, push source changes, and start or stop the managed session. `Push Sources` asks for confirmation before running.
+- Quick Install
 
-Modules view title actions can create standard or class modules through `xlflow module new`, then refresh discovered symbols. Module item context menus can open, rename, delete, reveal, and copy source details for standard and class modules. Document modules can be opened, revealed, and copied, but destructive actions are hidden. Rename and delete delegate to `xlflow module rename` and `xlflow module remove`; the extension does not delete or rename source files directly.
+  ```bash
+  irm https://harumiweb.github.io/xlflow/install.ps1 | iex
+  ```
 
-Procedure item context menus can open runnable procedures, run no-argument procedures through `xlflow run <ModuleName.ProcedureName>`, and copy procedure or qualified names.
+- Using WinGet
 
-UserForms view title actions can create sidecar UserForm source through `xlflow form new`, then refresh discovered form artifacts. UserForm item context menus can open the primary source artifact, rename, delete, reveal, and copy source details. Rename and delete delegate to `xlflow module rename` and `xlflow module remove` because UserForms may include `.frm`, `.frx`, sidecar code, and designer spec artifacts. Artifact item context menus can open, reveal, and copy paths for existing artifacts; missing artifacts do not expose file actions.
+  ```bash
+  winget install HarumiWeb.Xlflow
+  ```
 
-`UserForms` follows `[userform].code_source` from `xlflow.toml`. In `sidecar` mode it groups each form with its `src/forms/code/<FormName>.bas` code-behind file and `src/forms/specs/<FormName>.yaml` designer spec. In `frm` mode it shows the `.frm` file only. Binary `.frx` companion files are intentionally hidden.
+- Via Scoop
 
-## Development
+  ```bash
+  scoop bucket add harumiweb https://github.com/harumiWeb/scoop-bucket
+  scoop install xlflow
+  ```
 
-Use Node.js 22 or newer. The extension test runner uses `@vscode/test-electron` 3.x.
+- For WSL installation (note that separate installation on Windows is also required):
 
-From this directory:
+  ```bash
+  curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
+  ```
 
-```bash
-pnpm install
-pnpm compile
-```
+## Features of This Extension
 
-To launch the extension in VS Code development mode, open this folder and run the extension host from the Run and Debug view after compiling.
+With xlflow for Visual Studio Code, you can perform all core operations of the xlflow CLI directly from VSCode.
+The main features include:
 
-## Settings
+- Displays project status for xlflow projects
+- Project recognition based on `xlflow.toml` configuration
+- Imports VBA modules from Excel workbooks
+- Applies edited VBA modules back to Excel workbooks
+- Starts and stops xlflow sessions
+- Runs automated tests
+- Provides input completion and real-time diagnostics via LSP
+- Offers AST-based static analysis and formatter capabilities
+- Lists standard modules, class modules, and other project components
+- Allows execution of xlflow commands from the command palette
+- Includes auxiliary features for VBA development
 
-Configure the executable path when `xlflow` is not on `PATH`:
+## Target Use Cases
+
+This extension is designed for Excel VBA development scenarios such as:
+
+- Managing Excel VBA macros with Git version control
+- Editing VBA code in VSCode rather than the VBE environment
+- Safely maintaining existing Excel macro assets
+- Implementing lint and formatting tools for VBA as well
+- Delegating Excel VBA development to AI agents
+- Performing synchronized operations between Excel workbooks and source code through a GUI interface
+- Integrating Excel VBA with WSL or CLI-based development workflows
+
+## Quick Start Guide
+
+### Project Setup
+
+- To create a new xlflow project, click `New Project` from the extension sidebar, enter a file name, and press Enter.
+  ![New Project](./images/new_proj.png)
+- To convert an existing macro workbook into an xlflow project, click `Init Existing Workbook` from the extension sidebar and select the macro book.
+  ![Init Project](./images/init_proj.png)
+
+### Workflow Operations
+
+- For importing source code from workbooks, execute the `Pull Workbook` button.
+  ![Pull](./images/pull.png)
+- For applying source code changes to workbooks, run the `Push Sources` button.
+  ![Push](./images/push.png)
+
+## Configuration Settings
+
+To specify the executable path when `xlflow` isn't in the system PATH:
 
 ```json
 {
@@ -60,110 +112,195 @@ Configure the executable path when `xlflow` is not on `PATH`:
 }
 ```
 
-Common settings:
+Common configuration options include:
 
-- `xlflow.lsp.enabled`: start `xlflow lsp --stdio` for VBA files.
-- `xlflow.lsp.logFile`: log file passed to the language server. The default is `.xlflow/lsp.log`.
-- `xlflow.lsp.trace.server`: trace verbosity for the language server trace output channel.
-- `xlflow.codeLens.enabled`: show xlflow CodeLens actions above runnable VBA procedures.
-- `xlflow.codeLens.runProcedure`: show `Run` actions above runnable VBA procedures.
-- `xlflow.codeLens.runTests`: show `Run Test` actions above VBA test procedures.
-- `xlflow.codeLens.userFormEvents`: show `Run` actions above UserForm event handlers.
-- `xlflow.run.saveBeforeRun`: save dirty VBA documents before running a procedure from CodeLens.
-- `xlflow.completion.triggerSuggestInStatements`: trigger VS Code suggestions in likely VBA statement contexts.
-- `xlflow.completion.progIdsInStrings`: trigger VS Code suggestions inside `CreateObject("...")` and `GetObject("...")` strings.
-- `xlflow.testing.autoDiscover`: automatically discover VBA tests when an xlflow workspace opens.
+- `xlflow.lsp.enabled`: Launches `xlflow lsp --stdio` for VBA files.
+- `xlflow.lsp.logFile`: Specifies the log file to pass to the language server. The default value is `.xlflow/lsp.log`.
+- `xlflow.lsp.trace.server`: Sets the verbosity level for the trace output channel of the language server.
+- `xlflow.codeLens.enabled`: Displays xlflow CodeLens actions above executable VBA procedures.
+- `xlflow.codeLens.runProcedure`: Shows a "Run" action above executable VBA procedures.
+- `xlflow.codeLens.runTests`: Displays a "Run Test" action above VBA test procedures.
+- `xlflow.codeLens.userFormEvents`: Shows a "Run" action above event handlers in UserForms.
+- `xlflow.run.saveBeforeRun`: Saves modified VBA documents before executing procedures via CodeLens.
+- `xlflow.completion.triggerSuggestInStatements`: Triggers VS Code suggestion functionality in contexts where VBA statements are likely to be written.
+- `xlflow.completion.progIdsInStrings`: Triggers VS Code suggestion functionality within strings containing `CreateObject("...")` and `GetObject("...")` syntax.
+- `xlflow.testing.autoDiscover`: Automatically discovers VBA tests when the xlflow workspace is opened.
 
-## Commands
+## About the Command
 
-The command palette includes:
+The command palette includes the following features:
 
-- `xlflow: Restart Language Server`
-- `xlflow: Check Environment`
-- `xlflow: New Project`
-- `xlflow: Initialize Project`
-- `xlflow: Install Agent Skill`
-- `xlflow: Install Helper Modules`
-- `xlflow: New Module`
-- `xlflow: New Standard Module`
-- `xlflow: New Class Module`
-- `xlflow: New UserForm`
-- `xlflow: Pull Workbook`
-- `xlflow: Push Sources`
-- `xlflow: Run Macro`
-- `xlflow: Run Procedure`
-- `xlflow: Run Test Procedure`
-- `xlflow: Run Tests`
-- `xlflow: Lint Workspace`
-- `xlflow: Format Document`
-- `xlflow: Format Project`
-- `xlflow: Save Workbook`
-- `xlflow: Start Session`
-- `xlflow: Session Status`
-- `xlflow: Restart Session`
-- `xlflow: Stop Session`
-- `xlflow: Open Output`
-- `xlflow: Refresh Project`
-- `xlflow: Refresh Modules`
-- `xlflow: Refresh UserForms`
-- `xlflow: Refresh Tests`
-- `xlflow: Run All Tests`
-- `xlflow: Run Doctor`
-- `xlflow: Toggle Session`
-- `xlflow: Open Documentation`
-- `xlflow: Rename Module`
-- `xlflow: Delete Module`
-- `xlflow: Reveal Source File`
-- `xlflow: Copy Module Name`
-- `xlflow: Copy Relative Path`
-- `xlflow: Copy Procedure Name`
-- `xlflow: Copy Qualified Name`
-- `xlflow: Rename UserForm`
-- `xlflow: Delete UserForm`
-- `xlflow: Reveal UserForm Source`
-- `xlflow: Copy UserForm Name`
-- `xlflow: Copy UserForm Relative Path`
+| Command                               | Description                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `xlflow: Restart Language Server`     | Reloads the VBA Language Server when completion, diagnostics, or jumps become misaligned. |
+| `xlflow: Check Environment`           | Verifies availability of xlflow, Excel integration, and the current workspace.            |
+| `xlflow: Open Install Guide`          | Opens the xlflow installation guide.                                                      |
+| `xlflow: Configure Path`              | Opens the VS Code setting for the xlflow executable path.                                 |
+| `xlflow: Retry CLI Detection`         | Rechecks xlflow CLI availability and refreshes extension views.                           |
+| `xlflow: New Project`                 | Creates a template for a new xlflow project.                                              |
+| `xlflow: Initialize Project`          | Adds xlflow configuration to an existing workbook project.                                |
+| `xlflow: Install Agent Skill`         | Installs the AI agent skill for xlflow.                                                   |
+| `xlflow: Install Helper Modules`      | Adds auxiliary VBA modules for functional features and samples in xlflow.                 |
+| `xlflow: New Module`                  | Creates a new VBA module of specified type.                                               |
+| `xlflow: New Standard Module`         | Creates a new standard module.                                                            |
+| `xlflow: New Class Module`            | Creates a new class module.                                                               |
+| `xlflow: New UserForm`                | Creates a complete set of new UserForms.                                                  |
+| `xlflow: Pull Workbook`               | Imports VBA assets from the current workbook into the workspace.                          |
+| `xlflow: Push Sources`                | Applies source changes from the workspace back to the book.                               |
+| `xlflow: Run Macro`                   | Executes the configured entry macro.                                                      |
+| `xlflow: Run Procedure`               | Executes a selected VBA procedure.                                                        |
+| `xlflow: Run Test Procedure`          | Directly executes a selected VBA test procedure.                                          |
+| `xlflow: Run Tests`                   | Executes the complete set of VBA tests in the project.                                    |
+| `xlflow: Lint Workspace`              | Performs linting checks on the workspace's source code.                                   |
+| `xlflow: Format Document`             | Formats the currently active VBA document.                                                |
+| `xlflow: Format Project`              | Formats all corresponding source files in the project collectively.                       |
+| `xlflow: Save Workbook`               | Saves the connected Excel workbook.                                                       |
+| `xlflow: Start Session`               | Launches a reusable Excel session for faster repeated execution.                          |
+| `xlflow: Session Status`              | Displays the current status of xlflow sessions.                                           |
+| `xlflow: Restart Session`             | Resets the managed Excel session.                                                         |
+| `xlflow: Stop Session`                | Terminates the current xlflow session.                                                    |
+| `xlflow: Open Output`                 | Opens the VS Code output channel for xlflow.                                              |
+| `xlflow: Refresh Project`             | Reloads the project tree and related states.                                              |
+| `xlflow: Refresh Modules`             | Updates the list of modules in the sidebar.                                               |
+| `xlflow: Refresh UserForms`           | Updates the list of UserForms in the sidebar.                                             |
+| `xlflow: Refresh Tests`               | Updates detected tests in the test explorer.                                              |
+| `xlflow: Run All Tests`               | Executes all detected VBA tests from the sidebar or test view.                            |
+| `xlflow: Run Doctor`                  | Runs `xlflow doctor` for detailed environment diagnostics.                                |
+| `xlflow: Toggle Session`              | Enables/disables session mode in the current workspace.                                   |
+| `xlflow: Open Documentation`          | Opens the documentation for xlflow.                                                       |
+| `xlflow: Rename Module`               | Renames a VBA module and the corresponding source file name.                              |
+| `xlflow: Delete Module`               | Removes a module from the workspace.                                                      |
+| `xlflow: Reveal Source File`          | Opens the location for the selected module source code.                                   |
+| `xlflow: Copy Module Name`            | Copies the selected module name to the clipboard.                                         |
+| `xlflow: Copy Relative Path`          | Copies the relative path of the selected source file within the project.                  |
+| `xlflow: Copy Procedure Name`         | Copies the selected procedure name.                                                       |
+| `xlflow: Copy Qualified Name`         | Copies fully qualified procedure names including module names.                            |
+| `xlflow: Rename UserForm`             | Renames a UserForm and renames related artifacts.                                         |
+| `xlflow: Delete UserForm`             | Removes a UserForm from the workspace.                                                    |
+| `xlflow: Reveal UserForm Source`      | Opens the location for the selected UserForm source code.                                 |
+| `xlflow: Copy UserForm Name`          | Copies the selected UserForm name.                                                        |
+| `xlflow: Copy UserForm Relative Path` | Copies the relative path of the selected UserForm source within the project.              |
 
-Workbook commands run from the resolved workspace folder. `New Project` runs `xlflow new`, `Initialize Project` runs `xlflow init <workbook>`, `Install Agent Skill` runs `xlflow skill install --agent <provider>`, `Install Helper Modules` runs `xlflow module install` or `xlflow module install --push`, `New Module` runs `xlflow module new <name> --type standard|class`, `Rename Module` and `Rename UserForm` run `xlflow --json module rename <old> <new>`, `Delete Module` and `Delete UserForm` run `xlflow --json module remove <name>`, `New UserForm` runs `xlflow form new <name>`, `Pull Workbook` runs `xlflow pull`, `Push Sources` runs `xlflow push`, `Run Macro` runs `xlflow run`, `Run Tests` runs `xlflow test`, `Lint Workspace` runs `xlflow lint`, `Format Project` runs `xlflow fmt --write`, and `Save Workbook` runs `xlflow save`.
+## Integration with AI Agents
 
-`Install Agent Skill` prompts for one of the bundled provider targets: `codex`, `claude`, `cursor`, `gemini`, or `agents`. It also asks whether to pass `--force` before replacing an existing skill installation. `Install Helper Modules` prompts before using `--push` because that mode imports the helper modules into the configured workbook.
+xlflow is a tool specifically designed to enable AI agents to develop Excel VBA macros, featuring CLI-based operation and AI-friendly structured output.
+From your terminal:
 
-`New UserForm` delegates sidecar validation to the CLI. It works for projects with `[userform].code_source = "sidecar"`; `frm` mode projects should use the existing snapshot/build workflow or migrate intentionally.
+```bash
+xlflow skill install
+```
 
-The language server supplies CodeLens actions for no-argument VBA `Sub` procedures. `$(play) Run` invokes `xlflow run <qualifiedName>`, and `$(beaker) Run Test` invokes `xlflow --json test --module <moduleName> --filter <name>`. The Modules TreeView uses the same run commands for procedure items. VS Code renders the `$(...)` prefixes as codicons. Dirty VBA documents are saved first when `xlflow.run.saveBeforeRun` is enabled.
+or through the VSCode command palette using:
 
-`Format Document` invokes VS Code document formatting for the active editor. For VBA files, formatting is provided by `xlflow lsp --stdio`.
+```bash
+xlflow: Install Agent Skill
+```
 
-Session commands run `xlflow session start`, `xlflow --json session status`, `xlflow session stop`, and restart from the resolved workspace folder.
+you can install the **Agent Skill** for AI agents, which helps coding assistants like Codex / Claude Code / GitHub Copilot / Cursor better understand how to interact with `xlflow`. This enables autonomous macro implementation, testing, and modification processes for VBA scripts in Excel.
+As a result, it becomes easier to incorporate test-driven development and automated correction workflows into Excel VBA development.
+![Ai-Driven Development](./images/ai-drive-develop.gif)
 
-## Session Status
+## WSL Integration Notes
 
-The extension shows a lightweight xlflow session indicator in the Status Bar:
+xlflow supports workflows that connect Excel on Windows with development environments running in WSL (Windows Subsystem for Linux).
+You can edit VBA code from editors or AI agents running on WSL, then import, apply, and execute changes directly on Excel on Windows.
+When using WSL integration, please note the following requirements:
 
-- `$(circle-slash) xlflow: No Project`: the selected workspace folder has no `xlflow.toml`.
-- `$(circle-slash) xlflow: No Session`: no active session.
-- `$(check) xlflow: Session Active`: an active session is available.
-- `$(sync~spin) xlflow: Starting` or `$(sync~spin) xlflow: Stopping`: session start or stop is running.
-- `$(warning) xlflow: Session Error`: session status or operation failed.
+- You must install xlflow on both the Windows and WSL sides
+- Your target project files must be located in a shared directory accessible from both Windows and WSL, such as `/mnt/c/...`
+- Access to Microsoft Excel on Windows is required for working with Excel workbooks
+  For detailed instructions, refer to the [official xlflow documentation](https://harumiweb.github.io/xlflow/installation#wsl-development-frontend).
 
-Click the Status Bar item to start, stop, restart, inspect the session, open the output channel, or run `xlflow doctor`. In setup mode, it opens setup actions instead. Active sessions use a green status color. Session details and command output are written to the `xlflow` output channel.
+## Troubleshooting
 
-## Testing
+### "Cannot Find xlflow Command" Error
 
-The extension registers a VS Code Test Explorer controller for VBA tests. Discovery runs `xlflow test list --json` and execution runs `xlflow test --json --module <module> --filter <name>` from the selected workspace folder. The TypeScript extension does not parse VBA or generate test cases itself.
+Please verify that the `xlflow` CLI is installed.
+In the terminal, execute:
 
-When `xlflow.testing.autoDiscover` is enabled, startup discovery runs only for workspace folders that contain `xlflow.toml`. Manual Test Explorer refresh remains available regardless of this setting.
+```bash
+xlflow version
+```
 
-`xlflow: Run Tests` remains available as a command palette escape hatch that runs `xlflow test` and writes the CLI output to the `xlflow` output channel.
+Either add `xlflow` to your system PATH or specify the absolute path to the executable in VSCode settings under `xlflow.path`.
 
-## Output
+### Project Not Being Recognized
 
-Use the `xlflow` output channel for CLI command output and language client messages. Use `xlflow Language Server Trace` for LSP trace output.
+Check whether an `xlflow.toml` file exists either at the root of your workspace or within the target folder:
+
+```txt
+my-project/
+  xlflow.toml
+```
+
+If the `xlflow.toml` file is missing, run project initialization through the command palette or via the dedicated sidebar interface:
+
+```bash
+xlflow: Initialize Project
+```
+
+### Failure in Excel Workbook Operations
+
+Excel workbook operations require Microsoft Excel installed on Windows.
+Please verify the following:
+
+- Whether Microsoft Excel is installed
+- Whether the target workbook can be opened
+- Whether access to VBA projects is allowed
+- Whether the workbook is not protected
+- Whether another Excel process has locked the workbook
+
+### Operation Issues from WSL
+
+When using WSL integration, the project must be located in a directory accessible from both Windows and WSL environments.
+Recommended deployment structure:
+
+```txt
+/mnt/c/dev/my-xlflow-project
+
+```
+
+Additionally, ensure that both Windows and WSL instances can execute xlflow successfully.
 
 ## Known Limitations
 
-- The extension does not install or bundle `xlflow`.
-- Macro selection is not interactive yet; `xlflow: Run Macro` runs the configured default macro. Runnable no-argument `Sub` procedures can be launched from CodeLens.
-- The sidebar is native TreeView UI only. There are no webviews, workbook previews, or rich HTML dashboards.
-- `xlflow: New Project` and `xlflow: Initialize Project` expose only the base CLI workflow, without option pickers for `--with-skill`, `--with-module`, `--agent`, or `--json`.
-- The extension does not implement VBA parsing, diagnostics, formatting, completion candidates, symbol analysis, or type inference in TypeScript.
+- This extension does not install or bundle `xlflow` itself.
+- Macro selection functionality currently does not support interactive operations. Running `xlflow: Run Macro` will execute the configured default macro. Standalone `Sub` procedures without arguments can be invoked via CodeLens.
+- Both `xlflow: New Project` and `xlflow: Initialize Project` only display basic CLI workflows and do not provide a picker for selecting options like `--with-skill`, `--with-module`, `--agent`, or `--json`.
+- This extension itself does not implement VBA code analysis, diagnostics, formatting, suggestion displays, or symbol analysis. These functionalities are delegated to the `xlflow` CLI and `xlflow-lsp` components.
+
+## Documentation
+
+For detailed usage instructions, please refer to the following documentation:
+[xlflow Documentation](https://harumiweb.github.io/xlflow/)
+[GitHub Repository](https://github.com/harumiWeb/xlflow)
+
+## Feedback and Issue Reporting
+
+Please report bugs, feature requests, and questions via GitHub Issues.
+[Issues](https://github.com/harumiWeb/xlflow/issues)
+When reporting issues, please include the following information whenever possible:
+
+- Operating system version
+- VSCode version
+- xlflow version
+- Version of this extension
+- Command executed
+- Error message
+- Reproduction steps
+
+## Development Notes
+
+Please use Node.js 22 or later. The extension's test runner utilizes `@vscode/test-electron` 3.x.
+From this directory:
+
+```bash
+pnpm install
+pnpm compile
+```
+
+To launch the extension in VS Code's development mode, open this folder and run the Extension Host from the [Run and Debug] view after compilation is complete.
+
+## License
+
+MIT License
