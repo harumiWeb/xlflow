@@ -93,6 +93,7 @@ tasks:
     cmds:
       - golangci-lint run
       - task ps-lint
+      - pnpm lint
 
   test:
     cmds:
