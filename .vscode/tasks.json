@@ -15,21 +15,6 @@
       ],
       "problemMatcher": "$tsc",
       "group": "build"
-    },
-    {
-      "label": "compile xlflow LSP Dev Client",
-      "type": "process",
-      "command": "pnpm",
-      "windows": {
-        "command": "pnpm.cmd"
-      },
-      "args": [
-        "--dir",
-        "tools/vscode-lsp-dev",
-        "compile"
-      ],
-      "problemMatcher": "$tsc",
-      "group": "build"
     }
   ]
 }
