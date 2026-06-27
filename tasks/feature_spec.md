@@ -160,15 +160,11 @@ Fix two independent bugs that cause `xlflow run` to produce spurious `XlflowDebu
 
 ## Fix B: compile watcher failure misclassification
 
-**Goal:** When `Invoke-XlflowVBECompile` cannot find the VBE compile command control, the failure must be reported as `vba_compile_failed`, not misclassified as `vbide_access_denied` or `macro_not_found`.
+**Status:** Obsolete after the legacy PowerShell bridge removal. Compile diagnostics now live in the .NET bridge path.
 
-**Root cause:** `Invoke-XlflowVBECompile` in `internal/excel/scripts/common.ps1` catch block did not set `$result.ok = $false`, allowing `run.ps1` to route the failure incorrectly.
-
-**Fix:** Set `$result.ok = $false` in the catch block of `Invoke-XlflowVBECompile` so callers can detect the failure.
+**Historical note:** The removed PowerShell bridge previously handled this path in script helpers; do not restore that implementation.
 
 **Implementation note:** In real Excel VBE, the compile command lives under `CommandBars("Menu Bar") -> Debug` and is exposed as control `Id = 578`; it is not reliably present on the `CommandBars("Debug")` toolbar. Also, when the compile control exists but `Enabled = false`, treat that state as "no compile needed / already compiled" instead of attempting `Execute()` and surfacing a COM failure.
-
-**Regression test:** `TestInvokeXlflowVBECompileMarksFailureWhenCompileControlNotFound` in `internal/excel/scripts/scripts_test.go` — dot-sources common.ps1, mocks `Get-XlflowVBECompileControl` returning `$null`, verifies `ok=false` with error message.
 
 ## Expected Behavior After Fix
 
@@ -422,8 +418,6 @@ foreach ($moduleGroup in $selected | Group-Object module) {
 
 ### Phase 2
 
-- `internal/excel/scripts/common.ps1`
-- `internal/excel/scripts/test.ps1`
 - `internal/cli/root.go`
 - `internal/excel/bridge.go` (if `buildTestScriptArgs` needs new params)
 - `internal/output/output.go`

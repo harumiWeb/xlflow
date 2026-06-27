@@ -69,12 +69,6 @@ type versionFeature struct {
 	Description string `json:"description"`
 }
 
-type versionScriptInfo struct {
-	Command string `json:"command"`
-	Source  string `json:"source"`
-	Path    string `json:"path,omitempty"`
-}
-
 type versionBuildSetting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -86,7 +80,6 @@ type versionVerbosePayload struct {
 	GoVersion      string                `json:"go_version,omitempty"`
 	ModulePath     string                `json:"module_path,omitempty"`
 	BuildSettings  []versionBuildSetting `json:"build_settings,omitempty"`
-	Scripts        []versionScriptInfo   `json:"scripts,omitempty"`
 	Features       []versionFeature      `json:"features,omitempty"`
 }
 
@@ -152,7 +145,7 @@ func (a *app) rootCommand() *cobra.Command {
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
-	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, dotnet; powershell is deprecated explicit opt-in until v0.16.0")
+	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, dotnet")
 	root.AddCommand(
 		a.newCommand(),
 		a.initCommand(),
@@ -218,7 +211,6 @@ func (a *app) versionPayload(verbose bool) any {
 		BuildInfo:      info,
 		ExecutablePath: resolvedExecutablePath(),
 		Features:       supportedVersionFeatures(),
-		Scripts:        resolvedVersionScripts(a.cwd),
 	}
 	if buildInfo, ok := debug.ReadBuildInfo(); ok {
 		payload.GoVersion = buildInfo.GoVersion
@@ -269,41 +261,6 @@ func supportedVersionFeatures() []versionFeature {
 		{Name: "form-build-overwrite", Description: "Create or replace Designer-backed UserForms from persisted xlflow.userform specs."},
 		{Name: "workbook-edit-helpers", Description: "Mutate a live session workbook for agent-driven test setup, event triggering, and visual tuning."},
 	}
-}
-
-func resolvedVersionScripts(root string) []versionScriptInfo {
-	commands := []string{"run", "push", "pull", "macros", "test", "session", "list", "inspect-form", "form-write", "export-image", "form-export-image", "edit", "process"}
-	scripts := make([]versionScriptInfo, 0, len(commands))
-	for _, command := range commands {
-		info := versionScriptInfo{Command: command, Source: "embedded"}
-		if path, ok := resolvedVersionScriptPath(root, command); ok {
-			info.Source = "override"
-			info.Path = path
-		}
-		scripts = append(scripts, info)
-	}
-	return scripts
-}
-
-func resolvedVersionScriptPath(root, command string) (string, bool) {
-	name := command + ".ps1"
-	candidates := []string{}
-	if root != "" {
-		candidates = append(candidates, filepath.Join(root, "scripts", name))
-	}
-	if _, file, _, ok := runtime.Caller(0); ok {
-		candidates = append(candidates, filepath.Join(filepath.Dir(file), "scripts", name))
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "scripts", name))
-	}
-	for _, candidate := range candidates {
-		clean := filepath.Clean(candidate)
-		if _, err := os.Stat(clean); err == nil {
-			return clean, true
-		}
-	}
-	return "", false
 }
 
 func buildSettingsFromInfo(info *debug.BuildInfo) []versionBuildSetting {

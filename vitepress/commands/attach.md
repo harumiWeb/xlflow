@@ -27,7 +27,7 @@ xlflow attach --active --json
 > [!IMPORTANT]
 > `attach` is a safety check. It does not import source, change workbook state, or create a managed session.
 
-`attach` uses the `.NET` bridge on Windows in `auto` mode. Deprecated `--bridge powershell` remains explicit opt-in for v0.15.0 only and emits a removal warning.
+`attach` uses the `.NET` bridge on Windows in `auto` mode.
 
 ::: tip
 Use this before manual Excel work when multiple workbooks are open.

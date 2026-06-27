@@ -313,7 +313,7 @@ The bridge advertises supported command keys through:
 xlflow-excel-bridge.exe --capabilities-json
 ```
 
-The Go resolver uses the `.NET` bridge for Windows `auto` mode. In v0.15.0, capability, runtime, protocol, transport, and workbook-open failures are returned directly; `auto` does not fall back to PowerShell. Explicit `--bridge dotnet` remains strict.
+The Go resolver uses the `.NET` bridge for Windows `auto` mode. Capability, runtime, protocol, transport, and workbook-open failures are returned directly. Explicit `--bridge dotnet` remains strict.
 
 ## Selection
 
@@ -324,7 +324,7 @@ xlflow doctor --bridge dotnet --json
 xlflow run Main.Run --bridge dotnet --json
 ```
 
-Windows `auto` mode uses the `.NET` bridge for workbook-backed commands including `doctor`, `inspect`, `pull`, `push`, `run`, `macros`, `process`, and `test`. `--bridge powershell` remains a deprecated explicit opt-in only for v0.15.0 and emits `powershell_bridge_deprecated`; it is planned for removal in v0.16.0. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors rather than invoking PowerShell.
+Windows `auto` mode uses the `.NET` bridge for workbook-backed commands including `doctor`, `inspect`, `pull`, `push`, `run`, `macros`, `process`, and `test`. The legacy PowerShell bridge was removed in v0.16.0; `auto` and `dotnet` are the only supported bridge modes. Missing bridge executable, version mismatch, protocol mismatch, or unsupported command must be reported as structured errors.
 
 ## Initial Migration Order
 

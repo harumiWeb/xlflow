@@ -260,8 +260,7 @@ func delegatedDoctorBridgeFound(env output.Envelope, diagnostics map[string]any)
 	}
 	return env.Error.Code != "bridge_not_available" &&
 		env.Error.Code != "dotnet_missing" &&
-		env.Error.Code != "dotnet_runtime_missing" &&
-		env.Error.Code != "powershell_missing"
+		env.Error.Code != "dotnet_runtime_missing"
 }
 
 func delegatedDoctorExcelAvailable(env output.Envelope, diagnostics map[string]any) bool {

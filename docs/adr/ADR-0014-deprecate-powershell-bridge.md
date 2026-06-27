@@ -1,4 +1,4 @@
-# ADR-0014: Deprecate the PowerShell Bridge
+# ADR-0014: Deprecate and Remove the PowerShell Bridge
 
 ## Status
 
@@ -14,17 +14,17 @@ Keeping both implementations active means every Excel COM, VBIDE, path/encoding,
 
 ## Decision
 
-Deprecate the legacy PowerShell bridge in v0.15.0 and remove it in v0.16.0.
+Deprecate the legacy PowerShell bridge in v0.15.0 and remove it in v0.16.0. The v0.16.0 removal is now implemented.
 
 In v0.15.0:
 
 - Windows `auto` mode selects the `.NET` bridge and does not fall back to PowerShell.
 - Explicit `.NET` selection remains strict.
-- PowerShell remains available only through explicit opt-in: `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, or `[excel].bridge = "powershell"`.
-- Any PowerShell bridge selection emits a `powershell_bridge_deprecated` warning that states the v0.16.0 removal target.
-- The PowerShell bridge is frozen except for critical safety or regression fixes.
+- PowerShell remained available only through explicit opt-in: `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, or `[excel].bridge = "powershell"`.
+- Any PowerShell bridge selection emitted a `powershell_bridge_deprecated` warning that stated the v0.16.0 removal target.
+- The PowerShell bridge was frozen except for critical safety or regression fixes.
 
-In v0.16.0, remove PowerShell bridge selection, implementation, tests, documentation, and bundled bridge scripts.
+In v0.16.0, PowerShell bridge selection, implementation, tests, documentation, and bundled bridge scripts are removed. `auto` and `dotnet` are the only accepted bridge modes; `powershell` selected through the CLI, environment, or config is rejected as an invalid bridge mode.
 
 This decision supersedes the fallback portions of ADR-0008 and ADR-0009. Their provider abstraction and `.NET` bridge process boundaries remain valid, but automatic PowerShell fallback is no longer part of the current contract.
 
@@ -33,8 +33,8 @@ This decision supersedes the fallback portions of ADR-0008 and ADR-0009. Their p
 - Positive: workbook-backed command behavior becomes easier to reason about because `auto` has one provider.
 - Positive: missing `.NET` bridge executables, protocol mismatches, unsupported commands, invalid bridge JSON, and workbook-open failures are surfaced directly instead of being hidden by fallback.
 - Positive: future Excel COM, VBIDE, dialog, and session fixes need only target the supported `.NET` bridge.
-- Negative: users who still depend on PowerShell-specific behavior must opt in explicitly during v0.15.0 and report blockers before v0.16.0.
-- Negative: environments that have not installed `xlflow-excel-bridge.exe` beside `xlflow.exe` will now fail in `auto` mode instead of silently using PowerShell.
+- Negative: users who still depend on PowerShell-specific behavior must migrate to the `.NET` bridge.
+- Negative: environments that have not installed `xlflow-excel-bridge.exe` beside `xlflow.exe` fail in `auto` mode instead of silently using PowerShell.
 
 ## Alternatives Considered
 
@@ -47,6 +47,5 @@ This decision supersedes the fallback portions of ADR-0008 and ADR-0009. Their p
 - `docs/adr/ADR-0008-dotnet-excel-bridge.md`
 - `docs/adr/ADR-0009-bridge-provider-contract.md`
 - `docs/bridge/dotnet-bridge.md`
-- `docs/bridge/powershell-bridge-legacy.md`
 - `docs/specs/cli-contract.md`
 - xlflow issue #177

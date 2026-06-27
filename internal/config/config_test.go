@@ -471,7 +471,7 @@ entry = "Main.Run"
 
 [excel]
 path = "build/Book.xlsm"
-bridge = " PowerShell "
+bridge = " DotNet "
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -480,8 +480,26 @@ bridge = " PowerShell "
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Excel.Bridge != "powershell" {
-		t.Fatalf("excel.bridge = %q, want powershell", cfg.Excel.Bridge)
+	if cfg.Excel.Bridge != "dotnet" {
+		t.Fatalf("excel.bridge = %q, want dotnet", cfg.Excel.Bridge)
+	}
+}
+
+func TestLoadRejectsRemovedPowerShellExcelBridge(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+bridge = " PowerShell "
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected removed powershell bridge value to be rejected")
 	}
 }
 
@@ -489,7 +507,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Default()
 	cfg.Project.Name = "write-test"
-	cfg.Excel.Bridge = "powershell"
+	cfg.Excel.Bridge = "dotnet"
 	cfg.UserForm.CodeSource = "frm"
 	cfg.Lint.ForbidInteractiveInput = false
 	cfg.Analyze.ForbidUnqualifiedExcelObjects = false
@@ -526,8 +544,8 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	if loaded.UserForm.CodeSource != "frm" {
 		t.Fatalf("userform.code_source mismatch: got %q, want frm", loaded.UserForm.CodeSource)
 	}
-	if loaded.Excel.Bridge != "powershell" {
-		t.Fatalf("excel.bridge mismatch: got %q, want powershell", loaded.Excel.Bridge)
+	if loaded.Excel.Bridge != "dotnet" {
+		t.Fatalf("excel.bridge mismatch: got %q, want dotnet", loaded.Excel.Bridge)
 	}
 	if loaded.Lint.ForbidInteractiveInput {
 		t.Fatal("expected forbid_interactive_input=false")

@@ -8,16 +8,15 @@ import (
 
 const EnvBridge = "XLFLOW_EXCEL_BRIDGE"
 
-var ErrInvalidMode = errors.New("bridge mode must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+var ErrInvalidMode = errors.New("bridge mode must be one of auto, dotnet; powershell bridge was removed, use dotnet")
 
 type Mode string
 
 const (
 	ProtocolVersion = 1
 
-	ModeAuto       Mode = "auto"
-	ModePowerShell Mode = "powershell"
-	ModeDotNet     Mode = "dotnet"
+	ModeAuto   Mode = "auto"
+	ModeDotNet Mode = "dotnet"
 )
 
 type Request struct {
@@ -46,11 +45,10 @@ type Provider interface {
 type ErrorKind string
 
 const (
-	ErrorUnsupportedHost   ErrorKind = "unsupported_host"
-	ErrorPowerShellMissing ErrorKind = "powershell_missing"
-	ErrorScriptNotFound    ErrorKind = "script_not_found"
-	ErrorDotNetMissing     ErrorKind = "dotnet_missing"
-	ErrorDotNetRuntime     ErrorKind = "dotnet_runtime_missing"
+	ErrorUnsupportedHost ErrorKind = "unsupported_host"
+	ErrorScriptNotFound  ErrorKind = "script_not_found"
+	ErrorDotNetMissing   ErrorKind = "dotnet_missing"
+	ErrorDotNetRuntime   ErrorKind = "dotnet_runtime_missing"
 )
 
 type Error struct {
@@ -79,7 +77,7 @@ func ParseMode(raw string) (Mode, error) {
 		return "", ErrInvalidMode
 	}
 	switch mode {
-	case ModeAuto, ModePowerShell, ModeDotNet:
+	case ModeAuto, ModeDotNet:
 		return mode, nil
 	default:
 		return "", ErrInvalidMode

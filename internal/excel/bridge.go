@@ -28,12 +28,7 @@ type Runner struct {
 }
 
 var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
-	switch mode {
-	case excelbridge.ModeDotNet:
-		return excelbridge.DotNetProvider{RootDir: root}
-	default:
-		return excelbridge.PowerShellProvider{RootDir: root}
-	}
+	return excelbridge.DotNetProvider{RootDir: root}
 }
 
 type providerExecution struct {
@@ -43,8 +38,6 @@ type providerExecution struct {
 	decodeErr error
 	result    *ScriptResult
 }
-
-const powerShellBridgeDeprecatedMessage = "The PowerShell bridge is deprecated in v0.15.0 and will be removed in v0.16.0. Use the .NET bridge."
 
 func executeBridgeProvider(ctx context.Context, provider excelbridge.Provider, commandName string, args map[string]string) providerExecution {
 	execution := providerExecution{provider: provider}
@@ -73,47 +66,12 @@ func enrichDoctorDiagnostics(commandName string, requestedMode excelbridge.Mode,
 	}
 
 	selected := provider.Name()
-	legacy := selected == string(excelbridge.ModePowerShell)
-	fallback := requestedMode == excelbridge.ModeAuto && legacy
 
 	diag["requested_bridge"] = string(requestedMode)
 	diag["selected_bridge"] = selected
-	diag["fallback"] = fallback
-	diag["legacy"] = legacy
+	diag["fallback"] = false
+	diag["legacy"] = false
 	return diag
-}
-
-func addPowerShellBridgeDeprecationWarning(env *output.Envelope, provider excelbridge.Provider) {
-	if env == nil || provider == nil || provider.Name() != string(excelbridge.ModePowerShell) {
-		return
-	}
-	warnings := warningObjectList(env.Warnings)
-	warnings = append(warnings, map[string]any{
-		"code":            "powershell_bridge_deprecated",
-		"message":         powerShellBridgeDeprecatedMessage,
-		"removal_version": "v0.16.0",
-	})
-	env.Warnings = warnings
-}
-
-func warningObjectList(value any) []map[string]any {
-	if value == nil {
-		return nil
-	}
-	switch typed := value.(type) {
-	case []map[string]any:
-		return append([]map[string]any{}, typed...)
-	case []any:
-		out := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			if warning, ok := item.(map[string]any); ok {
-				out = append(out, warning)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
 }
 
 func diagnosticsObjectMap(value any) map[string]any {
@@ -600,7 +558,7 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	if err != nil {
 		return nil, err
 	}
-	// Base64-encode the JSON to avoid PowerShell command-line parsing issues
+	// Base64-encode the JSON to preserve the existing bridge payload contract.
 	argsJSON64 := base64.StdEncoding.EncodeToString(argsJSON)
 	scriptArgs := map[string]string{
 		"WorkbookPath":            workbookPath(root, workbook),
@@ -1573,7 +1531,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
 			env.UI = mergeUIResult(nil, uiEvents)
-			addPowerShellBridgeDeprecationWarning(&env, provider)
 			return env, output.ExitValidation, nil
 		}
 		code := "script_failed"
@@ -1586,7 +1543,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		var bridgeErr *excelbridge.Error
 		if errors.As(err, &bridgeErr) {
 			switch bridgeErr.Kind {
-			case excelbridge.ErrorUnsupportedHost, excelbridge.ErrorPowerShellMissing:
+			case excelbridge.ErrorUnsupportedHost:
 				code = "environment"
 				source = "xlflow"
 			case excelbridge.ErrorScriptNotFound:
@@ -1599,7 +1556,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			}
 		}
 		env = output.Failure(commandName, output.Error{Code: code, Message: message, Source: source, Phase: phase})
-		addPowerShellBridgeDeprecationWarning(&env, provider)
 		if debugStreamErr != nil {
 			env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
 		}
@@ -1614,7 +1570,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	if execution.decodeErr != nil {
 		env = output.Failure(commandName, output.Error{Code: "invalid_script_json", Message: fmt.Sprintf("failed to parse script JSON: %v", execution.decodeErr), Source: provider.Name()})
 		env.Logs = []string{string(response.Stdout)}
-		addPowerShellBridgeDeprecationWarning(&env, provider)
 		if uiStreamErr != nil {
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
@@ -1637,7 +1592,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
-		addPowerShellBridgeDeprecationWarning(&env, provider)
 		return env, output.ExitEnvironment, nil
 	}
 	if result.Status == "" {
@@ -1677,7 +1631,6 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Spec = result.Spec
 	env.Edit = result.Edit
 	env.Warnings = result.Warnings
-	addPowerShellBridgeDeprecationWarning(&env, provider)
 	env.Hints = result.Hints
 	env.Inspect = result.Inspect
 	if result.DefaultEntry != "" {
@@ -1873,24 +1826,4 @@ func workbookPath(root, path string) string {
 		return path
 	}
 	return filepath.Join(root, path)
-}
-
-func scriptPath(root, commandName string) (string, func(), error) {
-	return excelbridge.ScriptPath(root, commandName)
-}
-
-func materializeBundledScript(commandName string) (string, func(), error) {
-	return excelbridge.MaterializeBundledScript(commandName)
-}
-
-func externalScriptPath(root, commandName string) (string, bool) {
-	return excelbridge.ExternalScriptPath(root, commandName)
-}
-
-func hasExternalScriptOverride(root, commandName string) bool {
-	return excelbridge.HasExternalScriptOverride(root, commandName)
-}
-
-func powerShellExecutableFor(goos string, lookPath func(file string) (string, error)) (string, error) {
-	return excelbridge.PowerShellExecutableFor(goos, lookPath)
 }

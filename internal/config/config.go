@@ -15,7 +15,7 @@ const FileName = "xlflow.toml"
 
 var (
 	ErrConfigNotFound     = errors.New("config not found")
-	ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet, powershell (deprecated explicit opt-in)")
+	ErrInvalidExcelBridge = errors.New("excel.bridge must be one of auto, dotnet; powershell bridge was removed, use dotnet")
 )
 
 type Config struct {
@@ -674,7 +674,7 @@ path = %q
 visible = %t
 # Suppress Excel alert dialogs (e.g. overwrite confirmations).
 display_alerts = %t
-# Excel bridge mode. Valid values: "auto", "dotnet". "powershell" is deprecated and will be removed in v0.16.0.
+# Excel bridge mode. Valid values: "auto", "dotnet".
 bridge = %q
 
 # Source tree directories.

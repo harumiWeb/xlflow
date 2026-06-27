@@ -1,6 +1,6 @@
 # Architecture
 
-xlflow is a Windows-first Go CLI using Cobra for command routing, `xlflow.toml` for project configuration, stable JSON envelopes for automation, and a Windows bridge layer that uses the `.NET` Excel bridge in `auto` mode. The PowerShell bridge is deprecated in v0.15.0, remains explicit opt-in only, and is planned for removal in v0.16.0. Under WSL, source-only commands remain local while Excel-related commands delegate to Windows `xlflow.exe`.
+xlflow is a Windows-first Go CLI using Cobra for command routing, `xlflow.toml` for project configuration, stable JSON envelopes for automation, and a Windows bridge layer that uses the `.NET` Excel bridge in `auto` mode. The legacy PowerShell bridge was removed in v0.16.0. Under WSL, source-only commands remain local while Excel-related commands delegate to Windows `xlflow.exe`.
 
 Key decisions:
 
