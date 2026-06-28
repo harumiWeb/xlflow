@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total) ![VS Marketplace](https://vsmarketplacebadges.dev/version-short/harumiweb.xlflow-vscode.svg)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
@@ -104,17 +104,18 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## What xlflow can do
 
-| Area           | Capabilities                                                                                                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source control | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
-| Execution      | Run macros from the CLI with typed arguments                                                                                                                                 |
-| Testing        | Discover and run VBA test procedures                                                                                                                                         |
-| Formatting     | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
-| Linting        | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
-| GUI safety     | Detect file pickers, input boxes, modal message boxes, and other automation-hostile boundaries                                                                               |
-| Debugging      | Collect terminal logs and return runtime diagnostics                                                                                                                         |
-| Diffing        | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
-| AI agents      | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
+| Area                                              | Capabilities                                                                                                                                                                 |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source control                                    | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Execution                                         | Run macros from the CLI with typed arguments                                                                                                                                 |
+| Testing                                           | Discover and run VBA test procedures                                                                                                                                         |
+| Formatting                                        | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
+| Linting                                           | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
+| Debugging                                         | Collect terminal logs and return runtime diagnostics                                                                                                                         |
+| Diffing                                           | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
+| AI agents                                         | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
+| LSP Server                                        | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
+| [VS Code Extension](<(editors/vscode/README.md)>) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
@@ -484,6 +485,27 @@ End If
 ```
 
 `run --headless` resolves to `headless`, `run --interactive` resolves to `interactive`, and `test` resolves to `test`. Plain `run` falls back to `interactive` unless the xlflow process environment sets `XLFLOW_MODE=interactive|headless|ci|agent|test`.
+
+---
+
+## VS Code Extension
+
+To provide what we believe to be the most user-friendly Excel VBA macro development tool, xlflow also offers a compatible VS Code extension.
+This extension enables you to access most of the core functionality provided by the xlflow CLI through a graphical user interface.
+
+Furthermore, by integrating with an LSP server, it delivers several valuable features for manual code editing, including:
+
+- Type inference-based auto-completion
+- Definition jumping
+- Real-time diagnostics
+
+You can install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode).
+
+![Demo](/editors/vscode/images/demo.gif)
+
+> [!IMPORTANT]
+> Note that the xlflow extension is primarily a wrapper that facilitates calling the xlflow CLI through a GUI.
+> When using this extension, you must also ensure to install the xlflow CLI simultaneously.
 
 ---
 
