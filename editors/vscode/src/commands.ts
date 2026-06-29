@@ -185,18 +185,20 @@ export function registerCommands(
         requireWorkspace: true,
         uiLabel: vscode.l10n.t("xlflow run"),
       });
+      await refreshSessionProjectState(sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
-      await runProcedure(args, channels);
+      await runProcedure(args, channels, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runTestProcedure", async (args: unknown) => {
-      await runTestProcedureFromCodeLens(args, channels);
+      await runTestProcedureFromCodeLens(args, channels, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.test", async () => {
       const code = await runXlflowCommand(["test"], "xlflow test", channels.output, {
         requireWorkspace: true,
         uiLabel: vscode.l10n.t("xlflow test"),
       });
+      await refreshSessionProjectState(sessionManager, hooks);
       if (code === 0) {
         await hooks.refreshTests();
       }
@@ -222,8 +224,7 @@ export function registerCommands(
         uiLabel: vscode.l10n.t("xlflow save"),
       });
       if (code === 0) {
-        await sessionManager.refreshStatus();
-        hooks.refreshProject();
+        await refreshSessionProjectState(sessionManager, hooks);
       }
     }),
     vscode.commands.registerCommand("xlflow.sessionStart", async () => {
@@ -803,7 +804,12 @@ function validateComponentNameInput(value: string): string | undefined {
   return undefined;
 }
 
-async function runProcedure(value: unknown, channels: XlflowChannels): Promise<void> {
+async function runProcedure(
+  value: unknown,
+  channels: XlflowChannels,
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
   const args = normalizeRunProcedureArgs(value);
   if (args === undefined) {
     vscode.window.showWarningMessage(
@@ -822,11 +828,14 @@ async function runProcedure(value: unknown, channels: XlflowChannels): Promise<v
     uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
     workspaceFolder,
   });
+  await refreshSessionProjectState(sessionManager, hooks);
 }
 
 async function runTestProcedureFromCodeLens(
   value: unknown,
   channels: XlflowChannels,
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
 ): Promise<void> {
   const args = normalizeRunProcedureArgs(value);
   if (args === undefined) {
@@ -857,6 +866,15 @@ async function runTestProcedureFromCodeLens(
       workspaceFolder,
     },
   );
+  await refreshSessionProjectState(sessionManager, hooks);
+}
+
+async function refreshSessionProjectState(
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
+  await sessionManager.refreshStatus();
+  await hooks.refreshProject();
 }
 
 function normalizeRunProcedureArgs(value: unknown): RunProcedureArgs | undefined {
