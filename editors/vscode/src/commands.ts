@@ -217,10 +217,14 @@ export function registerCommands(
       });
     }),
     vscode.commands.registerCommand("xlflow.saveWorkbook", async () => {
-      await runXlflowCommand(["save"], "xlflow save", channels.output, {
+      const code = await runXlflowCommand(["save"], "xlflow save", channels.output, {
         requireWorkspace: true,
         uiLabel: vscode.l10n.t("xlflow save"),
       });
+      if (code === 0) {
+        await sessionManager.refreshStatus();
+        hooks.refreshProject();
+      }
     }),
     vscode.commands.registerCommand("xlflow.sessionStart", async () => {
       await sessionManager.start();

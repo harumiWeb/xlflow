@@ -16,6 +16,7 @@ import {
   readExcelPathFromToml,
   readFormsRootFromToml,
   readUserFormCodeSourceFromToml,
+  saveRequiredProjectNode,
   userFormArtifactContextValue,
   userFormContextValue,
 } from "../../src/sidebar";
@@ -149,6 +150,8 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "inactive",
   );
   assert.strictEqual(sessionStateFromEnvelope({ status: "failed" }), "error");
+  assert.strictEqual(saveRequiredProjectNode(true).command?.command, "xlflow.saveWorkbook");
+  assert.strictEqual(saveRequiredProjectNode(false).command, undefined);
   assert.strictEqual(
     readExcelPathFromToml('[project]\nname = "sample"\n[excel]\npath = "build/Book.xlsm"\n'),
     "build/Book.xlsm",
@@ -320,6 +323,13 @@ function assertLocalizationResources(extensionPath: string): void {
   assert.strictEqual(
     menuWhen(manifest, "view/title", "xlflow.sessionStop"),
     "view == xlflow.project && xlflow.sessionStopEnabled",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/title", "xlflow.saveWorkbook", {
+      when: "view == xlflow.project && xlflow.saveRequired",
+      group: "navigation@4",
+    }),
+    "project view title menu should contribute xlflow.saveWorkbook only when save is required",
   );
   assert.ok(
     hasMenuItem(manifest, "view/item/context", "xlflow.formatDocument", {

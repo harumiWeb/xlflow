@@ -345,6 +345,11 @@ export class SessionManager implements vscode.Disposable {
       "xlflow.sessionStopEnabled",
       projectReady && this.snapshot.state === "active",
     );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.saveRequired",
+      projectReady && this.snapshot.session?.save_required === true,
+    );
   }
 }
 

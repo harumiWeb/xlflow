@@ -297,7 +297,8 @@
       {
         "command": "xlflow.saveWorkbook",
         "title": "%command.saveWorkbook.title%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "icon": "$(save)"
       },
       {
         "command": "xlflow.sessionStart",
@@ -484,14 +485,19 @@
           "group": "navigation@3"
         },
         {
+          "command": "xlflow.saveWorkbook",
+          "when": "view == xlflow.project && xlflow.saveRequired",
+          "group": "navigation@4"
+        },
+        {
           "command": "xlflow.sessionStart",
           "when": "view == xlflow.project && xlflow.sessionStartEnabled",
-          "group": "navigation@4"
+          "group": "navigation@5"
         },
         {
           "command": "xlflow.sessionStop",
           "when": "view == xlflow.project && xlflow.sessionStopEnabled",
-          "group": "navigation@5"
+          "group": "navigation@6"
         },
         {
           "command": "xlflow.newModule",

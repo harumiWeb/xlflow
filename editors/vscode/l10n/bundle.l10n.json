@@ -58,6 +58,8 @@
   "Session Actions": "Session Actions",
   "Save required": "Save required",
   "Whether the managed session workbook has unsaved changes that should be saved.": "Whether the managed session workbook has unsaved changes that should be saved.",
+  "Click to save the managed session workbook.": "Click to save the managed session workbook.",
+  "The managed session workbook does not require saving.": "The managed session workbook does not require saving.",
   "Open Module": "Open Module",
   "Open Procedure": "Open Procedure",
   "missing": "missing",

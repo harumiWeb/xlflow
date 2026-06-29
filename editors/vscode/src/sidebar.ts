@@ -306,6 +306,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
     const configuredWorkbookPath = await configuredWorkbook(state);
     const workbookPath = workbookPathFromSession(snapshot.session) ?? configuredWorkbookPath;
     const workbookLabel = workbookDisplayName(snapshot.session) ?? configuredWorkbookPath;
+    const saveRequired = snapshot.session?.save_required === true;
     const nodes: ProjectNode[] = [
       {
         kind: "project",
@@ -352,18 +353,25 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
         icon: sessionIcon(snapshot.state),
         command: { command: "xlflow.sessionActions", title: vscode.l10n.t("Session Actions") },
       },
-      {
-        kind: "project",
-        label: vscode.l10n.t("Save required"),
-        description: String(snapshot.session?.save_required === true),
-        tooltip: vscode.l10n.t(
-          "Whether the managed session workbook has unsaved changes that should be saved.",
-        ),
-        icon: new vscode.ThemeIcon(snapshot.session?.save_required === true ? "warning" : "check"),
-      },
+      saveRequiredProjectNode(saveRequired),
     ];
     return nodes;
   }
+}
+
+export function saveRequiredProjectNode(saveRequired: boolean): ProjectNode {
+  return {
+    kind: "project",
+    label: vscode.l10n.t("Save required"),
+    description: String(saveRequired),
+    tooltip: saveRequired
+      ? vscode.l10n.t("Click to save the managed session workbook.")
+      : vscode.l10n.t("The managed session workbook does not require saving."),
+    icon: new vscode.ThemeIcon(saveRequired ? "warning" : "check"),
+    command: saveRequired
+      ? { command: "xlflow.saveWorkbook", title: vscode.l10n.t("xlflow save") }
+      : undefined,
+  };
 }
 
 class ModulesTreeProvider implements vscode.TreeDataProvider<TreeNode> {
