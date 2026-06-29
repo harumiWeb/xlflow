@@ -1,0 +1,145 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmAliasMaster
+  caption: ""
+  observed:
+    width: 680
+    height: 470
+controls:
+  - id: lbl_aliases
+    name: lblAliases
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 14
+    width: 90
+    height: 16
+    caption: 別名一覧
+  - id: lst_aliases
+    name: lstAliases
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 32
+    width: 382
+    height: 354
+  - id: lbl_alias
+    name: lblAlias
+    type: Label
+    progId: Forms.Label.1
+    left: 420
+    top: 36
+    width: 42
+    height: 16
+    caption: 別名
+  - id: txt_alias
+    name: txtAlias
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 468
+    top: 32
+    width: 190
+    height: 20
+    text: ""
+  - id: lbl_law_title
+    name: lblLawTitle
+    type: Label
+    progId: Forms.Label.1
+    left: 420
+    top: 66
+    width: 42
+    height: 16
+    caption: 法令名
+  - id: txt_law_title
+    name: txtLawTitle
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 468
+    top: 62
+    width: 190
+    height: 40
+    text: ""
+  - id: lbl_note
+    name: lblNote
+    type: Label
+    progId: Forms.Label.1
+    left: 420
+    top: 116
+    width: 42
+    height: 16
+    caption: メモ
+  - id: txt_note
+    name: txtNote
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 468
+    top: 112
+    width: 190
+    height: 84
+    text: ""
+  - id: lbl_updated
+    name: lblUpdated
+    type: Label
+    progId: Forms.Label.1
+    left: 420
+    top: 210
+    width: 42
+    height: 16
+    caption: 更新
+  - id: lbl_updated_value
+    name: lblUpdatedValue
+    type: Label
+    progId: Forms.Label.1
+    left: 468
+    top: 210
+    width: 190
+    height: 16
+    caption: ""
+  - id: cmd_new
+    name: cmdNew
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 420
+    top: 244
+    width: 52
+    height: 24
+    caption: 新規
+  - id: cmd_save
+    name: cmdSave
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 478
+    top: 244
+    width: 52
+    height: 24
+    caption: 保存
+  - id: cmd_delete
+    name: cmdDelete
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 536
+    top: 244
+    width: 52
+    height: 24
+    caption: 削除
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 594
+    top: 244
+    width: 64
+    height: 24
+    caption: 閉じる
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 420
+    width: 640
+    height: 20
+    caption: 待機中

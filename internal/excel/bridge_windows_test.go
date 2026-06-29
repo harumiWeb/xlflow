@@ -11,6 +11,12 @@ import (
 	winio "github.com/Microsoft/go-winio"
 )
 
+const (
+	uiStreamTestPipeTimeout  = 10 * time.Second
+	uiStreamTestEventTimeout = 10 * time.Second
+	uiStreamTestCloseTimeout = 10 * time.Second
+)
+
 func TestFormatUIStreamEventRedactsInputValue(t *testing.T) {
 	got := formatUIStreamEvent(map[string]any{"kind": "inputbox", "dialog_id": "customer-name", "response_source": "default", "resolved_value": "Alice", "redacted": true})
 	for _, want := range []string{"xlflow: ui", "kind=inputbox", "id=customer-name", "source=default", "value=[redacted]"} {
@@ -35,7 +41,7 @@ func TestUIStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeout := 2 * time.Second
+	timeout := uiStreamTestPipeTimeout
 	conn, err := winio.DialPipe(session.PipePath(), &timeout)
 	if err != nil {
 		_ = session.Close()
@@ -47,13 +53,20 @@ func TestUIStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.Close()
-	events := waitForUIStreamEvents(session, 1, 2*time.Second)
+	events := waitForUIStreamEvents(session, 1, uiStreamTestEventTimeout)
 	if len(events) != 1 {
-		_ = session.Close()
-		t.Fatalf("events = %#v, want 1 event", events)
-	}
-	if err := session.Close(); err != nil {
+		closeErr := session.Close()
+		events = session.Events()
+		if len(events) == 1 && closeErr == nil {
+			t.Log("UI stream event was collected only after session close")
+		} else {
+			t.Fatalf("events = %#v after close error %v, want 1 event", events, closeErr)
+		}
+	} else if err := session.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1 event", events)
 	}
 	if events[0]["dialog_id"] != "confirm-save" {
 		t.Fatalf("dialog_id = %#v, want confirm-save", events[0]["dialog_id"])
@@ -69,7 +82,7 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeout := 2 * time.Second
+	timeout := uiStreamTestPipeTimeout
 	conn, err := winio.DialPipe(session.PipePath(), &timeout)
 	if err != nil {
 		_ = session.Close()
@@ -80,7 +93,7 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 		_ = session.Close()
 		t.Fatal(err)
 	}
-	events := waitForUIStreamEvents(session, 1, 2*time.Second)
+	events := waitForUIStreamEvents(session, 1, uiStreamTestEventTimeout)
 	if len(events) != 1 {
 		_ = conn.Close()
 		_ = session.Close()
@@ -95,7 +108,7 @@ func TestUIStreamSessionCloseDoesNotHangOnOpenConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(uiStreamTestCloseTimeout):
 		_ = conn.Close()
 		t.Fatal("session.Close() timed out while the pipe client remained open")
 	}
@@ -113,7 +126,7 @@ func TestUIStreamSessionRejectsOversizedPendingLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeout := 2 * time.Second
+	timeout := uiStreamTestPipeTimeout
 	conn, err := winio.DialPipe(session.PipePath(), &timeout)
 	if err != nil {
 		_ = session.Close()

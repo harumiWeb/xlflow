@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total)
+![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total) ![VS Marketplace](https://vsmarketplacebadges.dev/version-short/harumiweb.xlflow-vscode.svg)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow)
 
 </div>
@@ -72,8 +72,8 @@ VBA のエクスポート、編集、lint、インポート、テスト、デバ
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/images/weather-news.png" alt="weather news" width="100%">
-      <sub>リアルタイムの天気ニュースを表示するマクロ</sub>
+      <img src="docs/images/legal_viewer.jpg" alt="legal viewer" width="100%">
+      <sub>法令データ検索ツール</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/images/maze-big.gif" alt="maze chase" width="100%">
@@ -105,17 +105,18 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## できること
 
-| 領域               | 機能                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| ソース管理         | 標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet モジュールをエクスポート・インポート                           |
-| 実行               | CLI から型付き引数つきでマクロを実行                                                                                            |
-| テスト             | VBA のテスト手続きを検出して実行                                                                                                |
-| フォーマット       | `.bas` / `.cls` ソースファイルに対する保守的で非破壊な VBA フォーマット                                                         |
-| lint               | `Option Explicit` 不足、`Select` / `Activate`、広すぎるエラー処理、暗黙の Variant、Public module field、対話的処理を検出        |
-| GUI 安全性         | ファイル選択、`InputBox`、modal `MsgBox`、UserForm などの自動実行に不向きな境界を検出                                           |
-| デバッグ           | terminal log と runtime diagnostic を収集                                                                                       |
-| 差分確認           | workbook のセル値、数式、シート構成、VBA ソース差分を比較                                                                       |
-| AIエージェント連携 | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
+| 領域                                            | 機能                                                                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ソース管理                                      | 標準モジュール、クラスモジュール、UserForm、Workbook / Worksheet モジュールをエクスポート・インポート                           |
+| 実行                                            | CLI から型付き引数つきでマクロを実行                                                                                            |
+| テスト                                          | VBA のテスト手続きを検出して実行                                                                                                |
+| フォーマット                                    | `.bas` / `.cls` ソースファイルに対する保守的で非破壊な VBA フォーマット                                                         |
+| lint                                            | `Option Explicit` 不足、`Select` / `Activate`、広すぎるエラー処理、暗黙の Variant、Public module field、対話的処理を検出        |
+| デバッグ                                        | terminal log と runtime diagnostic を収集                                                                                       |
+| 差分確認                                        | workbook のセル値、数式、シート構成、VBA ソース差分を比較                                                                       |
+| AIエージェント連携                              | 安定した JSON を返し、Codex / Claude / Cursor / Gemini / GitHub Copilot 風ワークフローなどに使わせるための Skill をインストール |
+| LSPサーバー                                     | 入力補完、定義ジャンプ、リアルタイム診断などを提供                                                                              |
+| [VS Code 拡張機能](editors/vscode/README.ja.md) | xlflowのあらゆる操作をGUI化し、LSPサーバーを利用した優れた開発体験                                                              |
 
 > [!IMPORTANT]
 > xlflow は workbook 実行について **Windows-first** のツールです。Workbook 操作には Windows 上の **Microsoft Excel + COM** と `.NET` Excel bridge を使用します。WSL は Windows 側の xlflow へ Excel 関連コマンドを委譲することで、開発 frontend として利用できます。
@@ -483,6 +484,23 @@ End If
 ```
 
 `run --headless` は `headless`、`run --interactive` は `interactive`、`test` は `test` に解決されます。plain `run` は、xlflow 実行プロセスの環境変数 `XLFLOW_MODE=interactive|headless|ci|agent|test` が無い限り `interactive` にフォールバックします。
+
+---
+
+## VS Code 拡張機能
+
+xlflowは人間にとっても最も優れたExcelVBAマクロ開発ツールを目指し、VS Code拡張機能も提供しています。
+拡張機能では、xlflow CLIが提供する主要操作の大部分をGUIから呼べるようにします。
+
+また、LSPサーバーとの連携によって**エディタ編集中の型推論に基づく入力補完、定義ジャンプ、リアルタイム診断**など人が手でコードを書く際に有用な機能を提供します。
+
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode) からインストールすることができます。
+
+![Demo](/editors/vscode/images/demo.gif)
+
+> [!IMPORTANT]
+> xlflow 拡張機能はあくまで xlflow CLI をGUIから呼び出すラッパーです。
+> 使用する場合は xlflow CLI も同時にインストールする必要があります。
 
 ---
 

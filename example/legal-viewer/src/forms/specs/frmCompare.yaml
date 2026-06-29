@@ -1,0 +1,144 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmCompare
+  caption: ""
+  observed:
+    width: 1010
+    height: 680
+controls:
+  - id: lbl_left_law
+    name: lblLeftLaw
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 14
+    width: 72
+    height: 16
+    caption: 左法令
+  - id: lst_left_laws
+    name: lstLeftLaws
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 32
+    width: 236
+    height: 136
+  - id: lbl_left_body
+    name: lblLeftBody
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 176
+    width: 84
+    height: 16
+    caption: 左本文単位
+  - id: lst_left_bodies
+    name: lstLeftBodies
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 194
+    width: 236
+    height: 206
+  - id: lbl_right_law
+    name: lblRightLaw
+    type: Label
+    progId: Forms.Label.1
+    left: 260
+    top: 14
+    width: 72
+    height: 16
+    caption: 右法令
+  - id: lst_right_laws
+    name: lstRightLaws
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 260
+    top: 32
+    width: 236
+    height: 136
+  - id: lbl_right_body
+    name: lblRightBody
+    type: Label
+    progId: Forms.Label.1
+    left: 260
+    top: 176
+    width: 84
+    height: 16
+    caption: 右本文単位
+  - id: lst_right_bodies
+    name: lstRightBodies
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 260
+    top: 194
+    width: 236
+    height: 206
+  - id: lbl_diff
+    name: lblDiff
+    type: Label
+    progId: Forms.Label.1
+    left: 514
+    top: 14
+    width: 56
+    height: 16
+    caption: 差分
+  - id: txt_diff
+    name: txtDiff
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 514
+    top: 32
+    width: 478
+    height: 584
+    text: ""
+  - id: rdo_table_markdown
+    name: rdoTableMarkdown
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 18
+    top: 414
+    width: 92
+    height: 18
+    caption: Markdown
+    value: true
+  - id: rdo_table_ascii
+    name: rdoTableAscii
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 118
+    top: 414
+    width: 104
+    height: 18
+    caption: ASCII罫線
+    value: false
+  - id: cmd_compare
+    name: cmdCompare
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 18
+    top: 438
+    width: 52
+    height: 24
+    caption: 比較
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 76
+    top: 438
+    width: 58
+    height: 24
+    caption: 閉じる
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 646
+    width: 974
+    height: 18
+    caption: 待機中

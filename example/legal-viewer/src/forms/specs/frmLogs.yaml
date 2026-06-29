@@ -1,0 +1,73 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmLogs
+  caption: ""
+  observed:
+    width: 840
+    height: 520
+controls:
+  - id: lbl_kind
+    name: lblKind
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 14
+    width: 140
+    height: 16
+    caption: API通信ログ
+  - id: lst_logs
+    name: lstLogs
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 36
+    width: 804
+    height: 220
+  - id: lbl_detail
+    name: lblDetail
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 268
+    width: 120
+    height: 16
+    caption: 詳細
+  - id: txt_detail
+    name: txtDetail
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 18
+    top: 286
+    width: 804
+    height: 148
+    text: ""
+  - id: cmd_clear
+    name: cmdClear
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 18
+    top: 446
+    width: 58
+    height: 24
+    caption: クリア
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 84
+    top: 446
+    width: 58
+    height: 24
+    caption: 閉じる
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 482
+    width: 804
+    height: 18
+    caption: 待機中

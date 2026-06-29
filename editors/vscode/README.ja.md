@@ -8,7 +8,9 @@
 - VBAモジュールのインポートとエクスポート機能を実装
 - 高速に各種操作を行うセッション管理機能を搭載
 - LSP機能により、VSCode上でVBA向けの補完、診断、シンボル解析などを利用できます。
-- 各種コマンドを直接VSCode上から実行可能
+- 意味に基づくソースコードのシンタックスハイライトを提供
+- ASTベースのLinter, Formatterを搭載
+- テストフレームワークを搭載、自動テスト可能
 
 これにより、Excel VBAマクロ開発がよりセキュアになり、Gitバージョン管理システムとの連携が容易になるとともに、AIエージェントとの連携も簡素化されます。
 
@@ -59,6 +61,10 @@ xlflow for VSCode では**上記の機能群をGUI化し、LSPサーバーも提
   ```bash
   curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
   ```
+
+- [GitHub Releases](https://github.com/harumiWeb/xlflow/releases) から手動DL
+
+  DLしたら、任意のディレクトリに展開して配置後に環境変数`Path`に設定もしくは、VS Codeの`settings.json`に`"xlflow.path": "C:\\path\\to\\xlflow.exe"`のように指定してください。
 
 ## この拡張機能でできること
 

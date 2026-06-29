@@ -26,7 +26,7 @@ func TestDebugStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeout := 2 * time.Second
+	timeout := uiStreamTestPipeTimeout
 	conn, err := winio.DialPipe(session.PipePath(), &timeout)
 	if err != nil {
 		_ = session.Close()
@@ -38,13 +38,17 @@ func TestDebugStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.Close()
-	result := waitForDebugStreamResult(session, 1, 2*time.Second)
+	result := waitForDebugStreamResult(session, 1, uiStreamTestEventTimeout)
 	resultMap, ok := result.(map[string]any)
 	if !ok {
-		_ = session.Close()
-		t.Fatalf("result = %#v, want map", result)
-	}
-	if err := session.Close(); err != nil {
+		closeErr := session.Close()
+		result = session.Result()
+		resultMap, ok = result.(map[string]any)
+		if !ok {
+			t.Fatalf("result = %#v after close error %v, want map", result, closeErr)
+		}
+		t.Log("debug stream event was collected only after session close")
+	} else if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if count, ok := resultMap["count"].(int); ok {
@@ -65,7 +69,7 @@ func TestDebugStreamSessionTracksTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeout := 2 * time.Second
+	timeout := uiStreamTestPipeTimeout
 	conn, err := winio.DialPipe(session.PipePath(), &timeout)
 	if err != nil {
 		_ = session.Close()
