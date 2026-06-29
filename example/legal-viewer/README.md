@@ -32,13 +32,6 @@ You can verify the full text of each statute by publication date as available on
 - Environment capable of executing VBA macros
   Note: This application is not compatible with Mac versions of Excel.
 
-## Launch Instructions
-
-1. Save `law-viewer.xlsm` to your local folder.
-2. For files downloaded from the internet, open the file properties and enable "Allow" if prompted.
-3. Open the file in Excel and select either "Enable Content" or activate macros.
-4. Click the "Open Statute Viewer" button in the main sheet.
-
 ## Basic Usage Guide
 
 ### 1. Adding a Statute
