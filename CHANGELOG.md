@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.16.1
+
 - Fixed `VB029` false positives for module-level declarations inside `#If ... #Else ... #End If` conditional compilation blocks.
 - Fixed `VB029` false positives for Excel member chains such as `Cells(ws.Rows.Count, "A").End(xlUp).Row`, where string or numeric arguments were mistaken for undeclared receiver identifiers.
 
