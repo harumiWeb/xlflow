@@ -6,6 +6,7 @@
 - Temporary import/export workspaces must be removed in `finally` after the owning command finishes. Do not leave generated source copies under `.xlflow/tmp` after success or failure.
 - Excel COM-backed Go tests can take several minutes, especially userform/VBIDE round-trip tests. Do not use two-minute timeouts for full `go test ./...` or `go test ./scripts`; use at least 8 minutes for full runs and 5 minutes for `scripts` package runs before treating slowness as a hang.
 - Avoid tight wall-clock sleeps in concurrency/ticker tests. Prefer polling with a generous deadline or injecting the clock/ticker so Windows CI scheduler delays do not make tests flaky.
+- Windows named-pipe stream tests must keep the client connection open until the server observes the expected event. Closing immediately after `Write` can race on hosted runners and make the server see only pipe closure, even when the write succeeded locally.
 - Validate cheap CLI/script action enums before opening Excel COM or workbook files. Unsupported actions should return argument errors without starting Excel, so invalid input cannot be masked by workbook-open failures or localized COM messages.
 - After refactoring shared CLI helpers, run lint or search for now-unused wrappers before finalizing; tests can pass while `unused` still fails CI lint.
 - Avoid depending on optional PowerShell cmdlets for core Excel bridge behavior. Prefer stable .NET APIs for file hashing and add regression tests that shadow missing cmdlets when environment differences can break agent workflows.

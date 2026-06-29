@@ -37,10 +37,10 @@ func TestDebugStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 		_ = session.Close()
 		t.Fatal(err)
 	}
-	_ = conn.Close()
 	result := waitForDebugStreamResult(session, 1, uiStreamTestEventTimeout)
 	resultMap, ok := result.(map[string]any)
 	if !ok {
+		_ = conn.Close()
 		closeErr := session.Close()
 		result = session.Result()
 		resultMap, ok = result.(map[string]any)
@@ -48,6 +48,9 @@ func TestDebugStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 			t.Fatalf("result = %#v after close error %v, want map", result, closeErr)
 		}
 		t.Log("debug stream event was collected only after session close")
+	} else if err := conn.Close(); err != nil {
+		_ = session.Close()
+		t.Fatal(err)
 	} else if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
