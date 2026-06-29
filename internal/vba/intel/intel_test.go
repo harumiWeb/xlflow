@@ -234,6 +234,28 @@ End Sub
 	}
 }
 
+func TestSignatureHelpResolvesFormattedNestedCallTarget(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Debug.Print IIf(True, MsgBox(
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	line := `    Debug.Print IIf(True, MsgBox(`
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 2, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %+v, want one MsgBox signature", help)
+	}
+	if got := help.Signatures[0].Label; !strings.HasPrefix(got, "VBA.Global.MsgBox(") {
+		t.Fatalf("signature label = %q, want MsgBox signature", got)
+	}
+}
+
 func TestDiagnosticsTreatErrAsBuiltinGlobal(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

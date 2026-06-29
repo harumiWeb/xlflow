@@ -1156,6 +1156,7 @@ func lastTopLevelSpaceSeparatedField(text string) string {
 	if text == "" {
 		return ""
 	}
+	targetDepth := unmatchedParenDepth(text)
 	inString := false
 	depth := 0
 	start := 0
@@ -1175,13 +1176,41 @@ func lastTopLevelSpaceSeparatedField(text string) string {
 			if !inString && depth > 0 {
 				depth--
 			}
-		case ' ', '\t':
-			if !inString && depth == 0 {
+		case ',', ' ', '\t':
+			if !inString && callTargetBoundaryDepth(depth, targetDepth) {
 				start = i + 1
 			}
 		}
 	}
 	return strings.TrimSpace(text[start:])
+}
+
+func unmatchedParenDepth(text string) int {
+	inString := false
+	depth := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+func callTargetBoundaryDepth(depth, targetDepth int) bool {
+	return depth == 0 || (targetDepth > 0 && depth == targetDepth)
 }
 
 func parseArguments(text string) []argument {
