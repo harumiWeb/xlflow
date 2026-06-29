@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added sidebar save actions so the Project view toolbar and `Save required` indicator can run `xlflow save` when a session workbook needs saving.
+
 ## 0.1.0
 
 - Added CodeLens commands for running no-argument VBA procedures and tests through `xlflow.runProcedure` and `xlflow.runTestProcedure`.

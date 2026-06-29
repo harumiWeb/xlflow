@@ -58,6 +58,8 @@
   "Session Actions": "セッション操作",
   "Save required": "保存が必要",
   "Whether the managed session workbook has unsaved changes that should be saved.": "管理中のセッションブックに保存すべき未保存の変更があるかどうか。",
+  "Click to save the managed session workbook.": "クリックして管理中のセッションブックを保存します。",
+  "The managed session workbook does not require saving.": "管理中のセッションブックは保存不要です。",
   "Open Module": "モジュールを開く",
   "Open Procedure": "プロシージャを開く",
   "missing": "未作成",

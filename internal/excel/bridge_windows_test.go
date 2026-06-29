@@ -52,9 +52,9 @@ func TestUIStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 		_ = session.Close()
 		t.Fatal(err)
 	}
-	_ = conn.Close()
 	events := waitForUIStreamEvents(session, 1, uiStreamTestEventTimeout)
 	if len(events) != 1 {
+		_ = conn.Close()
 		closeErr := session.Close()
 		events = session.Events()
 		if len(events) == 1 && closeErr == nil {
@@ -62,6 +62,9 @@ func TestUIStreamSessionCollectsNamedPipeEvents(t *testing.T) {
 		} else {
 			t.Fatalf("events = %#v after close error %v, want 1 event", events, closeErr)
 		}
+	} else if err := conn.Close(); err != nil {
+		_ = session.Close()
+		t.Fatal(err)
 	} else if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
