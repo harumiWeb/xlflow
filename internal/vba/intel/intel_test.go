@@ -516,6 +516,30 @@ End Sub
 	}
 }
 
+func TestDiagnosticsDoNotReportExcelRangeCallChainArgumentsAsUndeclared(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub TestLastRow()
+    Dim ws As Worksheet
+    Dim lastRowA As Long
+
+    lastRowA = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    lastRowA = Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Debug.Print ws.Range("A1").Value
+    Debug.Print ws.Range("A1:B10").Rows.Count
+    Debug.Print ThisWorkbook.Worksheets("Sheet1").Cells(1, "A").Value
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029")
+	if len(diagnostics) != 0 {
+		t.Fatalf("expected no undeclared diagnostics for Excel member chains, got %+v", diagnostics)
+	}
+}
+
 func TestE2ESmokeNamespaceBuiltinAndWithSignatureCompletions(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
@@ -786,6 +810,9 @@ func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.
 	}
 	if got, ok := analyzer.ResolveExpressionType(`Range("A1").Font`); !ok || got != "Excel.Font" {
 		t.Fatalf("Range(...).Font = %q, %v", got, ok)
+	}
+	if got, ok := analyzer.ResolveExpressionType(`Cells(1, "A").End(xlUp)`); !ok || got != "Excel.Range" {
+		t.Fatalf("Cells(...).End(...) = %q, %v", got, ok)
 	}
 	if got, ok := analyzer.ResolveExpressionType(`Application.WorksheetFunction`); !ok || got != "Excel.WorksheetFunction" {
 		t.Fatalf("Application.WorksheetFunction = %q, %v", got, ok)

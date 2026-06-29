@@ -1147,11 +1147,41 @@ func callTargetBeforeOpen(prefix string) string {
 	if strings.HasPrefix(strings.ToLower(target), "call ") {
 		target = strings.TrimSpace(target[len("call "):])
 	}
-	fields := strings.Fields(target)
-	if len(fields) > 1 {
-		target = fields[len(fields)-1]
-	}
+	target = lastTopLevelSpaceSeparatedField(target)
 	return strings.TrimSpace(target)
+}
+
+func lastTopLevelSpaceSeparatedField(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	inString := false
+	depth := 0
+	start := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case ' ', '\t':
+			if !inString && depth == 0 {
+				start = i + 1
+			}
+		}
+	}
+	return strings.TrimSpace(text[start:])
 }
 
 func parseArguments(text string) []argument {
@@ -2121,7 +2151,7 @@ func bestSetAssignmentExpression(source, word string, offset int) (string, int, 
 
 func (a Analyzer) collectionDefaultType(name string) (string, bool) {
 	typ, ok := a.DB.ResolveType(name)
-	if !ok || typ.ElementType == "" {
+	if !ok || !strings.EqualFold(typ.Kind, "collection") || typ.ElementType == "" {
 		return "", false
 	}
 	return typ.ElementType, true
