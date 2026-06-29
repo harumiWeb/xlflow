@@ -1,0 +1,354 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmMain
+  caption: ""
+  observed:
+    width: 860
+    height: 610
+controls:
+  - id: cmd_add_law
+    name: cmdAddLaw
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 24
+    top: 12
+    width: 76
+    height: 24
+    caption: 法令追加
+  - id: cmd_history
+    name: cmdHistory
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 170
+    top: 12
+    width: 58
+    height: 24
+    caption: 履歴
+  - id: cmd_bookmarks
+    name: cmdBookmarks
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 234
+    top: 12
+    width: 74
+    height: 24
+    caption: ブックマーク
+  - id: cmd_bookmark_add
+    name: cmdBookmarkAdd
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 24
+    top: 490
+    width: 116
+    height: 24
+    caption: ブックマーク追加
+  - id: cmd_alias_master
+    name: cmdAliasMaster
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 146
+    top: 490
+    width: 104
+    height: 24
+    caption: 別名マスター
+  - id: cmd_compare
+    name: cmdCompare
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 24
+    top: 520
+    width: 52
+    height: 24
+    caption: 比較
+  - id: cmd_settings
+    name: cmdSettings
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 82
+    top: 520
+    width: 52
+    height: 24
+    caption: 設定
+  - id: cmd_api_logs
+    name: cmdApiLogs
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 140
+    top: 520
+    width: 58
+    height: 24
+    caption: APIログ
+  - id: cmd_error_logs
+    name: cmdErrorLogs
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 204
+    top: 520
+    width: 64
+    height: 24
+    caption: エラーログ
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 106
+    top: 12
+    width: 58
+    height: 24
+    caption: 閉じる
+  - id: lbl_body_search
+    name: lblBodySearch
+    type: Label
+    progId: Forms.Label.1
+    left: 310
+    top: 16
+    width: 44
+    height: 16
+    caption: 検索語
+  - id: txt_body_search
+    name: txtBodySearch
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 360
+    top: 12
+    width: 250
+    height: 20
+    text: ""
+  - id: cmb_search_mode
+    name: cmbSearchMode
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    left: 616
+    top: 12
+    width: 64
+    height: 20
+    text: AND
+  - id: cmd_search
+    name: cmdSearch
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 688
+    top: 12
+    width: 58
+    height: 22
+    caption: 検索
+  - id: lbl_added_laws
+    name: lblAddedLaws
+    type: Label
+    progId: Forms.Label.1
+    left: 24
+    top: 46
+    width: 120
+    height: 16
+    caption: 追加済み法令
+  - id: lst_added_laws
+    name: lstAddedLaws
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 24
+    top: 64
+    width: 248
+    height: 152
+  - id: lbl_selected_title
+    name: lblSelectedTitle
+    type: Label
+    progId: Forms.Label.1
+    left: 24
+    top: 226
+    width: 120
+    height: 16
+    caption: 選択中
+  - id: lbl_selected
+    name: lblSelected
+    type: Label
+    progId: Forms.Label.1
+    left: 24
+    top: 244
+    width: 248
+    height: 42
+    caption: ""
+  - id: lbl_body_nav
+    name: lblBodyNav
+    type: Label
+    progId: Forms.Label.1
+    left: 24
+    top: 298
+    width: 120
+    height: 16
+    caption: 本文ナビ
+  - id: lst_body_nav
+    name: lstBodyNav
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 24
+    top: 316
+    width: 248
+    height: 164
+  - id: lbl_preview
+    name: lblPreview
+    type: Label
+    progId: Forms.Label.1
+    left: 290
+    top: 46
+    width: 120
+    height: 16
+    caption: プレビュー
+  - id: txt_preview
+    name: txtPreview
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 290
+    top: 64
+    width: 540
+    height: 166
+    text: ""
+  - id: lbl_results
+    name: lblResults
+    type: Label
+    progId: Forms.Label.1
+    left: 290
+    top: 242
+    width: 120
+    height: 16
+    caption: 検索結果
+  - id: lst_results
+    name: lstResults
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 290
+    top: 260
+    width: 540
+    height: 104
+  - id: lbl_unit_preview
+    name: lblUnitPreview
+    type: Label
+    progId: Forms.Label.1
+    left: 290
+    top: 376
+    width: 120
+    height: 16
+    caption: 選択単位
+  - id: rdo_table_markdown
+    name: rdoTableMarkdown
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 414
+    top: 374
+    width: 92
+    height: 18
+    caption: Markdown
+    value: true
+  - id: rdo_table_ascii
+    name: rdoTableAscii
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 512
+    top: 374
+    width: 104
+    height: 18
+    caption: ASCII罫線
+    value: false
+  - id: txt_unit_preview
+    name: txtUnitPreview
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 290
+    top: 394
+    width: 540
+    height: 64
+    text: ""
+  - id: lbl_citation_target
+    name: lblCitationTarget
+    type: Label
+    progId: Forms.Label.1
+    left: 290
+    top: 466
+    width: 36
+    height: 16
+    caption: 対象
+  - id: rdo_citation_body
+    name: rdoCitationBody
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 330
+    top: 464
+    width: 64
+    height: 18
+    caption: 本文
+    value: true
+  - id: rdo_citation_search
+    name: rdoCitationSearch
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    left: 402
+    top: 464
+    width: 82
+    height: 18
+    caption: 検索結果
+    value: false
+  - id: lbl_citation_format
+    name: lblCitationFormat
+    type: Label
+    progId: Forms.Label.1
+    left: 492
+    top: 466
+    width: 36
+    height: 16
+    caption: 形式
+  - id: lbl_citation
+    name: lblCitation
+    type: Label
+    progId: Forms.Label.1
+    left: 290
+    top: 492
+    width: 56
+    height: 16
+    caption: 引用文
+  - id: cmb_citation_format
+    name: cmbCitationFormat
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    left: 530
+    top: 462
+    width: 184
+    height: 20
+    text: 出典情報つき引用
+  - id: cmd_generate_citation
+    name: cmdGenerateCitation
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 722
+    top: 460
+    width: 50
+    height: 24
+    caption: 生成
+  - id: cmd_copy_citation
+    name: cmdCopyCitation
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 780
+    top: 460
+    width: 50
+    height: 24
+    caption: コピー
+  - id: txt_citation
+    name: txtCitation
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 290
+    top: 510
+    width: 540
+    height: 52
+    text: ""
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 24
+    top: 556
+    width: 806
+    height: 20
+    caption: 待機中

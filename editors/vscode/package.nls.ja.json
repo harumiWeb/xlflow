@@ -1,6 +1,6 @@
 {
   "extension.displayName": "Xlflow - VBA Dev Tools",
-  "extension.description": "VS Code support for source-controlled Excel VBA projects powered by xlflow.",
+  "extension.description": "Provides VBA syntax highlighting, LSP server, code import/export, Linter, Formatter, etc.",
   "configuration.title": "xlflow",
   "configuration.xlflow.path.description": "xlflow実行ファイルのパスです。",
   "configuration.xlflow.lsp.enabled.description": "VBAファイルで xlflow lsp --stdio を開始します。",

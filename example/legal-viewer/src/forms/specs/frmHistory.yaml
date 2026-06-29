@@ -1,0 +1,109 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmHistory
+  caption: ""
+  observed:
+    width: 760
+    height: 500
+controls:
+  - id: lbl_kind_filter
+    name: lblKindFilter
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 16
+    width: 36
+    height: 16
+    caption: 種別
+  - id: cmb_kind_filter
+    name: cmbKindFilter
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    left: 56
+    top: 12
+    width: 110
+    height: 20
+    text: すべて
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 690
+    top: 12
+    width: 58
+    height: 24
+    caption: 閉じる
+  - id: lst_history
+    name: lstHistory
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 44
+    width: 722
+    height: 312
+  - id: lbl_detail
+    name: lblDetail
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 366
+    width: 120
+    height: 16
+    caption: 選択内容
+  - id: txt_detail
+    name: txtDetail
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 18
+    top: 384
+    width: 722
+    height: 52
+    text: ""
+  - id: cmd_readd
+    name: cmdReAdd
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 18
+    top: 446
+    width: 64
+    height: 24
+    caption: 開く
+  - id: cmd_delete
+    name: cmdDelete
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 88
+    top: 446
+    width: 52
+    height: 24
+    caption: 削除
+  - id: cmd_delete_kind
+    name: cmdDeleteKind
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 146
+    top: 446
+    width: 74
+    height: 24
+    caption: 種別削除
+  - id: cmd_delete_all
+    name: cmdDeleteAll
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 226
+    top: 446
+    width: 58
+    height: 24
+    caption: 全削除
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 474
+    width: 722
+    height: 16
+    caption: 待機中

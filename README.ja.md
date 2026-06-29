@@ -72,8 +72,8 @@ VBA のエクスポート、編集、lint、インポート、テスト、デバ
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/images/weather-news.png" alt="weather news" width="100%">
-      <sub>リアルタイムの天気ニュースを表示するマクロ</sub>
+      <img src="docs/images/legal_viewer.jpg" alt="legal viewer" width="100%">
+      <sub>法令データ検索ツール</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/images/maze-big.gif" alt="maze chase" width="100%">

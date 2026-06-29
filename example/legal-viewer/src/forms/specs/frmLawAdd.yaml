@@ -1,0 +1,110 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: frmLawAdd
+  caption: ""
+  observed:
+    width: 610
+    height: 410
+controls:
+  - id: lbl_keyword
+    name: lblKeyword
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 16
+    width: 44
+    height: 18
+    caption: 検索語
+  - id: txt_keyword
+    name: txtKeyword
+    type: TextBox
+    progId: Forms.TextBox.1
+    left: 64
+    top: 13.95
+    width: 260
+    height: 20
+    text: ""
+  - id: cmd_search
+    name: cmdSearch
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 332
+    top: 12
+    width: 58
+    height: 24
+    caption: 検索
+  - id: cmd_clear
+    name: cmdClear
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 396
+    top: 12
+    width: 58
+    height: 24
+    caption: クリア
+  - id: lst_results
+    name: lstResults
+    type: ListBox
+    progId: Forms.ListBox.1
+    left: 18
+    top: 43.95
+    width: 572
+    height: 188
+  - id: lbl_enforcement
+    name: lblEnforcementDate
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 244
+    width: 58
+    height: 18
+    caption: 施行日
+  - id: cbo_enforcement_date
+    name: cboEnforcementDate
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    left: 78
+    top: 240
+    width: 248
+    height: 20
+    enabled: false
+  - id: lbl_selected
+    name: lblSelected
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 272
+    width: 420
+    height: 34
+    caption: ""
+  - id: cmd_select
+    name: cmdSelect
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 446
+    top: 268
+    width: 62
+    height: 26
+    caption: 追加
+    enabled: false
+  - id: cmd_close
+    name: cmdClose
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    left: 516
+    top: 268
+    width: 62
+    height: 26
+    caption: 閉じる
+  - id: lbl_status
+    name: lblStatus
+    type: Label
+    progId: Forms.Label.1
+    left: 18
+    top: 319.95
+    width: 572
+    height: 18
+    caption: 待機中

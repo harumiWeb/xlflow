@@ -7,9 +7,11 @@ It enables developers to:
 
 - Ability to check the status of xlflow projects
 - Implemented import/export functionality for VBA modules
-- Features session management capabilities for performing various operations quickly
-- LSP integration enables VSCode users to access VBA-specific features including code completion, diagnostics, and symbol analysis
-- Direct execution of various commands from within VSCode itself
+- Features session management for performing various operations quickly
+- LSP (Language Server Protocol) integration enables VSCode users to access VBA-specific features including code completion, diagnostics, and symbol analysis
+- Provides semantic-based syntax highlighting for source code
+- Includes AST (Abstract Syntax Tree)-based Linter and Formatter tools
+- Comes equipped with a testing framework that supports automated testing
 
 This makes Excel VBA macro development more secure while simplifying integration with Git version control systems and AI agents.
 
@@ -56,6 +58,11 @@ In **xlflow for VSCode**, we **GUI-ify these functionalities while also providin
   ```bash
   curl -fsSL https://harumiweb.github.io/xlflow/install.sh | sh
   ```
+
+- Manual download from [GitHub Releases](https://github.com/harumiWeb/xlflow/releases)
+  After downloading, extract the files to any desired directory and place them there, then either:
+  a. Set them in the environment variable `Path`
+  b. Specify in VS Code's `settings.json` like this: `"xlflow.path": "C:\\path\\to\\xlflow.exe"`
 
 ## Features of This Extension
 

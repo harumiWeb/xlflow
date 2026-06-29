@@ -71,8 +71,8 @@ These [samples](example) were created by an AI agent using xlflow with only mini
   </tr>
     <tr>
     <td align="center" width="50%">
-      <img src="docs/images/weather-news.png" alt="weather news" width="100%">
-      <sub>Macro that displays real-time weather news</sub>
+      <img src="docs/images/legal_viewer.jpg" alt="legal viewer" width="100%">
+      <sub>Legal Act Data Search Tool</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/images/maze-big.gif" alt="maze chase" width="100%">
