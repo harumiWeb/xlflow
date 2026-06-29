@@ -1258,6 +1258,59 @@ End Function
 	assertIssue(t, PushBlockingIssues(issues), "VB029", 10)
 }
 
+func TestLinterAllowsModuleVariablesDeclaredInsideConditionalCompilationBlocks(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Private Const TimerIntervalMs As Long = 180
+
+#If VBA7 Then
+Private Declare PtrSafe Function SetTimer Lib "user32" (ByVal hwnd As LongPtr, ByVal nIDEvent As LongPtr, ByVal uElapse As Long, ByVal lpTimerFunc As LongPtr) As LongPtr
+Private Declare PtrSafe Function KillTimer Lib "user32" (ByVal hwnd As LongPtr, ByVal uIDEvent As LongPtr) As Long
+Private mTimerId As LongPtr
+#Else
+Private Declare Function SetTimer Lib "user32" (ByVal hwnd As Long, ByVal nIDEvent As Long, ByVal uElapse As Long, ByVal lpTimerFunc As Long) As Long
+Private Declare Function KillTimer Lib "user32" (ByVal hwnd As Long, ByVal uIDEvent As Long) As Long
+Private mTimerId As Long
+#End If
+
+Public Sub StartLoop()
+    If mTimerId <> 0 Then
+        Exit Sub
+    End If
+
+    #If VBA7 Then
+    mTimerId = SetTimer(0, 0, TimerIntervalMs, AddressOf MazeChaseTimerProc)
+    #Else
+    mTimerId = SetTimer(0, 0, TimerIntervalMs, AddressOf MazeChaseTimerProc)
+    #End If
+End Sub
+
+Public Sub StopLoop()
+    If mTimerId = 0 Then
+        Exit Sub
+    End If
+
+    KillTimer 0, mTimerId
+    mTimerId = 0
+    stillMissing = 1
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb029 := issuesByCode(issues, "VB029")
+	if len(vb029) != 1 {
+		t.Fatalf("expected only the truly undeclared assignment to trigger VB029, got %+v", vb029)
+	}
+	if vb029[0].Symbol != "stillMissing" {
+		t.Fatalf("mTimerId declared inside conditional compilation should not trigger VB029: %+v", vb029)
+	}
+}
+
 func TestLinterUndeclaredAssignmentsRequireOptionExplicit(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Public Sub Run()

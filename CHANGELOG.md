@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB029` false positives for module-level declarations inside `#If ... #Else ... #End If` conditional compilation blocks.
+
 ## v0.16.0
 
 - Removed the legacy PowerShell Excel bridge for v0.16.0. The only supported bridge modes are now `auto` and `dotnet`; `--bridge powershell`, `XLFLOW_EXCEL_BRIDGE=powershell`, and `[excel].bridge = "powershell"` now fail with bridge-mode/configuration errors instead of emitting a deprecation warning.

@@ -470,10 +470,22 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		if child == nil {
 			continue
 		}
-		if child.Kind() == "block" || node.Kind() == "source_file" || node.Kind() == "block" {
+		if shouldVisitSymbolChild(node.Kind(), child.Kind()) {
 			e.visit(child, parentProc)
 		}
 	}
+}
+
+func shouldVisitSymbolChild(parentKind, childKind string) bool {
+	return childKind == "block" ||
+		parentKind == "source_file" ||
+		parentKind == "block" ||
+		isPreprocessorNode(parentKind) ||
+		isPreprocessorNode(childKind)
+}
+
+func isPreprocessorNode(kind string) bool {
+	return strings.HasPrefix(kind, "preprocessor_")
 }
 
 func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {

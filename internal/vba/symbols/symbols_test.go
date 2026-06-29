@@ -109,6 +109,39 @@ End Sub
 	assertSymbol(t, privateFile.Symbols, "LocalLimit", "const")
 }
 
+func TestInspectExtractsSymbolsInsideConditionalCompilationBlocks(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+#If VBA7 Then
+Private Declare PtrSafe Function SetTimer Lib "user32" () As LongPtr
+Private mTimerId As LongPtr
+#Else
+Private Declare Function SetTimer Lib "user32" () As Long
+Private mTimerId As Long
+#End If
+
+Public Sub Run()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(moduleDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg, IncludePrivate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := result.Files[0]
+	assertSymbol(t, file.Symbols, "SetTimer", "declare_function")
+	assertSymbol(t, file.Symbols, "mTimerId", "module_variable")
+}
+
 func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
