@@ -150,6 +150,7 @@ func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {
 		"runner",
 		"session",
 		"test",
+		"type-db-import",
 		"ui",
 	}
 
