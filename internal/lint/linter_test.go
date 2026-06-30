@@ -964,6 +964,10 @@ Public Sub Run()
     Debug.Print "??"
     ' ?? "comment"
     Debug.Print "ok": ?? "after colon"
+StartLabel: ?? "after label"
+10  ?? "after line number"
+    Debug.Print _
+        ?? "continued expression"
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
@@ -974,8 +978,8 @@ End Sub
 		t.Fatal(err)
 	}
 	vb032 := issuesByCode(issues, "VB032")
-	if len(vb032) != 3 {
-		t.Fatalf("expected three VB032 findings, got %+v", vb032)
+	if len(vb032) != 5 {
+		t.Fatalf("expected five VB032 findings, got %+v", vb032)
 	}
 	assertIssue(t, vb032, "VB032", 3)
 	assertIssue(t, vb032, "VB032", 4)
@@ -983,8 +987,13 @@ End Sub
 	if colonIssue.Column == 0 {
 		t.Fatalf("expected VB032 to include a column, got %+v", colonIssue)
 	}
+	assertIssue(t, vb032, "VB032", 9)
+	lineNumberIssue := findIssue(t, vb032, "VB032", 10)
+	if lineNumberIssue.Column != 5 {
+		t.Fatalf("expected line-number-prefixed VB032 at column 5, got %+v", lineNumberIssue)
+	}
 	blocking := issuesByCode(PushBlockingIssues(issues), "VB032")
-	if len(blocking) != 3 {
+	if len(blocking) != 5 {
 		t.Fatalf("VB032 should be push-blocking, got %+v", blocking)
 	}
 }

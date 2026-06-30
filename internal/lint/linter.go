@@ -313,8 +313,10 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 		if containsLikelyCStyleQuoteEscape(code) {
 			issues = append(issues, l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character."))
 		}
-		for _, column := range repeatedQuestionShorthandColumns(detectionCode) {
-			issues = append(issues, l.issueAt(path, vbaast.Range{StartLine: lineNo, StartColumn: column}, "VB032", "error", "Repeated ? shorthand is invalid. Use a single ? or Debug.Print."))
+		if logicalLine.Len() == 0 {
+			for _, column := range repeatedQuestionShorthandColumns(detectionCode) {
+				issues = append(issues, l.issueAt(path, vbaast.Range{StartLine: lineNo, StartColumn: column}, "VB032", "error", "Repeated ? shorthand is invalid. Use a single ? or Debug.Print."))
+			}
 		}
 		lineForProcedure := detectionCode
 		if logicalStartLine == 0 {
@@ -1587,21 +1589,37 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 
 func repeatedQuestionShorthandColumns(line string) []int {
 	var columns []int
-	atStatementStart := true
-	for i := 0; i < len(line); i++ {
-		switch line[i] {
-		case ':':
-			atStatementStart = true
-			continue
-		case ' ', '\t':
-			continue
+	for _, statement := range splitStatementsWithColumns(line) {
+		start := statement.start
+		text := statement.text
+		trimmed := strings.TrimLeft(text, " \t")
+		start += len(text) - len(trimmed)
+		text = trimmed
+		lineNumber := leadingLineNumberLength(text)
+		if lineNumber > 0 {
+			start += lineNumber
+			text = strings.TrimLeft(text[lineNumber:], " \t")
+			start += len(trimmed[lineNumber:]) - len(text)
 		}
-		if atStatementStart && line[i] == '?' && i+1 < len(line) && line[i+1] == '?' {
-			columns = append(columns, i+1)
+		if strings.HasPrefix(text, "??") {
+			columns = append(columns, start+1)
 		}
-		atStatementStart = false
 	}
 	return columns
+}
+
+func leadingLineNumberLength(text string) int {
+	i := 0
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0
+	}
+	if i == len(text) || text[i] == ' ' || text[i] == '\t' {
+		return i
+	}
+	return 0
 }
 
 func isTypeStartLine(lower string) bool {
@@ -1888,7 +1906,21 @@ func removeLineContinuationMarker(line string) string {
 }
 
 func splitStatements(line string) []string {
-	statements := make([]string, 0, 1)
+	parts := splitStatementsWithColumns(line)
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		statements = append(statements, part.text)
+	}
+	return statements
+}
+
+type statementPart struct {
+	text  string
+	start int
+}
+
+func splitStatementsWithColumns(line string) []statementPart {
+	parts := make([]statementPart, 0, 1)
 	start := 0
 	inString := false
 	for i := 0; i < len(line); i++ {
@@ -1905,16 +1937,20 @@ func splitStatements(line string) []string {
 			}
 			statement := strings.TrimSpace(line[start:i])
 			if statement != "" {
-				statements = append(statements, statement)
+				parts = append(parts, statementPart{text: statement, start: start + leadingWhitespaceLength(line[start:i])})
 			}
 			start = i + 1
 		}
 	}
 	statement := strings.TrimSpace(line[start:])
 	if statement != "" {
-		statements = append(statements, statement)
+		parts = append(parts, statementPart{text: statement, start: start + leadingWhitespaceLength(line[start:])})
 	}
-	return statements
+	return parts
+}
+
+func leadingWhitespaceLength(text string) int {
+	return len(text) - len(strings.TrimLeft(text, " \t"))
 }
 
 func endsWithIdentifierUnderscore(line string) bool {
