@@ -1,6 +1,10 @@
 package vbadb
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	db, err := LoadBuiltin()
@@ -220,6 +224,68 @@ func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
 	}
 	if !hasMember(db.Members("Excel.Font"), "Color") {
 		t.Fatalf("Font.Color member missing: %+v", db.Members("Excel.Font"))
+	}
+}
+
+func TestLoadFilesMergesTypesMembersAndOverridesMembers(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	overlay := filepath.Join(dir, "overlay.json")
+	if err := os.WriteFile(base, []byte(`{
+  "types": [
+    {
+      "name": "Excel.Range",
+      "library": "Excel",
+      "kind": "class",
+      "properties": [
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "methods": [
+        { "name": "Find", "return_type": "Object" }
+      ]
+    }
+  ],
+  "constants": [
+    { "name": "xlUp", "library": "Excel", "enum_group": "XlDirection" }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(overlay, []byte(`{
+  "types": [
+    {
+      "name": "Excel.Range",
+      "source": "xlflow",
+      "properties": [
+        { "name": "Font", "return_type": "Excel.Font" }
+      ],
+      "methods": [
+        { "name": "Find", "return_type": "Excel.Range", "parameters": [{ "name": "What", "type": "Variant" }] }
+      ]
+    }
+  ],
+  "constants": [
+    { "name": "xlUp", "library": "Excel", "enum_group": "XlDirection", "summary": "overlay" }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := LoadFiles(base, overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := db.ResolveMember("Range", "Value"); !ok || got.ReturnType != "Variant" {
+		t.Fatalf("base property missing after merge: %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Range", "Font"); !ok || got.ReturnType != "Excel.Font" {
+		t.Fatalf("overlay property missing after merge: %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Range", "Find"); !ok || got.ReturnType != "Excel.Range" || len(got.Parameters) != 1 {
+		t.Fatalf("overlay method should replace base method: %+v, %v", got, ok)
+	}
+	if c, ok := db.ResolveConstant("xlUp"); !ok || c.Summary != "overlay" {
+		t.Fatalf("constant overlay missing: %+v, %v", c, ok)
 	}
 }
 

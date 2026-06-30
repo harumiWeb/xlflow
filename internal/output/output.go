@@ -72,6 +72,7 @@ type Envelope struct {
 	Edit           any `json:"edit,omitempty"`
 	Project        any `json:"project,omitempty"`
 	State          any `json:"state,omitempty"`
+	TypeDB         any `json:"type_db,omitempty"`
 	Warnings       any `json:"warnings,omitempty"`
 	Hints          any `json:"hints,omitempty"`
 	DefaultEntry   any `json:"default_entry,omitempty"`
@@ -419,6 +420,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderSession(env))
 	case "status":
 		b.WriteString(r.renderStatus(env))
+	case "type db status", "type db clean":
+		b.WriteString(r.renderTypeDB(env))
 	case "save":
 		b.WriteString(r.renderSave(env))
 	case "export-image":
@@ -738,6 +741,67 @@ func (r renderer) renderVersion(env Envelope) string {
 			fmt.Fprintf(&b, "- %s: %s\n", stringValue(feature, "name"), stringValue(feature, "description"))
 		}
 	}
+	return b.String()
+}
+
+func (r renderer) renderTypeDB(env Envelope) string {
+	db := objectMap(env.TypeDB)
+	if len(db) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if dir := stringValue(db, "dir"); dir != "" {
+		b.WriteString(kv("Directory", dir))
+	}
+	if path := stringValue(db, "manifest_path"); path != "" {
+		b.WriteString(kv("Manifest", path))
+	}
+	if _, ok := boolValueOK(db, "manifest_exists"); ok {
+		b.WriteString(kv("Manifest state", yesNo(boolValue(db, "manifest_exists"))))
+	}
+	if generatedAt := stringValue(db, "generated_at"); generatedAt != "" {
+		b.WriteString(kv("Generated at", generatedAt))
+	}
+	if _, ok := boolValueOK(db, "stale"); ok {
+		b.WriteString(kv("Stale", yesNo(boolValue(db, "stale"))))
+	}
+	if reason := stringValue(db, "reason"); reason != "" {
+		b.WriteString(kv("Reason", reason))
+	}
+	libraries := listOfObjects(db["libraries"])
+	if len(libraries) > 0 {
+		b.WriteString("Libraries:\n")
+		for _, library := range libraries {
+			name := stringValue(library, "name")
+			if name == "" {
+				name = stringValue(library, "libid")
+			}
+			state := "missing"
+			if boolValue(library, "exists") {
+				state = "present"
+			}
+			if boolValue(library, "stale") {
+				state += ", stale"
+			}
+			output := stringValue(library, "output")
+			if output != "" {
+				output = " -> " + output
+			}
+			fmt.Fprintf(&b, "- %s (%s)%s\n", name, state, output)
+		}
+	}
+	files := stringList(db["generated_files"])
+	if len(files) > 0 {
+		b.WriteString("Generated files:\n")
+		for _, file := range files {
+			b.WriteString("- ")
+			b.WriteString(file)
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
 	return b.String()
 }
 

@@ -38,6 +38,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
@@ -168,6 +169,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.macrosCommand(),
 		a.uiCommand(),
 		a.testCommand(),
+		a.typeCommand(),
 		a.diffCommand(),
 		a.inspectCommand(),
 		a.inspectGUICommand(),
@@ -3240,6 +3242,76 @@ func (a *app) testListCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", "", "source directory or file to inspect (default: configured source tree)")
 	cmd.Flags().StringVar(&module, "module", "", "list only tests in the module whose name exactly matches filter")
+	return cmd
+}
+
+func (a *app) typeCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "type",
+		Short: "Manage VBA type intelligence data",
+	}
+	cmd.AddCommand(a.typeDBCommand())
+	return cmd
+}
+
+func (a *app) typeDBCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "db",
+		Short: "Manage generated TypeLib type databases",
+	}
+	cmd.AddCommand(
+		a.typeDBStatusCommand(),
+		a.typeDBCleanCommand(),
+	)
+	return cmd
+}
+
+func (a *app) typeDBStatusCommand() *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show generated TypeLib type database status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := typedb.StatusFor(typedb.Options{
+				Dir:              dir,
+				GeneratorVersion: a.buildInfo.withDefaults().Version,
+			})
+			if err != nil {
+				return a.writeFailure("type db status", output.ExitEnvironment, "type_db_status_failed", err)
+			}
+			env := output.New("type db status")
+			env.TypeDB = status
+			if status.ManifestExists {
+				env.Logs = []string{"generated type database status loaded"}
+			} else {
+				env.Logs = []string{"generated type database has not been initialized"}
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	return cmd
+}
+
+func (a *app) typeDBCleanCommand() *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "clean",
+		Short: "Delete generated TypeLib type databases",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cleaned, err := typedb.Clean(dir)
+			if err != nil {
+				return a.writeFailure("type db clean", output.ExitEnvironment, "type_db_clean_failed", err)
+			}
+			env := output.New("type db clean")
+			env.TypeDB = map[string]any{"dir": cleaned}
+			env.Logs = []string{"deleted generated type database directory"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
 	return cmd
 }
 

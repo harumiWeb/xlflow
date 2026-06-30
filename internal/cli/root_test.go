@@ -116,6 +116,26 @@ func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesTypeDBCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"type"},
+		{"type", "db"},
+		{"type", "db", "status"},
+		{"type", "db", "clean"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", args, err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("Find(%v) = %#v", args, cmd)
+		}
+	}
+}
+
 func TestRootCommandIncludesBridgeFlag(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

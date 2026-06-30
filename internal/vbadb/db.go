@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+const SchemaVersion = 1
 
 //go:embed builtin/*.json
 var builtinFS embed.FS
@@ -74,15 +77,7 @@ type fileData struct {
 }
 
 func LoadBuiltin() (*DB, error) {
-	db := &DB{
-		Types:        map[string]TypeInfo{},
-		Aliases:      map[string]string{},
-		Constants:    map[string]ConstantInfo{},
-		ProgIDs:      map[string]string{},
-		ProgIDNames:  map[string]string{},
-		GlobalValues: map[string]string{},
-		GlobalNames:  map[string]string{},
-	}
+	db := New()
 	err := fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -94,24 +89,8 @@ func LoadBuiltin() (*DB, error) {
 		if err != nil {
 			return err
 		}
-		var data fileData
-		if err := json.Unmarshal(body, &data); err != nil {
+		if err := db.MergeJSON(body); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
-		}
-		for _, typ := range data.Types {
-			db.addType(typ)
-		}
-		for _, c := range data.Constants {
-			db.Constants[fold(c.Name)] = c
-		}
-		for progID, typ := range data.ProgIDs {
-			key := fold(progID)
-			db.ProgIDs[key] = typ
-			db.ProgIDNames[key] = progID
-		}
-		for name, typ := range data.GlobalValues {
-			db.GlobalValues[fold(name)] = typ
-			db.GlobalNames[fold(name)] = name
 		}
 		return nil
 	})
@@ -121,9 +100,96 @@ func LoadBuiltin() (*DB, error) {
 	return db, nil
 }
 
+func New() *DB {
+	return &DB{
+		Types:        map[string]TypeInfo{},
+		Aliases:      map[string]string{},
+		Constants:    map[string]ConstantInfo{},
+		ProgIDs:      map[string]string{},
+		ProgIDNames:  map[string]string{},
+		GlobalValues: map[string]string{},
+		GlobalNames:  map[string]string{},
+	}
+}
+
+func LoadFiles(paths ...string) (*DB, error) {
+	db := New()
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := db.MergeJSON(body); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return db, nil
+}
+
+func LoadDir(dir string) (*DB, error) {
+	db := New()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || strings.ToLower(filepath.Ext(path)) != ".json" {
+			return nil
+		}
+		if strings.EqualFold(filepath.Base(path), "manifest.json") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := db.MergeJSON(body); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+func (db *DB) MergeJSON(body []byte) error {
+	var data fileData
+	if err := json.Unmarshal(body, &data); err != nil {
+		return err
+	}
+	db.MergeData(data)
+	return nil
+}
+
+func (db *DB) MergeData(data fileData) {
+	if db == nil {
+		return
+	}
+	for _, typ := range data.Types {
+		db.addType(typ)
+	}
+	for _, c := range data.Constants {
+		db.Constants[fold(c.Name)] = c
+	}
+	for progID, typ := range data.ProgIDs {
+		key := fold(progID)
+		db.ProgIDs[key] = typ
+		db.ProgIDNames[key] = progID
+	}
+	for name, typ := range data.GlobalValues {
+		db.GlobalValues[fold(name)] = typ
+		db.GlobalNames[fold(name)] = name
+	}
+}
+
 func (db *DB) addType(typ TypeInfo) {
 	if typ.Name == "" {
 		return
+	}
+	key := fold(typ.Name)
+	if existing, ok := db.Types[key]; ok {
+		typ = mergeType(existing, typ)
 	}
 	db.Aliases[fold(typ.Name)] = typ.Name
 	short := typ.Name
@@ -137,7 +203,89 @@ func (db *DB) addType(typ TypeInfo) {
 	if typ.Kind == "collection" {
 		typ.Collection = true
 	}
-	db.Types[fold(typ.Name)] = typ
+	db.Types[key] = typ
+}
+
+func mergeType(base, overlay TypeInfo) TypeInfo {
+	out := base
+	if overlay.Name != "" {
+		out.Name = overlay.Name
+	}
+	if overlay.Library != "" {
+		out.Library = overlay.Library
+	}
+	if overlay.Kind != "" {
+		out.Kind = overlay.Kind
+	}
+	if overlay.Summary != "" {
+		out.Summary = overlay.Summary
+	}
+	if overlay.ElementType != "" {
+		out.ElementType = overlay.ElementType
+	}
+	if overlay.DefaultMember != "" {
+		out.DefaultMember = overlay.DefaultMember
+	}
+	if overlay.DefaultMemberType != "" {
+		out.DefaultMemberType = overlay.DefaultMemberType
+	}
+	if overlay.Collection {
+		out.Collection = true
+	}
+	if overlay.Confidence != "" {
+		out.Confidence = overlay.Confidence
+	}
+	if overlay.Source != "" {
+		out.Source = overlay.Source
+	}
+	out.Aliases = mergeStrings(out.Aliases, overlay.Aliases)
+	out.Properties = mergeMembers(out.Properties, overlay.Properties)
+	out.Methods = mergeMembers(out.Methods, overlay.Methods)
+	out.Events = mergeMembers(out.Events, overlay.Events)
+	return out
+}
+
+func mergeStrings(base, overlay []string) []string {
+	if len(base) == 0 {
+		return append([]string{}, overlay...)
+	}
+	out := append([]string{}, base...)
+	seen := map[string]bool{}
+	for _, value := range out {
+		seen[fold(value)] = true
+	}
+	for _, value := range overlay {
+		if value == "" || seen[fold(value)] {
+			continue
+		}
+		seen[fold(value)] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func mergeMembers(base, overlay []MemberInfo) []MemberInfo {
+	if len(base) == 0 {
+		return append([]MemberInfo{}, overlay...)
+	}
+	out := append([]MemberInfo{}, base...)
+	index := map[string]int{}
+	for i, member := range out {
+		index[fold(member.Name)] = i
+	}
+	for _, member := range overlay {
+		key := fold(member.Name)
+		if key == "" {
+			continue
+		}
+		if i, ok := index[key]; ok {
+			out[i] = member
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, member)
+	}
+	return out
 }
 
 func (db *DB) ResolveType(name string) (TypeInfo, bool) {
