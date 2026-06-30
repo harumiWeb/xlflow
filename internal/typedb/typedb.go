@@ -69,6 +69,14 @@ type Options struct {
 	GeneratorVersion string
 }
 
+type LoadResult struct {
+	DB             *vbadb.DB
+	GeneratedDir   string
+	GeneratedFiles []string
+	Generated      bool
+	Warnings       []string
+}
+
 func DefaultDir() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv(EnvDir)); dir != "" {
 		return filepath.Clean(dir), nil
@@ -230,6 +238,31 @@ func LoadGenerated(dir string) (*vbadb.DB, error) {
 		return vbadb.New(), nil
 	}
 	return vbadb.LoadDir(resolved)
+}
+
+func LoadForRuntime(dir string) (LoadResult, error) {
+	resolved, err := ResolveDir(dir)
+	if err != nil {
+		return LoadResult{}, err
+	}
+	result := LoadResult{GeneratedDir: resolved}
+	files := generatedFiles(resolved)
+	result.GeneratedFiles = files
+	db := vbadb.New()
+	if len(files) > 0 {
+		generated, err := vbadb.LoadFiles(files...)
+		if err != nil {
+			result.Warnings = append(result.Warnings, "generated type database could not be loaded: "+err.Error())
+		} else {
+			db = generated
+			result.Generated = true
+		}
+	}
+	if err := vbadb.LoadBuiltinInto(db); err != nil {
+		return LoadResult{}, err
+	}
+	result.DB = db
+	return result, nil
 }
 
 func generatedFiles(dir string) []string {

@@ -24,6 +24,35 @@ func TestCheckLoadsBuiltinDatabase(t *testing.T) {
 	}
 }
 
+func TestNewLoadsGeneratedTypeDatabaseWhenPresent(t *testing.T) {
+	typeDBDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(typeDBDir, "vendor.generated.json"), []byte(`{
+  "types": [
+    {
+      "name": "Vendor.Widget",
+      "library": "Vendor",
+      "kind": "class",
+      "properties": [{ "name": "Name", "return_type": "String" }]
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server, cleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default(), TypeDBDir: typeDBDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if typ, ok := server.db.ResolveType("Vendor.Widget"); !ok || typ.Name != "Vendor.Widget" {
+		t.Fatalf("generated type missing: %+v, %v", typ, ok)
+	}
+	if member, ok := server.db.ResolveMember("Vendor.Widget", "Name"); !ok || member.ReturnType != "String" {
+		t.Fatalf("generated member missing: %+v, %v", member, ok)
+	}
+}
+
 func TestFileURIPathRoundTripWithEscapedJapanesePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "日本 語#%dir", "Main.bas")
 	uri := pathToFileURI(path)

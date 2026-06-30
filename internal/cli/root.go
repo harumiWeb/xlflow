@@ -5177,12 +5177,20 @@ func (a *app) lspCommand() *cobra.Command {
 				if err := lspserver.Check(opts); err != nil {
 					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
 				}
+				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+				typeDatabase := "builtin"
+				if statusErr == nil && typeDBStatus.ManifestExists && !typeDBStatus.Stale {
+					typeDatabase = "builtin+global_generated"
+				}
 				env := output.New("lsp")
 				env.Diagnostics = map[string]any{
 					"server":        "xlflow-vba-lsp",
 					"transport":     "stdio",
-					"type_database": "builtin",
+					"type_database": typeDatabase,
 					"sync":          "full",
+				}
+				if statusErr == nil {
+					env.TypeDB = typeDBStatus
 				}
 				env.Logs = []string{"lsp pre-launch check passed"}
 				return a.write(env, output.ExitSuccess)

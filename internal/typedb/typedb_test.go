@@ -81,3 +81,42 @@ func TestCleanRemovesResolvedDir(t *testing.T) {
 		t.Fatalf("dir still exists or unexpected error: %v", err)
 	}
 }
+
+func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "custom.generated.json"), []byte(`{
+  "types": [
+    {
+      "name": "Vendor.Widget",
+      "library": "Vendor",
+      "kind": "class",
+      "properties": [{ "name": "Name", "return_type": "String" }]
+    },
+    {
+      "name": "Excel.Range",
+      "library": "Excel",
+      "kind": "class",
+      "properties": [{ "name": "Value", "return_type": "Long" }]
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Generated {
+		t.Fatal("generated DB should be loaded")
+	}
+	if typ, ok := result.DB.ResolveType("Vendor.Widget"); !ok || typ.Name != "Vendor.Widget" {
+		t.Fatalf("generated type missing: %+v, %v", typ, ok)
+	}
+	if member, ok := result.DB.ResolveMember("Vendor.Widget", "Name"); !ok || member.ReturnType != "String" {
+		t.Fatalf("generated member missing: %+v, %v", member, ok)
+	}
+	if member, ok := result.DB.ResolveMember("Excel.Range", "Value"); !ok || member.ReturnType != "Variant" {
+		t.Fatalf("built-in overlay should override generated Excel.Range.Value: %+v, %v", member, ok)
+	}
+}

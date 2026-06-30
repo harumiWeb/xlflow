@@ -20,6 +20,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -36,11 +37,12 @@ type BuildInfo struct {
 }
 
 type Options struct {
-	RootDir string
-	Config  config.Config
-	Build   BuildInfo
-	LogFile string
-	Stderr  io.Writer
+	RootDir   string
+	Config    config.Config
+	Build     BuildInfo
+	LogFile   string
+	Stderr    io.Writer
+	TypeDBDir string
 }
 
 type Server struct {
@@ -59,11 +61,11 @@ type Server struct {
 }
 
 func Check(opts Options) error {
-	db, err := vbadb.LoadBuiltin()
+	result, err := typedb.LoadForRuntime(opts.TypeDBDir)
 	if err != nil {
 		return err
 	}
-	return intel.Analyzer{RootDir: opts.RootDir, Config: opts.Config, DB: db}.Check()
+	return intel.Analyzer{RootDir: opts.RootDir, Config: opts.Config, DB: result.DB}.Check()
 }
 
 func RunStdio(opts Options) error {
@@ -79,7 +81,7 @@ func RunStdio(opts Options) error {
 }
 
 func New(opts Options) (*Server, func(), error) {
-	db, err := vbadb.LoadBuiltin()
+	typeDB, err := typedb.LoadForRuntime(opts.TypeDBDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -87,13 +89,16 @@ func New(opts Options) (*Server, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, warning := range typeDB.Warnings {
+		logger.Printf("type database warning: %s", warning)
+	}
 	s := &Server{
 		opts: opts,
-		db:   db,
+		db:   typeDB.DB,
 		analyzer: intel.Analyzer{
 			RootDir: opts.RootDir,
 			Config:  opts.Config,
-			DB:      db,
+			DB:      typeDB.DB,
 		},
 		docs:           newDocuments(opts.RootDir),
 		logger:         logger,

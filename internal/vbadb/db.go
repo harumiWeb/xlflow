@@ -78,6 +78,16 @@ type fileData struct {
 
 func LoadBuiltin() (*DB, error) {
 	db := New()
+	if err := LoadBuiltinInto(db); err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+func LoadBuiltinInto(db *DB) error {
+	if db == nil {
+		return fmt.Errorf("vbadb: nil DB")
+	}
 	err := fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -94,10 +104,7 @@ func LoadBuiltin() (*DB, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
+	return err
 }
 
 func New() *DB {
