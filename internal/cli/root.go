@@ -1093,6 +1093,7 @@ func (a *app) newCommand() *cobra.Command {
 				if withSkill {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
+				a.attachTypeDBBootstrap(&env)
 				return a.write(env, output.ExitSuccess)
 			}
 		},
@@ -1185,6 +1186,7 @@ func (a *app) initCommand() *cobra.Command {
 				if withSkill {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
+				a.attachTypeDBBootstrap(&env)
 				return a.write(env, output.ExitSuccess)
 			}
 		},
@@ -1219,6 +1221,65 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 			Keepalive: keepaliveOpts,
 		})
 	})
+}
+
+func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
+	if env == nil {
+		return
+	}
+	env.Logs = append(env.Logs, "Type database: built-in DB ok")
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
+		return
+	}
+	if status.ManifestExists {
+		env.Logs = append(env.Logs, "Type database: generated TypeLib DB already exists")
+		env.TypeDB = status
+		return
+	}
+	resolvedDir, err := typedb.ResolveDir("")
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_dir_failed", "Generated TypeLib DB directory could not be resolved: "+err.Error())
+		return
+	}
+	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        []string{"excel"},
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_init_skipped", "Generated TypeLib DB was skipped: "+err.Error())
+		appendTypeDBBootstrapHint(env)
+		return
+	}
+	if code != output.ExitSuccess {
+		reason := "unknown error"
+		if typeDBEnv.Error != nil && typeDBEnv.Error.Message != "" {
+			reason = typeDBEnv.Error.Message
+		}
+		appendTypeDBBootstrapWarning(env, "type_db_init_skipped", "Generated TypeLib DB was skipped: "+reason)
+		appendTypeDBBootstrapHint(env)
+		return
+	}
+	env.Logs = append(env.Logs, "Type database: generated TypeLib DB created at "+resolvedDir)
+	env.TypeDB = typeDBEnv.TypeDB
+}
+
+func appendTypeDBBootstrapWarning(env *output.Envelope, code string, message string) {
+	warnings := anySlice(env.Warnings)
+	warnings = append(warnings, map[string]any{"code": code, "message": message})
+	env.Warnings = warnings
+}
+
+func appendTypeDBBootstrapHint(env *output.Envelope) {
+	hints := anySlice(env.Hints)
+	hints = append(hints, map[string]any{
+		"code":    "type_db_init_later",
+		"message": "Run `xlflow type db init` after installing Excel to enable richer COM completions.",
+	})
+	env.Hints = hints
 }
 
 func (a *app) doctorCommand() *cobra.Command {

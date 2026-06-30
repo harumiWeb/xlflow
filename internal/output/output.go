@@ -2667,6 +2667,7 @@ func (r renderer) renderCreated(env Envelope) string {
 			}
 		}
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
 

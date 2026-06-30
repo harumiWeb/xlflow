@@ -30,6 +30,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [macros](./macros)             | Discover runnable public workbook macro entrypoints without executing user code. |
 | [ui](./ui)                     | Manage xlflow-owned worksheet buttons.                                           |
 | [test](./test)                 | Discover and run workbook VBA test procedures.                                   |
+| [type db](./type-db)           | Manage generated TypeLib databases for LSP type intelligence.                    |
 | [diff](./diff)                 | Compare workbook files and optionally exported VBA source trees.                 |
 | [inspect](./inspect)           | Inspect saved workbook state or UserForm state.                                  |
 | [inspect-gui](./inspect-gui)   | Scan source for automation-hostile GUI boundaries without opening Excel.         |
