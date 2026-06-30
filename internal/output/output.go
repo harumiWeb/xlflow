@@ -420,7 +420,7 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderSession(env))
 	case "status":
 		b.WriteString(r.renderStatus(env))
-	case "type db status", "type db clean":
+	case "type db status", "type db init", "type db refresh", "type db clean":
 		b.WriteString(r.renderTypeDB(env))
 	case "save":
 		b.WriteString(r.renderSave(env))

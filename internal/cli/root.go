@@ -3261,6 +3261,8 @@ func (a *app) typeDBCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		a.typeDBStatusCommand(),
+		a.typeDBInitCommand(),
+		a.typeDBRefreshCommand(),
 		a.typeDBCleanCommand(),
 	)
 	return cmd
@@ -3292,6 +3294,78 @@ func (a *app) typeDBStatusCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
 	return cmd
+}
+
+func (a *app) typeDBInitCommand() *cobra.Command {
+	var dir string
+	var libraries []string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Generate TypeLib type databases when missing",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
+			if err != nil {
+				return a.writeFailure("type db init", output.ExitEnvironment, "type_db_status_failed", err)
+			}
+			if status.ManifestExists && !status.Stale {
+				env := output.New("type db init")
+				env.TypeDB = status
+				env.Logs = []string{"generated type database already exists"}
+				return a.write(env, output.ExitSuccess)
+			}
+			return a.generateTypeDB("type db init", dir, libraries)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; default: excel)")
+	return cmd
+}
+
+func (a *app) typeDBRefreshCommand() *cobra.Command {
+	var dir string
+	var libraries []string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "refresh",
+		Short: "Refresh generated TypeLib type databases",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
+			if err != nil {
+				return a.writeFailure("type db refresh", output.ExitEnvironment, "type_db_status_failed", err)
+			}
+			if !force && status.ManifestExists && !status.Stale {
+				env := output.New("type db refresh")
+				env.TypeDB = status
+				env.Logs = []string{"generated type database is up to date"}
+				return a.write(env, output.ExitSuccess)
+			}
+			return a.generateTypeDB("type db refresh", dir, libraries)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; default: excel)")
+	cmd.Flags().BoolVar(&force, "force", false, "regenerate even when the manifest is current")
+	return cmd
+}
+
+func (a *app) generateTypeDB(command string, dir string, libraries []string) error {
+	resolvedDir, err := typedb.ResolveDir(dir)
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "type_db_dir_failed", err)
+	}
+	env, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        libraries,
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		return err
+	}
+	env.Command = command
+	return a.write(env, code)
 }
 
 func (a *app) typeDBCleanCommand() *cobra.Command {

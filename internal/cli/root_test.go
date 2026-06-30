@@ -124,6 +124,8 @@ func TestRootCommandIncludesTypeDBCommands(t *testing.T) {
 		{"type"},
 		{"type", "db"},
 		{"type", "db", "status"},
+		{"type", "db", "init"},
+		{"type", "db", "refresh"},
 		{"type", "db", "clean"},
 	} {
 		cmd, _, err := root.Find(args)
