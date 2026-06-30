@@ -313,6 +313,11 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 		if containsLikelyCStyleQuoteEscape(code) {
 			issues = append(issues, l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character."))
 		}
+		if logicalLine.Len() == 0 {
+			for _, column := range repeatedQuestionShorthandColumns(detectionCode) {
+				issues = append(issues, l.issueAt(path, vbaast.Range{StartLine: lineNo, StartColumn: column}, "VB032", "error", "Repeated ? shorthand is invalid. Use a single ? or Debug.Print."))
+			}
+		}
 		lineForProcedure := detectionCode
 		if logicalStartLine == 0 {
 			logicalStartLine = lineNo
@@ -1018,7 +1023,7 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" || issue.Code == "VB032" {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -1487,7 +1492,7 @@ func intString(value int) string {
 
 func hasSpecificSyntaxIssue(issues []Issue) bool {
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB032" {
 			return true
 		}
 	}
@@ -1580,6 +1585,41 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 		}
 	}
 	return false
+}
+
+func repeatedQuestionShorthandColumns(line string) []int {
+	var columns []int
+	for _, statement := range splitStatementsWithColumns(line) {
+		start := statement.start
+		text := statement.text
+		trimmed := strings.TrimLeft(text, " \t")
+		start += len(text) - len(trimmed)
+		text = trimmed
+		lineNumber := leadingLineNumberLength(text)
+		if lineNumber > 0 {
+			start += lineNumber
+			text = strings.TrimLeft(text[lineNumber:], " \t")
+			start += len(trimmed[lineNumber:]) - len(text)
+		}
+		if strings.HasPrefix(text, "??") {
+			columns = append(columns, start+1)
+		}
+	}
+	return columns
+}
+
+func leadingLineNumberLength(text string) int {
+	i := 0
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0
+	}
+	if i == len(text) || text[i] == ' ' || text[i] == '\t' {
+		return i
+	}
+	return 0
 }
 
 func isTypeStartLine(lower string) bool {
@@ -1866,7 +1906,21 @@ func removeLineContinuationMarker(line string) string {
 }
 
 func splitStatements(line string) []string {
-	statements := make([]string, 0, 1)
+	parts := splitStatementsWithColumns(line)
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		statements = append(statements, part.text)
+	}
+	return statements
+}
+
+type statementPart struct {
+	text  string
+	start int
+}
+
+func splitStatementsWithColumns(line string) []statementPart {
+	parts := make([]statementPart, 0, 1)
 	start := 0
 	inString := false
 	for i := 0; i < len(line); i++ {
@@ -1883,16 +1937,20 @@ func splitStatements(line string) []string {
 			}
 			statement := strings.TrimSpace(line[start:i])
 			if statement != "" {
-				statements = append(statements, statement)
+				parts = append(parts, statementPart{text: statement, start: start + leadingWhitespaceLength(line[start:i])})
 			}
 			start = i + 1
 		}
 	}
 	statement := strings.TrimSpace(line[start:])
 	if statement != "" {
-		statements = append(statements, statement)
+		parts = append(parts, statementPart{text: statement, start: start + leadingWhitespaceLength(line[start:])})
 	}
-	return statements
+	return parts
+}
+
+func leadingWhitespaceLength(text string) int {
+	return len(text) - len(strings.TrimLeft(text, " \t"))
 }
 
 func endsWithIdentifierUnderscore(line string) bool {

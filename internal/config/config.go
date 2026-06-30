@@ -154,6 +154,7 @@ var (
 		"VB028":  true,
 		"VB029":  true,
 		"VB031":  true,
+		"VB032":  true,
 		"VBA101": true,
 		"VBA102": true,
 		"VBA103": true,
@@ -196,7 +197,7 @@ func AnalyzeDiagnosticID(id string) bool {
 func InlineSuppressibleDiagnosticID(id string) bool {
 	id = strings.ToUpper(strings.TrimSpace(id))
 	switch id {
-	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB028", "VB029", "VB031",
+	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB028", "VB029", "VB031", "VB032",
 		"VBA104", "VBA105", "VBA106", "VBA211":
 		return false
 	default:
