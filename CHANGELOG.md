@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `VB032` lint/LSP/preflight validation for repeated `?` Debug.Print shorthand such as `?? "hoge"`, reporting it before Excel/VBE interaction.
+
 ## v0.16.1
 
 - Fixed `VB029` false positives for module-level declarations inside `#If ... #Else ... #End If` conditional compilation blocks.

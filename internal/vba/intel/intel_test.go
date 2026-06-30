@@ -61,6 +61,16 @@ End Sub
 
 	doc.Source = `Option Explicit
 Public Sub Run()
+    ?? "hoge"
+End Sub
+`
+	diagnostics = analyzer.Diagnostics(doc)
+	if !hasDiagnostic(diagnostics, "VB032") {
+		t.Fatalf("VB032 diagnostic missing: %+v", diagnostics)
+	}
+
+	doc.Source = `Option Explicit
+Public Sub Run()
     Dim missingValue As Long
     missingValue = 1
 End Sub

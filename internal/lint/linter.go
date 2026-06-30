@@ -313,6 +313,9 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 		if containsLikelyCStyleQuoteEscape(code) {
 			issues = append(issues, l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character."))
 		}
+		for _, column := range repeatedQuestionShorthandColumns(detectionCode) {
+			issues = append(issues, l.issueAt(path, vbaast.Range{StartLine: lineNo, StartColumn: column}, "VB032", "error", "Repeated ? shorthand is invalid. Use a single ? or Debug.Print."))
+		}
 		lineForProcedure := detectionCode
 		if logicalStartLine == 0 {
 			logicalStartLine = lineNo
@@ -1018,7 +1021,7 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" || issue.Code == "VB032" {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -1487,7 +1490,7 @@ func intString(value int) string {
 
 func hasSpecificSyntaxIssue(issues []Issue) bool {
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB032" {
 			return true
 		}
 	}
@@ -1580,6 +1583,25 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 		}
 	}
 	return false
+}
+
+func repeatedQuestionShorthandColumns(line string) []int {
+	var columns []int
+	atStatementStart := true
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case ':':
+			atStatementStart = true
+			continue
+		case ' ', '\t':
+			continue
+		}
+		if atStatementStart && line[i] == '?' && i+1 < len(line) && line[i+1] == '?' {
+			columns = append(columns, i+1)
+		}
+		atStatementStart = false
+	}
+	return columns
 }
 
 func isTypeStartLine(lower string) bool {

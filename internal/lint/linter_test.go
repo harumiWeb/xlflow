@@ -950,6 +950,45 @@ End Sub
 	}
 }
 
+func TestLinterFindsRepeatedQuestionShorthand(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Public Sub Run()
+    ?? "hoge"
+    ??? "fuga"
+    ? "ok"
+    Debug.Print "??"
+    ' ?? "comment"
+    Debug.Print "ok": ?? "after colon"
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb032 := issuesByCode(issues, "VB032")
+	if len(vb032) != 3 {
+		t.Fatalf("expected three VB032 findings, got %+v", vb032)
+	}
+	assertIssue(t, vb032, "VB032", 3)
+	assertIssue(t, vb032, "VB032", 4)
+	colonIssue := findIssue(t, vb032, "VB032", 8)
+	if colonIssue.Column == 0 {
+		t.Fatalf("expected VB032 to include a column, got %+v", colonIssue)
+	}
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB032")
+	if len(blocking) != 3 {
+		t.Fatalf("VB032 should be push-blocking, got %+v", blocking)
+	}
+}
+
 func TestLinterAllowsIdentifiersEndingWithUnderscore(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
