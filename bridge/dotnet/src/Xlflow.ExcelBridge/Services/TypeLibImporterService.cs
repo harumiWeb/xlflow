@@ -54,11 +54,21 @@ public sealed class TypeLibImporterService
             var libraries = ResolveLibraries(args.Libraries);
             var manifestLibraries = new List<Dictionary<string, object?>>();
             var generatedFiles = new List<string>();
+            var logs = new List<string>();
 
-            foreach (var target in libraries)
+            foreach (var target in libraries.Targets)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var registration = ResolveRegisteredTypeLib(target);
+                TypeLibRegistration registration;
+                try
+                {
+                    registration = ResolveRegisteredTypeLib(target);
+                }
+                catch (InvalidOperationException ex) when (libraries.BestEffort)
+                {
+                    logs.Add($"skipped {target.Name}: {ex.Message}");
+                    continue;
+                }
                 var db = ImportLibrary(target, registration);
                 var outputPath = Path.Combine(outputDir, target.Output);
                 File.WriteAllText(outputPath, JsonSerializer.Serialize(db, JsonOptions) + Environment.NewLine);
@@ -73,6 +83,11 @@ public sealed class TypeLibImporterService
                     ["source"] = "registry",
                     ["output"] = target.Output,
                 });
+            }
+
+            if (generatedFiles.Count == 0)
+            {
+                throw new InvalidOperationException("No requested TypeLib libraries were found on this machine.");
             }
 
             var manifest = new Dictionary<string, object?>
@@ -91,7 +106,7 @@ public sealed class TypeLibImporterService
             {
                 RequestId = request.RequestId,
                 Command = request.Command,
-                Logs = [$"generated {generatedFiles.Count} TypeLib type database file(s)"],
+                Logs = [$"generated {generatedFiles.Count} TypeLib type database file(s)", .. logs],
                 Extensions = new Dictionary<string, object?>
                 {
                     ["type_db"] = new Dictionary<string, object?>
@@ -114,12 +129,16 @@ public sealed class TypeLibImporterService
         }
     }
 
-    private static List<LibraryTarget> ResolveLibraries(string libraries)
+    private static ResolvedLibraries ResolveLibraries(string libraries)
     {
         var names = libraries.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (names.Length == 0)
         {
             names = ["excel"];
+        }
+        if (names.Any(name => string.Equals(name, "all", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new ResolvedLibraries(KnownLibraries.Values.ToList(), BestEffort: true);
         }
         var targets = new List<LibraryTarget>();
         foreach (var name in names)
@@ -133,7 +152,7 @@ public sealed class TypeLibImporterService
                 targets.Add(target);
             }
         }
-        return targets;
+        return new ResolvedLibraries(targets, BestEffort: false);
     }
 
     private static TypeLibRegistration ResolveRegisteredTypeLib(LibraryTarget target)
@@ -175,6 +194,7 @@ public sealed class TypeLibImporterService
         LoadRegTypeLib(ref guid, (ushort)registration.Major, (ushort)registration.Minor, registration.LCID, out var typeLib);
         var types = new List<Dictionary<string, object?>>();
         var constants = new List<Dictionary<string, object?>>();
+        var classIDs = new Dictionary<Guid, string>();
         var count = typeLib.GetTypeInfoCount();
         for (var i = 0; i < count; i++)
         {
@@ -188,6 +208,10 @@ public sealed class TypeLibImporterService
                 if (string.IsNullOrWhiteSpace(name))
                 {
                     continue;
+                }
+                if (attr.typekind == TYPEKIND.TKIND_COCLASS && attr.guid != Guid.Empty)
+                {
+                    classIDs[attr.guid] = name;
                 }
                 if (attr.typekind == TYPEKIND.TKIND_ENUM)
                 {
@@ -230,11 +254,101 @@ public sealed class TypeLibImporterService
             }
         }
 
-        return new Dictionary<string, object?>
+        var db = new Dictionary<string, object?>
         {
             ["types"] = types.OrderBy(item => item["name"]).ToArray(),
             ["constants"] = constants.OrderBy(item => item["name"]).ToArray(),
         };
+        var progIDs = DiscoverProgIDs(target.LibID, classIDs);
+        if (progIDs.Count > 0)
+        {
+            db["progids"] = progIDs;
+        }
+        return db;
+    }
+
+    private static Dictionary<string, string> DiscoverProgIDs(string libID, IReadOnlyDictionary<Guid, string> classIDs)
+    {
+        return SelectProgIDsForTypeLib(libID, classIDs, EnumerateRegisteredProgIDs());
+    }
+
+    internal static Dictionary<string, string> SelectProgIDsForTypeLib(
+        string libID,
+        IReadOnlyDictionary<Guid, string> classIDs,
+        IEnumerable<RegisteredProgID> registrations)
+    {
+        var outMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var targetLibID = NormalizeGuid(libID);
+        foreach (var registration in registrations)
+        {
+            if (!string.IsNullOrWhiteSpace(registration.TypeLib) &&
+                !string.Equals(NormalizeGuid(registration.TypeLib), targetLibID, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (!classIDs.TryGetValue(registration.ClassID, out var typeName) || string.IsNullOrWhiteSpace(typeName))
+            {
+                continue;
+            }
+            foreach (var progID in registration.ProgIDs)
+            {
+                if (!string.IsNullOrWhiteSpace(progID))
+                {
+                    outMap[progID] = typeName;
+                }
+            }
+        }
+        return outMap
+            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<RegisteredProgID> EnumerateRegisteredProgIDs()
+    {
+        using var clsidRoot = Registry.ClassesRoot.OpenSubKey("CLSID");
+        if (clsidRoot is null)
+        {
+            yield break;
+        }
+        foreach (var classIDName in clsidRoot.GetSubKeyNames())
+        {
+            if (!Guid.TryParse(classIDName, out var classID))
+            {
+                continue;
+            }
+            using var classKey = clsidRoot.OpenSubKey(classIDName);
+            if (classKey is null)
+            {
+                continue;
+            }
+            var typeLib = StringValue(classKey.OpenSubKey("TypeLib"));
+            var progIDs = new[]
+                {
+                    StringValue(classKey.OpenSubKey("VersionIndependentProgID")),
+                    StringValue(classKey.OpenSubKey("ProgID")),
+                }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (progIDs.Length == 0)
+            {
+                continue;
+            }
+            yield return new RegisteredProgID(classID, typeLib, progIDs);
+        }
+    }
+
+    private static string StringValue(RegistryKey? key)
+    {
+        using (key)
+        {
+            return key?.GetValue(null) as string ?? "";
+        }
+    }
+
+    private static string NormalizeGuid(string value)
+    {
+        return Guid.TryParse(value, out var guid) ? guid.ToString("B").ToUpperInvariant() : value.Trim().ToUpperInvariant();
     }
 
     private static ImportedMembers ImportMembers(ITypeInfo typeInfo, TYPEATTR attr, string library)
@@ -463,9 +577,13 @@ public sealed class TypeLibImporterService
 
     private sealed record LibraryTarget(string Name, string LibID, string Output);
 
+    private sealed record ResolvedLibraries(List<LibraryTarget> Targets, bool BestEffort);
+
     private sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
 
     private sealed record ImportedMembers(List<Dictionary<string, object?>> Properties, List<Dictionary<string, object?>> Methods);
 }
 
 public sealed record TypeDbImportArguments(string OutputDir, string GeneratorVersion, string Libraries);
+
+internal sealed record RegisteredProgID(Guid ClassID, string TypeLib, IReadOnlyList<string> ProgIDs);

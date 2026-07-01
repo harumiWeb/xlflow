@@ -7,6 +7,7 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow type db status/init/refresh/clean` for global generated TypeLib databases, with an initial Excel TypeLib importer feeding LSP type intelligence.
 - Updated `xlflow lsp` to load generated TypeLib databases when present while continuing to work with only the embedded built-in database.
 - Added best-effort generated TypeLib DB initialization after successful `new` and `init`; failures are reported as warnings and do not fail project creation.
+- Extended generated TypeLib databases with registry-derived ProgID mappings and `--library all`, improving LSP `CreateObject("...")` late-binding inference for installed Excel, Scripting, ADODB, MSForms, Office, and VBIDE libraries.
 - Improved VBA LSP intelligence for common Excel idioms, including With-relative call-chain signature help, collection default-member signatures such as `ListObjects(1)`, multi-line signature help across `_` continuations, named-argument completions such as `Destination:=`, and `WScript.Shell` / `VBScript.RegExp` `CreateObject` inference.
 - Expanded VBA LSP top-level expression completions with `Set ... = New`, `Nothing`, object-producing built-ins such as `GetObject`, and common VBA `Is*`/type-inspection functions including signature help.
 - Expanded the curated VBA standard library database with string, date/time, math, conversion, file-system, interaction, and financial functions plus common `vb*` constants for completion and signature help.

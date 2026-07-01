@@ -3379,7 +3379,7 @@ func (a *app) typeDBInitCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
-	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; default: excel)")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
 	return cmd
 }
 
@@ -3406,7 +3406,7 @@ func (a *app) typeDBRefreshCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
-	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; default: excel)")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
 	cmd.Flags().BoolVar(&force, "force", false, "regenerate even when the manifest is current")
 	return cmd
 }
