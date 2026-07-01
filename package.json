@@ -21,7 +21,7 @@
     "vite": "^6.4.2",
     "vitepress": "^1.6.4"
   },
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@11.9.0",
   "pnpm": {
     "overrides": {
       "esbuild@<=0.24.2": ">=0.25.0",
