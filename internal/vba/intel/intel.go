@@ -532,8 +532,8 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.Source, pos) && moduleHasContent(doc.Source) {
 		return nil, nil
 	}
-	if progIDPrefix, replaceRange, ok := createObjectProgIDCompletionContext(prefix, pos); ok {
-		return a.progIDCompletions(progIDPrefix, replaceRange), nil
+	if progIDPrefix, replaceRange, quoteInsert, ok := createObjectProgIDCompletionContext(prefix, pos); ok {
+		return a.progIDCompletions(progIDPrefix, replaceRange, quoteInsert), nil
 	}
 	if insideOpenString(prefix) {
 		return nil, nil
@@ -1433,13 +1433,17 @@ func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Documen
 	return uniqueCompletions(out), nil
 }
 
-func (a Analyzer) progIDCompletions(prefix string, replaceRange Range) []Completion {
+func (a Analyzer) progIDCompletions(prefix string, replaceRange Range, quoteInsert bool) []Completion {
 	var out []Completion
 	for _, progID := range a.DB.ProgIDsList() {
 		if !completionMatches(progID, prefix) {
 			continue
 		}
 		replace := replaceRange
+		insertText := progID
+		if quoteInsert {
+			insertText = `"` + progID + `"`
+		}
 		detail := "ProgID"
 		if typ, ok := a.DB.ResolveProgID(progID); ok {
 			detail = typ.Name
@@ -1448,7 +1452,7 @@ func (a Analyzer) progIDCompletions(prefix string, replaceRange Range) []Complet
 			Label:        progID,
 			Kind:         "type",
 			Detail:       detail,
-			InsertText:   progID,
+			InsertText:   insertText,
 			ReplaceRange: &replace,
 		})
 	}
@@ -3334,23 +3338,30 @@ func forEachInCompletionContext(prefix string, pos Position) (eachPrefix string,
 	}, true
 }
 
-func createObjectProgIDCompletionContext(prefix string, pos Position) (progIDPrefix string, replaceRange Range, ok bool) {
+func createObjectProgIDCompletionContext(prefix string, pos Position) (progIDPrefix string, replaceRange Range, quoteInsert bool, ok bool) {
 	quote := strings.LastIndex(prefix, `"`)
-	if quote < 0 {
-		return "", Range{}, false
+	createObjectArgStart := regexp.MustCompile(`(?i)\bCreateObject\s*(?:\(\s*)?(?:Class\s*:=\s*)?$`)
+	if quote >= 0 {
+		beforeQuote := prefix[:quote]
+		if !createObjectArgStart.MatchString(beforeQuote) {
+			return "", Range{}, false, false
+		}
+		progIDPrefix = prefix[quote+1:]
+		if strings.Contains(progIDPrefix, `"`) {
+			return "", Range{}, false, false
+		}
+		return progIDPrefix, Range{
+			Start: Position{Line: pos.Line, Character: utf16Len(prefix[:quote+1])},
+			End:   pos,
+		}, false, true
 	}
-	beforeQuote := prefix[:quote]
-	if !regexp.MustCompile(`(?i)\bCreateObject\s*\(\s*$`).MatchString(beforeQuote) {
-		return "", Range{}, false
+	if !createObjectArgStart.MatchString(prefix) {
+		return "", Range{}, false, false
 	}
-	progIDPrefix = prefix[quote+1:]
-	if strings.Contains(progIDPrefix, `"`) {
-		return "", Range{}, false
-	}
-	return progIDPrefix, Range{
-		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:quote+1])},
+	return "", Range{
+		Start: pos,
 		End:   pos,
-	}, true
+	}, true, true
 }
 
 func insideOpenString(prefix string) bool {

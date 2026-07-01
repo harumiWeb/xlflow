@@ -1458,22 +1458,72 @@ Option Explicit
 
 func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
-	line := `    Set dict = CreateObject("`
-	doc := Document{
-		Path:   filepath.Join(t.TempDir(), "Main.bas"),
-		Source: "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n",
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas")}
+
+	for _, tc := range []struct {
+		name       string
+		line       string
+		wantInsert string
+		wantStart  int
+	}{
+		{
+			name:       "inside paren string",
+			line:       `    Set dict = CreateObject("`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject("`),
+		},
+		{
+			name:       "inside paren named string",
+			line:       `    Set dict = CreateObject(Class:="`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject(Class:="`),
+		},
+		{
+			name:       "inside parenless string",
+			line:       `    Set dict = CreateObject "`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject "`),
+		},
+		{
+			name:       "at argument start",
+			line:       `    Set dict = CreateObject(`,
+			wantInsert: `"Scripting.Dictionary"`,
+			wantStart:  utf16Len(`    Set dict = CreateObject(`),
+		},
+		{
+			name:       "at named argument start",
+			line:       `    Set dict = CreateObject(Class:=`,
+			wantInsert: `"Scripting.Dictionary"`,
+			wantStart:  utf16Len(`    Set dict = CreateObject(Class:=`),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc.Source = "Option Explicit\nSub Test()\n" + tc.line + "\nEnd Sub\n"
+			items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(tc.line)}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, ok := findCompletion(items, "Scripting.Dictionary")
+			if !ok {
+				t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
+			}
+			if item.Detail != "Scripting.Dictionary" {
+				t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
+			}
+			if item.InsertText != tc.wantInsert {
+				t.Fatalf("ProgID insert text = %q, want %q", item.InsertText, tc.wantInsert)
+			}
+			if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != tc.wantStart || item.ReplaceRange.End.Character != utf16Len(tc.line) {
+				t.Fatalf("ProgID replace range = %+v, want %d-%d", item.ReplaceRange, tc.wantStart, utf16Len(tc.line))
+			}
+		})
 	}
 
+	line := `    Set dict = CreateObject("`
+	doc.Source = "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n"
 	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(line)}, nil)
 	if err != nil {
 		t.Fatal(err)
-	}
-	item, ok := findCompletion(items, "Scripting.Dictionary")
-	if !ok {
-		t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
-	}
-	if item.Detail != "Scripting.Dictionary" {
-		t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
 	}
 	for _, want := range []string{"ADODB.Connection", "ADODB.Recordset", "Excel.Application"} {
 		item, ok := findCompletion(items, want)
@@ -1483,9 +1533,6 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 		if item.Detail != want {
 			t.Fatalf("%s ProgID detail = %q, want resolved type", want, item.Detail)
 		}
-	}
-	if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != utf16Len(`    Set dict = CreateObject("`) || item.ReplaceRange.End.Character != utf16Len(line) {
-		t.Fatalf("ProgID replace range = %+v, want string literal content range", item.ReplaceRange)
 	}
 
 	otherString := `    Debug.Print "xlU`

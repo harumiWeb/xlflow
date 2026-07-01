@@ -504,6 +504,35 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 			Version:                3,
 		},
 		ContentChanges: []any{
+			map[string]any{"text": "Option Explicit\nSub Test()\n    Set app = CreateObject(\nEnd Sub\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var progIDList protocol.CompletionList
+	if err := clientConn.Call(ctx, string(protocol.MethodTextDocumentCompletion), protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 27},
+		},
+	}, &progIDList); err != nil {
+		t.Fatal(err)
+	}
+	progIDItem, ok := findCompletionItem(progIDList.Items, "Excel.Application")
+	if !ok {
+		t.Fatalf("Excel.Application ProgID completion missing: %+v", progIDList.Items)
+	}
+	progIDEdit, ok := progIDItem.TextEdit.(protocol.TextEdit)
+	if !ok || progIDEdit.NewText != `"Excel.Application"` {
+		t.Fatalf("Excel.Application text edit = %+v, want quoted ProgID insertion", progIDItem.TextEdit)
+	}
+
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Version:                4,
+		},
+		ContentChanges: []any{
 			map[string]any{"text": "Option Explicit\nPublic Sub UnsavedRun()\nEnd Sub\nPublic Sub Test_UnsavedRun()\nEnd Sub\nPublic Sub WithArg(value As String)\nEnd Sub\n"},
 		},
 	}); err != nil {
