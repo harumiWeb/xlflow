@@ -9,6 +9,7 @@ All notable changes to xlflow will be documented in this file.
 - Added best-effort generated TypeLib DB initialization after successful `new` and `init`; failures are reported as warnings and do not fail project creation.
 - Improved VBA LSP intelligence for common Excel idioms, including With-relative call-chain signature help, collection default-member signatures such as `ListObjects(1)`, multi-line signature help across `_` continuations, named-argument completions such as `Destination:=`, and `WScript.Shell` / `VBScript.RegExp` `CreateObject` inference.
 - Expanded VBA LSP top-level expression completions with `Set ... = New`, `Nothing`, object-producing built-ins such as `GetObject`, and common VBA `Is*`/type-inspection functions including signature help.
+- Expanded the curated VBA standard library database with string, date/time, math, conversion, file-system, interaction, and financial functions plus common `vb*` constants for completion and signature help.
 - Improved VBA formatting so explicit line-continuation tails are indented one additional level while preserving existing line-number alignment behavior.
 - Added `VB032` lint/LSP/preflight validation for repeated `?` Debug.Print shorthand such as `?? "hoge"`, reporting it before Excel/VBE interaction.
 

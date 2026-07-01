@@ -1567,6 +1567,71 @@ End Sub
 	}
 }
 
+func TestCompletionsReturnExpandedVBAStandardLibraryFunctionsAndConstants(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Debug.Print For
+    Debug.Print Date
+    Debug.Print vbCr
+    Debug.Print vbObject
+    Debug.Print DateDiff(
+End Sub
+`,
+	}
+
+	formatLine := `    Debug.Print For`
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(formatLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Format", "FormatCurrency", "FormatDateTime", "FormatNumber", "FormatPercent"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing for expanded VBA globals: %+v", want, items)
+		}
+	}
+
+	dateLine := `    Debug.Print Date`
+	items, err = analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(dateLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"DateAdd", "DateDiff", "DatePart", "DateValue"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing for expanded VBA globals: %+v", want, items)
+		}
+	}
+
+	crLine := `    Debug.Print vbCr`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(crLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "vbCrLf") {
+		t.Fatalf("vbCrLf constant completion missing: %+v", items)
+	}
+
+	objectLine := `    Debug.Print vbObject`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(objectLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "vbObjectError") {
+		t.Fatalf("vbObjectError constant completion missing: %+v", items)
+	}
+
+	helpLine := `    Debug.Print DateDiff(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 6, Character: utf16Len(helpLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "VBA.Global.DateDiff(Interval As String, Date1 As Variant, Date2 As Variant") {
+		t.Fatalf("DateDiff signature help = %+v", help)
+	}
+}
+
 func TestCompletionsReturnModuleProcedureCandidates(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

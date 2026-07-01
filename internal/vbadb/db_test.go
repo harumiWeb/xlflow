@@ -156,6 +156,62 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 }
 
+func TestBuiltinVBAStandardLibraryCoverage(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedFunctions := []string{
+		"Abs", "AppActivate", "Array", "Asc", "AscB", "AscW", "Atn", "Beep",
+		"CBool", "CCur", "CDate", "CDbl", "CDec", "Choose", "Chr", "ChrB", "ChrW",
+		"CInt", "CLng", "Command", "Cos", "CreateObject", "CStr", "CurDir", "CVar", "CVDate",
+		"Date", "DateAdd", "DateDiff", "DatePart", "DateSerial", "DateValue", "Day", "DDB",
+		"Dir", "DoEvents", "Environ", "EOF", "Error", "Exp", "FileAttr", "FileCopy",
+		"FileDateTime", "FileLen", "Filter", "Fix", "Format", "FormatCurrency",
+		"FormatDateTime", "FormatNumber", "FormatPercent", "FreeFile", "FV",
+		"GetAllSettings", "GetAttr", "GetObject", "GetSetting", "Hex", "Hour",
+		"IIf", "IMEStatus", "InStr", "InStrRev", "InputBox", "Int", "IPmt", "IRR",
+		"IsArray", "IsDate", "IsEmpty", "IsError", "IsMissing", "IsNull", "IsNumeric", "IsObject",
+		"Join", "Kill", "LBound", "LCase", "Left", "LeftB", "Len", "LenB", "Loc", "LOF",
+		"Log", "LTrim", "Mid", "MidB", "Minute", "MIRR", "MkDir", "Month", "MonthName",
+		"MsgBox", "NPer", "Now", "NPV", "Oct", "Partition", "Pmt", "PPmt", "PV",
+		"QBColor", "Randomize", "Rate", "Replace", "Reset", "RGB", "Right", "RightB",
+		"RmDir", "Rnd", "Round", "RTrim", "SaveSetting", "Second", "Seek", "SendKeys",
+		"SetAttr", "Sgn", "Shell", "Sin", "SLN", "Space", "Split", "Sqr", "Str",
+		"StrComp", "StrConv", "String", "Switch", "SYD", "Tan", "Time", "Timer",
+		"TimeSerial", "TimeValue", "Trim", "TypeName", "UBound", "UCase", "VarType",
+		"Weekday", "WeekdayName", "Year",
+	}
+	for _, name := range expectedFunctions {
+		if _, ok := db.ResolveMember("VBA.Global", name); !ok {
+			t.Fatalf("VBA.Global.%s missing from built-in DB", name)
+		}
+	}
+
+	expectedConstants := []string{
+		"vbCr", "vbCrLf", "vbLf", "vbNewLine", "vbTab", "vbBack", "vbFormFeed",
+		"vbVerticalTab", "vbNullChar", "vbNullString", "vbObjectError",
+		"vbOKOnly", "vbOKCancel", "vbAbortRetryIgnore", "vbYesNoCancel", "vbYesNo",
+		"vbRetryCancel", "vbCritical", "vbQuestion", "vbExclamation", "vbInformation",
+		"vbDefaultButton1", "vbDefaultButton2", "vbDefaultButton3", "vbDefaultButton4",
+		"vbApplicationModal", "vbSystemModal", "vbOK", "vbCancel", "vbAbort", "vbRetry",
+		"vbIgnore", "vbYes", "vbNo", "vbUseCompareOption", "vbBinaryCompare",
+		"vbTextCompare", "vbDatabaseCompare", "vbGeneralDate", "vbLongDate",
+		"vbShortDate", "vbLongTime", "vbShortTime", "vbUseDefault", "vbTrue", "vbFalse",
+		"vbEmpty", "vbNull", "vbInteger", "vbLong", "vbSingle", "vbDouble",
+		"vbCurrency", "vbDate", "vbString", "vbObject", "vbError", "vbBoolean",
+		"vbVariant", "vbDataObject", "vbDecimal", "vbByte", "vbLongLong",
+		"vbUserDefinedType", "vbArray", "vbNormal", "vbReadOnly", "vbHidden",
+		"vbSystem", "vbVolume", "vbDirectory", "vbArchive", "vbAlias",
+	}
+	for _, name := range expectedConstants {
+		if _, ok := db.ResolveConstant(name); !ok {
+			t.Fatalf("%s missing from built-in constants", name)
+		}
+	}
+}
+
 func TestResolveMemberIncludesEvents(t *testing.T) {
 	db := &DB{Types: map[string]TypeInfo{}, Aliases: map[string]string{}}
 	db.addType(TypeInfo{
