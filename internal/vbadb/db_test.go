@@ -80,6 +80,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
 		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("VBA.Global", "IsObject"); !ok || len(got.Parameters) != 1 || got.ReturnType != "Boolean" {
+		t.Fatalf("VBA.Global.IsObject parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.Global", "GetObject"); !ok || got.ReturnType != "Object" {
+		t.Fatalf("VBA.Global.GetObject = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("VBA.ErrObject", "Raise"); !ok || len(got.Parameters) != 5 || got.Parameters[0].Name != "Number" {
 		t.Fatalf("Err.Raise parameters = %+v, %v", got, ok)
 	}

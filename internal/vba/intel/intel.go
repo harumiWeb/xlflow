@@ -1553,6 +1553,24 @@ func (a Analyzer) namedArgumentCompletions(doc Document, pos Position, open []Do
 func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
 	var out []Completion
 	replace := replaceRange
+	if completionMatches("New", prefix) {
+		out = append(out, Completion{
+			Label:        "New",
+			Kind:         "keyword",
+			Detail:       "Create a new object instance",
+			InsertText:   "New ${1:Collection}",
+			Snippet:      true,
+			ReplaceRange: &replace,
+		})
+	}
+	if completionMatches("Nothing", prefix) {
+		out = append(out, Completion{
+			Label:        "Nothing",
+			Kind:         "constant",
+			Detail:       "Object literal",
+			ReplaceRange: &replace,
+		})
+	}
 	if completionMatches("CreateObject", prefix) {
 		out = append(out, Completion{
 			Label:        "CreateObject",
@@ -1560,6 +1578,18 @@ func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Docum
 			Detail:       "Create object from ProgID",
 			InsertText:   "CreateObject(\"${1:Scripting.Dictionary}\")",
 			Snippet:      true,
+			ReplaceRange: &replace,
+		})
+	}
+	for _, member := range a.DB.Members("VBA.Global") {
+		if !completionMatches(member.Name, prefix) || !objectLikeType(member.ReturnType) {
+			continue
+		}
+		replace := replaceRange
+		out = append(out, Completion{
+			Label:        member.Name,
+			Kind:         "function",
+			Detail:       a.signatureFromMember("VBA.Global", member, "method").Label,
 			ReplaceRange: &replace,
 		})
 	}

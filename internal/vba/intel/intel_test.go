@@ -1499,6 +1499,74 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	}
 }
 
+func TestCompletionsReturnSetObjectInitializersAndVBAIsFunctions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim target As Object
+    Set target = N
+    Set target = No
+    Set target = Get
+    If IsObject(
+    If Is
+End Sub
+`,
+	}
+
+	newLine := `    Set target = N`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(newLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newItem, ok := findCompletion(items, "New")
+	if !ok || !newItem.Snippet || !strings.Contains(newItem.InsertText, "New ${1:Collection}") {
+		t.Fatalf("New snippet completion missing after Set RHS: %+v", items)
+	}
+	if !hasCompletion(items, "Nothing") {
+		t.Fatalf("Nothing completion missing after Set RHS: %+v", items)
+	}
+
+	nothingLine := `    Set target = No`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(nothingLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Nothing") {
+		t.Fatalf("Nothing completion missing after Set RHS prefix No: %+v", items)
+	}
+
+	getObjectLine := `    Set target = Get`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(getObjectLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "GetObject") {
+		t.Fatalf("GetObject completion missing after Set RHS: %+v", items)
+	}
+
+	isLine := `    If Is`
+	items, err = analyzer.Completions(doc, Position{Line: 7, Character: utf16Len(isLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"IsObject", "IsNull", "IsNumeric", "IsDate"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing in condition context: %+v", want, items)
+		}
+	}
+
+	helpLine := `    If IsObject(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 6, Character: utf16Len(helpLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "VBA.Global.IsObject(Identifier As Variant) As Boolean") {
+		t.Fatalf("IsObject signature help = %+v", help)
+	}
+}
+
 func TestCompletionsReturnModuleProcedureCandidates(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")
