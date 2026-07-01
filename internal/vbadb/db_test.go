@@ -21,6 +21,12 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
 		t.Fatalf("ResolveProgID(Scripting.Dictionary) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveProgID("WScript.Shell"); !ok || typ.Name != "WScript.Shell" {
+		t.Fatalf("ResolveProgID(WScript.Shell) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveProgID("VBScript.RegExp"); !ok || typ.Name != "VBScript.RegExp" {
+		t.Fatalf("ResolveProgID(VBScript.RegExp) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveProgID("ADODB.Connection"); !ok || typ.Name != "ADODB.Connection" {
 		t.Fatalf("ResolveProgID(ADODB.Connection) = %+v, %v", typ, ok)
 	}

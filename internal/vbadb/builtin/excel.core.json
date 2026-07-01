@@ -286,6 +286,37 @@
         },
         { "name": "ClearContents" },
         {
+          "name": "AutoFilter",
+          "parameters": [
+            { "name": "Field", "type": "Variant", "optional": true },
+            { "name": "Criteria1", "type": "Variant", "optional": true },
+            { "name": "Operator", "type": "Variant", "optional": true },
+            { "name": "Criteria2", "type": "Variant", "optional": true },
+            { "name": "SubField", "type": "Variant", "optional": true },
+            { "name": "VisibleDropDown", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "Sort",
+          "parameters": [
+            { "name": "Key1", "type": "Variant", "optional": true },
+            { "name": "Order1", "type": "Variant", "optional": true },
+            { "name": "Key2", "type": "Variant", "optional": true },
+            { "name": "Type", "type": "Variant", "optional": true },
+            { "name": "Order2", "type": "Variant", "optional": true },
+            { "name": "Key3", "type": "Variant", "optional": true },
+            { "name": "Order3", "type": "Variant", "optional": true },
+            { "name": "Header", "type": "Variant", "optional": true },
+            { "name": "OrderCustom", "type": "Variant", "optional": true },
+            { "name": "MatchCase", "type": "Variant", "optional": true },
+            { "name": "Orientation", "type": "Variant", "optional": true },
+            { "name": "SortMethod", "type": "Variant", "optional": true },
+            { "name": "DataOption1", "type": "Variant", "optional": true },
+            { "name": "DataOption2", "type": "Variant", "optional": true },
+            { "name": "DataOption3", "type": "Variant", "optional": true }
+          ]
+        },
+        {
           "name": "Find",
           "return_type": "Excel.Range",
           "parameters": [

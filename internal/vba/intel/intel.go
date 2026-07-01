@@ -555,6 +555,11 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		}
 		return a.moduleMemberCompletions(open, receiverExpr, memberPrefix)
 	}
+	if argPrefix, replaceRange, call, ok := a.namedArgumentCompletionContext(doc, pos); ok {
+		if items, err := a.namedArgumentCompletions(doc, pos, open, call, argPrefix, replaceRange); err != nil || len(items) > 0 {
+			return items, err
+		}
+	}
 	if typePrefix, replaceRange, ok := typeCompletionContext(prefix, pos); ok {
 		return a.typeCompletions(typePrefix, replaceRange, doc, open)
 	}
@@ -606,8 +611,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 }
 
 func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*SignatureHelp, error) {
-	line := lineAt(doc.Source, pos.Line)
-	prefix := utf16Prefix(line, pos.Character)
+	prefix := logicalCallPrefixAt(doc.Source, pos)
 	call, ok := callContextFromPrefix(prefix)
 	if !ok {
 		return nil, nil
@@ -634,6 +638,42 @@ type callContext struct {
 type argument struct {
 	Name string
 	Text string
+}
+
+func logicalCallPrefixAt(source string, pos Position) string {
+	lines := normalizedLines(source)
+	if pos.Line < 0 || pos.Line >= len(lines) {
+		return ""
+	}
+	prefix := utf16Prefix(lines[pos.Line], pos.Character)
+	for lineNo := pos.Line - 1; lineNo >= 0; lineNo-- {
+		line := stripLineComment(lines[lineNo])
+		if !hasExplicitContinuation(line) {
+			break
+		}
+		prefix = strings.TrimRight(trimExplicitContinuation(line), " \t") + " " + strings.TrimLeft(prefix, " \t")
+	}
+	return prefix
+}
+
+func trimExplicitContinuation(line string) string {
+	trimmed := strings.TrimRight(line, " \t")
+	if strings.HasSuffix(trimmed, "_") {
+		return strings.TrimRight(strings.TrimSuffix(trimmed, "_"), " \t")
+	}
+	return line
+}
+
+func hasExplicitContinuation(line string) bool {
+	trimmed := strings.TrimRight(stripLineComment(line), " \t")
+	if !strings.HasSuffix(trimmed, "_") {
+		return false
+	}
+	if len(trimmed) == 1 {
+		return true
+	}
+	prev, _ := lastRune(trimmed[:len(trimmed)-1])
+	return prev == ' ' || prev == '\t'
 }
 
 func callContextFromPrefix(prefix string) (callContext, bool) {
@@ -688,13 +728,26 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		return Signature{}, false, nil
 	}
 	if strings.HasPrefix(target, ".") {
-		memberName := strings.TrimPrefix(target, ".")
-		if idx := strings.Index(memberName, "."); idx >= 0 {
-			memberName = memberName[:idx]
+		receiver, memberName, hasReceiver := splitCallTarget(target)
+		if !hasReceiver {
+			memberName = strings.TrimSpace(strings.TrimPrefix(target, "."))
 		}
 		if receiverType, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos)); ok {
+			if hasReceiver {
+				if typ, ok := a.resolveRelativeMemberExpressionType(receiverType, receiver); ok {
+					receiverType = typ
+				}
+			}
 			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
+				if len(member.Parameters) == 0 {
+					if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
+						return sig, true, nil
+					}
+				}
 				return a.signatureFromMember(receiverType, member, a.memberKind(receiverType, memberName)), true, nil
+			}
+			if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
+				return sig, true, nil
 			}
 		}
 	}
@@ -705,7 +758,15 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 				receiverType = "Excel.Worksheet"
 			}
 			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
+				if len(member.Parameters) == 0 {
+					if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
+						return sig, true, nil
+					}
+				}
 				return a.signatureFromMember(receiverType, member, a.memberKind(receiverType, memberName)), true, nil
+			}
+			if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
+				return sig, true, nil
 			}
 		}
 		return Signature{}, false, nil
@@ -728,6 +789,22 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		return signatureFromSymbol(sym), true, nil
 	}
 	return Signature{}, false, nil
+}
+
+func (a Analyzer) defaultMemberSignatureForCall(receiverType, memberName string) (Signature, bool) {
+	member, found := a.DB.ResolveMember(receiverType, memberName)
+	if !found || len(member.Parameters) > 0 || member.ReturnType == "" {
+		return Signature{}, false
+	}
+	returnType, ok := a.DB.ResolveType(member.ReturnType)
+	if !ok || returnType.DefaultMember == "" {
+		return Signature{}, false
+	}
+	defaultMember, ok := a.DB.ResolveMember(returnType.Name, returnType.DefaultMember)
+	if !ok || len(defaultMember.Parameters) == 0 {
+		return Signature{}, false
+	}
+	return a.signatureFromMember(returnType.Name, defaultMember, a.memberKind(returnType.Name, defaultMember.Name)), true
 }
 
 func splitCallTarget(target string) (receiver string, member string, ok bool) {
@@ -937,27 +1014,68 @@ func parenCallsOnLine(line string) []parsedCall {
 }
 
 func parenlessCallOnLine(line string) (parsedCall, bool) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
+	text := strings.TrimLeft(line, " \t")
+	if strings.TrimSpace(text) == "" {
 		return parsedCall{}, false
 	}
-	lower := strings.ToLower(trimmed)
+	lower := strings.ToLower(strings.TrimSpace(text))
 	for _, prefix := range []string{"if ", "elseif ", "do ", "loop ", "for ", "dim ", "set ", "let ", "with ", "select ", "case ", "option ", "end ", "debug.print"} {
 		if strings.HasPrefix(lower, prefix) {
 			return parsedCall{}, false
 		}
 	}
-	re := regexp.MustCompile(`(?i)(?:^|[:\s])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|[A-Za-z_][A-Za-z0-9_]*)(\s+)(.*)$`)
-	m := re.FindStringSubmatchIndex(line)
-	if len(m) == 0 {
+	sep := firstTopLevelWhitespace(text)
+	if sep < 0 {
 		return parsedCall{}, false
 	}
-	target := strings.TrimSpace(line[m[2]:m[3]])
-	argsText := strings.TrimSpace(line[m[6]:m[7]])
+	head := strings.TrimSpace(text[:sep])
+	argsText := strings.TrimSpace(text[sep+1:])
+	target := callTargetBeforeOpenLike(head)
 	if target == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
 		return parsedCall{}, false
 	}
-	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: m[2], End: m[7]}, true
+	start := strings.LastIndex(line, target)
+	if start < 0 {
+		start = 0
+	}
+	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: start, End: len(line)}, true
+}
+
+func firstTopLevelWhitespace(text string) int {
+	inString := false
+	depth := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case ' ', '\t':
+			if !inString && depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func callTargetBeforeOpenLike(prefix string) string {
+	target := expressionBefore(prefix)
+	target = strings.TrimSpace(target)
+	if strings.HasPrefix(strings.ToLower(target), "call ") {
+		target = strings.TrimSpace(target[len("call "):])
+	}
+	return strings.TrimSpace(target)
 }
 
 func matchingParen(line string, open int) int {
@@ -1373,6 +1491,59 @@ func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Documen
 			Label:        sym.Name,
 			Kind:         completionKindForSymbol(sym.Kind),
 			Detail:       sym.Detail,
+			ReplaceRange: &replace,
+		})
+	}
+	return uniqueCompletions(out), nil
+}
+
+func (a Analyzer) namedArgumentCompletionContext(doc Document, pos Position) (argPrefix string, replaceRange Range, call callContext, ok bool) {
+	line := lineAt(doc.Source, pos.Line)
+	prefix := utf16Prefix(line, pos.Character)
+	wordPrefix := currentIdentifierPrefix(prefix)
+	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
+	if strings.HasSuffix(beforeWord, ":=") {
+		return "", Range{}, callContext{}, false
+	}
+	logicalPrefix := logicalCallPrefixAt(doc.Source, pos)
+	call, ok = callContextFromPrefix(logicalPrefix)
+	if !ok || call.Target == "" {
+		return "", Range{}, callContext{}, false
+	}
+	start := len(prefix) - len(wordPrefix)
+	return wordPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
+		End:   pos,
+	}, call, true
+}
+
+func (a Analyzer) namedArgumentCompletions(doc Document, pos Position, open []Document, call callContext, prefix string, replaceRange Range) ([]Completion, error) {
+	sig, ok, err := a.resolveCallSignature(doc, call.Target, pos, open)
+	if err != nil || !ok || len(sig.Parameters) == 0 {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for _, arg := range call.Arguments {
+		if arg.Name != "" {
+			used[strings.ToLower(arg.Name)] = true
+		}
+	}
+	out := make([]Completion, 0, len(sig.Parameters))
+	for _, param := range sig.Parameters {
+		if param.Name == "" || used[strings.ToLower(param.Name)] || !completionMatches(param.Name, prefix) {
+			continue
+		}
+		replace := replaceRange
+		detail := param.Type
+		if param.Optional {
+			detail = strings.TrimSpace("Optional " + detail)
+		}
+		out = append(out, Completion{
+			Label:        param.Name + ":=",
+			Kind:         "variable",
+			Detail:       detail,
+			InsertText:   param.Name + ":=${1}",
+			Snippet:      true,
 			ReplaceRange: &replace,
 		})
 	}
@@ -2413,6 +2584,7 @@ func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string)
 		if member == "" {
 			continue
 		}
+		called := strings.Contains(member, "(")
 		if idx := strings.Index(member, "("); idx >= 0 {
 			member = strings.TrimSpace(member[:idx])
 		}
@@ -2424,6 +2596,11 @@ func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string)
 			return "", false
 		}
 		current = info.ReturnType
+		if called {
+			if typ, ok := a.collectionDefaultType(current); ok {
+				current = typ
+			}
+		}
 	}
 	return current, true
 }

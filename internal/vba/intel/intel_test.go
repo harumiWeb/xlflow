@@ -633,6 +633,118 @@ End Function
 	}
 }
 
+func TestExcelIdiomsSignatureHelpAndNamedArgumentCompletions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+
+Public Sub TestWithBlockInference()
+    Dim ws As Excel.Worksheet
+    Set ws = ThisWorkbook.Worksheets(1)
+
+    With ws.Range("A1:D10")
+        .Offset(1,0).Resize(
+    End With
+
+    With ThisWorkbook.Worksheets(1).ListObjects(
+        .ListColumns(1).DataBodyRange.Font.Bold = True
+    End With
+End Sub
+
+Public Sub TestSignatureHelp()
+    Dim wb As Excel.Workbook
+    Set wb = Workbooks.Open( _
+    Filename:="sample.xlsx", _
+    ReadOnly:=True, _
+    AddToMru:=False _
+    )
+End Sub
+
+Public Sub TestCommonExcelIdioms()
+    Dim ws As Worksheet
+    Dim r As Range
+    Set ws = ThisWorkbook.Worksheets("Data")
+    Set r = ws.Range(ws.Cells(1,1), ws.Cells(10, 5))
+
+    r.AutoFilter Field:=1, Criteria1:="<>"
+    r.Sort O
+
+    ws.ListObjects("Table1").DataBodyRange.Copy D
+
+    Dim shell As Object
+    Set shell = CreateObject("WScript.Shell")
+    shell.
+
+    Dim re As Object
+    Set re = CreateObject("VBScript.RegExp")
+    re.
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Idioms.bas"), Source: source}
+
+	resizeLine := `        .Offset(1,0).Resize(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 7, Character: utf16Len(resizeLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.Range.Resize(Optional RowSize As Variant, Optional ColumnSize As Variant)") {
+		t.Fatalf("Resize signature help = %+v", help)
+	}
+
+	listObjectsLine := `    With ThisWorkbook.Worksheets(1).ListObjects(`
+	help, err = analyzer.SignatureHelp(doc, Position{Line: 10, Character: utf16Len(listObjectsLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.ListObjects.Item(Index As Variant) As Excel.ListObject") {
+		t.Fatalf("ListObjects default member signature help = %+v", help)
+	}
+
+	readOnlyLine := `    ReadOnly:=True, _`
+	help, err = analyzer.SignatureHelp(doc, Position{Line: 19, Character: utf16Len(readOnlyLine[:strings.Index(readOnlyLine, "True")])}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.Workbooks.Open(Filename As String, Optional UpdateLinks As Variant, Optional ReadOnly As Variant") || help.ActiveParameter != 2 {
+		t.Fatalf("multi-line Workbooks.Open signature help = %+v", help)
+	}
+
+	sortLine := `    r.Sort O`
+	items, err := analyzer.Completions(doc, Position{Line: 31, Character: utf16Len(sortLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Order1:=") {
+		t.Fatalf("Sort named argument completion missing Order1:= %+v", items)
+	}
+
+	copyLine := `    ws.ListObjects("Table1").DataBodyRange.Copy D`
+	items, err = analyzer.Completions(doc, Position{Line: 33, Character: utf16Len(copyLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Destination:=") {
+		t.Fatalf("Copy named argument completion missing Destination:= %+v", items)
+	}
+
+	shellLine := `    shell.`
+	items, err = analyzer.Completions(doc, Position{Line: 37, Character: utf16Len(shellLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Run") {
+		t.Fatalf("WScript.Shell completion missing Run: %+v", items)
+	}
+
+	reLine := `    re.`
+	items, err = analyzer.Completions(doc, Position{Line: 41, Character: utf16Len(reLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Pattern") || !hasCompletion(items, "Test") {
+		t.Fatalf("VBScript.RegExp completion missing Pattern/Test: %+v", items)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
