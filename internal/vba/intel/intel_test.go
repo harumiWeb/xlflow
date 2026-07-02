@@ -572,6 +572,26 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeNoReturnValueMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim rng As Excel.Range
+    Dim result As Variant
+    result = rng.ClearContents
+    rng.ClearContents
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB039")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, `Method "ClearContents" on Excel.Range does not return a value.`) {
+		t.Fatalf("no-return-value diagnostic missing: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

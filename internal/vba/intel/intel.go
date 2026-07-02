@@ -1135,6 +1135,7 @@ func (a Analyzer) writeOnlyReadDiagnostics(doc Document, lineNo int, line, text 
 type memberAccessInfo struct {
 	ReceiverType string
 	Member       vbadb.MemberInfo
+	Kind         string
 }
 
 func (a Analyzer) memberAccessInfo(doc Document, lineNo int, line, expr string) (memberAccessInfo, bool) {
@@ -1155,7 +1156,7 @@ func (a Analyzer) memberAccessInfo(doc Document, lineNo int, line, expr string) 
 	if !ok {
 		return memberAccessInfo{}, false
 	}
-	return memberAccessInfo{ReceiverType: receiverType, Member: member}, true
+	return memberAccessInfo{ReceiverType: receiverType, Member: member, Kind: a.memberKind(receiverType, memberName)}, true
 }
 
 func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, member, message string) Diagnostic {
@@ -1204,6 +1205,11 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 			continue
 		}
 		offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+		rhsExpr := strings.TrimSpace(code[eq+1:])
+		if diag, ok := a.noReturnValueDiagnostic(doc, lineNo, line, rhsExpr); ok {
+			out = append(out, diag)
+			continue
+		}
 		lhsType, ok := a.assignmentLHSType(doc, lineNo, line, lhsExpr, offset)
 		if !ok {
 			continue
@@ -1217,7 +1223,7 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 				out = append(out, assignmentDiagnostic("VB037", "vba/type/set-not-allowed", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("'Set' cannot be used with value type %q.", lhsType)))
 				continue
 			}
-			rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, strings.TrimSpace(code[eq+1:]), offset)
+			rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, rhsExpr, offset)
 			if !ok || !concreteObjectDiagnosticType(lhsType) || !concreteObjectDiagnosticType(rhsType) {
 				continue
 			}
@@ -1230,7 +1236,7 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 		if !concreteObjectDiagnosticType(lhsType) {
 			continue
 		}
-		rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, strings.TrimSpace(code[eq+1:]), offset)
+		rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, rhsExpr, offset)
 		if !ok || !concreteObjectDiagnosticType(rhsType) {
 			continue
 		}
@@ -1264,6 +1270,21 @@ func (a Analyzer) assignmentLHSType(doc Document, lineNo int, line, lhsExpr stri
 		return "", false
 	}
 	return canonicalDiagnosticType(a.DB, inferred.Type), true
+}
+
+func (a Analyzer) noReturnValueDiagnostic(doc Document, lineNo int, line, rhsExpr string) (Diagnostic, bool) {
+	if rhsExpr == "" || !strings.Contains(rhsExpr, ".") {
+		return Diagnostic{}, false
+	}
+	access, ok := a.memberAccessInfo(doc, lineNo, line, rhsExpr)
+	if !ok || access.Kind != "method" || access.Member.ReturnType != "" {
+		return Diagnostic{}, false
+	}
+	exprStart := strings.Index(line, rhsExpr)
+	if exprStart < 0 {
+		exprStart = 0
+	}
+	return assignmentDiagnostic("VB039", "vba/type/no-return-value", lineNo, line, exprStart, rhsExpr, fmt.Sprintf("Method %q on %s does not return a value.", access.Member.Name, access.ReceiverType)), true
 }
 
 func canonicalDiagnosticType(db *vbadb.DB, typ string) string {
