@@ -160,6 +160,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 	out = append(out, a.argumentDiagnostics(doc)...)
 	out = append(out, a.unknownMemberDiagnostics(doc)...)
 	out = append(out, a.propertyAccessDiagnostics(doc)...)
+	out = append(out, a.assignmentDiagnostics(doc)...)
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
 	return out
 }
@@ -1175,6 +1176,121 @@ func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprSt
 		Range: Range{
 			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
 			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
+}
+
+func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		eq := assignmentOperatorIndex(code)
+		if eq < 0 {
+			continue
+		}
+		lhsText := strings.TrimSpace(code[:eq])
+		setUsed, lhsExpr := assignmentLHSExpression(lhsText)
+		if disallowedValueAssignmentLHS(lhsExpr) {
+			continue
+		}
+		if lhsExpr == "" {
+			continue
+		}
+		offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+		lhsType, ok := a.assignmentLHSType(doc, lineNo, line, lhsExpr, offset)
+		if !ok {
+			continue
+		}
+		lhsStart := strings.Index(line, lhsExpr)
+		if lhsStart < 0 {
+			lhsStart = 0
+		}
+		if setUsed {
+			if valueDiagnosticType(lhsType) {
+				out = append(out, assignmentDiagnostic("VB037", "vba/type/set-not-allowed", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("'Set' cannot be used with value type %q.", lhsType)))
+			}
+			continue
+		}
+		if !concreteObjectDiagnosticType(lhsType) {
+			continue
+		}
+		rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, strings.TrimSpace(code[eq+1:]), offset)
+		if !ok || !concreteObjectDiagnosticType(rhsType) {
+			continue
+		}
+		out = append(out, assignmentDiagnostic("VB036", "vba/type/set-required", lineNo, line, lhsStart, lhsExpr, "Object assignment requires 'Set'."))
+	}
+	return out
+}
+
+func assignmentLHSExpression(lhs string) (setUsed bool, expr string) {
+	clean := strings.TrimSpace(lhs)
+	lower := strings.ToLower(clean)
+	if strings.HasPrefix(lower, "set ") {
+		return true, strings.TrimSpace(clean[4:])
+	}
+	if strings.HasPrefix(lower, "let ") {
+		return false, strings.TrimSpace(clean[4:])
+	}
+	return false, clean
+}
+
+func (a Analyzer) assignmentLHSType(doc Document, lineNo int, line, lhsExpr string, offset int) (string, bool) {
+	if strings.Contains(lhsExpr, ".") {
+		access, ok := a.memberAccessInfo(doc, lineNo, line, lhsExpr)
+		if !ok || access.Member.ReturnType == "" {
+			return "", false
+		}
+		return canonicalDiagnosticType(a.DB, access.Member.ReturnType), true
+	}
+	inferred, ok := a.inferWordTypeInfoAt(doc, lhsExpr, offset)
+	if !ok {
+		return "", false
+	}
+	return canonicalDiagnosticType(a.DB, inferred.Type), true
+}
+
+func canonicalDiagnosticType(db *vbadb.DB, typ string) string {
+	if db != nil {
+		if resolved, ok := db.ResolveType(typ); ok {
+			return resolved.Name
+		}
+	}
+	return strings.TrimSpace(typ)
+}
+
+func concreteObjectDiagnosticType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	return !lowConfidenceDiagnosticType(typ) && objectLikeType(typ)
+}
+
+func valueDiagnosticType(typ string) bool {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "boolean", "byte", "currency", "date", "decimal", "double", "integer", "long", "longlong", "longptr", "single", "string":
+		return true
+	default:
+		return false
+	}
+}
+
+func assignmentDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, message string) Diagnostic {
+	return Diagnostic{
+		Code:       code,
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       rule,
+		Confidence: "high",
+		Message:    message,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(exprStart, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(exprStart+len(expr), len(line)))])},
 		},
 	}
 }

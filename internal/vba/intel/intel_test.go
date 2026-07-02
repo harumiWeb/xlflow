@@ -506,6 +506,52 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeSetAssignmentMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    ws = Application.Worksheets(1)
+    Dim n As Long
+    Set n = 1
+End Sub
+`,
+	}
+
+	setRequired := diagnosticsByCode(analyzer.Diagnostics(doc), "VB036")
+	if len(setRequired) != 1 || !hasDiagnosticMessage(setRequired, "Object assignment requires 'Set'.") {
+		t.Fatalf("set-required diagnostic missing: %+v", setRequired)
+	}
+	setNotAllowed := diagnosticsByCode(analyzer.Diagnostics(doc), "VB037")
+	if len(setNotAllowed) != 1 || !hasDiagnosticMessage(setNotAllowed, `'Set' cannot be used with value type "Long".`) {
+		t.Fatalf("set-not-allowed diagnostic missing: %+v", setNotAllowed)
+	}
+}
+
+func TestSetAssignmentDiagnosticsSkipAmbiguousTypes(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim x As Object
+    x = GetSomething()
+    Dim v As Variant
+    Set v = GetSomething()
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB036"); len(diagnostics) != 0 {
+		t.Fatalf("Object fallback should not produce set-required diagnostics: %+v", diagnostics)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB037"); len(diagnostics) != 0 {
+		t.Fatalf("Variant should not produce set-not-allowed diagnostics: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
