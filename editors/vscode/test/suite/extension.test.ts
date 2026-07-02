@@ -8,7 +8,7 @@ import {
   normalizeAvailabilityFailure,
   normalizeAvailabilitySuccess,
 } from "../../src/cliAvailability";
-import { lspServerArgs } from "../../src/client";
+import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
@@ -112,6 +112,24 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, undefined),
     ["lsp", "--stdio"],
   );
+  const codeLensConfig = {
+    codeLensEnabled: true,
+    codeLensRunProcedure: true,
+    codeLensRunTests: true,
+    codeLensUserFormEvents: false,
+  };
+  assert.deepStrictEqual(lspCodeLensOptions(codeLensConfig, false), {
+    enabled: false,
+    runProcedure: true,
+    runTests: true,
+    userFormEvents: false,
+  });
+  assert.deepStrictEqual(lspCodeLensOptions(codeLensConfig, true), {
+    enabled: true,
+    runProcedure: true,
+    runTests: true,
+    userFormEvents: false,
+  });
   assert.deepStrictEqual(
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: true }, undefined),
     ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],

@@ -41,7 +41,9 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
     const cwd = folder?.uri.fsPath;
     const workspaceFolderKey = folder?.uri.toString();
-    const args = await lspServerArgs(config, folder);
+    const xlflowProject = await hasXlflowConfig(folder);
+    const args = lspServerArgsForProject(config, xlflowProject);
+    const codeLens = lspCodeLensOptions(config, xlflowProject);
     const serverOptions: ServerOptions = {
       command: config.path,
       args,
@@ -59,12 +61,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       outputChannel: this.channels.output,
       traceOutputChannel: this.channels.trace,
       initializationOptions: {
-        codeLens: {
-          enabled: config.codeLensEnabled,
-          runProcedure: config.codeLensRunProcedure,
-          runTests: config.codeLensRunTests,
-          userFormEvents: config.codeLensUserFormEvents,
-        },
+        codeLens,
       },
     };
 
@@ -159,11 +156,40 @@ export async function lspServerArgs(
   config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured">,
   folder: vscode.WorkspaceFolder | undefined,
 ): Promise<string[]> {
+  return lspServerArgsForProject(config, await hasXlflowConfig(folder));
+}
+
+export function lspServerArgsForProject(
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured">,
+  xlflowProject: boolean,
+): string[] {
   const args = ["lsp", "--stdio"];
-  if (config.lspLogFileConfigured || (await hasXlflowConfig(folder))) {
+  if (config.lspLogFileConfigured || xlflowProject) {
     args.push("--log-file", config.lspLogFile);
   }
   return args;
+}
+
+export interface LSPCodeLensOptions {
+  enabled: boolean;
+  runProcedure: boolean;
+  runTests: boolean;
+  userFormEvents: boolean;
+}
+
+export function lspCodeLensOptions(
+  config: Pick<
+    XlflowConfig,
+    "codeLensEnabled" | "codeLensRunProcedure" | "codeLensRunTests" | "codeLensUserFormEvents"
+  >,
+  xlflowProject: boolean,
+): LSPCodeLensOptions {
+  return {
+    enabled: xlflowProject && config.codeLensEnabled,
+    runProcedure: config.codeLensRunProcedure,
+    runTests: config.codeLensRunTests,
+    userFormEvents: config.codeLensUserFormEvents,
+  };
 }
 
 async function hasXlflowConfig(folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
