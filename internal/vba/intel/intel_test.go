@@ -357,7 +357,7 @@ Sub Test()
     Dim dict As Scripting.Dictionary
     dict.Add "A"
     Range()
-    dict.Add Key:="A", Value:=1
+    dict.Add Key:="A", Iteem:=1
 End Sub
 `,
 	}
@@ -373,7 +373,7 @@ End Sub
 	if !hasDiagnosticMessage(vb030, "Range expects at least 1 argument") {
 		t.Fatalf("missing Range argument count diagnostic: %+v", vb030)
 	}
-	if !hasDiagnosticMessage(vb030, "Unknown named argument: Value") {
+	if !hasDiagnosticMessage(vb030, `Unknown named argument: Iteem. Did you mean "Item"?`) {
 		t.Fatalf("missing unknown named argument diagnostic: %+v", vb030)
 	}
 }
@@ -436,10 +436,10 @@ End Sub
 	if len(diagnostics) != 2 {
 		t.Fatalf("unknown member diagnostics = %+v, want 2", diagnostics)
 	}
-	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Excel.Worksheet`) {
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Excel.Worksheet. Did you mean "Range"?`) {
 		t.Fatalf("missing Worksheet.Ragne diagnostic: %+v", diagnostics)
 	}
-	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Excel.Workbooks`) {
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Excel.Workbooks. Did you mean "Open"?`) {
 		t.Fatalf("missing Workbooks.Opne diagnostic: %+v", diagnostics)
 	}
 	for _, diag := range diagnostics {

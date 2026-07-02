@@ -958,7 +958,7 @@ func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int,
 			}
 			continue
 		}
-		return unknownMemberDiagnostic(lineNo, line, exprStartByte, expr, current, member), true
+		return a.unknownMemberDiagnostic(lineNo, line, exprStartByte, expr, current, member), true
 	}
 	return Diagnostic{}, false
 }
@@ -1017,7 +1017,7 @@ func lowConfidenceDiagnosticType(typ string) bool {
 	return typ == "" || strings.EqualFold(typ, "Object") || strings.EqualFold(typ, "Variant")
 }
 
-func unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, receiverType, member string) Diagnostic {
+func (a Analyzer) unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, receiverType, member string) Diagnostic {
 	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
 	start := exprStartByte
 	end := exprStartByte + len(expr)
@@ -1025,18 +1025,33 @@ func unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, r
 		start = exprStartByte + memberStart
 		end = start + len(member)
 	}
+	message := fmt.Sprintf("Unknown member %q on %s.", member, receiverType)
+	if suggestion, ok := a.closestMemberName(receiverType, member); ok {
+		message += fmt.Sprintf(" Did you mean %q?", suggestion)
+	}
 	return Diagnostic{
 		Code:       "VB033",
 		Severity:   "warning",
 		Source:     "xlflow",
 		Rule:       "vba/type/unknown-member",
 		Confidence: "high",
-		Message:    fmt.Sprintf("Unknown member %q on %s.", member, receiverType),
+		Message:    message,
 		Range: Range{
 			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
 			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
 		},
 	}
+}
+
+func (a Analyzer) closestMemberName(receiverType, name string) (string, bool) {
+	if a.DB == nil {
+		return "", false
+	}
+	candidates := make([]string, 0)
+	for _, member := range a.DB.Members(receiverType) {
+		candidates = append(candidates, member.Name)
+	}
+	return closestName(candidates, name)
 }
 
 func isDeclarationLineForTypeDiagnostics(line string) bool {
@@ -1276,7 +1291,11 @@ func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []D
 			continue
 		}
 		if !signatureHasParameter(sig.Parameters, arg.Name) {
-			out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Unknown named argument: %s.", arg.Name)))
+			msg := fmt.Sprintf("Unknown named argument: %s.", arg.Name)
+			if suggestion, ok := closestParameterName(sig.Parameters, arg.Name); ok {
+				msg += fmt.Sprintf(" Did you mean %q?", suggestion)
+			}
+			out = append(out, callDiagnostic(lineNo, call, msg))
 		}
 	}
 	return out
@@ -1302,6 +1321,67 @@ func signatureHasParameter(params []Parameter, name string) bool {
 		}
 	}
 	return false
+}
+
+func closestParameterName(params []Parameter, name string) (string, bool) {
+	candidates := make([]string, 0, len(params))
+	for _, param := range params {
+		candidates = append(candidates, param.Name)
+	}
+	return closestName(candidates, name)
+}
+
+func closestName(candidates []string, name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	best := ""
+	bestDistance := 4
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.EqualFold(candidate, name) {
+			continue
+		}
+		distance := editDistance(strings.ToLower(name), strings.ToLower(candidate))
+		if distance < bestDistance || distance == bestDistance && (best == "" || strings.ToLower(candidate) < strings.ToLower(best)) {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+	limit := 1
+	if len(name) >= 4 {
+		limit = 2
+	}
+	if best == "" || bestDistance > limit {
+		return "", false
+	}
+	return best, true
+}
+
+func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ar := []rune(a)
+	br := []rune(b)
+	prev := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i, ra := range ar {
+		current := make([]int, len(br)+1)
+		current[0] = i + 1
+		for j, rb := range br {
+			cost := 0
+			if ra != rb {
+				cost = 1
+			}
+			current[j+1] = min(min(current[j]+1, prev[j+1]+1), prev[j]+cost)
+		}
+		prev = current
+	}
+	return prev[len(br)]
 }
 
 func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
