@@ -5325,6 +5325,7 @@ func (a *app) lspCommand() *cobra.Command {
 				Stderr:  a.stderrWriter(),
 			}
 			if check {
+				a.ensureLSPTypeDBGenerated()
 				if err := lspserver.Check(opts); err != nil {
 					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
 				}
@@ -5346,6 +5347,7 @@ func (a *app) lspCommand() *cobra.Command {
 				env.Logs = []string{"lsp pre-launch check passed"}
 				return a.write(env, output.ExitSuccess)
 			}
+			a.ensureLSPTypeDBGenerated()
 			return lspserver.RunStdio(opts)
 		},
 	}
@@ -5354,6 +5356,46 @@ func (a *app) lspCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&showVersion, "version", false, "show LSP server version and exit")
 	cmd.Flags().StringVar(&logFile, "log-file", "", "write LSP logs to this file instead of stderr")
 	return cmd
+}
+
+func (a *app) ensureLSPTypeDBGenerated() {
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB status could not be inspected: %v\n", err)
+		return
+	}
+	if status.ManifestExists && !status.Stale {
+		return
+	}
+	resolvedDir, err := typedb.ResolveDir("")
+	if err != nil {
+		fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB directory could not be resolved: %v\n", err)
+		return
+	}
+	state := "missing"
+	if status.ManifestExists && status.Stale {
+		state = "stale"
+	}
+	fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB %s; attempting best-effort generation at %s\n", state, resolvedDir)
+	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        []string{"all"},
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB generation skipped: %v\n", err)
+		return
+	}
+	if code != output.ExitSuccess {
+		reason := "unknown error"
+		if typeDBEnv.Error != nil && typeDBEnv.Error.Message != "" {
+			reason = typeDBEnv.Error.Message
+		}
+		fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB generation skipped: %s\n", reason)
+		return
+	}
+	fmt.Fprintf(a.stderrWriter(), "xlflow-lsp: generated TypeLib DB created at %s\n", resolvedDir)
 }
 
 func (a *app) analyzeCommand() *cobra.Command {

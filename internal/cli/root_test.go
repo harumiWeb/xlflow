@@ -173,6 +173,37 @@ func TestAttachTypeDBDoctorStatusWarnsWhenGeneratedDBMissing(t *testing.T) {
 	}
 }
 
+func TestEnsureLSPTypeDBGeneratedSkipsCurrentDatabase(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(typedb.EnvDir, dir)
+	generated := filepath.Join(dir, "excel.generated.json")
+	if err := os.WriteFile(generated, []byte(`{"schema_version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(dir, typedb.Manifest{
+		GeneratorVersion: "dev",
+		Libraries: []typedb.ManifestLibrary{{
+			Name:   "Excel",
+			LibID:  "{00020813-0000-0000-C000-000000000046}",
+			Major:  1,
+			Minor:  9,
+			LCID:   0,
+			Source: "registry",
+			Output: "excel.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	a := &app{stderr: &stderr, buildInfo: BuildInfo{Version: "dev"}}
+
+	a.ensureLSPTypeDBGenerated()
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want no LSP Type DB bootstrap output", stderr.String())
+	}
+}
+
 func TestBridgeFlagRejectsRemovedPowerShellValue(t *testing.T) {
 	dir := t.TempDir()
 	var stdout bytes.Buffer
