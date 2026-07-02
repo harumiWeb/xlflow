@@ -127,6 +127,8 @@ func New(opts Options) (*Server, func(), error) {
 		WorkspaceSymbol:                s.workspaceSymbol,
 		TextDocumentDefinition:         s.definition,
 		TextDocumentReferences:         s.references,
+		TextDocumentPrepareRename:      s.prepareRename,
+		TextDocumentRename:             s.rename,
 		TextDocumentHover:              s.hover,
 		TextDocumentCompletion:         s.completion,
 		TextDocumentSignatureHelp:      s.signatureHelp,
@@ -179,6 +181,10 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	if capabilities.SignatureHelpProvider != nil {
 		capabilities.SignatureHelpProvider.TriggerCharacters = []string{"(", ",", " "}
 		capabilities.SignatureHelpProvider.RetriggerCharacters = []string{","}
+	}
+	if capabilities.RenameProvider != nil {
+		prepareProvider := true
+		capabilities.RenameProvider = protocol.RenameOptions{PrepareProvider: &prepareProvider}
 	}
 	if semantic, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions); ok {
 		semantic.Legend = protocol.SemanticTokensLegend{
@@ -385,6 +391,45 @@ func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) (
 		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
 	}
 	return out, nil
+}
+
+func (s *Server) prepareRename(_ *glsp.Context, params *protocol.PrepareRenameParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.analyzer.PrepareRename(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
+	if err != nil {
+		return nil, err
+	}
+	return protocol.RangeWithPlaceholder{
+		Range:       toProtocolRange(target.Range),
+		Placeholder: target.Name,
+	}, nil
+}
+
+func (s *Server) rename(_ *glsp.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	edits, err := s.analyzer.Rename(doc, fromProtocolPosition(params.Position), params.NewName, s.docs.openDocuments(), s.docs.uriForDisplayPath)
+	if err != nil {
+		return nil, err
+	}
+	changes := map[protocol.DocumentUri][]protocol.TextEdit{}
+	for _, edit := range edits {
+		uri := edit.URI
+		if uri == "" {
+			uri = s.docs.uriForDisplayPath(edit.Path)
+		}
+		docURI := protocol.DocumentUri(uri)
+		changes[docURI] = append(changes[docURI], protocol.TextEdit{
+			Range:   toProtocolRange(edit.Range),
+			NewText: edit.NewText,
+		})
+	}
+	return &protocol.WorkspaceEdit{Changes: changes}, nil
 }
 
 func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {

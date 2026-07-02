@@ -30,7 +30,9 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 When the global generated TypeLib database is missing or stale, `xlflow lsp --stdio` and `xlflow lsp --check` attempt best-effort generation before loading the database. Generation failures are reported on stderr and do not prevent the LSP from starting with the embedded built-in database.
 
-The MVP server supports full document synchronization, diagnostics, semantic tokens, document symbols, workspace symbols, definition lookup, references, hover, completion, signature help, document formatting, and CodeLens. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
+The MVP server supports full document synchronization, diagnostics, semantic tokens, document symbols, workspace symbols, definition lookup, references, prepare rename, rename, hover, completion, signature help, document formatting, and CodeLens. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
+
+Rename support is conservative and scope-aware. It works for high-confidence VBA source symbols such as local variables, parameters, procedure-local constants, private module-level variables/constants, same-module private procedures, and same-procedure labels used by `GoTo`, `GoSub`, `Resume`, or `On Error GoTo`. It refuses host object model members, TypeLib/external members, public project-wide APIs, module files, `Attribute VB_Name`, UserForm controls, event handlers, property groups, ambiguous names, and unresolved identifiers.
 
 Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
 
