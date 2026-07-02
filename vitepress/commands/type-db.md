@@ -14,11 +14,11 @@ xlflow type db clean
 
 ## Options
 
-| Option      | Description                                          | Default             |
-| ----------- | ---------------------------------------------------- | ------------------- |
-| `--dir`     | Override the generated type DB directory.            | `~/.xlflow/typelib` |
+| Option      | Description                                                                                                      | Default             |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `--dir`     | Override the generated type DB directory.                                                                        | `~/.xlflow/typelib` |
 | `--library` | TypeLib library to import. Repeat, comma-separate, or use `all` for every known library present on this machine. | `excel`             |
-| `--force`   | Deprecated compatibility flag; `refresh` always regenerates. | `false`             |
+| `--force`   | Deprecated compatibility flag; `refresh` always regenerates.                                                     | `false`             |
 
 `status` reports manifest presence, generated files, library LIBID/version metadata, stale state, and the LSP database search order.
 

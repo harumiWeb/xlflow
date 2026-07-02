@@ -1,77 +1,588 @@
 {
   "constants": [
-    { "name": "vbCr", "library": "VBA", "kind": "constant", "type": "String", "value": "\\r", "enum_group": "VbStringConstant" },
-    { "name": "vbCrLf", "library": "VBA", "kind": "constant", "type": "String", "value": "\\r\\n", "enum_group": "VbStringConstant" },
-    { "name": "vbLf", "library": "VBA", "kind": "constant", "type": "String", "value": "\\n", "enum_group": "VbStringConstant" },
-    { "name": "vbNewLine", "library": "VBA", "kind": "constant", "type": "String", "value": "\\r\\n", "enum_group": "VbStringConstant" },
-    { "name": "vbTab", "library": "VBA", "kind": "constant", "type": "String", "value": "\\t", "enum_group": "VbStringConstant" },
-    { "name": "vbBack", "library": "VBA", "kind": "constant", "type": "String", "value": "\\b", "enum_group": "VbStringConstant" },
-    { "name": "vbFormFeed", "library": "VBA", "kind": "constant", "type": "String", "value": "\\f", "enum_group": "VbStringConstant" },
-    { "name": "vbVerticalTab", "library": "VBA", "kind": "constant", "type": "String", "value": "\\v", "enum_group": "VbStringConstant" },
-    { "name": "vbNullChar", "library": "VBA", "kind": "constant", "type": "String", "value": "\\0", "enum_group": "VbStringConstant" },
-    { "name": "vbNullString", "library": "VBA", "kind": "constant", "type": "String", "value": "", "enum_group": "VbStringConstant" },
-    { "name": "vbObjectError", "library": "VBA", "kind": "constant", "type": "Long", "value": "-2147221504", "enum_group": "VbRuntimeConstant" },
-    { "name": "vbOKOnly", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbOKCancel", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbAbortRetryIgnore", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbYesNoCancel", "library": "VBA", "kind": "constant", "type": "Long", "value": "3", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbYesNo", "library": "VBA", "kind": "constant", "type": "Long", "value": "4", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbRetryCancel", "library": "VBA", "kind": "constant", "type": "Long", "value": "5", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbCritical", "library": "VBA", "kind": "constant", "type": "Long", "value": "16", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbQuestion", "library": "VBA", "kind": "constant", "type": "Long", "value": "32", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbExclamation", "library": "VBA", "kind": "constant", "type": "Long", "value": "48", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbInformation", "library": "VBA", "kind": "constant", "type": "Long", "value": "64", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbDefaultButton1", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbDefaultButton2", "library": "VBA", "kind": "constant", "type": "Long", "value": "256", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbDefaultButton3", "library": "VBA", "kind": "constant", "type": "Long", "value": "512", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbDefaultButton4", "library": "VBA", "kind": "constant", "type": "Long", "value": "768", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbApplicationModal", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbSystemModal", "library": "VBA", "kind": "constant", "type": "Long", "value": "4096", "enum_group": "VbMsgBoxStyle" },
-    { "name": "vbOK", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbCancel", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbAbort", "library": "VBA", "kind": "constant", "type": "Long", "value": "3", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbRetry", "library": "VBA", "kind": "constant", "type": "Long", "value": "4", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbIgnore", "library": "VBA", "kind": "constant", "type": "Long", "value": "5", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbYes", "library": "VBA", "kind": "constant", "type": "Long", "value": "6", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbNo", "library": "VBA", "kind": "constant", "type": "Long", "value": "7", "enum_group": "VbMsgBoxResult" },
-    { "name": "vbUseCompareOption", "library": "VBA", "kind": "constant", "type": "Long", "value": "-1", "enum_group": "VbCompareMethod" },
-    { "name": "vbBinaryCompare", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbCompareMethod" },
-    { "name": "vbTextCompare", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbCompareMethod" },
-    { "name": "vbDatabaseCompare", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbCompareMethod" },
-    { "name": "vbGeneralDate", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbDateTimeFormat" },
-    { "name": "vbLongDate", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbDateTimeFormat" },
-    { "name": "vbShortDate", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbDateTimeFormat" },
-    { "name": "vbLongTime", "library": "VBA", "kind": "constant", "type": "Long", "value": "3", "enum_group": "VbDateTimeFormat" },
-    { "name": "vbShortTime", "library": "VBA", "kind": "constant", "type": "Long", "value": "4", "enum_group": "VbDateTimeFormat" },
-    { "name": "vbUseDefault", "library": "VBA", "kind": "constant", "type": "Long", "value": "-2", "enum_group": "VbTriState" },
-    { "name": "vbTrue", "library": "VBA", "kind": "constant", "type": "Long", "value": "-1", "enum_group": "VbTriState" },
-    { "name": "vbFalse", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbTriState" },
-    { "name": "vbEmpty", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbVarType" },
-    { "name": "vbNull", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbVarType" },
-    { "name": "vbInteger", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbVarType" },
-    { "name": "vbLong", "library": "VBA", "kind": "constant", "type": "Long", "value": "3", "enum_group": "VbVarType" },
-    { "name": "vbSingle", "library": "VBA", "kind": "constant", "type": "Long", "value": "4", "enum_group": "VbVarType" },
-    { "name": "vbDouble", "library": "VBA", "kind": "constant", "type": "Long", "value": "5", "enum_group": "VbVarType" },
-    { "name": "vbCurrency", "library": "VBA", "kind": "constant", "type": "Long", "value": "6", "enum_group": "VbVarType" },
-    { "name": "vbDate", "library": "VBA", "kind": "constant", "type": "Long", "value": "7", "enum_group": "VbVarType" },
-    { "name": "vbString", "library": "VBA", "kind": "constant", "type": "Long", "value": "8", "enum_group": "VbVarType" },
-    { "name": "vbObject", "library": "VBA", "kind": "constant", "type": "Long", "value": "9", "enum_group": "VbVarType" },
-    { "name": "vbError", "library": "VBA", "kind": "constant", "type": "Long", "value": "10", "enum_group": "VbVarType" },
-    { "name": "vbBoolean", "library": "VBA", "kind": "constant", "type": "Long", "value": "11", "enum_group": "VbVarType" },
-    { "name": "vbVariant", "library": "VBA", "kind": "constant", "type": "Long", "value": "12", "enum_group": "VbVarType" },
-    { "name": "vbDataObject", "library": "VBA", "kind": "constant", "type": "Long", "value": "13", "enum_group": "VbVarType" },
-    { "name": "vbDecimal", "library": "VBA", "kind": "constant", "type": "Long", "value": "14", "enum_group": "VbVarType" },
-    { "name": "vbByte", "library": "VBA", "kind": "constant", "type": "Long", "value": "17", "enum_group": "VbVarType" },
-    { "name": "vbLongLong", "library": "VBA", "kind": "constant", "type": "Long", "value": "20", "enum_group": "VbVarType" },
-    { "name": "vbUserDefinedType", "library": "VBA", "kind": "constant", "type": "Long", "value": "36", "enum_group": "VbVarType" },
-    { "name": "vbArray", "library": "VBA", "kind": "constant", "type": "Long", "value": "8192", "enum_group": "VbVarType" },
-    { "name": "vbNormal", "library": "VBA", "kind": "constant", "type": "Long", "value": "0", "enum_group": "VbFileAttribute" },
-    { "name": "vbReadOnly", "library": "VBA", "kind": "constant", "type": "Long", "value": "1", "enum_group": "VbFileAttribute" },
-    { "name": "vbHidden", "library": "VBA", "kind": "constant", "type": "Long", "value": "2", "enum_group": "VbFileAttribute" },
-    { "name": "vbSystem", "library": "VBA", "kind": "constant", "type": "Long", "value": "4", "enum_group": "VbFileAttribute" },
-    { "name": "vbVolume", "library": "VBA", "kind": "constant", "type": "Long", "value": "8", "enum_group": "VbFileAttribute" },
-    { "name": "vbDirectory", "library": "VBA", "kind": "constant", "type": "Long", "value": "16", "enum_group": "VbFileAttribute" },
-    { "name": "vbArchive", "library": "VBA", "kind": "constant", "type": "Long", "value": "32", "enum_group": "VbFileAttribute" },
-    { "name": "vbAlias", "library": "VBA", "kind": "constant", "type": "Long", "value": "64", "enum_group": "VbFileAttribute" }
+    {
+      "name": "vbCr",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\r",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbCrLf",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\r\\n",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbLf",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\n",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbNewLine",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\r\\n",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbTab",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\t",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbBack",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\b",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbFormFeed",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\f",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbVerticalTab",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\v",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbNullChar",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "\\0",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbNullString",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "String",
+      "value": "",
+      "enum_group": "VbStringConstant"
+    },
+    {
+      "name": "vbObjectError",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-2147221504",
+      "enum_group": "VbRuntimeConstant"
+    },
+    {
+      "name": "vbOKOnly",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbOKCancel",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbAbortRetryIgnore",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbYesNoCancel",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "3",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbYesNo",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbRetryCancel",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "5",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbCritical",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "16",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbQuestion",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "32",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbExclamation",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "48",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbInformation",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "64",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbDefaultButton1",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbDefaultButton2",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "256",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbDefaultButton3",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "512",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbDefaultButton4",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "768",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbApplicationModal",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbSystemModal",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4096",
+      "enum_group": "VbMsgBoxStyle"
+    },
+    {
+      "name": "vbOK",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbCancel",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbAbort",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "3",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbRetry",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbIgnore",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "5",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbYes",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "6",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbNo",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "7",
+      "enum_group": "VbMsgBoxResult"
+    },
+    {
+      "name": "vbUseCompareOption",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-1",
+      "enum_group": "VbCompareMethod"
+    },
+    {
+      "name": "vbBinaryCompare",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbCompareMethod"
+    },
+    {
+      "name": "vbTextCompare",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbCompareMethod"
+    },
+    {
+      "name": "vbDatabaseCompare",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbCompareMethod"
+    },
+    {
+      "name": "vbGeneralDate",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbDateTimeFormat"
+    },
+    {
+      "name": "vbLongDate",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbDateTimeFormat"
+    },
+    {
+      "name": "vbShortDate",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbDateTimeFormat"
+    },
+    {
+      "name": "vbLongTime",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "3",
+      "enum_group": "VbDateTimeFormat"
+    },
+    {
+      "name": "vbShortTime",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbDateTimeFormat"
+    },
+    {
+      "name": "vbUseDefault",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-2",
+      "enum_group": "VbTriState"
+    },
+    {
+      "name": "vbTrue",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "-1",
+      "enum_group": "VbTriState"
+    },
+    {
+      "name": "vbFalse",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbTriState"
+    },
+    {
+      "name": "vbEmpty",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbNull",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbInteger",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbLong",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "3",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbSingle",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbDouble",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "5",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbCurrency",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "6",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbDate",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "7",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbString",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "8",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbObject",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "9",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbError",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "10",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbBoolean",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "11",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbVariant",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "12",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbDataObject",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "13",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbDecimal",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "14",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbByte",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "17",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbLongLong",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "20",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbUserDefinedType",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "36",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbArray",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "8192",
+      "enum_group": "VbVarType"
+    },
+    {
+      "name": "vbNormal",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbReadOnly",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbHidden",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbSystem",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbVolume",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "8",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbDirectory",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "16",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbArchive",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "32",
+      "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbAlias",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "64",
+      "enum_group": "VbFileAttribute"
+    }
   ]
 }
