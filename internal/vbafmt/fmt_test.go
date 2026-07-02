@@ -221,6 +221,27 @@ End Sub
 	}
 }
 
+func TestFormatBasIndentsExplicitContinuationTail(t *testing.T) {
+	input := `Public Sub Test()
+ws.ListObjects("Table1").DataBodyRange.Copy _
+Destination:=ThisWorkbook.Worksheets("Out").Range("A1")
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTrimmedLineIndent(t, got, `ws.ListObjects("Table1").DataBodyRange.Copy _`, 4)
+	assertTrimmedLineIndent(t, got, `Destination:=ThisWorkbook.Worksheets("Out").Range("A1")`, 8)
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("continuation tail format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
 func assertTrimmedLineIndent(t *testing.T, text, trimmed string, want int) {
 	t.Helper()
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {

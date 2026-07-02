@@ -24,7 +24,7 @@ func TestDelegatedTopLevelCommands(t *testing.T) {
 	delegated := []string{
 		"attach", "check", "doctor", "edit", "export-image", "form", "init",
 		"list", "macros", "new", "process", "pull", "push", "rollback",
-		"run", "runner", "save", "session", "status", "test", "ui",
+		"run", "runner", "save", "session", "status", "test", "type", "ui",
 	}
 	local := []string{
 		"backup", "completion", "diff", "fmt", "generate", "inspect-gui", "lint",

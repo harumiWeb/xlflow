@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
@@ -7,6 +8,7 @@ import {
   normalizeAvailabilityFailure,
   normalizeAvailabilitySuccess,
 } from "../../src/cliAvailability";
+import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
@@ -106,6 +108,50 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   }
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
+  assert.deepStrictEqual(
+    await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, undefined),
+    ["lsp", "--stdio"],
+  );
+  const codeLensConfig = {
+    codeLensEnabled: true,
+    codeLensRunProcedure: true,
+    codeLensRunTests: true,
+    codeLensUserFormEvents: false,
+  };
+  assert.deepStrictEqual(lspCodeLensOptions(codeLensConfig, false), {
+    enabled: false,
+    runProcedure: true,
+    runTests: true,
+    userFormEvents: false,
+  });
+  assert.deepStrictEqual(lspCodeLensOptions(codeLensConfig, true), {
+    enabled: true,
+    runProcedure: true,
+    runTests: true,
+    userFormEvents: false,
+  });
+  assert.deepStrictEqual(
+    await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: true }, undefined),
+    ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
+  );
+  const lspProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "xlflow-vscode-lsp-"));
+  try {
+    fs.writeFileSync(path.join(lspProjectDir, "xlflow.toml"), "[project]\nname = \"test\"\n");
+    const folder: vscode.WorkspaceFolder = {
+      uri: vscode.Uri.file(lspProjectDir),
+      name: "xlflow-vscode-lsp",
+      index: 0,
+    };
+    assert.deepStrictEqual(
+      await lspServerArgs(
+        { lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false },
+        folder,
+      ),
+      ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
+    );
+  } finally {
+    fs.rmSync(lspProjectDir, { recursive: true, force: true });
+  }
   assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow: No Session");
   assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session Active");
   assert.strictEqual(

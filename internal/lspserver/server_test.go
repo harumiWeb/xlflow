@@ -24,6 +24,35 @@ func TestCheckLoadsBuiltinDatabase(t *testing.T) {
 	}
 }
 
+func TestNewLoadsGeneratedTypeDatabaseWhenPresent(t *testing.T) {
+	typeDBDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(typeDBDir, "vendor.generated.json"), []byte(`{
+  "types": [
+    {
+      "name": "Vendor.Widget",
+      "library": "Vendor",
+      "kind": "class",
+      "properties": [{ "name": "Name", "return_type": "String" }]
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server, cleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default(), TypeDBDir: typeDBDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if typ, ok := server.db.ResolveType("Vendor.Widget"); !ok || typ.Name != "Vendor.Widget" {
+		t.Fatalf("generated type missing: %+v, %v", typ, ok)
+	}
+	if member, ok := server.db.ResolveMember("Vendor.Widget", "Name"); !ok || member.ReturnType != "String" {
+		t.Fatalf("generated member missing: %+v, %v", member, ok)
+	}
+}
+
 func TestFileURIPathRoundTripWithEscapedJapanesePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "日本 語#%dir", "Main.bas")
 	uri := pathToFileURI(path)
@@ -473,6 +502,41 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
 			Version:                3,
+		},
+		ContentChanges: []any{
+			map[string]any{"text": "Option Explicit\nSub Test()\n    Set app = CreateObject(\nEnd Sub\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var progIDList protocol.CompletionList
+	if err := clientConn.Call(ctx, string(protocol.MethodTextDocumentCompletion), protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 27},
+		},
+	}, &progIDList); err != nil {
+		t.Fatal(err)
+	}
+	progIDItem, ok := findCompletionItem(progIDList.Items, "Excel.Application")
+	if !ok {
+		t.Fatalf("Excel.Application ProgID completion missing: %+v", progIDList.Items)
+	}
+	progIDEdit, ok := progIDItem.TextEdit.(protocol.TextEdit)
+	if !ok || progIDEdit.NewText != `"Excel.Application"` {
+		t.Fatalf("Excel.Application text edit = %+v, want quoted ProgID insertion", progIDItem.TextEdit)
+	}
+	if progIDItem.SortText == nil || *progIDItem.SortText != "1:excel.application" {
+		t.Fatalf("Excel.Application sortText = %+v, want version-independent priority", progIDItem.SortText)
+	}
+	if progIDItem.Detail == nil || *progIDItem.Detail != "Excel.Application - version-independent ProgID" {
+		t.Fatalf("Excel.Application detail = %+v", progIDItem.Detail)
+	}
+
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Version:                4,
 		},
 		ContentChanges: []any{
 			map[string]any{"text": "Option Explicit\nPublic Sub UnsavedRun()\nEnd Sub\nPublic Sub Test_UnsavedRun()\nEnd Sub\nPublic Sub WithArg(value As String)\nEnd Sub\n"},

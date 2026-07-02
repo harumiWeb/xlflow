@@ -34,6 +34,10 @@ Run `doctor` before debugging workbook behavior on a new Windows or Excel instal
 By default, `doctor` performs lightweight Excel COM, VBIDE, and systemprofile Desktop checks without opening the configured workbook. Use `--workbook` when you need to prove that the configured workbook can be opened by the selected bridge.
 :::
 
+::: tip
+`doctor` also checks the generated TypeLib database used by the LSP. If it has not been initialized, or if it is stale, `doctor` keeps the environment check successful but prints a warning and a hint to run `xlflow type db init` or `xlflow type db refresh --library all`.
+:::
+
 ::: warning
 VBIDE access must be enabled in Excel Trust Center before xlflow can import, export, or inspect VBA components.
 :::

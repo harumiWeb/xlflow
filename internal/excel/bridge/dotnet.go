@@ -42,6 +42,7 @@ var dotNetSupportedCommands = map[string]struct{}{
 	"runner":            {},
 	"session":           {},
 	"test":              {},
+	"type-db-import":    {},
 	"ui":                {},
 }
 

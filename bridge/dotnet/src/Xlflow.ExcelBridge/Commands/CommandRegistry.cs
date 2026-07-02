@@ -39,6 +39,7 @@ public sealed class CommandRegistry
             new RunnerCommand(),
             new SessionCommand(),
             new TestCommand(),
+            new TypeDbImportCommand(),
             new UICommand(),
         });
     }
@@ -62,6 +63,7 @@ public sealed class CommandRegistry
         IRunnerService? runnerService = null,
         ISessionService? sessionService = null,
         ITestService? testService = null,
+        TypeLibImporterService? typeLibImporterService = null,
         IUIService? uiService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
@@ -84,6 +86,7 @@ public sealed class CommandRegistry
             new RunnerCommand(runnerService),
             new SessionCommand(sessionService),
             new TestCommand(testService),
+            new TypeDbImportCommand(typeLibImporterService),
             new UICommand(uiService),
         });
     }

@@ -21,6 +21,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/xuri/excelize/v2"
 )
@@ -116,6 +117,28 @@ func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesTypeDBCommands(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	for _, args := range [][]string{
+		{"type"},
+		{"type", "db"},
+		{"type", "db", "status"},
+		{"type", "db", "init"},
+		{"type", "db", "refresh"},
+		{"type", "db", "clean"},
+	} {
+		cmd, _, err := root.Find(args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", args, err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("Find(%v) = %#v", args, cmd)
+		}
+	}
+}
+
 func TestRootCommandIncludesBridgeFlag(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -123,6 +146,61 @@ func TestRootCommandIncludesBridgeFlag(t *testing.T) {
 	flag := root.PersistentFlags().Lookup("bridge")
 	if flag == nil {
 		t.Fatal("expected persistent --bridge flag")
+	}
+}
+
+func TestAttachTypeDBDoctorStatusWarnsWhenGeneratedDBMissing(t *testing.T) {
+	t.Setenv(typedb.EnvDir, t.TempDir())
+	a := &app{}
+	env := output.New("doctor")
+
+	a.attachTypeDBDoctorStatus(&env)
+
+	status, ok := env.TypeDB.(typedb.Status)
+	if !ok {
+		t.Fatalf("type_db = %T, want typedb.Status", env.TypeDB)
+	}
+	if status.ManifestExists {
+		t.Fatalf("manifest_exists = true, want false")
+	}
+	warnings := anySlice(env.Warnings)
+	if len(warnings) != 1 || warnings[0].(map[string]any)["code"] != "type_db_missing" {
+		t.Fatalf("warnings = %#v", env.Warnings)
+	}
+	hints := anySlice(env.Hints)
+	if len(hints) != 1 || hints[0].(map[string]any)["code"] != "type_db_init" {
+		t.Fatalf("hints = %#v", env.Hints)
+	}
+}
+
+func TestEnsureLSPTypeDBGeneratedSkipsCurrentDatabase(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(typedb.EnvDir, dir)
+	generated := filepath.Join(dir, "excel.generated.json")
+	if err := os.WriteFile(generated, []byte(`{"schema_version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(dir, typedb.Manifest{
+		GeneratorVersion: "dev",
+		Libraries: []typedb.ManifestLibrary{{
+			Name:   "Excel",
+			LibID:  "{00020813-0000-0000-C000-000000000046}",
+			Major:  1,
+			Minor:  9,
+			LCID:   0,
+			Source: "registry",
+			Output: "excel.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	a := &app{stderr: &stderr, buildInfo: BuildInfo{Version: "dev"}}
+
+	a.ensureLSPTypeDBGenerated()
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want no LSP Type DB bootstrap output", stderr.String())
 	}
 }
 

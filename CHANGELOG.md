@@ -4,6 +4,22 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow type db status/init/refresh/clean` for global generated TypeLib databases, with an initial Excel TypeLib importer feeding LSP type intelligence.
+- Updated `xlflow lsp` to load generated TypeLib databases when present while continuing to work with only the embedded built-in database.
+- Added best-effort generated TypeLib DB initialization after successful `new` and `init`; failures are reported as warnings and do not fail project creation.
+- Extended generated TypeLib databases with registry-derived ProgID mappings and `--library all`, improving LSP `CreateObject("...")` late-binding inference for installed Excel, Scripting, ADODB, MSForms, Office, and VBIDE libraries.
+- Changed `xlflow type db refresh` to always regenerate the generated TypeLib database; `--force` remains accepted for compatibility but is no longer required.
+- Updated `xlflow doctor` to report generated TypeLib DB status and suggest initialization or refresh when the global DB is missing or stale.
+- Added best-effort generated TypeLib DB initialization when `xlflow lsp --stdio` or `xlflow lsp --check` starts and the global DB is missing or stale.
+- Hardened generated TypeLib DB clean/refresh behavior to reject unsafe clean targets, avoid loading stale generated files outside the manifest, and keep best-effort multi-library imports from failing the whole run when one TypeLib cannot be imported.
+- Updated the VS Code extension to avoid passing the default `.xlflow/lsp.log` path in non-xlflow workspaces, so syntax/LSP-only users do not get workspace log files unless they configure one.
+- Updated the VS Code extension to hide LSP CodeLens run actions in non-xlflow workspaces.
+- Fixed LSP ProgID completions so `CreateObject(`, `CreateObject "..."`, and `CreateObject(Class:=...)` contexts surface late-binding candidates instead of requiring an already-open string literal.
+- Improved LSP ProgID completion ranking and details by prioritizing version-independent ProgIDs and labeling versioned ProgIDs such as `Excel.Application.16` or `Forms.CommandButton.1`.
+- Improved VBA LSP intelligence for common Excel idioms, including With-relative call-chain signature help, collection default-member signatures such as `ListObjects(1)`, multi-line signature help across `_` continuations, named-argument completions such as `Destination:=`, and `WScript.Shell` / `VBScript.RegExp` `CreateObject` inference.
+- Expanded VBA LSP top-level expression completions with `Set ... = New`, `Nothing`, object-producing built-ins such as `GetObject`, and common VBA `Is*`/type-inspection functions including signature help.
+- Expanded the curated VBA standard library database with string, date/time, math, conversion, file-system, interaction, and financial functions plus common `vb*` constants for completion and signature help.
+- Improved VBA formatting so explicit line-continuation tails are indented one additional level while preserving existing line-number alignment behavior.
 - Added `VB032` lint/LSP/preflight validation for repeated `?` Debug.Print shorthand such as `?? "hoge"`, reporting it before Excel/VBE interaction.
 
 ## v0.16.1

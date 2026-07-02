@@ -1221,6 +1221,43 @@ func TestRunnerAutoModeDoesNotFallBackToPowerShellWhenDotNetProtocolVersionMissi
 	}
 }
 
+func TestRunnerTypeDBImportUsesDotNetAndMapsTypeDBPayload(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var requests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(mode),
+			supports: mode == excelbridge.ModeDotNet,
+			requests: &requests,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"type-db-import","logs":["generated"],"type_db":{"dir":"C:\\typedb","generated_files":["C:\\typedb\\excel.generated.json"]}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.TypeDBImport(TypeDBImportOptions{
+		OutputDir:        `C:\typedb`,
+		GeneratorVersion: "1.2.3",
+		Libraries:        []string{"excel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want success: %+v", code, env.Error)
+	}
+	if len(requests) != 1 || requests[0].Command != "type-db-import" {
+		t.Fatalf("requests = %+v", requests)
+	}
+	if requests[0].Args["OutputDir"] != `C:\typedb` || requests[0].Args["GeneratorVersion"] != "1.2.3" || requests[0].Args["Libraries"] != "excel" {
+		t.Fatalf("unexpected request args: %+v", requests[0].Args)
+	}
+	typeDB, ok := env.TypeDB.(map[string]any)
+	if !ok || typeDB["dir"] != `C:\typedb` {
+		t.Fatalf("type_db not mapped: %+v", env.TypeDB)
+	}
+}
+
 func TestBuildUIButtonAddScriptArgs(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

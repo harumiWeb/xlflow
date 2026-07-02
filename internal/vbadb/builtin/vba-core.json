@@ -125,6 +125,93 @@
           "parameters": [{ "name": "Expression", "type": "Variant" }]
         },
         {
+          "name": "IsArray",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "VarName", "type": "Variant" }]
+        },
+        {
+          "name": "IsDate",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "IsEmpty",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "IsError",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "IsMissing",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "ArgName", "type": "Variant" }]
+        },
+        {
+          "name": "IsNull",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "IsNumeric",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Expression", "type": "Variant" }]
+        },
+        {
+          "name": "IsObject",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "Identifier", "type": "Variant" }]
+        },
+        {
+          "name": "TypeName",
+          "return_type": "String",
+          "parameters": [{ "name": "VarName", "type": "Variant" }]
+        },
+        {
+          "name": "VarType",
+          "return_type": "VbVarType",
+          "parameters": [{ "name": "VarName", "type": "Variant" }]
+        },
+        {
+          "name": "Array",
+          "return_type": "Variant",
+          "parameters": [{ "name": "ArgList", "type": "Variant", "optional": true }]
+        },
+        {
+          "name": "LBound",
+          "return_type": "Long",
+          "parameters": [
+            { "name": "ArrayName", "type": "Variant" },
+            { "name": "Dimension", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "UBound",
+          "return_type": "Long",
+          "parameters": [
+            { "name": "ArrayName", "type": "Variant" },
+            { "name": "Dimension", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "CreateObject",
+          "return_type": "Object",
+          "parameters": [
+            { "name": "Class", "type": "String" },
+            { "name": "ServerName", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "GetObject",
+          "return_type": "Object",
+          "parameters": [
+            { "name": "PathName", "type": "Variant", "optional": true },
+            { "name": "Class", "type": "Variant", "optional": true }
+          ]
+        },
+        {
           "name": "DateSerial",
           "return_type": "Date",
           "parameters": [

@@ -400,6 +400,7 @@ type ScriptResult struct {
 	DefaultEntry    string        `json:"default_entry,omitempty"`
 	Suggestions     any           `json:"suggestions,omitempty"`
 	Process         any           `json:"process,omitempty"`
+	TypeDB          any           `json:"type_db,omitempty"`
 }
 
 type ProcessListOptions struct {
@@ -442,6 +443,13 @@ type DoctorOptions struct {
 	Keepalive     CommandOptions
 }
 
+type TypeDBImportOptions struct {
+	OutputDir        string
+	GeneratorVersion string
+	Libraries        []string
+	Keepalive        CommandOptions
+}
+
 func (r Runner) Doctor(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	doctorOpts := DoctorOptions{}
 	if len(opts) > 0 {
@@ -459,6 +467,18 @@ func (r Runner) DoctorWithOptions(cfg config.Config, opts DoctorOptions) (output
 		args["WorkbookPath"] = workbookPath(r.RootDir, cfg.Excel.Path)
 	}
 	return r.run("doctor", args, opts.Keepalive)
+}
+
+func (r Runner) TypeDBImport(opts TypeDBImportOptions) (output.Envelope, int, error) {
+	libraries := opts.Libraries
+	if len(libraries) == 0 {
+		libraries = []string{"excel"}
+	}
+	return r.run("type-db-import", map[string]string{
+		"OutputDir":        opts.OutputDir,
+		"GeneratorVersion": opts.GeneratorVersion,
+		"Libraries":        strings.Join(libraries, ","),
+	}, opts.Keepalive)
 }
 
 func (r Runner) New(workbook string, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -1640,6 +1660,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		env.Suggestions = result.Suggestions
 	}
 	env.Process = result.Process
+	env.TypeDB = result.TypeDB
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 	}

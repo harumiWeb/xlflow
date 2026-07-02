@@ -257,6 +257,9 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 		keyword, _ := classifyLine(content)
 
 		outLine := indentModel.formatLine(i+1, content)
+		if inLineContinuationTail && mode == LineNumberModePreserve {
+			outLine = strings.Repeat(" ", indentWidth) + outLine
+		}
 		recoverableLegacyLineNumber := inProcedure && (inLineContinuationTail || isRecoverableLegacyNonEligibleLine(content))
 		formatted = append(formatted, formattedLine{
 			Text:                        outLine,
@@ -383,7 +386,7 @@ func renderFormattedLines(lines []formattedLine, assignments map[int]int, dropRe
 	for i, line := range lines {
 		text := line.Text
 		if continuationPadding != "" && text != "" {
-			text = continuationPadding + text
+			text = continuationPadding + strings.TrimLeft(text, " ")
 		}
 
 		switch {
@@ -394,7 +397,7 @@ func renderFormattedLines(lines []formattedLine, assignments map[int]int, dropRe
 			if n, ok := assignments[i]; ok {
 				b.WriteString(formatLineNumberedLine(n, line.Text))
 				b.WriteByte('\n')
-				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(n))
+				continuationPadding = nextNumberedContinuationPadding(line.Text, lineNumberPadding(n))
 				continue
 			}
 			if dropRecoverableLegacyLineNumbers && line.HadLineNumber && line.RecoverableLegacyLineNumber {
@@ -406,7 +409,7 @@ func renderFormattedLines(lines []formattedLine, assignments map[int]int, dropRe
 			if line.HadLineNumber && !line.Eligible {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
-				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
+				continuationPadding = nextNumberedContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
 			b.WriteString(text)
@@ -416,7 +419,7 @@ func renderFormattedLines(lines []formattedLine, assignments map[int]int, dropRe
 			if line.HadLineNumber {
 				b.WriteString(formatLineNumberedLine(line.LineNumber, line.Text))
 				b.WriteByte('\n')
-				continuationPadding = nextContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
+				continuationPadding = nextNumberedContinuationPadding(line.Text, lineNumberPadding(line.LineNumber))
 				continue
 			}
 			b.WriteString(text)
@@ -452,6 +455,17 @@ func nextContinuationPadding(text, currentPadding string) string {
 		return currentPadding
 	}
 	return ""
+}
+
+func nextNumberedContinuationPadding(text, numberPadding string) string {
+	if hasExplicitLineContinuation(text) {
+		return numberPadding + leadingWhitespace(text)
+	}
+	return ""
+}
+
+func leadingWhitespace(text string) string {
+	return text[:len(text)-len(strings.TrimLeft(text, " "))]
 }
 
 func isLineNumberEligibleContent(content string) bool {

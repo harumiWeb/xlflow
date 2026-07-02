@@ -658,6 +658,38 @@ func TestWriteWithOptionsRendersDoctorChecklistFromDotNetBridge(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersDoctorTypeDBStatus(t *testing.T) {
+	env := New("doctor")
+	env.Diagnostics = map[string]any{
+		"excel": map[string]any{
+			"com_activation": true,
+			"vbide_access":   true,
+		},
+	}
+	env.TypeDB = map[string]any{
+		"manifest_exists": false,
+		"dir":             `C:\Users\me\.xlflow\typelib`,
+	}
+	env.Warnings = []map[string]any{{
+		"code":    "type_db_missing",
+		"message": "Generated TypeLib DB has not been initialized.",
+	}}
+	env.Hints = []map[string]any{{
+		"code":    "type_db_init",
+		"message": "Run `xlflow type db init` to enable richer COM completions.",
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Generated Type DB", "not initialized", "type_db_missing", "type_db_init"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersMissingSystemProfileDesktopFix(t *testing.T) {
 	env := New("doctor")
 	env.Status = StatusFailed

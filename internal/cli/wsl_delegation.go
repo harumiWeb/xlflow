@@ -46,6 +46,7 @@ var delegatedTopLevelCommands = map[string]struct{}{
 	"session":      {},
 	"status":       {},
 	"test":         {},
+	"type":         {},
 	"ui":           {},
 }
 

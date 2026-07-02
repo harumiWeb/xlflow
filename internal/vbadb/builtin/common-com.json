@@ -100,6 +100,79 @@
       "source": "xlflow"
     },
     {
+      "name": "WScript.Shell",
+      "library": "WScript",
+      "kind": "class",
+      "aliases": ["Shell"],
+      "methods": [
+        {
+          "name": "Run",
+          "return_type": "Long",
+          "parameters": [
+            { "name": "Command", "type": "String" },
+            { "name": "WindowStyle", "type": "Variant", "optional": true },
+            { "name": "WaitOnReturn", "type": "Boolean", "optional": true }
+          ]
+        },
+        {
+          "name": "Exec",
+          "return_type": "Object",
+          "parameters": [{ "name": "Command", "type": "String" }]
+        },
+        {
+          "name": "Popup",
+          "return_type": "Long",
+          "parameters": [
+            { "name": "Text", "type": "String" },
+            { "name": "SecondsToWait", "type": "Variant", "optional": true },
+            { "name": "Title", "type": "Variant", "optional": true },
+            { "name": "Type", "type": "Variant", "optional": true }
+          ]
+        },
+        {
+          "name": "ExpandEnvironmentStrings",
+          "return_type": "String",
+          "parameters": [{ "name": "Source", "type": "String" }]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "VBScript.RegExp",
+      "library": "VBScript",
+      "kind": "class",
+      "aliases": ["RegExp"],
+      "properties": [
+        { "name": "Pattern", "return_type": "String" },
+        { "name": "IgnoreCase", "return_type": "Boolean" },
+        { "name": "Global", "return_type": "Boolean" },
+        { "name": "MultiLine", "return_type": "Boolean" }
+      ],
+      "methods": [
+        {
+          "name": "Test",
+          "return_type": "Boolean",
+          "parameters": [{ "name": "String", "type": "String" }]
+        },
+        {
+          "name": "Execute",
+          "return_type": "Object",
+          "parameters": [{ "name": "String", "type": "String" }]
+        },
+        {
+          "name": "Replace",
+          "return_type": "String",
+          "parameters": [
+            { "name": "String1", "type": "String" },
+            { "name": "String2", "type": "String" }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
       "name": "ADODB.Connection",
       "library": "ADODB",
       "kind": "class",
@@ -240,6 +313,8 @@
   "progids": {
     "Scripting.Dictionary": "Scripting.Dictionary",
     "Scripting.FileSystemObject": "Scripting.FileSystemObject",
+    "WScript.Shell": "WScript.Shell",
+    "VBScript.RegExp": "VBScript.RegExp",
     "ADODB.Connection": "ADODB.Connection",
     "ADODB.Recordset": "ADODB.Recordset"
   }

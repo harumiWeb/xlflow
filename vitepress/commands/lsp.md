@@ -28,6 +28,8 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `xlflow lsp --check` works even before a project has an `xlflow.toml`; it validates the parser and built-in type database using default configuration.
 
+When the global generated TypeLib database is missing or stale, `xlflow lsp --stdio` and `xlflow lsp --check` attempt best-effort generation before loading the database. Generation failures are reported on stderr and do not prevent the LSP from starting with the embedded built-in database.
+
 The MVP server supports full document synchronization, diagnostics, semantic tokens, document symbols, workspace symbols, definition lookup, references, hover, completion, signature help, document formatting, and CodeLens. Open editor buffers are authoritative over saved filesystem content until the editor sends `textDocument/didClose`.
 
 Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.

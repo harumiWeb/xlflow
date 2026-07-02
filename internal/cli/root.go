@@ -38,6 +38,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
@@ -168,6 +169,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.macrosCommand(),
 		a.uiCommand(),
 		a.testCommand(),
+		a.typeCommand(),
 		a.diffCommand(),
 		a.inspectCommand(),
 		a.inspectGUICommand(),
@@ -1091,6 +1093,7 @@ func (a *app) newCommand() *cobra.Command {
 				if withSkill {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
+				a.attachTypeDBBootstrap(&env)
 				return a.write(env, output.ExitSuccess)
 			}
 		},
@@ -1183,6 +1186,7 @@ func (a *app) initCommand() *cobra.Command {
 				if withSkill {
 					env.Logs = append(env.Logs, "installed xlflow skill to "+skillResult.Path)
 				}
+				a.attachTypeDBBootstrap(&env)
 				return a.write(env, output.ExitSuccess)
 			}
 		},
@@ -1219,6 +1223,73 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 	})
 }
 
+func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
+	if env == nil {
+		return
+	}
+	env.Logs = append(env.Logs, "Type database: built-in DB ok")
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
+		return
+	}
+	if status.ManifestExists && !status.Stale {
+		env.Logs = append(env.Logs, "Type database: generated TypeLib DB already exists")
+		env.TypeDB = status
+		return
+	}
+	if status.ManifestExists && status.Stale {
+		reason := status.Reason
+		if reason == "" {
+			reason = "unknown reason"
+		}
+		appendTypeDBBootstrapWarning(env, "type_db_stale", "Generated TypeLib DB is stale: "+reason)
+	}
+	resolvedDir, err := typedb.ResolveDir("")
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_dir_failed", "Generated TypeLib DB directory could not be resolved: "+err.Error())
+		return
+	}
+	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        []string{"excel"},
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_init_skipped", "Generated TypeLib DB was skipped: "+err.Error())
+		appendTypeDBBootstrapHint(env)
+		return
+	}
+	if code != output.ExitSuccess {
+		reason := "unknown error"
+		if typeDBEnv.Error != nil && typeDBEnv.Error.Message != "" {
+			reason = typeDBEnv.Error.Message
+		}
+		appendTypeDBBootstrapWarning(env, "type_db_init_skipped", "Generated TypeLib DB was skipped: "+reason)
+		appendTypeDBBootstrapHint(env)
+		return
+	}
+	env.Logs = append(env.Logs, "Type database: generated TypeLib DB created at "+resolvedDir)
+	env.TypeDB = typeDBEnv.TypeDB
+}
+
+func appendTypeDBBootstrapWarning(env *output.Envelope, code string, message string) {
+	warnings := anySlice(env.Warnings)
+	warnings = append(warnings, map[string]any{"code": code, "message": message})
+	env.Warnings = warnings
+}
+
+func appendTypeDBBootstrapHint(env *output.Envelope) {
+	appendEnvelopeHint(env, "type_db_init_later", "Run `xlflow type db init` after installing Excel to enable richer COM completions.")
+}
+
+func appendEnvelopeHint(env *output.Envelope, code string, message string) {
+	hints := anySlice(env.Hints)
+	hints = append(hints, map[string]any{"code": code, "message": message})
+	env.Hints = hints
+}
+
 func (a *app) doctorCommand() *cobra.Command {
 	var checkWorkbook bool
 	cmd := &cobra.Command{
@@ -1250,11 +1321,36 @@ func (a *app) doctorCommand() *cobra.Command {
 				env.Diagnostics = withGUIBoundarySummary(env.Diagnostics, boundaries)
 				env.Logs = append(env.Logs, fmt.Sprintf("detected %d GUI boundary candidate(s) in source", len(boundaries)))
 			}
+			a.attachTypeDBDoctorStatus(&env)
 			return a.write(env, code)
 		},
 	}
 	cmd.Flags().BoolVar(&checkWorkbook, "workbook", false, "open the configured workbook as part of doctor diagnostics")
 	return cmd
+}
+
+func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {
+	if env == nil {
+		return
+	}
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
+		return
+	}
+	env.TypeDB = status
+	switch {
+	case !status.ManifestExists:
+		appendTypeDBBootstrapWarning(env, "type_db_missing", "Generated TypeLib DB has not been initialized.")
+		appendEnvelopeHint(env, "type_db_init", "Run `xlflow type db init` or `xlflow type db refresh --library all` to enable richer COM completions.")
+	case status.Stale:
+		reason := status.Reason
+		if reason == "" {
+			reason = "unknown reason"
+		}
+		appendTypeDBBootstrapWarning(env, "type_db_stale", "Generated TypeLib DB is stale: "+reason)
+		appendEnvelopeHint(env, "type_db_refresh", "Run `xlflow type db refresh --library all` to regenerate the TypeLib database.")
+	}
 }
 
 func (a *app) attachCommand() *cobra.Command {
@@ -3243,6 +3339,140 @@ func (a *app) testListCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *app) typeCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "type",
+		Short: "Manage VBA type intelligence data",
+	}
+	cmd.AddCommand(a.typeDBCommand())
+	return cmd
+}
+
+func (a *app) typeDBCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "db",
+		Short: "Manage generated TypeLib type databases",
+	}
+	cmd.AddCommand(
+		a.typeDBStatusCommand(),
+		a.typeDBInitCommand(),
+		a.typeDBRefreshCommand(),
+		a.typeDBCleanCommand(),
+	)
+	return cmd
+}
+
+func (a *app) typeDBStatusCommand() *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show generated TypeLib type database status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := typedb.StatusFor(typedb.Options{
+				Dir:              dir,
+				GeneratorVersion: a.buildInfo.withDefaults().Version,
+			})
+			if err != nil {
+				return a.writeFailure("type db status", output.ExitEnvironment, "type_db_status_failed", err)
+			}
+			env := output.New("type db status")
+			env.TypeDB = status
+			if status.ManifestExists {
+				env.Logs = []string{"generated type database status loaded"}
+			} else {
+				env.Logs = []string{"generated type database has not been initialized"}
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	return cmd
+}
+
+func (a *app) typeDBInitCommand() *cobra.Command {
+	var dir string
+	var libraries []string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Generate TypeLib type databases when missing",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
+			if err != nil {
+				return a.writeFailure("type db init", output.ExitEnvironment, "type_db_status_failed", err)
+			}
+			if status.ManifestExists && !status.Stale {
+				env := output.New("type db init")
+				env.TypeDB = status
+				env.Logs = []string{"generated type database already exists"}
+				return a.write(env, output.ExitSuccess)
+			}
+			return a.generateTypeDB("type db init", dir, libraries)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
+	return cmd
+}
+
+func (a *app) typeDBRefreshCommand() *cobra.Command {
+	var dir string
+	var libraries []string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "refresh",
+		Short: "Refresh generated TypeLib type databases",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.generateTypeDB("type db refresh", dir, libraries)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
+	cmd.Flags().BoolVar(&force, "force", false, "deprecated compatibility flag; refresh always regenerates")
+	return cmd
+}
+
+func (a *app) generateTypeDB(command string, dir string, libraries []string) error {
+	resolvedDir, err := typedb.ResolveDir(dir)
+	if err != nil {
+		return a.writeFailure(command, output.ExitEnvironment, "type_db_dir_failed", err)
+	}
+	env, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        libraries,
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		return err
+	}
+	env.Command = command
+	return a.write(env, code)
+}
+
+func (a *app) typeDBCleanCommand() *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "clean",
+		Short: "Delete generated TypeLib type databases",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cleaned, err := typedb.Clean(dir)
+			if err != nil {
+				return a.writeFailure("type db clean", output.ExitEnvironment, "type_db_clean_failed", err)
+			}
+			env := output.New("type db clean")
+			env.TypeDB = map[string]any{"dir": cleaned}
+			env.Logs = []string{"deleted generated type database directory"}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
+	return cmd
+}
+
 func (a *app) processCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "process",
@@ -5102,19 +5332,29 @@ func (a *app) lspCommand() *cobra.Command {
 				Stderr:  a.stderrWriter(),
 			}
 			if check {
+				a.ensureLSPTypeDBGenerated()
 				if err := lspserver.Check(opts); err != nil {
 					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
+				}
+				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+				typeDatabase := "builtin"
+				if statusErr == nil && typeDBStatus.ManifestExists && !typeDBStatus.Stale {
+					typeDatabase = "builtin+global_generated"
 				}
 				env := output.New("lsp")
 				env.Diagnostics = map[string]any{
 					"server":        "xlflow-vba-lsp",
 					"transport":     "stdio",
-					"type_database": "builtin",
+					"type_database": typeDatabase,
 					"sync":          "full",
+				}
+				if statusErr == nil {
+					env.TypeDB = typeDBStatus
 				}
 				env.Logs = []string{"lsp pre-launch check passed"}
 				return a.write(env, output.ExitSuccess)
 			}
+			a.ensureLSPTypeDBGenerated()
 			return lspserver.RunStdio(opts)
 		},
 	}
@@ -5123,6 +5363,50 @@ func (a *app) lspCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&showVersion, "version", false, "show LSP server version and exit")
 	cmd.Flags().StringVar(&logFile, "log-file", "", "write LSP logs to this file instead of stderr")
 	return cmd
+}
+
+func (a *app) ensureLSPTypeDBGenerated() {
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB status could not be inspected: %v\n", err)
+		return
+	}
+	if status.ManifestExists && !status.Stale {
+		return
+	}
+	resolvedDir, err := typedb.ResolveDir("")
+	if err != nil {
+		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB directory could not be resolved: %v\n", err)
+		return
+	}
+	state := "missing"
+	if status.ManifestExists && status.Stale {
+		state = "stale"
+	}
+	a.writeLSPStderr("xlflow-lsp: generated TypeLib DB %s; attempting best-effort generation at %s\n", state, resolvedDir)
+	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
+		OutputDir:        resolvedDir,
+		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		Libraries:        []string{"all"},
+		Keepalive:        buildCommandOptions(a.stderrWriter()),
+	})
+	if err != nil {
+		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB generation skipped: %v\n", err)
+		return
+	}
+	if code != output.ExitSuccess {
+		reason := "unknown error"
+		if typeDBEnv.Error != nil && typeDBEnv.Error.Message != "" {
+			reason = typeDBEnv.Error.Message
+		}
+		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB generation skipped: %s\n", reason)
+		return
+	}
+	a.writeLSPStderr("xlflow-lsp: generated TypeLib DB created at %s\n", resolvedDir)
+}
+
+func (a *app) writeLSPStderr(format string, args ...any) {
+	_, _ = fmt.Fprintf(a.stderrWriter(), format, args...)
 }
 
 func (a *app) analyzeCommand() *cobra.Command {

@@ -633,6 +633,118 @@ End Function
 	}
 }
 
+func TestExcelIdiomsSignatureHelpAndNamedArgumentCompletions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+
+Public Sub TestWithBlockInference()
+    Dim ws As Excel.Worksheet
+    Set ws = ThisWorkbook.Worksheets(1)
+
+    With ws.Range("A1:D10")
+        .Offset(1,0).Resize(
+    End With
+
+    With ThisWorkbook.Worksheets(1).ListObjects(
+        .ListColumns(1).DataBodyRange.Font.Bold = True
+    End With
+End Sub
+
+Public Sub TestSignatureHelp()
+    Dim wb As Excel.Workbook
+    Set wb = Workbooks.Open( _
+    Filename:="sample.xlsx", _
+    ReadOnly:=True, _
+    AddToMru:=False _
+    )
+End Sub
+
+Public Sub TestCommonExcelIdioms()
+    Dim ws As Worksheet
+    Dim r As Range
+    Set ws = ThisWorkbook.Worksheets("Data")
+    Set r = ws.Range(ws.Cells(1,1), ws.Cells(10, 5))
+
+    r.AutoFilter Field:=1, Criteria1:="<>"
+    r.Sort O
+
+    ws.ListObjects("Table1").DataBodyRange.Copy D
+
+    Dim shell As Object
+    Set shell = CreateObject("WScript.Shell")
+    shell.
+
+    Dim re As Object
+    Set re = CreateObject("VBScript.RegExp")
+    re.
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Idioms.bas"), Source: source}
+
+	resizeLine := `        .Offset(1,0).Resize(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 7, Character: utf16Len(resizeLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.Range.Resize(Optional RowSize As Variant, Optional ColumnSize As Variant)") {
+		t.Fatalf("Resize signature help = %+v", help)
+	}
+
+	listObjectsLine := `    With ThisWorkbook.Worksheets(1).ListObjects(`
+	help, err = analyzer.SignatureHelp(doc, Position{Line: 10, Character: utf16Len(listObjectsLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.ListObjects.Item(Index As Variant) As Excel.ListObject") {
+		t.Fatalf("ListObjects default member signature help = %+v", help)
+	}
+
+	readOnlyLine := `    ReadOnly:=True, _`
+	help, err = analyzer.SignatureHelp(doc, Position{Line: 19, Character: utf16Len(readOnlyLine[:strings.Index(readOnlyLine, "True")])}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "Excel.Workbooks.Open(Filename As String, Optional UpdateLinks As Variant, Optional ReadOnly As Variant") || help.ActiveParameter != 2 {
+		t.Fatalf("multi-line Workbooks.Open signature help = %+v", help)
+	}
+
+	sortLine := `    r.Sort O`
+	items, err := analyzer.Completions(doc, Position{Line: 31, Character: utf16Len(sortLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Order1:=") {
+		t.Fatalf("Sort named argument completion missing Order1:= %+v", items)
+	}
+
+	copyLine := `    ws.ListObjects("Table1").DataBodyRange.Copy D`
+	items, err = analyzer.Completions(doc, Position{Line: 33, Character: utf16Len(copyLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Destination:=") {
+		t.Fatalf("Copy named argument completion missing Destination:= %+v", items)
+	}
+
+	shellLine := `    shell.`
+	items, err = analyzer.Completions(doc, Position{Line: 37, Character: utf16Len(shellLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Run") {
+		t.Fatalf("WScript.Shell completion missing Run: %+v", items)
+	}
+
+	reLine := `    re.`
+	items, err = analyzer.Completions(doc, Position{Line: 41, Character: utf16Len(reLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Pattern") || !hasCompletion(items, "Test") {
+		t.Fatalf("VBScript.RegExp completion missing Pattern/Test: %+v", items)
+	}
+}
+
 func TestDocumentSymbolsUseUnsavedDocumentContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -1346,34 +1458,85 @@ Option Explicit
 
 func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
-	line := `    Set dict = CreateObject("`
-	doc := Document{
-		Path:   filepath.Join(t.TempDir(), "Main.bas"),
-		Source: "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n",
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas")}
+
+	for _, tc := range []struct {
+		name       string
+		line       string
+		wantInsert string
+		wantStart  int
+	}{
+		{
+			name:       "inside paren string",
+			line:       `    Set dict = CreateObject("`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject("`),
+		},
+		{
+			name:       "inside paren named string",
+			line:       `    Set dict = CreateObject(Class:="`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject(Class:="`),
+		},
+		{
+			name:       "inside parenless string",
+			line:       `    Set dict = CreateObject "`,
+			wantInsert: "Scripting.Dictionary",
+			wantStart:  utf16Len(`    Set dict = CreateObject "`),
+		},
+		{
+			name:       "at argument start",
+			line:       `    Set dict = CreateObject(`,
+			wantInsert: `"Scripting.Dictionary"`,
+			wantStart:  utf16Len(`    Set dict = CreateObject(`),
+		},
+		{
+			name:       "at named argument start",
+			line:       `    Set dict = CreateObject(Class:=`,
+			wantInsert: `"Scripting.Dictionary"`,
+			wantStart:  utf16Len(`    Set dict = CreateObject(Class:=`),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc.Source = "Option Explicit\nSub Test()\n" + tc.line + "\nEnd Sub\n"
+			items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(tc.line)}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, ok := findCompletion(items, "Scripting.Dictionary")
+			if !ok {
+				t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
+			}
+			if item.Detail != "Scripting.Dictionary - version-independent ProgID" {
+				t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
+			}
+			if item.SortText != "1:scripting.dictionary" {
+				t.Fatalf("ProgID sort text = %q, want version-independent priority", item.SortText)
+			}
+			if item.InsertText != tc.wantInsert {
+				t.Fatalf("ProgID insert text = %q, want %q", item.InsertText, tc.wantInsert)
+			}
+			if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != tc.wantStart || item.ReplaceRange.End.Character != utf16Len(tc.line) {
+				t.Fatalf("ProgID replace range = %+v, want %d-%d", item.ReplaceRange, tc.wantStart, utf16Len(tc.line))
+			}
+		})
 	}
 
+	line := `    Set dict = CreateObject("`
+	doc.Source = "Option Explicit\nSub Test()\n" + line + "\nEnd Sub\n"
 	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(line)}, nil)
 	if err != nil {
 		t.Fatal(err)
-	}
-	item, ok := findCompletion(items, "Scripting.Dictionary")
-	if !ok {
-		t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
-	}
-	if item.Detail != "Scripting.Dictionary" {
-		t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
 	}
 	for _, want := range []string{"ADODB.Connection", "ADODB.Recordset", "Excel.Application"} {
 		item, ok := findCompletion(items, want)
 		if !ok {
 			t.Fatalf("%s ProgID completion missing: %+v", want, items)
 		}
-		if item.Detail != want {
+		wantDetail := want + " - version-independent ProgID"
+		if item.Detail != wantDetail {
 			t.Fatalf("%s ProgID detail = %q, want resolved type", want, item.Detail)
 		}
-	}
-	if item.ReplaceRange == nil || item.ReplaceRange.Start.Character != utf16Len(`    Set dict = CreateObject("`) || item.ReplaceRange.End.Character != utf16Len(line) {
-		t.Fatalf("ProgID replace range = %+v, want string literal content range", item.ReplaceRange)
 	}
 
 	otherString := `    Debug.Print "xlU`
@@ -1384,6 +1547,160 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("non-CreateObject strings should not return completions: %+v", items)
+	}
+}
+
+func TestProgIDCompletionClassifiesVersionedNames(t *testing.T) {
+	if got := progIDVersionKind("Excel.Application"); got != "version-independent" {
+		t.Fatalf("Excel.Application kind = %q", got)
+	}
+	if got := progIDVersionKind("Excel.Application.16"); got != "versioned" {
+		t.Fatalf("Excel.Application.16 kind = %q", got)
+	}
+	if got := progIDVersionKind("ADODB.Connection.6.0"); got != "versioned" {
+		t.Fatalf("ADODB.Connection.6.0 kind = %q", got)
+	}
+	if got := progIDVersionKind("Forms.CommandButton.1"); got != "versioned" {
+		t.Fatalf("Forms.CommandButton.1 kind = %q", got)
+	}
+	if got := progIDSortText("Excel.Application"); got != "1:excel.application" {
+		t.Fatalf("Excel.Application sort text = %q", got)
+	}
+	if got := progIDSortText("Excel.Application.16"); got != "2:excel.application.16" {
+		t.Fatalf("Excel.Application.16 sort text = %q", got)
+	}
+}
+
+func TestCompletionsReturnSetObjectInitializersAndVBAIsFunctions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim target As Object
+    Set target = N
+    Set target = No
+    Set target = Get
+    If IsObject(
+    If Is
+End Sub
+`,
+	}
+
+	newLine := `    Set target = N`
+	items, err := analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(newLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newItem, ok := findCompletion(items, "New")
+	if !ok || !newItem.Snippet || !strings.Contains(newItem.InsertText, "New ${1:Collection}") {
+		t.Fatalf("New snippet completion missing after Set RHS: %+v", items)
+	}
+	if !hasCompletion(items, "Nothing") {
+		t.Fatalf("Nothing completion missing after Set RHS: %+v", items)
+	}
+
+	nothingLine := `    Set target = No`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(nothingLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "Nothing") {
+		t.Fatalf("Nothing completion missing after Set RHS prefix No: %+v", items)
+	}
+
+	getObjectLine := `    Set target = Get`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(getObjectLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "GetObject") {
+		t.Fatalf("GetObject completion missing after Set RHS: %+v", items)
+	}
+
+	isLine := `    If Is`
+	items, err = analyzer.Completions(doc, Position{Line: 7, Character: utf16Len(isLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"IsObject", "IsNull", "IsNumeric", "IsDate"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing in condition context: %+v", want, items)
+		}
+	}
+
+	helpLine := `    If IsObject(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 6, Character: utf16Len(helpLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "VBA.Global.IsObject(Identifier As Variant) As Boolean") {
+		t.Fatalf("IsObject signature help = %+v", help)
+	}
+}
+
+func TestCompletionsReturnExpandedVBAStandardLibraryFunctionsAndConstants(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Debug.Print For
+    Debug.Print Date
+    Debug.Print vbCr
+    Debug.Print vbObject
+    Debug.Print DateDiff(
+End Sub
+`,
+	}
+
+	formatLine := `    Debug.Print For`
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(formatLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Format", "FormatCurrency", "FormatDateTime", "FormatNumber", "FormatPercent"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing for expanded VBA globals: %+v", want, items)
+		}
+	}
+
+	dateLine := `    Debug.Print Date`
+	items, err = analyzer.Completions(doc, Position{Line: 3, Character: utf16Len(dateLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"DateAdd", "DateDiff", "DatePart", "DateValue"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing for expanded VBA globals: %+v", want, items)
+		}
+	}
+
+	crLine := `    Debug.Print vbCr`
+	items, err = analyzer.Completions(doc, Position{Line: 4, Character: utf16Len(crLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "vbCrLf") {
+		t.Fatalf("vbCrLf constant completion missing: %+v", items)
+	}
+
+	objectLine := `    Debug.Print vbObject`
+	items, err = analyzer.Completions(doc, Position{Line: 5, Character: utf16Len(objectLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(items, "vbObjectError") {
+		t.Fatalf("vbObjectError constant completion missing: %+v", items)
+	}
+
+	helpLine := `    Debug.Print DateDiff(`
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 6, Character: utf16Len(helpLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "VBA.Global.DateDiff(Interval As String, Date1 As Variant, Date2 As Variant") {
+		t.Fatalf("DateDiff signature help = %+v", help)
 	}
 }
 

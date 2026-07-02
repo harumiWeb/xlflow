@@ -1,6 +1,10 @@
 package vbadb
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	db, err := LoadBuiltin()
@@ -16,6 +20,12 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	}
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
 		t.Fatalf("ResolveProgID(Scripting.Dictionary) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveProgID("WScript.Shell"); !ok || typ.Name != "WScript.Shell" {
+		t.Fatalf("ResolveProgID(WScript.Shell) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveProgID("VBScript.RegExp"); !ok || typ.Name != "VBScript.RegExp" {
+		t.Fatalf("ResolveProgID(VBScript.RegExp) = %+v, %v", typ, ok)
 	}
 	if typ, ok := db.ResolveProgID("ADODB.Connection"); !ok || typ.Name != "ADODB.Connection" {
 		t.Fatalf("ResolveProgID(ADODB.Connection) = %+v, %v", typ, ok)
@@ -69,6 +79,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
 		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.Global", "IsObject"); !ok || len(got.Parameters) != 1 || got.ReturnType != "Boolean" {
+		t.Fatalf("VBA.Global.IsObject parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("VBA.Global", "GetObject"); !ok || got.ReturnType != "Object" {
+		t.Fatalf("VBA.Global.GetObject = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("VBA.ErrObject", "Raise"); !ok || len(got.Parameters) != 5 || got.Parameters[0].Name != "Number" {
 		t.Fatalf("Err.Raise parameters = %+v, %v", got, ok)
@@ -136,6 +152,62 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	for _, name := range []string{"Sum", "Average", "CountA"} {
 		if got, ok := db.ResolveMember("Excel.WorksheetFunction", name); !ok || len(got.Parameters) != 30 || !got.Parameters[29].Optional {
 			t.Fatalf("WorksheetFunction.%s parameters = %+v, %v", name, got, ok)
+		}
+	}
+}
+
+func TestBuiltinVBAStandardLibraryCoverage(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedFunctions := []string{
+		"Abs", "AppActivate", "Array", "Asc", "AscB", "AscW", "Atn", "Beep",
+		"CBool", "CCur", "CDate", "CDbl", "CDec", "Choose", "Chr", "ChrB", "ChrW",
+		"CInt", "CLng", "Command", "Cos", "CreateObject", "CStr", "CurDir", "CVar", "CVDate",
+		"Date", "DateAdd", "DateDiff", "DatePart", "DateSerial", "DateValue", "Day", "DDB",
+		"Dir", "DoEvents", "Environ", "EOF", "Error", "Exp", "FileAttr", "FileCopy",
+		"FileDateTime", "FileLen", "Filter", "Fix", "Format", "FormatCurrency",
+		"FormatDateTime", "FormatNumber", "FormatPercent", "FreeFile", "FV",
+		"GetAllSettings", "GetAttr", "GetObject", "GetSetting", "Hex", "Hour",
+		"IIf", "IMEStatus", "InStr", "InStrRev", "InputBox", "Int", "IPmt", "IRR",
+		"IsArray", "IsDate", "IsEmpty", "IsError", "IsMissing", "IsNull", "IsNumeric", "IsObject",
+		"Join", "Kill", "LBound", "LCase", "Left", "LeftB", "Len", "LenB", "Loc", "LOF",
+		"Log", "LTrim", "Mid", "MidB", "Minute", "MIRR", "MkDir", "Month", "MonthName",
+		"MsgBox", "NPer", "Now", "NPV", "Oct", "Partition", "Pmt", "PPmt", "PV",
+		"QBColor", "Randomize", "Rate", "Replace", "Reset", "RGB", "Right", "RightB",
+		"RmDir", "Rnd", "Round", "RTrim", "SaveSetting", "Second", "Seek", "SendKeys",
+		"SetAttr", "Sgn", "Shell", "Sin", "SLN", "Space", "Split", "Sqr", "Str",
+		"StrComp", "StrConv", "String", "Switch", "SYD", "Tan", "Time", "Timer",
+		"TimeSerial", "TimeValue", "Trim", "TypeName", "UBound", "UCase", "VarType",
+		"Weekday", "WeekdayName", "Year",
+	}
+	for _, name := range expectedFunctions {
+		if _, ok := db.ResolveMember("VBA.Global", name); !ok {
+			t.Fatalf("VBA.Global.%s missing from built-in DB", name)
+		}
+	}
+
+	expectedConstants := []string{
+		"vbCr", "vbCrLf", "vbLf", "vbNewLine", "vbTab", "vbBack", "vbFormFeed",
+		"vbVerticalTab", "vbNullChar", "vbNullString", "vbObjectError",
+		"vbOKOnly", "vbOKCancel", "vbAbortRetryIgnore", "vbYesNoCancel", "vbYesNo",
+		"vbRetryCancel", "vbCritical", "vbQuestion", "vbExclamation", "vbInformation",
+		"vbDefaultButton1", "vbDefaultButton2", "vbDefaultButton3", "vbDefaultButton4",
+		"vbApplicationModal", "vbSystemModal", "vbOK", "vbCancel", "vbAbort", "vbRetry",
+		"vbIgnore", "vbYes", "vbNo", "vbUseCompareOption", "vbBinaryCompare",
+		"vbTextCompare", "vbDatabaseCompare", "vbGeneralDate", "vbLongDate",
+		"vbShortDate", "vbLongTime", "vbShortTime", "vbUseDefault", "vbTrue", "vbFalse",
+		"vbEmpty", "vbNull", "vbInteger", "vbLong", "vbSingle", "vbDouble",
+		"vbCurrency", "vbDate", "vbString", "vbObject", "vbError", "vbBoolean",
+		"vbVariant", "vbDataObject", "vbDecimal", "vbByte", "vbLongLong",
+		"vbUserDefinedType", "vbArray", "vbNormal", "vbReadOnly", "vbHidden",
+		"vbSystem", "vbVolume", "vbDirectory", "vbArchive", "vbAlias",
+	}
+	for _, name := range expectedConstants {
+		if _, ok := db.ResolveConstant(name); !ok {
+			t.Fatalf("%s missing from built-in constants", name)
 		}
 	}
 }
@@ -220,6 +292,68 @@ func TestCompletionListsExposeGlobalsConstantsAndMembers(t *testing.T) {
 	}
 	if !hasMember(db.Members("Excel.Font"), "Color") {
 		t.Fatalf("Font.Color member missing: %+v", db.Members("Excel.Font"))
+	}
+}
+
+func TestLoadFilesMergesTypesMembersAndOverridesMembers(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	overlay := filepath.Join(dir, "overlay.json")
+	if err := os.WriteFile(base, []byte(`{
+  "types": [
+    {
+      "name": "Excel.Range",
+      "library": "Excel",
+      "kind": "class",
+      "properties": [
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "methods": [
+        { "name": "Find", "return_type": "Object" }
+      ]
+    }
+  ],
+  "constants": [
+    { "name": "xlUp", "library": "Excel", "enum_group": "XlDirection" }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(overlay, []byte(`{
+  "types": [
+    {
+      "name": "Excel.Range",
+      "source": "xlflow",
+      "properties": [
+        { "name": "Font", "return_type": "Excel.Font" }
+      ],
+      "methods": [
+        { "name": "Find", "return_type": "Excel.Range", "parameters": [{ "name": "What", "type": "Variant" }] }
+      ]
+    }
+  ],
+  "constants": [
+    { "name": "xlUp", "library": "Excel", "enum_group": "XlDirection", "summary": "overlay" }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := LoadFiles(base, overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := db.ResolveMember("Range", "Value"); !ok || got.ReturnType != "Variant" {
+		t.Fatalf("base property missing after merge: %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Range", "Font"); !ok || got.ReturnType != "Excel.Font" {
+		t.Fatalf("overlay property missing after merge: %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Range", "Find"); !ok || got.ReturnType != "Excel.Range" || len(got.Parameters) != 1 {
+		t.Fatalf("overlay method should replace base method: %+v, %v", got, ok)
+	}
+	if c, ok := db.ResolveConstant("xlUp"); !ok || c.Summary != "overlay" {
+		t.Fatalf("constant overlay missing: %+v, %v", c, ok)
 	}
 }
 

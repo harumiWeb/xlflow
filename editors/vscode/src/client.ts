@@ -7,7 +7,7 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { XlflowCliAvailabilityService } from "./cliAvailability";
-import { readConfig, TraceServer } from "./config";
+import { readConfig, TraceServer, XlflowConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
 
@@ -41,9 +41,12 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
     const cwd = folder?.uri.fsPath;
     const workspaceFolderKey = folder?.uri.toString();
+    const xlflowProject = await hasXlflowConfig(folder);
+    const args = lspServerArgsForProject(config, xlflowProject);
+    const codeLens = lspCodeLensOptions(config, xlflowProject);
     const serverOptions: ServerOptions = {
       command: config.path,
-      args: ["lsp", "--stdio", "--log-file", config.lspLogFile],
+      args,
       transport: TransportKind.stdio,
       options: cwd === undefined ? undefined : { cwd },
     };
@@ -58,12 +61,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       outputChannel: this.channels.output,
       traceOutputChannel: this.channels.trace,
       initializationOptions: {
-        codeLens: {
-          enabled: config.codeLensEnabled,
-          runProcedure: config.codeLensRunProcedure,
-          runTests: config.codeLensRunTests,
-          userFormEvents: config.codeLensUserFormEvents,
-        },
+        codeLens,
       },
     };
 
@@ -74,8 +72,11 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       await client.start();
       this.workspaceFolderKey = workspaceFolderKey;
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
+      const logDescription = args.includes("--log-file")
+        ? ` with log file ${config.lspLogFile}`
+        : " without workspace log file";
       this.channels.output.info(
-        `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`} with log file ${config.lspLogFile}`,
+        `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`}${logDescription}`,
       );
     } catch (error) {
       this.client = undefined;
@@ -148,6 +149,58 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       clearTimeout(this.suggestTimer);
       this.suggestTimer = undefined;
     }
+  }
+}
+
+export async function lspServerArgs(
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured">,
+  folder: vscode.WorkspaceFolder | undefined,
+): Promise<string[]> {
+  return lspServerArgsForProject(config, await hasXlflowConfig(folder));
+}
+
+export function lspServerArgsForProject(
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured">,
+  xlflowProject: boolean,
+): string[] {
+  const args = ["lsp", "--stdio"];
+  if (config.lspLogFileConfigured || xlflowProject) {
+    args.push("--log-file", config.lspLogFile);
+  }
+  return args;
+}
+
+export interface LSPCodeLensOptions {
+  enabled: boolean;
+  runProcedure: boolean;
+  runTests: boolean;
+  userFormEvents: boolean;
+}
+
+export function lspCodeLensOptions(
+  config: Pick<
+    XlflowConfig,
+    "codeLensEnabled" | "codeLensRunProcedure" | "codeLensRunTests" | "codeLensUserFormEvents"
+  >,
+  xlflowProject: boolean,
+): LSPCodeLensOptions {
+  return {
+    enabled: xlflowProject && config.codeLensEnabled,
+    runProcedure: config.codeLensRunProcedure,
+    runTests: config.codeLensRunTests,
+    userFormEvents: config.codeLensUserFormEvents,
+  };
+}
+
+async function hasXlflowConfig(folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
+  if (folder === undefined) {
+    return false;
+  }
+  try {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.joinPath(folder.uri, "xlflow.toml"));
+    return (stat.type & vscode.FileType.File) !== 0;
+  } catch {
+    return false;
   }
 }
 

@@ -51,6 +51,7 @@ public sealed class BridgeHostTests
         Assert.Contains("runner", commands);
         Assert.Contains("session", commands);
         Assert.Contains("test", commands);
+        Assert.Contains("type-db-import", commands);
         Assert.Contains("ui", commands);
     }
 
