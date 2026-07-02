@@ -136,17 +136,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   const lspProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "xlflow-vscode-lsp-"));
   try {
-    fs.writeFileSync(path.join(lspProjectDir, "xlflow.toml"), "[project]\nname = \"test\"\n");
+    fs.writeFileSync(path.join(lspProjectDir, "xlflow.toml"), '[project]\nname = "test"\n');
     const folder: vscode.WorkspaceFolder = {
       uri: vscode.Uri.file(lspProjectDir),
       name: "xlflow-vscode-lsp",
       index: 0,
     };
     assert.deepStrictEqual(
-      await lspServerArgs(
-        { lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false },
-        folder,
-      ),
+      await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, folder),
       ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
     );
   } finally {

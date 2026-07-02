@@ -38,6 +38,7 @@ type TypeInfo struct {
 	Confidence        string       `json:"confidence,omitempty"`
 	Source            string       `json:"source,omitempty"`
 	Aliases           []string     `json:"aliases,omitempty"`
+	AssignableTo      []string     `json:"assignable_to,omitempty"`
 	Properties        []MemberInfo `json:"properties,omitempty"`
 	Methods           []MemberInfo `json:"methods,omitempty"`
 	Events            []MemberInfo `json:"events,omitempty"`
@@ -54,9 +55,10 @@ type MemberInfo struct {
 }
 
 type ParamInfo struct {
-	Name     string `json:"name"`
-	Type     string `json:"type,omitempty"`
-	Optional bool   `json:"optional,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type,omitempty"`
+	Optional   bool   `json:"optional,omitempty"`
+	ParamArray bool   `json:"param_array,omitempty"`
 }
 
 type ConstantInfo struct {
@@ -246,6 +248,7 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 		out.Source = overlay.Source
 	}
 	out.Aliases = mergeStrings(out.Aliases, overlay.Aliases)
+	out.AssignableTo = mergeStrings(out.AssignableTo, overlay.AssignableTo)
 	out.Properties = mergeMembers(out.Properties, overlay.Properties)
 	out.Methods = mergeMembers(out.Methods, overlay.Methods)
 	out.Events = mergeMembers(out.Events, overlay.Events)
@@ -395,6 +398,43 @@ func (db *DB) Members(receiverType string) []MemberInfo {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func (db *DB) IsAssignable(targetType, sourceType string) (assignable bool, known bool) {
+	target, ok := db.ResolveType(targetType)
+	if !ok {
+		return false, false
+	}
+	source, ok := db.ResolveType(sourceType)
+	if !ok {
+		return false, false
+	}
+	if strings.EqualFold(target.Name, source.Name) {
+		return true, true
+	}
+	if len(source.AssignableTo) == 0 {
+		return false, false
+	}
+	seen := map[string]bool{}
+	var visit func(TypeInfo) bool
+	visit = func(typ TypeInfo) bool {
+		for _, parentName := range typ.AssignableTo {
+			parent, ok := db.ResolveType(parentName)
+			if !ok {
+				continue
+			}
+			key := fold(parent.Name)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if strings.EqualFold(parent.Name, target.Name) || visit(parent) {
+				return true
+			}
+		}
+		return false
+	}
+	return visit(source), true
 }
 
 func (db *DB) TypeNames() []string {

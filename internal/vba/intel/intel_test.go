@@ -357,7 +357,7 @@ Sub Test()
     Dim dict As Scripting.Dictionary
     dict.Add "A"
     Range()
-    dict.Add Key:="A", Value:=1
+    dict.Add Key:="A", Iteem:=1
 End Sub
 `,
 	}
@@ -373,8 +373,299 @@ End Sub
 	if !hasDiagnosticMessage(vb030, "Range expects at least 1 argument") {
 		t.Fatalf("missing Range argument count diagnostic: %+v", vb030)
 	}
-	if !hasDiagnosticMessage(vb030, "Unknown named argument: Value") {
+	if !hasDiagnosticMessage(vb030, `Unknown named argument: Iteem. Did you mean "Item"?`) {
 		t.Fatalf("missing unknown named argument diagnostic: %+v", vb030)
+	}
+}
+
+func TestArgumentDiagnosticsAllowParamArray(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.ParamArrayHost",
+    "library": "Test",
+    "kind": "interface",
+    "methods": [{
+      "name": "Log",
+      "parameters": [
+        { "name": "Level", "type": "String" },
+        { "name": "Parts", "type": "Variant", "optional": true, "param_array": true }
+      ]
+    }]
+  }],
+  "global_values": { "Logger": "Test.ParamArrayHost" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Logger.Log "info", "a", "b", "c"
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+		t.Fatalf("ParamArray call should not produce argument diagnostics: %+v", diagnostics)
+	}
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 2, Character: utf16Len(`    Logger.Log "info", `)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "ParamArray Parts As Variant") {
+		t.Fatalf("ParamArray signature missing: %+v", help)
+	}
+}
+
+func TestDiagnosticsIncludeUnknownMemberOnKnownConcreteType(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [
+    {
+      "name": "Test.Worksheet",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Range", "return_type": "Test.Range" }]
+    },
+    {
+      "name": "Test.Range",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Value", "return_type": "Variant" }]
+    },
+    {
+      "name": "Test.Application",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Workbooks", "return_type": "Test.Workbooks" }]
+    },
+    {
+      "name": "Test.Workbooks",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "methods": [{ "name": "Open", "return_type": "Test.Workbook", "parameters": [{ "name": "Filename", "type": "String" }] }]
+    },
+    {
+      "name": "Test.Workbook",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib"
+    }
+  ],
+  "global_values": { "TestApplication": "Test.Application" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Test.Worksheet
+    ws.Ragne("A1").Value = 1
+    TestApplication.Workbooks.Opne Filename:="C:\temp\a.xlsx"
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033")
+	if len(diagnostics) != 2 {
+		t.Fatalf("unknown member diagnostics = %+v, want 2", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Test.Worksheet. Did you mean "Range"?`) {
+		t.Fatalf("missing Worksheet.Ragne diagnostic: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Test.Workbooks. Did you mean "Open"?`) {
+		t.Fatalf("missing Workbooks.Opne diagnostic: %+v", diagnostics)
+	}
+	for _, diag := range diagnostics {
+		if diag.Rule != "vba/type/unknown-member" || diag.Confidence != "high" {
+			t.Fatalf("unexpected diagnostic metadata: %+v", diag)
+		}
+	}
+}
+
+func TestUnknownMemberDiagnosticsSkipIncompleteDBTypesAndStrings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    Debug.Print ws.Name
+    Debug.Print "ws.Ragne"
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033"); len(diagnostics) != 0 {
+		t.Fatalf("curated DB gaps and string literals should not produce unknown member diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestUnknownMemberDiagnosticsSkipLowConfidenceReceivers(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim x As Object
+    x.SomeMember
+    Dim v As Variant
+    v.OtherMember
+    ThisWorkbook.Sheets(1).MaybeWorksheetMember
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033"); len(diagnostics) != 0 {
+		t.Fatalf("low-confidence receivers should not produce unknown member diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsIncludePropertyAccessMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.SecretBox",
+    "library": "Test",
+    "kind": "interface",
+    "properties": [
+      { "name": "Count", "return_type": "Long", "read_only": true },
+      { "name": "Secret", "return_type": "String", "write_only": true }
+    ]
+  }],
+  "global_values": { "Box": "Test.SecretBox" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Box.Count = 1
+    Debug.Print Box.Secret
+    Box.Secret = "ok"
+End Sub
+`,
+	}
+
+	readOnly := diagnosticsByCode(analyzer.Diagnostics(doc), "VB034")
+	if len(readOnly) != 1 || !hasDiagnosticMessage(readOnly, `Property "Count" on Test.SecretBox is read-only.`) {
+		t.Fatalf("read-only diagnostic missing: %+v", readOnly)
+	}
+	writeOnly := diagnosticsByCode(analyzer.Diagnostics(doc), "VB035")
+	if len(writeOnly) != 1 || !hasDiagnosticMessage(writeOnly, `Property "Secret" on Test.SecretBox is write-only.`) {
+		t.Fatalf("write-only diagnostic missing: %+v", writeOnly)
+	}
+}
+
+func TestDiagnosticsIncludeSetAssignmentMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    ws = Application.Worksheets(1)
+    Dim n As Long
+    Set n = 1
+End Sub
+`,
+	}
+
+	setRequired := diagnosticsByCode(analyzer.Diagnostics(doc), "VB036")
+	if len(setRequired) != 1 || !hasDiagnosticMessage(setRequired, "Object assignment requires 'Set'.") {
+		t.Fatalf("set-required diagnostic missing: %+v", setRequired)
+	}
+	setNotAllowed := diagnosticsByCode(analyzer.Diagnostics(doc), "VB037")
+	if len(setNotAllowed) != 1 || !hasDiagnosticMessage(setNotAllowed, `'Set' cannot be used with value type "Long".`) {
+		t.Fatalf("set-not-allowed diagnostic missing: %+v", setNotAllowed)
+	}
+}
+
+func TestSetAssignmentDiagnosticsSkipAmbiguousTypes(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim x As Object
+    x = GetSomething()
+    Dim v As Variant
+    Set v = GetSomething()
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB036"); len(diagnostics) != 0 {
+		t.Fatalf("Object fallback should not produce set-required diagnostics: %+v", diagnostics)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB037"); len(diagnostics) != 0 {
+		t.Fatalf("Variant should not produce set-not-allowed diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsIncludeIncompatibleObjectAssignment(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [
+    { "name": "Test.Control", "library": "Test", "kind": "interface" },
+    { "name": "Test.TextBox", "library": "Test", "kind": "interface", "assignable_to": ["Test.Control"] },
+    { "name": "Test.Worksheet", "library": "Test", "kind": "interface" },
+    { "name": "Test.Factory", "library": "Test", "kind": "interface", "methods": [
+      { "name": "TextBox", "return_type": "Test.TextBox" }
+    ] }
+  ],
+  "global_values": { "Factory": "Test.Factory" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim control As Test.Control
+    Set control = Factory.TextBox()
+    Dim ws As Test.Worksheet
+    Set ws = Factory.TextBox()
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB038")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "Cannot assign Test.TextBox to Test.Worksheet.") {
+		t.Fatalf("incompatible assignment diagnostic missing: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsIncludeNoReturnValueMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim rng As Excel.Range
+    Dim result As Variant
+    result = rng.ClearContents
+    rng.ClearContents
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB039")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, `Method "ClearContents" on Excel.Range does not return a value.`) {
+		t.Fatalf("no-return-value diagnostic missing: %+v", diagnostics)
 	}
 }
 

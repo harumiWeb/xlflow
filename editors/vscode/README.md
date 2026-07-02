@@ -81,6 +81,18 @@ The main features include:
 - Allows execution of xlflow commands from the command palette
 - Includes auxiliary features for VBA development
 
+![Diagnostic screenshot](./images/diagnostic.png)
+
+<p align="center">
+<small>Enables real-time type checking, code completion, and symbol analysis similar to modern languages.</small>
+</p>
+
+![LSP demo](./images/lsp-demo.gif)
+
+<p align="center">
+<small>Static type inference for objects created via late binding `CreateObject`.</small>
+</p>
+
 ## Target Use Cases
 
 This extension is designed for Excel VBA development scenarios such as:

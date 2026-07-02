@@ -47,6 +47,54 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	}
 }
 
+func TestMergeJSONPreservesParamArrayParameters(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.Logger",
+    "methods": [{
+      "name": "Log",
+      "parameters": [
+        { "name": "Level", "type": "String" },
+        { "name": "Parts", "type": "Variant", "optional": true, "param_array": true }
+      ]
+    }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	member, ok := db.ResolveMember("Test.Logger", "Log")
+	if !ok || len(member.Parameters) != 2 {
+		t.Fatalf("Log member = %+v, %v", member, ok)
+	}
+	if param := member.Parameters[1]; !param.Optional || !param.ParamArray {
+		t.Fatalf("ParamArray metadata not preserved: %+v", param)
+	}
+}
+
+func TestIsAssignableUsesExplicitRelationshipsOnly(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [
+    { "name": "Test.Control" },
+    { "name": "Test.TextBox", "assignable_to": ["Test.Control"] },
+    { "name": "Test.Worksheet" },
+    { "name": "Test.Workbook" }
+  ]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	if assignable, known := db.IsAssignable("Test.Control", "Test.TextBox"); !known || !assignable {
+		t.Fatalf("TextBox should be assignable to Control: assignable=%v known=%v", assignable, known)
+	}
+	if assignable, known := db.IsAssignable("Test.Worksheet", "Test.TextBox"); !known || assignable {
+		t.Fatalf("TextBox to Worksheet should be known incompatible: assignable=%v known=%v", assignable, known)
+	}
+	if assignable, known := db.IsAssignable("Test.Worksheet", "Test.Workbook"); known || assignable {
+		t.Fatalf("Workbook to Worksheet should be unknown without relationship metadata: assignable=%v known=%v", assignable, known)
+	}
+}
+
 func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) {
 	db, err := LoadBuiltin()
 	if err != nil {

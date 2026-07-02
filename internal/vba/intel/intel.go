@@ -44,11 +44,13 @@ type Range struct {
 }
 
 type Diagnostic struct {
-	Code     string
-	Severity string
-	Source   string
-	Message  string
-	Range    Range
+	Code       string
+	Severity   string
+	Source     string
+	Message    string
+	Range      Range
+	Rule       string
+	Confidence string
 }
 
 type Symbol struct {
@@ -67,9 +69,10 @@ type Symbol struct {
 }
 
 type Parameter struct {
-	Name     string
-	Type     string
-	Optional bool
+	Name       string
+	Type       string
+	Optional   bool
+	ParamArray bool
 }
 
 type Location struct {
@@ -155,6 +158,9 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 		})
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
+	out = append(out, a.unknownMemberDiagnostics(doc)...)
+	out = append(out, a.propertyAccessDiagnostics(doc)...)
+	out = append(out, a.assignmentDiagnostics(doc)...)
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
 	return out
 }
@@ -833,7 +839,7 @@ func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
 	}
 	out := make([]Parameter, 0, len(params))
 	for _, param := range params {
-		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional})
+		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional || param.ParamArray, ParamArray: param.ParamArray})
 	}
 	return out
 }
@@ -893,6 +899,472 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 		}
 	}
 	return out
+}
+
+func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	seen := map[string]bool{}
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		scan := codeWithoutStringLiterals(code)
+		for _, match := range memberExprRe.FindAllStringSubmatchIndex(scan, -1) {
+			if len(match) < 6 {
+				continue
+			}
+			expr := strings.TrimSpace(code[match[2]:match[5]])
+			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(expr))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if diag, ok := a.unknownMemberDiagnosticForExpression(doc, lineNo, line, expr, match[2], byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+				out = append(out, diag)
+			}
+		}
+	}
+	return out
+}
+
+func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int, line, expr string, exprStartByte, offset int) (Diagnostic, bool) {
+	parts := splitMemberExpression(expr)
+	if len(parts) < 2 {
+		return Diagnostic{}, false
+	}
+	current, ok := a.typeDiagnosticBaseType(doc, parts[0], offset)
+	if !ok || lowConfidenceDiagnosticType(current) {
+		return Diagnostic{}, false
+	}
+	for _, raw := range parts[1:] {
+		member, called := memberNameAndCalled(raw)
+		if member == "" {
+			continue
+		}
+		if lowConfidenceDiagnosticType(current) {
+			return Diagnostic{}, false
+		}
+		if info, found := a.DB.ResolveMember(current, member); found {
+			if info.ReturnType == "" {
+				return Diagnostic{}, false
+			}
+			current = info.ReturnType
+			if called {
+				if typ, ok := a.collectionDefaultType(current); ok {
+					current = typ
+				}
+			}
+			continue
+		}
+		if !a.completeMemberSetType(current) {
+			return Diagnostic{}, false
+		}
+		return a.unknownMemberDiagnostic(lineNo, line, exprStartByte, expr, current, member), true
+	}
+	return Diagnostic{}, false
+}
+
+func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (string, bool) {
+	base := strings.TrimSpace(raw)
+	called := strings.Contains(base, "(")
+	if idx := strings.Index(base, "("); idx >= 0 {
+		base = strings.TrimSpace(base[:idx])
+	}
+	if base == "" {
+		return "", false
+	}
+	var current string
+	switch {
+	case strings.EqualFold(base, "Me") && a.isFormDocument(doc):
+		current = "MSForms.UserForm"
+	case a.DB != nil:
+		if typ, ok := a.DB.ResolveGlobal(base); ok {
+			current = typ.Name
+		} else if typ, ok := a.DB.ResolveType(base); ok {
+			current = typ.Name
+		}
+	}
+	if current == "" {
+		if inferred, ok := a.inferWordTypeInfoAt(doc, base, offset); ok {
+			current = inferred.Type
+		} else {
+			return "", false
+		}
+	}
+	if called {
+		if typ, ok := a.collectionDefaultType(current); ok {
+			current = typ
+		}
+		if strings.EqualFold(current, "Object") {
+			return "", false
+		}
+	}
+	if typ, ok := a.DB.ResolveType(current); ok {
+		current = typ.Name
+	}
+	return current, true
+}
+
+func memberNameAndCalled(raw string) (string, bool) {
+	member := strings.TrimSpace(raw)
+	called := strings.Contains(member, "(")
+	if idx := strings.Index(member, "("); idx >= 0 {
+		member = strings.TrimSpace(member[:idx])
+	}
+	return member, called
+}
+
+func lowConfidenceDiagnosticType(typ string) bool {
+	return typ == "" || strings.EqualFold(typ, "Object") || strings.EqualFold(typ, "Variant")
+}
+
+func (a Analyzer) completeMemberSetType(typ string) bool {
+	if a.DB == nil {
+		return false
+	}
+	info, ok := a.DB.ResolveType(typ)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(info.Source, "typelib") && strings.EqualFold(info.Confidence, "generated")
+}
+
+func (a Analyzer) unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, receiverType, member string) Diagnostic {
+	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
+	start := exprStartByte
+	end := exprStartByte + len(expr)
+	if memberStart >= 0 {
+		start = exprStartByte + memberStart
+		end = start + len(member)
+	}
+	message := fmt.Sprintf("Unknown member %q on %s.", member, receiverType)
+	if suggestion, ok := a.closestMemberName(receiverType, member); ok {
+		message += fmt.Sprintf(" Did you mean %q?", suggestion)
+	}
+	return Diagnostic{
+		Code:       "VB033",
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       "vba/type/unknown-member",
+		Confidence: "high",
+		Message:    message,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
+}
+
+func (a Analyzer) closestMemberName(receiverType, name string) (string, bool) {
+	if a.DB == nil {
+		return "", false
+	}
+	candidates := make([]string, 0)
+	for _, member := range a.DB.Members(receiverType) {
+		candidates = append(candidates, member.Name)
+	}
+	return closestName(candidates, name)
+}
+
+func isDeclarationLineForTypeDiagnostics(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(lower, "dim ") ||
+		strings.HasPrefix(lower, "private ") ||
+		strings.HasPrefix(lower, "public ") ||
+		strings.HasPrefix(lower, "friend ") ||
+		strings.HasPrefix(lower, "static ") ||
+		isDeclarationCallPrefix(trimmed)
+}
+
+func codeWithoutStringLiterals(line string) string {
+	if !strings.Contains(line, `"`) {
+		return line
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	inString := false
+	for i := 0; i < len(line); i++ {
+		if line[i] == '"' {
+			b.WriteByte(' ')
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				b.WriteByte(' ')
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			b.WriteByte(' ')
+		} else {
+			b.WriteByte(line[i])
+		}
+	}
+	return b.String()
+}
+
+func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		eq := assignmentOperatorIndex(code)
+		if eq >= 0 {
+			if diag, ok := a.readOnlyAssignmentDiagnostic(doc, lineNo, line, strings.TrimSpace(code[:eq])); ok {
+				out = append(out, diag)
+			}
+			out = append(out, a.writeOnlyReadDiagnostics(doc, lineNo, line, code[eq+1:], eq+1)...)
+			continue
+		}
+		out = append(out, a.writeOnlyReadDiagnostics(doc, lineNo, line, code, 0)...)
+	}
+	return out
+}
+
+func (a Analyzer) readOnlyAssignmentDiagnostic(doc Document, lineNo int, line, lhs string) (Diagnostic, bool) {
+	clean := strings.TrimSpace(lhs)
+	lower := strings.ToLower(clean)
+	if strings.HasPrefix(lower, "set ") {
+		clean = strings.TrimSpace(clean[4:])
+	} else if strings.HasPrefix(lower, "let ") {
+		clean = strings.TrimSpace(clean[4:])
+	}
+	access, ok := a.memberAccessInfo(doc, lineNo, line, clean)
+	if !ok || !access.Member.ReadOnly {
+		return Diagnostic{}, false
+	}
+	exprStart := strings.Index(line, clean)
+	if exprStart < 0 {
+		exprStart = 0
+	}
+	return propertyAccessDiagnostic("VB034", "vba/type/readonly-assignment", lineNo, line, exprStart, clean, access.Member.Name, fmt.Sprintf("Property %q on %s is read-only.", access.Member.Name, access.ReceiverType)), true
+}
+
+func (a Analyzer) writeOnlyReadDiagnostics(doc Document, lineNo int, line, text string, textStart int) []Diagnostic {
+	var out []Diagnostic
+	seen := map[string]bool{}
+	for _, match := range memberExprRe.FindAllStringSubmatchIndex(text, -1) {
+		if len(match) < 6 {
+			continue
+		}
+		expr := strings.TrimSpace(text[match[2]:match[5]])
+		key := strings.ToLower(expr)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		access, ok := a.memberAccessInfo(doc, lineNo, line, expr)
+		if !ok || !access.Member.WriteOnly {
+			continue
+		}
+		out = append(out, propertyAccessDiagnostic("VB035", "vba/type/writeonly-read", lineNo, line, textStart+match[2], expr, access.Member.Name, fmt.Sprintf("Property %q on %s is write-only.", access.Member.Name, access.ReceiverType)))
+	}
+	return out
+}
+
+type memberAccessInfo struct {
+	ReceiverType string
+	Member       vbadb.MemberInfo
+	Kind         string
+}
+
+func (a Analyzer) memberAccessInfo(doc Document, lineNo int, line, expr string) (memberAccessInfo, bool) {
+	receiver, memberName, ok := splitCallTarget(expr)
+	if !ok {
+		return memberAccessInfo{}, false
+	}
+	offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, offset)
+	if !ok || lowConfidenceDiagnosticType(receiverType) {
+		return memberAccessInfo{}, false
+	}
+	if typ, ok := a.DB.ResolveType(receiverType); ok {
+		receiverType = typ.Name
+	}
+	memberName, _ = memberNameAndCalled(memberName)
+	member, ok := a.DB.ResolveMember(receiverType, memberName)
+	if !ok {
+		return memberAccessInfo{}, false
+	}
+	return memberAccessInfo{ReceiverType: receiverType, Member: member, Kind: a.memberKind(receiverType, memberName)}, true
+}
+
+func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, member, message string) Diagnostic {
+	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
+	start := exprStart
+	end := exprStart + len(expr)
+	if memberStart >= 0 {
+		start = exprStart + memberStart
+		end = start + len(member)
+	}
+	return Diagnostic{
+		Code:       code,
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       rule,
+		Confidence: "high",
+		Message:    message,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
+}
+
+func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		eq := assignmentOperatorIndex(code)
+		if eq < 0 {
+			continue
+		}
+		lhsText := strings.TrimSpace(code[:eq])
+		setUsed, lhsExpr := assignmentLHSExpression(lhsText)
+		if disallowedValueAssignmentLHS(lhsExpr) {
+			continue
+		}
+		if lhsExpr == "" {
+			continue
+		}
+		offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+		rhsExpr := strings.TrimSpace(code[eq+1:])
+		if diag, ok := a.noReturnValueDiagnostic(doc, lineNo, line, rhsExpr); ok {
+			out = append(out, diag)
+			continue
+		}
+		lhsType, ok := a.assignmentLHSType(doc, lineNo, line, lhsExpr, offset)
+		if !ok {
+			continue
+		}
+		lhsStart := strings.Index(line, lhsExpr)
+		if lhsStart < 0 {
+			lhsStart = 0
+		}
+		if setUsed {
+			if valueDiagnosticType(lhsType) {
+				out = append(out, assignmentDiagnostic("VB037", "vba/type/set-not-allowed", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("'Set' cannot be used with value type %q.", lhsType)))
+				continue
+			}
+			rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, rhsExpr, offset)
+			if !ok || !concreteObjectDiagnosticType(lhsType) || !concreteObjectDiagnosticType(rhsType) {
+				continue
+			}
+			rhsType = canonicalDiagnosticType(a.DB, rhsType)
+			if assignable, known := a.DB.IsAssignable(lhsType, rhsType); known && !assignable {
+				out = append(out, assignmentDiagnostic("VB038", "vba/type/incompatible-assignment", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("Cannot assign %s to %s.", rhsType, lhsType)))
+			}
+			continue
+		}
+		if !concreteObjectDiagnosticType(lhsType) {
+			continue
+		}
+		rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, rhsExpr, offset)
+		if !ok || !concreteObjectDiagnosticType(rhsType) {
+			continue
+		}
+		out = append(out, assignmentDiagnostic("VB036", "vba/type/set-required", lineNo, line, lhsStart, lhsExpr, "Object assignment requires 'Set'."))
+	}
+	return out
+}
+
+func assignmentLHSExpression(lhs string) (setUsed bool, expr string) {
+	clean := strings.TrimSpace(lhs)
+	lower := strings.ToLower(clean)
+	if strings.HasPrefix(lower, "set ") {
+		return true, strings.TrimSpace(clean[4:])
+	}
+	if strings.HasPrefix(lower, "let ") {
+		return false, strings.TrimSpace(clean[4:])
+	}
+	return false, clean
+}
+
+func (a Analyzer) assignmentLHSType(doc Document, lineNo int, line, lhsExpr string, offset int) (string, bool) {
+	if strings.Contains(lhsExpr, ".") {
+		access, ok := a.memberAccessInfo(doc, lineNo, line, lhsExpr)
+		if !ok || access.Member.ReturnType == "" {
+			return "", false
+		}
+		return canonicalDiagnosticType(a.DB, access.Member.ReturnType), true
+	}
+	inferred, ok := a.inferWordTypeInfoAt(doc, lhsExpr, offset)
+	if !ok {
+		return "", false
+	}
+	return canonicalDiagnosticType(a.DB, inferred.Type), true
+}
+
+func (a Analyzer) noReturnValueDiagnostic(doc Document, lineNo int, line, rhsExpr string) (Diagnostic, bool) {
+	if rhsExpr == "" || !strings.Contains(rhsExpr, ".") {
+		return Diagnostic{}, false
+	}
+	access, ok := a.memberAccessInfo(doc, lineNo, line, rhsExpr)
+	if !ok || access.Kind != "method" || access.Member.ReturnType != "" {
+		return Diagnostic{}, false
+	}
+	exprStart := strings.Index(line, rhsExpr)
+	if exprStart < 0 {
+		exprStart = 0
+	}
+	return assignmentDiagnostic("VB039", "vba/type/no-return-value", lineNo, line, exprStart, rhsExpr, fmt.Sprintf("Method %q on %s does not return a value.", access.Member.Name, access.ReceiverType)), true
+}
+
+func canonicalDiagnosticType(db *vbadb.DB, typ string) string {
+	if db != nil {
+		if resolved, ok := db.ResolveType(typ); ok {
+			return resolved.Name
+		}
+	}
+	return strings.TrimSpace(typ)
+}
+
+func concreteObjectDiagnosticType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	return !lowConfidenceDiagnosticType(typ) && objectLikeType(typ)
+}
+
+func valueDiagnosticType(typ string) bool {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "boolean", "byte", "currency", "date", "decimal", "double", "integer", "long", "longlong", "longptr", "single", "string":
+		return true
+	default:
+		return false
+	}
+}
+
+func assignmentDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, message string) Diagnostic {
+	return Diagnostic{
+		Code:       code,
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       rule,
+		Confidence: "high",
+		Message:    message,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(exprStart, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(exprStart+len(expr), len(line)))])},
+		},
+	}
 }
 
 func memberReceiverBase(receiver string) string {
@@ -1121,7 +1593,11 @@ func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []D
 			continue
 		}
 		if !signatureHasParameter(sig.Parameters, arg.Name) {
-			out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Unknown named argument: %s.", arg.Name)))
+			msg := fmt.Sprintf("Unknown named argument: %s.", arg.Name)
+			if suggestion, ok := closestParameterName(sig.Parameters, arg.Name); ok {
+				msg += fmt.Sprintf(" Did you mean %q?", suggestion)
+			}
+			out = append(out, callDiagnostic(lineNo, call, msg))
 		}
 	}
 	return out
@@ -1130,6 +1606,9 @@ func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []D
 func signatureArity(params []Parameter) (min int, max int) {
 	max = len(params)
 	for _, param := range params {
+		if param.ParamArray {
+			max = -1
+		}
 		if !param.Optional {
 			min++
 		}
@@ -1144,6 +1623,67 @@ func signatureHasParameter(params []Parameter, name string) bool {
 		}
 	}
 	return false
+}
+
+func closestParameterName(params []Parameter, name string) (string, bool) {
+	candidates := make([]string, 0, len(params))
+	for _, param := range params {
+		candidates = append(candidates, param.Name)
+	}
+	return closestName(candidates, name)
+}
+
+func closestName(candidates []string, name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	best := ""
+	bestDistance := 4
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.EqualFold(candidate, name) {
+			continue
+		}
+		distance := editDistance(strings.ToLower(name), strings.ToLower(candidate))
+		if distance < bestDistance || distance == bestDistance && (best == "" || strings.ToLower(candidate) < strings.ToLower(best)) {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+	limit := 1
+	if len(name) >= 4 {
+		limit = 2
+	}
+	if best == "" || bestDistance > limit {
+		return "", false
+	}
+	return best, true
+}
+
+func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ar := []rune(a)
+	br := []rune(b)
+	prev := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i, ra := range ar {
+		current := make([]int, len(br)+1)
+		current[0] = i + 1
+		for j, rb := range br {
+			cost := 0
+			if ra != rb {
+				cost = 1
+			}
+			current[j+1] = min(min(current[j]+1, prev[j+1]+1), prev[j]+cost)
+		}
+		prev = current
+	}
+	return prev[len(br)]
 }
 
 func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
@@ -1223,7 +1763,9 @@ func symbolSignatureLabel(sym Symbol) string {
 }
 
 func writeParameterLabel(b *strings.Builder, param Parameter) {
-	if param.Optional {
+	if param.ParamArray {
+		b.WriteString("ParamArray ")
+	} else if param.Optional {
 		b.WriteString("Optional ")
 	}
 	b.WriteString(param.Name)
@@ -4014,7 +4556,9 @@ func memberSignature(receiverType string, member vbadb.MemberInfo, kind string) 
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			if param.Optional {
+			if param.ParamArray {
+				b.WriteString("ParamArray ")
+			} else if param.Optional {
 				b.WriteString("Optional ")
 			}
 			b.WriteString(param.Name)
