@@ -158,6 +158,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 		})
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
+	out = append(out, a.unknownMemberDiagnostics(doc)...)
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
 	return out
 }
@@ -896,6 +897,157 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 		}
 	}
 	return out
+}
+
+func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	seen := map[string]bool{}
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		for _, match := range memberExprRe.FindAllStringSubmatchIndex(code, -1) {
+			if len(match) < 6 {
+				continue
+			}
+			expr := strings.TrimSpace(code[match[2]:match[5]])
+			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(expr))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if diag, ok := a.unknownMemberDiagnosticForExpression(doc, lineNo, line, expr, match[2], byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+				out = append(out, diag)
+			}
+		}
+	}
+	return out
+}
+
+func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int, line, expr string, exprStartByte, offset int) (Diagnostic, bool) {
+	parts := splitMemberExpression(expr)
+	if len(parts) < 2 {
+		return Diagnostic{}, false
+	}
+	current, ok := a.typeDiagnosticBaseType(doc, parts[0], offset)
+	if !ok || lowConfidenceDiagnosticType(current) {
+		return Diagnostic{}, false
+	}
+	for _, raw := range parts[1:] {
+		member, called := memberNameAndCalled(raw)
+		if member == "" {
+			continue
+		}
+		if lowConfidenceDiagnosticType(current) {
+			return Diagnostic{}, false
+		}
+		if info, found := a.DB.ResolveMember(current, member); found {
+			if info.ReturnType == "" {
+				return Diagnostic{}, false
+			}
+			current = info.ReturnType
+			if called {
+				if typ, ok := a.collectionDefaultType(current); ok {
+					current = typ
+				}
+			}
+			continue
+		}
+		return unknownMemberDiagnostic(lineNo, line, exprStartByte, expr, current, member), true
+	}
+	return Diagnostic{}, false
+}
+
+func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (string, bool) {
+	base := strings.TrimSpace(raw)
+	called := strings.Contains(base, "(")
+	if idx := strings.Index(base, "("); idx >= 0 {
+		base = strings.TrimSpace(base[:idx])
+	}
+	if base == "" {
+		return "", false
+	}
+	var current string
+	switch {
+	case strings.EqualFold(base, "Me") && a.isFormDocument(doc):
+		current = "MSForms.UserForm"
+	case a.DB != nil:
+		if typ, ok := a.DB.ResolveGlobal(base); ok {
+			current = typ.Name
+		} else if typ, ok := a.DB.ResolveType(base); ok {
+			current = typ.Name
+		}
+	}
+	if current == "" {
+		if inferred, ok := a.inferWordTypeInfoAt(doc, base, offset); ok {
+			current = inferred.Type
+		} else {
+			return "", false
+		}
+	}
+	if called {
+		if typ, ok := a.collectionDefaultType(current); ok {
+			current = typ
+		}
+		if strings.EqualFold(current, "Object") {
+			return "", false
+		}
+	}
+	if typ, ok := a.DB.ResolveType(current); ok {
+		current = typ.Name
+	}
+	return current, true
+}
+
+func memberNameAndCalled(raw string) (string, bool) {
+	member := strings.TrimSpace(raw)
+	called := strings.Contains(member, "(")
+	if idx := strings.Index(member, "("); idx >= 0 {
+		member = strings.TrimSpace(member[:idx])
+	}
+	return member, called
+}
+
+func lowConfidenceDiagnosticType(typ string) bool {
+	return typ == "" || strings.EqualFold(typ, "Object") || strings.EqualFold(typ, "Variant")
+}
+
+func unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, receiverType, member string) Diagnostic {
+	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
+	start := exprStartByte
+	end := exprStartByte + len(expr)
+	if memberStart >= 0 {
+		start = exprStartByte + memberStart
+		end = start + len(member)
+	}
+	return Diagnostic{
+		Code:       "VB033",
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       "vba/type/unknown-member",
+		Confidence: "high",
+		Message:    fmt.Sprintf("Unknown member %q on %s.", member, receiverType),
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
+}
+
+func isDeclarationLineForTypeDiagnostics(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(lower, "dim ") ||
+		strings.HasPrefix(lower, "private ") ||
+		strings.HasPrefix(lower, "public ") ||
+		strings.HasPrefix(lower, "friend ") ||
+		strings.HasPrefix(lower, "static ") ||
+		isDeclarationCallPrefix(trimmed)
 }
 
 func memberReceiverBase(receiver string) string {

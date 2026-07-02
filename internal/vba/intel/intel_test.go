@@ -419,6 +419,56 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeUnknownMemberOnKnownConcreteType(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    ws.Ragne("A1").Value = 1
+    Application.Workbooks.Opne Filename:="C:\temp\a.xlsx"
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033")
+	if len(diagnostics) != 2 {
+		t.Fatalf("unknown member diagnostics = %+v, want 2", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Excel.Worksheet`) {
+		t.Fatalf("missing Worksheet.Ragne diagnostic: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Excel.Workbooks`) {
+		t.Fatalf("missing Workbooks.Opne diagnostic: %+v", diagnostics)
+	}
+	for _, diag := range diagnostics {
+		if diag.Rule != "vba/type/unknown-member" || diag.Confidence != "high" {
+			t.Fatalf("unexpected diagnostic metadata: %+v", diag)
+		}
+	}
+}
+
+func TestUnknownMemberDiagnosticsSkipLowConfidenceReceivers(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim x As Object
+    x.SomeMember
+    Dim v As Variant
+    v.OtherMember
+    ThisWorkbook.Sheets(1).MaybeWorksheetMember
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033"); len(diagnostics) != 0 {
+		t.Fatalf("low-confidence receivers should not produce unknown member diagnostics: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
