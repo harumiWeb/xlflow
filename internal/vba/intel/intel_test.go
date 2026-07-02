@@ -1507,8 +1507,11 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 			if !ok {
 				t.Fatalf("Scripting.Dictionary ProgID completion missing: %+v", items)
 			}
-			if item.Detail != "Scripting.Dictionary" {
+			if item.Detail != "Scripting.Dictionary - version-independent ProgID" {
 				t.Fatalf("ProgID detail = %q, want resolved type", item.Detail)
+			}
+			if item.SortText != "1:scripting.dictionary" {
+				t.Fatalf("ProgID sort text = %q, want version-independent priority", item.SortText)
 			}
 			if item.InsertText != tc.wantInsert {
 				t.Fatalf("ProgID insert text = %q, want %q", item.InsertText, tc.wantInsert)
@@ -1530,7 +1533,8 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s ProgID completion missing: %+v", want, items)
 		}
-		if item.Detail != want {
+		wantDetail := want + " - version-independent ProgID"
+		if item.Detail != wantDetail {
 			t.Fatalf("%s ProgID detail = %q, want resolved type", want, item.Detail)
 		}
 	}
@@ -1543,6 +1547,27 @@ func TestCompletionsReturnProgIDsInsideCreateObjectString(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("non-CreateObject strings should not return completions: %+v", items)
+	}
+}
+
+func TestProgIDCompletionClassifiesVersionedNames(t *testing.T) {
+	if got := progIDVersionKind("Excel.Application"); got != "version-independent" {
+		t.Fatalf("Excel.Application kind = %q", got)
+	}
+	if got := progIDVersionKind("Excel.Application.16"); got != "versioned" {
+		t.Fatalf("Excel.Application.16 kind = %q", got)
+	}
+	if got := progIDVersionKind("ADODB.Connection.6.0"); got != "versioned" {
+		t.Fatalf("ADODB.Connection.6.0 kind = %q", got)
+	}
+	if got := progIDVersionKind("Forms.CommandButton.1"); got != "versioned" {
+		t.Fatalf("Forms.CommandButton.1 kind = %q", got)
+	}
+	if got := progIDSortText("Excel.Application"); got != "1:excel.application" {
+		t.Fatalf("Excel.Application sort text = %q", got)
+	}
+	if got := progIDSortText("Excel.Application.16"); got != "2:excel.application.16" {
+		t.Fatalf("Excel.Application.16 sort text = %q", got)
 	}
 }
 

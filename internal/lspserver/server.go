@@ -417,6 +417,9 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		if completion.InsertText != "" {
 			item.InsertText = &completion.InsertText
 		}
+		if completion.SortText != "" {
+			item.SortText = &completion.SortText
+		}
 		if completion.ReplaceRange != nil {
 			item.TextEdit = protocol.TextEdit{
 				Range:   toProtocolRange(*completion.ReplaceRange),

@@ -526,6 +526,12 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if !ok || progIDEdit.NewText != `"Excel.Application"` {
 		t.Fatalf("Excel.Application text edit = %+v, want quoted ProgID insertion", progIDItem.TextEdit)
 	}
+	if progIDItem.SortText == nil || *progIDItem.SortText != "1:excel.application" {
+		t.Fatalf("Excel.Application sortText = %+v, want version-independent priority", progIDItem.SortText)
+	}
+	if progIDItem.Detail == nil || *progIDItem.Detail != "Excel.Application - version-independent ProgID" {
+		t.Fatalf("Excel.Application detail = %+v", progIDItem.Detail)
+	}
 
 	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{

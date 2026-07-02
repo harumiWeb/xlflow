@@ -89,6 +89,7 @@ type Completion struct {
 	Detail        string
 	Documentation string
 	InsertText    string
+	SortText      string
 	Snippet       bool
 	ReplaceRange  *Range
 }
@@ -1448,15 +1449,50 @@ func (a Analyzer) progIDCompletions(prefix string, replaceRange Range, quoteInse
 		if typ, ok := a.DB.ResolveProgID(progID); ok {
 			detail = typ.Name
 		}
+		progIDKind := progIDVersionKind(progID)
+		detail = strings.TrimSpace(detail + " - " + progIDKind + " ProgID")
 		out = append(out, Completion{
 			Label:        progID,
 			Kind:         "type",
 			Detail:       detail,
 			InsertText:   insertText,
+			SortText:     progIDSortText(progID),
 			ReplaceRange: &replace,
 		})
 	}
 	return uniqueCompletions(out)
+}
+
+func progIDVersionKind(progID string) string {
+	if progIDHasVersionSuffix(progID) {
+		return "versioned"
+	}
+	return "version-independent"
+}
+
+func progIDSortText(progID string) string {
+	prefix := "1:"
+	if progIDHasVersionSuffix(progID) {
+		prefix = "2:"
+	}
+	return prefix + strings.ToLower(progID)
+}
+
+func progIDHasVersionSuffix(progID string) bool {
+	parts := strings.Split(progID, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	last := parts[len(parts)-1]
+	if last == "" {
+		return false
+	}
+	for _, r := range last {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (a Analyzer) namespaceCompletions(namespace, prefix string) []Completion {
