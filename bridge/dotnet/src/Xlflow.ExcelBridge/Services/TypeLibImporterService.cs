@@ -490,12 +490,14 @@ public sealed class TypeLibImporterService
             var paramName = names.Length > i + 1 && !string.IsNullOrWhiteSpace(names[i + 1])
                 ? names[i + 1]
                 : "Arg" + (i + 1).ToString(CultureInfo.InvariantCulture);
-            var optionalByPosition = i >= desc.cParams - desc.cParamsOpt;
+            var isParamArray = desc.cParamsOpt < 0 && i == desc.cParams - 1;
+            var optionalByPosition = desc.cParamsOpt > 0 && i >= desc.cParams - desc.cParamsOpt;
             parameters.Add(new Dictionary<string, object?>
             {
                 ["name"] = paramName,
                 ["type"] = TypeName(typeInfo, elem.tdesc, library),
-                ["optional"] = optionalByPosition || (elem.desc.paramdesc.wParamFlags & PARAMFLAG.PARAMFLAG_FOPT) != 0,
+                ["optional"] = isParamArray || optionalByPosition || (elem.desc.paramdesc.wParamFlags & PARAMFLAG.PARAMFLAG_FOPT) != 0,
+                ["param_array"] = isParamArray ? true : null,
             });
         }
         return parameters;

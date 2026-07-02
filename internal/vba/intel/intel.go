@@ -44,11 +44,13 @@ type Range struct {
 }
 
 type Diagnostic struct {
-	Code     string
-	Severity string
-	Source   string
-	Message  string
-	Range    Range
+	Code       string
+	Severity   string
+	Source     string
+	Message    string
+	Range      Range
+	Rule       string
+	Confidence string
 }
 
 type Symbol struct {
@@ -67,9 +69,10 @@ type Symbol struct {
 }
 
 type Parameter struct {
-	Name     string
-	Type     string
-	Optional bool
+	Name       string
+	Type       string
+	Optional   bool
+	ParamArray bool
 }
 
 type Location struct {
@@ -833,7 +836,7 @@ func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
 	}
 	out := make([]Parameter, 0, len(params))
 	for _, param := range params {
-		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional})
+		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional || param.ParamArray, ParamArray: param.ParamArray})
 	}
 	return out
 }
@@ -1130,6 +1133,9 @@ func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []D
 func signatureArity(params []Parameter) (min int, max int) {
 	max = len(params)
 	for _, param := range params {
+		if param.ParamArray {
+			max = -1
+		}
 		if !param.Optional {
 			min++
 		}
@@ -1223,7 +1229,9 @@ func symbolSignatureLabel(sym Symbol) string {
 }
 
 func writeParameterLabel(b *strings.Builder, param Parameter) {
-	if param.Optional {
+	if param.ParamArray {
+		b.WriteString("ParamArray ")
+	} else if param.Optional {
 		b.WriteString("Optional ")
 	}
 	b.WriteString(param.Name)
@@ -4014,7 +4022,9 @@ func memberSignature(receiverType string, member vbadb.MemberInfo, kind string) 
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			if param.Optional {
+			if param.ParamArray {
+				b.WriteString("ParamArray ")
+			} else if param.Optional {
 				b.WriteString("Optional ")
 			}
 			b.WriteString(param.Name)

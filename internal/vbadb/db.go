@@ -54,9 +54,10 @@ type MemberInfo struct {
 }
 
 type ParamInfo struct {
-	Name     string `json:"name"`
-	Type     string `json:"type,omitempty"`
-	Optional bool   `json:"optional,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type,omitempty"`
+	Optional   bool   `json:"optional,omitempty"`
+	ParamArray bool   `json:"param_array,omitempty"`
 }
 
 type ConstantInfo struct {

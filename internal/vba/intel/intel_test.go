@@ -378,6 +378,47 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsAllowParamArray(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.ParamArrayHost",
+    "library": "Test",
+    "kind": "interface",
+    "methods": [{
+      "name": "Log",
+      "parameters": [
+        { "name": "Level", "type": "String" },
+        { "name": "Parts", "type": "Variant", "optional": true, "param_array": true }
+      ]
+    }]
+  }],
+  "global_values": { "Logger": "Test.ParamArrayHost" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Logger.Log "info", "a", "b", "c"
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+		t.Fatalf("ParamArray call should not produce argument diagnostics: %+v", diagnostics)
+	}
+
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 2, Character: utf16Len(`    Logger.Log "info", `)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || len(help.Signatures) != 1 || !strings.Contains(help.Signatures[0].Label, "ParamArray Parts As Variant") {
+		t.Fatalf("ParamArray signature missing: %+v", help)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
