@@ -11,6 +11,7 @@ All notable changes to xlflow will be documented in this file.
 - Changed `xlflow type db refresh` to always regenerate the generated TypeLib database; `--force` remains accepted for compatibility but is no longer required.
 - Updated `xlflow doctor` to report generated TypeLib DB status and suggest initialization or refresh when the global DB is missing or stale.
 - Added best-effort generated TypeLib DB initialization when `xlflow lsp --stdio` or `xlflow lsp --check` starts and the global DB is missing or stale.
+- Hardened generated TypeLib DB clean/refresh behavior to reject unsafe clean targets, avoid loading stale generated files outside the manifest, and keep best-effort multi-library imports from failing the whole run when one TypeLib cannot be imported.
 - Updated the VS Code extension to avoid passing the default `.xlflow/lsp.log` path in non-xlflow workspaces, so syntax/LSP-only users do not get workspace log files unless they configure one.
 - Updated the VS Code extension to hide LSP CodeLens run actions in non-xlflow workspaces.
 - Fixed LSP ProgID completions so `CreateObject(`, `CreateObject "..."`, and `CreateObject(Class:=...)` contexts surface late-binding candidates instead of requiring an already-open string literal.

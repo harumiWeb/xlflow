@@ -52,6 +52,7 @@ public sealed class TypeLibImporterService
             var outputDir = Path.GetFullPath(args.OutputDir);
             Directory.CreateDirectory(outputDir);
             var libraries = ResolveLibraries(args.Libraries);
+            RemoveStaleGeneratedFiles(outputDir);
             var manifestLibraries = new List<Dictionary<string, object?>>();
             var generatedFiles = new List<string>();
             var logs = new List<string>();
@@ -69,7 +70,16 @@ public sealed class TypeLibImporterService
                     logs.Add($"skipped {target.Name}: {ex.Message}");
                     continue;
                 }
-                var db = ImportLibrary(target, registration);
+                Dictionary<string, object?> db;
+                try
+                {
+                    db = ImportLibrary(target, registration);
+                }
+                catch (Exception ex) when (libraries.BestEffort)
+                {
+                    logs.Add($"skipped {target.Name}: {ex.Message}");
+                    continue;
+                }
                 var outputPath = Path.Combine(outputDir, target.Output);
                 File.WriteAllText(outputPath, JsonSerializer.Serialize(db, JsonOptions) + Environment.NewLine);
                 generatedFiles.Add(outputPath);
@@ -126,6 +136,19 @@ public sealed class TypeLibImporterService
                 Message: ex.Message,
                 Phase: "type-db-import",
                 Source: "xlflow-excel-bridge"));
+        }
+    }
+
+    private static void RemoveStaleGeneratedFiles(string outputDir)
+    {
+        foreach (var path in Directory.EnumerateFiles(outputDir, "*.generated.json"))
+        {
+            File.Delete(path);
+        }
+        var manifestPath = Path.Combine(outputDir, "manifest.json");
+        if (File.Exists(manifestPath))
+        {
+            File.Delete(manifestPath);
         }
     }
 
@@ -354,6 +377,7 @@ public sealed class TypeLibImporterService
     private static ImportedMembers ImportMembers(ITypeInfo typeInfo, TYPEATTR attr, string library)
     {
         var properties = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+        var propertiesWithGetter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var methods = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < attr.cFuncs; i++)
         {
@@ -385,15 +409,24 @@ public sealed class TypeLibImporterService
                 {
                     if (!properties.TryGetValue(memberName, out var property))
                     {
-                        property = member;
+                        property = new Dictionary<string, object?>
+                        {
+                            ["name"] = memberName,
+                        };
                         properties[memberName] = property;
+                    }
+                    if (desc.memid == DispIDValue)
+                    {
+                        property["default"] = true;
                     }
                     if (desc.invkind == INVOKEKIND.INVOKE_PROPERTYGET)
                     {
                         property["return_type"] = member["return_type"];
                         property["parameters"] = member["parameters"];
+                        property.Remove("write_only");
+                        propertiesWithGetter.Add(memberName);
                     }
-                    else if (!property.ContainsKey("return_type"))
+                    else if (!propertiesWithGetter.Contains(memberName))
                     {
                         property["write_only"] = true;
                     }
@@ -515,7 +548,7 @@ public sealed class TypeLibImporterService
             21 => "LongLong",
             22 => "Long",
             23 => "Long",
-            24 => "LongPtr",
+            24 => "",
             25 => "HRESULT",
             _ => "Variant",
         };

@@ -220,8 +220,11 @@ func Clean(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(resolved) == "" || filepath.Clean(resolved) == filepath.Clean(string(os.PathSeparator)) {
+	if unsafeCleanTarget(resolved) {
 		return "", fmt.Errorf("refusing to clean unsafe type DB directory %q", resolved)
+	}
+	if err := validateCleanTarget(resolved); err != nil {
+		return "", err
 	}
 	if err := os.RemoveAll(resolved); err != nil {
 		return "", err
@@ -246,7 +249,7 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	result := LoadResult{GeneratedDir: resolved}
-	files := generatedFiles(resolved)
+	files := runtimeGeneratedFiles(resolved)
 	result.GeneratedFiles = files
 	db := vbadb.New()
 	if len(files) > 0 {
@@ -283,6 +286,77 @@ func generatedFiles(dir string) []string {
 	}
 	sort.Strings(files)
 	return files
+}
+
+func runtimeGeneratedFiles(dir string) []string {
+	manifest, err := ReadManifest(dir)
+	if err != nil {
+		return generatedFiles(dir)
+	}
+	var files []string
+	for _, library := range manifest.Libraries {
+		if strings.TrimSpace(library.Output) == "" {
+			continue
+		}
+		path := filepath.Join(dir, library.Output)
+		if _, err := os.Stat(path); err == nil {
+			files = append(files, path)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func unsafeCleanTarget(path string) bool {
+	cleaned := filepath.Clean(path)
+	if strings.TrimSpace(cleaned) == "" || cleaned == "." {
+		return true
+	}
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		abs = cleaned
+	}
+	abs = filepath.Clean(abs)
+	if abs == filepath.Clean(string(os.PathSeparator)) {
+		return true
+	}
+	if volume := filepath.VolumeName(abs); volume != "" {
+		volumeRoot := filepath.Clean(volume + string(os.PathSeparator))
+		if strings.EqualFold(abs, volumeRoot) {
+			return true
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.EqualFold(abs, filepath.Clean(home)) {
+		return true
+	}
+	if cwd, err := os.Getwd(); err == nil && strings.EqualFold(abs, filepath.Clean(cwd)) {
+		return true
+	}
+	return false
+}
+
+func validateCleanTarget(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if _, err := os.Stat(ManifestPath(dir)); err == nil {
+		return nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") || !strings.HasSuffix(strings.ToLower(entry.Name()), ".generated.json") {
+			return fmt.Errorf("refusing to clean %q: does not look like a type DB directory", dir)
+		}
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

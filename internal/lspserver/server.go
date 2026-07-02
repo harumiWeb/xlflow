@@ -65,6 +65,13 @@ func Check(opts Options) error {
 	if err != nil {
 		return err
 	}
+	w := opts.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	for _, warning := range result.Warnings {
+		_, _ = fmt.Fprintf(w, "type database warning: %s\n", warning)
+	}
 	return intel.Analyzer{RootDir: opts.RootDir, Config: opts.Config, DB: result.DB}.Check()
 }
 

@@ -82,6 +82,32 @@ func TestCleanRemovesResolvedDir(t *testing.T) {
 	}
 }
 
+func TestCleanRejectsUnsafeTargets(t *testing.T) {
+	if _, err := Clean("."); err == nil {
+		t.Fatal("Clean should reject current directory")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Clean(home); err == nil {
+		t.Fatal("Clean should reject home directory")
+	}
+}
+
+func TestCleanRejectsNonTypeDBDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a type db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Clean(dir); err == nil {
+		t.Fatal("Clean should reject non-TypeDB directory")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("directory should remain: %v", err)
+	}
+}
+
 func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "custom.generated.json"), []byte(`{
@@ -118,5 +144,39 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	}
 	if member, ok := result.DB.ResolveMember("Excel.Range", "Value"); !ok || member.ReturnType != "Variant" {
 		t.Fatalf("built-in overlay should override generated Excel.Range.Value: %+v, %v", member, ok)
+	}
+}
+
+func TestLoadForRuntimeUsesManifestOutputsWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "excel.generated.json"), []byte(`{
+  "types": [{ "name": "Vendor.Kept", "library": "Vendor", "kind": "class" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stale.generated.json"), []byte(`{
+  "types": [{ "name": "Vendor.Stale", "library": "Vendor", "kind": "class" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManifest(dir, Manifest{
+		GeneratorVersion: "1.2.3",
+		Libraries: []ManifestLibrary{{
+			Name:   "Excel",
+			Output: "excel.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.DB.ResolveType("Vendor.Kept"); !ok {
+		t.Fatal("manifest output should be loaded")
+	}
+	if _, ok := result.DB.ResolveType("Vendor.Stale"); ok {
+		t.Fatal("stale output outside manifest should not be loaded")
 	}
 }
