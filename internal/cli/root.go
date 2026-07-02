@@ -3392,22 +3392,12 @@ func (a *app) typeDBRefreshCommand() *cobra.Command {
 		Short: "Refresh generated TypeLib type databases",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
-			if err != nil {
-				return a.writeFailure("type db refresh", output.ExitEnvironment, "type_db_status_failed", err)
-			}
-			if !force && status.ManifestExists && !status.Stale {
-				env := output.New("type db refresh")
-				env.TypeDB = status
-				env.Logs = []string{"generated type database is up to date"}
-				return a.write(env, output.ExitSuccess)
-			}
 			return a.generateTypeDB("type db refresh", dir, libraries)
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
 	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
-	cmd.Flags().BoolVar(&force, "force", false, "regenerate even when the manifest is current")
+	cmd.Flags().BoolVar(&force, "force", false, "deprecated compatibility flag; refresh always regenerates")
 	return cmd
 }
 
