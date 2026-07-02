@@ -4,7 +4,7 @@
   "configuration.title": "xlflow",
   "configuration.xlflow.path.description": "Path to the xlflow executable.",
   "configuration.xlflow.lsp.enabled.description": "Start xlflow lsp --stdio for VBA files.",
-  "configuration.xlflow.lsp.logFile.description": "Log file passed to xlflow lsp --stdio.",
+  "configuration.xlflow.lsp.logFile.description": "Log file passed to xlflow lsp --stdio for xlflow projects. Non-xlflow workspaces use the output channel unless this setting is explicitly configured.",
   "configuration.xlflow.lsp.trace.server.description": "Trace verbosity for the xlflow language server output channel.",
   "configuration.xlflow.codeLens.enabled.description": "Show xlflow CodeLens actions above runnable VBA procedures.",
   "configuration.xlflow.codeLens.runProcedure.description": "Show Run actions above runnable VBA procedures.",

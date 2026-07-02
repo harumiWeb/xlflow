@@ -11,6 +11,7 @@ All notable changes to xlflow will be documented in this file.
 - Changed `xlflow type db refresh` to always regenerate the generated TypeLib database; `--force` remains accepted for compatibility but is no longer required.
 - Updated `xlflow doctor` to report generated TypeLib DB status and suggest initialization or refresh when the global DB is missing or stale.
 - Added best-effort generated TypeLib DB initialization when `xlflow lsp --stdio` or `xlflow lsp --check` starts and the global DB is missing or stale.
+- Updated the VS Code extension to avoid passing the default `.xlflow/lsp.log` path in non-xlflow workspaces, so syntax/LSP-only users do not get workspace log files unless they configure one.
 - Fixed LSP ProgID completions so `CreateObject(`, `CreateObject "..."`, and `CreateObject(Class:=...)` contexts surface late-binding candidates instead of requiring an already-open string literal.
 - Improved LSP ProgID completion ranking and details by prioritizing version-independent ProgIDs and labeling versioned ProgIDs such as `Excel.Application.16` or `Forms.CommandButton.1`.
 - Improved VBA LSP intelligence for common Excel idioms, including With-relative call-chain signature help, collection default-member signatures such as `ListObjects(1)`, multi-line signature help across `_` continuations, named-argument completions such as `Destination:=`, and `WScript.Shell` / `VBScript.RegExp` `CreateObject` inference.

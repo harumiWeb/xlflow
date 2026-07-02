@@ -6,6 +6,7 @@ export interface XlflowConfig {
   path: string;
   lspEnabled: boolean;
   lspLogFile: string;
+  lspLogFileConfigured: boolean;
   lspTraceServer: TraceServer;
   codeLensEnabled: boolean;
   codeLensRunProcedure: boolean;
@@ -23,6 +24,7 @@ export function readConfig(): XlflowConfig {
     path: readString(config, "path", "xlflow"),
     lspEnabled: config.get<boolean>("lsp.enabled", true),
     lspLogFile: readString(config, "lsp.logFile", ".xlflow/lsp.log"),
+    lspLogFileConfigured: hasConfiguredValue(config, "lsp.logFile"),
     lspTraceServer: readTraceServer(config),
     codeLensEnabled: config.get<boolean>("codeLens.enabled", true),
     codeLensRunProcedure: config.get<boolean>("codeLens.runProcedure", true),
@@ -36,6 +38,15 @@ export function readConfig(): XlflowConfig {
     completionProgIdsInStrings: config.get<boolean>("completion.progIdsInStrings", true),
     testingAutoDiscover: config.get<boolean>("testing.autoDiscover", true),
   };
+}
+
+function hasConfiguredValue(config: vscode.WorkspaceConfiguration, key: string): boolean {
+  const inspected = config.inspect(key);
+  return (
+    inspected?.globalValue !== undefined ||
+    inspected?.workspaceValue !== undefined ||
+    inspected?.workspaceFolderValue !== undefined
+  );
 }
 
 function readString(config: vscode.WorkspaceConfiguration, key: string, fallback: string): string {

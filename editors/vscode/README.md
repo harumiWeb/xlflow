@@ -122,7 +122,7 @@ To specify the executable path when `xlflow` isn't in the system PATH:
 Common configuration options include:
 
 - `xlflow.lsp.enabled`: Launches `xlflow lsp --stdio` for VBA files.
-- `xlflow.lsp.logFile`: Specifies the log file to pass to the language server. The default value is `.xlflow/lsp.log`.
+- `xlflow.lsp.logFile`: Specifies the log file to pass to the language server for xlflow projects. Non-xlflow workspaces use the output channel unless this setting is explicitly configured. The default value is `.xlflow/lsp.log`.
 - `xlflow.lsp.trace.server`: Sets the verbosity level for the trace output channel of the language server.
 - `xlflow.codeLens.enabled`: Displays xlflow CodeLens actions above executable VBA procedures.
 - `xlflow.codeLens.runProcedure`: Shows a "Run" action above executable VBA procedures.

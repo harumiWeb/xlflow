@@ -7,7 +7,7 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { XlflowCliAvailabilityService } from "./cliAvailability";
-import { readConfig, TraceServer } from "./config";
+import { readConfig, TraceServer, XlflowConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
 
@@ -41,9 +41,10 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
     const cwd = folder?.uri.fsPath;
     const workspaceFolderKey = folder?.uri.toString();
+    const args = await lspServerArgs(config, folder);
     const serverOptions: ServerOptions = {
       command: config.path,
-      args: ["lsp", "--stdio", "--log-file", config.lspLogFile],
+      args,
       transport: TransportKind.stdio,
       options: cwd === undefined ? undefined : { cwd },
     };
@@ -74,8 +75,11 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       await client.start();
       this.workspaceFolderKey = workspaceFolderKey;
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
+      const logDescription = args.includes("--log-file")
+        ? ` with log file ${config.lspLogFile}`
+        : " without workspace log file";
       this.channels.output.info(
-        `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`} with log file ${config.lspLogFile}`,
+        `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`}${logDescription}`,
       );
     } catch (error) {
       this.client = undefined;
@@ -148,6 +152,29 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       clearTimeout(this.suggestTimer);
       this.suggestTimer = undefined;
     }
+  }
+}
+
+export async function lspServerArgs(
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured">,
+  folder: vscode.WorkspaceFolder | undefined,
+): Promise<string[]> {
+  const args = ["lsp", "--stdio"];
+  if (config.lspLogFileConfigured || (await hasXlflowConfig(folder))) {
+    args.push("--log-file", config.lspLogFile);
+  }
+  return args;
+}
+
+async function hasXlflowConfig(folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
+  if (folder === undefined) {
+    return false;
+  }
+  try {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.joinPath(folder.uri, "xlflow.toml"));
+    return (stat.type & vscode.FileType.File) !== 0;
+  } catch {
+    return false;
   }
 }
 
