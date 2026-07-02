@@ -81,16 +81,16 @@ The main features include:
 - Allows execution of xlflow commands from the command palette
 - Includes auxiliary features for VBA development
 
-![](./images/diagnostic.png)
+![Diagnostic screenshot](./images/diagnostic.png)
 
 <p align="center">
 <small>Enables real-time type checking, code completion, and symbol analysis similar to modern languages.</small>
 </p>
 
-![](./images/lsp-demo.gif)
+![LSP demo](./images/lsp-demo.gif)
 
 <p align="center">
-<small>Static type inference for objects created via lazy binding `CreateObject`.</small>
+<small>Static type inference for objects created via late binding `CreateObject`.</small>
 </p>
 
 ## Target Use Cases

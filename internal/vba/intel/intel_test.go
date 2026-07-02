@@ -421,13 +421,59 @@ End Sub
 
 func TestDiagnosticsIncludeUnknownMemberOnKnownConcreteType(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [
+    {
+      "name": "Test.Worksheet",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Range", "return_type": "Test.Range" }]
+    },
+    {
+      "name": "Test.Range",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Value", "return_type": "Variant" }]
+    },
+    {
+      "name": "Test.Application",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "Workbooks", "return_type": "Test.Workbooks" }]
+    },
+    {
+      "name": "Test.Workbooks",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "methods": [{ "name": "Open", "return_type": "Test.Workbook", "parameters": [{ "name": "Filename", "type": "String" }] }]
+    },
+    {
+      "name": "Test.Workbook",
+      "library": "Test",
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib"
+    }
+  ],
+  "global_values": { "TestApplication": "Test.Application" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
 		Source: `Option Explicit
 Sub Test()
-    Dim ws As Excel.Worksheet
+    Dim ws As Test.Worksheet
     ws.Ragne("A1").Value = 1
-    Application.Workbooks.Opne Filename:="C:\temp\a.xlsx"
+    TestApplication.Workbooks.Opne Filename:="C:\temp\a.xlsx"
 End Sub
 `,
 	}
@@ -436,16 +482,34 @@ End Sub
 	if len(diagnostics) != 2 {
 		t.Fatalf("unknown member diagnostics = %+v, want 2", diagnostics)
 	}
-	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Excel.Worksheet. Did you mean "Range"?`) {
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Ragne" on Test.Worksheet. Did you mean "Range"?`) {
 		t.Fatalf("missing Worksheet.Ragne diagnostic: %+v", diagnostics)
 	}
-	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Excel.Workbooks. Did you mean "Open"?`) {
+	if !hasDiagnosticMessage(diagnostics, `Unknown member "Opne" on Test.Workbooks. Did you mean "Open"?`) {
 		t.Fatalf("missing Workbooks.Opne diagnostic: %+v", diagnostics)
 	}
 	for _, diag := range diagnostics {
 		if diag.Rule != "vba/type/unknown-member" || diag.Confidence != "high" {
 			t.Fatalf("unexpected diagnostic metadata: %+v", diag)
 		}
+	}
+}
+
+func TestUnknownMemberDiagnosticsSkipIncompleteDBTypesAndStrings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    Debug.Print ws.Name
+    Debug.Print "ws.Ragne"
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033"); len(diagnostics) != 0 {
+		t.Fatalf("curated DB gaps and string literals should not produce unknown member diagnostics: %+v", diagnostics)
 	}
 }
 
@@ -554,20 +618,33 @@ End Sub
 
 func TestDiagnosticsIncludeIncompatibleObjectAssignment(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [
+    { "name": "Test.Control", "library": "Test", "kind": "interface" },
+    { "name": "Test.TextBox", "library": "Test", "kind": "interface", "assignable_to": ["Test.Control"] },
+    { "name": "Test.Worksheet", "library": "Test", "kind": "interface" },
+    { "name": "Test.Factory", "library": "Test", "kind": "interface", "methods": [
+      { "name": "TextBox", "return_type": "Test.TextBox" }
+    ] }
+  ],
+  "global_values": { "Factory": "Test.Factory" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
 		Source: `Option Explicit
 Sub Test()
-    Dim ws As Excel.Worksheet
-    Set ws = Application.Workbooks.Open("C:\temp\a.xlsx")
-    Dim wb As Excel.Workbook
-    Set wb = Application.Workbooks.Open("C:\temp\b.xlsx")
+    Dim control As Test.Control
+    Set control = Factory.TextBox()
+    Dim ws As Test.Worksheet
+    Set ws = Factory.TextBox()
 End Sub
 `,
 	}
 
 	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB038")
-	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "Cannot assign Excel.Workbook to Excel.Worksheet.") {
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "Cannot assign Test.TextBox to Test.Worksheet.") {
 		t.Fatalf("incompatible assignment diagnostic missing: %+v", diagnostics)
 	}
 }

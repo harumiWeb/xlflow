@@ -913,7 +913,8 @@ func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
 		if isDeclarationLineForTypeDiagnostics(code) {
 			continue
 		}
-		for _, match := range memberExprRe.FindAllStringSubmatchIndex(code, -1) {
+		scan := codeWithoutStringLiterals(code)
+		for _, match := range memberExprRe.FindAllStringSubmatchIndex(scan, -1) {
 			if len(match) < 6 {
 				continue
 			}
@@ -959,6 +960,9 @@ func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int,
 				}
 			}
 			continue
+		}
+		if !a.completeMemberSetType(current) {
+			return Diagnostic{}, false
 		}
 		return a.unknownMemberDiagnostic(lineNo, line, exprStartByte, expr, current, member), true
 	}
@@ -1019,6 +1023,17 @@ func lowConfidenceDiagnosticType(typ string) bool {
 	return typ == "" || strings.EqualFold(typ, "Object") || strings.EqualFold(typ, "Variant")
 }
 
+func (a Analyzer) completeMemberSetType(typ string) bool {
+	if a.DB == nil {
+		return false
+	}
+	info, ok := a.DB.ResolveType(typ)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(info.Source, "typelib") && strings.EqualFold(info.Confidence, "generated")
+}
+
 func (a Analyzer) unknownMemberDiagnostic(lineNo int, line string, exprStartByte int, expr, receiverType, member string) Diagnostic {
 	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
 	start := exprStartByte
@@ -1065,6 +1080,33 @@ func isDeclarationLineForTypeDiagnostics(line string) bool {
 		strings.HasPrefix(lower, "friend ") ||
 		strings.HasPrefix(lower, "static ") ||
 		isDeclarationCallPrefix(trimmed)
+}
+
+func codeWithoutStringLiterals(line string) string {
+	if !strings.Contains(line, `"`) {
+		return line
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	inString := false
+	for i := 0; i < len(line); i++ {
+		if line[i] == '"' {
+			b.WriteByte(' ')
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				b.WriteByte(' ')
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			b.WriteByte(' ')
+		} else {
+			b.WriteByte(line[i])
+		}
+	}
+	return b.String()
 }
 
 func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
@@ -1228,7 +1270,7 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 				continue
 			}
 			rhsType = canonicalDiagnosticType(a.DB, rhsType)
-			if !assignableDiagnosticType(lhsType, rhsType) {
+			if assignable, known := a.DB.IsAssignable(lhsType, rhsType); known && !assignable {
 				out = append(out, assignmentDiagnostic("VB038", "vba/type/incompatible-assignment", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("Cannot assign %s to %s.", rhsType, lhsType)))
 			}
 			continue
@@ -1299,10 +1341,6 @@ func canonicalDiagnosticType(db *vbadb.DB, typ string) string {
 func concreteObjectDiagnosticType(typ string) bool {
 	typ = strings.TrimSpace(typ)
 	return !lowConfidenceDiagnosticType(typ) && objectLikeType(typ)
-}
-
-func assignableDiagnosticType(lhs, rhs string) bool {
-	return strings.EqualFold(strings.TrimSpace(lhs), strings.TrimSpace(rhs))
 }
 
 func valueDiagnosticType(typ string) bool {

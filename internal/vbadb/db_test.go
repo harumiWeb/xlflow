@@ -72,6 +72,29 @@ func TestMergeJSONPreservesParamArrayParameters(t *testing.T) {
 	}
 }
 
+func TestIsAssignableUsesExplicitRelationshipsOnly(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [
+    { "name": "Test.Control" },
+    { "name": "Test.TextBox", "assignable_to": ["Test.Control"] },
+    { "name": "Test.Worksheet" },
+    { "name": "Test.Workbook" }
+  ]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	if assignable, known := db.IsAssignable("Test.Control", "Test.TextBox"); !known || !assignable {
+		t.Fatalf("TextBox should be assignable to Control: assignable=%v known=%v", assignable, known)
+	}
+	if assignable, known := db.IsAssignable("Test.Worksheet", "Test.TextBox"); !known || assignable {
+		t.Fatalf("TextBox to Worksheet should be known incompatible: assignable=%v known=%v", assignable, known)
+	}
+	if assignable, known := db.IsAssignable("Test.Worksheet", "Test.Workbook"); known || assignable {
+		t.Fatalf("Workbook to Worksheet should be unknown without relationship metadata: assignable=%v known=%v", assignable, known)
+	}
+}
+
 func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) {
 	db, err := LoadBuiltin()
 	if err != nil {
