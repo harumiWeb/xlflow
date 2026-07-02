@@ -552,6 +552,26 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeIncompatibleObjectAssignment(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    Set ws = Application.Workbooks.Open("C:\temp\a.xlsx")
+    Dim wb As Excel.Workbook
+    Set wb = Application.Workbooks.Open("C:\temp\b.xlsx")
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB038")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "Cannot assign Excel.Workbook to Excel.Worksheet.") {
+		t.Fatalf("incompatible assignment diagnostic missing: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

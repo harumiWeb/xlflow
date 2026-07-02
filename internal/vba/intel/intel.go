@@ -1215,6 +1215,15 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 		if setUsed {
 			if valueDiagnosticType(lhsType) {
 				out = append(out, assignmentDiagnostic("VB037", "vba/type/set-not-allowed", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("'Set' cannot be used with value type %q.", lhsType)))
+				continue
+			}
+			rhsType, ok := a.resolveDocumentExpressionTypeAt(doc, strings.TrimSpace(code[eq+1:]), offset)
+			if !ok || !concreteObjectDiagnosticType(lhsType) || !concreteObjectDiagnosticType(rhsType) {
+				continue
+			}
+			rhsType = canonicalDiagnosticType(a.DB, rhsType)
+			if !assignableDiagnosticType(lhsType, rhsType) {
+				out = append(out, assignmentDiagnostic("VB038", "vba/type/incompatible-assignment", lineNo, line, lhsStart, lhsExpr, fmt.Sprintf("Cannot assign %s to %s.", rhsType, lhsType)))
 			}
 			continue
 		}
@@ -1269,6 +1278,10 @@ func canonicalDiagnosticType(db *vbadb.DB, typ string) string {
 func concreteObjectDiagnosticType(typ string) bool {
 	typ = strings.TrimSpace(typ)
 	return !lowConfidenceDiagnosticType(typ) && objectLikeType(typ)
+}
+
+func assignableDiagnosticType(lhs, rhs string) bool {
+	return strings.EqualFold(strings.TrimSpace(lhs), strings.TrimSpace(rhs))
 }
 
 func valueDiagnosticType(typ string) bool {
