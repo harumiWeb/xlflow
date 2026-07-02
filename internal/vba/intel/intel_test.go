@@ -469,6 +469,43 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludePropertyAccessMisuse(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.SecretBox",
+    "library": "Test",
+    "kind": "interface",
+    "properties": [
+      { "name": "Count", "return_type": "Long", "read_only": true },
+      { "name": "Secret", "return_type": "String", "write_only": true }
+    ]
+  }],
+  "global_values": { "Box": "Test.SecretBox" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Box.Count = 1
+    Debug.Print Box.Secret
+    Box.Secret = "ok"
+End Sub
+`,
+	}
+
+	readOnly := diagnosticsByCode(analyzer.Diagnostics(doc), "VB034")
+	if len(readOnly) != 1 || !hasDiagnosticMessage(readOnly, `Property "Count" on Test.SecretBox is read-only.`) {
+		t.Fatalf("read-only diagnostic missing: %+v", readOnly)
+	}
+	writeOnly := diagnosticsByCode(analyzer.Diagnostics(doc), "VB035")
+	if len(writeOnly) != 1 || !hasDiagnosticMessage(writeOnly, `Property "Secret" on Test.SecretBox is write-only.`) {
+		t.Fatalf("write-only diagnostic missing: %+v", writeOnly)
+	}
+}
+
 func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

@@ -159,6 +159,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
 	out = append(out, a.unknownMemberDiagnostics(doc)...)
+	out = append(out, a.propertyAccessDiagnostics(doc)...)
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
 	return out
 }
@@ -1063,6 +1064,119 @@ func isDeclarationLineForTypeDiagnostics(line string) bool {
 		strings.HasPrefix(lower, "friend ") ||
 		strings.HasPrefix(lower, "static ") ||
 		isDeclarationCallPrefix(trimmed)
+}
+
+func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
+	if a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	lines := normalizedLines(doc.Source)
+	for lineNo, line := range lines {
+		code := stripLineComment(line)
+		if isDeclarationLineForTypeDiagnostics(code) {
+			continue
+		}
+		eq := assignmentOperatorIndex(code)
+		if eq >= 0 {
+			if diag, ok := a.readOnlyAssignmentDiagnostic(doc, lineNo, line, strings.TrimSpace(code[:eq])); ok {
+				out = append(out, diag)
+			}
+			out = append(out, a.writeOnlyReadDiagnostics(doc, lineNo, line, code[eq+1:], eq+1)...)
+			continue
+		}
+		out = append(out, a.writeOnlyReadDiagnostics(doc, lineNo, line, code, 0)...)
+	}
+	return out
+}
+
+func (a Analyzer) readOnlyAssignmentDiagnostic(doc Document, lineNo int, line, lhs string) (Diagnostic, bool) {
+	clean := strings.TrimSpace(lhs)
+	lower := strings.ToLower(clean)
+	if strings.HasPrefix(lower, "set ") {
+		clean = strings.TrimSpace(clean[4:])
+	} else if strings.HasPrefix(lower, "let ") {
+		clean = strings.TrimSpace(clean[4:])
+	}
+	access, ok := a.memberAccessInfo(doc, lineNo, line, clean)
+	if !ok || !access.Member.ReadOnly {
+		return Diagnostic{}, false
+	}
+	exprStart := strings.Index(line, clean)
+	if exprStart < 0 {
+		exprStart = 0
+	}
+	return propertyAccessDiagnostic("VB034", "vba/type/readonly-assignment", lineNo, line, exprStart, clean, access.Member.Name, fmt.Sprintf("Property %q on %s is read-only.", access.Member.Name, access.ReceiverType)), true
+}
+
+func (a Analyzer) writeOnlyReadDiagnostics(doc Document, lineNo int, line, text string, textStart int) []Diagnostic {
+	var out []Diagnostic
+	seen := map[string]bool{}
+	for _, match := range memberExprRe.FindAllStringSubmatchIndex(text, -1) {
+		if len(match) < 6 {
+			continue
+		}
+		expr := strings.TrimSpace(text[match[2]:match[5]])
+		key := strings.ToLower(expr)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		access, ok := a.memberAccessInfo(doc, lineNo, line, expr)
+		if !ok || !access.Member.WriteOnly {
+			continue
+		}
+		out = append(out, propertyAccessDiagnostic("VB035", "vba/type/writeonly-read", lineNo, line, textStart+match[2], expr, access.Member.Name, fmt.Sprintf("Property %q on %s is write-only.", access.Member.Name, access.ReceiverType)))
+	}
+	return out
+}
+
+type memberAccessInfo struct {
+	ReceiverType string
+	Member       vbadb.MemberInfo
+}
+
+func (a Analyzer) memberAccessInfo(doc Document, lineNo int, line, expr string) (memberAccessInfo, bool) {
+	receiver, memberName, ok := splitCallTarget(expr)
+	if !ok {
+		return memberAccessInfo{}, false
+	}
+	offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, offset)
+	if !ok || lowConfidenceDiagnosticType(receiverType) {
+		return memberAccessInfo{}, false
+	}
+	if typ, ok := a.DB.ResolveType(receiverType); ok {
+		receiverType = typ.Name
+	}
+	memberName, _ = memberNameAndCalled(memberName)
+	member, ok := a.DB.ResolveMember(receiverType, memberName)
+	if !ok {
+		return memberAccessInfo{}, false
+	}
+	return memberAccessInfo{ReceiverType: receiverType, Member: member}, true
+}
+
+func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, member, message string) Diagnostic {
+	memberStart := strings.LastIndex(strings.ToLower(expr), strings.ToLower(member))
+	start := exprStart
+	end := exprStart + len(expr)
+	if memberStart >= 0 {
+		start = exprStart + memberStart
+		end = start + len(member)
+	}
+	return Diagnostic{
+		Code:       code,
+		Severity:   "warning",
+		Source:     "xlflow",
+		Rule:       rule,
+		Confidence: "high",
+		Message:    message,
+		Range: Range{
+			Start: Position{Line: lineNo, Character: utf16Len(line[:max(0, min(start, len(line)))])},
+			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
+		},
+	}
 }
 
 func memberReceiverBase(receiver string) string {
