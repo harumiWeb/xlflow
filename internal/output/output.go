@@ -625,6 +625,9 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString(r.skipLine("Workbook", "Not checked; run xlflow doctor --workbook to open the configured workbook"))
 	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "vbide_access", ""), "VBIDE access", "VBA project object model is available"))
+	if typeDBLine := r.doctorTypeDBLine(env); typeDBLine != "" {
+		b.WriteString(typeDBLine)
+	}
 	if fix := stringValue(diag, "fix"); fix != "" {
 		b.WriteString("\n")
 		b.WriteString(r.style("Fix:", "214", true))
@@ -632,7 +635,35 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString(fix)
 		b.WriteString("\n")
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func (r renderer) doctorTypeDBLine(env Envelope) string {
+	db := objectMap(env.TypeDB)
+	if len(db) == 0 {
+		return ""
+	}
+	dir := stringValue(db, "dir")
+	if dir == "" {
+		dir = "global generated TypeLib DB"
+	}
+	if !boolValue(db, "manifest_exists") {
+		return r.warnLine("Generated Type DB", "not initialized at "+dir)
+	}
+	if boolValue(db, "stale") {
+		reason := stringValue(db, "reason")
+		if reason == "" {
+			reason = "stale"
+		}
+		return r.warnLine("Generated Type DB", reason+" at "+dir)
+	}
+	generatedFiles := stringList(db["generated_files"])
+	detail := dir
+	if len(generatedFiles) > 0 {
+		detail = fmt.Sprintf("%d generated file(s) at %s", len(generatedFiles), dir)
+	}
+	return r.checkLine(true, "Generated Type DB", detail)
 }
 
 func summarizeSystemProfileDesktop(systemProfileDesktop map[string]any) (string, string) {

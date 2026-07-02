@@ -21,6 +21,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/xuri/excelize/v2"
 )
@@ -145,6 +146,30 @@ func TestRootCommandIncludesBridgeFlag(t *testing.T) {
 	flag := root.PersistentFlags().Lookup("bridge")
 	if flag == nil {
 		t.Fatal("expected persistent --bridge flag")
+	}
+}
+
+func TestAttachTypeDBDoctorStatusWarnsWhenGeneratedDBMissing(t *testing.T) {
+	t.Setenv(typedb.EnvDir, t.TempDir())
+	a := &app{}
+	env := output.New("doctor")
+
+	a.attachTypeDBDoctorStatus(&env)
+
+	status, ok := env.TypeDB.(typedb.Status)
+	if !ok {
+		t.Fatalf("type_db = %T, want typedb.Status", env.TypeDB)
+	}
+	if status.ManifestExists {
+		t.Fatalf("manifest_exists = true, want false")
+	}
+	warnings := anySlice(env.Warnings)
+	if len(warnings) != 1 || warnings[0].(map[string]any)["code"] != "type_db_missing" {
+		t.Fatalf("warnings = %#v", env.Warnings)
+	}
+	hints := anySlice(env.Hints)
+	if len(hints) != 1 || hints[0].(map[string]any)["code"] != "type_db_init" {
+		t.Fatalf("hints = %#v", env.Hints)
 	}
 }
 

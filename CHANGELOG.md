@@ -9,6 +9,7 @@ All notable changes to xlflow will be documented in this file.
 - Added best-effort generated TypeLib DB initialization after successful `new` and `init`; failures are reported as warnings and do not fail project creation.
 - Extended generated TypeLib databases with registry-derived ProgID mappings and `--library all`, improving LSP `CreateObject("...")` late-binding inference for installed Excel, Scripting, ADODB, MSForms, Office, and VBIDE libraries.
 - Changed `xlflow type db refresh` to always regenerate the generated TypeLib database; `--force` remains accepted for compatibility but is no longer required.
+- Updated `xlflow doctor` to report generated TypeLib DB status and suggest initialization or refresh when the global DB is missing or stale.
 - Fixed LSP ProgID completions so `CreateObject(`, `CreateObject "..."`, and `CreateObject(Class:=...)` contexts surface late-binding candidates instead of requiring an already-open string literal.
 - Improved LSP ProgID completion ranking and details by prioritizing version-independent ProgIDs and labeling versioned ProgIDs such as `Excel.Application.16` or `Forms.CommandButton.1`.
 - Improved VBA LSP intelligence for common Excel idioms, including With-relative call-chain signature help, collection default-member signatures such as `ListObjects(1)`, multi-line signature help across `_` continuations, named-argument completions such as `Destination:=`, and `WScript.Shell` / `VBScript.RegExp` `CreateObject` inference.

@@ -1274,11 +1274,12 @@ func appendTypeDBBootstrapWarning(env *output.Envelope, code string, message str
 }
 
 func appendTypeDBBootstrapHint(env *output.Envelope) {
+	appendEnvelopeHint(env, "type_db_init_later", "Run `xlflow type db init` after installing Excel to enable richer COM completions.")
+}
+
+func appendEnvelopeHint(env *output.Envelope, code string, message string) {
 	hints := anySlice(env.Hints)
-	hints = append(hints, map[string]any{
-		"code":    "type_db_init_later",
-		"message": "Run `xlflow type db init` after installing Excel to enable richer COM completions.",
-	})
+	hints = append(hints, map[string]any{"code": code, "message": message})
 	env.Hints = hints
 }
 
@@ -1313,11 +1314,36 @@ func (a *app) doctorCommand() *cobra.Command {
 				env.Diagnostics = withGUIBoundarySummary(env.Diagnostics, boundaries)
 				env.Logs = append(env.Logs, fmt.Sprintf("detected %d GUI boundary candidate(s) in source", len(boundaries)))
 			}
+			a.attachTypeDBDoctorStatus(&env)
 			return a.write(env, code)
 		},
 	}
 	cmd.Flags().BoolVar(&checkWorkbook, "workbook", false, "open the configured workbook as part of doctor diagnostics")
 	return cmd
+}
+
+func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {
+	if env == nil {
+		return
+	}
+	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	if err != nil {
+		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
+		return
+	}
+	env.TypeDB = status
+	switch {
+	case !status.ManifestExists:
+		appendTypeDBBootstrapWarning(env, "type_db_missing", "Generated TypeLib DB has not been initialized.")
+		appendEnvelopeHint(env, "type_db_init", "Run `xlflow type db init` or `xlflow type db refresh --library all` to enable richer COM completions.")
+	case status.Stale:
+		reason := status.Reason
+		if reason == "" {
+			reason = "unknown reason"
+		}
+		appendTypeDBBootstrapWarning(env, "type_db_stale", "Generated TypeLib DB is stale: "+reason)
+		appendEnvelopeHint(env, "type_db_refresh", "Run `xlflow type db refresh --library all` to regenerate the TypeLib database.")
+	}
 }
 
 func (a *app) attachCommand() *cobra.Command {
