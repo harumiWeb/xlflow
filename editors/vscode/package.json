@@ -379,7 +379,8 @@
       {
         "command": "xlflow.runDoctor",
         "title": "%command.runDoctor.title%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "icon": "$(pulse)"
       },
       {
         "command": "xlflow.sessionToggle",
