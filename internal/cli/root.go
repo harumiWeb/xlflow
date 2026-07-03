@@ -3150,7 +3150,7 @@ func (a *app) runCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if env.Status == output.StatusFailed && env.Error != nil && env.Error.Code == "macro_failed" && env.Error.Phase == "invoke_macro" {
+			if shouldAttachRunDiagnostic(env) {
 				env.RunDiagnostic = a.buildRunDiagnostic(cfg, env)
 			}
 			return a.writeWithOutputOptions(env, code, a.outputOptionsWithVerbose(verbose))
@@ -3184,6 +3184,18 @@ func buildRunPushOptions(session bool, keepalive excel.CommandOptions) (excel.Pu
 		return excel.PushOptions{}, err
 	}
 	return pushOpts, nil
+}
+
+func shouldAttachRunDiagnostic(env output.Envelope) bool {
+	if env.Status != output.StatusFailed || env.Error == nil || env.Error.Phase != "invoke_macro" {
+		return false
+	}
+	switch env.Error.Code {
+	case "macro_failed", "macro_not_found", "macro_disabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *app) exportImageCommand() *cobra.Command {
@@ -5814,10 +5826,25 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 	for key, item := range cliObjectMap(env.RunDiagnostic) {
 		diag[key] = item
 	}
+	state := buildStatusState(a.cwd, cfg, workbookArgPath(a.cwd, cfg.Excel.Path))
+	sourceNewer := boolValueForCLI(state, "src_newer_than_workbook")
 	if _, ok := diag["kind"]; !ok {
 		diag["kind"] = "runtime"
 	}
-	if _, ok := diag["likely_cause"]; !ok {
+	if sourceNewer {
+		diag["likely_cause"] = "The macro may not have been pushed yet. Source files are newer than the saved workbook."
+		diag["suggestion"] = "Run `xlflow push` first, or rerun as `xlflow run --push ...` to import source before executing the macro."
+		sourceState := map[string]any{
+			"src_newer_than_workbook": true,
+		}
+		if latest := stringValueForCLI(state, "latest_source_modified_at"); latest != "" {
+			sourceState["latest_source_modified_at"] = latest
+		}
+		if workbook := stringValueForCLI(state, "workbook_last_modified_at"); workbook != "" {
+			sourceState["workbook_last_modified_at"] = workbook
+		}
+		diag["source_state"] = sourceState
+	} else if _, ok := diag["likely_cause"]; !ok {
 		diag["likely_cause"] = "The macro failed while running user VBA code."
 	}
 	if _, ok := diag["suggestion"]; !ok {
@@ -5836,7 +5863,7 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 		}
 	}
 	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
-	if err == nil && env.Error != nil {
+	if err == nil && env.Error != nil && !sourceNewer {
 		for _, finding := range findings {
 			if finding.Module != "" && env.Error.Source != "" && !strings.EqualFold(finding.Module, env.Error.Source) {
 				continue

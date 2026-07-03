@@ -39,6 +39,21 @@ interface XlflowMutationEnvelope {
   };
 }
 
+interface XlflowStatusEnvelope {
+  state?: {
+    src_newer_than_workbook?: boolean;
+  };
+  hints?: Array<{
+    code?: string;
+    message?: string;
+  }>;
+}
+
+interface RunArgsChoice {
+  args: string[];
+  workspaceFolder?: vscode.WorkspaceFolder;
+}
+
 interface CommandRefreshHooks {
   refreshAll(): Promise<void>;
   refreshProject(): Promise<void> | void;
@@ -196,12 +211,21 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
-      const launched = await runXlflowTerminalCommand(
+      const runChoice = await runArgsWithOptionalPush(
         ["run", "--interactive"],
-        "xlflow run --interactive",
+        channels,
+        undefined,
+      );
+      if (runChoice === undefined) {
+        return;
+      }
+      const launched = await runXlflowTerminalCommand(
+        runChoice.args,
+        `xlflow ${runChoice.args.join(" ")}`,
         {
           requireWorkspace: true,
           uiLabel: vscode.l10n.t("xlflow run"),
+          workspaceFolder: runChoice.workspaceFolder,
           terminalName: vscode.l10n.t("xlflow run"),
         },
       );
@@ -210,7 +234,7 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
-      await runProcedure(args, sessionManager, hooks);
+      await runProcedure(args, channels, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runTestProcedure", async (args: unknown) => {
       await runTestProcedureFromCodeLens(args, sessionManager, hooks);
@@ -829,6 +853,7 @@ function validateComponentNameInput(value: string): string | undefined {
 
 async function runProcedure(
   value: unknown,
+  channels: XlflowChannels,
   sessionManager: SessionManager,
   hooks: CommandRefreshHooks,
 ): Promise<void> {
@@ -845,19 +870,96 @@ async function runProcedure(
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
   const target = readNonEmpty(args.qualifiedName) ?? args.name;
-  const launched = await runXlflowTerminalCommand(
+  const runChoice = await runArgsWithOptionalPush(
     ["run", "--interactive", target],
-    `xlflow run --interactive ${target}`,
+    channels,
+    workspaceFolder,
+  );
+  if (runChoice === undefined) {
+    return;
+  }
+  const launched = await runXlflowTerminalCommand(
+    runChoice.args,
+    `xlflow ${runChoice.args.join(" ")}`,
     {
       requireWorkspace: true,
       uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
-      workspaceFolder,
+      workspaceFolder: runChoice.workspaceFolder,
       terminalName: vscode.l10n.t("xlflow run"),
     },
   );
   if (launched) {
     scheduleSessionProjectRefresh(sessionManager, hooks);
   }
+}
+
+async function runArgsWithOptionalPush(
+  baseArgs: string[],
+  channels: XlflowChannels,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): Promise<RunArgsChoice | undefined> {
+  const folder =
+    workspaceFolder ??
+    (await resolveWorkspaceRoot({
+      prompt: true,
+      fallbackToFirst: false,
+    }));
+  if (folder === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: vscode.l10n.t("xlflow run"),
+      }),
+    );
+    return undefined;
+  }
+  const status = await runXlflowJsonCommand<XlflowStatusEnvelope>(
+    ["--json", "status"],
+    "xlflow status",
+    channels.output,
+    {
+      requireWorkspace: true,
+      showCliUnavailable: false,
+      workspaceFolder: folder,
+    },
+  );
+  if (!statusShowsSourceNewer(status.json)) {
+    return { args: baseArgs, workspaceFolder: folder };
+  }
+
+  const pushAndRun = vscode.l10n.t("Push & Run");
+  const runWithoutPush = vscode.l10n.t("Run Without Push");
+  const selected = await vscode.window.showWarningMessage(
+    vscode.l10n.t(
+      "Source files are newer than the workbook. Push before running so Excel executes the latest code?",
+    ),
+    pushAndRun,
+    runWithoutPush,
+  );
+  if (selected === pushAndRun) {
+    return { args: withRunPushFlag(baseArgs), workspaceFolder: folder };
+  }
+  if (selected === runWithoutPush) {
+    return { args: baseArgs, workspaceFolder: folder };
+  }
+  return undefined;
+}
+
+function statusShowsSourceNewer(envelope: XlflowStatusEnvelope | undefined): boolean {
+  if (envelope?.state?.src_newer_than_workbook === true) {
+    return true;
+  }
+  return envelope?.hints?.some((hint) => hint.code === "push_source") === true;
+}
+
+function withRunPushFlag(args: string[]): string[] {
+  if (args.includes("--push")) {
+    return args;
+  }
+  const runIndex = args.indexOf("run");
+  if (runIndex === -1) {
+    return args;
+  }
+  return [...args.slice(0, runIndex + 1), "--push", ...args.slice(runIndex + 1)];
 }
 
 async function runTestProcedureFromCodeLens(

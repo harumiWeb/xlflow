@@ -57,6 +57,10 @@ Use `xlflow run --push ...` when you want the command to import edited source fi
 `--push` targets the configured project workbook, so it cannot be combined with `--input`.
 :::
 
+::: tip
+When a macro fails and your source files are newer than the workbook, `run` reports that the macro may not have been pushed yet and suggests `xlflow push` or `xlflow run --push`.
+:::
+
 ::: warning
 Use `--interactive` only when the macro intentionally shows dialogs or UserForms. Headless automation should avoid GUI prompts.
 :::
