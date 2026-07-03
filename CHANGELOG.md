@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow update check` for structured GitHub Release update checks, and wired the VS Code extension to notify users when the installed xlflow CLI is behind the latest release.
 - Added `xlflow type db status/init/refresh/clean` for global generated TypeLib databases, with an initial Excel TypeLib importer feeding LSP type intelligence.
 - Added AST-aware VBA operator spacing to `xlflow fmt`, enabled by default and configurable with `[fmt].operator_spacing`.
 - Added AST-aware VBA declaration spacing to `xlflow fmt`, enabled by default and configurable with `[fmt].declaration_spacing`.

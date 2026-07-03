@@ -24,6 +24,7 @@
   "command.openInstallGuide.title": "インストールガイドを開く",
   "command.configurePath.title": "xlflowパスを設定",
   "command.retryCliDetection.title": "CLI検出を再試行",
+  "command.checkForUpdates.title": "更新を確認",
   "command.restartLanguageServer.title": "Language Serverを再起動",
   "command.checkEnvironment.title": "環境を確認",
   "command.newProject.title": "新しいプロジェクト",

@@ -44,3 +44,4 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [process](./process)           | List and manage local Excel processes.                                           |
 | [skill](./skill)               | Install the bundled xlflow skill for AI agent tools.                             |
 | [version](./version)           | Show xlflow build metadata.                                                      |
+| [update](./update)             | Check whether a newer xlflow release is available.                               |

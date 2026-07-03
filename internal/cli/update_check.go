@@ -22,7 +22,8 @@ type releaseChecker interface {
 }
 
 type latestRelease struct {
-	Version string
+	Version    string
+	ReleaseURL string
 }
 
 type gitHubReleaseChecker struct {
@@ -32,6 +33,7 @@ type gitHubReleaseChecker struct {
 
 type scaffoldUpdateInfo struct {
 	LatestVersion string
+	ReleaseURL    string
 }
 
 type semanticVersion struct {
@@ -98,7 +100,10 @@ func checkForUpdate(ctx context.Context, checker releaseChecker, currentVersion 
 	if latest.compare(current) <= 0 {
 		return scaffoldUpdateInfo{}, nil
 	}
-	return scaffoldUpdateInfo{LatestVersion: strings.TrimSpace(release.Version)}, nil
+	return scaffoldUpdateInfo{
+		LatestVersion: strings.TrimSpace(release.Version),
+		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
+	}, nil
 }
 
 func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {
@@ -123,6 +128,7 @@ func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease,
 
 	var payload struct {
 		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return latestRelease{}, err
@@ -130,7 +136,10 @@ func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease,
 	if strings.TrimSpace(payload.TagName) == "" {
 		return latestRelease{}, fmt.Errorf("github release tag_name is empty")
 	}
-	return latestRelease{Version: strings.TrimSpace(payload.TagName)}, nil
+	return latestRelease{
+		Version:    strings.TrimSpace(payload.TagName),
+		ReleaseURL: strings.TrimSpace(payload.HTMLURL),
+	}, nil
 }
 
 func parseSemanticVersion(raw string) (semanticVersion, bool) {
