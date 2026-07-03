@@ -4,6 +4,7 @@
 
 - Run macros from VS Code with `xlflow run --interactive` so user-triggered macro execution uses interactive mode explicitly.
 - Run user-triggered macro and procedure commands in the VS Code terminal instead of the Output panel.
+- Keep the xlflow Output panel in the background for routine commands; diagnostics still open it explicitly, and failures offer an Open Output action.
 
 ## v0.2.0
 

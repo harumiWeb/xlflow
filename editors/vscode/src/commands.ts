@@ -64,6 +64,7 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.checkEnvironment", async () => {
       await runXlflowCommand(["lsp", "--check"], "xlflow environment check", channels.output, {
         requireWorkspace: false,
+        showOutput: true,
         uiLabel: vscode.l10n.t("xlflow environment check"),
       });
     }),

@@ -80,7 +80,7 @@ export async function runXlflowCommand(
 
   const config = readConfig();
   const cwd = folder?.uri.fsPath;
-  if (options.showOutput !== false) {
+  if (options.showOutput === true) {
     outputChannel.show(true);
   }
   outputChannel.appendLine(
@@ -106,7 +106,7 @@ export async function runXlflowCommand(
     child.stderr.on("data", (data: Buffer) => appendProcessOutput(outputChannel, "stderr", data));
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
-      vscode.window.showErrorMessage(
+      showCommandFailure(
         vscode.l10n.t("{label} failed: {message}", {
           label: uiLabel,
           message: error.message,
@@ -129,7 +129,7 @@ export async function runXlflowCommand(
           vscode.l10n.t("{label} completed.", { label: uiLabel }),
         );
       } else {
-        vscode.window.showErrorMessage(
+        showCommandFailure(
           vscode.l10n.t("{label} failed with exit code {exitCode}.", {
             label: uiLabel,
             exitCode,
@@ -303,4 +303,13 @@ async function ensureCliAvailable(showActions: boolean): Promise<boolean> {
     return true;
   }
   return cliAvailabilityService.ensureAvailable({ showActions });
+}
+
+function showCommandFailure(message: string): void {
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  void vscode.window.showErrorMessage(message, openOutput).then((action) => {
+    if (action === openOutput) {
+      void vscode.commands.executeCommand("xlflow.openOutput");
+    }
+  });
 }

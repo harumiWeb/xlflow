@@ -192,12 +192,13 @@ export class SessionManager implements vscode.Disposable {
     const code = await runXlflowCommand(["doctor"], "xlflow doctor", this.channels.output, {
       requireWorkspace: true,
       notify: false,
+      showOutput: true,
       uiLabel: vscode.l10n.t("xlflow doctor"),
     });
     if (code === 0) {
       vscode.window.showInformationMessage(vscode.l10n.t("xlflow doctor completed."));
     } else {
-      vscode.window.showErrorMessage(vscode.l10n.t("xlflow doctor failed. See xlflow output."));
+      this.showOutputError(vscode.l10n.t("xlflow doctor failed. See xlflow output."));
     }
   }
 
@@ -290,7 +291,7 @@ export class SessionManager implements vscode.Disposable {
   }
 
   private async handleSessionFailure(): Promise<void> {
-    vscode.window.showErrorMessage(vscode.l10n.t("xlflow session failed. See xlflow output."));
+    this.showOutputError(vscode.l10n.t("xlflow session failed. See xlflow output."));
     await this.refreshStatus();
     if (this.snapshot.state !== "error") {
       this.snapshot = {
@@ -301,6 +302,15 @@ export class SessionManager implements vscode.Disposable {
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
     }
+  }
+
+  private showOutputError(message: string): void {
+    const openOutput = vscode.l10n.t("Open xlflow Output");
+    void vscode.window.showErrorMessage(message, openOutput).then((action) => {
+      if (action === openOutput) {
+        this.openOutput();
+      }
+    });
   }
 
   private setTransientState(state: SessionState): void {
