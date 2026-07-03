@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Renamed the Japanese VS Code setup action for existing workbook initialization to clarify that it converts a workbook into an xlflow project instead of wiping the workbook.
 - Added xlflow CLI update notifications, a Project view update indicator, and a command palette action to check for updates manually.
 - Added sidebar save actions so the Project view toolbar and `Save required` indicator can run `xlflow save` when a session workbook needs saving.
 
