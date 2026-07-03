@@ -12,7 +12,6 @@ import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
 import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
 import {
   buildUserFormModels,
-  cliVersionSummary,
   moduleContextValue,
   moduleGroups,
   readExcelPathFromToml,
@@ -23,6 +22,14 @@ import {
   userFormContextValue,
 } from "../../src/sidebar";
 import { sourceUri } from "../../src/testDiscovery";
+import {
+  cliVersionSummary,
+  lastCheckedKey,
+  normalizeUpdateResult,
+  shouldRunAutomaticCheck,
+  updateDismissedKey,
+  updateSummary,
+} from "../../src/updateCheck";
 
 export async function run(): Promise<void> {
   const config = vscode.workspace.getConfiguration("xlflow");
@@ -53,6 +60,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.openInstallGuide",
     "xlflow.configurePath",
     "xlflow.retryCliDetection",
+    "xlflow.checkForUpdates",
     "xlflow.newProject",
     "xlflow.initProject",
     "xlflow.skillInstall",
@@ -168,6 +176,68 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   assert.strictEqual(cliVersionSummary("xlflow 0.1.0\n"), "0.1.0");
   assert.strictEqual(cliVersionSummary(undefined), undefined);
+  assert.deepStrictEqual(
+    normalizeUpdateResult({
+      exitCode: 0,
+      stdout:
+        '{"status":"ok","command":"update check","update":{"current_version":"1.2.3","latest_version":"v1.2.4","update_available":true,"release_url":"https://example.com/v1.2.4"}}',
+      stderr: "",
+    }),
+    {
+      kind: "available",
+      info: {
+        currentVersion: "1.2.3",
+        latestVersion: "v1.2.4",
+        updateAvailable: true,
+        releaseUrl: "https://example.com/v1.2.4",
+      },
+    },
+  );
+  assert.deepStrictEqual(
+    normalizeUpdateResult({
+      exitCode: 0,
+      stdout:
+        '{"status":"ok","command":"update check","update":{"current_version":"1.2.3","update_available":false}}',
+      stderr: "",
+    }),
+    {
+      kind: "upToDate",
+      info: {
+        currentVersion: "1.2.3",
+        latestVersion: undefined,
+        updateAvailable: false,
+        releaseUrl: undefined,
+      },
+    },
+  );
+  assert.strictEqual(
+    normalizeUpdateResult({
+      exitCode: 3,
+      stdout:
+        '{"status":"failed","error":{"message":"network down"},"update":{"current_version":"1.2.3","update_available":false}}',
+      stderr: "",
+    }).kind,
+    "error",
+  );
+  assert.strictEqual(lastCheckedKey("xlflow", "1.2.3"), "xlflow.update.lastChecked.xlflow.1.2.3");
+  assert.strictEqual(
+    updateDismissedKey("xlflow", "1.2.3", "v1.2.4"),
+    "xlflow.update.dismissed.xlflow.1.2.3.v1.2.4",
+  );
+  assert.strictEqual(shouldRunAutomaticCheck(1000, undefined), true);
+  assert.strictEqual(shouldRunAutomaticCheck(1000, 999), false);
+  assert.strictEqual(shouldRunAutomaticCheck(24 * 60 * 60 * 1000 + 1, 0), true);
+  assert.strictEqual(
+    updateSummary("xlflow 1.2.3", {
+      kind: "available",
+      info: {
+        currentVersion: "1.2.3",
+        latestVersion: "v1.2.4",
+        updateAvailable: true,
+      },
+    }),
+    "1.2.3 -> v1.2.4",
+  );
   const missingAvailability = normalizeAvailabilityFailure("xlflow", { code: "ENOENT" });
   assert.strictEqual(missingAvailability.ok, false);
   assert.strictEqual(missingAvailability.reason, "notFound");

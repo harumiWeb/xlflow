@@ -26,6 +26,7 @@
   "command.openInstallGuide.title": "Open Install Guide",
   "command.configurePath.title": "Configure Path",
   "command.retryCliDetection.title": "Retry CLI Detection",
+  "command.checkForUpdates.title": "Check for Updates",
   "command.newProject.title": "New Project",
   "command.initProject.title": "Initialize Project",
   "command.skillInstall.title": "Install Agent Skill",

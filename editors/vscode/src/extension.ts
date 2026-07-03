@@ -6,6 +6,7 @@ import { createChannels } from "./logging";
 import { selectedWorkspaceFolder, XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowSidebar } from "./sidebar";
+import { XlflowUpdateService } from "./updateCheck";
 import { XlflowTestController } from "./testing";
 import { setXlflowCliAvailabilityService } from "./xlflow";
 
@@ -15,6 +16,7 @@ let sessionManager: SessionManager | undefined;
 let projectState: XlflowProjectStateService | undefined;
 let sidebar: XlflowSidebar | undefined;
 let cliAvailability: XlflowCliAvailabilityService | undefined;
+let updateService: XlflowUpdateService | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const channels = createChannels();
@@ -24,7 +26,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);
   projectState = new XlflowProjectStateService();
-  sidebar = new XlflowSidebar(projectState, sessionManager, cliAvailability, channels);
+  updateService = new XlflowUpdateService(context);
+  sidebar = new XlflowSidebar(
+    projectState,
+    sessionManager,
+    cliAvailability,
+    updateService,
+    channels,
+  );
 
   context.subscriptions.push(
     channels.output,
@@ -34,6 +43,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     testController,
     sessionManager,
     projectState,
+    updateService,
     sidebar,
   );
   let lastSelectedWorkspaceKey = selectedWorkspaceKey();
@@ -71,6 +81,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context,
     clientManager,
     cliAvailability,
+    updateService,
     channels,
     sessionManager,
     projectState,
@@ -124,6 +135,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const lspChanged = event.affectsConfiguration("xlflow.lsp");
       if (pathChanged) {
         await cliAvailability?.refresh();
+        await updateService?.checkAutomatic(cliAvailability?.current());
       }
       if (pathChanged || lspChanged) {
         await clientManager?.restart();
@@ -148,6 +160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
   await cliAvailability.refresh();
+  await updateService.checkAutomatic(cliAvailability.current());
   await refreshSelectedProject({ restartLsp: false });
 }
 
@@ -158,17 +171,20 @@ export async function deactivate(): Promise<void> {
   const states = projectState;
   const bars = sidebar;
   const availability = cliAvailability;
+  const updates = updateService;
   clientManager = undefined;
   testController = undefined;
   sessionManager = undefined;
   projectState = undefined;
   sidebar = undefined;
   cliAvailability = undefined;
+  updateService = undefined;
   setXlflowCliAvailabilityService(undefined);
   bars?.dispose();
   states?.dispose();
   tests?.dispose();
   sessions?.dispose();
+  updates?.dispose();
   availability?.dispose();
   await manager?.stop();
 }

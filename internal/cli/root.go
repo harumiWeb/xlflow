@@ -84,6 +84,13 @@ type versionVerbosePayload struct {
 	Features       []versionFeature      `json:"features,omitempty"`
 }
 
+type updateCheckPayload struct {
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+	ReleaseURL      string `json:"release_url,omitempty"`
+}
+
 type formSnapshotCommandOptions struct {
 	Inspect excel.InspectFormOptions
 	OutPath string
@@ -182,6 +189,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.moduleCommand(),
 		a.skillCommand(),
 		a.versionCommand(),
+		a.updateCommand(),
 		a.processCommand(),
 	)
 	return root
@@ -305,6 +313,66 @@ func (a *app) versionCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "show executable path, build settings, script resolution, and supported features")
 	return cmd
+}
+
+func (a *app) updateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Check for xlflow updates",
+	}
+	cmd.AddCommand(a.updateCheckCommand())
+	return cmd
+}
+
+func (a *app) updateCheckCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "check",
+		Short: "Check the latest xlflow GitHub release",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, exitCode := a.updateCheckEnvelope(cmd.Context())
+			return a.write(env, exitCode)
+		},
+	}
+}
+
+func (a *app) updateCheckEnvelope(ctx context.Context) (output.Envelope, int) {
+	info := a.buildInfo.withDefaults()
+	payload := updateCheckPayload{
+		CurrentVersion: info.Version,
+	}
+	if a.updateChecker == nil {
+		a.updateChecker = newGitHubReleaseChecker(nil)
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, updateCheckTimeout)
+	defer cancel()
+	update, err := checkForUpdate(checkCtx, a.updateChecker, info.Version)
+	if err != nil {
+		env := output.Failure("update check", output.Error{
+			Code:    "update_check_failed",
+			Message: "failed to check for xlflow updates: " + err.Error(),
+			Phase:   "update_check",
+		})
+		env.Update = payload
+		return env, output.ExitEnvironment
+	}
+	payload.LatestVersion = update.LatestVersion
+	payload.UpdateAvailable = update.LatestVersion != ""
+	payload.ReleaseURL = update.ReleaseURL
+	env := output.New("update check")
+	env.Update = payload
+	if payload.UpdateAvailable {
+		env.Logs = []string{
+			"current version: " + payload.CurrentVersion,
+			"latest version: " + payload.LatestVersion,
+		}
+		if payload.ReleaseURL != "" {
+			env.Logs = append(env.Logs, "release: "+payload.ReleaseURL)
+		}
+	} else {
+		env.Logs = []string{"xlflow is up to date"}
+	}
+	return env, output.ExitSuccess
 }
 
 func (a *app) versionPayload(verbose bool) any {

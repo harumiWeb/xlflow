@@ -77,6 +77,7 @@ function commandSidebar() {
         { text: "process", link: "/commands/process" },
         { text: "skill", link: "/commands/skill" },
         { text: "version", link: "/commands/version" },
+        { text: "update", link: "/commands/update" },
       ],
     },
   ];

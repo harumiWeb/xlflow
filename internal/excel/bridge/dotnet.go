@@ -20,6 +20,8 @@ const dotNetBridgeInternalRunFlag = "--bridge-internal-run"
 var dotNetLookPath = exec.LookPath
 var dotNetBridgeCandidatesFunc = dotNetBridgeCandidates
 var repoLocalDotNetBridgeProjectPathFunc = repoLocalDotNetBridgeProjectPath
+var dotNetExecutablePath = os.Executable
+var dotNetEvalSymlinks = filepath.EvalSymlinks
 
 // dotNetSupportedCommands is the Go-side source of truth for Windows auto-mode
 // provider support.
@@ -232,15 +234,26 @@ func dotNetBridgeCandidates() []string {
 			filepath.Join(repoRoot, "bridge", "dotnet", "src", "Xlflow.ExcelBridge", "bin", "Debug", "net8.0", dotNetBridgeBinaryName+".dll"),
 		)
 	}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, dotNetBridgeBinaryName+".exe"),
-			filepath.Join(dir, dotNetBridgeBinaryName),
-			filepath.Join(dir, dotNetBridgeBinaryName+".dll"),
-		)
+	if exe, err := dotNetExecutablePath(); err == nil {
+		candidates = append(candidates, dotNetBridgeSiblingCandidates(exe)...)
+		if resolved, err := dotNetEvalSymlinks(exe); err == nil && !samePath(resolved, exe) {
+			candidates = append(candidates, dotNetBridgeSiblingCandidates(resolved)...)
+		}
 	}
 	return candidates
+}
+
+func dotNetBridgeSiblingCandidates(executable string) []string {
+	dir := filepath.Dir(executable)
+	return []string{
+		filepath.Join(dir, dotNetBridgeBinaryName+".exe"),
+		filepath.Join(dir, dotNetBridgeBinaryName),
+		filepath.Join(dir, dotNetBridgeBinaryName+".dll"),
+	}
+}
+
+func samePath(left, right string) bool {
+	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
 }
 
 func repoLocalDotNetBridgeProjectPath() (string, bool) {

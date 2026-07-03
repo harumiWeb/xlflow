@@ -37,6 +37,7 @@ var (
 type scaffoldWelcomeModel struct {
 	Version       string
 	UpdateVersion string
+	UpdateWarning string
 }
 
 func shouldRenderScaffoldWelcome(command string, opts output.Options) bool {
@@ -85,7 +86,7 @@ func renderScaffoldWelcomeBadge(text string) string {
 }
 
 func renderScaffoldWelcomeMeta(model scaffoldWelcomeModel, color bool) string {
-	lines := make([]string, 0, 3)
+	lines := make([]string, 0, 4)
 	if url := strings.TrimSpace(scaffoldWelcomeCommandsURL); url != "" {
 		line := "Docs: " + url
 		if color {
@@ -102,6 +103,15 @@ func renderScaffoldWelcomeMeta(model scaffoldWelcomeModel, color bool) string {
 			line = lipgloss.NewStyle().
 				Foreground(lipgloss.Color(welcomeInfoColor.hex())).
 				Faint(true).
+				Render(line)
+		}
+		lines = append(lines, line)
+	}
+	if warning := strings.TrimSpace(model.UpdateWarning); warning != "" {
+		line := "Warning: " + warning
+		if color {
+			line = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(welcomeAlertColor.hex())).
 				Render(line)
 		}
 		lines = append(lines, line)

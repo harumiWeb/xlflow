@@ -10,6 +10,7 @@ import { readConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
+import { XlflowUpdateService } from "./updateCheck";
 import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./xlflow";
 
 type RunProcedureArgs = {
@@ -45,6 +46,7 @@ export function registerCommands(
   context: vscode.ExtensionContext,
   clientManager: XlflowLanguageClientManager,
   cliAvailability: XlflowCliAvailabilityService,
+  updateService: XlflowUpdateService,
   channels: XlflowChannels,
   sessionManager: SessionManager,
   projectState: XlflowProjectStateService,
@@ -70,8 +72,15 @@ export function registerCommands(
       const availability = await cliAvailability.refresh();
       if (availability.ok) {
         await clientManager.restart();
+        await updateService.checkAutomatic(availability);
       }
       await hooks.refreshAll();
+    }),
+    vscode.commands.registerCommand("xlflow.checkForUpdates", async () => {
+      await updateService.checkManual(
+        cliAvailability.current() ?? (await cliAvailability.refresh()),
+      );
+      hooks.refreshProject();
     }),
     vscode.commands.registerCommand("xlflow.newProject", async () => {
       const workbook = await vscode.window.showInputBox({
@@ -377,6 +386,7 @@ async function showSetupActions(): Promise<void> {
       { label: vscode.l10n.t("Install Guide"), command: "xlflow.openInstallGuide" },
       { label: vscode.l10n.t("Configure Path"), command: "xlflow.configurePath" },
       { label: vscode.l10n.t("Retry"), command: "xlflow.retryCliDetection" },
+      { label: vscode.l10n.t("Check for Updates"), command: "xlflow.checkForUpdates" },
       { label: vscode.l10n.t("New Project"), command: "xlflow.newProject" },
       { label: vscode.l10n.t("Init Existing Workbook"), command: "xlflow.initProject" },
       { label: vscode.l10n.t("Run Doctor"), command: "xlflow.runDoctor" },

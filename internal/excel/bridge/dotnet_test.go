@@ -120,6 +120,35 @@ func TestDotNetBridgeCommandUsesBuildServerSafeArgsForProjectFallback(t *testing
 	}
 }
 
+func TestDotNetBridgeCandidatesIncludeResolvedExecutableSiblings(t *testing.T) {
+	originalExecutablePath := dotNetExecutablePath
+	originalEvalSymlinks := dotNetEvalSymlinks
+	t.Cleanup(func() {
+		dotNetExecutablePath = originalExecutablePath
+		dotNetEvalSymlinks = originalEvalSymlinks
+	})
+
+	linkExe := `C:\Users\HARUMI\AppData\Local\Microsoft\WinGet\Links\xlflow.exe`
+	packageExe := `C:\Users\HARUMI\AppData\Local\Microsoft\WinGet\Packages\HarumiWeb.Xlflow_Microsoft.Winget.Source_8wekyb3d8bbwe\xlflow.exe`
+	dotNetExecutablePath = func() (string, error) { return linkExe, nil }
+	dotNetEvalSymlinks = func(path string) (string, error) {
+		if path != linkExe {
+			t.Fatalf("EvalSymlinks path = %q, want %q", path, linkExe)
+		}
+		return packageExe, nil
+	}
+
+	candidates := dotNetBridgeCandidates()
+	wantLinkCandidate := filepath.Join(filepath.Dir(linkExe), dotNetBridgeBinaryName+".exe")
+	wantPackageCandidate := filepath.Join(filepath.Dir(packageExe), dotNetBridgeBinaryName+".exe")
+	if !containsPath(candidates, wantLinkCandidate) {
+		t.Fatalf("candidates missing link sibling %q:\n%v", wantLinkCandidate, candidates)
+	}
+	if !containsPath(candidates, wantPackageCandidate) {
+		t.Fatalf("candidates missing resolved package sibling %q:\n%v", wantPackageCandidate, candidates)
+	}
+}
+
 func TestDotNetProviderAdvertisesMajorCommandsForAutoSelection(t *testing.T) {
 	provider := DotNetProvider{}
 
@@ -128,6 +157,15 @@ func TestDotNetProviderAdvertisesMajorCommandsForAutoSelection(t *testing.T) {
 			t.Fatalf("Supports(%q) = false, want true; auto mode should prefer .NET for major Windows bridge commands", command)
 		}
 	}
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if samePath(path, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDotNetSupportedCommandsMatchExpectedSet(t *testing.T) {

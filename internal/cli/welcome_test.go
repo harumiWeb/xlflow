@@ -111,6 +111,31 @@ func TestRenderScaffoldWelcomeIncludesUpdateNotice(t *testing.T) {
 	}
 }
 
+func TestRenderScaffoldWelcomeIncludesUpdateWarning(t *testing.T) {
+	got := renderScaffoldWelcome(scaffoldWelcomeModel{
+		Version:       "dev",
+		UpdateWarning: `update check skipped: current version "dev" is not a release version`,
+	}, false)
+	for _, want := range []string{
+		"Docs: https://harumiweb.github.io/xlflow/commands/",
+		"Version: dev",
+		`Warning: update check skipped: current version "dev" is not a release version`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("welcome output missing %q:\n%s", want, got)
+		}
+	}
+	versionIndex := strings.Index(got, "Version: dev")
+	warningIndex := strings.Index(got, `Warning: update check skipped: current version "dev" is not a release version`)
+	updateIndex := strings.Index(got, "Update available:")
+	if versionIndex >= warningIndex {
+		t.Fatalf("expected version -> warning order:\n%s", got)
+	}
+	if updateIndex >= 0 {
+		t.Fatalf("did not expect update notice when only warning is present:\n%s", got)
+	}
+}
+
 func TestRenderScaffoldWelcomeBadgeUsesDisplayWidthForEmoji(t *testing.T) {
 	got := renderScaffoldWelcomeBadge("🏄‍♂️ Welcome to xlflow")
 	lines := strings.Split(got, "\n")

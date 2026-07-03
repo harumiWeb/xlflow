@@ -22,7 +22,8 @@ type releaseChecker interface {
 }
 
 type latestRelease struct {
-	Version string
+	Version    string
+	ReleaseURL string
 }
 
 type gitHubReleaseChecker struct {
@@ -32,7 +33,17 @@ type gitHubReleaseChecker struct {
 
 type scaffoldUpdateInfo struct {
 	LatestVersion string
+	ReleaseURL    string
+	Warning       string
 }
+
+type updateSkipReason string
+
+const (
+	updateSkipNone             updateSkipReason = ""
+	updateSkipCurrentNotSemver updateSkipReason = "current-not-semver"
+	updateSkipLatestNotSemver  updateSkipReason = "latest-not-semver"
+)
 
 type semanticVersion struct {
 	major      int
@@ -60,11 +71,9 @@ func (a *app) scaffoldWelcomeModel(skipUpdateCheck bool) scaffoldWelcomeModel {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
 	defer cancel()
-	update, err := checkForUpdate(ctx, a.updateChecker, model.Version)
-	if err != nil {
-		return model
-	}
+	update := checkForUpdateBestEffort(ctx, a.updateChecker, model.Version)
 	model.UpdateVersion = update.LatestVersion
+	model.UpdateWarning = update.Warning
 	return model
 }
 
@@ -83,22 +92,50 @@ func shouldSkipScaffoldUpdateCheck() bool {
 }
 
 func checkForUpdate(ctx context.Context, checker releaseChecker, currentVersion string) (scaffoldUpdateInfo, error) {
+	info, reason, _, err := evaluateUpdate(ctx, checker, currentVersion)
+	if reason != updateSkipNone {
+		return scaffoldUpdateInfo{}, err
+	}
+	return info, err
+}
+
+func checkForUpdateBestEffort(ctx context.Context, checker releaseChecker, currentVersion string) scaffoldUpdateInfo {
+	info, reason, latestTag, err := evaluateUpdate(ctx, checker, currentVersion)
+	if err != nil {
+		info.Warning = "update check failed: " + err.Error()
+		return info
+	}
+	switch reason {
+	case updateSkipCurrentNotSemver:
+		info.Warning = fmt.Sprintf("update check skipped: current version %q is not a release version", strings.TrimSpace(currentVersion))
+	case updateSkipLatestNotSemver:
+		info.Warning = fmt.Sprintf("update check skipped: latest release tag %q is not semantic version", latestTag)
+	}
+	return info
+}
+
+func evaluateUpdate(ctx context.Context, checker releaseChecker, currentVersion string) (scaffoldUpdateInfo, updateSkipReason, string, error) {
 	current, ok := parseSemanticVersion(currentVersion)
 	if !ok {
-		return scaffoldUpdateInfo{}, nil
+		return scaffoldUpdateInfo{}, updateSkipCurrentNotSemver, "", nil
 	}
 	release, err := checker.LatestRelease(ctx)
 	if err != nil {
-		return scaffoldUpdateInfo{}, err
+		return scaffoldUpdateInfo{}, updateSkipNone, "", err
+	}
+	latestTag := strings.TrimSpace(release.Version)
+	info := scaffoldUpdateInfo{
+		LatestVersion: latestTag,
+		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
 	}
 	latest, ok := parseSemanticVersion(release.Version)
 	if !ok {
-		return scaffoldUpdateInfo{}, nil
+		return scaffoldUpdateInfo{}, updateSkipLatestNotSemver, latestTag, nil
 	}
 	if latest.compare(current) <= 0 {
-		return scaffoldUpdateInfo{}, nil
+		return scaffoldUpdateInfo{}, updateSkipNone, latestTag, nil
 	}
-	return scaffoldUpdateInfo{LatestVersion: strings.TrimSpace(release.Version)}, nil
+	return info, updateSkipNone, latestTag, nil
 }
 
 func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {
@@ -123,6 +160,7 @@ func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease,
 
 	var payload struct {
 		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return latestRelease{}, err
@@ -130,7 +168,10 @@ func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease,
 	if strings.TrimSpace(payload.TagName) == "" {
 		return latestRelease{}, fmt.Errorf("github release tag_name is empty")
 	}
-	return latestRelease{Version: strings.TrimSpace(payload.TagName)}, nil
+	return latestRelease{
+		Version:    strings.TrimSpace(payload.TagName),
+		ReleaseURL: strings.TrimSpace(payload.HTMLURL),
+	}, nil
 }
 
 func parseSemanticVersion(raw string) (semanticVersion, bool) {

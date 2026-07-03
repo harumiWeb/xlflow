@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added xlflow CLI update notifications, a Project view update indicator, and a command palette action to check for updates manually.
 - Added sidebar save actions so the Project view toolbar and `Save required` indicator can run `xlflow save` when a session workbook needs saving.
 
 ## 0.1.0

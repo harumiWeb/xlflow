@@ -13,6 +13,12 @@ import {
 } from "./projectState";
 import { SessionManager, SessionState, XlflowSessionPayload } from "./session";
 import { discoverTests, readNonEmpty, sourceUri, XlflowDiscoveredTest } from "./testDiscovery";
+import {
+  updateSummary,
+  updateTooltip,
+  XlflowUpdateService,
+  XlflowUpdateStatus,
+} from "./updateCheck";
 import { runXlflowJsonCommand } from "./xlflow";
 
 type TreeNode =
@@ -149,10 +155,16 @@ export class XlflowSidebar implements vscode.Disposable {
     private readonly projectState: XlflowProjectStateService,
     private readonly sessionManager: SessionManager,
     private readonly cliAvailability: XlflowCliAvailabilityService,
+    private readonly updateService: XlflowUpdateService,
     channels: XlflowChannels,
   ) {
     this.setupProvider = new SetupTreeProvider(projectState, cliAvailability);
-    this.projectProvider = new ProjectTreeProvider(projectState, sessionManager, cliAvailability);
+    this.projectProvider = new ProjectTreeProvider(
+      projectState,
+      sessionManager,
+      cliAvailability,
+      updateService,
+    );
     this.modulesProvider = new ModulesTreeProvider(projectState, channels);
     this.userFormsProvider = new UserFormsTreeProvider(projectState);
     this.testsProvider = new TestsTreeProvider(projectState, channels);
@@ -169,6 +181,7 @@ export class XlflowSidebar implements vscode.Disposable {
       }),
       sessionManager.onDidChangeSnapshot(() => this.projectProvider.refresh()),
       cliAvailability.onDidChangeAvailability(() => this.refreshProjectViews()),
+      updateService.onDidChangeUpdate(() => this.projectProvider.refresh()),
     );
   }
 
@@ -280,6 +293,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
     private readonly projectState: XlflowProjectStateService,
     private readonly sessionManager: SessionManager,
     private readonly cliAvailability: XlflowCliAvailabilityService,
+    private readonly updateService: XlflowUpdateService,
   ) {}
 
   refresh(): void {
@@ -303,6 +317,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
     }
     const snapshot = this.sessionManager.currentSnapshot();
     const availability = this.cliAvailability.current();
+    const updateStatus = this.updateService.current();
     const configuredWorkbookPath = await configuredWorkbook(state);
     const workbookPath = workbookPathFromSession(snapshot.session) ?? configuredWorkbookPath;
     const workbookLabel = workbookDisplayName(snapshot.session) ?? configuredWorkbookPath;
@@ -344,7 +359,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
           arguments: [state.configPath],
         },
       },
-      cliProjectNode(availability),
+      cliProjectNode(availability, updateStatus),
       {
         kind: "project",
         label: vscode.l10n.t("Session"),
@@ -727,7 +742,10 @@ function setupAction(label: string, icon: string, command: string): SetupNode {
   };
 }
 
-function cliProjectNode(availability: XlflowCliAvailability | undefined): ProjectNode {
+function cliProjectNode(
+  availability: XlflowCliAvailability | undefined,
+  updateStatus?: XlflowUpdateStatus,
+): ProjectNode {
   if (availability === undefined) {
     return {
       kind: "project",
@@ -737,13 +755,14 @@ function cliProjectNode(availability: XlflowCliAvailability | undefined): Projec
     };
   }
   if (availability.ok) {
-    const versionSummary = cliVersionSummary(availability.version);
+    const versionSummary = updateSummary(availability.version, updateStatus);
+    const tooltip = updateTooltip(cliVersionTooltip(availability), updateStatus);
     return {
       kind: "project",
       label: vscode.l10n.t("CLI"),
       description: versionSummary ?? vscode.l10n.t("OK"),
-      tooltip: cliVersionTooltip(availability),
-      icon: new vscode.ThemeIcon("check"),
+      tooltip,
+      icon: cliProjectIcon(updateStatus),
     };
   }
   return {
@@ -760,23 +779,17 @@ function cliProjectNode(availability: XlflowCliAvailability | undefined): Projec
   };
 }
 
-export function cliVersionSummary(version: string | undefined): string | undefined {
-  const text = readNonEmpty(version);
-  if (text === undefined) {
-    return undefined;
+function cliProjectIcon(updateStatus?: XlflowUpdateStatus): vscode.ThemeIcon {
+  switch (updateStatus?.kind) {
+    case "available":
+      return new vscode.ThemeIcon("cloud-download");
+    case "checking":
+      return new vscode.ThemeIcon("sync~spin");
+    case "error":
+      return new vscode.ThemeIcon("warning");
+    default:
+      return new vscode.ThemeIcon("check");
   }
-  for (const line of text.split(/\r?\n/)) {
-    const match = line.match(/^\s*Version:\s*(.+?)\s*$/);
-    if (match !== null) {
-      return match[1].trim();
-    }
-  }
-  const firstUsefulLine = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0 && !/^OK\b/i.test(line));
-  const xlflowVersion = firstUsefulLine?.match(/^xlflow\s+(.+)$/i);
-  return xlflowVersion?.[1]?.trim() ?? firstUsefulLine;
 }
 
 function cliVersionTooltip(availability: Extract<XlflowCliAvailability, { ok: true }>): string {
