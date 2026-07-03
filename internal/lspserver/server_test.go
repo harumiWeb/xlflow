@@ -447,6 +447,10 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		*initResult.Capabilities.CodeLensProvider.ResolveProvider {
 		t.Fatalf("codeLensProvider = %+v, want resolveProvider=false", initResult.Capabilities.CodeLensProvider)
 	}
+	renameOptions, ok := initResult.Capabilities.RenameProvider.(protocol.RenameOptions)
+	if !ok || renameOptions.PrepareProvider == nil || !*renameOptions.PrepareProvider {
+		t.Fatalf("renameProvider = %+v, want prepareProvider=true", initResult.Capabilities.RenameProvider)
+	}
 
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
@@ -829,6 +833,83 @@ func TestInitializeAdvertisesCodeLensProviderAndParsesConfig(t *testing.T) {
 	}
 	if s.codeLensConfig.RunProcedure || !s.codeLensConfig.RunTests || !s.codeLensConfig.UserFormEvents {
 		t.Fatalf("codeLensConfig = %+v", s.codeLensConfig)
+	}
+}
+
+func TestPrepareRenameAndRenameReturnWorkspaceEdit(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPrivate Sub Test()\n    Dim lastRow As Long\n    lastRow = 1\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	prepare, err := s.prepareRename(nil, &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 3, Character: 6},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, ok := prepare.(protocol.RangeWithPlaceholder)
+	if !ok {
+		t.Fatalf("prepareRename result = %T, want RangeWithPlaceholder", prepare)
+	}
+	if prepared.Placeholder != "lastRow" || prepared.Range.Start.Line != 2 {
+		t.Fatalf("prepareRename = %+v, want declaration range for lastRow", prepared)
+	}
+
+	edit, err := s.rename(nil, &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 3, Character: 6},
+		},
+		NewName: "lastDataRow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := edit.Changes[protocol.DocumentUri(uri)]
+	if len(changes) != 2 {
+		t.Fatalf("rename changes = %+v, want declaration and assignment edits", changes)
+	}
+	if changes[0].NewText != "lastDataRow" || changes[1].NewText != "lastDataRow" {
+		t.Fatalf("rename edit texts = %+v", changes)
+	}
+}
+
+func TestPrepareRenameReturnsClearRejection(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPrivate Sub Test()\n    Range(\"A1\").Value = 1\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.prepareRename(nil, &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 2, Character: 18},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot rename external host member") {
+		t.Fatalf("prepareRename host member error = %v", err)
 	}
 }
 
