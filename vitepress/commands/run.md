@@ -5,7 +5,7 @@ Run a workbook macro from the CLI.
 ## Usage
 
 ```bash
-xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--save|--save-as <path>] [--headless|--interactive] [--session]
+xlflow run [macro] [--push] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--inputbox <dialog-id=value>]... [--filedialog <kind>:<dialog-id>=<value>]... [--ui-stream] [--save|--save-as <path>] [--headless|--interactive] [--session]
 ```
 
 ## Options and Arguments
@@ -18,6 +18,7 @@ xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--i
 | `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat for multiple dialogs.              | -                   |
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat for multiple values or dialogs. | -                   |
 | `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                         | false               |
+| `--push`                       | Import source VBA into the configured workbook before running the macro.                   | false               |
 | `--headless`                   | Run without showing Excel when possible.                                                   | false               |
 | `--interactive`                | Allow visible Excel interaction for dialogs or UserForms.                                  | false               |
 | `--session`                    | Run in the managed live session workbook.                                                  | false               |
@@ -35,6 +36,7 @@ xlflow run [macro] [--arg <type:value>]... [--msgbox <dialog-id=result>]... [--i
 
 ```bash
 xlflow macros --json
+xlflow run Main.Run --push --json
 xlflow run Main.Run --headless --json
 xlflow run Main.Run --arg string:ABC123 --session --json
 xlflow run Main.Run --headless --msgbox confirm-save=yes --inputbox customer-name=alice --ui-stream --json
@@ -45,6 +47,14 @@ xlflow run Main.Run --headless --filedialog get-open:source-files=C:\temp\a.txt 
 
 ::: tip
 Discover entrypoints with `xlflow macros --json` before running macros from an agent.
+:::
+
+::: tip
+Use `xlflow run --push ...` when you want the command to import edited source files before executing the macro. With `--session`, xlflow pushes into the live session workbook without saving to disk first, then runs against that same session.
+:::
+
+::: warning
+`--push` targets the configured project workbook, so it cannot be combined with `--input`.
 :::
 
 ::: warning

@@ -3072,6 +3072,7 @@ func (a *app) runCommand() *cobra.Command {
 	var session bool
 	var timeout time.Duration
 	var uiStream bool
+	var push bool
 
 	cmd := &cobra.Command{
 		Use:   "run [macro]",
@@ -3099,6 +3100,22 @@ func (a *app) runCommand() *cobra.Command {
 			}
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
+			}
+			if push {
+				if strings.TrimSpace(input) != "" {
+					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--push cannot be combined with --input"))
+				}
+				pushOpts, err := buildRunPushOptions(session, buildCommandOptions(a.stderrWriter()))
+				if err != nil {
+					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
+				}
+				pushEnv, pushCode, pushErr := a.pushSource("run", cfg, pushOpts, "Importing VBA source")
+				if pushErr != nil {
+					return pushErr
+				}
+				if pushCode != output.ExitSuccess {
+					return a.write(pushEnv, pushCode)
+				}
 			}
 			if a.shouldRunSourcePreflight(cfg, opts) {
 				if err := a.runSourcePreflight("run", cfg, "running macros", nil, nil); err != nil {
@@ -3157,7 +3174,16 @@ func (a *app) runCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "maximum macro runtime before xlflow reports a timeout")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
+	cmd.Flags().BoolVar(&push, "push", false, "import source VBA into the workbook before running the macro")
 	return cmd
+}
+
+func buildRunPushOptions(session bool, keepalive excel.CommandOptions) (excel.PushOptions, error) {
+	pushOpts, err := buildPushOptions("always", false, false, session, session, keepalive)
+	if err != nil {
+		return excel.PushOptions{}, err
+	}
+	return pushOpts, nil
 }
 
 func (a *app) exportImageCommand() *cobra.Command {

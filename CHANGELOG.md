@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow run --push` to import edited VBA source into the configured workbook before running a macro.
 - Fixed `.NET` `xlflow run --interactive` so native VBA UI such as `MsgBox` is left for the user to dismiss instead of being misreported as `macro_failed`.
 - Fixed `.NET` Excel cleanup so direct `run`/`test` executions and `session stop` do not leave owned Excel processes behind after successful commands.
 

@@ -825,10 +825,42 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream", "push"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestBuildRunPushOptionsUsesSessionNoSave(t *testing.T) {
+	opts, err := buildRunPushOptions(true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Session {
+		t.Fatalf("Session = false, want true")
+	}
+	if !opts.NoSave {
+		t.Fatalf("NoSave = false, want true for session run --push")
+	}
+	if opts.BackupMode != "always" {
+		t.Fatalf("BackupMode = %q, want always", opts.BackupMode)
+	}
+}
+
+func TestBuildRunPushOptionsSavesNonSessionPush(t *testing.T) {
+	opts, err := buildRunPushOptions(false, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Session {
+		t.Fatalf("Session = true, want false")
+	}
+	if opts.NoSave {
+		t.Fatalf("NoSave = true, want false for non-session run --push")
+	}
+	if opts.BackupMode != "always" {
+		t.Fatalf("BackupMode = %q, want always", opts.BackupMode)
 	}
 }
 
