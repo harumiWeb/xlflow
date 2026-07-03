@@ -76,18 +76,21 @@ The main features include:
 - Starts and stops xlflow sessions
 - Runs automated tests
 - Provides input completion and real-time diagnostics via LSP
+- Symbol analysis and jump functionality
+- Meaning-based syntax highlighting
+- Safe renaming and deletion operations
 - Offers AST-based static analysis and formatter capabilities
 - Lists standard modules, class modules, and other project components
 - Allows execution of xlflow commands from the command palette
 - Includes auxiliary features for VBA development
 
-![Diagnostic screenshot](./images/diagnostic.png)
+![Diagnostic screenshot](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/diagnostic.png)
 
 <p align="center">
 <small>Enables real-time type checking, code completion, and symbol analysis similar to modern languages.</small>
 </p>
 
-![LSP demo](./images/lsp-demo.gif)
+![LSP demo](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/lsp-demo.gif)
 
 <p align="center">
 <small>Static type inference for objects created via late binding `CreateObject`.</small>
