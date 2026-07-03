@@ -26,6 +26,7 @@ public sealed class ExcelTestService : ITestService
         RuntimeInjectionHelper.RuntimeInjectionState? runtimeState = null;
         var sessionAttached = false;
         var sessionMode = "none";
+        var excelProcessId = 0;
 
         try
         {
@@ -35,6 +36,7 @@ public sealed class ExcelTestService : ITestService
             workbook = openResult.Workbook;
             sessionAttached = openResult.SessionAttached;
             sessionMode = openResult.SessionMode;
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
 
             runtimeState = RuntimeInjectionHelper.ApplyRuntimeInjection(
                 workbook,
@@ -473,7 +475,7 @@ public sealed class ExcelTestService : ITestService
             }
             else
             {
-                CloseWorkbook(workbook, excel);
+                CloseWorkbook(workbook, excel, excelProcessId);
             }
         }
     }
@@ -917,20 +919,9 @@ public sealed class ExcelTestService : ITestService
         return (direct.Excel, direct.Workbook, false, "none");
     }
 
-    private static void CloseWorkbook(object? workbook, object? excel)
+    private static void CloseWorkbook(object? workbook, object? excel, int ownedProcessId)
     {
-        if (workbook is not null)
-        {
-            try { ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false); }
-            catch { /* best-effort */ }
-            ExcelBridgeSupport.ReleaseComObject(workbook);
-        }
-        if (excel is not null)
-        {
-            try { dynamic app = excel; app.Quit(); }
-            catch { /* best-effort */ }
-            ExcelBridgeSupport.ReleaseComObject(excel);
-        }
+        ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, ownedProcessId);
     }
 
     private static void SetProperty(object comObject, string name, object value)

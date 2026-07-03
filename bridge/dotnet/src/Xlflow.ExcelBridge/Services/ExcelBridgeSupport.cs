@@ -1289,6 +1289,73 @@ internal static class ExcelBridgeSupport
         }
     }
 
+    public static void CloseWorkbookAndQuitApplication(object? workbook, object? excel, int ownedProcessId = 0)
+    {
+        if (workbook is not null)
+        {
+            try
+            {
+                InvokeViaDynamic(workbook, "Close", false);
+            }
+            catch
+            {
+                // best-effort close
+            }
+            ReleaseComObject(workbook);
+        }
+
+        if (excel is not null)
+        {
+            try
+            {
+                dynamic app = excel;
+                app.DisplayAlerts = false;
+                app.EnableEvents = false;
+                app.Quit();
+            }
+            catch
+            {
+                // best-effort quit
+            }
+            ReleaseComObject(excel);
+        }
+
+        CollectComGarbage();
+        EnsureOwnedExcelProcessExited(ownedProcessId);
+    }
+
+    public static void CollectComGarbage()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+    }
+
+    private static void EnsureOwnedExcelProcessExited(int processId)
+    {
+        if (processId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (process.WaitForExit(1500))
+            {
+                return;
+            }
+
+            process.Kill(entireProcessTree: true);
+            _ = process.WaitForExit(3000);
+        }
+        catch
+        {
+            // The process may already have exited, or Windows may refuse termination.
+        }
+    }
+
     private static List<IntPtr> GetWindowsForProcess(int processId)
     {
         var windows = new List<IntPtr>();
