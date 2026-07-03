@@ -35,6 +35,10 @@ By default, `doctor` performs lightweight Excel COM, VBIDE, and systemprofile De
 :::
 
 ::: tip
+`doctor` can run outside an xlflow project. When `xlflow.toml` is missing, it still checks the project-independent Excel, bridge, VBIDE, and TypeLib environment, reports `diagnostics.project_config.found: false`, and prints hints for `xlflow new` or `xlflow init <workbook>`. In that state, `--workbook` is skipped because there is no configured workbook path.
+:::
+
+::: tip
 `doctor` also checks the generated TypeLib database used by the LSP. If it has not been initialized, or if it is stale, `doctor` keeps the environment check successful but prints a warning and a hint to run `xlflow type db init` or `xlflow type db refresh --library all`.
 :::
 
@@ -47,6 +51,8 @@ VBIDE access must be enabled in Excel Trust Center before xlflow can import, exp
 Successful `--json` output uses the xlflow envelope plus the `diagnostics` object.
 
 On Windows, `doctor` uses the `.NET` bridge in `auto` mode. The nested `diagnostics` object always reports the requested bridge mode, the selected provider, `fallback=false`, and `legacy=false`.
+
+When no `xlflow.toml` exists in the current workspace, successful output also includes `diagnostics.project_config.found: false` plus warnings and hints. Project-dependent checks, including workbook opening, are skipped.
 
 Under WSL, `doctor` invokes Windows xlflow and augments the Windows result with:
 

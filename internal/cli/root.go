@@ -1366,16 +1366,17 @@ func (a *app) doctorCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts := buildCommandOptions(a.stderrWriter())
-			cfg, err := a.loadConfig("doctor")
+			doctorConfig, err := a.loadDoctorConfig(checkWorkbook)
 			if err != nil {
 				return err
 			}
+			cfg := doctorConfig.Config
 			var env output.Envelope
 			var code int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
 				env, code, runErr = a.excelRunnerForConfig(cfg).DoctorWithOptions(cfg, excel.DoctorOptions{
-					CheckWorkbook: checkWorkbook,
+					CheckWorkbook: doctorConfig.CheckWorkbook,
 					Keepalive:     commandOpts,
 				})
 				return runErr
@@ -1383,11 +1384,15 @@ func (a *app) doctorCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			boundaries, analyzeErr := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
-			if analyzeErr == nil && len(boundaries) > 0 {
-				env.GUIBoundaries = boundaries
-				env.Diagnostics = withGUIBoundarySummary(env.Diagnostics, boundaries)
-				env.Logs = append(env.Logs, fmt.Sprintf("detected %d GUI boundary candidate(s) in source", len(boundaries)))
+			attachDoctorProjectConfigDiagnostics(&env, doctorConfig)
+			appendDoctorConfigMessages(&env, doctorConfig)
+			if doctorConfig.Found {
+				boundaries, analyzeErr := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+				if analyzeErr == nil && len(boundaries) > 0 {
+					env.GUIBoundaries = boundaries
+					env.Diagnostics = withGUIBoundarySummary(env.Diagnostics, boundaries)
+					env.Logs = append(env.Logs, fmt.Sprintf("detected %d GUI boundary candidate(s) in source", len(boundaries)))
+				}
 			}
 			a.attachTypeDBDoctorStatus(&env)
 			return a.write(env, code)
@@ -1395,6 +1400,106 @@ func (a *app) doctorCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&checkWorkbook, "workbook", false, "open the configured workbook as part of doctor diagnostics")
 	return cmd
+}
+
+type doctorConfigLoadResult struct {
+	Config        config.Config
+	Found         bool
+	Path          string
+	CheckWorkbook bool
+	Warnings      []map[string]any
+	Hints         []map[string]any
+}
+
+func (a *app) loadDoctorConfig(requestedCheckWorkbook bool) (doctorConfigLoadResult, error) {
+	path := filepath.Join(a.cwd, config.FileName)
+	cfg, err := config.Load(a.cwd)
+	if err != nil && errors.Is(err, config.ErrInvalidExcelBridge) && a.hasValidBridgeOverride() {
+		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
+	}
+	if err == nil {
+		if len(cfg.Warnings) > 0 {
+			a.configWarnings = append(a.configWarnings, cfg.Warnings...)
+		}
+		return doctorConfigLoadResult{
+			Config:        cfg,
+			Found:         true,
+			Path:          path,
+			CheckWorkbook: requestedCheckWorkbook,
+		}, nil
+	}
+	if !errors.Is(err, config.ErrConfigNotFound) {
+		return doctorConfigLoadResult{}, a.writeFailure("doctor", output.ExitConfig, "config_error", err)
+	}
+
+	result := doctorConfigLoadResult{
+		Config:        config.Default(),
+		Found:         false,
+		Path:          path,
+		CheckWorkbook: false,
+		Warnings: []map[string]any{
+			{
+				"code":    "project_config_missing",
+				"message": fmt.Sprintf("%s was not found; running project-independent diagnostics only.", config.FileName),
+			},
+		},
+		Hints: []map[string]any{
+			{
+				"code":    "project_create",
+				"message": "Run `xlflow new` to create a new xlflow project.",
+			},
+			{
+				"code":    "project_init",
+				"message": "Run `xlflow init <workbook>` to convert an existing workbook into an xlflow project.",
+			},
+		},
+	}
+	if requestedCheckWorkbook {
+		result.Warnings = append(result.Warnings, map[string]any{
+			"code":    "doctor_workbook_skipped",
+			"message": "`xlflow doctor --workbook` was requested, but no configured workbook is available without xlflow.toml.",
+		})
+		result.Hints = append(result.Hints, map[string]any{
+			"code":    "doctor_workbook_requires_project",
+			"message": "Create or initialize an xlflow project before using `xlflow doctor --workbook`.",
+		})
+	}
+	return result, nil
+}
+
+func attachDoctorProjectConfigDiagnostics(env *output.Envelope, result doctorConfigLoadResult) {
+	if env == nil {
+		return
+	}
+	diag := map[string]any{}
+	for key, item := range cliObjectMap(env.Diagnostics) {
+		diag[key] = item
+	}
+	diag["project_config"] = map[string]any{
+		"found": result.Found,
+		"path":  result.Path,
+	}
+	env.Diagnostics = diag
+}
+
+func appendDoctorConfigMessages(env *output.Envelope, result doctorConfigLoadResult) {
+	if env == nil {
+		return
+	}
+	if len(result.Warnings) > 0 {
+		warnings := anySlice(env.Warnings)
+		for _, warning := range result.Warnings {
+			warnings = append(warnings, warning)
+		}
+		env.Warnings = warnings
+	}
+	if len(result.Hints) > 0 {
+		hints := anySlice(env.Hints)
+		for _, hint := range result.Hints {
+			hints = append(hints, hint)
+		}
+		env.Hints = hints
+	}
 }
 
 func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {

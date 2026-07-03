@@ -28,7 +28,7 @@
   "command.restartLanguageServer.title": "Language Serverを再起動",
   "command.checkEnvironment.title": "環境を確認",
   "command.newProject.title": "新しいプロジェクト",
-  "command.initProject.title": "プロジェクトを初期化",
+  "command.initProject.title": "既存ブックをプロジェクト化",
   "command.skillInstall.title": "エージェントSkillをインストール",
   "command.moduleInstall.title": "ヘルパーモジュールをインストール",
   "command.newModule.title": "新しいモジュール",

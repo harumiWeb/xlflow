@@ -173,6 +173,109 @@ func TestAttachTypeDBDoctorStatusWarnsWhenGeneratedDBMissing(t *testing.T) {
 	}
 }
 
+func TestLoadDoctorConfigFallsBackWhenConfigMissing(t *testing.T) {
+	dir := t.TempDir()
+	a := &app{cwd: dir}
+
+	result, err := a.loadDoctorConfig(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Found {
+		t.Fatal("Found = true, want false")
+	}
+	if result.Path != filepath.Join(dir, config.FileName) {
+		t.Fatalf("Path = %q", result.Path)
+	}
+	if result.CheckWorkbook {
+		t.Fatal("CheckWorkbook = true, want false without xlflow.toml")
+	}
+	if result.Config.Excel.Path != config.Default().Excel.Path {
+		t.Fatalf("default workbook path = %q", result.Config.Excel.Path)
+	}
+	if !hasCode(result.Warnings, "project_config_missing") {
+		t.Fatalf("warnings = %#v, want project_config_missing", result.Warnings)
+	}
+	if !hasCode(result.Warnings, "doctor_workbook_skipped") {
+		t.Fatalf("warnings = %#v, want doctor_workbook_skipped", result.Warnings)
+	}
+	if !hasCode(result.Hints, "project_create") || !hasCode(result.Hints, "project_init") {
+		t.Fatalf("hints = %#v, want project setup hints", result.Hints)
+	}
+}
+
+func TestLoadDoctorConfigKeepsWorkbookCheckWhenConfigExists(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.ToSlash(filepath.Join("build", "Configured.xlsm"))
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+
+	result, err := a.loadDoctorConfig(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !result.Found {
+		t.Fatal("Found = false, want true")
+	}
+	if !result.CheckWorkbook {
+		t.Fatal("CheckWorkbook = false, want true")
+	}
+	if result.Config.Excel.Path != cfg.Excel.Path {
+		t.Fatalf("Excel.Path = %q, want %q", result.Config.Excel.Path, cfg.Excel.Path)
+	}
+	if len(result.Warnings) != 0 || len(result.Hints) != 0 {
+		t.Fatalf("unexpected fallback messages: warnings=%#v hints=%#v", result.Warnings, result.Hints)
+	}
+}
+
+func TestLoadDoctorConfigFailsWhenConfigIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte("[excel\npath ="), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+
+	_, err := a.loadDoctorConfig(false)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if got := output.ExitCode(err); got != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", got, output.ExitConfig)
+	}
+	if !strings.Contains(stdout.String(), "config_error") {
+		t.Fatalf("stdout = %q, want config_error", stdout.String())
+	}
+}
+
+func TestAttachDoctorProjectConfigDiagnosticsPreservesBridgeDiagnostics(t *testing.T) {
+	env := output.New("doctor")
+	env.Diagnostics = map[string]any{
+		"excel": map[string]any{"com_activation": true},
+	}
+	result := doctorConfigLoadResult{
+		Found: false,
+		Path:  filepath.Join("C:\\work", config.FileName),
+	}
+
+	attachDoctorProjectConfigDiagnostics(&env, result)
+
+	diag := cliObjectMap(env.Diagnostics)
+	excel := cliObjectMap(diag["excel"])
+	if excel["com_activation"] != true {
+		t.Fatalf("excel diagnostics not preserved: %#v", diag)
+	}
+	projectConfig := cliObjectMap(diag["project_config"])
+	if projectConfig["found"] != false || projectConfig["path"] != result.Path {
+		t.Fatalf("project_config diagnostics = %#v", projectConfig)
+	}
+}
+
 func TestEnsureLSPTypeDBGeneratedSkipsCurrentDatabase(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(typedb.EnvDir, dir)
@@ -662,6 +765,15 @@ path = "build/Book.xlsm"
 func hasCLIWarning(warnings []map[string]any, code string, rule string) bool {
 	for _, warning := range warnings {
 		if warning["code"] == code && warning["rule"] == rule {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCode(items []map[string]any, code string) bool {
+	for _, item := range items {
+		if item["code"] == code {
 			return true
 		}
 	}

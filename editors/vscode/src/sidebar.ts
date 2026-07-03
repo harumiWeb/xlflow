@@ -267,7 +267,7 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
           description: state.error,
           icon: new vscode.ThemeIcon("warning"),
         },
-        setupAction(vscode.l10n.t("Run Doctor"), "stethoscope", "xlflow.runDoctor"),
+        setupAction(vscode.l10n.t("Run Doctor"), "pulse", "xlflow.runDoctor"),
         setupAction(vscode.l10n.t("Open Documentation"), "book", "xlflow.openDocumentation"),
       ];
     }
@@ -279,7 +279,7 @@ class SetupTreeProvider implements vscode.TreeDataProvider<SetupNode> {
       { kind: "setup", label: status, icon: new vscode.ThemeIcon("info") },
       setupAction(vscode.l10n.t("New Project"), "new-file", "xlflow.newProject"),
       setupAction(vscode.l10n.t("Init Existing Workbook"), "file-add", "xlflow.initProject"),
-      setupAction(vscode.l10n.t("Run Doctor"), "stethoscope", "xlflow.runDoctor"),
+      setupAction(vscode.l10n.t("Run Doctor"), "pulse", "xlflow.runDoctor"),
       setupAction(vscode.l10n.t("Open Documentation"), "book", "xlflow.openDocumentation"),
     ];
   }

@@ -1,7 +1,7 @@
 {
   "name": "xlflow-vscode",
   "displayName": "%extension.displayName%",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "%extension.description%",
   "categories": [
     "Formatters",
@@ -379,7 +379,8 @@
       {
         "command": "xlflow.runDoctor",
         "title": "%command.runDoctor.title%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "icon": "$(pulse)"
       },
       {
         "command": "xlflow.sessionToggle",
