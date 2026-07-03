@@ -292,6 +292,7 @@ public sealed class ExcelSessionService : ISessionService
         object? workbook = null;
         var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
         var removedStaleMetadata = false;
+        var excelProcessId = 0;
 
         try
         {
@@ -308,6 +309,7 @@ public sealed class ExcelSessionService : ISessionService
                 removedStaleMetadata = true;
                 return BuildStopResponse(request, workbookPath, false, removedStaleMetadata);
             }
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
 
             try
             {
@@ -327,8 +329,9 @@ public sealed class ExcelSessionService : ISessionService
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             }
 
-            ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
-            ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit");
+            ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, excelProcessId);
+            workbook = null;
+            excel = null;
             ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
             return BuildStopResponse(request, workbookPath, wasDirty, false);
         }
@@ -408,6 +411,7 @@ public sealed class ExcelSessionService : ISessionService
 
         object? excel = null;
         object? workbook = null;
+        var excelProcessId = 0;
         try
         {
             excel = ExcelBridgeSupport.GetSessionExcel(metadataPath);
@@ -416,6 +420,7 @@ public sealed class ExcelSessionService : ISessionService
                 ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
                 return;
             }
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
 
             try
             {
@@ -432,8 +437,9 @@ public sealed class ExcelSessionService : ISessionService
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             }
 
-            ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
-            ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit");
+            ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, excelProcessId);
+            workbook = null;
+            excel = null;
             ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
         }
         finally

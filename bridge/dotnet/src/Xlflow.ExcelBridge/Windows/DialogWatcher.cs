@@ -9,6 +9,7 @@ namespace Xlflow.ExcelBridge.Windows;
 public enum DialogKind
 {
     Any,
+    MacroError,
     Runtime,
     Compile,
     MsgBox,
@@ -293,6 +294,10 @@ public sealed class DialogWatcher
 
     private static bool Matches(DialogKind requested, DialogKind actual)
     {
+        if (requested == DialogKind.MacroError)
+        {
+            return actual is DialogKind.Runtime or DialogKind.Compile;
+        }
         return requested == DialogKind.Any || requested == actual;
     }
 }

@@ -24,16 +24,22 @@ public sealed class ExcelRunService : IRunService
         object? workbook = null;
         object? vbProject = null;
         object? runnerComponent = null;
+        object? runnerComponents = null;
+        object? runnerCodeModule = null;
         RuntimeInjectionHelper.RuntimeInjectionState? runtimeState = null;
         var sessionAttached = false;
         var sessionMode = "none";
         var skipComCleanup = false;
+        var excelProcessId = 0;
+        var ownedExcelProcess = OwnedExcelProcess.None;
 
         try
         {
             var openResult = ExcelBridgeSupport.RunPhase("open_workbook", () =>
                 OpenWorkbookForRun(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
             excel = openResult.Excel;
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            ownedExcelProcess = ExcelBridgeSupport.CaptureOwnedExcelProcess(excelProcessId);
             workbook = openResult.Workbook;
             sessionAttached = openResult.SessionAttached;
             sessionMode = openResult.SessionMode;
@@ -64,7 +70,6 @@ public sealed class ExcelRunService : IRunService
                 logs.Add($"attached to xlflow session ({sessionMode})");
             }
 
-            var excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
             var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
             if (excelProcessId <= 0)
             {
@@ -114,15 +119,19 @@ public sealed class ExcelRunService : IRunService
                 vbProject = ExcelBridgeSupport.RunPhase("prepare_vbide", () => ExcelBridgeSupport.Get(workbook, "VBProject"))
                     ?? throw new InvalidOperationException("prepare_vbide failed: VBProject is unavailable.");
                 RuntimeInjectionHelper.EnableUIStreamInjection(workbook, vbProject, runtimeState);
-                var components = ExcelBridgeSupport.Get(vbProject, "VBComponents")
+                runnerComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents")
                     ?? throw new InvalidOperationException("prepare_vbide failed: VBComponents is unavailable.");
-                runnerComponent = ExcelBridgeSupport.InvokeMethod(components, "Add", 1)
+                runnerComponent = ExcelBridgeSupport.InvokeMethod(runnerComponents, "Add", 1)
                     ?? throw new InvalidOperationException("inject_harness failed: could not add a temporary module.");
                 var runnerName = "XlflowRun_" + Guid.NewGuid().ToString("N")[..8];
                 SetProperty(runnerComponent, "Name", runnerName);
-                var codeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
+                runnerCodeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                     ?? throw new InvalidOperationException("inject_harness failed: CodeModule is unavailable.");
-                ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs));
+                ExcelBridgeSupport.InvokeMethod(runnerCodeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs));
+                ExcelBridgeSupport.ReleaseComObject(runnerCodeModule);
+                runnerCodeModule = null;
+                ExcelBridgeSupport.ReleaseComObject(runnerComponents);
+                runnerComponents = null;
                 macroReference = runnerName + ".RunMacro";
             }
 
@@ -137,7 +146,7 @@ public sealed class ExcelRunService : IRunService
                         .ToArray(),
                     WorkbookPath: args.WorkbookPath),
                 excelHwnd,
-                DialogKind.Any,
+                MacroInvocationDialogKind(args),
                 args.SuppressModalErrors,
                 ResolveTimeout(request, args, commandStopwatch.Elapsed),
                 cancellationToken,
@@ -461,6 +470,8 @@ public sealed class ExcelRunService : IRunService
         {
             if (!skipComCleanup)
             {
+                ExcelBridgeSupport.ReleaseComObject(runnerCodeModule);
+                ExcelBridgeSupport.ReleaseComObject(runnerComponents);
                 RemoveTemporaryComponent(vbProject, runnerComponent);
                 RestoreRuntimeMarkers(workbook, runtimeState);
                 ExcelBridgeSupport.ReleaseComObject(vbProject);
@@ -470,7 +481,7 @@ public sealed class ExcelRunService : IRunService
                 }
                 else
                 {
-                    CloseWorkbook(workbook, excel);
+                    CloseWorkbook(workbook, excel, ownedExcelProcess);
                 }
             }
         }
@@ -552,6 +563,13 @@ public sealed class ExcelRunService : IRunService
             timeout,
             cancellationToken,
             selectionLocator);
+    }
+
+    internal static DialogKind MacroInvocationDialogKind(RunCommandArguments args)
+    {
+        return string.Equals(args.RuntimeMode, "interactive", StringComparison.OrdinalIgnoreCase)
+            ? DialogKind.MacroError
+            : DialogKind.Any;
     }
 
     internal static DialogSnapshot? WaitForPostWorkerDialog(
@@ -1053,33 +1071,8 @@ public sealed class ExcelRunService : IRunService
         }
     }
 
-    private static void CloseWorkbook(object? workbook, object? excel)
+    private static void CloseWorkbook(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
     {
-        if (workbook is not null)
-        {
-            try
-            {
-                ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
-            }
-            catch
-            {
-                // best-effort close
-            }
-            ExcelBridgeSupport.ReleaseComObject(workbook);
-        }
-
-        if (excel is not null)
-        {
-            try
-            {
-                dynamic app = excel;
-                app.Quit();
-            }
-            catch
-            {
-                // best-effort quit
-            }
-            ExcelBridgeSupport.ReleaseComObject(excel);
-        }
+        ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, ownedProcess);
     }
 }

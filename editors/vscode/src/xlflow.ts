@@ -80,7 +80,7 @@ export async function runXlflowCommand(
 
   const config = readConfig();
   const cwd = folder?.uri.fsPath;
-  if (options.showOutput !== false) {
+  if (options.showOutput === true) {
     outputChannel.show(true);
   }
   outputChannel.appendLine(
@@ -106,7 +106,7 @@ export async function runXlflowCommand(
     child.stderr.on("data", (data: Buffer) => appendProcessOutput(outputChannel, "stderr", data));
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
-      vscode.window.showErrorMessage(
+      showCommandFailure(
         vscode.l10n.t("{label} failed: {message}", {
           label: uiLabel,
           message: error.message,
@@ -129,7 +129,7 @@ export async function runXlflowCommand(
           vscode.l10n.t("{label} completed.", { label: uiLabel }),
         );
       } else {
-        vscode.window.showErrorMessage(
+        showCommandFailure(
           vscode.l10n.t("{label} failed with exit code {exitCode}.", {
             label: uiLabel,
             exitCode,
@@ -150,6 +150,58 @@ export async function runXlflowCommand(
     },
     () => run,
   );
+}
+
+export async function runXlflowTerminalCommand(
+  args: string[],
+  label: string,
+  options: {
+    requireWorkspace: boolean;
+    showCliUnavailable?: boolean;
+    uiLabel?: string;
+    workspaceFolder?: vscode.WorkspaceFolder;
+    terminalName?: string;
+  },
+): Promise<boolean> {
+  const uiLabel = options.uiLabel ?? label;
+  const folder =
+    options.workspaceFolder ??
+    (await resolveWorkspaceRoot({
+      prompt: options.requireWorkspace,
+      fallbackToFirst: !options.requireWorkspace,
+    }));
+  if (options.requireWorkspace && folder === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: uiLabel,
+      }),
+    );
+    return false;
+  }
+
+  if (!(await ensureCliAvailable(options.showCliUnavailable !== false))) {
+    return false;
+  }
+
+  const config = readConfig();
+  const terminal = vscode.window.createTerminal({
+    name: options.terminalName ?? "xlflow",
+    cwd: folder?.uri.fsPath,
+  });
+  terminal.show(true);
+  terminal.sendText(buildTerminalCommandLine(config.path, args), true);
+  return true;
+}
+
+export function buildTerminalCommandLine(executable: string, args: string[]): string {
+  return [executable, ...args].map(quoteTerminalArgument).join(" ");
+}
+
+function quoteTerminalArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:\\-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/(["`$])/g, "`$1")}"`;
 }
 
 export interface XlflowJsonCommandResult<T> {
@@ -251,4 +303,13 @@ async function ensureCliAvailable(showActions: boolean): Promise<boolean> {
     return true;
   }
   return cliAvailabilityService.ensureAvailable({ showActions });
+}
+
+function showCommandFailure(message: string): void {
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  void vscode.window.showErrorMessage(message, openOutput).then((action) => {
+    if (action === openOutput) {
+      void vscode.commands.executeCommand("xlflow.openOutput");
+    }
+  });
 }

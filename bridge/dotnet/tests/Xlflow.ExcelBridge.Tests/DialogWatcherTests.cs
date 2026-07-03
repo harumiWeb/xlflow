@@ -215,6 +215,65 @@ public sealed class DialogWatcherTests
         Assert.Equal(DialogAction.None, action);
     }
 
+    [Fact]
+    public void MacroErrorKindIgnoresNativeMsgBox()
+    {
+        var watcher = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Microsoft Excel", text: ["Hello"], buttons: [Button(11, "OK")])]),
+            new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.MacroError,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromMilliseconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(1));
+
+        Assert.Null(watcher.TryCaptureCurrentDialog(request, includeUia: false, executeAction: true));
+    }
+
+    [Fact]
+    public void MacroErrorKindMatchesRuntimeDialog()
+    {
+        var watcher = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Microsoft Visual Basic", text: ["Run-time error '5':"], buttons: [Button(11, "End"), Button(12, "Debug")])]),
+            new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.MacroError,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromMilliseconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(1));
+
+        var dialog = watcher.TryCaptureCurrentDialog(request, includeUia: false, executeAction: true);
+
+        Assert.NotNull(dialog);
+        Assert.Equal("runtime", dialog!.Kind);
+        Assert.Equal("runtime_end", dialog.Action);
+    }
+
+    [Fact]
+    public void MacroErrorKindMatchesCompileDialog()
+    {
+        var watcher = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Microsoft Visual Basic", text: ["Compile error:", "Sub or Function not defined"], buttons: [Button(11, "OK")])]),
+            new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.MacroError,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromMilliseconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(1));
+
+        var dialog = watcher.TryCaptureCurrentDialog(request, includeUia: false, executeAction: true);
+
+        Assert.NotNull(dialog);
+        Assert.Equal("compile", dialog!.Kind);
+        Assert.Equal("compile_close", dialog.Action);
+    }
+
     private static WindowCandidate Candidate(
         string title,
         string className = "#32770",
@@ -241,5 +300,18 @@ public sealed class DialogWatcherTests
     private static WindowElement Button(long hwnd, string text)
     {
         return new WindowElement(hwnd, "Button", text);
+    }
+
+    private sealed class StaticWindowEnumerator(IReadOnlyList<WindowCandidate> candidates) : IWindowEnumerator
+    {
+        public IReadOnlyList<WindowCandidate> Enumerate(int processId, int vbeThreadId) => candidates;
+        public bool ClickButton(long hwnd) => true;
+        public bool CloseWindow(long hwnd) => true;
+    }
+
+    private sealed class NullUiaDialogAdapter : IUiaDialogAdapter
+    {
+        public UiaDialogDescription? Describe(long hwnd) => null;
+        public bool TryInvoke(long hwnd) => false;
     }
 }

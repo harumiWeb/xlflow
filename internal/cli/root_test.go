@@ -825,10 +825,65 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream"} {
+	for _, name := range []string{"arg", "msgbox", "inputbox", "filedialog", "input", "save", "no-save", "save-as", "headless", "interactive", "direct", "fast", "diagnostic", "gui-compile-errors", "session", "timeout", "ui-stream", "push"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected run command to define --%s", name)
 		}
+	}
+}
+
+func TestBuildRunPushOptionsUsesSessionNoSave(t *testing.T) {
+	opts, err := buildRunPushOptions(true, false, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Session {
+		t.Fatalf("Session = false, want true")
+	}
+	if !opts.NoSave {
+		t.Fatalf("NoSave = false, want true for session run --push")
+	}
+	if opts.BackupMode != "always" {
+		t.Fatalf("BackupMode = %q, want always", opts.BackupMode)
+	}
+}
+
+func TestBuildRunPushOptionsSavesNonSessionPush(t *testing.T) {
+	opts, err := buildRunPushOptions(false, false, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Session {
+		t.Fatalf("Session = true, want false")
+	}
+	if opts.NoSave {
+		t.Fatalf("NoSave = true, want false for non-session run --push")
+	}
+	if opts.BackupMode != "always" {
+		t.Fatalf("BackupMode = %q, want always", opts.BackupMode)
+	}
+}
+
+func TestBuildRunPushOptionsPreservesFast(t *testing.T) {
+	opts, err := buildRunPushOptions(false, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Fast {
+		t.Fatalf("Fast = false, want true for run --push --fast")
+	}
+}
+
+func TestShouldAttachRunDiagnosticForInvokeMacroTargetFailures(t *testing.T) {
+	for _, code := range []string{"macro_failed", "macro_not_found", "macro_disabled"} {
+		env := output.Failure("run", output.Error{Code: code, Message: "failed", Phase: "invoke_macro"})
+		if !shouldAttachRunDiagnostic(env) {
+			t.Fatalf("should attach diagnostic for %s", code)
+		}
+	}
+	env := output.Failure("run", output.Error{Code: "macro_timeout", Message: "timeout", Phase: "invoke_macro"})
+	if shouldAttachRunDiagnostic(env) {
+		t.Fatal("should not attach run diagnostic for macro_timeout")
 	}
 }
 
@@ -5410,6 +5465,43 @@ func TestBuildRunDiagnosticBackfillsBlankScriptLocation(t *testing.T) {
 	}
 	if got := location["line"]; got != 12 {
 		t.Fatalf("line = %#v, want 12: %#v", got, diag)
+	}
+}
+
+func TestBuildRunDiagnosticSuggestsPushWhenSourceIsNewer(t *testing.T) {
+	dir := t.TempDir()
+	createStatusCommandFixture(t, dir)
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcFile := filepath.Join(dir, "src", "modules", "Main.bas")
+	if err := os.WriteFile(srcFile, []byte("Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	wbInfo, err := os.Stat(workbookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := wbInfo.ModTime().Add(time.Minute)
+	if err := os.Chtimes(srcFile, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{cwd: dir}
+	env := output.Failure("run", output.Error{Code: "macro_failed", Message: "macro not available", Source: "Sheet1", Number: 1004, Phase: "invoke_macro"})
+	diag := a.buildRunDiagnostic(cfg, env)
+
+	if got := fmt.Sprint(diag["likely_cause"]); !strings.Contains(got, "not have been pushed") {
+		t.Fatalf("likely_cause = %q, want unpushed source guidance: %#v", got, diag)
+	}
+	if got := fmt.Sprint(diag["suggestion"]); !strings.Contains(got, "xlflow run --push") {
+		t.Fatalf("suggestion = %q, want run --push guidance: %#v", got, diag)
+	}
+	sourceState := cliObjectMap(diag["source_state"])
+	if sourceState["src_newer_than_workbook"] != true {
+		t.Fatalf("source_state = %#v, want src_newer_than_workbook=true", sourceState)
 	}
 }
 

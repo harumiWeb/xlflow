@@ -11,7 +11,12 @@ import { XlflowChannels } from "./logging";
 import { XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowUpdateService } from "./updateCheck";
-import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./xlflow";
+import {
+  resolveWorkspaceRoot,
+  runXlflowCommand,
+  runXlflowJsonCommand,
+  runXlflowTerminalCommand,
+} from "./xlflow";
 
 type RunProcedureArgs = {
   uri: string;
@@ -32,6 +37,21 @@ interface XlflowMutationEnvelope {
     renamed?: string[];
     removed?: string[];
   };
+}
+
+interface XlflowStatusEnvelope {
+  state?: {
+    src_newer_than_workbook?: boolean;
+  };
+  hints?: Array<{
+    code?: string;
+    message?: string;
+  }>;
+}
+
+interface RunArgsChoice {
+  args: string[];
+  workspaceFolder?: vscode.WorkspaceFolder;
 }
 
 interface CommandRefreshHooks {
@@ -59,6 +79,7 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.checkEnvironment", async () => {
       await runXlflowCommand(["lsp", "--check"], "xlflow environment check", channels.output, {
         requireWorkspace: false,
+        showOutput: true,
         uiLabel: vscode.l10n.t("xlflow environment check"),
       });
     }),
@@ -190,17 +211,33 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
-      await runXlflowCommand(["run"], "xlflow run", channels.output, {
-        requireWorkspace: true,
-        uiLabel: vscode.l10n.t("xlflow run"),
-      });
-      await refreshSessionProjectState(sessionManager, hooks);
+      const runChoice = await runArgsWithOptionalPush(
+        ["run", "--interactive"],
+        channels,
+        undefined,
+      );
+      if (runChoice === undefined) {
+        return;
+      }
+      const launched = await runXlflowTerminalCommand(
+        runChoice.args,
+        `xlflow ${runChoice.args.join(" ")}`,
+        {
+          requireWorkspace: true,
+          uiLabel: vscode.l10n.t("xlflow run"),
+          workspaceFolder: runChoice.workspaceFolder,
+          terminalName: vscode.l10n.t("xlflow run"),
+        },
+      );
+      if (launched) {
+        scheduleSessionProjectRefresh(sessionManager, hooks);
+      }
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
       await runProcedure(args, channels, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runTestProcedure", async (args: unknown) => {
-      await runTestProcedureFromCodeLens(args, channels, sessionManager, hooks);
+      await runTestProcedureFromCodeLens(args, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.test", async () => {
       const code = await runXlflowCommand(["test"], "xlflow test", channels.output, {
@@ -833,17 +870,100 @@ async function runProcedure(
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
   const target = readNonEmpty(args.qualifiedName) ?? args.name;
-  await runXlflowCommand(["run", target], `xlflow run ${target}`, channels.output, {
-    requireWorkspace: true,
-    uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
+  const runChoice = await runArgsWithOptionalPush(
+    ["run", "--interactive", target],
+    channels,
     workspaceFolder,
-  });
-  await refreshSessionProjectState(sessionManager, hooks);
+  );
+  if (runChoice === undefined) {
+    return;
+  }
+  const launched = await runXlflowTerminalCommand(
+    runChoice.args,
+    `xlflow ${runChoice.args.join(" ")}`,
+    {
+      requireWorkspace: true,
+      uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
+      workspaceFolder: runChoice.workspaceFolder,
+      terminalName: vscode.l10n.t("xlflow run"),
+    },
+  );
+  if (launched) {
+    scheduleSessionProjectRefresh(sessionManager, hooks);
+  }
+}
+
+async function runArgsWithOptionalPush(
+  baseArgs: string[],
+  channels: XlflowChannels,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): Promise<RunArgsChoice | undefined> {
+  const folder =
+    workspaceFolder ??
+    (await resolveWorkspaceRoot({
+      prompt: true,
+      fallbackToFirst: false,
+    }));
+  if (folder === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: vscode.l10n.t("xlflow run"),
+      }),
+    );
+    return undefined;
+  }
+  const status = await runXlflowJsonCommand<XlflowStatusEnvelope>(
+    ["--json", "status"],
+    "xlflow status",
+    channels.output,
+    {
+      requireWorkspace: true,
+      showCliUnavailable: false,
+      workspaceFolder: folder,
+    },
+  );
+  if (!statusShowsSourceNewer(status.json)) {
+    return { args: baseArgs, workspaceFolder: folder };
+  }
+
+  const pushAndRun = vscode.l10n.t("Push & Run");
+  const runWithoutPush = vscode.l10n.t("Run Without Push");
+  const selected = await vscode.window.showWarningMessage(
+    vscode.l10n.t(
+      "Source files are newer than the workbook. Push before running so Excel executes the latest code?",
+    ),
+    pushAndRun,
+    runWithoutPush,
+  );
+  if (selected === pushAndRun) {
+    return { args: withRunPushFlag(baseArgs), workspaceFolder: folder };
+  }
+  if (selected === runWithoutPush) {
+    return { args: baseArgs, workspaceFolder: folder };
+  }
+  return undefined;
+}
+
+function statusShowsSourceNewer(envelope: XlflowStatusEnvelope | undefined): boolean {
+  if (envelope?.state?.src_newer_than_workbook === true) {
+    return true;
+  }
+  return envelope?.hints?.some((hint) => hint.code === "push_source") === true;
+}
+
+function withRunPushFlag(args: string[]): string[] {
+  if (args.includes("--push")) {
+    return args;
+  }
+  const runIndex = args.indexOf("run");
+  if (runIndex === -1) {
+    return args;
+  }
+  return [...args.slice(0, runIndex + 1), "--push", ...args.slice(runIndex + 1)];
 }
 
 async function runTestProcedureFromCodeLens(
   value: unknown,
-  channels: XlflowChannels,
   sessionManager: SessionManager,
   hooks: CommandRefreshHooks,
 ): Promise<void> {
@@ -866,17 +986,19 @@ async function runTestProcedureFromCodeLens(
     return;
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
-  await runXlflowCommand(
+  const launched = await runXlflowTerminalCommand(
     ["test", "--module", moduleName, "--filter", args.name],
     `xlflow test ${moduleName}.${args.name}`,
-    channels.output,
     {
       requireWorkspace: true,
       uiLabel: vscode.l10n.t("xlflow test {target}", { target: `${moduleName}.${args.name}` }),
       workspaceFolder,
+      terminalName: vscode.l10n.t("xlflow test"),
     },
   );
-  await refreshSessionProjectState(sessionManager, hooks);
+  if (launched) {
+    scheduleSessionProjectRefresh(sessionManager, hooks, { refreshTests: true });
+  }
 }
 
 async function refreshSessionProjectState(
@@ -885,6 +1007,21 @@ async function refreshSessionProjectState(
 ): Promise<void> {
   await sessionManager.refreshStatus();
   await hooks.refreshProject();
+}
+
+function scheduleSessionProjectRefresh(
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+  options: { refreshTests?: boolean } = {},
+): void {
+  for (const delayMs of [1500, 5000]) {
+    setTimeout(() => {
+      void refreshSessionProjectState(sessionManager, hooks);
+      if (options.refreshTests === true) {
+        void hooks.refreshTests();
+      }
+    }, delayMs);
+  }
 }
 
 function normalizeRunProcedureArgs(value: unknown): RunProcedureArgs | undefined {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Offer a Push & Run choice before VS Code macro/procedure runs when source files are newer than the workbook.
+- Run macros from VS Code with `xlflow run --interactive` so user-triggered macro execution uses interactive mode explicitly.
+- Run user-triggered macro and procedure commands in the VS Code terminal instead of the Output panel.
+- Keep the xlflow Output panel in the background for routine commands; diagnostics still open it explicitly, and failures offer an Open Output action.
+
 ## v0.2.0
 
 - Added a visible pulse icon for the `Run Doctor` setup action in the VS Code sidebar.

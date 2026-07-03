@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Improved human-readable CLI output with clearer sections, status markers, warnings/hints, and table-style summaries while preserving `--json` contracts.
+- Added `xlflow run --push` to import edited VBA source into the configured workbook before running a macro.
+- Improved `xlflow run` macro-failure diagnostics to suggest `xlflow push` / `xlflow run --push` when source files are newer than the saved workbook.
+- Fixed `.NET` `xlflow run --interactive` so native VBA UI such as `MsgBox` is left for the user to dismiss instead of being misreported as `macro_failed`.
+- Fixed `.NET` Excel cleanup so direct `run`/`test` executions and `session stop` do not leave owned Excel processes behind after successful commands.
+
 ## v0.17.0
 
 - Updated `xlflow doctor` to run project-independent diagnostics successfully even when `xlflow.toml` is missing, with warnings and setup hints instead of a config failure.
