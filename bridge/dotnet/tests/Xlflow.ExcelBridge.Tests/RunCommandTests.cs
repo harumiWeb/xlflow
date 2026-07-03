@@ -339,6 +339,28 @@ public sealed class RunCommandTests
         Assert.False(ExcelRunService.IsDefaultRuntimeWithoutInjectedFeatures(args));
     }
 
+    [Fact]
+    public void InteractiveRunWatchesOnlyMacroErrorDialogs()
+    {
+        var args = RunArgs(@"C:\work\Book.xlsm", "Main.Run") with
+        {
+            RuntimeMode = "interactive",
+        };
+
+        Assert.Equal(DialogKind.MacroError, ExcelRunService.MacroInvocationDialogKind(args));
+    }
+
+    [Fact]
+    public void HeadlessRunWatchesAnyDialog()
+    {
+        var args = RunArgs(@"C:\work\Book.xlsm", "Main.Run") with
+        {
+            RuntimeMode = "headless",
+        };
+
+        Assert.Equal(DialogKind.Any, ExcelRunService.MacroInvocationDialogKind(args));
+    }
+
     private static RunCommandArguments RunArgs(string workbookPath, string macroName)
     {
         return new RunCommandArguments(

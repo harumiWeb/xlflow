@@ -190,10 +190,15 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
-      await runXlflowCommand(["run"], "xlflow run", channels.output, {
-        requireWorkspace: true,
-        uiLabel: vscode.l10n.t("xlflow run"),
-      });
+      await runXlflowCommand(
+        ["run", "--interactive"],
+        "xlflow run --interactive",
+        channels.output,
+        {
+          requireWorkspace: true,
+          uiLabel: vscode.l10n.t("xlflow run"),
+        },
+      );
       await refreshSessionProjectState(sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
@@ -833,11 +838,16 @@ async function runProcedure(
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
   const target = readNonEmpty(args.qualifiedName) ?? args.name;
-  await runXlflowCommand(["run", target], `xlflow run ${target}`, channels.output, {
-    requireWorkspace: true,
-    uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
-    workspaceFolder,
-  });
+  await runXlflowCommand(
+    ["run", "--interactive", target],
+    `xlflow run --interactive ${target}`,
+    channels.output,
+    {
+      requireWorkspace: true,
+      uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
+      workspaceFolder,
+    },
+  );
   await refreshSessionProjectState(sessionManager, hooks);
 }
 

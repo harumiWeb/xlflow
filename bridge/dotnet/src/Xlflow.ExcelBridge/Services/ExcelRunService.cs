@@ -137,7 +137,7 @@ public sealed class ExcelRunService : IRunService
                         .ToArray(),
                     WorkbookPath: args.WorkbookPath),
                 excelHwnd,
-                DialogKind.Any,
+                MacroInvocationDialogKind(args),
                 args.SuppressModalErrors,
                 ResolveTimeout(request, args, commandStopwatch.Elapsed),
                 cancellationToken,
@@ -552,6 +552,13 @@ public sealed class ExcelRunService : IRunService
             timeout,
             cancellationToken,
             selectionLocator);
+    }
+
+    internal static DialogKind MacroInvocationDialogKind(RunCommandArguments args)
+    {
+        return string.Equals(args.RuntimeMode, "interactive", StringComparison.OrdinalIgnoreCase)
+            ? DialogKind.MacroError
+            : DialogKind.Any;
     }
 
     internal static DialogSnapshot? WaitForPostWorkerDialog(

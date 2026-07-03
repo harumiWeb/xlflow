@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `.NET` `xlflow run --interactive` so native VBA UI such as `MsgBox` is left for the user to dismiss instead of being misreported as `macro_failed`.
+
 ## v0.17.0
 
 - Updated `xlflow doctor` to run project-independent diagnostics successfully even when `xlflow.toml` is missing, with warnings and setup hints instead of a config failure.

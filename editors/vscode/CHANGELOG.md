@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Run macros from VS Code with `xlflow run --interactive` so user-triggered macro execution uses interactive mode explicitly.
+
 ## v0.2.0
 
 - Added a visible pulse icon for the `Run Doctor` setup action in the VS Code sidebar.
