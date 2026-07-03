@@ -14,7 +14,6 @@ import {
 import { SessionManager, SessionState, XlflowSessionPayload } from "./session";
 import { discoverTests, readNonEmpty, sourceUri, XlflowDiscoveredTest } from "./testDiscovery";
 import {
-  cliVersionSummary,
   updateSummary,
   updateTooltip,
   XlflowUpdateService,
