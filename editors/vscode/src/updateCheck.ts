@@ -61,7 +61,7 @@ export class XlflowUpdateService implements vscode.Disposable {
       return;
     }
     const currentVersionHint = cliVersionSummary(availability.version);
-    if (!this.shouldRunAutomaticCheck(availability, currentVersionHint)) {
+    if (!this.shouldRunAutomaticCheckForAvailability(availability, currentVersionHint)) {
       return;
     }
     const status = await this.check({
@@ -153,14 +153,14 @@ export class XlflowUpdateService implements vscode.Disposable {
     return this.pending;
   }
 
-  private shouldRunAutomaticCheck(
+  private shouldRunAutomaticCheckForAvailability(
     availability: Extract<XlflowCliAvailability, { ok: true }>,
     currentVersion: string | undefined,
   ) {
     const lastChecked = this.context.globalState.get<number>(
       lastCheckedKey(availability.executable, currentVersion),
     );
-    return typeof lastChecked !== "number" || Date.now() - lastChecked >= autoCheckIntervalMs;
+    return shouldRunAutomaticCheck(Date.now(), lastChecked);
   }
 
   private async showUpdateAvailable(

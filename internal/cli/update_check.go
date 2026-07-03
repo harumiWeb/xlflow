@@ -37,6 +37,14 @@ type scaffoldUpdateInfo struct {
 	Warning       string
 }
 
+type updateSkipReason string
+
+const (
+	updateSkipNone             updateSkipReason = ""
+	updateSkipCurrentNotSemver updateSkipReason = "current-not-semver"
+	updateSkipLatestNotSemver  updateSkipReason = "latest-not-semver"
+)
+
 type semanticVersion struct {
 	major      int
 	minor      int
@@ -84,53 +92,50 @@ func shouldSkipScaffoldUpdateCheck() bool {
 }
 
 func checkForUpdate(ctx context.Context, checker releaseChecker, currentVersion string) (scaffoldUpdateInfo, error) {
-	current, ok := parseSemanticVersion(currentVersion)
-	if !ok {
-		return scaffoldUpdateInfo{}, nil
-	}
-	release, err := checker.LatestRelease(ctx)
-	if err != nil {
+	info, reason, _, err := evaluateUpdate(ctx, checker, currentVersion)
+	if reason != updateSkipNone {
 		return scaffoldUpdateInfo{}, err
 	}
-	latest, ok := parseSemanticVersion(release.Version)
-	if !ok {
-		return scaffoldUpdateInfo{}, nil
-	}
-	if latest.compare(current) <= 0 {
-		return scaffoldUpdateInfo{}, nil
-	}
-	return scaffoldUpdateInfo{
-		LatestVersion: strings.TrimSpace(release.Version),
-		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
-	}, nil
+	return info, err
 }
 
 func checkForUpdateBestEffort(ctx context.Context, checker releaseChecker, currentVersion string) scaffoldUpdateInfo {
+	info, reason, latestTag, err := evaluateUpdate(ctx, checker, currentVersion)
+	if err != nil {
+		info.Warning = "update check failed: " + err.Error()
+		return info
+	}
+	switch reason {
+	case updateSkipCurrentNotSemver:
+		info.Warning = fmt.Sprintf("update check skipped: current version %q is not a release version", strings.TrimSpace(currentVersion))
+	case updateSkipLatestNotSemver:
+		info.Warning = fmt.Sprintf("update check skipped: latest release tag %q is not semantic version", latestTag)
+	}
+	return info
+}
+
+func evaluateUpdate(ctx context.Context, checker releaseChecker, currentVersion string) (scaffoldUpdateInfo, updateSkipReason, string, error) {
 	current, ok := parseSemanticVersion(currentVersion)
 	if !ok {
-		return scaffoldUpdateInfo{
-			Warning: fmt.Sprintf("update check skipped: current version %q is not a release version", strings.TrimSpace(currentVersion)),
-		}
+		return scaffoldUpdateInfo{}, updateSkipCurrentNotSemver, "", nil
 	}
 	release, err := checker.LatestRelease(ctx)
 	if err != nil {
-		return scaffoldUpdateInfo{
-			Warning: "update check failed: " + err.Error(),
-		}
+		return scaffoldUpdateInfo{}, updateSkipNone, "", err
+	}
+	latestTag := strings.TrimSpace(release.Version)
+	info := scaffoldUpdateInfo{
+		LatestVersion: latestTag,
+		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
 	}
 	latest, ok := parseSemanticVersion(release.Version)
 	if !ok {
-		return scaffoldUpdateInfo{
-			Warning: fmt.Sprintf("update check skipped: latest release tag %q is not semantic version", strings.TrimSpace(release.Version)),
-		}
+		return scaffoldUpdateInfo{}, updateSkipLatestNotSemver, latestTag, nil
 	}
 	if latest.compare(current) <= 0 {
-		return scaffoldUpdateInfo{}
+		return scaffoldUpdateInfo{}, updateSkipNone, latestTag, nil
 	}
-	return scaffoldUpdateInfo{
-		LatestVersion: strings.TrimSpace(release.Version),
-		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
-	}
+	return info, updateSkipNone, latestTag, nil
 }
 
 func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {

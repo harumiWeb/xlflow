@@ -762,7 +762,7 @@ function cliProjectNode(
       label: vscode.l10n.t("CLI"),
       description: versionSummary ?? vscode.l10n.t("OK"),
       tooltip,
-      icon: new vscode.ThemeIcon(updateStatus?.kind === "available" ? "cloud-download" : "check"),
+      icon: cliProjectIcon(updateStatus),
     };
   }
   return {
@@ -777,6 +777,19 @@ function cliProjectNode(
       title: vscode.l10n.t("Retry"),
     },
   };
+}
+
+function cliProjectIcon(updateStatus?: XlflowUpdateStatus): vscode.ThemeIcon {
+  switch (updateStatus?.kind) {
+    case "available":
+      return new vscode.ThemeIcon("cloud-download");
+    case "checking":
+      return new vscode.ThemeIcon("sync~spin");
+    case "error":
+      return new vscode.ThemeIcon("warning");
+    default:
+      return new vscode.ThemeIcon("check");
+  }
 }
 
 function cliVersionTooltip(availability: Extract<XlflowCliAvailability, { ok: true }>): string {

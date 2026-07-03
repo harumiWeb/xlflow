@@ -232,6 +232,7 @@ func TestUpdateCheckCommandWritesJSON(t *testing.T) {
 		release        latestRelease
 		wantAvailable  bool
 		wantLatest     string
+		wantReleaseURL string
 		wantExit       int
 	}{
 		{
@@ -241,9 +242,10 @@ func TestUpdateCheckCommandWritesJSON(t *testing.T) {
 				Version:    "v1.2.4",
 				ReleaseURL: "https://example.com/v1.2.4",
 			},
-			wantAvailable: true,
-			wantLatest:    "v1.2.4",
-			wantExit:      0,
+			wantAvailable:  true,
+			wantLatest:     "v1.2.4",
+			wantReleaseURL: "https://example.com/v1.2.4",
+			wantExit:       0,
 		},
 		{
 			name:           "up to date",
@@ -302,6 +304,9 @@ func TestUpdateCheckCommandWritesJSON(t *testing.T) {
 			}
 			if got.Update.LatestVersion != tt.wantLatest {
 				t.Fatalf("latest = %q, want %q", got.Update.LatestVersion, tt.wantLatest)
+			}
+			if got.Update.ReleaseURL != tt.wantReleaseURL {
+				t.Fatalf("release URL = %q, want %q", got.Update.ReleaseURL, tt.wantReleaseURL)
 			}
 		})
 	}
