@@ -84,6 +84,11 @@ internal sealed record ExcelSessionAttachment(object Excel, object Workbook, str
 
 internal sealed record ExcelProcessInfo(int ProcessId, bool? HasWorkbook);
 
+internal sealed record OwnedExcelProcess(int ProcessId, DateTime? StartTime = null)
+{
+    public static OwnedExcelProcess None { get; } = new(0);
+}
+
 internal sealed class SessionPoisonedException(SessionMetadata metadata)
     : InvalidOperationException("xlflow session is poisoned after a fatal Excel COM/RPC failure")
 {
@@ -1291,6 +1296,11 @@ internal static class ExcelBridgeSupport
 
     public static void CloseWorkbookAndQuitApplication(object? workbook, object? excel, int ownedProcessId = 0)
     {
+        CloseWorkbookAndQuitApplication(workbook, excel, CaptureOwnedExcelProcess(ownedProcessId));
+    }
+
+    public static void CloseWorkbookAndQuitApplication(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
+    {
         if (workbook is not null)
         {
             try
@@ -1321,7 +1331,7 @@ internal static class ExcelBridgeSupport
         }
 
         CollectComGarbage();
-        EnsureOwnedExcelProcessExited(ownedProcessId);
+        EnsureOwnedExcelProcessExited(ownedProcess);
     }
 
     public static void CollectComGarbage()
@@ -1332,17 +1342,54 @@ internal static class ExcelBridgeSupport
         GC.WaitForPendingFinalizers();
     }
 
-    private static void EnsureOwnedExcelProcessExited(int processId)
+    public static OwnedExcelProcess CaptureOwnedExcelProcess(int processId)
     {
         if (processId <= 0)
+        {
+            return OwnedExcelProcess.None;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!IsExcelProcess(process))
+            {
+                return OwnedExcelProcess.None;
+            }
+
+            DateTime? startTime = null;
+            try
+            {
+                startTime = process.StartTime;
+            }
+            catch
+            {
+                // Some environments deny StartTime; process name still guards non-Excel PID reuse.
+            }
+            return new OwnedExcelProcess(processId, startTime);
+        }
+        catch
+        {
+            return OwnedExcelProcess.None;
+        }
+    }
+
+    private static void EnsureOwnedExcelProcessExited(OwnedExcelProcess ownedProcess)
+    {
+        if (ownedProcess.ProcessId <= 0)
         {
             return;
         }
 
         try
         {
-            using var process = Process.GetProcessById(processId);
+            using var process = Process.GetProcessById(ownedProcess.ProcessId);
             if (process.WaitForExit(1500))
+            {
+                return;
+            }
+
+            if (!IsSameOwnedExcelProcess(process, ownedProcess))
             {
                 return;
             }
@@ -1353,6 +1400,38 @@ internal static class ExcelBridgeSupport
         catch
         {
             // The process may already have exited, or Windows may refuse termination.
+        }
+    }
+
+    private static bool IsSameOwnedExcelProcess(Process process, OwnedExcelProcess ownedProcess)
+    {
+        if (!IsExcelProcess(process))
+        {
+            return false;
+        }
+        if (ownedProcess.StartTime is null)
+        {
+            return true;
+        }
+        try
+        {
+            return process.StartTime == ownedProcess.StartTime.Value;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsExcelProcess(Process process)
+    {
+        try
+        {
+            return string.Equals(process.ProcessName, "EXCEL", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -1555,6 +1555,24 @@ func TestWriteWithOptionsRichHumanOutputNoColorHasNoANSI(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRunWorkbookSectionUsesPathLabel(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run"}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm"}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "Workbook:\nPath:") {
+		t.Fatalf("run workbook section should use Path label:\n%s", got)
+	}
+	if strings.Contains(got, "Workbook:\nWorkbook:") {
+		t.Fatalf("run workbook section should not repeat Workbook label:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRichHumanOutputColorUsesANSIAndSymbols(t *testing.T) {
 	env := Failure("run", Error{Code: "macro_failed", Message: "boom"})
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
@@ -1569,6 +1587,13 @@ func TestWriteWithOptionsRichHumanOutputColorUsesANSIAndSymbols(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rich color output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestSeverityBadgeColorizesUnknownSeverity(t *testing.T) {
+	got := renderer{color: true}.severityBadge("notice")
+	if !strings.Contains(got, "\x1b[") || !strings.Contains(got, "notice") {
+		t.Fatalf("unknown severity should be colorized with original label, got %q", got)
 	}
 }
 

@@ -3105,7 +3105,7 @@ func (a *app) runCommand() *cobra.Command {
 				if strings.TrimSpace(input) != "" {
 					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--push cannot be combined with --input"))
 				}
-				pushOpts, err := buildRunPushOptions(session, buildCommandOptions(a.stderrWriter()))
+				pushOpts, err := buildRunPushOptions(session, fast, buildCommandOptions(a.stderrWriter()))
 				if err != nil {
 					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 				}
@@ -3178,8 +3178,8 @@ func (a *app) runCommand() *cobra.Command {
 	return cmd
 }
 
-func buildRunPushOptions(session bool, keepalive excel.CommandOptions) (excel.PushOptions, error) {
-	pushOpts, err := buildPushOptions("always", false, false, session, session, keepalive)
+func buildRunPushOptions(session bool, fast bool, keepalive excel.CommandOptions) (excel.PushOptions, error) {
+	pushOpts, err := buildPushOptions("always", fast, false, session, session, keepalive)
 	if err != nil {
 		return excel.PushOptions{}, err
 	}

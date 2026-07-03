@@ -31,12 +31,15 @@ public sealed class ExcelRunService : IRunService
         var sessionMode = "none";
         var skipComCleanup = false;
         var excelProcessId = 0;
+        var ownedExcelProcess = OwnedExcelProcess.None;
 
         try
         {
             var openResult = ExcelBridgeSupport.RunPhase("open_workbook", () =>
                 OpenWorkbookForRun(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
             excel = openResult.Excel;
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            ownedExcelProcess = ExcelBridgeSupport.CaptureOwnedExcelProcess(excelProcessId);
             workbook = openResult.Workbook;
             sessionAttached = openResult.SessionAttached;
             sessionMode = openResult.SessionMode;
@@ -67,7 +70,6 @@ public sealed class ExcelRunService : IRunService
                 logs.Add($"attached to xlflow session ({sessionMode})");
             }
 
-            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
             var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
             if (excelProcessId <= 0)
             {
@@ -479,7 +481,7 @@ public sealed class ExcelRunService : IRunService
                 }
                 else
                 {
-                    CloseWorkbook(workbook, excel, excelProcessId);
+                    CloseWorkbook(workbook, excel, ownedExcelProcess);
                 }
             }
         }
@@ -1069,8 +1071,8 @@ public sealed class ExcelRunService : IRunService
         }
     }
 
-    private static void CloseWorkbook(object? workbook, object? excel, int ownedProcessId)
+    private static void CloseWorkbook(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
     {
-        ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, ownedProcessId);
+        ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, ownedProcess);
     }
 }

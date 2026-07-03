@@ -253,6 +253,27 @@ public sealed class DialogWatcherTests
         Assert.Equal("runtime_end", dialog.Action);
     }
 
+    [Fact]
+    public void MacroErrorKindMatchesCompileDialog()
+    {
+        var watcher = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Microsoft Visual Basic", text: ["Compile error:", "Sub or Function not defined"], buttons: [Button(11, "OK")])]),
+            new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.MacroError,
+            ActionPolicy: DialogActionPolicy.SuppressVbaError,
+            Timeout: TimeSpan.FromMilliseconds(1),
+            PollInterval: TimeSpan.FromMilliseconds(1));
+
+        var dialog = watcher.TryCaptureCurrentDialog(request, includeUia: false, executeAction: true);
+
+        Assert.NotNull(dialog);
+        Assert.Equal("compile", dialog!.Kind);
+        Assert.Equal("compile_close", dialog.Action);
+    }
+
     private static WindowCandidate Candidate(
         string title,
         string className = "#32770",

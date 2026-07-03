@@ -1187,7 +1187,7 @@ func (r renderer) renderRun(env Envelope) string {
 	}
 	workbookRows := []kvRow{}
 	if path := stringValue(workbook, "path"); path != "" {
-		workbookRows = append(workbookRows, kvRow{"Workbook", path})
+		workbookRows = append(workbookRows, kvRow{"Path", path})
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		workbookRows = append(workbookRows, kvRow{"Session", sessionSummary})
@@ -1592,6 +1592,9 @@ func (r renderer) severityBadge(severity string) string {
 		}
 		return "[info]"
 	default:
+		if r.color {
+			return r.style("ℹ "+severity, "39", true)
+		}
 		return "[" + severity + "]"
 	}
 }

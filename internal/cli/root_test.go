@@ -833,7 +833,7 @@ func TestRootCommandIncludesRunFlags(t *testing.T) {
 }
 
 func TestBuildRunPushOptionsUsesSessionNoSave(t *testing.T) {
-	opts, err := buildRunPushOptions(true, excel.CommandOptions{})
+	opts, err := buildRunPushOptions(true, false, excel.CommandOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -849,7 +849,7 @@ func TestBuildRunPushOptionsUsesSessionNoSave(t *testing.T) {
 }
 
 func TestBuildRunPushOptionsSavesNonSessionPush(t *testing.T) {
-	opts, err := buildRunPushOptions(false, excel.CommandOptions{})
+	opts, err := buildRunPushOptions(false, false, excel.CommandOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,6 +861,16 @@ func TestBuildRunPushOptionsSavesNonSessionPush(t *testing.T) {
 	}
 	if opts.BackupMode != "always" {
 		t.Fatalf("BackupMode = %q, want always", opts.BackupMode)
+	}
+}
+
+func TestBuildRunPushOptionsPreservesFast(t *testing.T) {
+	opts, err := buildRunPushOptions(false, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Fast {
+		t.Fatalf("Fast = false, want true for run --push --fast")
 	}
 }
 
