@@ -16,9 +16,11 @@ const (
 )
 
 type FormatConfig struct {
-	LineNumbers        LineNumberMode
-	OperatorSpacing    bool
-	OperatorSpacingSet bool
+	LineNumbers           LineNumberMode
+	OperatorSpacing       bool
+	OperatorSpacingSet    bool
+	DeclarationSpacing    bool
+	DeclarationSpacingSet bool
 }
 
 type LineNumberWarning struct {
@@ -82,6 +84,13 @@ func normalizeOperatorSpacing(cfg FormatConfig) bool {
 		return true
 	}
 	return cfg.OperatorSpacing
+}
+
+func normalizeDeclarationSpacing(cfg FormatConfig) bool {
+	if !cfg.DeclarationSpacingSet {
+		return true
+	}
+	return cfg.DeclarationSpacing
 }
 
 func parseLineNumberDirective(line string) lineNumberDirective {
@@ -183,6 +192,13 @@ func lastNonBlankFormattedLine(lines []formattedLine) *formattedLine {
 }
 
 func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, lineNumberFileResult, error) {
+	if normalizeDeclarationSpacing(cfg) {
+		spaced, err := formatDeclarationSpacing(text, isClass)
+		if err != nil {
+			return "", lineNumberFileResult{}, err
+		}
+		text = spaced
+	}
 	if normalizeOperatorSpacing(cfg) {
 		spaced, err := formatOperatorSpacing(text, isClass)
 		if err != nil {

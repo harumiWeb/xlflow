@@ -195,6 +195,165 @@ func TestFormatBasOperatorSpacingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestFormatBasDeclarationSpacing(t *testing.T) {
+	input := `Option Explicit
+Dim   wb   As   Workbook
+Private   mName   As   String
+Public   Count   As   Long
+Friend   Name   As   String
+Private   Const   MaxRows   As   Long=100
+Public Const Name As String="xlflow"
+
+Public Sub   Foo(ByVal   path   As   String,Optional   ByVal overwrite   As Boolean=False)
+Dim a As Long,b As String,c As Double
+Static   cached   As   Object
+End Sub
+`
+	want := `Option Explicit
+
+Dim wb As Workbook
+Private mName As String
+Public Count As Long
+Friend Name As String
+Private Const MaxRows As Long = 100
+Public Const Name As String = "xlflow"
+
+Public Sub Foo(ByVal path As String, Optional ByVal overwrite As Boolean = False)
+    Dim a As Long, b As String, c As Double
+    Static cached As Object
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("declaration spacing mismatch:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("declaration spacing not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
+func TestFormatBasDeclarationSpacingProcedureHeaders(t *testing.T) {
+	input := `Private Function   Add(ByVal a As Long,ByVal b As Long)As Long
+Add = a + b
+End Function
+
+Public Property Get   Name()As String
+End Property
+
+Public Property Let   Name(ByVal   value   As String)
+End Property
+
+Public Property Set   Target(ByVal   value   As Object)
+End Property
+`
+	want := `Private Function Add(ByVal a As Long, ByVal b As Long) As Long
+    Add = a + b
+End Function
+
+Public Property Get Name() As String
+End Property
+
+Public Property Let Name(ByVal value As String)
+End Property
+
+Public Property Set Target(ByVal value As Object)
+End Property
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("procedure declaration spacing mismatch:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestFormatBasDeclarationSpacingAsNew(t *testing.T) {
+	input := `Sub Main()
+Dim   dict   As   New   Scripting.Dictionary
+Private   app   As   New   Excel.Application
+End Sub
+`
+	want := `Sub Main()
+    Dim dict As New Scripting.Dictionary
+    Private app As New Excel.Application
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("As New declaration spacing mismatch:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestFormatBasDeclarationSpacingPreservesUnsafeForms(t *testing.T) {
+	input := `Attribute VB_Name = "Module1"
+' Dim   x   As   Long
+#If VBA7 Then
+Private Declare PtrSafe Function Foo Lib "user32" () As LongPtr
+#End If
+Sub Main()
+Dim i%
+Dim n&
+Dim s$
+Dim d#
+Dim c@
+Dim p^
+Dim fixed As String * 10
+Dim arr(1 To 3) As Long
+Dim value As String: value = "x"
+Dim continued   As   Long _
+Dim bracketed As [Excel.Range]
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`Attribute VB_Name = "Module1"`,
+		"' Dim   x   As   Long",
+		"#If VBA7 Then",
+		`Private Declare PtrSafe Function Foo Lib "user32" () As LongPtr`,
+		"Dim i%", "Dim n&", "Dim s$", "Dim d#", "Dim c@", "Dim p^",
+		"Dim fixed As String * 10",
+		"Dim arr(1 To 3) As Long",
+		`Dim value As String: value = "x"`,
+		"Dim continued   As   Long _",
+		"Dim bracketed As [Excel.Range]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "i %") || strings.Contains(got, "n &") || strings.Contains(got, "s $") {
+		t.Fatalf("type declaration suffix was split:\n%s", got)
+	}
+}
+
+func TestFormatBasDeclarationSpacingCanBeDisabled(t *testing.T) {
+	input := "Sub Main()\nDim   x   As   Long\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{
+		DeclarationSpacing:    false,
+		DeclarationSpacingSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "    Dim   x   As   Long") {
+		t.Fatalf("declaration spacing should be disabled while indentation remains active:\n%s", got)
+	}
+}
+
 func TestFormatBasPreserveStringKeywords(t *testing.T) {
 	input := `Sub Main()
     Dim s As String

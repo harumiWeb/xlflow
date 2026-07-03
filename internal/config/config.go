@@ -60,7 +60,8 @@ type UserFormConfig struct {
 }
 
 type FmtConfig struct {
-	OperatorSpacing bool `toml:"operator_spacing"`
+	OperatorSpacing    bool `toml:"operator_spacing"`
+	DeclarationSpacing bool `toml:"declaration_spacing"`
 }
 
 type LintConfig struct {
@@ -237,7 +238,8 @@ func Default() Config {
 			CodeSource: "sidecar",
 		},
 		Fmt: FmtConfig{
-			OperatorSpacing: true,
+			OperatorSpacing:    true,
+			DeclarationSpacing: true,
 		},
 		Lint: LintConfig{
 			RequireOptionExplicit:           true,
@@ -722,6 +724,8 @@ code_source = %q
 [fmt]
 # Normalize spacing around safe binary operators in xlflow fmt.
 operator_spacing = %t
+# Normalize spacing in safe VBA declarations in xlflow fmt.
+declaration_spacing = %t
 
 # Static analysis rules.
 [lint]
@@ -737,7 +741,7 @@ operator_spacing = %t
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
-		cfg.Fmt.OperatorSpacing,
+		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing,
 		lintConfigText,
 		analyzeConfigText,
 	)

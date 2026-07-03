@@ -44,15 +44,17 @@ type SkippedReason struct {
 
 // FmtOptions controls the format operation.
 type FmtOptions struct {
-	Write              bool
-	Check              bool
-	Diff               bool
-	Paths              []string
-	Root               string
-	Cfg                config.Config
-	LineNumbers        LineNumberMode
-	OperatorSpacing    bool
-	OperatorSpacingSet bool
+	Write                 bool
+	Check                 bool
+	Diff                  bool
+	Paths                 []string
+	Root                  string
+	Cfg                   config.Config
+	LineNumbers           LineNumberMode
+	OperatorSpacing       bool
+	OperatorSpacingSet    bool
+	DeclarationSpacing    bool
+	DeclarationSpacingSet bool
 }
 
 func Run(opts FmtOptions) (*Result, error) {
@@ -63,9 +65,11 @@ func Run(opts FmtOptions) (*Result, error) {
 
 	results := make([]FileResult, 0, len(files))
 	formatCfg := FormatConfig{
-		LineNumbers:        opts.LineNumbers,
-		OperatorSpacing:    opts.OperatorSpacing,
-		OperatorSpacingSet: opts.OperatorSpacingSet,
+		LineNumbers:           opts.LineNumbers,
+		OperatorSpacing:       opts.OperatorSpacing,
+		OperatorSpacingSet:    opts.OperatorSpacingSet,
+		DeclarationSpacing:    opts.DeclarationSpacing,
+		DeclarationSpacingSet: opts.DeclarationSpacingSet,
 	}
 	for _, path := range files {
 		fr, err := formatFile(path, formatCfg)
