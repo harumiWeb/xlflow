@@ -278,6 +278,9 @@ func lexicalSymbolOperatorIsBinary(line string, start, end, lineEnd int) bool {
 	if !isOperandEndByte(prev) {
 		return false
 	}
+	if line[start:end] == "&" && symbolLooksLikeAttachedTypeSuffix(line, start) && (next == '+' || next == '-') {
+		return false
+	}
 	if isOperandStartByte(next) {
 		return true
 	}
@@ -285,6 +288,14 @@ func lexicalSymbolOperatorIsBinary(line string, start, end, lineEnd int) bool {
 		return true
 	}
 	return false
+}
+
+func symbolLooksLikeAttachedTypeSuffix(line string, start int) bool {
+	if start <= 0 || isHorizontalWhitespace(line[start-1]) {
+		return false
+	}
+	prev := line[start-1]
+	return isIdentifierPartByte(prev) || (prev >= '0' && prev <= '9')
 }
 
 func lexicalKeywordOperatorIsBinary(line string, start, end, lineEnd int) bool {

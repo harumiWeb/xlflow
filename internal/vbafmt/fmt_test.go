@@ -149,6 +149,8 @@ x=1+ _
  2
 x=-1
 x=a*-b
+x=n&-1
+x=1&-2
 If Not flag Then x=1
 End Sub
 `
@@ -167,6 +169,8 @@ End Sub
 		"x=1+ _",
 		"x = -1",
 		"x = a * -b",
+		"x = n&-1",
+		"x = 1&-2",
 		"If Not flag Then x = 1",
 	} {
 		if !strings.Contains(got, want) {
@@ -204,8 +208,9 @@ Friend   Name   As   String
 Private   Const   MaxRows   As   Long=100
 Public Const Name As String="xlflow"
 
-Public Sub   Foo(ByVal   path   As   String,Optional   ByVal overwrite   As Boolean=False)
+Public Sub   Foo(ByVal   path   As   String,Optional   ByVal overwrite   As Boolean=False,Optional delta As Long=-1)
 Dim a As Long,b As String,c As Double
+Const LocalLimit As Long=+1
 Static   cached   As   Object
 End Sub
 `
@@ -218,8 +223,9 @@ Friend Name As String
 Private Const MaxRows As Long = 100
 Public Const Name As String = "xlflow"
 
-Public Sub Foo(ByVal path As String, Optional ByVal overwrite As Boolean = False)
+Public Sub Foo(ByVal path As String, Optional ByVal overwrite As Boolean = False, Optional delta As Long = -1)
     Dim a As Long, b As String, c As Double
+    Const LocalLimit As Long = +1
     Static cached As Object
 End Sub
 `

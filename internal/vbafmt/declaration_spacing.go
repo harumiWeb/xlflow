@@ -189,6 +189,15 @@ func scanDeclarationTokens(code string) ([]declarationToken, bool) {
 			tokens = append(tokens, declarationToken{text: code[start:i]})
 			continue
 		}
+		if (ch == '+' || ch == '-') && declarationSignStartsInitializerNumber(tokens, code, i) {
+			start := i
+			i += 2
+			for i < len(code) && isDeclarationNumberPart(code[i]) {
+				i++
+			}
+			tokens = append(tokens, declarationToken{text: code[start:i]})
+			continue
+		}
 		switch ch {
 		case '(', ')', ',', '.', '=':
 			tokens = append(tokens, declarationToken{text: code[i : i+1]})
@@ -267,4 +276,11 @@ func isDeclarationIdentifierPart(ch byte) bool {
 
 func isDeclarationNumberPart(ch byte) bool {
 	return (ch >= '0' && ch <= '9') || ch == '.' || strings.ContainsRune("$%&!#@^", rune(ch))
+}
+
+func declarationSignStartsInitializerNumber(tokens []declarationToken, code string, index int) bool {
+	if index+1 >= len(code) || code[index+1] < '0' || code[index+1] > '9' {
+		return false
+	}
+	return len(tokens) > 0 && tokens[len(tokens)-1].text == "="
 }
