@@ -18,7 +18,7 @@ importers:
         specifier: ^1.71.0
         version: 1.71.0
       vite:
-        specifier: ^6.4.2
+        specifier: ^6.4.3
         version: 6.4.3(lightningcss@1.32.0)
       vitepress:
         specifier: ^1.6.4
