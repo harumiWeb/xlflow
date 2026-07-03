@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.17.0
+
 - Updated `xlflow doctor` to run project-independent diagnostics successfully even when `xlflow.toml` is missing, with warnings and setup hints instead of a config failure.
 - Added `xlflow update check` for structured GitHub Release update checks, and wired the VS Code extension to notify users when the installed xlflow CLI is behind the latest release.
 - Added `xlflow type db status/init/refresh/clean` for global generated TypeLib databases, with an initial Excel TypeLib importer feeding LSP type intelligence.
