@@ -11,7 +11,12 @@ import { XlflowChannels } from "./logging";
 import { XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowUpdateService } from "./updateCheck";
-import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./xlflow";
+import {
+  resolveWorkspaceRoot,
+  runXlflowCommand,
+  runXlflowJsonCommand,
+  runXlflowTerminalCommand,
+} from "./xlflow";
 
 type RunProcedureArgs = {
   uri: string;
@@ -190,22 +195,24 @@ export function registerCommands(
       }
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
-      await runXlflowCommand(
+      const launched = await runXlflowTerminalCommand(
         ["run", "--interactive"],
         "xlflow run --interactive",
-        channels.output,
         {
           requireWorkspace: true,
           uiLabel: vscode.l10n.t("xlflow run"),
+          terminalName: vscode.l10n.t("xlflow run"),
         },
       );
-      await refreshSessionProjectState(sessionManager, hooks);
+      if (launched) {
+        scheduleSessionProjectRefresh(sessionManager, hooks);
+      }
     }),
     vscode.commands.registerCommand("xlflow.runProcedure", async (args: unknown) => {
-      await runProcedure(args, channels, sessionManager, hooks);
+      await runProcedure(args, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.runTestProcedure", async (args: unknown) => {
-      await runTestProcedureFromCodeLens(args, channels, sessionManager, hooks);
+      await runTestProcedureFromCodeLens(args, sessionManager, hooks);
     }),
     vscode.commands.registerCommand("xlflow.test", async () => {
       const code = await runXlflowCommand(["test"], "xlflow test", channels.output, {
@@ -821,7 +828,6 @@ function validateComponentNameInput(value: string): string | undefined {
 
 async function runProcedure(
   value: unknown,
-  channels: XlflowChannels,
   sessionManager: SessionManager,
   hooks: CommandRefreshHooks,
 ): Promise<void> {
@@ -838,22 +844,23 @@ async function runProcedure(
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
   const target = readNonEmpty(args.qualifiedName) ?? args.name;
-  await runXlflowCommand(
+  const launched = await runXlflowTerminalCommand(
     ["run", "--interactive", target],
     `xlflow run --interactive ${target}`,
-    channels.output,
     {
       requireWorkspace: true,
       uiLabel: vscode.l10n.t("xlflow run {target}", { target }),
       workspaceFolder,
+      terminalName: vscode.l10n.t("xlflow run"),
     },
   );
-  await refreshSessionProjectState(sessionManager, hooks);
+  if (launched) {
+    scheduleSessionProjectRefresh(sessionManager, hooks);
+  }
 }
 
 async function runTestProcedureFromCodeLens(
   value: unknown,
-  channels: XlflowChannels,
   sessionManager: SessionManager,
   hooks: CommandRefreshHooks,
 ): Promise<void> {
@@ -876,17 +883,19 @@ async function runTestProcedureFromCodeLens(
     return;
   }
   const workspaceFolder = await workspaceFolderForUri(uri);
-  await runXlflowCommand(
+  const launched = await runXlflowTerminalCommand(
     ["test", "--module", moduleName, "--filter", args.name],
     `xlflow test ${moduleName}.${args.name}`,
-    channels.output,
     {
       requireWorkspace: true,
       uiLabel: vscode.l10n.t("xlflow test {target}", { target: `${moduleName}.${args.name}` }),
       workspaceFolder,
+      terminalName: vscode.l10n.t("xlflow test"),
     },
   );
-  await refreshSessionProjectState(sessionManager, hooks);
+  if (launched) {
+    scheduleSessionProjectRefresh(sessionManager, hooks, { refreshTests: true });
+  }
 }
 
 async function refreshSessionProjectState(
@@ -895,6 +904,21 @@ async function refreshSessionProjectState(
 ): Promise<void> {
   await sessionManager.refreshStatus();
   await hooks.refreshProject();
+}
+
+function scheduleSessionProjectRefresh(
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+  options: { refreshTests?: boolean } = {},
+): void {
+  for (const delayMs of [1500, 5000]) {
+    setTimeout(() => {
+      void refreshSessionProjectState(sessionManager, hooks);
+      if (options.refreshTests === true) {
+        void hooks.refreshTests();
+      }
+    }, delayMs);
+  }
 }
 
 function normalizeRunProcedureArgs(value: unknown): RunProcedureArgs | undefined {

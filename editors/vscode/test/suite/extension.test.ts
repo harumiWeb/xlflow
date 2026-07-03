@@ -22,6 +22,7 @@ import {
   userFormContextValue,
 } from "../../src/sidebar";
 import { sourceUri } from "../../src/testDiscovery";
+import { buildTerminalCommandLine } from "../../src/xlflow";
 import {
   cliVersionSummary,
   lastCheckedKey,
@@ -116,6 +117,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   }
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
+  assert.strictEqual(
+    buildTerminalCommandLine("xlflow", ["run", "--interactive", "Sheet1.Sample"]),
+    "xlflow run --interactive Sheet1.Sample",
+  );
+  assert.strictEqual(
+    buildTerminalCommandLine("C:\\Program Files\\xlflow\\xlflow.exe", ["run", "Main.Hello World"]),
+    '"C:\\Program Files\\xlflow\\xlflow.exe" run "Main.Hello World"',
+  );
   assert.deepStrictEqual(
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, undefined),
     ["lsp", "--stdio"],
