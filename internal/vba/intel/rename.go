@@ -49,6 +49,9 @@ func (a Analyzer) Rename(doc Document, pos Position, newName string, open []Docu
 	if err != nil {
 		return nil, err
 	}
+	if err := a.checkRenameCollision(doc, target.Symbol, newName); err != nil {
+		return nil, err
+	}
 	var ranges []Range
 	if isRenameLabel(target.Symbol) {
 		ranges = labelRenameRanges(doc, target.Symbol)
@@ -173,6 +176,55 @@ func renameSymbolIdentity(sym Symbol) symbolIdentity {
 		Kind:       strings.ToLower(sym.Kind),
 		Range:      sym.Selection,
 		Name:       strings.ToLower(sym.Name),
+	}
+}
+
+func (a Analyzer) checkRenameCollision(doc Document, target Symbol, newName string) error {
+	if strings.EqualFold(target.Name, newName) {
+		return nil
+	}
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return err
+	}
+	targetID := renameSymbolIdentity(target)
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, newName) || renameSymbolIdentity(sym) == targetID {
+			continue
+		}
+		if renameScopesOverlap(target, sym) {
+			return fmt.Errorf("cannot rename to %q because an in-scope symbol already exists", newName)
+		}
+	}
+	return nil
+}
+
+func renameScopesOverlap(target, existing Symbol) bool {
+	if isRenameLabel(target) {
+		return isRenameLabel(existing) && strings.EqualFold(target.Parent, existing.Parent)
+	}
+	if isLocalSymbol(target) {
+		return strings.EqualFold(target.Parent, existing.Parent) && renameLocalCollisionSymbol(existing) ||
+			existing.Parent == "" && renameModuleScopedSymbol(existing)
+	}
+	if renameModuleScopedSymbol(target) {
+		return renameModuleScopedSymbol(existing) || renameLocalCollisionSymbol(existing)
+	}
+	return false
+}
+
+func renameLocalCollisionSymbol(sym Symbol) bool {
+	return strings.EqualFold(sym.Kind, "local_variable") ||
+		strings.EqualFold(sym.Kind, "parameter") ||
+		(sym.Parent != "" && strings.EqualFold(sym.Kind, "const"))
+}
+
+func renameModuleScopedSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "module_variable", "const", "sub", "function", "property", "property_get", "property_let", "property_set":
+		return sym.Parent == ""
+	default:
+		return false
 	}
 }
 
@@ -352,40 +404,50 @@ func labelRenameRanges(doc Document, target Symbol) []Range {
 func labelReferenceRanges(source, name string) []Range {
 	var out []Range
 	for lineNo, line := range normalizedLines(source) {
-		limit := codeLimit(line)
-		if limit <= 0 {
-			continue
-		}
-		code := line[:limit]
-		for _, re := range labelReferenceRegexps(name) {
-			for _, match := range re.FindAllStringSubmatchIndex(code, -1) {
-				if len(match) >= 4 && match[2] >= 0 && match[3] >= 0 {
-					out = append(out, byteRange(lineNo, line, match[2], match[3]))
-				}
+		for _, span := range codeIdentifierSpans(line) {
+			if strings.EqualFold(line[span.start:span.end], name) && labelReferencePrefix(line[:span.start]) {
+				out = append(out, byteRange(lineNo, line, span.start, span.end))
 			}
 		}
 	}
 	return out
 }
 
-func labelReferenceRegexps(name string) []*regexp.Regexp {
-	quoted := regexp.QuoteMeta(name)
-	return []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\bGoTo\s+(` + quoted + `)\b`),
-		regexp.MustCompile(`(?i)\bGoSub\s+(` + quoted + `)\b`),
-		regexp.MustCompile(`(?i)\bResume\s+(` + quoted + `)\b`),
-		regexp.MustCompile(`(?i)\bOn\s+Error\s+GoTo\s+(` + quoted + `)\b`),
-	}
+func labelReferencePrefix(prefix string) bool {
+	return regexp.MustCompile(`(?i)\b(?:GoTo|GoSub|Resume)\s+$`).MatchString(prefix) ||
+		regexp.MustCompile(`(?i)\bOn\s+Error\s+GoTo\s+$`).MatchString(prefix)
 }
 
 func validateRenameName(name string) error {
 	if !normalVBAIdentifier(name) {
 		return fmt.Errorf("invalid VBA identifier for rename")
 	}
-	if semanticKeywords[strings.ToLower(name)] || semanticModifiers[strings.ToLower(name)] {
+	if vbaReservedWords[strings.ToLower(name)] {
 		return fmt.Errorf("invalid VBA identifier for rename")
 	}
 	return nil
+}
+
+var vbaReservedWords = map[string]bool{
+	"addhandler": true, "addressof": true, "alias": true, "and": true, "andalso": true, "as": true,
+	"boolean": true, "byref": true, "byte": true, "byval": true,
+	"call": true, "case": true, "catch": true, "cbool": true, "cbyte": true, "cchar": true, "cdate": true, "cdbl": true, "cdec": true, "char": true, "cint": true, "class": true, "clng": true, "cobj": true, "const": true, "continue": true, "csbyte": true, "cshort": true, "csng": true, "cstr": true, "ctype": true, "cuint": true, "culng": true, "cushort": true,
+	"date": true, "decimal": true, "declare": true, "default": true, "delegate": true, "dim": true, "directcast": true, "do": true, "double": true,
+	"each": true, "else": true, "elseif": true, "end": true, "endif": true, "enum": true, "erase": true, "error": true, "event": true, "exit": true,
+	"false": true, "finally": true, "for": true, "friend": true, "function": true,
+	"get": true, "gettype": true, "getxmlnamespace": true, "global": true, "gosub": true, "goto": true,
+	"handles": true, "if": true, "implements": true, "imports": true, "in": true, "inherits": true, "integer": true, "interface": true, "is": true, "isnot": true,
+	"let": true, "lib": true, "like": true, "long": true, "loop": true,
+	"me": true, "mod": true, "module": true, "mustinherit": true, "mustoverride": true, "mybase": true, "myclass": true,
+	"namespace": true, "narrowing": true, "new": true, "next": true, "not": true, "nothing": true, "notinheritable": true, "notoverridable": true,
+	"object": true, "of": true, "on": true, "operator": true, "option": true, "optional": true, "or": true, "orelse": true, "overloads": true, "overridable": true, "overrides": true,
+	"paramarray": true, "partial": true, "private": true, "property": true, "protected": true, "public": true,
+	"raiseevent": true, "readonly": true, "redim": true, "rem": true, "removehandler": true, "resume": true, "return": true,
+	"sbyte": true, "select": true, "set": true, "shadows": true, "shared": true, "short": true, "single": true, "static": true, "step": true, "stop": true, "string": true, "structure": true, "sub": true, "synclock": true,
+	"then": true, "throw": true, "to": true, "true": true, "try": true, "trycast": true, "typeof": true,
+	"uinteger": true, "ulong": true, "until": true, "ushort": true, "using": true,
+	"variant": true, "wend": true, "when": true, "while": true, "widening": true, "with": true, "withevents": true, "writeonly": true,
+	"xor": true,
 }
 
 func normalVBAIdentifier(name string) bool {

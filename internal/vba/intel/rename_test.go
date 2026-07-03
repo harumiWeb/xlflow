@@ -136,6 +136,7 @@ Private Sub Sample()
     Resume Cleanup
 Cleanup:
     Debug.Print "Cleanup"
+    Debug.Print "GoTo Cleanup"
 End Sub
 `
 	doc := renameDoc(t, source)
@@ -146,8 +147,59 @@ End Sub
 		!strings.Contains(renamed, "GoTo Done") ||
 		!strings.Contains(renamed, "Resume Done") ||
 		!strings.Contains(renamed, "Done:") ||
-		!strings.Contains(renamed, `Debug.Print "Cleanup"`) {
+		!strings.Contains(renamed, `Debug.Print "Cleanup"`) ||
+		!strings.Contains(renamed, `Debug.Print "GoTo Cleanup"`) {
 		t.Fatalf("label rename result:\n%s", renamed)
+	}
+}
+
+func TestRenameRejectsReservedWords(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := renameDoc(t, `Option Explicit
+Private Sub Sample()
+    Dim value As Long
+    value = 1
+End Sub
+`)
+
+	for _, newName := range []string{"Dim", "Rem", "And", "Not"} {
+		_, err := analyzer.Rename(doc, renamePosition(t, doc.Source, "value = 1", "value"), newName, []Document{doc}, nil)
+		if err == nil || !strings.Contains(err.Error(), "invalid VBA identifier for rename") {
+			t.Fatalf("Rename to reserved word %q error = %v", newName, err)
+		}
+	}
+}
+
+func TestRenameRejectsInScopeCollisions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := renameDoc(t, `Option Explicit
+Private moduleValue As Long
+
+Private Sub Sample(ByVal argumentValue As Long)
+    Dim localValue As Long
+    localValue = moduleValue + argumentValue
+End Sub
+
+Private Sub Other()
+    Dim otherLocal As Long
+    moduleValue = otherLocal
+End Sub
+`)
+
+	cases := []struct {
+		lineText string
+		word     string
+		newName  string
+	}{
+		{"localValue = moduleValue", "localValue", "argumentValue"},
+		{"localValue = moduleValue", "localValue", "moduleValue"},
+		{"moduleValue = otherLocal", "moduleValue", "otherLocal"},
+	}
+	for _, tc := range cases {
+		_, err := analyzer.Rename(doc, renamePosition(t, doc.Source, tc.lineText, tc.word), tc.newName, []Document{doc}, nil)
+		if err == nil || !strings.Contains(err.Error(), "in-scope symbol already exists") {
+			t.Fatalf("Rename(%s -> %s) error = %v, want collision", tc.word, tc.newName, err)
+		}
 	}
 }
 
