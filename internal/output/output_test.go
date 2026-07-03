@@ -1534,6 +1534,88 @@ func TestWriteWithOptionsRendersLintIssues(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRichHumanOutputNoColorHasNoANSI(t *testing.T) {
+	env := New("run")
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "saved": false}
+	env.Warnings = []map[string]any{{"code": "save_required", "message": "Run `xlflow save --session`."}}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{Color: false}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"OK xlflow run", "Macro:", "Workbook:", "Warnings:", "[!] [save_required]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rich no-color output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("no-color output should not contain ANSI escapes:\n%s", got)
+	}
+}
+
+func TestWriteWithOptionsRichHumanOutputColorUsesANSIAndSymbols(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_failed", Message: "boom"})
+	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}
+	env.RunDiagnostic = map[string]any{"kind": "runtime", "suggestion": "Inspect Main.Run."}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{Color: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"\x1b[", "✖ FAILED", "Macro:", "Diagnostic:", "Inspect Main.Run."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rich color output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersLintIssuesAsTable(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "2 lint issue(s) found"})
+	env.Issues = []map[string]any{
+		{"code": "VB001", "severity": "warning", "file": "src/modules/Main.bas", "line": 1, "message": "missing Option Explicit"},
+		{"code": "VB004", "severity": "error", "file": "src/modules/Report.bas", "line": 7, "message": "avoid On Error Resume Next"},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Severity", "Code", "Location", "Message", "[warning]", "[error]", "src/modules/Report.bas:7"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lint table output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersLongLintMessageWithoutWideSeparator(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
+	env.Issues = []map[string]any{{
+		"code":     "VB007",
+		"severity": "warning",
+		"file":     "src/workbook/Sheet1.bas",
+		"line":     4,
+		"message":  "Raw MsgBox blocks unattended execution and bypasses XlflowUI. Replace it with XlflowUI.MsgBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass scripted responses.",
+	}}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "Code: lint_failed") {
+		t.Fatalf("expected key/value spacing after Code label:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "--------") && len(line) > 180 {
+			t.Fatalf("table separator is too wide (%d chars):\n%s", len(line), got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersDiffSummary(t *testing.T) {
 	env := New("diff")
 	env.Diff = map[string]any{"summary": map[string]any{"total_diffs": 2, "sheet_diffs": 1, "cell_diffs": 1, "vba_diffs": 0}}

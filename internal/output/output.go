@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -523,6 +524,11 @@ type renderer struct {
 	color bool
 }
 
+type kvRow struct {
+	Key   string
+	Value string
+}
+
 func (r renderer) title(env Envelope) string {
 	status := env.Status
 	if status == "" {
@@ -533,9 +539,286 @@ func (r renderer) title(env Envelope) string {
 		label = "xlflow"
 	}
 	if status == StatusOK {
-		return r.style("OK", "42", true) + " " + r.style(label, "", true)
+		if r.color {
+			return r.statusBadge(StatusOK) + " " + r.style(label, "", true)
+		}
+		return "OK " + label
 	}
-	return r.style("FAILED", "196", true) + " " + r.style(label, "", true)
+	if r.color {
+		return r.statusBadge(StatusFailed) + " " + r.style(label, "", true)
+	}
+	return "FAILED " + label
+}
+
+func (r renderer) section(title string) string {
+	if title == "" {
+		return "\n"
+	}
+	return "\n" + r.style(title+":", "39", true) + "\n"
+}
+
+func (r renderer) kvRows(rows ...kvRow) string {
+	width := 0
+	for _, row := range rows {
+		if row.Key == "" || row.Value == "" {
+			continue
+		}
+		if len(row.Key) > width {
+			width = len(row.Key)
+		}
+	}
+	if width == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, row := range rows {
+		if row.Key == "" || row.Value == "" {
+			continue
+		}
+		label := fmt.Sprintf("%-*s", width+2, row.Key+":")
+		b.WriteString(r.style(label, "244", false))
+		b.WriteString(row.Value)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (r renderer) table(headers []string, rows [][]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	widths := make([]int, len(headers))
+	for i, header := range headers {
+		widths[i] = visibleLen(header)
+	}
+	for _, row := range rows {
+		for i := range headers {
+			value := ""
+			if i < len(row) {
+				value = row[i]
+			}
+			if width := visibleLen(value); width > widths[i] {
+				widths[i] = width
+			}
+		}
+	}
+	for i := range widths {
+		if maxWidth := tableColumnMaxWidth(headers[i]); widths[i] > maxWidth {
+			widths[i] = maxWidth
+		}
+	}
+	var b strings.Builder
+	writeRow := func(row []string, header bool) {
+		cells := make([][]string, len(headers))
+		lineCount := 1
+		for i := range headers {
+			value := ""
+			if i < len(row) {
+				value = row[i]
+			}
+			cells[i] = wrapVisible(value, widths[i])
+			if len(cells[i]) > lineCount {
+				lineCount = len(cells[i])
+			}
+		}
+		for line := 0; line < lineCount; line++ {
+			for i := range headers {
+				if i > 0 {
+					b.WriteString("  ")
+				}
+				value := ""
+				if line < len(cells[i]) {
+					value = cells[i][line]
+				}
+				padded := padRightVisible(value, widths[i])
+				if header {
+					padded = r.style(padded, "244", true)
+				}
+				b.WriteString(padded)
+			}
+			b.WriteString("\n")
+		}
+	}
+	writeRow(headers, true)
+	separator := make([]string, len(headers))
+	for i, width := range widths {
+		separator[i] = strings.Repeat("-", width)
+	}
+	writeRow(separator, false)
+	for _, row := range rows {
+		writeRow(row, false)
+	}
+	return b.String()
+}
+
+func tableColumnMaxWidth(header string) int {
+	switch strings.ToLower(strings.TrimSpace(header)) {
+	case "severity":
+		return 12
+	case "code", "duration":
+		return 12
+	case "location":
+		return 48
+	case "message":
+		return 88
+	case "test":
+		return 56
+	case "detail":
+		return 64
+	default:
+		return 40
+	}
+}
+
+func wrapVisible(value string, width int) []string {
+	if width <= 0 || visibleLen(value) <= width {
+		return []string{value}
+	}
+	lines := []string{}
+	for _, rawLine := range strings.Split(value, "\n") {
+		if visibleLen(rawLine) <= width {
+			lines = append(lines, rawLine)
+			continue
+		}
+		if strings.Contains(rawLine, "\x1b[") {
+			lines = append(lines, rawLine)
+			continue
+		}
+		lines = append(lines, wrapPlainVisible(rawLine, width)...)
+	}
+	return lines
+}
+
+func wrapPlainVisible(value string, width int) []string {
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := []string{}
+	current := ""
+	for _, word := range words {
+		if current == "" {
+			if visibleLen(word) > width {
+				chunks := hardWrapPlain(word, width)
+				lines = append(lines, chunks[:len(chunks)-1]...)
+				current = chunks[len(chunks)-1]
+			} else {
+				current = word
+			}
+			continue
+		}
+		if visibleLen(current)+1+visibleLen(word) <= width {
+			current += " " + word
+			continue
+		}
+		lines = append(lines, current)
+		if visibleLen(word) > width {
+			chunks := hardWrapPlain(word, width)
+			lines = append(lines, chunks[:len(chunks)-1]...)
+			current = chunks[len(chunks)-1]
+		} else {
+			current = word
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+func hardWrapPlain(value string, width int) []string {
+	if width <= 0 {
+		return []string{value}
+	}
+	lines := []string{}
+	var b strings.Builder
+	count := 0
+	for _, r := range value {
+		if count >= width {
+			lines = append(lines, b.String())
+			b.Reset()
+			count = 0
+		}
+		b.WriteRune(r)
+		count++
+	}
+	if b.Len() > 0 {
+		lines = append(lines, b.String())
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func padRightVisible(value string, width int) string {
+	padding := width - visibleLen(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
+}
+
+func visibleLen(value string) int {
+	count := 0
+	inEscape := false
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if inEscape {
+			if ch >= '@' && ch <= '~' {
+				inEscape = false
+			}
+			continue
+		}
+		if ch == 0x1b && i+1 < len(value) && value[i+1] == '[' {
+			inEscape = true
+			i++
+			continue
+		}
+		if ch < 0x80 {
+			count++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(value[i:])
+		if r == utf8.RuneError && size == 1 {
+			count++
+			continue
+		}
+		count++
+		i += size - 1
+	}
+	return count
+}
+
+func (r renderer) statusBadge(status string) string {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	switch normalized {
+	case StatusOK, "passed", "pass", "success", "succeeded", "true":
+		if r.color {
+			return r.style("✓ OK", "42", true)
+		}
+		return "[ok]"
+	case StatusFailed, "fail", "error", "false":
+		if r.color {
+			return r.style("✖ FAILED", "196", true)
+		}
+		return "[x]"
+	case "warning", "warn", "inconclusive":
+		if r.color {
+			return r.style("⚠ WARNING", "214", true)
+		}
+		return "[!]"
+	case "info", "hint", "skipped", "skip", "not_run", "not run", "":
+		if r.color {
+			return r.style("ℹ INFO", "39", true)
+		}
+		return "[-]"
+	default:
+		if r.color {
+			return r.style("ℹ "+strings.ToUpper(status), "39", true)
+		}
+		return "[" + status + "]"
+	}
 }
 
 func (r renderer) renderDoctor(env Envelope) string {
@@ -549,13 +832,13 @@ func (r renderer) renderDoctor(env Envelope) string {
 	pathTranslation := objectMap(diag["path_translation"])
 	workbook := objectMap(env.Workbook)
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(r.section("Diagnostics"))
 	if boolValue(host, "is_wsl") {
 		distro := stringValue(host, "distro")
 		if distro == "" {
 			distro = "detected"
 		}
-		b.WriteString(kv("WSL", distro))
+		b.WriteString(r.kvRows(kvRow{"WSL", distro}))
 	}
 	if len(windows) > 0 {
 		detail := stringValue(windows, "xlflow_path")
@@ -579,20 +862,20 @@ func (r renderer) renderDoctor(env Envelope) string {
 		b.WriteString(r.checkLine(boolValue(pathTranslation, "supported"), "Path translation", detail))
 	}
 	if selected := stringValue(diag, "selected_bridge"); selected != "" {
-		b.WriteString(kv("Selected bridge", selected))
+		b.WriteString(r.kvRows(kvRow{"Selected bridge", selected}))
 	}
 	if requested := stringValue(diag, "requested_bridge"); requested != "" {
-		b.WriteString(kv("Requested bridge", requested))
+		b.WriteString(r.kvRows(kvRow{"Requested bridge", requested}))
 	}
 	if _, ok := boolValueOK(diag, "fallback"); ok {
-		b.WriteString(kv("Fallback", yesNo(boolValue(diag, "fallback"))))
+		b.WriteString(r.kvRows(kvRow{"Fallback", yesNo(boolValue(diag, "fallback"))}))
 	}
 	if _, ok := boolValueOK(diag, "legacy"); ok {
 		role := "primary"
 		if boolValue(diag, "legacy") {
 			role = "deprecated legacy"
 		}
-		b.WriteString(kv("Bridge role", role))
+		b.WriteString(r.kvRows(kvRow{"Bridge role", role}))
 	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "excel_installed", "com_activation"), "Excel automation", "Excel COM can be created"))
 	systemProfileDesktop := objectMap(excel["systemprofile_desktop"])
@@ -838,19 +1121,19 @@ func (r renderer) renderTypeDB(env Envelope) string {
 }
 
 func (r renderer) checkLine(ok bool, name, detail string) string {
-	marker := r.style("[x]", "196", true)
+	marker := r.statusBadge(StatusFailed)
 	if ok {
-		marker = r.style("[ok]", "42", true)
+		marker = r.statusBadge(StatusOK)
 	}
 	return fmt.Sprintf("%s %s - %s\n", marker, r.style(name, "", true), detail)
 }
 
 func (r renderer) skipLine(name, detail string) string {
-	return fmt.Sprintf("%s %s - %s\n", r.style("[-]", "244", true), r.style(name, "", true), detail)
+	return fmt.Sprintf("%s %s - %s\n", r.statusBadge("info"), r.style(name, "", true), detail)
 }
 
 func (r renderer) warnLine(name, detail string) string {
-	return fmt.Sprintf("%s %s - %s\n", r.style("[!]", "214", true), r.style(name, "", true), detail)
+	return fmt.Sprintf("%s %s - %s\n", r.statusBadge("warning"), r.style(name, "", true), detail)
 }
 
 func summarizeRuntime(runtime map[string]any) string {
@@ -892,37 +1175,40 @@ func (r renderer) renderRun(env Envelope) string {
 		return b.String()
 	}
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(r.section("Macro"))
 	if name := stringValue(macro, "name"); name != "" {
-		b.WriteString(kv("Macro", name))
+		b.WriteString(r.kvRows(kvRow{"Name", name}))
 	}
 	if summary := summarizeRuntime(runtime); summary != "" {
-		b.WriteString(kv("Runtime", summary))
+		b.WriteString(r.kvRows(kvRow{"Runtime", summary}))
 	}
 	if duration, ok := numberValue(macro, "duration_ms"); ok {
-		b.WriteString(kv("Duration", fmt.Sprintf("%dms", int(duration))))
+		b.WriteString(r.kvRows(kvRow{"Duration", fmt.Sprintf("%dms", int(duration))}))
 	}
+	workbookRows := []kvRow{}
 	if path := stringValue(workbook, "path"); path != "" {
-		b.WriteString(kv("Workbook", path))
+		workbookRows = append(workbookRows, kvRow{"Workbook", path})
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
-		b.WriteString(kv("Session", sessionSummary))
+		workbookRows = append(workbookRows, kvRow{"Session", sessionSummary})
 	}
 	if save := summarizeSaveRequirement(workbook); save != "" {
-		b.WriteString(kv("Save", save))
+		workbookRows = append(workbookRows, kvRow{"Save", r.style(save, "214", true)})
 	}
 	if summary := summarizeRunWorkbookResult(workbook); summary != "" {
-		b.WriteString(kv("Result", summary))
+		workbookRows = append(workbookRows, kvRow{"Result", summary})
+	}
+	if len(workbookRows) > 0 {
+		b.WriteString(r.section("Workbook"))
+		b.WriteString(r.kvRows(workbookRows...))
 	}
 	b.WriteString(r.renderLogs(env))
 	b.WriteString(r.renderUI(env))
 	b.WriteString(r.renderDebug(env))
 	if diag := objectMap(env.RunDiagnostic); len(diag) > 0 {
-		b.WriteString("\n")
-		b.WriteString(r.style("Diagnostic", "", true))
-		b.WriteString("\n")
+		b.WriteString(r.section("Diagnostic"))
 		if kind := stringValue(diag, "kind"); kind != "" {
-			b.WriteString(kv("Kind", kind))
+			b.WriteString(r.kvRows(kvRow{"Kind", kind}))
 		}
 		if messages := stringList(diag["message"]); len(messages) > 0 {
 			b.WriteString("Message:\n")
@@ -932,7 +1218,7 @@ func (r renderer) renderRun(env Envelope) string {
 				b.WriteString("\n")
 			}
 		} else if message := stringValue(diag, "message"); message != "" {
-			b.WriteString(kv("Message", message))
+			b.WriteString(r.kvRows(kvRow{"Message", message}))
 		}
 		if loc := objectMap(diag["location"]); len(loc) > 0 {
 			parts := []string{}
@@ -953,14 +1239,14 @@ func (r renderer) renderRun(env Envelope) string {
 				parts = append(parts, text)
 			}
 			if len(parts) > 0 {
-				b.WriteString(kv("Location", strings.Join(parts, " ")))
+				b.WriteString(r.kvRows(kvRow{"Location", strings.Join(parts, " ")}))
 			}
 		}
 		if cause := stringValue(diag, "likely_cause"); cause != "" {
-			b.WriteString(kv("Likely cause", cause))
+			b.WriteString(r.kvRows(kvRow{"Likely cause", cause}))
 		}
 		if suggestion := stringValue(diag, "suggestion"); suggestion != "" {
-			b.WriteString(kv("Suggestion", suggestion))
+			b.WriteString(r.kvRows(kvRow{"Suggestion", suggestion}))
 		}
 		if nearby := stringList(diag["nearby_code"]); len(nearby) > 0 {
 			b.WriteString("Nearby code:\n")
@@ -1004,19 +1290,7 @@ func (r renderer) renderTest(env Envelope) string {
 		}
 	}
 	var b strings.Builder
-	b.WriteString("\n")
-	if path := stringValue(workbook, "path"); path != "" {
-		b.WriteString(kv("Workbook", path))
-	}
-	if summary := summarizeRuntime(runtime); summary != "" {
-		b.WriteString(kv("Runtime", summary))
-	}
-	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
-		b.WriteString(kv("Session", sessionSummary))
-	}
-	if needsSave := summarizeSaveRequirement(workbook); needsSave != "" {
-		b.WriteString(kv("Save", needsSave))
-	}
+	b.WriteString(r.section("Summary"))
 	summary := fmt.Sprintf("%d passed, %d failed", passed, failed)
 	if inconclusive > 0 {
 		summary += fmt.Sprintf(", %d inconclusive", inconclusive)
@@ -1025,35 +1299,58 @@ func (r renderer) renderTest(env Envelope) string {
 		summary += fmt.Sprintf(", %d not run", notRun)
 	}
 	summary += fmt.Sprintf(", %d total", len(tests))
-	b.WriteString(kv("Summary", summary))
+	b.WriteString(r.kvRows(kvRow{"Tests", summary}))
+	b.WriteString(r.section("Runtime"))
+	if path := stringValue(workbook, "path"); path != "" {
+		b.WriteString(r.kvRows(kvRow{"Workbook", path}))
+	}
+	if summary := summarizeRuntime(runtime); summary != "" {
+		b.WriteString(r.kvRows(kvRow{"Runtime", summary}))
+	}
+	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
+		b.WriteString(r.kvRows(kvRow{"Session", sessionSummary}))
+	}
+	if needsSave := summarizeSaveRequirement(workbook); needsSave != "" {
+		b.WriteString(r.kvRows(kvRow{"Save", r.style(needsSave, "214", true)}))
+	}
+	rows := make([][]string, 0, len(tests))
 	for _, test := range tests {
 		status := stringValue(test, "status")
-		marker := r.style("[-]", "241", true)
-		switch status {
-		case "passed":
-			marker = r.style("[ok]", "42", true)
-		case "failed":
-			marker = r.style("[x]", "196", true)
-		case "inconclusive":
-			marker = r.style("[?]", "214", true)
-		}
+		marker := testStatusMarker(r, status)
 		name := stringValue(test, "name")
 		module := stringValue(test, "module")
 		duration := ""
 		if n, ok := numberValue(test, "duration_ms"); ok {
-			duration = fmt.Sprintf(" (%dms)", int(n))
+			duration = fmt.Sprintf("%dms", int(n))
 		}
-		fmt.Fprintf(&b, "%s %s.%s%s\n", marker, module, name, duration)
+		errText := ""
 		if errMap := objectMap(test["error"]); len(errMap) > 0 {
-			b.WriteString("  ")
-			b.WriteString(stringValue(errMap, "message"))
-			b.WriteString("\n")
+			errText = stringValue(errMap, "message")
 		}
+		rows = append(rows, []string{marker + " " + strings.Trim(strings.Join([]string{module, name}, "."), "."), duration, errText})
 	}
+	b.WriteString(r.section("Tests"))
+	b.WriteString(r.table([]string{"Test", "Duration", "Message"}, rows))
 	b.WriteString(r.renderUI(env))
 	b.WriteString(r.renderDebug(env))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func testStatusMarker(r renderer, status string) string {
+	switch status {
+	case "passed":
+		return r.statusBadge("passed")
+	case "failed":
+		return r.statusBadge("failed")
+	case "inconclusive":
+		if r.color {
+			return r.style("?", "214", true)
+		}
+		return "[?]"
+	default:
+		return r.statusBadge("info")
+	}
 }
 
 func (r renderer) renderDiagnostic(title string, value any) string {
@@ -1187,20 +1484,27 @@ func (r renderer) renderLint(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(r.section("Lint"))
 	if len(issues) == 0 {
 		b.WriteString("No lint issues found.\n")
 		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
-	b.WriteString(kv("Issues", fmt.Sprintf("%d", len(issues))))
+	b.WriteString(r.kvRows(kvRow{"Issues", fmt.Sprintf("%d", len(issues))}))
+	rows := make([][]string, 0, len(issues))
 	for _, issue := range issues {
 		loc := stringValue(issue, "file")
 		if n, ok := numberValue(issue, "line"); ok && n > 0 {
 			loc = fmt.Sprintf("%s:%d", loc, int(n))
 		}
-		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(issue, "severity")+"]", "214", true), stringValue(issue, "code"), loc, stringValue(issue, "message"))
+		rows = append(rows, []string{
+			r.severityBadge(stringValue(issue, "severity")),
+			stringValue(issue, "code"),
+			loc,
+			stringValue(issue, "message"),
+		})
 	}
+	b.WriteString(r.table([]string{"Severity", "Code", "Location", "Message"}, rows))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
@@ -1211,25 +1515,31 @@ func (r renderer) renderAnalysis(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(r.section("Analysis"))
 	if len(findings) == 0 {
 		b.WriteString("No analysis findings found.\n")
 		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
-	b.WriteString(kv("Findings", fmt.Sprintf("%d", len(findings))))
+	b.WriteString(r.kvRows(kvRow{"Findings", fmt.Sprintf("%d", len(findings))}))
+	rows := make([][]string, 0, len(findings))
 	for _, finding := range findings {
 		loc := stringValue(finding, "file")
 		if n, ok := numberValue(finding, "line"); ok && n > 0 {
 			loc = fmt.Sprintf("%s:%d", loc, int(n))
 		}
-		fmt.Fprintf(&b, "%s %s %s - %s\n", r.style("["+stringValue(finding, "severity")+"]", "214", true), stringValue(finding, "code"), loc, stringValue(finding, "message"))
+		message := stringValue(finding, "message")
 		if suggestion := stringValue(finding, "suggestion"); suggestion != "" {
-			b.WriteString("  Suggestion: ")
-			b.WriteString(suggestion)
-			b.WriteString("\n")
+			message += " Suggestion: " + suggestion
 		}
+		rows = append(rows, []string{
+			r.severityBadge(stringValue(finding, "severity")),
+			stringValue(finding, "code"),
+			loc,
+			message,
+		})
 	}
+	b.WriteString(r.table([]string{"Severity", "Code", "Location", "Message"}, rows))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
 }
@@ -1240,7 +1550,8 @@ func (r renderer) renderCheck(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(r.section("Check"))
+	rows := [][]string{}
 	for _, name := range []string{"lint", "analyze", "doctor"} {
 		item := objectMap(check[name])
 		if len(item) == 0 {
@@ -1254,10 +1565,35 @@ func (r renderer) renderCheck(env Envelope) string {
 		if n, ok := numberValue(item, "count"); ok {
 			count = fmt.Sprintf(" (%d)", int(n))
 		}
-		b.WriteString(kv(name, status+count))
+		rows = append(rows, []string{name, r.statusBadge(status), strings.TrimSpace(status + count)})
+	}
+	if len(rows) > 0 {
+		b.WriteString(r.table([]string{"Check", "Status", "Detail"}, rows))
 	}
 	b.WriteString(r.renderLogs(env))
 	return b.String()
+}
+
+func (r renderer) severityBadge(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "error":
+		if r.color {
+			return r.style("✖ error", "196", true)
+		}
+		return "[error]"
+	case "warning", "warn":
+		if r.color {
+			return r.style("⚠ warning", "214", true)
+		}
+		return "[warning]"
+	case "info", "":
+		if r.color {
+			return r.style("ℹ info", "39", true)
+		}
+		return "[info]"
+	default:
+		return "[" + severity + "]"
+	}
 }
 
 func (r renderer) renderMacros(env Envelope) string {
@@ -2775,48 +3111,53 @@ func (r renderer) renderStatus(env Envelope) string {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
-	b.WriteString("\n")
 	if len(project) > 0 {
-		b.WriteString("Project:\n")
-		b.WriteString(kv("Root", stringValue(project, "root")))
-		b.WriteString(kv("Workbook", stringValue(project, "workbook_path")))
+		b.WriteString(r.section("Project"))
+		b.WriteString(r.kvRows(
+			kvRow{"Root", stringValue(project, "root")},
+			kvRow{"Workbook", stringValue(project, "workbook_path")},
+		))
 		srcPaths := stringList(project["src_paths"])
 		for _, srcPath := range srcPaths {
-			b.WriteString(kv("Source", srcPath))
+			b.WriteString(r.kvRows(kvRow{"Source", srcPath}))
 		}
 	}
 	if len(session) > 0 {
-		b.WriteString("Session:\n")
+		b.WriteString(r.section("Session"))
 		if active, ok := boolValueOK(session, "active"); ok {
 			dirty, dirtyKnown := boolValueOK(session, "dirty")
-			b.WriteString(kv("Status", sessionSummary(active, dirty, dirtyKnown)))
+			b.WriteString(r.kvRows(kvRow{"Status", sessionSummary(active, dirty, dirtyKnown)}))
 		}
 		if dirty, ok := boolValueOK(session, "dirty"); ok && dirty {
-			b.WriteString(kv("Dirty", "true"))
+			b.WriteString(r.kvRows(kvRow{"Dirty", r.style("true", "214", true)}))
 		}
 	}
 	if len(state) > 0 {
-		b.WriteString("State:\n")
+		b.WriteString(r.section("State"))
 		if srcNewer, ok := boolValueOK(state, "src_newer_than_workbook"); ok {
-			b.WriteString(kv("Source newer", fmt.Sprintf("%t", srcNewer)))
+			b.WriteString(r.kvRows(kvRow{"Source newer", fmt.Sprintf("%t", srcNewer)}))
 		}
 		if liveNewer, ok := boolValueOK(state, "live_session_newer_than_disk"); ok {
-			b.WriteString(kv("Live newer", fmt.Sprintf("%t", liveNewer)))
+			value := fmt.Sprintf("%t", liveNewer)
+			if liveNewer {
+				value = r.style(value, "214", true)
+			}
+			b.WriteString(r.kvRows(kvRow{"Live newer", value}))
 		}
 		if saved, ok := boolValueOK(state, "workbook_saved"); ok {
-			b.WriteString(kv("Workbook saved", fmt.Sprintf("%t", saved)))
+			b.WriteString(r.kvRows(kvRow{"Workbook saved", fmt.Sprintf("%t", saved)}))
 		}
 		if sourceOfTruth := stringValue(state, "source_of_truth"); sourceOfTruth != "" {
-			b.WriteString(kv("Source of truth", sourceOfTruth))
+			b.WriteString(r.kvRows(kvRow{"Source of truth", sourceOfTruth}))
 		}
 		if mtime := stringValue(state, "workbook_last_modified_at"); mtime != "" {
-			b.WriteString(kv("Workbook mtime", mtime))
+			b.WriteString(r.kvRows(kvRow{"Workbook mtime", mtime}))
 		}
 		if mtime := stringValue(state, "latest_source_modified_at"); mtime != "" {
-			b.WriteString(kv("Source mtime", mtime))
+			b.WriteString(r.kvRows(kvRow{"Source mtime", mtime}))
 		}
 		if mtime := stringValue(state, "push_state_last_modified_at"); mtime != "" {
-			b.WriteString(kv("Push state mtime", mtime))
+			b.WriteString(r.kvRows(kvRow{"Push state mtime", mtime}))
 		}
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
@@ -2867,42 +3208,6 @@ func (r renderer) renderLogsSkipping(env Envelope, skip map[string]bool) string 
 	return b.String()
 }
 
-func renderWarningList(warnings []map[string]any) string {
-	if len(warnings) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, warning := range warnings {
-		b.WriteString("- ")
-		if code := stringValue(warning, "code"); code != "" {
-			b.WriteString("[")
-			b.WriteString(code)
-			b.WriteString("] ")
-		}
-		b.WriteString(stringValue(warning, "message"))
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func renderHintList(hints []map[string]any) string {
-	if len(hints) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, hint := range hints {
-		b.WriteString("- ")
-		if code := stringValue(hint, "code"); code != "" {
-			b.WriteString("[")
-			b.WriteString(code)
-			b.WriteString("] ")
-		}
-		b.WriteString(stringValue(hint, "message"))
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
 func (r renderer) renderTargetSession(env Envelope) string {
 	target := objectMap(env.Target)
 	session := objectMap(env.Session)
@@ -2937,13 +3242,33 @@ func (r renderer) renderWarningsAndHints(env Envelope) string {
 		return ""
 	}
 	var b strings.Builder
-	if renderedWarnings := renderWarningList(warnings); renderedWarnings != "" {
-		b.WriteString("Warnings:\n")
-		b.WriteString(renderedWarnings)
+	if len(warnings) > 0 {
+		b.WriteString(r.section("Warnings"))
+		for _, warning := range warnings {
+			b.WriteString(r.statusBadge("warning"))
+			b.WriteString(" ")
+			if code := stringValue(warning, "code"); code != "" {
+				b.WriteString("[")
+				b.WriteString(code)
+				b.WriteString("] ")
+			}
+			b.WriteString(stringValue(warning, "message"))
+			b.WriteString("\n")
+		}
 	}
-	if renderedHints := renderHintList(hints); renderedHints != "" {
-		b.WriteString("Hints:\n")
-		b.WriteString(renderedHints)
+	if len(hints) > 0 {
+		b.WriteString(r.section("Hints"))
+		for _, hint := range hints {
+			b.WriteString(r.statusBadge("hint"))
+			b.WriteString(" ")
+			if code := stringValue(hint, "code"); code != "" {
+				b.WriteString("[")
+				b.WriteString(code)
+				b.WriteString("] ")
+			}
+			b.WriteString(stringValue(hint, "message"))
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
@@ -3438,28 +3763,28 @@ func yesNo(v bool) string {
 
 func (r renderer) errorBlock(env Envelope) string {
 	if env.Error == nil {
-		return "\nError: command failed\n"
+		return r.section("Error") + "command failed\n"
 	}
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(r.style("Error:", "196", true))
+	b.WriteString(r.section("Error"))
+	b.WriteString(r.statusBadge(StatusFailed))
 	b.WriteString(" ")
 	b.WriteString(env.Error.Message)
 	b.WriteString("\n")
 	if env.Error.Code != "" {
-		b.WriteString(kv("Code", env.Error.Code))
+		b.WriteString(r.kvRows(kvRow{"Code", env.Error.Code}))
 	}
 	if env.Error.Phase != "" {
-		b.WriteString(kv("Phase", env.Error.Phase))
+		b.WriteString(r.kvRows(kvRow{"Phase", env.Error.Phase}))
 	}
 	if env.Error.Source != "" {
-		b.WriteString(kv("Source", env.Error.Source))
+		b.WriteString(r.kvRows(kvRow{"Source", env.Error.Source}))
 	}
 	if env.Error.Number != 0 {
-		b.WriteString(kv("Number", fmt.Sprintf("%d", env.Error.Number)))
+		b.WriteString(r.kvRows(kvRow{"Number", fmt.Sprintf("%d", env.Error.Number)}))
 	}
 	if env.Error.Line != 0 {
-		b.WriteString(kv("Line", fmt.Sprintf("%d", env.Error.Line)))
+		b.WriteString(r.kvRows(kvRow{"Line", fmt.Sprintf("%d", env.Error.Line)}))
 	}
 	return b.String()
 }
@@ -3475,7 +3800,42 @@ func (r renderer) style(s, color string, bold bool) string {
 	if bold {
 		style = style.Bold(true)
 	}
-	return style.Render(s)
+	rendered := style.Render(s)
+	if (color != "" || bold) && !strings.Contains(rendered, "\x1b[") {
+		return ansiStyle(s, color, bold)
+	}
+	return rendered
+}
+
+func ansiStyle(s, color string, bold bool) string {
+	codes := []string{}
+	if bold {
+		codes = append(codes, "1")
+	}
+	if code := ansiColorCode(color); code != "" {
+		codes = append(codes, code)
+	}
+	if len(codes) == 0 {
+		return s
+	}
+	return "\x1b[" + strings.Join(codes, ";") + "m" + s + "\x1b[0m"
+}
+
+func ansiColorCode(color string) string {
+	switch color {
+	case "42":
+		return "32"
+	case "196":
+		return "31"
+	case "214":
+		return "33"
+	case "244":
+		return "90"
+	case "39":
+		return "36"
+	default:
+		return ""
+	}
 }
 
 func kv(key, value string) string {
