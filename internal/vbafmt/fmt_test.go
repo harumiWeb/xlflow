@@ -61,6 +61,140 @@ End Sub
 	}
 }
 
+func TestFormatBasOperatorSpacing(t *testing.T) {
+	input := `Sub Main()
+x=1+2*3
+If a=1 And b<>2 Then x=1
+Range("A"&i).Value=x+1
+x = a Mod b
+If a Like "A*" Then x=1
+If obj Is Nothing Then x=1
+End Sub
+`
+	want := `Sub Main()
+    x = 1 + 2 * 3
+    If a = 1 And b <> 2 Then x = 1
+    Range("A" & i).Value = x + 1
+    x = a Mod b
+    If a Like "A*" Then x = 1
+    If obj Is Nothing Then x = 1
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("operator spacing mismatch:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("operator spacing not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
+func TestFormatBasOperatorSpacingOperators(t *testing.T) {
+	input := `Sub Main()
+x=1-2
+x=1/2
+x=1\2
+x=1^2
+x="A"&"B"
+If a<=1 Or b>=2 Then x=1
+x=a Xor b
+x=a Eqv b
+x=a Imp b
+End Sub
+`
+	want := `Sub Main()
+    x = 1 - 2
+    x = 1 / 2
+    x = 1 \ 2
+    x = 1 ^ 2
+    x = "A" & "B"
+    If a <= 1 Or b >= 2 Then x = 1
+    x = a Xor b
+    x = a Eqv b
+    x = a Imp b
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("operator spacing mismatch:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestFormatBasOperatorSpacingPreservesUnsafeForms(t *testing.T) {
+	input := `Sub Main()
+Workbooks.Open Filename:="C:\a.xlsx", ReadOnly:=True
+Dim n&
+Dim i%
+Dim s$
+Dim d#
+Dim c@
+Dim p^
+Debug.Print "x=1+2"
+' x=1+2
+#If VBA7 Then
+x=1+2
+#End If
+name = [A+B]
+x=1+ _
+ 2
+x=-1
+x=a*-b
+If Not flag Then x=1
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`Workbooks.Open Filename:="C:\a.xlsx", ReadOnly:=True`,
+		"Dim n&", "Dim i%", "Dim s$", "Dim d#", "Dim c@", "Dim p^",
+		`Debug.Print "x=1+2"`,
+		"' x=1+2",
+		"#If VBA7 Then",
+		"    x = 1 + 2",
+		"name = [A+B]",
+		"x=1+ _",
+		"x = -1",
+		"x = a * -b",
+		"If Not flag Then x = 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Filename :=") || strings.Contains(got, "Filename: =") || strings.Contains(got, "ReadOnly :=") {
+		t.Fatalf("named argument operator was damaged:\n%s", got)
+	}
+	if strings.Contains(got, "n &") || strings.Contains(got, "i %") || strings.Contains(got, "s $") {
+		t.Fatalf("type declaration suffix was split:\n%s", got)
+	}
+}
+
+func TestFormatBasOperatorSpacingCanBeDisabled(t *testing.T) {
+	input := "Sub Main()\nx=1+2\nEnd Sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{
+		OperatorSpacing:    false,
+		OperatorSpacingSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "    x=1+2") {
+		t.Fatalf("operator spacing should be disabled while indentation remains active:\n%s", got)
+	}
+}
+
 func TestFormatBasPreserveStringKeywords(t *testing.T) {
 	input := `Sub Main()
     Dim s As String
@@ -686,7 +820,7 @@ func TestFileResultDetectsChange(t *testing.T) {
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path, "")
+	fr, err := formatFile(path, FormatConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +839,7 @@ func TestFileResultNoChangeWhenFormatted(t *testing.T) {
 	if err := os.WriteFile(path, []byte(formatted), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path, "")
+	fr, err := formatFile(path, FormatConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -949,7 +1083,7 @@ func TestFormatFileSkipsUnsupportedExtension(t *testing.T) {
 	if err := os.WriteFile(path, []byte("VERSION 5.00\nBegin Form\nEnd\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path, "")
+	fr, err := formatFile(path, FormatConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,7 +1102,7 @@ func TestFormatFileSkipsParserErrors(t *testing.T) {
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path, "")
+	fr, err := formatFile(path, FormatConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -990,7 +1124,7 @@ func TestFormatFileFormatsVBA07RecoveredSyntax(t *testing.T) {
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fr, err := formatFile(path, "")
+	fr, err := formatFile(path, FormatConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1486,7 +1620,7 @@ func TestFormatTextPreservesExistingLineNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"10      x=1",
+		"10      x = 1",
 		"20      If x = 1 Then",
 		"30          y = 2",
 		"40      End If",

@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added `xlflow type db status/init/refresh/clean` for global generated TypeLib databases, with an initial Excel TypeLib importer feeding LSP type intelligence.
+- Added AST-aware VBA operator spacing to `xlflow fmt`, enabled by default and configurable with `[fmt].operator_spacing`.
 - Added conservative VBA LSP `prepareRename` and `rename` support for high-confidence local, private module, private procedure, and label symbols while refusing host, TypeLib, public API, UserForm/event, ambiguous, and unresolved targets.
 - Updated `xlflow lsp` to load generated TypeLib databases when present while continuing to work with only the embedded built-in database.
 - Added best-effort generated TypeLib DB initialization after successful `new` and `init`; failures are reported as warnings and do not fail project creation.

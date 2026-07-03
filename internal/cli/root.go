@@ -4957,13 +4957,15 @@ func (a *app) fmtCommand() *cobra.Command {
 				return err
 			}
 			opts := vbafmt.FmtOptions{
-				Write:       write,
-				Check:       check,
-				Diff:        diff,
-				Paths:       args,
-				Root:        a.cwd,
-				Cfg:         cfg,
-				LineNumbers: lineNumberMode,
+				Write:              write,
+				Check:              check,
+				Diff:               diff,
+				Paths:              args,
+				Root:               a.cwd,
+				Cfg:                cfg,
+				LineNumbers:        lineNumberMode,
+				OperatorSpacing:    cfg.Fmt.OperatorSpacing,
+				OperatorSpacingSet: true,
 			}
 			result, err := vbafmt.Run(opts)
 			if err != nil {
@@ -5120,7 +5122,16 @@ func (a *app) runFmtStdin() error {
 		_, _ = fmt.Fprintln(a.stdoutWriter())
 		return nil
 	}
-	formatted, err := vbafmt.FormatText(input, looksLikeClassModule(input))
+	formatCfg := vbafmt.FormatConfig{
+		OperatorSpacing:    true,
+		OperatorSpacingSet: true,
+	}
+	if cfg, err := config.Load(a.cwd); err == nil {
+		formatCfg.OperatorSpacing = cfg.Fmt.OperatorSpacing
+	} else if !errors.Is(err, config.ErrConfigNotFound) {
+		return a.writeFailure("fmt", output.ExitConfig, "config_error", err)
+	}
+	formatted, err := vbafmt.FormatTextWithOptions(input, looksLikeClassModule(input), formatCfg)
 	if err != nil {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
 	}
