@@ -64,11 +64,32 @@ xlflow fmt --check --json
 cat MyModule.bas | xlflow fmt --stdin --json
 ```
 
+## Configuration
+
+Operator and declaration spacing are enabled by default:
+
+```toml
+[fmt]
+operator_spacing = true
+declaration_spacing = true
+```
+
+Set `operator_spacing = false` to keep expression/operator spacing unchanged while still applying the other formatter passes.
+Set `declaration_spacing = false` to keep declaration whitespace unchanged while still applying indentation, line-number handling, and other enabled formatter passes.
+
 ## Notes
 
 > [!IMPORTANT]
 > `fmt` is source-only and does not open Excel COM. It targets `.bas` and `.cls` files under the configured project source directories plus `tests/`.
 > It uses parser-backed block structure for indentation and only applies minimal text edits.
+> [!NOTE]
+> By default, `fmt` normalizes safe binary operator spacing such as `x=1+2` to `x = 1 + 2` and `Range("A"&i).Value=x+1` to `Range("A" & i).Value = x + 1`.
+> [!NOTE]
+> Operator spacing preserves named arguments such as `Filename:="C:\a.xlsx"`, type-declaration suffixes such as `Dim n&`, strings, comments, attributes, preprocessor directives, and explicit line-continuation statements. Ambiguous cases are skipped instead of rewritten.
+> [!NOTE]
+> Declaration spacing normalizes safe declarations such as `Dim   wb   As   Workbook` to `Dim wb As Workbook`, `Dim a As Long,b As String` to `Dim a As Long, b As String`, and `Private Function   Add(a As Long,b As Long)As Long` to `Private Function Add(a As Long, b As Long) As Long`.
+> [!NOTE]
+> Declaration spacing preserves type-declaration suffixes, comments, strings, attributes, preprocessor directives, `Declare` statements, fixed-length string declarations, and explicit line-continuation statements. Unsupported declaration shapes are skipped.
 > [!WARNING]
 > `.frm` files are skipped by default. The formatter preserves class module metadata (`Attribute VB_*`, `VERSION`, `BEGIN`/`END` blocks) verbatim.
 > [!WARNING]

@@ -4952,18 +4952,23 @@ func (a *app) fmtCommand() *cobra.Command {
 			default:
 				return a.writeFailure("fmt", output.ExitConfig, "fmt_args_invalid", fmt.Errorf("invalid --line-numbers %q: expected preserve, add, remove, or renumber", lineNumbers))
 			}
-			cfg, err := a.loadConfig("fmt")
+			cfg, err := a.loadFmtConfig("fmt", false)
 			if err != nil {
 				return err
 			}
+			formatCfg := fmtFormatConfigFromConfig(cfg)
 			opts := vbafmt.FmtOptions{
-				Write:       write,
-				Check:       check,
-				Diff:        diff,
-				Paths:       args,
-				Root:        a.cwd,
-				Cfg:         cfg,
-				LineNumbers: lineNumberMode,
+				Write:                 write,
+				Check:                 check,
+				Diff:                  diff,
+				Paths:                 args,
+				Root:                  a.cwd,
+				Cfg:                   cfg,
+				LineNumbers:           lineNumberMode,
+				OperatorSpacing:       formatCfg.OperatorSpacing,
+				OperatorSpacingSet:    formatCfg.OperatorSpacingSet,
+				DeclarationSpacing:    formatCfg.DeclarationSpacing,
+				DeclarationSpacingSet: formatCfg.DeclarationSpacingSet,
 			}
 			result, err := vbafmt.Run(opts)
 			if err != nil {
@@ -5120,7 +5125,12 @@ func (a *app) runFmtStdin() error {
 		_, _ = fmt.Fprintln(a.stdoutWriter())
 		return nil
 	}
-	formatted, err := vbafmt.FormatText(input, looksLikeClassModule(input))
+	cfg, err := a.loadFmtConfig("fmt", true)
+	if err != nil {
+		return err
+	}
+	formatCfg := fmtFormatConfigFromConfig(cfg)
+	formatted, err := vbafmt.FormatTextWithOptions(input, looksLikeClassModule(input), formatCfg)
 	if err != nil {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_failed", err)
 	}
@@ -5149,6 +5159,32 @@ func (a *app) runFmtStdin() error {
 		return a.writeFailure("fmt", output.ExitEnvironment, "fmt_stdin_write_failed", err)
 	}
 	return nil
+}
+
+func (a *app) loadFmtConfig(command string, allowMissing bool) (config.Config, error) {
+	cfg, err := config.Load(a.cwd)
+	if err != nil && errors.Is(err, config.ErrInvalidExcelBridge) && a.hasValidBridgeOverride() {
+		cfg, err = config.LoadAllowInvalidExcelBridge(a.cwd)
+	}
+	if err != nil {
+		if allowMissing && errors.Is(err, config.ErrConfigNotFound) {
+			return config.Default(), nil
+		}
+		return cfg, a.writeFailure(command, output.ExitConfig, "config_error", err)
+	}
+	if len(cfg.Warnings) > 0 {
+		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
+	}
+	return cfg, nil
+}
+
+func fmtFormatConfigFromConfig(cfg config.Config) vbafmt.FormatConfig {
+	return vbafmt.FormatConfig{
+		OperatorSpacing:       cfg.Fmt.OperatorSpacing,
+		OperatorSpacingSet:    true,
+		DeclarationSpacing:    cfg.Fmt.DeclarationSpacing,
+		DeclarationSpacingSet: true,
+	}
 }
 
 func looksLikeClassModule(input string) bool {

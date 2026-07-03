@@ -24,6 +24,7 @@ type Config struct {
 	Src      SourceConfig     `toml:"src"`
 	VBA      VBAConfig        `toml:"vba"`
 	UserForm UserFormConfig   `toml:"userform"`
+	Fmt      FmtConfig        `toml:"fmt"`
 	Lint     LintConfig       `toml:"lint"`
 	Analyze  AnalyzeConfig    `toml:"analyze"`
 	Warnings []map[string]any `toml:"-"`
@@ -56,6 +57,11 @@ type VBAConfig struct {
 
 type UserFormConfig struct {
 	CodeSource string `toml:"code_source"`
+}
+
+type FmtConfig struct {
+	OperatorSpacing    bool `toml:"operator_spacing"`
+	DeclarationSpacing bool `toml:"declaration_spacing"`
 }
 
 type LintConfig struct {
@@ -230,6 +236,10 @@ func Default() Config {
 		},
 		UserForm: UserFormConfig{
 			CodeSource: "sidecar",
+		},
+		Fmt: FmtConfig{
+			OperatorSpacing:    true,
+			DeclarationSpacing: true,
 		},
 		Lint: LintConfig{
 			RequireOptionExplicit:           true,
@@ -710,6 +720,13 @@ default_component_folders = %t
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = %q
 
+# VBA formatter settings.
+[fmt]
+# Normalize spacing around safe binary operators in xlflow fmt.
+operator_spacing = %t
+# Normalize spacing in safe VBA declarations in xlflow fmt.
+declaration_spacing = %t
+
 # Static analysis rules.
 [lint]
 %s
@@ -724,6 +741,7 @@ code_source = %q
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
+		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing,
 		lintConfigText,
 		analyzeConfigText,
 	)

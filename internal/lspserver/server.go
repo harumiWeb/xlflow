@@ -536,7 +536,11 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 		return []protocol.TextEdit{}, nil
 	}
 	formatted, err := vbafmt.FormatTextWithOptions(doc.Source, documentIsClass(doc), vbafmt.FormatConfig{
-		LineNumbers: vbafmt.LineNumberModePreserve,
+		LineNumbers:           vbafmt.LineNumberModePreserve,
+		OperatorSpacing:       s.opts.Config.Fmt.OperatorSpacing,
+		OperatorSpacingSet:    true,
+		DeclarationSpacing:    s.opts.Config.Fmt.DeclarationSpacing,
+		DeclarationSpacingSet: true,
 	})
 	if err != nil {
 		return nil, err

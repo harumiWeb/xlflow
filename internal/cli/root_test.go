@@ -1222,6 +1222,95 @@ func TestFmtCheckViaCLI(t *testing.T) {
 	}
 }
 
+func TestFmtFileModeHonorsOperatorSpacingConfig(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte("[fmt]\noperator_spacing = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "test.bas")
+	original := "Sub Main()\nx=1+2\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--write", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --write error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "    x=1+2") {
+		t.Fatalf("expected indentation without operator spacing when disabled:\n%s", string(data))
+	}
+}
+
+func TestFmtFileModeHonorsDeclarationSpacingConfig(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte("[fmt]\ndeclaration_spacing = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "test.bas")
+	original := "Sub Main()\nDim   x   As   Long\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--write", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --write error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "    Dim   x   As   Long") {
+		t.Fatalf("expected indentation without declaration spacing when disabled:\n%s", string(data))
+	}
+}
+
+func TestFmtCheckHonorsDeclarationSpacingConfig(t *testing.T) {
+	dir := t.TempDir()
+	setupFmtProjectDir(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte("[fmt]\ndeclaration_spacing = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "test.bas")
+	input := "Sub Main()\n    Dim   x   As   Long\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		cwd:            dir,
+		stdout:         new(bytes.Buffer),
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "fmt", "--check", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --check should pass when only disabled declaration spacing differs: %v, exit = %d", err, output.ExitCode(err))
+	}
+}
+
 func TestFmtDiffViaCLI(t *testing.T) {
 	dir := t.TempDir()
 	setupFmtProjectDir(t, dir)
@@ -1565,6 +1654,81 @@ func TestFmtStdinViaCLI(t *testing.T) {
 	got := stdout.String()
 	if strings.TrimSpace(got) == "" {
 		t.Fatal("expected non-empty formatted output from --stdin")
+	}
+	if !strings.Contains(got, "x = 1") {
+		t.Fatalf("expected stdin fmt to apply default operator spacing:\n%s", got)
+	}
+}
+
+func TestFmtStdinHonorsOperatorSpacingConfig(t *testing.T) {
+	input := "Sub Main()\nx=1+2\nEnd Sub\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte("[fmt]\noperator_spacing = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--stdin"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --stdin error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "    x=1+2") {
+		t.Fatalf("expected stdin fmt to honor disabled operator spacing:\n%s", got)
+	}
+}
+
+func TestFmtStdinHonorsDeclarationSpacingConfig(t *testing.T) {
+	input := "Sub Main()\nDim   x   As   Long\nEnd Sub\n"
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = stdinWriter.Write([]byte(input))
+		_ = stdinWriter.Close()
+	}()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "xlflow.toml"), []byte("[fmt]\ndeclaration_spacing = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         new(bytes.Buffer),
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdinReader
+	defer func() { os.Stdin = oldStdin }()
+	root := a.rootCommand()
+	root.SetArgs([]string{"fmt", "--stdin"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("fmt --stdin error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "    Dim   x   As   Long") {
+		t.Fatalf("expected stdin fmt to honor disabled declaration spacing:\n%s", got)
 	}
 }
 

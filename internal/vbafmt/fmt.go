@@ -44,13 +44,17 @@ type SkippedReason struct {
 
 // FmtOptions controls the format operation.
 type FmtOptions struct {
-	Write       bool
-	Check       bool
-	Diff        bool
-	Paths       []string
-	Root        string
-	Cfg         config.Config
-	LineNumbers LineNumberMode
+	Write                 bool
+	Check                 bool
+	Diff                  bool
+	Paths                 []string
+	Root                  string
+	Cfg                   config.Config
+	LineNumbers           LineNumberMode
+	OperatorSpacing       bool
+	OperatorSpacingSet    bool
+	DeclarationSpacing    bool
+	DeclarationSpacingSet bool
 }
 
 func Run(opts FmtOptions) (*Result, error) {
@@ -60,8 +64,15 @@ func Run(opts FmtOptions) (*Result, error) {
 	}
 
 	results := make([]FileResult, 0, len(files))
+	formatCfg := FormatConfig{
+		LineNumbers:           opts.LineNumbers,
+		OperatorSpacing:       opts.OperatorSpacing,
+		OperatorSpacingSet:    opts.OperatorSpacingSet,
+		DeclarationSpacing:    opts.DeclarationSpacing,
+		DeclarationSpacingSet: opts.DeclarationSpacingSet,
+	}
 	for _, path := range files {
-		fr, err := formatFile(path, opts.LineNumbers)
+		fr, err := formatFile(path, formatCfg)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -211,7 +222,7 @@ func collectFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
+func formatFile(path string, cfg FormatConfig) (FileResult, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".bas" && ext != ".cls" {
 		return FileResult{
@@ -226,7 +237,7 @@ func formatFile(path string, lineNumbers LineNumberMode) (FileResult, error) {
 	}
 	isClass := ext == ".cls"
 	original := string(data)
-	formatted, lineNumResult, err := formatTextDetailed(original, isClass, FormatConfig{LineNumbers: lineNumbers})
+	formatted, lineNumResult, err := formatTextDetailed(original, isClass, cfg)
 	if err != nil {
 		if isFormatParseError(err) {
 			return FileResult{

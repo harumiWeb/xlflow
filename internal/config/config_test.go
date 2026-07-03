@@ -36,6 +36,12 @@ path = "build/Sales.xlsm"
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("unexpected userform defaults: %+v", cfg.UserForm)
 	}
+	if !cfg.Fmt.OperatorSpacing {
+		t.Fatalf("expected fmt.operator_spacing default to be enabled")
+	}
+	if !cfg.Fmt.DeclarationSpacing {
+		t.Fatalf("expected fmt.declaration_spacing default to be enabled")
+	}
 	if !cfg.Lint.RequireOptionExplicit {
 		t.Fatalf("lint defaults were not applied")
 	}
@@ -64,6 +70,55 @@ path = "build/Sales.xlsm"
 	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
 		cfg.Analyze.DetectFunctionReturnPath {
 		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
+	}
+}
+
+func TestLoadSupportsDisablingFmtOperatorSpacing(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[fmt]
+operator_spacing = false
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fmt.OperatorSpacing {
+		t.Fatal("expected fmt.operator_spacing=false to be honored")
+	}
+}
+
+func TestLoadSupportsDisablingFmtDeclarationSpacing(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[fmt]
+declaration_spacing = false
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fmt.DeclarationSpacing {
+		t.Fatal("expected fmt.declaration_spacing=false to be honored")
+	}
+	if !cfg.Fmt.OperatorSpacing {
+		t.Fatal("expected omitted fmt.operator_spacing to remain enabled")
 	}
 }
 
@@ -533,6 +588,11 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	if strings.Contains(text, "forbid_unqualified_excel_objects = false") || strings.Contains(text, "detect_range_find_nothing_check = true") {
 		t.Fatalf("generated config should prefer disabled_rules over legacy analyze booleans:\n%s", text)
 	}
+	if !strings.Contains(text, "[fmt]") ||
+		!strings.Contains(text, "operator_spacing = true") ||
+		!strings.Contains(text, "declaration_spacing = true") {
+		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
+	}
 
 	loaded, err := Load(dir)
 	if err != nil {
@@ -546,6 +606,12 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Excel.Bridge != "dotnet" {
 		t.Fatalf("excel.bridge mismatch: got %q, want dotnet", loaded.Excel.Bridge)
+	}
+	if !loaded.Fmt.OperatorSpacing {
+		t.Fatal("expected fmt.operator_spacing=true after Write/Load")
+	}
+	if !loaded.Fmt.DeclarationSpacing {
+		t.Fatal("expected fmt.declaration_spacing=true after Write/Load")
 	}
 	if loaded.Lint.ForbidInteractiveInput {
 		t.Fatal("expected forbid_interactive_input=false")
