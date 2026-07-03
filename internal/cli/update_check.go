@@ -34,6 +34,7 @@ type gitHubReleaseChecker struct {
 type scaffoldUpdateInfo struct {
 	LatestVersion string
 	ReleaseURL    string
+	Warning       string
 }
 
 type semanticVersion struct {
@@ -62,11 +63,9 @@ func (a *app) scaffoldWelcomeModel(skipUpdateCheck bool) scaffoldWelcomeModel {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
 	defer cancel()
-	update, err := checkForUpdate(ctx, a.updateChecker, model.Version)
-	if err != nil {
-		return model
-	}
+	update := checkForUpdateBestEffort(ctx, a.updateChecker, model.Version)
 	model.UpdateVersion = update.LatestVersion
+	model.UpdateWarning = update.Warning
 	return model
 }
 
@@ -104,6 +103,34 @@ func checkForUpdate(ctx context.Context, checker releaseChecker, currentVersion 
 		LatestVersion: strings.TrimSpace(release.Version),
 		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
 	}, nil
+}
+
+func checkForUpdateBestEffort(ctx context.Context, checker releaseChecker, currentVersion string) scaffoldUpdateInfo {
+	current, ok := parseSemanticVersion(currentVersion)
+	if !ok {
+		return scaffoldUpdateInfo{
+			Warning: fmt.Sprintf("update check skipped: current version %q is not a release version", strings.TrimSpace(currentVersion)),
+		}
+	}
+	release, err := checker.LatestRelease(ctx)
+	if err != nil {
+		return scaffoldUpdateInfo{
+			Warning: "update check failed: " + err.Error(),
+		}
+	}
+	latest, ok := parseSemanticVersion(release.Version)
+	if !ok {
+		return scaffoldUpdateInfo{
+			Warning: fmt.Sprintf("update check skipped: latest release tag %q is not semantic version", strings.TrimSpace(release.Version)),
+		}
+	}
+	if latest.compare(current) <= 0 {
+		return scaffoldUpdateInfo{}
+	}
+	return scaffoldUpdateInfo{
+		LatestVersion: strings.TrimSpace(release.Version),
+		ReleaseURL:    strings.TrimSpace(release.ReleaseURL),
+	}
 }
 
 func (c gitHubReleaseChecker) LatestRelease(ctx context.Context) (latestRelease, error) {

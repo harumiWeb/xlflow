@@ -70,6 +70,129 @@ func TestCheckForUpdate(t *testing.T) {
 	}
 }
 
+func TestCheckForUpdateBestEffortWarnings(t *testing.T) {
+	tests := []struct {
+		name           string
+		currentVersion string
+		checker        stubReleaseChecker
+		wantLatest     string
+		wantWarning    string
+	}{
+		{
+			name:           "newer release available",
+			currentVersion: "1.2.3",
+			checker: stubReleaseChecker{
+				release: latestRelease{Version: "v1.2.4", ReleaseURL: "https://example.com/v1.2.4"},
+			},
+			wantLatest: "v1.2.4",
+		},
+		{
+			name:           "current version is not semantic",
+			currentVersion: "dev",
+			checker:        stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+			wantWarning:    `update check skipped: current version "dev" is not a release version`,
+		},
+		{
+			name:           "release lookup fails",
+			currentVersion: "1.2.3",
+			checker:        stubReleaseChecker{err: errors.New("network blocked")},
+			wantWarning:    "update check failed: network blocked",
+		},
+		{
+			name:           "latest version is not semantic",
+			currentVersion: "1.2.3",
+			checker:        stubReleaseChecker{release: latestRelease{Version: "latest"}},
+			wantWarning:    `update check skipped: latest release tag "latest" is not semantic version`,
+		},
+		{
+			name:           "up to date",
+			currentVersion: "1.2.3",
+			checker:        stubReleaseChecker{release: latestRelease{Version: "v1.2.3"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkForUpdateBestEffort(context.Background(), tt.checker, tt.currentVersion)
+			if got.LatestVersion != tt.wantLatest {
+				t.Fatalf("latest = %q, want %q", got.LatestVersion, tt.wantLatest)
+			}
+			if got.Warning != tt.wantWarning {
+				t.Fatalf("warning = %q, want %q", got.Warning, tt.wantWarning)
+			}
+		})
+	}
+}
+
+func TestScaffoldWelcomeModelRecordsUpdateWarnings(t *testing.T) {
+	tests := []struct {
+		name        string
+		app         app
+		skip        bool
+		envValue    *string
+		wantLatest  string
+		wantWarning string
+	}{
+		{
+			name: "newer release",
+			app: app{
+				buildInfo:     BuildInfo{Version: "1.2.3"},
+				updateChecker: stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+			},
+			wantLatest: "v1.2.4",
+		},
+		{
+			name: "checker error warning",
+			app: app{
+				buildInfo:     BuildInfo{Version: "1.2.3"},
+				updateChecker: stubReleaseChecker{err: errors.New("network blocked")},
+			},
+			wantWarning: "update check failed: network blocked",
+		},
+		{
+			name: "non semantic current warning",
+			app: app{
+				buildInfo:     BuildInfo{Version: "dev"},
+				updateChecker: stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+			},
+			wantWarning: `update check skipped: current version "dev" is not a release version`,
+		},
+		{
+			name: "explicit flag skip has no warning",
+			app: app{
+				buildInfo:     BuildInfo{Version: "dev"},
+				updateChecker: stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+			},
+			skip: true,
+		},
+		{
+			name: "env skip has no warning",
+			app: app{
+				buildInfo:     BuildInfo{Version: "dev"},
+				updateChecker: stubReleaseChecker{release: latestRelease{Version: "v1.2.4"}},
+			},
+			envValue: ptrString("1"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue != nil {
+				t.Setenv(noUpdateCheckEnvVar, *tt.envValue)
+			} else {
+				t.Setenv(noUpdateCheckEnvVar, "0")
+			}
+			got := tt.app.scaffoldWelcomeModel(tt.skip)
+			if got.UpdateVersion != tt.wantLatest {
+				t.Fatalf("UpdateVersion = %q, want %q", got.UpdateVersion, tt.wantLatest)
+			}
+			if got.UpdateWarning != tt.wantWarning {
+				t.Fatalf("UpdateWarning = %q, want %q", got.UpdateWarning, tt.wantWarning)
+			}
+		})
+	}
+}
+
 func TestGitHubReleaseCheckerLatestRelease(t *testing.T) {
 	var gotAccept string
 	var gotUserAgent string
@@ -279,4 +402,8 @@ func TestShouldSkipScaffoldUpdateCheck(t *testing.T) {
 			}
 		})
 	}
+}
+
+func ptrString(value string) *string {
+	return &value
 }
