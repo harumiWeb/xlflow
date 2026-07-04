@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { registerLineSuppressionCodeActions } from "./codeActions";
 import { showProjectCliUnavailableNotice, XlflowCliAvailabilityService } from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { registerCommands } from "./commands";
@@ -45,6 +46,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     projectState,
     updateService,
     sidebar,
+    registerLineSuppressionCodeActions(),
   );
   let lastSelectedWorkspaceKey = selectedWorkspaceKey();
 

@@ -124,7 +124,7 @@ var configurableLintRules = []lintRuleConfig{
 	{ID: "VB007", Key: "forbid_interactive_input", Default: true, Get: func(c LintConfig) bool { return c.ForbidInteractiveInput }, Set: func(c *LintConfig, v bool) { c.ForbidInteractiveInput = v }},
 	{ID: "VB018", Key: "detect_scope_shadowing", Default: false, Get: func(c LintConfig) bool { return c.DetectScopeShadowing }, Set: func(c *LintConfig, v bool) { c.DetectScopeShadowing = v }},
 	{ID: "VB019", Key: "detect_multiple_declarator_clarity", Default: true, Get: func(c LintConfig) bool { return c.DetectMultipleDeclaratorClarity }, Set: func(c *LintConfig, v bool) { c.DetectMultipleDeclaratorClarity = v }},
-	{ID: "VB020", Key: "detect_unused_local_variables", Default: false, Get: func(c LintConfig) bool { return c.DetectUnusedLocalVariables }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLocalVariables = v }},
+	{ID: "VB020", Key: "detect_unused_local_variables", Default: true, Get: func(c LintConfig) bool { return c.DetectUnusedLocalVariables }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLocalVariables = v }},
 	{ID: "VB021", Key: "detect_unused_private_procedures", Default: false, Get: func(c LintConfig) bool { return c.DetectUnusedPrivateProcedures }, Set: func(c *LintConfig, v bool) { c.DetectUnusedPrivateProcedures = v }},
 	{ID: "VB022", Key: "detect_confusing_call_syntax", Default: true, Get: func(c LintConfig) bool { return c.DetectConfusingCallSyntax }, Set: func(c *LintConfig, v bool) { c.DetectConfusingCallSyntax = v }},
 	{ID: "VB023", Key: "detect_for_each_control_type", Default: true, Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
@@ -250,6 +250,7 @@ func Default() Config {
 			ForbidPublicModuleFields:        true,
 			ForbidInteractiveInput:          true,
 			DetectMultipleDeclaratorClarity: true,
+			DetectUnusedLocalVariables:      true,
 			DetectConfusingCallSyntax:       true,
 			DetectForEachControlType:        true,
 			DetectDangerousResume:           true,
@@ -549,9 +550,32 @@ func renderLintConfig(cfg LintConfig) string {
 		b.WriteString("]\n")
 	}
 	optIn := legacyOptInLintRulesForWrite(cfg)
+	optInSet := map[string]bool{}
+	for _, rule := range optIn {
+		optInSet[rule.Key] = true
+	}
+	b.WriteString("\n")
+	b.WriteString("# VB020 unused-local-variable warnings are enabled by default.\n")
+	b.WriteString("# Add \"VB020\" to disabled_rules if a project intentionally keeps scratch locals.\n")
+	b.WriteString("#\n")
+	b.WriteString("# Optional project-wide lint rules. They are disabled by default because\n")
+	b.WriteString("# they can be noisy in projects with callback-heavy or workbook-driven VBA.\n")
+	b.WriteString("# Uncomment individual rules to enable them.\n")
+	for _, hint := range []struct {
+		Key  string
+		Line string
+	}{
+		{"detect_scope_shadowing", "# detect_scope_shadowing = true          # VB018\n"},
+		{"detect_unused_private_procedures", "# detect_unused_private_procedures = true # VB021\n"},
+		{"detect_nested_with_ambiguity", "# detect_nested_with_ambiguity = true    # VB027\n"},
+	} {
+		if !optInSet[hint.Key] {
+			b.WriteString(hint.Line)
+		}
+	}
 	if len(optIn) > 0 {
 		b.WriteString("\n")
-		b.WriteString("# Legacy opt-in lint settings. Prefer disabled_rules for disabling recommended rules.\n")
+		b.WriteString("# Enabled optional lint settings.\n")
 		for _, rule := range optIn {
 			b.WriteString(rule.Key)
 			b.WriteString(" = true\n")

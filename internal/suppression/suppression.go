@@ -44,6 +44,17 @@ func DirectivesForFiles(root string, paths []string) ([]Directive, []map[string]
 	return directives, warnings, nil
 }
 
+func DirectivesForSource(root, path, source string) ([]Directive, []map[string]any) {
+	file, err := filepath.Rel(root, path)
+	if err != nil {
+		file = path
+	}
+	if !filepath.IsAbs(path) {
+		file = path
+	}
+	return directivesForSource(filepath.ToSlash(file), source)
+}
+
 func Apply(diagnostics []Diagnostic, directives []Directive, family Family) ([]bool, []map[string]any) {
 	suppressed := make([]bool, len(diagnostics))
 	used := make([]bool, len(directives))
@@ -92,7 +103,12 @@ func directivesForFile(root, path string) ([]Directive, []map[string]any, error)
 		file = path
 	}
 	file = filepath.ToSlash(file)
-	lines := normalizedSourceLines(string(body))
+	directives, warnings := directivesForSource(file, string(body))
+	return directives, warnings, nil
+}
+
+func directivesForSource(file, source string) ([]Directive, []map[string]any) {
+	lines := normalizedSourceLines(source)
 	var directives []Directive
 	var warnings []map[string]any
 	for i, line := range lines {
@@ -143,7 +159,7 @@ func directivesForFile(root, path string) ([]Directive, []map[string]any, error)
 			})
 		}
 	}
-	return directives, warnings, nil
+	return directives, warnings
 }
 
 func parseDirective(comment string) (string, []string, bool) {

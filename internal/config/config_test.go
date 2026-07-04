@@ -52,11 +52,12 @@ path = "build/Sales.xlsm"
 		t.Fatalf("interactive input lint default was not applied")
 	}
 	if !cfg.Lint.DetectMultipleDeclaratorClarity ||
+		!cfg.Lint.DetectUnusedLocalVariables ||
 		!cfg.Lint.DetectConfusingCallSyntax || !cfg.Lint.DetectForEachControlType ||
 		!cfg.Lint.DetectDangerousResume {
 		t.Fatalf("expected high-signal AST lint defaults to be enabled: %+v", cfg.Lint)
 	}
-	if cfg.Lint.DetectScopeShadowing || cfg.Lint.DetectUnusedLocalVariables ||
+	if cfg.Lint.DetectScopeShadowing ||
 		cfg.Lint.DetectUnusedPrivateProcedures ||
 		cfg.Lint.DetectNestedWithAmbiguity {
 		t.Fatalf("expected false-positive-prone AST lint defaults to be opt-in: %+v", cfg.Lint)
@@ -593,6 +594,15 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		!strings.Contains(text, "declaration_spacing = true") {
 		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
 	}
+	for _, want := range []string{
+		"# VB020 unused-local-variable warnings are enabled by default.",
+		"# Add \"VB020\" to disabled_rules if a project intentionally keeps scratch locals.",
+		"# detect_unused_private_procedures = true # VB021",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
 
 	loaded, err := Load(dir)
 	if err != nil {
@@ -624,6 +634,28 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected forbid_unqualified_excel_objects=false")
+	}
+}
+
+func TestWriteOmitsOptionalLintHintsForEnabledOptIns(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	p := filepath.Join(dir, FileName)
+	if err := Write(p, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, "# detect_unused_private_procedures = true # VB021") {
+		t.Fatalf("generated config should not include opt-in hint for enabled VB021:\n%s", text)
+	}
+	if !strings.Contains(text, "detect_unused_private_procedures = true") {
+		t.Fatalf("generated config should include enabled VB021 setting:\n%s", text)
 	}
 }
 

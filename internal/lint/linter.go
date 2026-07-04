@@ -202,6 +202,7 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 	}
 	issues = append(issues, l.flowIssues(path, string(source), parsed.Root)...)
 	issues = append(issues, l.undeclaredVariableIssues(path, string(source), parsed.Root)...)
+	issues = append(issues, l.unusedLocalVariableIssues(path, string(source))...)
 
 	if includeFilesystemRules && l.Config.Lint.ForbidInteractiveInput {
 		boundaries, err := gui.Analyzer{RootDir: l.RootDir, Config: l.Config}.AnalyzeFile(path)
@@ -220,6 +221,10 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 				Suggestion: boundary.Suggestion,
 			})
 		}
+	}
+	if !includeFilesystemRules {
+		directives, _ := suppression.DirectivesForSource(l.RootDir, path, string(source))
+		issues, _ = applyInlineSuppressions(issues, directives)
 	}
 	return issues, nil
 }
@@ -1179,7 +1184,7 @@ afterVisibility:
 
 func (l Linter) projectIssues() ([]Issue, error) {
 	cfg := l.Config.Lint
-	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedLocalVariables && !cfg.DetectUnusedPrivateProcedures {
+	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedPrivateProcedures {
 		return nil, nil
 	}
 	result, err := symbols.Inspect(symbols.Options{
@@ -1192,7 +1197,7 @@ func (l Linter) projectIssues() ([]Issue, error) {
 		return nil, err
 	}
 	var issues []Issue
-	if cfg.DetectScopeShadowing || cfg.DetectUnusedLocalVariables {
+	if cfg.DetectScopeShadowing {
 		issues = append(issues, l.symbolScopeIssues(result)...)
 	}
 	if cfg.DetectUnusedPrivateProcedures {
@@ -1210,7 +1215,6 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 		return nil
 	}
 	var issues []Issue
-	sourceCache := map[string]string{}
 	for _, file := range result.Files {
 		moduleNames := map[string]symbols.Symbol{}
 		procedureNames := map[string]symbols.Symbol{}
@@ -1255,26 +1259,41 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 					sameScope[scopeKey][key] = sym
 				}
 			}
-			if l.Config.Lint.DetectUnusedLocalVariables && !isIgnoredLocalName(sym.Name) {
-				source, ok := sourceCache[sym.File]
-				if !ok {
-					body, err := os.ReadFile(filepath.Join(l.RootDir, filepath.FromSlash(sym.File)))
-					if err != nil {
-						continue
-					}
-					source = string(body)
-					sourceCache[sym.File] = source
-				}
-				if !localNameReferenced(source, sym, procedureEndLineForSymbol(file.Symbols, sym)) {
-					issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
-					issue.Symbol = sym.Name
-					issues = append(issues, issue)
-				}
-			}
 		}
 		if l.Config.Lint.DetectScopeShadowing {
 			issues = append(issues, l.parameterShadowingIssues(file, moduleNames, procedureNames)...)
 		}
+	}
+	return issues
+}
+
+func (l Linter) unusedLocalVariableIssues(path, source string) []Issue {
+	if !l.Config.Lint.DetectUnusedLocalVariables {
+		return nil
+	}
+	file, err := symbols.InspectSource(symbols.SourceOptions{
+		RootDir:        l.RootDir,
+		Path:           path,
+		IncludePrivate: true,
+		IncludeLabels:  false,
+	}, []byte(source))
+	if err != nil {
+		return nil
+	}
+	var issues []Issue
+	for _, sym := range file.Symbols {
+		if sym.Kind != "local_variable" && (sym.Kind != "const" || sym.Parent == "") {
+			continue
+		}
+		if isIgnoredLocalName(sym.Name) {
+			continue
+		}
+		if localNameReferenced(source, sym, procedureEndLineForSymbol(file.Symbols, sym)) {
+			continue
+		}
+		issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
+		issue.Symbol = sym.Name
+		issues = append(issues, issue)
 	}
 	return issues
 }
@@ -1432,37 +1451,75 @@ func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
 func localNameReferenced(source string, sym symbols.Symbol, endLine int) bool {
 	lines := normalizedSourceLines(source)
 	needle := sym.Name
-	count := 0
 	for i := sym.StartLine - 1; i < len(lines); i++ {
 		lineNo := i + 1
 		if sym.Parent != "" && endLine > 0 && lineNo > endLine {
 			break
 		}
 		line := normalizedCodeLine(lines[i])
-		if lineNo == sym.StartLine {
-			line = stripDeclarationPrefix(line)
-		}
-		if hasWord(line, needle) {
-			count++
-		}
-		if count > 0 {
-			return true
+		for _, statement := range splitStatements(line) {
+			if lineNo == sym.StartLine && isLocalDeclarationStatement(statement) {
+				continue
+			}
+			if hasLocalReadUse(statement, needle) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func stripDeclarationPrefix(line string) string {
-	lower := strings.ToLower(line)
-	for _, prefix := range []string{"dim ", "static ", "private ", "public "} {
-		if strings.HasPrefix(lower, prefix) {
-			if idx := strings.Index(line, ","); idx >= 0 {
-				return line[idx+1:]
-			}
-			return ""
-		}
+func isLocalDeclarationStatement(statement string) bool {
+	fields := lowerFields(statement)
+	if len(fields) == 0 {
+		return false
 	}
-	return line
+	switch fields[0] {
+	case "dim", "static", "const":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasLocalReadUse(code, symbol string) bool {
+	lowerCode := strings.ToLower(code)
+	lowerSymbol := strings.ToLower(symbol)
+	for offset := 0; ; {
+		index := strings.Index(lowerCode[offset:], lowerSymbol)
+		if index < 0 {
+			return false
+		}
+		index += offset
+		end := index + len(symbol)
+		if isIdentifierBoundary(code, index-1) &&
+			isIdentifierBoundary(code, end) &&
+			!isQualifiedIdentifier(code, index) &&
+			!isLocalAssignmentTargetOccurrence(code, index, end) {
+			return true
+		}
+		offset = end
+	}
+}
+
+func isLocalAssignmentTargetOccurrence(code string, index, end int) bool {
+	if !isAssignmentTarget(code, end) {
+		return false
+	}
+	prefix := strings.TrimSpace(code[:index])
+	if prefix == "" {
+		return true
+	}
+	fields := strings.Fields(prefix)
+	if len(fields) == 0 {
+		return true
+	}
+	switch strings.ToLower(fields[len(fields)-1]) {
+	case "set", "let", "then", "else":
+		return true
+	default:
+		return false
+	}
 }
 
 func isKnownCallbackProcedure(name string) bool {

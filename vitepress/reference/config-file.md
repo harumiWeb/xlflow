@@ -62,6 +62,14 @@ code_source = "sidecar"
 # Disable specific lint rules by diagnostic ID.
 disabled_rules = []
 
+# VB020 unused-local-variable warnings are enabled by default.
+# Add "VB020" to disabled_rules if a project intentionally keeps scratch locals.
+#
+# Optional project-wide lint rules. Uncomment individual rules to enable them.
+# detect_scope_shadowing = true          # VB018
+# detect_unused_private_procedures = true # VB021
+# detect_nested_with_ambiguity = true    # VB027
+
 # Runtime-risk analysis rules.
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
@@ -120,6 +128,8 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 | `disabled_rules` | string[] | no       | `[]`    | Disable configurable lint rules by diagnostic ID. |
 
 Legacy per-rule booleans such as `forbid_select = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VB002"]`.
+
+`VB020` unused-local-variable warnings are enabled by default and can be disabled with `disabled_rules = ["VB020"]`. Other project-wide lint rules such as `detect_unused_private_procedures = true` (`VB021`) remain disabled by default. New `xlflow.toml` files include commented examples so projects can opt in deliberately.
 
 Configurable lint rule IDs:
 
