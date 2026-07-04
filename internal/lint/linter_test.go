@@ -1296,6 +1296,25 @@ func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
 	assertIssue(t, issues, "VB020", 3)
 }
 
+func TestLinterLintSourceAppliesInlineSuppressions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim x As Integer ' xlflow:disable-line VB020
+    x = 2
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 0 {
+		t.Fatalf("VB020 should be suppressed for in-memory lint source, got %+v", got)
+	}
+}
+
 func TestLinterReportsUndeclaredAssignmentsWithOptionExplicit(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit

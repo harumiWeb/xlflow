@@ -222,6 +222,10 @@ func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bo
 			})
 		}
 	}
+	if !includeFilesystemRules {
+		directives, _ := suppression.DirectivesForSource(l.RootDir, path, string(source))
+		issues, _ = applyInlineSuppressions(issues, directives)
+	}
 	return issues, nil
 }
 

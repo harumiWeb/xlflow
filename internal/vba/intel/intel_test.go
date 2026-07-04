@@ -859,6 +859,24 @@ End Sub
 	}
 }
 
+func TestDiagnosticsApplyInlineSuppressionsForUnsavedContent(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim x As Integer ' xlflow:disable-line VB020
+    x = 2
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB020")
+	if len(diagnostics) != 0 {
+		t.Fatalf("VB020 should be suppressed for unsaved LSP diagnostics, got %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsDoNotReportExcelRangeCallChainArgumentsAsUndeclared(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

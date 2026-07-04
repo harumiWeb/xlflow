@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v0.3.0
+
+- Added Quick Fix actions for xlflow diagnostics to insert `xlflow:disable-next-line` or `xlflow:disable-line` suppression comments.
 - Offer a Push & Run choice before VS Code macro/procedure runs when source files are newer than the workbook.
 - Run macros from VS Code with `xlflow run --interactive` so user-triggered macro execution uses interactive mode explicitly.
 - Run user-triggered macro and procedure commands in the VS Code terminal instead of the Output panel.
