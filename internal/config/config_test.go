@@ -637,6 +637,28 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 }
 
+func TestWriteOmitsOptionalLintHintsForEnabledOptIns(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	p := filepath.Join(dir, FileName)
+	if err := Write(p, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, "# detect_unused_private_procedures = true # VB021") {
+		t.Fatalf("generated config should not include opt-in hint for enabled VB021:\n%s", text)
+	}
+	if !strings.Contains(text, "detect_unused_private_procedures = true") {
+		t.Fatalf("generated config should include enabled VB021 setting:\n%s", text)
+	}
+}
+
 func hasConfigWarning(warnings []map[string]any, code string, rule string) bool {
 	for _, warning := range warnings {
 		if warning["code"] == code && warning["rule"] == rule {

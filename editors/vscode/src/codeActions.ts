@@ -38,12 +38,22 @@ class XlflowLineSuppressionCodeActionProvider implements vscode.CodeActionProvid
     const seen = new Set<string>();
     for (const diagnostic of context.diagnostics) {
       const code = diagnosticRuleCode(diagnostic);
-      if (code === undefined || seen.has(code)) {
+      if (code === undefined) {
         continue;
       }
-      seen.add(code);
-      actions.push(disableNextLineAction(document, diagnostic, code));
-      actions.push(disableLineAction(document, diagnostic, code));
+      const key = diagnosticActionKey(diagnostic, code);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const nextLineAction = disableNextLineAction(document, diagnostic, code);
+      if (nextLineAction !== undefined) {
+        actions.push(nextLineAction);
+      }
+      const lineAction = disableLineAction(document, diagnostic, code);
+      if (lineAction !== undefined) {
+        actions.push(lineAction);
+      }
     }
     return actions;
   }
@@ -70,11 +80,23 @@ export function diagnosticRuleCode(diagnostic: vscode.Diagnostic): string | unde
   return normalized;
 }
 
+export function diagnosticActionKey(diagnostic: vscode.Diagnostic, code: string): string {
+  const range = diagnostic.range;
+  return [
+    code,
+    range.start.line,
+    range.start.character,
+    range.end.line,
+    range.end.character,
+    diagnostic.message,
+  ].join(":");
+}
+
 function disableNextLineAction(
   document: vscode.TextDocument,
   diagnostic: vscode.Diagnostic,
   code: string,
-): vscode.CodeAction {
+): vscode.CodeAction | undefined {
   const line = diagnostic.range.start.line;
   const action = new vscode.CodeAction(
     vscode.l10n.t("Suppress {0} on the next line", code),
@@ -85,6 +107,9 @@ function disableNextLineAction(
   action.edit = new vscode.WorkspaceEdit();
   const previous = existingDirectiveLine(document, line, "xlflow:disable-next-line");
   if (previous !== undefined) {
+    if (directiveLineHasCode(document.lineAt(previous).text, "xlflow:disable-next-line", code)) {
+      return undefined;
+    }
     action.edit.insert(
       document.uri,
       new vscode.Position(previous, document.lineAt(previous).text.length),
@@ -104,7 +129,7 @@ function disableLineAction(
   document: vscode.TextDocument,
   diagnostic: vscode.Diagnostic,
   code: string,
-): vscode.CodeAction {
+): vscode.CodeAction | undefined {
   const line = diagnostic.range.start.line;
   const action = new vscode.CodeAction(
     vscode.l10n.t("Suppress {0} on this line", code),
@@ -113,11 +138,11 @@ function disableLineAction(
   action.diagnostics = [diagnostic];
   action.edit = new vscode.WorkspaceEdit();
   const text = document.lineAt(line).text;
-  action.edit.insert(
-    document.uri,
-    new vscode.Position(line, text.length),
-    disableLineSuffix(text, code),
-  );
+  const suffix = disableLineSuffix(text, code);
+  if (suffix === "") {
+    return undefined;
+  }
+  action.edit.insert(document.uri, new vscode.Position(line, text.length), suffix);
   return action;
 }
 
@@ -148,9 +173,26 @@ export function disableNextLineComment(
 }
 
 export function disableLineSuffix(lineText: string, code: string): string {
-  if (/'\s*xlflow:disable-line\b/i.test(lineText)) {
+  const existing = /'\s*xlflow:disable-line\b(.*)$/i.exec(lineText);
+  if (existing !== null) {
+    if (directiveCodesInclude(existing[1], code)) {
+      return "";
+    }
     return ` ${code}`;
   }
   const spacer = lineText.trimEnd().length === 0 ? "" : " ";
   return `${spacer}' xlflow:disable-line ${code}`;
+}
+
+function directiveLineHasCode(lineText: string, directive: string, code: string): boolean {
+  const escaped = directive.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`'\\s*${escaped}\\b(.*)$`, "i").exec(lineText);
+  return match !== null && directiveCodesInclude(match[1], code);
+}
+
+function directiveCodesInclude(text: string, code: string): boolean {
+  return text
+    .trim()
+    .split(/\s+/)
+    .some((candidate) => candidate.toUpperCase() === code.toUpperCase());
 }

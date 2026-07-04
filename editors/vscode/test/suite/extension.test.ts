@@ -9,6 +9,7 @@ import {
   normalizeAvailabilitySuccess,
 } from "../../src/cliAvailability";
 import {
+  diagnosticActionKey,
   diagnosticRuleCode,
   disableLineSuffix,
   disableNextLineComment,
@@ -139,6 +140,10 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     " VB021",
   );
   assert.strictEqual(
+    disableLineSuffix("    Dim staleValue As Long ' xlflow:disable-line VB020", "VB020"),
+    "",
+  );
+  assert.strictEqual(
     disableNextLineComment("    Dim staleValue As Long", "VB020", vscode.EndOfLine.LF),
     "    ' xlflow:disable-next-line VB020\n",
   );
@@ -150,6 +155,17 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   suppressibleDiagnostic.source = "xlflow";
   suppressibleDiagnostic.code = "VB020";
   assert.strictEqual(diagnosticRuleCode(suppressibleDiagnostic), "VB020");
+  const secondSuppressibleDiagnostic = new vscode.Diagnostic(
+    new vscode.Range(1, 0, 1, 1),
+    "unused local",
+    vscode.DiagnosticSeverity.Warning,
+  );
+  secondSuppressibleDiagnostic.source = "xlflow";
+  secondSuppressibleDiagnostic.code = "VB020";
+  assert.notStrictEqual(
+    diagnosticActionKey(suppressibleDiagnostic, "VB020"),
+    diagnosticActionKey(secondSuppressibleDiagnostic, "VB020"),
+  );
   suppressibleDiagnostic.code = "VB029";
   assert.strictEqual(diagnosticRuleCode(suppressibleDiagnostic), undefined);
   assert.deepStrictEqual(

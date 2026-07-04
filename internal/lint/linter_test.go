@@ -1219,6 +1219,29 @@ End Sub
 	}
 }
 
+func TestLinterUnusedLocalVariableTreatsOneLineConditionalAssignmentsAsWrites(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim scalarValue As Long
+  Dim objectValue As Object
+  If True Then scalarValue = 1
+  If True Then Set objectValue = Nothing
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLocalVariables = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb020 := issuesByCode(issues, "VB020")
+	if len(vb020) != 2 || vb020[0].Symbol != "scalarValue" || vb020[1].Symbol != "objectValue" {
+		t.Fatalf("expected one-line conditional write-only assignments to trigger VB020, got %+v", vb020)
+	}
+}
+
 func TestLinterDetectsNestedWithAmbiguityWhenEnabled(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit

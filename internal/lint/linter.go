@@ -1510,7 +1510,16 @@ func isLocalAssignmentTargetOccurrence(code string, index, end int) bool {
 	if prefix == "" {
 		return true
 	}
-	return strings.EqualFold(prefix, "Set") || strings.EqualFold(prefix, "Let")
+	fields := strings.Fields(prefix)
+	if len(fields) == 0 {
+		return true
+	}
+	switch strings.ToLower(fields[len(fields)-1]) {
+	case "set", "let", "then", "else":
+		return true
+	default:
+		return false
+	}
 }
 
 func isKnownCallbackProcedure(name string) bool {
