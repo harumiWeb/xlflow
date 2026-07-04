@@ -1194,6 +1194,31 @@ End Sub
 	}
 }
 
+func TestLinterUnusedLocalVariableIgnoresWriteOnlyAssignments(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim writtenOnly As Long
+  Dim assignedObject As Object
+  Dim updated As Long
+  writtenOnly = 1
+  Set assignedObject = Nothing
+  updated = updated + 1
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLocalVariables = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb020 := issuesByCode(issues, "VB020")
+	if len(vb020) != 2 || vb020[0].Symbol != "writtenOnly" || vb020[1].Symbol != "assignedObject" {
+		t.Fatalf("expected only write-only assignments to trigger VB020, got %+v", vb020)
+	}
+}
+
 func TestLinterDetectsNestedWithAmbiguityWhenEnabled(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
@@ -1268,6 +1293,7 @@ func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
 	assertIssue(t, issues, "VB001", 1)
 	assertIssue(t, issues, "VB002", 2)
 	assertIssue(t, issues, "VB005", 3)
+	assertIssue(t, issues, "VB020", 3)
 }
 
 func TestLinterReportsUndeclaredAssignmentsWithOptionExplicit(t *testing.T) {

@@ -7,6 +7,10 @@ All notable changes to xlflow will be documented in this file.
 - Improved human-readable CLI output with clearer sections, status markers, warnings/hints, and table-style summaries while preserving `--json` contracts.
 - Added `xlflow run --push` to import edited VBA source into the configured workbook before running a macro.
 - Improved `xlflow run` macro-failure diagnostics to suggest `xlflow push` / `xlflow run --push` when source files are newer than the saved workbook.
+- Enabled `VB020` unused local variable warnings by default; projects can opt out with `[lint].disabled_rules = ["VB020"]`.
+- Updated generated `xlflow.toml` files to show how to opt out of `VB020` and how to opt in to heavier project-wide rules such as `VB021` unused private procedures.
+- Improved `VB020` unused local variable detection so write-only assignments no longer count as variable references.
+- Fixed VBA LSP diagnostics so `VB020` unused local variable warnings appear in editor diagnostics for the current buffer.
 - Fixed `.NET` `xlflow run --interactive` so native VBA UI such as `MsgBox` is left for the user to dismiss instead of being misreported as `macro_failed`.
 - Fixed `.NET` Excel cleanup so direct `run`/`test` executions and `session stop` do not leave owned Excel processes behind after successful commands.
 

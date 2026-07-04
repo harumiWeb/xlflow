@@ -129,7 +129,7 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 `update check` queries the latest GitHub Release and compares it with the current xlflow build version. The command does not require Excel COM. Successful JSON uses `command="update check"` and includes top-level `update.current_version`, `update.latest_version` when a newer release is available, `update.update_available`, and optional `update.release_url`. Versions that cannot be parsed as semantic versions, such as `dev`, are treated as not updateable and return `update_available=false`. Network, API, or malformed release responses fail with `error.code="update_check_failed"` and exit code `3`.
 
-`lsp --stdio` starts the reusable VBA language server over Language Server Protocol JSON-RPC using standard input and standard output. While the server is running, stdout is reserved exclusively for framed LSP messages; normal logging goes to stderr by default or to `--log-file <path>` when supplied. The initial MVP supports `initialize`, `initialized`, `shutdown`, `exit`, full-document `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`, diagnostic publication, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, `textDocument/references`, `textDocument/prepareRename`, `textDocument/rename`, `textDocument/hover`, `textDocument/completion`, and `textDocument/codeLens`. Open editor buffers are authoritative over filesystem content until `didClose`. Diagnostics use `source="xlflow"` and xlflow rule IDs such as `VB001`, `VB005`, and `VB014`. LSP diagnostics reuse the file-local lint rules used by `xlflow lint` against the current in-memory buffer; project-wide and filesystem-only lint checks remain CLI-only.
+`lsp --stdio` starts the reusable VBA language server over Language Server Protocol JSON-RPC using standard input and standard output. While the server is running, stdout is reserved exclusively for framed LSP messages; normal logging goes to stderr by default or to `--log-file <path>` when supplied. The initial MVP supports `initialize`, `initialized`, `shutdown`, `exit`, full-document `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`, diagnostic publication, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, `textDocument/references`, `textDocument/prepareRename`, `textDocument/rename`, `textDocument/hover`, `textDocument/completion`, and `textDocument/codeLens`. Open editor buffers are authoritative over filesystem content until `didClose`. Diagnostics use `source="xlflow"` and xlflow rule IDs such as `VB001`, `VB005`, `VB014`, and `VB020`. LSP diagnostics reuse the file-local lint rules used by `xlflow lint` against the current in-memory buffer; project-wide and filesystem-only lint checks such as unused private procedure detection remain CLI-only.
 
 LSP rename is intentionally conservative and identity-based. `textDocument/prepareRename` returns a range only for high-confidence project/source symbols: local variables, parameters, procedure-local constants, private or implicit-private module variables/constants, same-module private procedures, and same-procedure labels referenced by `GoTo`, `GoSub`, `Resume`, or `On Error GoTo`. `textDocument/rename` returns edits only for resolved references to that same declaration and never edits strings or comments. Rename is rejected for host, Office, TypeLib, external library, public project-wide API, module/class file, `Attribute VB_Name`, UserForm control, event-handler, property group, ambiguous, or unresolved targets.
 
@@ -281,6 +281,10 @@ code_source = "sidecar"
 
 [lint]
 disabled_rules = []
+# VB020 unused-local-variable warnings are enabled by default.
+# Add "VB020" to disabled_rules if a project intentionally keeps scratch locals.
+# Other project-wide lint rules remain disabled by default.
+# detect_unused_private_procedures = true # VB021
 
 [analyze]
 disabled_rules = []
@@ -510,7 +514,7 @@ Unknown inline suppression IDs are reported in command `warnings` as `unknown_in
 
 Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_option_explicit`, `VB002` = `forbid_select`, `VB003` = `forbid_activate`, `VB004` = `forbid_on_error_resume_next`, `VB005` = `detect_implicit_variant`, `VB006` = `forbid_public_module_fields`, `VB007` = `forbid_interactive_input`, `VB018` = `detect_scope_shadowing`, `VB019` = `detect_multiple_declarator_clarity`, `VB020` = `detect_unused_local_variables`, `VB021` = `detect_unused_private_procedures`, `VB022` = `detect_confusing_call_syntax`, `VB023` = `detect_for_each_control_type`, `VB026` = `detect_dangerous_resume`, and `VB027` = `detect_nested_with_ambiguity`.
 
-Higher-signal lint rules `VB019`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB020`, `VB021`, and `VB027` are disabled by default and can still be enabled with their legacy `[lint]` booleans during the compatibility window.
+Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB021`, and `VB027` are disabled by default and can still be enabled with their legacy `[lint]` booleans during the compatibility window.
 
 ## Analysis Rules
 

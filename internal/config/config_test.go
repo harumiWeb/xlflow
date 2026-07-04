@@ -52,11 +52,12 @@ path = "build/Sales.xlsm"
 		t.Fatalf("interactive input lint default was not applied")
 	}
 	if !cfg.Lint.DetectMultipleDeclaratorClarity ||
+		!cfg.Lint.DetectUnusedLocalVariables ||
 		!cfg.Lint.DetectConfusingCallSyntax || !cfg.Lint.DetectForEachControlType ||
 		!cfg.Lint.DetectDangerousResume {
 		t.Fatalf("expected high-signal AST lint defaults to be enabled: %+v", cfg.Lint)
 	}
-	if cfg.Lint.DetectScopeShadowing || cfg.Lint.DetectUnusedLocalVariables ||
+	if cfg.Lint.DetectScopeShadowing ||
 		cfg.Lint.DetectUnusedPrivateProcedures ||
 		cfg.Lint.DetectNestedWithAmbiguity {
 		t.Fatalf("expected false-positive-prone AST lint defaults to be opt-in: %+v", cfg.Lint)
@@ -592,6 +593,15 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		!strings.Contains(text, "operator_spacing = true") ||
 		!strings.Contains(text, "declaration_spacing = true") {
 		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
+	}
+	for _, want := range []string{
+		"# VB020 unused-local-variable warnings are enabled by default.",
+		"# Add \"VB020\" to disabled_rules if a project intentionally keeps scratch locals.",
+		"# detect_unused_private_procedures = true # VB021",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
 	}
 
 	loaded, err := Load(dir)

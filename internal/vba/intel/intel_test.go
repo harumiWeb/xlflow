@@ -73,6 +73,7 @@ End Sub
 Public Sub Run()
     Dim missingValue As Long
     missingValue = 1
+    Debug.Print missingValue
 End Sub
 `
 	doc.Source = `Attribute VB_Name = "Main"
@@ -836,6 +837,25 @@ End Sub
 	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029")
 	if !hasDiagnosticMessage(diagnostics, `Undeclared identifier "dict"`) {
 		t.Fatalf("missing out-of-scope dict diagnostic: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsIncludeUnusedLocalVariables(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim staleValue As Long
+    Dim usedValue As Long
+    usedValue = usedValue + 1
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB020")
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "Procedure-local variable") {
+		t.Fatalf("expected one VB020 diagnostic for staleValue, got %+v", diagnostics)
 	}
 }
 
