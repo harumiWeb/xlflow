@@ -78,12 +78,12 @@ Names are sorted workbook scope first, then sheet order, then name. `refers_to` 
 
 ## Formula Regions
 
-Each sheet JSONL file contains one formula region per line. Normal formulas are grouped vertically when contiguous cells in the same column have the same normalized R1C1-like pattern and parse status.
+Each sheet JSONL file contains one logical formula region per line. Normal and shared OOXML formulas are treated as storage forms of the same semantic formula region. Adjacent regions are grouped vertically when contiguous cells in the same column have the same normalized R1C1-like pattern, parse status, and compatible features.
 
 ```jsonl
 {
   "range": "G2:G1000",
-  "kind": "normal",
+  "kind": "formula",
   "formula_r1c1": "=RC[-2]*RC[-1]",
   "example_cell": "G2",
   "example_formula": "=E2*F2",
@@ -94,28 +94,32 @@ Each sheet JSONL file contains one formula region per line. Normal formulas are 
 
 Single-cell deviations stay as one-cell regions. When xlflow can identify a one-cell deviation between larger matching regions in the same column, it adds `outlier` to `features`.
 
-Shared formulas are represented from the shared anchor and OOXML `ref` range instead of expanding child cells:
+Shared formulas are read from their OOXML anchor and `ref` range, but `shared_index`, anchor, and shared-group boundaries are storage metadata and do not define canonical regions. If Excel stores one copied formula range as multiple adjacent shared groups with the same normalized pattern, xlflow coalesces them:
 
 ```jsonl
 {
-  "range": "C2:C1000",
-  "kind": "shared",
-  "shared_index": "0",
-  "anchor": "C2",
+  "range": "D2:D101",
+  "kind": "formula",
   "formula_r1c1": "=RC[-2]*RC[-1]",
-  "example_cell": "C2",
-  "example_formula": "=A2*B2",
-  "count": 999,
-  "parse_status": "ok"
+  "example_cell": "D2",
+  "example_formula": "=B2*C2",
+  "count": 100,
+  "parse_status": "ok",
+  "storage_kinds": [
+    "shared"
+  ],
+  "storage_group_count": 2
 }
 ```
+
+`storage_kinds` identifies non-default OOXML storage forms that contributed to a canonical region. `storage_group_count` is emitted only when multiple storage-level groups were coalesced. Plain normal formula regions omit storage metadata.
 
 If a formula cannot be fully normalized, xlflow keeps raw formula text and continues:
 
 ```jsonl
 {
   "range": "D10",
-  "kind": "normal",
+  "kind": "formula",
   "formula": "=Table1[Amount]",
   "example_cell": "D10",
   "example_formula": "=Table1[Amount]",

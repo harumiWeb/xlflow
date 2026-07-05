@@ -42,11 +42,33 @@ func TestBuildRegionsSharedFormulaUsesAnchorRef(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("region count = %d: %#v", len(regions), regions)
 	}
-	if regions[0].Kind != "shared" || regions[0].Range != "C2:C4" || regions[0].SharedIndex != "0" || regions[0].Count != 3 {
+	if regions[0].Kind != "formula" || regions[0].Range != "C2:C4" || regions[0].Count != 3 {
 		t.Fatalf("shared region = %#v", regions[0])
+	}
+	if len(regions[0].StorageKinds) != 1 || regions[0].StorageKinds[0] != "shared" {
+		t.Fatalf("storage kinds = %#v", regions[0].StorageKinds)
 	}
 	if regions[0].FormulaR1C1 != "=RC[-2]*RC[-1]" {
 		t.Fatalf("formula_r1c1 = %q", regions[0].FormulaR1C1)
+	}
+}
+
+func TestBuildRegionsCoalescesAdjacentSharedFormulaStorageGroups(t *testing.T) {
+	regions := BuildRegions([]FormulaCell{
+		{Cell: "D2", Row: 2, Col: 4, Kind: "shared", SharedIndex: "0", SharedRef: "D2:D65", Formula: "=B2*C2"},
+		{Cell: "D66", Row: 66, Col: 4, Kind: "shared", SharedIndex: "1", SharedRef: "D66:D101", Formula: "=B66*C66"},
+	})
+	if len(regions) != 1 {
+		t.Fatalf("region count = %d: %#v", len(regions), regions)
+	}
+	if regions[0].Range != "D2:D101" || regions[0].Kind != "formula" || regions[0].FormulaR1C1 != "=RC[-2]*RC[-1]" || regions[0].Count != 100 {
+		t.Fatalf("coalesced region = %#v", regions[0])
+	}
+	if regions[0].StorageGroupCount != 2 {
+		t.Fatalf("storage_group_count = %d", regions[0].StorageGroupCount)
+	}
+	if len(regions[0].StorageKinds) != 1 || regions[0].StorageKinds[0] != "shared" {
+		t.Fatalf("storage_kinds = %#v", regions[0].StorageKinds)
 	}
 }
 
@@ -84,7 +106,7 @@ func TestBuildRegionsMalformedSharedAnchorFailsSoft(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("region count = %d", len(regions))
 	}
-	if regions[0].Kind != "shared" || regions[0].ParseStatus != "failed" || regions[0].Formula != "=A2*B2" {
+	if regions[0].Kind != "formula" || regions[0].ParseStatus != "failed" || regions[0].Formula != "=A2*B2" {
 		t.Fatalf("region = %#v", regions[0])
 	}
 	if !contains(regions[0].Features, "shared_formula_malformed_ref") {

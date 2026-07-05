@@ -34,22 +34,23 @@ type FormulaCell struct {
 }
 
 type FormulaRegion struct {
-	Range          string   `json:"range"`
-	Kind           string   `json:"kind"`
-	SharedIndex    string   `json:"shared_index,omitempty"`
-	Anchor         string   `json:"anchor,omitempty"`
-	FormulaR1C1    string   `json:"formula_r1c1,omitempty"`
-	Formula        string   `json:"formula,omitempty"`
-	ExampleCell    string   `json:"example_cell,omitempty"`
-	ExampleFormula string   `json:"example_formula,omitempty"`
-	Count          int      `json:"count"`
-	ParseStatus    string   `json:"parse_status"`
-	Features       []string `json:"features,omitempty"`
+	Range             string   `json:"range"`
+	Kind              string   `json:"kind"`
+	FormulaR1C1       string   `json:"formula_r1c1,omitempty"`
+	Formula           string   `json:"formula,omitempty"`
+	ExampleCell       string   `json:"example_cell,omitempty"`
+	ExampleFormula    string   `json:"example_formula,omitempty"`
+	Count             int      `json:"count"`
+	ParseStatus       string   `json:"parse_status"`
+	Features          []string `json:"features,omitempty"`
+	StorageKinds      []string `json:"storage_kinds,omitempty"`
+	StorageGroupCount int      `json:"storage_group_count,omitempty"`
 
-	startRow int
-	endRow   int
-	col      int
-	key      regionKey
+	startRow      int
+	endRow        int
+	col           int
+	key           regionKey
+	storageGroups int
 }
 
 type regionKey struct {
@@ -57,6 +58,7 @@ type regionKey struct {
 	FormulaR1C1 string
 	Formula     string
 	ParseStatus string
+	Features    string
 }
 
 type normalizeSummary struct {

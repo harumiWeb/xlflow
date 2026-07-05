@@ -19,6 +19,7 @@ The command is separate from VBA `xlflow pull`:
 - `pull` remains the Excel/VBIDE-backed VBA export command.
 - `formulas pull` is a file-level OOXML reader and never launches Excel.
 - The command writes region-based JSONL by default, grouping contiguous same-column formulas that share the same normalized R1C1-like pattern.
+- OOXML storage details such as shared formula indexes, anchors, and group boundaries do not define canonical regions. Normal and shared storage groups with the same logical formula pattern are coalesced, with optional `storage_kinds` and `storage_group_count` metadata when useful.
 - Workbook and sheet-scoped defined names are written to `formulas/names.jsonl`.
 - Unsupported formulas are preserved as raw formula data with `partial` or `failed` parse status instead of aborting extraction.
 
