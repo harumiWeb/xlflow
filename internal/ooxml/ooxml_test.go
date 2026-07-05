@@ -83,6 +83,43 @@ func TestReadWorksheetFormulasStreamsFormulaElementsOnly(t *testing.T) {
 	}
 }
 
+func TestReadWorkbookPreservesMalformedDefinedNameLocalSheetID(t *testing.T) {
+	path := writeZipFixture(t, map[string]string{
+		"xl/workbook.xml": `<?xml version="1.0"?>
+<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="BadScope" localSheetId="abc">Sheet1!$A$1</definedName>
+  </definedNames>
+</workbook>`,
+		"xl/_rels/workbook.xml.rels": `<Relationships>
+  <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+		"xl/worksheets/sheet1.xml": `<worksheet/>`,
+	})
+	pkg, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pkg.Close() }()
+
+	wb, err := pkg.ReadWorkbook()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wb.DefinedNames) != 1 {
+		t.Fatalf("defined names = %#v", wb.DefinedNames)
+	}
+	if wb.DefinedNames[0].LocalSheetIDRaw != "abc" {
+		t.Fatalf("localSheetId raw = %q", wb.DefinedNames[0].LocalSheetIDRaw)
+	}
+	if got := DefinedNameScope(wb.DefinedNames[0], wb.Sheets); got != "sheet" {
+		t.Fatalf("scope = %q", got)
+	}
+}
+
 func writeZipFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "book.xlsx")

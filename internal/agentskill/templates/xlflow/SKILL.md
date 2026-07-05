@@ -58,7 +58,6 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Run `xlflow doctor --json` when Excel, COM, VBIDE, or macro execution looks suspicious.
    - Start `xlflow session start` for normal AI-agent development once the source of truth is clear.
    - Run `xlflow pull --session --json` before editing when the workbook is the current source of truth.
-   - When worksheet formulas may affect the behavior, read [references/formulas.md](references/formulas.md), then run or inspect `xlflow formulas pull --json` output under `formulas/`.
 
 2. Edit source files.
    - Prefer `.bas`, `.cls`, and `.frm` files under the configured source directories.
@@ -184,7 +183,6 @@ When the user reports a runtime failure:
 - Read [references/testing.md](references/testing.md) for detailed guidance on `XlflowAssert`, lifecycle hooks, tag conventions, and failure diagnosis.
 - Use `xlflow macros --session --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
 - Use `xlflow inspect workbook --json` to confirm saved workbook metadata after save, or `xlflow inspect workbook --session --json` to inspect the live workbook before saving.
-- Use `xlflow formulas pull --json` to extract worksheet formulas, defined names, formula references, sheet dependencies, and parse summaries into `formulas/`. It reads the saved `.xlsx` / `.xlsm` directly without Excel COM; if the live session workbook is newer than disk, run `xlflow save --json` first.
 - Use `xlflow inspect sheets --json` to verify saved worksheet names, visibility, and lightweight used ranges, or `xlflow inspect sheets --session --json` for the live workbook.
 - Use `xlflow inspect range --sheet <name> --address <A1:F20> --json` when the expected saved-file output rectangle is known.
 - Use `xlflow inspect range --sheet <name> --address <A1:F20> --session --json` when the expected output rectangle is still only in the live workbook.

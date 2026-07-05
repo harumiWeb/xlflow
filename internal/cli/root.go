@@ -655,14 +655,7 @@ func (a *app) formulasPullCommand() *cobra.Command {
 			env.Workbook = map[string]any{
 				"path": displayPath(a.cwd, workbookPath),
 			}
-			env.Output = map[string]any{
-				"dir":                  displayPath(a.cwd, result.OutputDir),
-				"manifest":             displayPath(a.cwd, result.ManifestPath),
-				"sheet_count":          len(result.Manifest.Sheets),
-				"formula_region_count": result.FormulaRegionCount,
-				"parse_status_summary": result.Manifest.ParseStatusSummary,
-				"defined_name_count":   len(result.Names),
-			}
+			env.Output = formulaResultPayload(result, a.cwd)
 			env.Logs = []string{fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", result.FormulaRegionCount, len(result.Manifest.Sheets))}
 			return a.write(env, output.ExitSuccess)
 		},
@@ -1642,16 +1635,18 @@ func (a *app) pullCommand() *cobra.Command {
 			if code == output.ExitSuccess && withFormulas {
 				formulaResult, formulaErr := formulaspkg.Pull(workbookArgPath(a.cwd, cfg.Excel.Path), filepath.Join(a.cwd, "formulas"))
 				if formulaErr != nil {
-					return a.writeFailure("pull", output.ExitEnvironment, "pull_formulas_failed", formulaErr)
+					attachFormulaPullError(&env, formulaErr)
 				}
-				attachFormulaPullResult(&env, formulaResult, a.cwd)
-				if session {
+				if formulaErr == nil {
+					attachFormulaPullResult(&env, formulaResult, a.cwd)
+					env.Logs = append(env.Logs, fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", formulaResult.FormulaRegionCount, len(formulaResult.Manifest.Sheets)))
+				}
+				if session && formulaErr == nil {
 					env.Warnings = append(anySlice(env.Warnings), map[string]any{
 						"code":    "formula_snapshot_saved_file",
 						"message": "Formula snapshots were extracted from the saved workbook file. If the live session workbook has unsaved formula changes, run `xlflow save --json` and `xlflow formulas pull --json` again.",
 					})
 				}
-				env.Logs = append(env.Logs, fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", formulaResult.FormulaRegionCount, len(formulaResult.Manifest.Sheets)))
 			}
 			return a.write(env, code)
 		},
@@ -1666,7 +1661,12 @@ func attachFormulaPullResult(env *output.Envelope, result formulaspkg.Result, ro
 		return
 	}
 	outputPayload := cliObjectMap(env.Output)
-	outputPayload["formulas"] = map[string]any{
+	outputPayload["formulas"] = formulaResultPayload(result, root)
+	env.Output = outputPayload
+}
+
+func formulaResultPayload(result formulaspkg.Result, root string) map[string]any {
+	return map[string]any{
 		"dir":                  displayPath(root, result.OutputDir),
 		"manifest":             displayPath(root, result.ManifestPath),
 		"sheet_count":          len(result.Manifest.Sheets),
@@ -1674,7 +1674,22 @@ func attachFormulaPullResult(env *output.Envelope, result formulaspkg.Result, ro
 		"parse_status_summary": result.Manifest.ParseStatusSummary,
 		"defined_name_count":   len(result.Names),
 	}
+}
+
+func attachFormulaPullError(env *output.Envelope, err error) {
+	if env == nil || err == nil {
+		return
+	}
+	outputPayload := cliObjectMap(env.Output)
+	outputPayload["formulas_error"] = map[string]any{
+		"code":    "pull_formulas_failed",
+		"message": err.Error(),
+	}
 	env.Output = outputPayload
+	env.Warnings = append(anySlice(env.Warnings), map[string]any{
+		"code":    "pull_formulas_failed",
+		"message": "VBA source was pulled, but formula snapshot extraction failed: " + err.Error(),
+	})
 }
 
 func (a *app) packCommand() *cobra.Command {

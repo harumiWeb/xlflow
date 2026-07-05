@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -2233,6 +2234,30 @@ func TestAttachFormulaPullResultAddsOutputSummary(t *testing.T) {
 	parseSummary := cliObjectMap(formulas["parse_status_summary"])
 	if parseSummary["ok"] != float64(2) || parseSummary["partial"] != float64(1) || parseSummary["failed"] != float64(0) {
 		t.Fatalf("parse summary = %#v", parseSummary)
+	}
+}
+
+func TestAttachFormulaPullErrorPreservesPullEnvelope(t *testing.T) {
+	env := output.New("pull")
+	env.Logs = []string{"exported VBA source"}
+
+	attachFormulaPullError(&env, errors.New("bad workbook"))
+
+	if env.Status != output.StatusOK || env.Command != "pull" {
+		t.Fatalf("env status changed: %#v", env)
+	}
+	outputPayload := cliObjectMap(env.Output)
+	formulasErr := cliObjectMap(outputPayload["formulas_error"])
+	if formulasErr["code"] != "pull_formulas_failed" || formulasErr["message"] != "bad workbook" {
+		t.Fatalf("formulas_error = %#v", formulasErr)
+	}
+	warnings := anySlice(env.Warnings)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v", env.Warnings)
+	}
+	warning := cliObjectMap(warnings[0])
+	if warning["code"] != "pull_formulas_failed" || !strings.Contains(fmt.Sprint(warning["message"]), "bad workbook") {
+		t.Fatalf("warning = %#v", warning)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/ooxml"
 	"github.com/xuri/excelize/v2"
@@ -134,7 +135,7 @@ func sanitizeSheetName(name string) string {
 	var b strings.Builder
 	lastDash := false
 	for _, r := range name {
-		valid := r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		valid := unicode.IsLetter(r) || unicode.IsDigit(r)
 		if valid {
 			b.WriteRune(r)
 			lastDash = false

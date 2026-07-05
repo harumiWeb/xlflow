@@ -43,6 +43,10 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	manual := filepath.Join(dir, "formulas", "README.txt")
+	if err := os.WriteFile(manual, []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout, err := runFormulasCommandForTest(dir, "--json", "formulas", "pull")
 	if err != nil {
@@ -68,6 +72,9 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("stale output still exists or stat failed: %v", err)
+	}
+	if got := readText(t, manual); got != "keep me\n" {
+		t.Fatalf("manual file = %q", got)
 	}
 
 	manifest := readText(t, filepath.Join(dir, "formulas", "manifest.json"))

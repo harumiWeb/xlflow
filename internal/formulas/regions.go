@@ -85,7 +85,14 @@ func expandSharedFormula(cells map[string]FormulaCell, anchor FormulaCell) {
 		putFormulaCell(cells, failedFormulaCell(anchor, "shared_formula_malformed_ref", 30))
 		return
 	}
-	summary := normalizeFormula(anchor.Formula, anchor.Row, anchor.Col)
+	result := formula.NormalizeA1ToR1C1Pattern(anchor.Formula, formula.NormalizeOptions{BaseCell: formula.CellRef{Row: anchor.Row, Col: anchor.Col}})
+	summary := normalizeSummary{
+		status:      result.Status,
+		formulaR1C1: result.Formula,
+		rawFormula:  anchor.Formula,
+		features:    featureCodes(result.Features),
+	}
+	refs := sortedReferences(result.References)
 	groupID := "shared:" + anchor.SharedIndex + ":" + anchor.SharedRef
 	for row := start.row; row <= end.row; row++ {
 		for col := start.col; col <= end.col; col++ {
@@ -95,7 +102,7 @@ func expandSharedFormula(cells map[string]FormulaCell, anchor FormulaCell) {
 			}
 			formulaText := anchor.Formula
 			if row != anchor.Row || col != anchor.Col {
-				formulaText = translateSharedFormula(anchor.Formula, formula.CellRef{Row: anchor.Row, Col: anchor.Col}, formula.CellRef{Row: row, Col: col})
+				formulaText = translateSharedFormula(anchor.Formula, refs, formula.CellRef{Row: anchor.Row, Col: anchor.Col}, formula.CellRef{Row: row, Col: col})
 			}
 			priority := 20
 			if row == anchor.Row && col == anchor.Col {
@@ -321,18 +328,13 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-func translateSharedFormula(value string, from, to formula.CellRef) string {
-	result := formula.NormalizeA1ToR1C1Pattern(value, formula.NormalizeOptions{BaseCell: from})
-	if len(result.References) == 0 {
+func translateSharedFormula(value string, refs []formula.Reference, from, to formula.CellRef) string {
+	if len(refs) == 0 {
 		return value
 	}
 	shifted := value
 	deltaRow := to.Row - from.Row
 	deltaCol := to.Col - from.Col
-	refs := append([]formula.Reference{}, result.References...)
-	sort.Slice(refs, func(i, j int) bool {
-		return refs[i].Span.Start > refs[j].Span.Start
-	})
 	for _, ref := range refs {
 		replacement, ok := renderShiftedReference(ref, deltaRow, deltaCol)
 		if !ok || ref.Span.Start < 0 || ref.Span.End > len(shifted) || ref.Span.Start > ref.Span.End {
@@ -341,6 +343,14 @@ func translateSharedFormula(value string, from, to formula.CellRef) string {
 		shifted = shifted[:ref.Span.Start] + replacement + shifted[ref.Span.End:]
 	}
 	return shifted
+}
+
+func sortedReferences(refs []formula.Reference) []formula.Reference {
+	sorted := append([]formula.Reference{}, refs...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Span.Start > sorted[j].Span.Start
+	})
+	return sorted
 }
 
 func renderShiftedReference(ref formula.Reference, deltaRow, deltaCol int) (string, bool) {

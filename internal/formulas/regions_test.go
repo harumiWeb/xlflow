@@ -150,6 +150,22 @@ func TestBuildRegionsMalformedSharedAnchorFailsSoft(t *testing.T) {
 	}
 }
 
+func TestSanitizeSheetNamePreservesUnicodeLettersAndDigits(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		want string
+	}{
+		{name: "売上 集計", want: "売上-集計"},
+		{name: "Résumé 2026", want: "Résumé-2026"},
+		{name: "Лист 1", want: "Лист-1"},
+		{name: "!!!", want: "Sheet"},
+	} {
+		if got := sanitizeSheetName(tt.name); got != tt.want {
+			t.Fatalf("sanitizeSheetName(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 func contains(values []string, value string) bool {
 	for _, v := range values {
 		if v == value {

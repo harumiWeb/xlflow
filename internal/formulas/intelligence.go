@@ -66,9 +66,9 @@ func resolveEndpointForRegion(endpoint formula.RefEndpoint, region FormulaRegion
 	if !endpoint.RowAbs && endpoint.Row > 0 {
 		resolved.row = row + (endpoint.Row - region.startRow)
 	}
-	if !endpoint.ColAbs && endpoint.Col > 0 {
-		resolved.col = region.col + (endpoint.Col - region.col)
-	}
+	// Regions are currently grouped vertically in one column, so only row-relative
+	// references expand across the region. Column-relative expansion needs a
+	// target-column input if rectangular regions are introduced later.
 	return resolved
 }
 

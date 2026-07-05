@@ -24,9 +24,10 @@ type Sheet struct {
 }
 
 type DefinedName struct {
-	Name         string
-	LocalSheetID *int
-	RefersTo     string
+	Name            string
+	LocalSheetID    *int
+	LocalSheetIDRaw string
+	RefersTo        string
 }
 
 type relationship struct {
@@ -103,6 +104,7 @@ func (p *Package) readWorkbookXML() (workbook Workbook, err error) {
 					case "name":
 						current.Name = attr.Value
 					case "localSheetId":
+						current.LocalSheetIDRaw = attr.Value
 						if id, err := strconv.Atoi(attr.Value); err == nil {
 							current.LocalSheetID = &id
 						}
@@ -194,6 +196,9 @@ func sortDefinedNames(names []DefinedName, sheets []Sheet) {
 
 func definedNameScopeOrder(name DefinedName, sheets []Sheet) int {
 	if name.LocalSheetID == nil {
+		if name.LocalSheetIDRaw != "" {
+			return len(sheets)
+		}
 		return -1
 	}
 	return *name.LocalSheetID
@@ -201,6 +206,9 @@ func definedNameScopeOrder(name DefinedName, sheets []Sheet) int {
 
 func DefinedNameScope(name DefinedName, sheets []Sheet) string {
 	if name.LocalSheetID == nil {
+		if name.LocalSheetIDRaw != "" {
+			return "sheet"
+		}
 		return "workbook"
 	}
 	idx := *name.LocalSheetID

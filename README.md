@@ -122,8 +122,9 @@ Formula snapshots can also be created outside an xlflow workspace:
 
 ```bash
 xlflow formulas pull --src Book.xlsx --out formulas --json
-xlflow pull --formulas --json
 ```
+
+Inside an xlflow workspace, use `xlflow pull --formulas --json` to refresh formula snapshots after a successful VBA pull.
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
