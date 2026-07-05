@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/xuri/excelize/v2"
 )
 
 func TestRootCommandIncludesFormulasPullCommand(t *testing.T) {
@@ -85,6 +87,8 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 			t.Fatalf("invoice regions missing %q:\n%s", want, invoice)
 		}
 	}
+	assertJSONLRegionsCoverDistinctCells(t, filepath.Join(dir, "formulas", "sheets", "001-Invoice.regions.jsonl"), 6)
+	assertJSONLRegionsCoverDistinctCells(t, filepath.Join(dir, "formulas", "sheets", "002-Summary.regions.jsonl"), 1)
 }
 
 func TestFormulasPullSupportsStandaloneSourceAndOutput(t *testing.T) {
@@ -190,4 +194,93 @@ func readText(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+func assertJSONLRegionsCoverDistinctCells(t *testing.T, path string, wantCells int) {
+	t.Helper()
+	type regionRow struct {
+		Range string `json:"range"`
+		Count int    `json:"count"`
+	}
+	lines := strings.Split(strings.TrimSpace(readText(t, path)), "\n")
+	seen := map[string]string{}
+	gotCells := 0
+	var previous string
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row regionRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("invalid region JSON in %s: %v\n%s", path, err, line)
+		}
+		if previous != "" && compareRangeTopLeft(previous, row.Range) > 0 {
+			t.Fatalf("regions are not sorted in %s: %s before %s", path, previous, row.Range)
+		}
+		previous = row.Range
+		cells := expandA1RangeForTest(t, row.Range)
+		if row.Count != len(cells) {
+			t.Fatalf("region %s count = %d, expanded cells = %d", row.Range, row.Count, len(cells))
+		}
+		gotCells += len(cells)
+		for _, cell := range cells {
+			if prior, ok := seen[cell]; ok {
+				t.Fatalf("cell %s appears in multiple regions in %s: %s and %s", cell, path, prior, row.Range)
+			}
+			seen[cell] = row.Range
+		}
+	}
+	if gotCells != wantCells {
+		t.Fatalf("expanded region cell count in %s = %d, want %d", path, gotCells, wantCells)
+	}
+}
+
+func compareRangeTopLeft(left, right string) int {
+	leftCell := strings.Split(left, ":")[0]
+	rightCell := strings.Split(right, ":")[0]
+	leftCol, leftRow, _ := excelize.CellNameToCoordinates(leftCell)
+	rightCol, rightRow, _ := excelize.CellNameToCoordinates(rightCell)
+	switch {
+	case leftRow < rightRow:
+		return -1
+	case leftRow > rightRow:
+		return 1
+	case leftCol < rightCol:
+		return -1
+	case leftCol > rightCol:
+		return 1
+	default:
+		return strings.Compare(left, right)
+	}
+}
+
+func expandA1RangeForTest(t *testing.T, rangeText string) []string {
+	t.Helper()
+	parts := strings.Split(rangeText, ":")
+	if len(parts) == 0 || len(parts) > 2 {
+		t.Fatalf("invalid range %q", rangeText)
+	}
+	startCol, startRow, err := excelize.CellNameToCoordinates(parts[0])
+	if err != nil {
+		t.Fatalf("invalid range start %q: %v", rangeText, err)
+	}
+	endCol, endRow := startCol, startRow
+	if len(parts) == 2 {
+		endCol, endRow, err = excelize.CellNameToCoordinates(parts[1])
+		if err != nil {
+			t.Fatalf("invalid range end %q: %v", rangeText, err)
+		}
+	}
+	var cells []string
+	for row := startRow; row <= endRow; row++ {
+		for col := startCol; col <= endCol; col++ {
+			cell, err := excelize.CoordinatesToCellName(col, row)
+			if err != nil {
+				t.Fatalf("invalid coordinates %d,%d: %v", col, row, err)
+			}
+			cells = append(cells, cell)
+		}
+	}
+	sort.Strings(cells)
+	return cells
 }
