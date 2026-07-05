@@ -24,6 +24,8 @@ formulas/
 
 Unsupported formula syntax is preserved as raw formula data with `partial` or `failed` parse status so one unsupported formula does not block the snapshot.
 
+When you are already syncing workspace VBA source, `xlflow pull --formulas --json` runs the normal VBA pull first and then refreshes the default `formulas/` snapshot from the configured saved workbook.
+
 ## Standalone Use
 
 Use `--src` to point at a workbook directly and `--out` to choose the output directory. In this mode, `xlflow.toml` is not required.

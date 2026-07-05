@@ -107,7 +107,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Area                                              | Capabilities                                                                                                                                                                 |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Source control                                    | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
-| Formula snapshots                                 | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull`                                                                       |
+| Formula snapshots                                 | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull` or refresh them with `xlflow pull --formulas`                         |
 | Execution                                         | Run macros from the CLI with typed arguments                                                                                                                                 |
 | Testing                                           | Discover and run VBA test procedures                                                                                                                                         |
 | Formatting                                        | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
@@ -122,6 +122,7 @@ Formula snapshots can also be created outside an xlflow workspace:
 
 ```bash
 xlflow formulas pull --src Book.xlsx --out formulas --json
+xlflow pull --formulas --json
 ```
 
 > [!IMPORTANT]

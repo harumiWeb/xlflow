@@ -18,6 +18,8 @@ It can also run outside an xlflow workspace by specifying the source workbook di
 xlflow formulas pull --src path/to/Book.xlsx --out path/to/formulas
 ```
 
+For workspace source sync, `xlflow pull --formulas` is a convenience path that runs the normal VBA `pull` first and then refreshes the default `formulas/` snapshot from the saved configured workbook if the VBA pull succeeds. The standalone `xlflow formulas pull` command remains the canonical formula extraction command and should be used for `--src` / `--out` workflows.
+
 The command:
 
 - supports `.xlsx` and `.xlsm` files;

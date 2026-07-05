@@ -20,6 +20,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -2181,6 +2182,57 @@ func TestRootCommandIncludesSessionFlagsForWorkbookReaders(t *testing.T) {
 		if cmd.Flags().Lookup("session") == nil {
 			t.Fatalf("expected %v command to define --session", args)
 		}
+	}
+}
+
+func TestRootCommandIncludesPullFormulasFlag(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Flags().Lookup("formulas") == nil {
+		t.Fatal("expected pull command to define --formulas")
+	}
+}
+
+func TestAttachFormulaPullResultAddsOutputSummary(t *testing.T) {
+	root := t.TempDir()
+	env := output.New("pull")
+	result := formulaspkg.Result{
+		Manifest: formulaspkg.Manifest{
+			Sheets: []formulaspkg.SheetManifest{
+				{Name: "Sheet1"},
+				{Name: "Sheet2"},
+			},
+			ParseStatusSummary: formulaspkg.ParseStatusSummary{OK: 2, Partial: 1},
+		},
+		Names: []formulaspkg.DefinedName{
+			{Name: "TaxRate"},
+		},
+		OutputDir:          filepath.Join(root, "formulas"),
+		ManifestPath:       filepath.Join(root, "formulas", "manifest.json"),
+		FormulaRegionCount: 3,
+	}
+
+	attachFormulaPullResult(&env, result, root)
+
+	outputPayload := cliObjectMap(env.Output)
+	formulas := cliObjectMap(outputPayload["formulas"])
+	if formulas["dir"] != "formulas" {
+		t.Fatalf("dir = %#v", formulas["dir"])
+	}
+	if formulas["manifest"] != filepath.ToSlash(filepath.Join("formulas", "manifest.json")) {
+		t.Fatalf("manifest = %#v", formulas["manifest"])
+	}
+	if formulas["sheet_count"] != 2 || formulas["formula_region_count"] != 3 || formulas["defined_name_count"] != 1 {
+		t.Fatalf("formulas summary = %#v", formulas)
+	}
+	parseSummary := cliObjectMap(formulas["parse_status_summary"])
+	if parseSummary["ok"] != float64(2) || parseSummary["partial"] != float64(1) || parseSummary["failed"] != float64(0) {
+		t.Fatalf("parse summary = %#v", parseSummary)
 	}
 }
 
