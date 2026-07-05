@@ -55,6 +55,17 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	if env.Command != "formulas pull" {
 		t.Fatalf("command = %q", env.Command)
 	}
+	outputPayload, ok := env.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("output payload = %T", env.Output)
+	}
+	parseSummary, ok := outputPayload["parse_status_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("parse status summary payload = %T", outputPayload["parse_status_summary"])
+	}
+	if parseSummary["ok"] != float64(3) || parseSummary["partial"] != float64(1) || parseSummary["failed"] != float64(0) {
+		t.Fatalf("parse status summary = %#v", parseSummary)
+	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("stale output still exists or stat failed: %v", err)
 	}
@@ -62,6 +73,10 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	manifest := readText(t, filepath.Join(dir, "formulas", "manifest.json"))
 	for _, want := range []string{
 		`"workbook": "Book.xlsm"`,
+		`"parse_status_summary": {`,
+		`"ok": 3`,
+		`"partial": 1`,
+		`"failed": 0`,
 		`"path": "sheets/001-Invoice.regions.jsonl"`,
 		`"formula_region_count": 3`,
 		`"path": "sheets/002-Summary.regions.jsonl"`,

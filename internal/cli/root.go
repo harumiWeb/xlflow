@@ -660,6 +660,7 @@ func (a *app) formulasPullCommand() *cobra.Command {
 				"manifest":             displayPath(a.cwd, result.ManifestPath),
 				"sheet_count":          len(result.Manifest.Sheets),
 				"formula_region_count": result.FormulaRegionCount,
+				"parse_status_summary": result.Manifest.ParseStatusSummary,
 				"defined_name_count":   len(result.Names),
 			}
 			env.Logs = []string{fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", result.FormulaRegionCount, len(result.Manifest.Sheets))}

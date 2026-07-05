@@ -3,17 +3,25 @@ package formulas
 import "github.com/harumiWeb/xlflow/internal/formula"
 
 type Manifest struct {
-	Version  int             `json:"version"`
-	Workbook string          `json:"workbook"`
-	Sheets   []SheetManifest `json:"sheets"`
+	Version            int                `json:"version"`
+	Workbook           string             `json:"workbook"`
+	ParseStatusSummary ParseStatusSummary `json:"parse_status_summary"`
+	Sheets             []SheetManifest    `json:"sheets"`
 }
 
 type SheetManifest struct {
-	Index              int    `json:"index"`
-	Name               string `json:"name"`
-	SheetID            string `json:"sheet_id"`
-	Path               string `json:"path"`
-	FormulaRegionCount int    `json:"formula_region_count"`
+	Index              int                `json:"index"`
+	Name               string             `json:"name"`
+	SheetID            string             `json:"sheet_id"`
+	Path               string             `json:"path"`
+	FormulaRegionCount int                `json:"formula_region_count"`
+	ParseStatusSummary ParseStatusSummary `json:"parse_status_summary"`
+}
+
+type ParseStatusSummary struct {
+	OK      int `json:"ok"`
+	Partial int `json:"partial"`
+	Failed  int `json:"failed"`
 }
 
 type DefinedName struct {

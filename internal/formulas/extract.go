@@ -71,6 +71,8 @@ func Extract(workbookPath string) (manifest Manifest, names []DefinedName, regio
 			})
 		}
 		regions := BuildRegions(cells)
+		parseSummary := summarizeParseStatus(regions)
+		manifest.ParseStatusSummary.add(parseSummary)
 		relPath := sheetOutputPath(sheet.Index, sheet.Name, usedPaths)
 		regionsByPath[relPath] = regions
 		manifest.Sheets = append(manifest.Sheets, SheetManifest{
@@ -79,9 +81,31 @@ func Extract(workbookPath string) (manifest Manifest, names []DefinedName, regio
 			SheetID:            sheet.SheetID,
 			Path:               relPath,
 			FormulaRegionCount: len(regions),
+			ParseStatusSummary: parseSummary,
 		})
 	}
 	return manifest, names, regionsByPath, nil
+}
+
+func summarizeParseStatus(regions []FormulaRegion) ParseStatusSummary {
+	var summary ParseStatusSummary
+	for _, region := range regions {
+		switch region.ParseStatus {
+		case "partial":
+			summary.Partial++
+		case "failed":
+			summary.Failed++
+		default:
+			summary.OK++
+		}
+	}
+	return summary
+}
+
+func (summary *ParseStatusSummary) add(other ParseStatusSummary) {
+	summary.OK += other.OK
+	summary.Partial += other.Partial
+	summary.Failed += other.Failed
 }
 
 func formulaKind(value string) string {

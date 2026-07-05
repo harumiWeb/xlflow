@@ -51,19 +51,29 @@ Sheet region filenames use the workbook sheet index and a sanitized sheet name. 
 {
   "version": 1,
   "workbook": "Book.xlsm",
+  "parse_status_summary": {
+    "ok": 2,
+    "partial": 1,
+    "failed": 0
+  },
   "sheets": [
     {
       "index": 1,
       "name": "Invoice",
       "sheet_id": "1",
       "path": "sheets/001-Invoice.regions.jsonl",
-      "formula_region_count": 3
+      "formula_region_count": 3,
+      "parse_status_summary": {
+        "ok": 2,
+        "partial": 1,
+        "failed": 0
+      }
     }
   ]
 }
 ```
 
-The manifest is ordered by workbook sheet order.
+The manifest is ordered by workbook sheet order. `parse_status_summary` counts emitted formula regions by parse status at workbook and sheet level.
 
 ## Defined Names
 
