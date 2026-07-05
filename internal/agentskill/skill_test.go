@@ -40,6 +40,8 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json`",
 		"Use `xlflow form build <spec> --session --json`",
 		"Use `xlflow form build <spec> --session --overwrite --json`",
+		"[references/formulas.md](references/formulas.md)",
+		"xlflow formulas pull --json",
 		"[references/forms.md](references/forms.md)",
 		"[references/xlflow-ui.md](references/xlflow-ui.md)",
 		"XlflowUI.MsgBox",
@@ -100,6 +102,9 @@ func TestInstallUsesExplicitTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "forms.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "formulas.md")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "xlflow-ui.md")); err != nil {
