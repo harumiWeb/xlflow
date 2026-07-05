@@ -107,6 +107,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Area                                              | Capabilities                                                                                                                                                                 |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Source control                                    | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Formula snapshots                                 | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull`                                                                       |
 | Execution                                         | Run macros from the CLI with typed arguments                                                                                                                                 |
 | Testing                                           | Discover and run VBA test procedures                                                                                                                                         |
 | Formatting                                        | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
@@ -131,7 +132,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                           |
 
 > [!NOTE]
-> Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+> Commands that do not require Excel COM, such as `lint`, `fmt`, `formulas pull`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
 > [!NOTE]
 > xlflow uses the .NET bridge for Excel COM operations. The legacy PowerShell bridge was removed in v0.16.0; supported bridge modes are `auto` and `dotnet`.

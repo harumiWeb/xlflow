@@ -9,7 +9,7 @@ xlflow turns an Excel VBA workbook into a source-controlled project that can be 
 - PowerShell
 - Trust access to the VBA project object model enabled in Excel
 
-Commands that only inspect source files, such as `lint` and `analyze`, can run without Excel. Workbook-backed commands use Excel COM.
+Commands that only inspect source files or saved workbook files, such as `lint`, `analyze`, and `formulas pull`, can run without Excel. Workbook-backed automation commands use Excel COM.
 
 ## Create a project
 
@@ -36,6 +36,7 @@ xlflow new Book.xlsm --with-skill --agent codex
 ```bash
 xlflow doctor --json
 xlflow pull --json
+xlflow formulas pull --json
 xlflow lint --json
 xlflow macros --json
 xlflow run Main.Run --headless --json

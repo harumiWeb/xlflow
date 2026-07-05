@@ -31,6 +31,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -162,6 +163,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.backupCommand(),
 		a.listCommand(),
 		a.formCommand(),
+		a.formulasCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.packCommand(),
@@ -608,6 +610,52 @@ func (a *app) formCommand() *cobra.Command {
 		Short: "Manage workbook UserForms",
 	}
 	cmd.AddCommand(a.formNewCommand(), a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	return cmd
+}
+
+func (a *app) formulasCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "formulas",
+		Short: "Manage workbook formula snapshots",
+	}
+	cmd.AddCommand(a.formulasPullCommand())
+	return cmd
+}
+
+func (a *app) formulasPullCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pull",
+		Short: "Extract workbook formulas into region JSONL snapshots",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("formulas pull")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			ext := strings.ToLower(filepath.Ext(workbookPath))
+			if ext != ".xlsx" && ext != ".xlsm" {
+				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", fmt.Errorf("configured workbook must end in .xlsx or .xlsm: %s", cfg.Excel.Path))
+			}
+			result, err := formulaspkg.Pull(workbookPath, filepath.Join(a.cwd, "formulas"))
+			if err != nil {
+				return a.writeFailure("formulas pull", output.ExitEnvironment, "formulas_pull_failed", err)
+			}
+			env := output.New("formulas pull")
+			env.Workbook = map[string]any{
+				"path": displayPath(a.cwd, workbookPath),
+			}
+			env.Output = map[string]any{
+				"dir":                  displayPath(a.cwd, result.OutputDir),
+				"manifest":             displayPath(a.cwd, result.ManifestPath),
+				"sheet_count":          len(result.Manifest.Sheets),
+				"formula_region_count": result.FormulaRegionCount,
+				"defined_name_count":   len(result.Names),
+			}
+			env.Logs = []string{fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", result.FormulaRegionCount, len(result.Manifest.Sheets))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 	return cmd
 }
 
