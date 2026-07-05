@@ -42,7 +42,7 @@ func TestBuildRegionsSharedFormulaUsesAnchorRef(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("region count = %d: %#v", len(regions), regions)
 	}
-	if regions[0].Kind != "formula" || regions[0].Range != "C2:C4" || regions[0].Count != 3 {
+	if regions[0].Range != "C2:C4" || regions[0].Count != 3 {
 		t.Fatalf("shared region = %#v", regions[0])
 	}
 	if len(regions[0].StorageKinds) != 1 || regions[0].StorageKinds[0] != "shared" {
@@ -61,7 +61,7 @@ func TestBuildRegionsCoalescesAdjacentSharedFormulaStorageGroups(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("region count = %d: %#v", len(regions), regions)
 	}
-	if regions[0].Range != "D2:D101" || regions[0].Kind != "formula" || regions[0].FormulaR1C1 != "=RC[-2]*RC[-1]" || regions[0].Count != 100 {
+	if regions[0].Range != "D2:D101" || regions[0].FormulaR1C1 != "=RC[-2]*RC[-1]" || regions[0].Count != 100 {
 		t.Fatalf("coalesced region = %#v", regions[0])
 	}
 	if regions[0].StorageGroupCount != 2 {
@@ -70,6 +70,28 @@ func TestBuildRegionsCoalescesAdjacentSharedFormulaStorageGroups(t *testing.T) {
 	if len(regions[0].StorageKinds) != 1 || regions[0].StorageKinds[0] != "shared" {
 		t.Fatalf("storage_kinds = %#v", regions[0].StorageKinds)
 	}
+	assertNoOverlappingRegions(t, regions)
+}
+
+func TestBuildRegionsExplicitFormulaOverridesSharedExpansionForOutlier(t *testing.T) {
+	regions := BuildRegions([]FormulaCell{
+		{Cell: "D2", Row: 2, Col: 4, Kind: "shared", SharedIndex: "0", SharedRef: "D2:D1001", Formula: "=B2*C2"},
+		{Cell: "D500", Row: 500, Col: 4, Kind: "shared", SharedIndex: "1", SharedRef: "D500", Formula: `=IF(B500="",0,B500*C500)`},
+	})
+	if len(regions) != 3 {
+		t.Fatalf("region count = %d: %#v", len(regions), regions)
+	}
+	if regions[0].Range != "D2:D499" || regions[0].Count != 498 {
+		t.Fatalf("first region = %#v", regions[0])
+	}
+	if regions[1].Range != "D500" || regions[1].FormulaR1C1 != `=IF(RC[-2]="",0,RC[-2]*RC[-1])` || !contains(regions[1].Features, "outlier") {
+		t.Fatalf("outlier region = %#v", regions[1])
+	}
+	if regions[2].Range != "D501:D1001" || regions[2].Count != 501 {
+		t.Fatalf("third region = %#v", regions[2])
+	}
+	assertNoOverlappingRegions(t, regions)
+	assertRegionCellCount(t, regions, 1000)
 }
 
 func TestBuildRegionsUnsupportedFormulaPreservesRaw(t *testing.T) {
@@ -106,7 +128,7 @@ func TestBuildRegionsMalformedSharedAnchorFailsSoft(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("region count = %d", len(regions))
 	}
-	if regions[0].Kind != "formula" || regions[0].ParseStatus != "failed" || regions[0].Formula != "=A2*B2" {
+	if regions[0].ParseStatus != "failed" || regions[0].Formula != "=A2*B2" {
 		t.Fatalf("region = %#v", regions[0])
 	}
 	if !contains(regions[0].Features, "shared_formula_malformed_ref") {
@@ -121,4 +143,44 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func assertNoOverlappingRegions(t *testing.T, regions []FormulaRegion) {
+	t.Helper()
+	seen := map[string]string{}
+	for _, region := range regions {
+		for _, cell := range expandRegionCells(t, region.Range) {
+			if previous, ok := seen[cell]; ok {
+				t.Fatalf("cell %s appears in multiple regions: %s and %s", cell, previous, region.Range)
+			}
+			seen[cell] = region.Range
+		}
+	}
+}
+
+func assertRegionCellCount(t *testing.T, regions []FormulaRegion, want int) {
+	t.Helper()
+	got := 0
+	for _, region := range regions {
+		got += len(expandRegionCells(t, region.Range))
+	}
+	if got != want {
+		t.Fatalf("expanded region cell count = %d, want %d", got, want)
+	}
+}
+
+func expandRegionCells(t *testing.T, rangeText string) []string {
+	t.Helper()
+	start, end, _, ok := rangeInfo(rangeText)
+	if !ok {
+		t.Fatalf("invalid range %q", rangeText)
+	}
+	var cells []string
+	for row := start.row; row <= end.row; row++ {
+		for col := start.col; col <= end.col; col++ {
+			cell := renderRange(col, row, col, row)
+			cells = append(cells, cell)
+		}
+	}
+	return cells
 }

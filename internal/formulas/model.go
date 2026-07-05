@@ -31,11 +31,17 @@ type FormulaCell struct {
 	SharedIndex string
 	SharedRef   string
 	Formula     string
+
+	FormulaR1C1  string
+	ParseStatus  string
+	Features     []string
+	StorageKind  string
+	StorageGroup string
+	priority     int
 }
 
 type FormulaRegion struct {
 	Range             string   `json:"range"`
-	Kind              string   `json:"kind"`
 	FormulaR1C1       string   `json:"formula_r1c1,omitempty"`
 	Formula           string   `json:"formula,omitempty"`
 	ExampleCell       string   `json:"example_cell,omitempty"`
@@ -46,15 +52,15 @@ type FormulaRegion struct {
 	StorageKinds      []string `json:"storage_kinds,omitempty"`
 	StorageGroupCount int      `json:"storage_group_count,omitempty"`
 
-	startRow      int
-	endRow        int
-	col           int
-	key           regionKey
-	storageGroups int
+	startRow        int
+	endRow          int
+	col             int
+	key             regionKey
+	storageGroups   int
+	storageGroupIDs map[string]bool
 }
 
 type regionKey struct {
-	Kind        string
 	FormulaR1C1 string
 	Formula     string
 	ParseStatus string

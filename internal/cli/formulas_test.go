@@ -77,9 +77,9 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	}
 	invoice := readText(t, filepath.Join(dir, "formulas", "sheets", "001-Invoice.regions.jsonl"))
 	for _, want := range []string{
-		`"range":"C2:C4","kind":"formula","formula_r1c1":"=RC[-2]*RC[-1]","example_cell":"C2","example_formula":"=A2*B2","count":3,"parse_status":"ok","storage_kinds":["shared"]`,
-		`"range":"G2:G3","kind":"formula","formula_r1c1":"=RC[-2]*RC[-1]"`,
-		`"range":"G4","kind":"formula","formula":"=Table1[Amount]","example_cell":"G4","example_formula":"=Table1[Amount]","count":1,"parse_status":"partial","features":["structured_reference"]`,
+		`"range":"C2:C4","formula_r1c1":"=RC[-2]*RC[-1]","example_cell":"C2","example_formula":"=A2*B2","count":3,"parse_status":"ok","storage_kinds":["shared"]`,
+		`"range":"G2:G3","formula_r1c1":"=RC[-2]*RC[-1]"`,
+		`"range":"G4","formula":"=Table1[Amount]","example_cell":"G4","example_formula":"=Table1[Amount]","count":1,"parse_status":"partial","features":["structured_reference"]`,
 	} {
 		if !strings.Contains(invoice, want) {
 			t.Fatalf("invoice regions missing %q:\n%s", want, invoice)

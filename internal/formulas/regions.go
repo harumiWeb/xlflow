@@ -2,6 +2,7 @@ package formulas
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/formula"
@@ -9,14 +10,23 @@ import (
 )
 
 func BuildRegions(cells []FormulaCell) []FormulaRegion {
-	if len(cells) == 0 {
+	logical := logicalFormulaCells(cells)
+	if len(logical) == 0 {
 		return nil
 	}
+	regions := buildFormulaRegions(logical)
+	sortRegionsByColumn(regions)
+	markOutliers(regions)
+	sortRegions(regions)
+	finalizeStorageGroupCounts(regions)
+	return regions
+}
+
+func logicalFormulaCells(cells []FormulaCell) []FormulaCell {
 	sortCells(cells)
+	byCell := map[string]FormulaCell{}
 	sharedAnchors := map[string]FormulaCell{}
-	sharedCovered := map[string]bool{}
-	var regions []FormulaRegion
-	var normal []FormulaCell
+	sharedAnchorSeen := map[string]bool{}
 
 	for _, cell := range cells {
 		if cell.Kind == "shared" && cell.Formula != "" && cell.SharedIndex != "" {
@@ -26,86 +36,117 @@ func BuildRegions(cells []FormulaCell) []FormulaRegion {
 
 	for _, cell := range cells {
 		if cell.Kind != "shared" {
-			normal = append(normal, cell)
+			cell.StorageKind = "normal"
+			cell.priority = 30
+			putFormulaCell(byCell, cell)
 			continue
 		}
-		if cell.Formula != "" && cell.SharedRef != "" {
-			region := buildSharedRegion(cell)
-			regions = append(regions, region)
-			if region.ParseStatus == string(formula.ParseStatusOK) || region.ParseStatus == string(formula.ParseStatusPartial) {
-				sharedCovered[cell.SharedIndex] = true
-			}
+		switch {
+		case cell.Formula != "" && cell.SharedRef != "":
+			expandSharedFormula(byCell, cell)
+			sharedAnchorSeen[cell.SharedIndex] = true
+		case cell.Formula != "":
+			putFormulaCell(byCell, failedFormulaCell(cell, "shared_formula_malformed_ref", 30))
+		case cell.SharedIndex != "" && sharedAnchorSeen[cell.SharedIndex]:
 			continue
-		}
-		if cell.Formula != "" && cell.SharedRef == "" {
-			regions = append(regions, failedSharedAnchorRegion(cell, "shared_formula_malformed_ref"))
-			continue
-		}
-		if cell.SharedIndex != "" && sharedCovered[cell.SharedIndex] {
-			continue
-		}
-		if cell.Formula == "" {
+		default:
 			if _, ok := sharedAnchors[cell.SharedIndex]; ok {
 				continue
 			}
-			regions = append(regions, failedSingleCellRegion(cell, "shared_formula_missing_anchor"))
-			continue
+			putFormulaCell(byCell, failedFormulaCell(cell, "shared_formula_missing_anchor", 10))
 		}
-		normal = append(normal, cell)
 	}
 
-	regions = append(regions, buildNormalRegions(normal)...)
-	sortRegions(regions)
-	regions = coalesceFormulaRegions(regions)
-	sortRegionsByColumn(regions)
-	markOutliers(regions)
-	sortRegions(regions)
-	finalizeStorageGroupCounts(regions)
-	return regions
+	logical := make([]FormulaCell, 0, len(byCell))
+	for _, cell := range byCell {
+		logical = append(logical, cell)
+	}
+	sortCellsByColumn(logical)
+	return logical
 }
 
-func buildSharedRegion(cell FormulaCell) FormulaRegion {
-	start, end, count, ok := rangeInfo(cell.SharedRef)
+func putFormulaCell(cells map[string]FormulaCell, cell FormulaCell) {
+	if cell.Cell == "" {
+		return
+	}
+	if cell.StorageKind == "" {
+		cell.StorageKind = formulaStorageKind(cell)
+	}
+	if existing, ok := cells[cell.Cell]; ok && existing.priority > cell.priority {
+		return
+	}
+	cells[cell.Cell] = cell
+}
+
+func expandSharedFormula(cells map[string]FormulaCell, anchor FormulaCell) {
+	start, end, _, ok := rangeInfo(anchor.SharedRef)
 	if !ok {
-		return failedSharedAnchorRegion(cell, "shared_formula_malformed_ref")
+		putFormulaCell(cells, failedFormulaCell(anchor, "shared_formula_malformed_ref", 30))
+		return
 	}
-	summary := normalizeFormula(cell.Formula, cell.Row, cell.Col)
-	region := FormulaRegion{
-		Range:          cell.SharedRef,
-		Kind:           "formula",
-		ExampleCell:    cell.Cell,
-		ExampleFormula: cell.Formula,
-		Count:          count,
-		ParseStatus:    string(summary.status),
-		Features:       summary.features,
-		StorageKinds:   []string{"shared"},
-		startRow:       start.row,
-		endRow:         end.row,
-		col:            start.col,
-		storageGroups:  1,
+	summary := normalizeFormula(anchor.Formula, anchor.Row, anchor.Col)
+	groupID := "shared:" + anchor.SharedIndex + ":" + anchor.SharedRef
+	for row := start.row; row <= end.row; row++ {
+		for col := start.col; col <= end.col; col++ {
+			cellName, err := excelize.CoordinatesToCellName(col, row)
+			if err != nil {
+				continue
+			}
+			formulaText := anchor.Formula
+			if row != anchor.Row || col != anchor.Col {
+				formulaText = translateSharedFormula(anchor.Formula, formula.CellRef{Row: anchor.Row, Col: anchor.Col}, formula.CellRef{Row: row, Col: col})
+			}
+			priority := 20
+			if row == anchor.Row && col == anchor.Col {
+				priority = 25
+			}
+			putFormulaCell(cells, FormulaCell{
+				Cell:         cellName,
+				Row:          row,
+				Col:          col,
+				Kind:         "formula",
+				Formula:      formulaText,
+				FormulaR1C1:  summary.formulaR1C1,
+				ParseStatus:  string(summary.status),
+				Features:     summary.features,
+				StorageKind:  "shared",
+				StorageGroup: groupID,
+				priority:     priority,
+			})
+		}
 	}
-	if summary.status == formula.ParseStatusOK {
-		region.FormulaR1C1 = summary.formulaR1C1
-	} else {
-		region.Formula = summary.rawFormula
-	}
-	region.key = buildRegionKey(region)
-	return region
 }
 
-func buildNormalRegions(cells []FormulaCell) []FormulaRegion {
-	if len(cells) == 0 {
-		return nil
+func failedFormulaCell(cell FormulaCell, feature string, priority int) FormulaCell {
+	cell.Kind = "formula"
+	cell.ParseStatus = string(formula.ParseStatusFailed)
+	cell.Features = []string{feature}
+	cell.StorageKind = formulaStorageKind(cell)
+	cell.priority = priority
+	return cell
+}
+
+func formulaStorageKind(cell FormulaCell) string {
+	if cell.StorageKind != "" {
+		return cell.StorageKind
 	}
+	if cell.Kind == "shared" || cell.SharedIndex != "" {
+		return "shared"
+	}
+	if cell.Kind == "" || cell.Kind == "formula" {
+		return "normal"
+	}
+	return cell.Kind
+}
+
+func buildFormulaRegions(cells []FormulaCell) []FormulaRegion {
 	sortCellsByColumn(cells)
 	regions := []FormulaRegion{}
 	var current *FormulaRegion
 	for _, cell := range cells {
-		region := singleNormalRegion(cell)
+		region := singleFormulaRegion(cell)
 		if current != nil && canExtend(*current, region) {
-			current.endRow = region.endRow
-			current.Count++
-			current.Range = renderRange(current.col, current.startRow, current.col, current.endRow)
+			extendRegion(current, region)
 			continue
 		}
 		if current != nil {
@@ -119,21 +160,23 @@ func buildNormalRegions(cells []FormulaCell) []FormulaRegion {
 	return regions
 }
 
-func singleNormalRegion(cell FormulaCell) FormulaRegion {
-	summary := normalizeFormula(cell.Formula, cell.Row, cell.Col)
+func singleFormulaRegion(cell FormulaCell) FormulaRegion {
+	summary := normalizeCell(cell)
 	region := FormulaRegion{
 		Range:          cell.Cell,
-		Kind:           "formula",
 		ExampleCell:    cell.Cell,
 		ExampleFormula: cell.Formula,
 		Count:          1,
 		ParseStatus:    string(summary.status),
 		Features:       summary.features,
-		StorageKinds:   []string{"normal"},
+		StorageKinds:   []string{formulaStorageKind(cell)},
 		startRow:       cell.Row,
 		endRow:         cell.Row,
 		col:            cell.Col,
 		storageGroups:  1,
+	}
+	if cell.StorageGroup != "" {
+		region.storageGroupIDs = map[string]bool{cell.StorageGroup: true}
 	}
 	if summary.status == formula.ParseStatusOK {
 		region.FormulaR1C1 = summary.formulaR1C1
@@ -144,29 +187,22 @@ func singleNormalRegion(cell FormulaCell) FormulaRegion {
 	return region
 }
 
-func failedSingleCellRegion(cell FormulaCell, feature string) FormulaRegion {
-	features := []string{feature}
-	return FormulaRegion{
-		Range:          cell.Cell,
-		Kind:           "formula",
-		Formula:        cell.Formula,
-		ExampleCell:    cell.Cell,
-		ExampleFormula: cell.Formula,
-		Count:          1,
-		ParseStatus:    string(formula.ParseStatusFailed),
-		Features:       features,
-		StorageKinds:   []string{cell.Kind},
-		startRow:       cell.Row,
-		endRow:         cell.Row,
-		col:            cell.Col,
-		key:            regionKey{Kind: "formula", Formula: cell.Formula, ParseStatus: string(formula.ParseStatusFailed), Features: strings.Join(features, "\x00")},
-		storageGroups:  1,
+func extendRegion(current *FormulaRegion, next FormulaRegion) {
+	current.endRow = next.endRow
+	current.Count += next.Count
+	current.Range = renderRange(current.col, current.startRow, current.col, current.endRow)
+	current.StorageKinds = mergeStringSets(current.StorageKinds, next.StorageKinds)
+	if len(current.storageGroupIDs) == 0 && len(next.storageGroupIDs) == 0 {
+		current.storageGroups = 1
+		return
 	}
-}
-
-func failedSharedAnchorRegion(cell FormulaCell, feature string) FormulaRegion {
-	region := failedSingleCellRegion(cell, feature)
-	return region
+	if current.storageGroupIDs == nil {
+		current.storageGroupIDs = map[string]bool{}
+	}
+	for group := range next.storageGroupIDs {
+		current.storageGroupIDs[group] = true
+	}
+	current.storageGroups = len(current.storageGroupIDs)
 }
 
 func normalizeFormula(value string, row, col int) normalizeSummary {
@@ -183,6 +219,18 @@ func normalizeFormula(value string, row, col int) normalizeSummary {
 		rawFormula:  value,
 		features:    featureCodes(result.Features),
 	}
+}
+
+func normalizeCell(cell FormulaCell) normalizeSummary {
+	if cell.ParseStatus != "" {
+		return normalizeSummary{
+			status:      formula.ParseStatus(cell.ParseStatus),
+			formulaR1C1: cell.FormulaR1C1,
+			rawFormula:  cell.Formula,
+			features:    cell.Features,
+		}
+	}
+	return normalizeFormula(cell.Formula, cell.Row, cell.Col)
 }
 
 func featureCodes(features []formula.Feature) []string {
@@ -203,9 +251,7 @@ func featureCodes(features []formula.Feature) []string {
 }
 
 func canExtend(left, right FormulaRegion) bool {
-	return left.Kind == "formula" &&
-		right.Kind == "formula" &&
-		left.col == right.col &&
+	return left.col == right.col &&
 		left.endRow+1 == right.startRow &&
 		left.key == right.key
 }
@@ -213,7 +259,7 @@ func canExtend(left, right FormulaRegion) bool {
 func markOutliers(regions []FormulaRegion) {
 	for i := 1; i+1 < len(regions); i++ {
 		prev, current, next := regions[i-1], &regions[i], regions[i+1]
-		if current.Count != 1 || current.Kind != "formula" || prev.Kind != "formula" || next.Kind != "formula" {
+		if current.Count != 1 {
 			continue
 		}
 		if prev.col != current.col || next.col != current.col || prev.Count <= 1 || next.Count <= 1 {
@@ -226,35 +272,10 @@ func markOutliers(regions []FormulaRegion) {
 	}
 }
 
-func coalesceFormulaRegions(regions []FormulaRegion) []FormulaRegion {
-	if len(regions) == 0 {
-		return nil
-	}
-	sortRegionsByColumn(regions)
-	merged := []FormulaRegion{}
-	current := regions[0]
-	for _, next := range regions[1:] {
-		if canExtend(current, next) {
-			current.endRow = next.endRow
-			current.Count += next.Count
-			current.Range = renderRange(current.col, current.startRow, current.col, current.endRow)
-			current.StorageKinds = mergeStringSets(current.StorageKinds, next.StorageKinds)
-			current.storageGroups += max(1, next.storageGroups)
-			continue
-		}
-		merged = append(merged, current)
-		current = next
-	}
-	merged = append(merged, current)
-	sortRegions(merged)
-	return merged
-}
-
 func buildRegionKey(region FormulaRegion) regionKey {
 	features := append([]string{}, region.Features...)
 	sort.Strings(features)
 	return regionKey{
-		Kind:        region.Kind,
 		FormulaR1C1: region.FormulaR1C1,
 		Formula:     region.Formula,
 		ParseStatus: region.ParseStatus,
@@ -278,6 +299,9 @@ func mergeStringSets(left, right []string) []string {
 
 func finalizeStorageGroupCounts(regions []FormulaRegion) {
 	for i := range regions {
+		if len(regions[i].storageGroupIDs) > 0 {
+			regions[i].storageGroups = len(regions[i].storageGroupIDs)
+		}
 		if regions[i].storageGroups > 1 {
 			regions[i].StorageGroupCount = regions[i].storageGroups
 		}
@@ -294,6 +318,88 @@ func appendUnique(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
+}
+
+func translateSharedFormula(value string, from, to formula.CellRef) string {
+	result := formula.NormalizeA1ToR1C1Pattern(value, formula.NormalizeOptions{BaseCell: from})
+	if len(result.References) == 0 {
+		return value
+	}
+	shifted := value
+	deltaRow := to.Row - from.Row
+	deltaCol := to.Col - from.Col
+	refs := append([]formula.Reference{}, result.References...)
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].Span.Start > refs[j].Span.Start
+	})
+	for _, ref := range refs {
+		replacement, ok := renderShiftedReference(ref, deltaRow, deltaCol)
+		if !ok || ref.Span.Start < 0 || ref.Span.End > len(shifted) || ref.Span.Start > ref.Span.End {
+			continue
+		}
+		shifted = shifted[:ref.Span.Start] + replacement + shifted[ref.Span.End:]
+	}
+	return shifted
+}
+
+func renderShiftedReference(ref formula.Reference, deltaRow, deltaCol int) (string, bool) {
+	prefix := ""
+	if ref.Sheet != "" {
+		prefix = ref.Sheet + "!"
+	}
+	start := shiftEndpoint(ref.Start, deltaRow, deltaCol)
+	switch ref.Kind {
+	case formula.ReferenceKindCell:
+		return prefix + renderA1Endpoint(start, true, true), true
+	case formula.ReferenceKindRange:
+		if ref.End == nil {
+			return "", false
+		}
+		end := shiftEndpoint(*ref.End, deltaRow, deltaCol)
+		return prefix + renderA1Endpoint(start, true, true) + ":" + renderA1Endpoint(end, true, true), true
+	case formula.ReferenceKindColumnRange:
+		if ref.End == nil {
+			return "", false
+		}
+		end := shiftEndpoint(*ref.End, deltaRow, deltaCol)
+		return prefix + renderA1Endpoint(start, false, true) + ":" + renderA1Endpoint(end, false, true), true
+	case formula.ReferenceKindRowRange:
+		if ref.End == nil {
+			return "", false
+		}
+		end := shiftEndpoint(*ref.End, deltaRow, deltaCol)
+		return prefix + renderA1Endpoint(start, true, false) + ":" + renderA1Endpoint(end, true, false), true
+	default:
+		return "", false
+	}
+}
+
+func shiftEndpoint(endpoint formula.RefEndpoint, deltaRow, deltaCol int) formula.RefEndpoint {
+	if endpoint.Row > 0 && !endpoint.RowAbs {
+		endpoint.Row += deltaRow
+	}
+	if endpoint.Col > 0 && !endpoint.ColAbs {
+		endpoint.Col += deltaCol
+	}
+	return endpoint
+}
+
+func renderA1Endpoint(endpoint formula.RefEndpoint, includeRow, includeCol bool) string {
+	var b strings.Builder
+	if includeCol {
+		if endpoint.ColAbs {
+			b.WriteByte('$')
+		}
+		name, _ := excelize.ColumnNumberToName(endpoint.Col)
+		b.WriteString(name)
+	}
+	if includeRow {
+		if endpoint.RowAbs {
+			b.WriteByte('$')
+		}
+		b.WriteString(strconv.Itoa(endpoint.Row))
+	}
+	return b.String()
 }
 
 type cellPoint struct {

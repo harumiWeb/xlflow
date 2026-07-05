@@ -2,6 +2,7 @@ package formulas
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func writeJSONL[T any](path string, values []T) (err error) {
 	}()
 	w := bufio.NewWriter(file)
 	for _, value := range values {
-		line, err := json.Marshal(value)
+		line, err := marshalJSON(value, "", "")
 		if err != nil {
 			return err
 		}
@@ -73,7 +74,7 @@ func writeJSONL[T any](path string, values []T) (err error) {
 }
 
 func writeJSONFile(path string, value any) error {
-	body, err := json.MarshalIndent(value, "", "  ")
+	body, err := marshalJSON(value, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -82,4 +83,18 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, body, 0o644)
+}
+
+func marshalJSON(value any, prefix, indent string) ([]byte, error) {
+	var b bytes.Buffer
+	encoder := json.NewEncoder(&b)
+	encoder.SetEscapeHTML(false)
+	if indent != "" || prefix != "" {
+		encoder.SetIndent(prefix, indent)
+	}
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	body := b.Bytes()
+	return bytes.TrimSuffix(body, []byte{'\n'}), nil
 }

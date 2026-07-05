@@ -83,7 +83,6 @@ Each sheet JSONL file contains one logical formula region per line. Normal and s
 ```jsonl
 {
   "range": "G2:G1000",
-  "kind": "formula",
   "formula_r1c1": "=RC[-2]*RC[-1]",
   "example_cell": "G2",
   "example_formula": "=E2*F2",
@@ -99,7 +98,6 @@ Shared formulas are read from their OOXML anchor and `ref` range, but `shared_in
 ```jsonl
 {
   "range": "D2:D101",
-  "kind": "formula",
   "formula_r1c1": "=RC[-2]*RC[-1]",
   "example_cell": "D2",
   "example_formula": "=B2*C2",
@@ -119,7 +117,6 @@ If a formula cannot be fully normalized, xlflow keeps raw formula text and conti
 ```jsonl
 {
   "range": "D10",
-  "kind": "formula",
   "formula": "=Table1[Amount]",
   "example_cell": "D10",
   "example_formula": "=Table1[Amount]",
