@@ -1,0 +1,35 @@
+# formulas
+
+Extract saved workbook formulas into source-controlled snapshots without opening Excel.
+
+## Pull Formula Snapshots
+
+```bash
+xlflow formulas pull --json
+```
+
+The command reads the workbook configured by `[excel].path` and writes:
+
+```text
+formulas/
+  manifest.json
+  names.jsonl
+  sheets/
+    001-Sheet1.regions.jsonl
+```
+
+`manifest.json` lists workbook sheets, region files, formula region counts, and `ok` / `partial` / `failed` parse status summaries. `names.jsonl` contains workbook and sheet scoped defined names. Each sheet JSONL file contains logical formula regions grouped by normalized R1C1-like formula patterns. Region rows also include best-effort `refs`, `depends_on_sheets`, and `functions` indexes when xlflow can derive them from the formula text. OOXML shared formula group boundaries are coalesced when they differ only by storage metadata.
+
+`formulas pull` supports `.xlsx` and `.xlsm`, reads OOXML files directly, and does not use Excel COM. Cached calculated values are not included.
+
+Unsupported formula syntax is preserved as raw formula data with `partial` or `failed` parse status so one unsupported formula does not block the snapshot.
+
+When you are already syncing workspace VBA source, `xlflow pull --formulas --json` runs the normal VBA pull first and then refreshes the default `formulas/` snapshot from the configured saved workbook.
+
+## Standalone Use
+
+Use `--src` to point at a workbook directly and `--out` to choose the output directory. In this mode, `xlflow.toml` is not required.
+
+```bash
+xlflow formulas pull --src ./Book.xlsx --out ./formula-snapshot --json
+```

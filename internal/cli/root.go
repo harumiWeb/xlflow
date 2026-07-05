@@ -31,6 +31,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -162,6 +163,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.backupCommand(),
 		a.listCommand(),
 		a.formCommand(),
+		a.formulasCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
 		a.packCommand(),
@@ -608,6 +610,58 @@ func (a *app) formCommand() *cobra.Command {
 		Short: "Manage workbook UserForms",
 	}
 	cmd.AddCommand(a.formNewCommand(), a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	return cmd
+}
+
+func (a *app) formulasCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "formulas",
+		Short: "Manage workbook formula snapshots",
+	}
+	cmd.AddCommand(a.formulasPullCommand())
+	return cmd
+}
+
+func (a *app) formulasPullCommand() *cobra.Command {
+	var srcPath string
+	var outDir string
+	cmd := &cobra.Command{
+		Use:   "pull",
+		Short: "Extract workbook formulas into region JSONL snapshots",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			workbookPath := strings.TrimSpace(srcPath)
+			if workbookPath == "" {
+				cfg, err := a.loadConfig("formulas pull")
+				if err != nil {
+					return err
+				}
+				workbookPath = cfg.Excel.Path
+			}
+			workbookPath = workbookArgPath(a.cwd, workbookPath)
+			ext := strings.ToLower(filepath.Ext(workbookPath))
+			if ext != ".xlsx" && ext != ".xlsm" {
+				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", fmt.Errorf("source workbook must end in .xlsx or .xlsm: %s", workbookPath))
+			}
+			outputDir := workbookArgPath(a.cwd, strings.TrimSpace(outDir))
+			if outputDir == "" {
+				outputDir = filepath.Join(a.cwd, "formulas")
+			}
+			result, err := formulaspkg.Pull(workbookPath, outputDir)
+			if err != nil {
+				return a.writeFailure("formulas pull", output.ExitEnvironment, "formulas_pull_failed", err)
+			}
+			env := output.New("formulas pull")
+			env.Workbook = map[string]any{
+				"path": displayPath(a.cwd, workbookPath),
+			}
+			env.Output = formulaResultPayload(result, a.cwd)
+			env.Logs = []string{fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", result.FormulaRegionCount, len(result.Manifest.Sheets))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&srcPath, "src", "", "source workbook path; when omitted, use [excel].path from xlflow.toml")
+	cmd.Flags().StringVar(&outDir, "out", "formulas", "output directory for formula snapshots")
 	return cmd
 }
 
@@ -1557,6 +1611,7 @@ func (a *app) attachCommand() *cobra.Command {
 
 func (a *app) pullCommand() *cobra.Command {
 	var session bool
+	var withFormulas bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Export VBA components from the configured workbook",
@@ -1577,11 +1632,64 @@ func (a *app) pullCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if code == output.ExitSuccess && withFormulas {
+				formulaResult, formulaErr := formulaspkg.Pull(workbookArgPath(a.cwd, cfg.Excel.Path), filepath.Join(a.cwd, "formulas"))
+				if formulaErr != nil {
+					attachFormulaPullError(&env, formulaErr)
+				}
+				if formulaErr == nil {
+					attachFormulaPullResult(&env, formulaResult, a.cwd)
+					env.Logs = append(env.Logs, fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", formulaResult.FormulaRegionCount, len(formulaResult.Manifest.Sheets)))
+				}
+				if session && formulaErr == nil {
+					env.Warnings = append(anySlice(env.Warnings), map[string]any{
+						"code":    "formula_snapshot_saved_file",
+						"message": "Formula snapshots were extracted from the saved workbook file. If the live session workbook has unsaved formula changes, run `xlflow save --json` and `xlflow formulas pull --json` again.",
+					})
+				}
+			}
 			return a.write(env, code)
 		},
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
+	cmd.Flags().BoolVar(&withFormulas, "formulas", false, "also extract worksheet formula snapshots into formulas/")
 	return cmd
+}
+
+func attachFormulaPullResult(env *output.Envelope, result formulaspkg.Result, root string) {
+	if env == nil {
+		return
+	}
+	outputPayload := cliObjectMap(env.Output)
+	outputPayload["formulas"] = formulaResultPayload(result, root)
+	env.Output = outputPayload
+}
+
+func formulaResultPayload(result formulaspkg.Result, root string) map[string]any {
+	return map[string]any{
+		"dir":                  displayPath(root, result.OutputDir),
+		"manifest":             displayPath(root, result.ManifestPath),
+		"sheet_count":          len(result.Manifest.Sheets),
+		"formula_region_count": result.FormulaRegionCount,
+		"parse_status_summary": result.Manifest.ParseStatusSummary,
+		"defined_name_count":   len(result.Names),
+	}
+}
+
+func attachFormulaPullError(env *output.Envelope, err error) {
+	if env == nil || err == nil {
+		return
+	}
+	outputPayload := cliObjectMap(env.Output)
+	outputPayload["formulas_error"] = map[string]any{
+		"code":    "pull_formulas_failed",
+		"message": err.Error(),
+	}
+	env.Output = outputPayload
+	env.Warnings = append(anySlice(env.Warnings), map[string]any{
+		"code":    "pull_formulas_failed",
+		"message": "VBA source was pulled, but formula snapshot extraction failed: " + err.Error(),
+	})
 }
 
 func (a *app) packCommand() *cobra.Command {

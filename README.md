@@ -107,6 +107,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Area                                              | Capabilities                                                                                                                                                                 |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Source control                                    | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Formula snapshots                                 | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull` or refresh them with `xlflow pull --formulas`                         |
 | Execution                                         | Run macros from the CLI with typed arguments                                                                                                                                 |
 | Testing                                           | Discover and run VBA test procedures                                                                                                                                         |
 | Formatting                                        | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
@@ -116,6 +117,14 @@ pull → fmt → edit → push → lint → test/run → inspect
 | AI agents                                         | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
 | LSP Server                                        | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
 | [VS Code Extension](<(editors/vscode/README.md)>) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
+
+Formula snapshots can also be created outside an xlflow workspace:
+
+```bash
+xlflow formulas pull --src Book.xlsx --out formulas --json
+```
+
+Inside an xlflow workspace, use `xlflow pull --formulas --json` to refresh formula snapshots after a successful VBA pull.
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
@@ -131,7 +140,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Trust access to the VBA project object model | Reading and writing VBA projects                                                                                                                                           |
 
 > [!NOTE]
-> Commands that do not require Excel COM, such as `lint`, `fmt`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
+> Commands that do not require Excel COM, such as `lint`, `fmt`, `formulas pull`, parts of `diff`, and Go unit tests, can be verified in non-Excel environments.
 
 > [!NOTE]
 > xlflow uses the .NET bridge for Excel COM operations. The legacy PowerShell bridge was removed in v0.16.0; supported bridge modes are `auto` and `dotnet`.

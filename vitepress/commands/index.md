@@ -17,6 +17,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.              |
 | [list](./list)                 | List workbook resources. The public subcommand is `list forms`.                  |
 | [form](./form)                 | Manage UserForms through source scaffolds, snapshot, build, and image export.    |
+| [formulas](./formulas)         | Extract worksheet formulas into region-based JSONL snapshots without Excel.      |
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
 | [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
