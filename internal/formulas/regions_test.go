@@ -109,6 +109,20 @@ func TestBuildRegionsUnsupportedFormulaPreservesRaw(t *testing.T) {
 	}
 }
 
+func TestBuildRegionsAddsFormulaIntelligenceIndex(t *testing.T) {
+	regions := BuildRegions([]FormulaCell{
+		{Cell: "E2", Row: 2, Col: 5, Kind: "normal", Formula: "=IFERROR(D2*Config!$B$2,0)"},
+		{Cell: "E3", Row: 3, Col: 5, Kind: "normal", Formula: "=IFERROR(D3*Config!$B$2,0)"},
+		{Cell: "E4", Row: 4, Col: 5, Kind: "normal", Formula: "=IFERROR(D4*Config!$B$2,0)"},
+	})
+	if len(regions) != 1 {
+		t.Fatalf("region count = %d: %#v", len(regions), regions)
+	}
+	assertStrings(t, regions[0].Refs, []string{"Config!$B$2", "D2:D4"})
+	assertStrings(t, regions[0].DependsOnSheets, []string{"Config"})
+	assertStrings(t, regions[0].Functions, []string{"IFERROR"})
+}
+
 func TestBuildRegionsMissingSharedAnchorFailsSoft(t *testing.T) {
 	regions := BuildRegions([]FormulaCell{
 		{Cell: "C3", Row: 3, Col: 3, Kind: "shared", SharedIndex: "0"},
@@ -143,6 +157,18 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func assertStrings(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("strings = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("strings = %#v, want %#v", got, want)
+		}
+	}
 }
 
 func assertNoOverlappingRegions(t *testing.T, regions []FormulaRegion) {

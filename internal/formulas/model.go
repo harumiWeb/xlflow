@@ -49,6 +49,9 @@ type FormulaRegion struct {
 	Count             int      `json:"count"`
 	ParseStatus       string   `json:"parse_status"`
 	Features          []string `json:"features,omitempty"`
+	Refs              []string `json:"refs,omitempty"`
+	DependsOnSheets   []string `json:"depends_on_sheets,omitempty"`
+	Functions         []string `json:"functions,omitempty"`
 	StorageKinds      []string `json:"storage_kinds,omitempty"`
 	StorageGroupCount int      `json:"storage_group_count,omitempty"`
 

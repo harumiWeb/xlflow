@@ -18,6 +18,7 @@ func BuildRegions(cells []FormulaCell) []FormulaRegion {
 	sortRegionsByColumn(regions)
 	markOutliers(regions)
 	sortRegions(regions)
+	finalizeRegionIntelligence(regions)
 	finalizeStorageGroupCounts(regions)
 	return regions
 }

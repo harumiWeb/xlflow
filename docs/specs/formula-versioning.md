@@ -87,7 +87,11 @@ Each sheet JSONL file contains one logical formula region per line. Normal and s
   "example_cell": "G2",
   "example_formula": "=E2*F2",
   "count": 999,
-  "parse_status": "ok"
+  "parse_status": "ok",
+  "refs": [
+    "E2:E1000",
+    "F2:F1000"
+  ]
 }
 ```
 
@@ -103,12 +107,24 @@ Shared formulas are read from their OOXML anchor and `ref` range, but `shared_in
   "example_formula": "=B2*C2",
   "count": 100,
   "parse_status": "ok",
+  "refs": [
+    "B2:B101",
+    "C2:C101"
+  ],
   "storage_kinds": [
     "shared"
   ],
   "storage_group_count": 2
 }
 ```
+
+When available, region rows include lightweight formula intelligence fields:
+
+- `refs`: referenced A1 ranges expanded to the logical formula region shape;
+- `depends_on_sheets`: sheet names from sheet-qualified references;
+- `functions`: Excel function names used by the example formula.
+
+These fields are best-effort indexes for review and AI-agent context. They do not attempt full Excel dependency graph resolution.
 
 `storage_kinds` identifies non-default OOXML storage forms that contributed to a canonical region. `storage_group_count` is emitted only when multiple storage-level groups were coalesced. Plain normal formula regions omit storage metadata.
 

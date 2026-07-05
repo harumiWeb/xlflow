@@ -18,7 +18,7 @@ formulas/
     001-Sheet1.regions.jsonl
 ```
 
-`manifest.json` lists workbook sheets and region files. `names.jsonl` contains workbook and sheet scoped defined names. Each sheet JSONL file contains logical formula regions grouped by normalized R1C1-like formula patterns. OOXML shared formula group boundaries are coalesced when they differ only by storage metadata.
+`manifest.json` lists workbook sheets and region files. `names.jsonl` contains workbook and sheet scoped defined names. Each sheet JSONL file contains logical formula regions grouped by normalized R1C1-like formula patterns. Region rows also include best-effort `refs`, `depends_on_sheets`, and `functions` indexes when xlflow can derive them from the formula text. OOXML shared formula group boundaries are coalesced when they differ only by storage metadata.
 
 `formulas pull` supports `.xlsx` and `.xlsm`, reads OOXML files directly, and does not use Excel COM. Cached calculated values are not included.
 
