@@ -7,16 +7,19 @@ const (
 	DiagnosticSeverityError   DiagnosticSeverity = "error"
 )
 
+type DiagnosticCode string
+
 const (
-	DiagnosticInvalidBaseCell    = "invalid_base_cell"
-	DiagnosticUnterminatedString = "unterminated_string"
-	DiagnosticUnterminatedQuoted = "unterminated_quoted_name"
-	DiagnosticUnsupportedSyntax  = "unsupported_formula_syntax"
-	DiagnosticInvalidReference   = "invalid_reference"
+	DiagnosticInvalidBaseCell                 DiagnosticCode = "invalid_base_cell"
+	DiagnosticUnterminatedString              DiagnosticCode = "unterminated_string"
+	DiagnosticUnterminatedQuoted              DiagnosticCode = "unterminated_quoted_name"
+	DiagnosticUnterminatedStructuredReference DiagnosticCode = "unterminated_structured_reference"
+	DiagnosticUnsupportedSyntax               DiagnosticCode = "unsupported_formula_syntax"
+	DiagnosticInvalidReference                DiagnosticCode = "invalid_reference"
 )
 
 type Diagnostic struct {
-	Code     string             `json:"code"`
+	Code     DiagnosticCode     `json:"code"`
 	Severity DiagnosticSeverity `json:"severity"`
 	Message  string             `json:"message"`
 	Span     Span               `json:"span"`

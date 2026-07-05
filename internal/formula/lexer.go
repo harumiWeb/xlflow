@@ -72,14 +72,7 @@ func Lex(formula string) ([]Token, []Diagnostic) {
 			}
 			tokens = append(tokens, Token{Kind: TokenIdentifier, Text: formula[start:i], Span: Span{Start: start, End: i}})
 		case unicode.IsDigit(r):
-			i += size
-			for i < len(formula) {
-				next, nextSize := utf8.DecodeRuneInString(formula[i:])
-				if !unicode.IsDigit(next) && next != '.' {
-					break
-				}
-				i += nextSize
-			}
+			i = scanNumber(formula, i+size)
 			tokens = append(tokens, Token{Kind: TokenNumber, Text: formula[start:i], Span: Span{Start: start, End: i}})
 		case strings.ContainsRune("(){}[],;:!$@", r):
 			i += size
@@ -99,6 +92,40 @@ func Lex(formula string) ([]Token, []Diagnostic) {
 		}
 	}
 	return tokens, diagnostics
+}
+
+func scanNumber(s string, pos int) int {
+	i := pos
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if !unicode.IsDigit(r) && r != '.' {
+			break
+		}
+		i += size
+	}
+	if i >= len(s) || (s[i] != 'e' && s[i] != 'E') {
+		return i
+	}
+	exp := i + 1
+	if exp < len(s) && (s[exp] == '+' || s[exp] == '-') {
+		exp++
+	}
+	if exp >= len(s) {
+		return i
+	}
+	r, size := utf8.DecodeRuneInString(s[exp:])
+	if !unicode.IsDigit(r) {
+		return i
+	}
+	exp += size
+	for exp < len(s) {
+		r, size = utf8.DecodeRuneInString(s[exp:])
+		if !unicode.IsDigit(r) {
+			break
+		}
+		exp += size
+	}
+	return exp
 }
 
 func scanDoubleQuoted(s string, start int) (int, bool) {

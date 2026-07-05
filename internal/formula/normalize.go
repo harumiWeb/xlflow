@@ -56,8 +56,11 @@ func NormalizeA1ToR1C1Pattern(formula string, opts NormalizeOptions) NormalizeRe
 			i += consumed
 			continue
 		}
-		if feature, consumed, ok := detectStructuredReference(tokens, i); ok {
+		if feature, diagnostic, consumed, ok := detectStructuredReference(tokens, i); ok {
 			result.Features = append(result.Features, feature)
+			if diagnostic != nil {
+				result.Diagnostics = append(result.Diagnostics, *diagnostic)
+			}
 			out.WriteString(rawTokens(tokens[i : i+consumed]))
 			i += consumed
 			continue
@@ -146,9 +149,9 @@ func detect3DReference(tokens []Token, pos int) (Feature, int, bool) {
 	return Feature{}, 0, false
 }
 
-func detectStructuredReference(tokens []Token, pos int) (Feature, int, bool) {
+func detectStructuredReference(tokens []Token, pos int) (Feature, *Diagnostic, int, bool) {
 	if pos+2 >= len(tokens) || tokens[pos].Kind != TokenIdentifier || tokenText(tokens, pos+1) != "[" {
-		return Feature{}, 0, false
+		return Feature{}, nil, 0, false
 	}
 	depth := 0
 	for i := pos + 1; i < len(tokens); i++ {
@@ -159,15 +162,23 @@ func detectStructuredReference(tokens []Token, pos int) (Feature, int, bool) {
 			depth--
 			if depth == 0 {
 				consumed := i - pos + 1
-				return featureFromTokens(FeatureStructuredReference, tokens[pos:pos+consumed]), consumed, true
+				return featureFromTokens(FeatureStructuredReference, tokens[pos:pos+consumed]), nil, consumed, true
 			}
 		}
 	}
-	return Feature{
+	span := Span{Start: tokens[pos].Span.Start, End: tokens[len(tokens)-1].Span.End}
+	feature := Feature{
 		Code: FeatureStructuredReference,
 		Raw:  rawTokens(tokens[pos:]),
-		Span: Span{Start: tokens[pos].Span.Start, End: tokens[len(tokens)-1].Span.End},
-	}, len(tokens) - pos, true
+		Span: span,
+	}
+	diagnostic := Diagnostic{
+		Code:     DiagnosticUnterminatedStructuredReference,
+		Severity: DiagnosticSeverityWarning,
+		Message:  "unterminated structured reference",
+		Span:     span,
+	}
+	return feature, &diagnostic, len(tokens) - pos, true
 }
 
 func featureFromTokens(code string, tokens []Token) Feature {

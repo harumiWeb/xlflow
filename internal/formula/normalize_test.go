@@ -132,6 +132,32 @@ func TestNormalizeDetectsP1FeaturesAndPreservesRaw(t *testing.T) {
 	}
 }
 
+func TestNormalizeUnterminatedStructuredReferenceAddsDiagnostic(t *testing.T) {
+	got := NormalizeA1ToR1C1Pattern("=Table1[Amount*A1", NormalizeOptions{BaseCell: CellRef{Row: 2, Col: 3}})
+	if got.Status != ParseStatusPartial {
+		t.Fatalf("status = %q, want partial; result=%#v", got.Status, got)
+	}
+	if got.Formula != "=Table1[Amount*A1" {
+		t.Fatalf("formula = %q", got.Formula)
+	}
+	if !hasFeature(got.Features, FeatureStructuredReference) {
+		t.Fatalf("features = %#v", got.Features)
+	}
+	if !hasDiagnostic(got.Diagnostics, DiagnosticUnterminatedStructuredReference) {
+		t.Fatalf("diagnostics = %#v", got.Diagnostics)
+	}
+}
+
+func TestNormalizeScientificNotationDoesNotCreateReference(t *testing.T) {
+	got := NormalizeA1ToR1C1Pattern("=1E10+1.5e-3+A1", NormalizeOptions{BaseCell: CellRef{Row: 2, Col: 3}})
+	if got.Formula != "=1E10+1.5e-3+R[-1]C[-2]" {
+		t.Fatalf("formula = %q", got.Formula)
+	}
+	if len(got.References) != 1 || got.References[0].Raw != "A1" {
+		t.Fatalf("references = %#v", got.References)
+	}
+}
+
 func TestNormalizeInvalidBaseCellFails(t *testing.T) {
 	got := NormalizeA1ToR1C1Pattern("=A1", NormalizeOptions{BaseCell: CellRef{}})
 	if got.Status != ParseStatusFailed {
@@ -145,6 +171,15 @@ func TestNormalizeInvalidBaseCellFails(t *testing.T) {
 func hasFeature(features []Feature, code string) bool {
 	for _, feature := range features {
 		if feature.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnostic(diagnostics []Diagnostic, code DiagnosticCode) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
 			return true
 		}
 	}

@@ -18,6 +18,31 @@ func TestLexPreservesStringsQuotedNamesErrorsAndPunctuation(t *testing.T) {
 	}
 }
 
+func TestLexNumberLiterals(t *testing.T) {
+	tests := []string{
+		"123",
+		"1.25",
+		"1E10",
+		"1e10",
+		"1.5e-3",
+		"2E+7",
+	}
+	for _, literal := range tests {
+		t.Run(literal, func(t *testing.T) {
+			tokens, diagnostics := Lex("=" + literal)
+			if len(diagnostics) != 0 {
+				t.Fatalf("diagnostics = %#v", diagnostics)
+			}
+			if got := rawTokens(tokens); got != "="+literal {
+				t.Fatalf("raw tokens = %q", got)
+			}
+			if len(tokens) != 2 || tokens[1].Kind != TokenNumber || tokens[1].Text != literal {
+				t.Fatalf("tokens = %#v", tokens)
+			}
+		})
+	}
+}
+
 func TestLexEscapedQuotes(t *testing.T) {
 	tokens, diagnostics := Lex(`="A1 ""quoted"" B2"`)
 	if len(diagnostics) != 0 {

@@ -113,7 +113,7 @@ func parseCellEndpoint(tokens []Token, pos int) (RefEndpoint, int, bool) {
 	if pos >= len(tokens) || tokens[pos].Kind != TokenIdentifier {
 		return RefEndpoint{}, 0, false
 	}
-	col, rowText, combined := splitCellText(tokens[pos].Text)
+	col, rowText, _ := splitCellText(tokens[pos].Text)
 	if col == "" {
 		return RefEndpoint{}, 0, false
 	}
@@ -128,9 +128,6 @@ func parseCellEndpoint(tokens []Token, pos int) (RefEndpoint, int, bool) {
 		}
 		rowText = tokens[pos].Text
 		pos++
-	} else if combined && strings.HasPrefix(rowText, "$") {
-		rowAbs = true
-		rowText = strings.TrimPrefix(rowText, "$")
 	}
 	colNumber, err := excelize.ColumnNameToNumber(strings.ToUpper(col))
 	if err != nil {
