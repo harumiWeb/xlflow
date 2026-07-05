@@ -23,3 +23,11 @@ formulas/
 `formulas pull` supports `.xlsx` and `.xlsm`, reads OOXML files directly, and does not use Excel COM. Cached calculated values are not included.
 
 Unsupported formula syntax is preserved as raw formula data with `partial` or `failed` parse status so one unsupported formula does not block the snapshot.
+
+## Standalone Use
+
+Use `--src` to point at a workbook directly and `--out` to choose the output directory. In this mode, `xlflow.toml` is not required.
+
+```bash
+xlflow formulas pull --src ./Book.xlsx --out ./formula-snapshot --json
+```

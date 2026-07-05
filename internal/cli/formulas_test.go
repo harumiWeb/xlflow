@@ -87,6 +87,35 @@ func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
 	}
 }
 
+func TestFormulasPullSupportsStandaloneSourceAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "fixtures", "Standalone.xlsx")
+	outputDir := filepath.Join(dir, "snapshots")
+	writeFormulaWorkbookFixture(t, workbook)
+
+	stdout, err := runFormulasCommandForTest(dir, "--json", "formulas", "pull", "--src", workbook, "--out", outputDir)
+	if err != nil {
+		t.Fatalf("formulas pull error = %v\n%s", err, stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
+	}
+	output, ok := env.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("output payload = %T", env.Output)
+	}
+	if output["dir"] != "snapshots" {
+		t.Fatalf("output dir = %#v, want snapshots", output["dir"])
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "manifest.json")); err != nil {
+		t.Fatalf("manifest not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(err) {
+		t.Fatalf("test should not create or require xlflow.toml: %v", err)
+	}
+}
+
 func runFormulasCommandForTest(dir string, args ...string) (string, error) {
 	var stdout bytes.Buffer
 	a := &app{

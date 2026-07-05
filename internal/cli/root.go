@@ -623,21 +623,31 @@ func (a *app) formulasCommand() *cobra.Command {
 }
 
 func (a *app) formulasPullCommand() *cobra.Command {
+	var srcPath string
+	var outDir string
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Extract workbook formulas into region JSONL snapshots",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := a.loadConfig("formulas pull")
-			if err != nil {
-				return err
+			workbookPath := strings.TrimSpace(srcPath)
+			if workbookPath == "" {
+				cfg, err := a.loadConfig("formulas pull")
+				if err != nil {
+					return err
+				}
+				workbookPath = cfg.Excel.Path
 			}
-			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			workbookPath = workbookArgPath(a.cwd, workbookPath)
 			ext := strings.ToLower(filepath.Ext(workbookPath))
 			if ext != ".xlsx" && ext != ".xlsm" {
-				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", fmt.Errorf("configured workbook must end in .xlsx or .xlsm: %s", cfg.Excel.Path))
+				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", fmt.Errorf("source workbook must end in .xlsx or .xlsm: %s", workbookPath))
 			}
-			result, err := formulaspkg.Pull(workbookPath, filepath.Join(a.cwd, "formulas"))
+			outputDir := workbookArgPath(a.cwd, strings.TrimSpace(outDir))
+			if outputDir == "" {
+				outputDir = filepath.Join(a.cwd, "formulas")
+			}
+			result, err := formulaspkg.Pull(workbookPath, outputDir)
 			if err != nil {
 				return a.writeFailure("formulas pull", output.ExitEnvironment, "formulas_pull_failed", err)
 			}
@@ -656,6 +666,8 @@ func (a *app) formulasPullCommand() *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+	cmd.Flags().StringVar(&srcPath, "src", "", "source workbook path; when omitted, use [excel].path from xlflow.toml")
+	cmd.Flags().StringVar(&outDir, "out", "formulas", "output directory for formula snapshots")
 	return cmd
 }
 

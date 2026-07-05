@@ -118,6 +118,12 @@ pull → fmt → edit → push → lint → test/run → inspect
 | LSP Server                                        | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
 | [VS Code Extension](<(editors/vscode/README.md)>) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
 
+Formula snapshots can also be created outside an xlflow workspace:
+
+```bash
+xlflow formulas pull --src Book.xlsx --out formulas --json
+```
+
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
 

@@ -4,17 +4,31 @@ This spec defines the formula snapshot contract for `xlflow formulas pull`.
 
 ## Command
 
-`xlflow formulas pull` reads the workbook configured by `[excel].path` in `xlflow.toml` and writes formula metadata under `formulas/`.
+`xlflow formulas pull` reads a workbook and writes formula metadata under `formulas/`.
+
+By default, the command reads the workbook configured by `[excel].path` in `xlflow.toml`:
+
+```bash
+xlflow formulas pull
+```
+
+It can also run outside an xlflow workspace by specifying the source workbook directly:
+
+```bash
+xlflow formulas pull --src path/to/Book.xlsx --out path/to/formulas
+```
 
 The command:
 
 - supports `.xlsx` and `.xlsm` files;
+- accepts `--src <workbook>` to override the configured workbook and skip `xlflow.toml` loading;
+- accepts `--out <dir>` to choose the output directory; the default is `formulas`;
 - reads workbook files directly as OOXML zip packages;
 - does not launch Excel, use COM, evaluate formulas, recalculate, or write formulas back;
 - replaces the generated `formulas/` directory on each successful run;
 - omits volatile metadata such as generation timestamps.
 
-Unsupported workbook files or extraction failures return `formulas_pull_failed`. A configured workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`.
+Unsupported workbook files or extraction failures return `formulas_pull_failed`. A source workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`.
 
 ## Output Layout
 
