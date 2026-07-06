@@ -33,3 +33,110 @@ Use `--src` to point at a workbook directly and `--out` to choose the output dir
 ```bash
 xlflow formulas pull --src ./Book.xlsx --out ./formula-snapshot --json
 ```
+
+## Inspect Formula Snapshots
+
+Use `formulas inspect` to read existing formula snapshots without opening Excel.
+
+```bash
+xlflow formulas inspect
+```
+
+The default view is a workbook summary. It includes formula region counts, formula cell counts, parse status counts, notable features, sheet dependencies, and defined names when `names.jsonl` exists.
+
+```text
+Formula summary
+
+Sheets:
+  Invoice
+    formula regions: 3
+    formula cells: 3000
+    parse: ok 3, partial 0, failed 0
+    depends on sheets:
+      Config
+
+Defined names:
+  TaxRate -> =Config!$B$2
+```
+
+Inspect one sheet to list its formula regions:
+
+```bash
+xlflow formulas inspect --sheet Invoice
+```
+
+```text
+Invoice formulas
+
+D2:D1001
+  pattern: =RC[-2]*RC[-1]
+  example: D2 = B2*C2
+  cells: 1000
+  parse: ok
+```
+
+Inspect a specific cell to find the containing formula region. When the region has a supported `formula_r1c1` pattern, xlflow expands it to the requested cell.
+
+```bash
+xlflow formulas inspect --cell Invoice!E500
+```
+
+```text
+Invoice!E500
+
+Region:
+  E2:E1001
+
+Formula pattern:
+  =RC[-1]*Config!R2C2
+
+Expanded formula at Invoice!E500:
+  =D500*Config!$B$2
+```
+
+Inspect a range to list overlapping formula regions:
+
+```bash
+xlflow formulas inspect --range Invoice!D2:F1001
+```
+
+Snapshots generated somewhere other than `formulas/` can be inspected with `--dir`:
+
+```bash
+xlflow formulas inspect --dir ./formula-snapshot --summary
+```
+
+Use `--json` for agent-friendly output. The inspect payload is under `output.formulas_inspect`.
+
+```bash
+xlflow --json formulas inspect --cell Invoice!E500
+```
+
+```json
+{
+  "status": "ok",
+  "command": "formulas inspect",
+  "output": {
+    "formulas_inspect": {
+      "view": "cell",
+      "dir": "formulas",
+      "workbook": "Book.xlsm",
+      "cell": "Invoice!E500",
+      "region": {
+        "sheet": "Invoice",
+        "range": "E2:E1001",
+        "kind": "formula",
+        "formula_r1c1": "=RC[-1]*Config!R2C2",
+        "example_cell": "E2",
+        "example_formula": "=D2*Config!$B$2",
+        "count": 1000,
+        "parse_status": "ok",
+        "depends_on_sheets": ["Config"]
+      },
+      "expanded_formula": "=D500*Config!$B$2"
+    }
+  }
+}
+```
+
+`partial` and `failed` formula rows remain inspectable. They are shown with their parse status and any snapshot features, such as `structured_reference`, instead of failing the command.

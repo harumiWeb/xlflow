@@ -34,6 +34,24 @@ xlflow formulas pull --src ./Book.xlsx --out ./formulas --json
 
 If a live Excel session has unsaved workbook changes, run `xlflow save --json` before `formulas pull`; formula extraction reads the saved file, not unsaved session state.
 
+Inspect existing snapshots before opening raw JSONL files:
+
+```bash
+xlflow formulas inspect
+xlflow formulas inspect --sheet Invoice
+xlflow formulas inspect --cell Invoice!E500
+xlflow formulas inspect --range Invoice!D2:F1001
+xlflow formulas inspect --json
+```
+
+Use `--dir <path>` when the snapshot was generated outside the default `formulas/` directory:
+
+```bash
+xlflow formulas inspect --dir ./formula-snapshot --summary --json
+```
+
+`formulas inspect` reads existing snapshot files only. It does not open Excel, evaluate formulas, recalculate, or mutate workbook/source files.
+
 ## Output Layout
 
 ```text
@@ -164,16 +182,67 @@ Use the raw `formula`, `features`, and `functions` fields for reasoning. Structu
 
 Always check `names.jsonl` when formulas reference constants, workbook parameters, named ranges, or sheet-scoped aliases. A named value such as `TaxRate` may explain a formula that otherwise looks disconnected from its source cell.
 
+## Inspect Command
+
+Prefer `xlflow formulas inspect` when you need a quick, human-readable or agent-readable view of snapshot contents.
+
+Summary view:
+
+```bash
+xlflow formulas inspect --summary
+```
+
+Use it to answer:
+
+- which sheets contain formulas
+- how many formula regions and formula cells each sheet has
+- whether formulas parsed as `ok`, `partial`, or `failed`
+- which notable features appear, such as `structured_reference`
+- which sheets are referenced by formulas
+- which defined names exist
+
+Sheet view:
+
+```bash
+xlflow formulas inspect --sheet Invoice
+```
+
+Use it to list formula regions on one sheet, including each region's pattern or raw formula, example formula, cell count, parse status, features, and dependencies.
+
+Cell view:
+
+```bash
+xlflow formulas inspect --cell Invoice!E500
+```
+
+Use it to find which formula region contains a specific cell. When the region has a supported `formula_r1c1` pattern, inspect also shows the expanded A1 formula at the requested cell, such as `=D500*Config!$B$2`. If the cell is not part of a formula region, the command reports that clearly.
+
+Range view:
+
+```bash
+xlflow formulas inspect --range Invoice!D2:F1001
+```
+
+Use it to find all formula regions overlapping a range before changing columns, VBA range writes, named constants, or sheet layout.
+
+JSON output:
+
+```bash
+xlflow --json formulas inspect --cell Invoice!E500
+```
+
+The JSON envelope uses `command:"formulas inspect"` and places the view payload under `output.formulas_inspect`. Use this form when another agent or script needs structured fields such as `regions`, `region`, `expanded_formula`, `defined_names`, `features`, or `depends_on_sheets`.
+
 ## Agent Workflow
 
 Before editing VBA or workbook layout:
 
 1. Read `xlflow.toml` and identify the workbook and source directories.
 2. If the workbook has live session changes, save first with `xlflow save --json`.
-3. Run `xlflow formulas pull --json` or inspect existing `formulas/` snapshots.
-4. Open `manifest.json` to find relevant sheet region files and parse status summaries.
-5. Open relevant `sheets/*.regions.jsonl` files and inspect `range`, `formula_r1c1`, `refs`, `depends_on_sheets`, and `features`.
-6. Open `names.jsonl` and check named constants or ranges used by the formulas.
+3. Run `xlflow formulas pull --json` if the snapshot may be stale, or use existing `formulas/` snapshots if they are known current.
+4. Run `xlflow formulas inspect --summary --json` to identify formula-heavy sheets, parse statuses, defined names, features, and sheet dependencies.
+5. Use `xlflow formulas inspect --sheet <name> --json`, `--cell <sheet!A1> --json`, or `--range <sheet!A1:B2> --json` to narrow the affected formula regions.
+6. Open raw `manifest.json`, `names.jsonl`, or relevant `sheets/*.regions.jsonl` files only when inspect output is not detailed enough for the task.
 7. Identify whether the VBA or layout change touches formula input ranges, formula output ranges, defined names, or dependent sheets.
 8. Make the code or workbook-source change.
 9. Run xlflow lint/tests/macros as appropriate.
