@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.19.0
+
 - Added `xlflow formulas pull` to extract worksheet formulas and defined names from `.xlsx` / `.xlsm` files into deterministic region-based JSONL snapshots without launching Excel, including standalone `--src` and `--out` options, region dependency indexes, and parse status summaries.
 - Added `xlflow formulas inspect` to summarize formula snapshots, list sheet/range regions, locate a cell's formula region, expand supported R1C1 patterns, and emit agent-friendly JSON.
 - Added `xlflow pull --formulas` to refresh the default `formulas/` snapshot after a successful VBA pull.
