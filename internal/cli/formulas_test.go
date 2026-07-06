@@ -237,6 +237,27 @@ func TestFormulasInspectErrors(t *testing.T) {
 	if !strings.Contains(stdout, "formulas_inspect_failed") || !strings.Contains(stdout, "manifest not found") {
 		t.Fatalf("missing snapshot output = %s", stdout)
 	}
+
+	badDir := filepath.Join(dir, "bad")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "manifest.json"), []byte(`{"version":1,"sheets":[{"name":"Invoice","path":"sheets/001-Invoice.regions.jsonl"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(badDir, "sheets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "sheets", "001-Invoice.regions.jsonl"), []byte("{bad json}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err = runFormulasCommandForTest(dir, "--json", "formulas", "inspect", "--dir", badDir)
+	if err == nil {
+		t.Fatalf("expected malformed snapshot error\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "formulas_inspect_failed") || strings.Contains(stdout, "formulas_inspect_args_invalid") {
+		t.Fatalf("malformed snapshot output = %s", stdout)
+	}
 }
 
 func runFormulasCommandForTest(dir string, args ...string) (string, error) {

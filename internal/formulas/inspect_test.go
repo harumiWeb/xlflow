@@ -105,6 +105,18 @@ func TestInspectQuotedSheetAndR1C1Expansion(t *testing.T) {
 			}
 		})
 	}
+
+	for _, pattern := range []string{
+		"=SUM(C[-2]:C[-2])",
+		"=SUM(R[-1]:R[-1])",
+		"=R1C20000",
+	} {
+		t.Run("unsupported "+pattern, func(t *testing.T) {
+			if got, ok := ExpandR1C1Formula(pattern, formula.CellRef{Row: 5, Col: 3}); ok {
+				t.Fatalf("ExpandR1C1Formula(%q) = %q, true; want ok=false", pattern, got)
+			}
+		})
+	}
 }
 
 func TestInspectSnapshotErrors(t *testing.T) {

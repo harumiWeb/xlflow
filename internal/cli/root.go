@@ -700,7 +700,7 @@ func (a *app) formulasInspectCommand() *cobra.Command {
 			}
 			if err != nil {
 				code := output.ExitEnvironment
-				if strings.Contains(err.Error(), "invalid ") || strings.Contains(err.Error(), "selector") {
+				if formulaspkg.IsInspectArgumentError(err) {
 					code = output.ExitConfig
 				}
 				errCode := "formulas_inspect_failed"

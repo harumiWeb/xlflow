@@ -3,6 +3,7 @@ package formulas
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,27 @@ import (
 	"github.com/harumiWeb/xlflow/internal/formula"
 	"github.com/xuri/excelize/v2"
 )
+
+type InspectArgumentError struct {
+	Err error
+}
+
+func (e InspectArgumentError) Error() string {
+	return e.Err.Error()
+}
+
+func (e InspectArgumentError) Unwrap() error {
+	return e.Err
+}
+
+func IsInspectArgumentError(err error) bool {
+	var argErr InspectArgumentError
+	return errors.As(err, &argErr)
+}
+
+func inspectArgumentErrorf(format string, args ...any) error {
+	return InspectArgumentError{Err: fmt.Errorf(format, args...)}
+}
 
 type InspectResult struct {
 	View            string          `json:"view"`
@@ -339,11 +361,11 @@ func sortedKeys(values map[string]bool) []string {
 func parseSheetAddress(selector string, allowRange bool) (string, string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
-		return "", "", fmt.Errorf("selector is required")
+		return "", "", inspectArgumentErrorf("selector is required")
 	}
 	bang := sheetAddressBang(selector)
 	if bang < 0 {
-		return "", "", fmt.Errorf("expected selector in the form Sheet!A1")
+		return "", "", inspectArgumentErrorf("expected selector in the form Sheet!A1")
 	}
 	sheet := strings.TrimSpace(selector[:bang])
 	address := strings.TrimSpace(selector[bang+1:])
@@ -351,19 +373,19 @@ func parseSheetAddress(selector string, allowRange bool) (string, string, error)
 		sheet = strings.ReplaceAll(sheet[1:len(sheet)-1], "''", "'")
 	}
 	if sheet == "" || address == "" {
-		return "", "", fmt.Errorf("expected selector in the form Sheet!A1")
+		return "", "", inspectArgumentErrorf("expected selector in the form Sheet!A1")
 	}
 	if allowRange {
 		if _, _, _, ok := rangeInfo(address); !ok {
-			return "", "", fmt.Errorf("invalid range address %q", address)
+			return "", "", inspectArgumentErrorf("invalid range address %q", address)
 		}
 		return sheet, address, nil
 	}
 	if strings.Contains(address, ":") {
-		return "", "", fmt.Errorf("invalid cell address %q", address)
+		return "", "", inspectArgumentErrorf("invalid cell address %q", address)
 	}
 	if _, _, err := excelize.CellNameToCoordinates(address); err != nil {
-		return "", "", fmt.Errorf("invalid cell address %q: %w", address, err)
+		return "", "", inspectArgumentErrorf("invalid cell address %q: %w", address, err)
 	}
 	return sheet, address, nil
 }
@@ -401,6 +423,7 @@ var (
 	r1c1CombinedPattern = regexp.MustCompile(`^R(\[[-+]?\d+\]|\d*)C(\[[-+]?\d+\]|\d*)$`)
 	r1c1RowThenCPattern = regexp.MustCompile(`^R(\d+)C$`)
 	r1c1ColumnPattern   = regexp.MustCompile(`^C(\d+)$`)
+	r1c1RowColumnOnly   = regexp.MustCompile(`^[RC]\d+$`)
 )
 
 func ExpandR1C1Formula(value string, base formula.CellRef) (string, bool) {
@@ -417,6 +440,9 @@ func ExpandR1C1Formula(value string, base formula.CellRef) (string, bool) {
 			b.WriteString(replacement)
 			i += consumed
 			continue
+		}
+		if looksLikeUnsupportedR1C1(tokens, i) {
+			return "", false
 		}
 		b.WriteString(tokens[i].Text)
 		i++
@@ -442,9 +468,21 @@ func parseR1C1Reference(tokens []formula.Token, pos int, base formula.CellRef) (
 		if !ok {
 			return "", 0, false
 		}
-		return prefix + renderExpandedR1C1(first) + ":" + renderExpandedR1C1(second), pos + 1 + secondConsumed - start, true
+		renderedFirst, ok := renderExpandedR1C1(first)
+		if !ok {
+			return "", 0, false
+		}
+		renderedSecond, ok := renderExpandedR1C1(second)
+		if !ok {
+			return "", 0, false
+		}
+		return prefix + renderedFirst + ":" + renderedSecond, pos + 1 + secondConsumed - start, true
 	}
-	return prefix + renderExpandedR1C1(first), pos - start, true
+	rendered, ok := renderExpandedR1C1(first)
+	if !ok {
+		return "", 0, false
+	}
+	return prefix + rendered, pos - start, true
 }
 
 type expandedR1C1Endpoint struct {
@@ -454,42 +492,47 @@ type expandedR1C1Endpoint struct {
 	colAbs bool
 }
 
+const (
+	maxExcelRows = 1048576
+	maxExcelCols = 16384
+)
+
 func parseR1C1Endpoint(tokens []formula.Token, pos int, base formula.CellRef) (expandedR1C1Endpoint, int, bool) {
 	if pos >= len(tokens) {
 		return expandedR1C1Endpoint{}, 0, false
 	}
 	if tokens[pos].Kind == formula.TokenIdentifier {
 		if strings.EqualFold(tokens[pos].Text, "RC") {
-			col, colAbs, colConsumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Col)
+			col, colAbs, colConsumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Col, maxExcelCols)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
 			return expandedR1C1Endpoint{row: base.Row, col: col, colAbs: colAbs}, colConsumed + 1, true
 		}
 		if match := r1c1RowThenCPattern.FindStringSubmatch(strings.ToUpper(tokens[pos].Text)); match != nil {
-			row, rowAbs, ok := resolveR1C1Part(match[1], base.Row)
+			row, rowAbs, ok := resolveR1C1Part(match[1], base.Row, maxExcelRows)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
-			col, colAbs, colConsumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Col)
+			col, colAbs, colConsumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Col, maxExcelCols)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
 			return expandedR1C1Endpoint{row: row, col: col, rowAbs: rowAbs, colAbs: colAbs}, colConsumed + 1, true
 		}
 		if match := r1c1CombinedPattern.FindStringSubmatch(strings.ToUpper(tokens[pos].Text)); match != nil {
-			row, rowAbs, ok := resolveR1C1Part(match[1], base.Row)
+			row, rowAbs, ok := resolveR1C1Part(match[1], base.Row, maxExcelRows)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
-			col, colAbs, ok := resolveR1C1Part(match[2], base.Col)
+			col, colAbs, ok := resolveR1C1Part(match[2], base.Col, maxExcelCols)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
 			return expandedR1C1Endpoint{row: row, col: col, rowAbs: rowAbs, colAbs: colAbs}, 1, true
 		}
 		if strings.EqualFold(tokens[pos].Text, "R") {
-			row, rowAbs, consumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Row)
+			row, rowAbs, consumed, ok := parseSplitR1C1Part(tokens, pos+1, base.Row, maxExcelRows)
 			if !ok {
 				return expandedR1C1Endpoint{}, 0, false
 			}
@@ -508,23 +551,23 @@ func parseR1C1Column(tokens []formula.Token, pos int, base int) (int, bool, int,
 		return 0, false, 0, false
 	}
 	if strings.EqualFold(tokens[pos].Text, "C") {
-		col, colAbs, consumed, ok := parseSplitR1C1Part(tokens, pos+1, base)
+		col, colAbs, consumed, ok := parseSplitR1C1Part(tokens, pos+1, base, maxExcelCols)
 		return col, colAbs, consumed + 1, ok
 	}
 	if match := r1c1ColumnPattern.FindStringSubmatch(strings.ToUpper(tokens[pos].Text)); match != nil {
-		col, colAbs, ok := resolveR1C1Part(match[1], base)
+		col, colAbs, ok := resolveR1C1Part(match[1], base, maxExcelCols)
 		return col, colAbs, 1, ok
 	}
 	return 0, false, 0, false
 }
 
-func parseSplitR1C1Part(tokens []formula.Token, pos int, base int) (int, bool, int, bool) {
+func parseSplitR1C1Part(tokens []formula.Token, pos int, base int, maxValue int) (int, bool, int, bool) {
 	if pos >= len(tokens) || tokens[pos].Text == ":" || tokens[pos].Text == ")" || tokens[pos].Text == "," {
 		return base, false, 0, true
 	}
 	if tokens[pos].Kind == formula.TokenNumber {
 		value, err := strconv.Atoi(tokens[pos].Text)
-		if err != nil || value <= 0 {
+		if err != nil || value <= 0 || value > maxValue {
 			return 0, false, 0, false
 		}
 		return value, true, 1, true
@@ -550,13 +593,13 @@ func parseSplitR1C1Part(tokens []formula.Token, pos int, base int) (int, bool, i
 		return 0, false, 0, false
 	}
 	value := base + offset
-	if value <= 0 {
+	if value <= 0 || value > maxValue {
 		return 0, false, 0, false
 	}
 	return value, false, consumed, true
 }
 
-func resolveR1C1Part(text string, base int) (int, bool, bool) {
+func resolveR1C1Part(text string, base int, maxValue int) (int, bool, bool) {
 	if text == "" {
 		return base, false, true
 	}
@@ -566,20 +609,52 @@ func resolveR1C1Part(text string, base int) (int, bool, bool) {
 			return 0, false, false
 		}
 		value := base + offset
-		if value <= 0 {
+		if value <= 0 || value > maxValue {
 			return 0, false, false
 		}
 		return value, false, true
 	}
 	value, err := strconv.Atoi(text)
-	if err != nil || value <= 0 {
+	if err != nil || value <= 0 || value > maxValue {
 		return 0, false, false
 	}
 	return value, true, true
 }
 
-func renderExpandedR1C1(endpoint expandedR1C1Endpoint) string {
-	col, _ := excelize.ColumnNumberToName(endpoint.col)
+func looksLikeUnsupportedR1C1(tokens []formula.Token, pos int) bool {
+	if pos >= len(tokens) || tokens[pos].Kind != formula.TokenIdentifier {
+		return false
+	}
+	text := strings.ToUpper(tokens[pos].Text)
+	switch {
+	case text == "R" || text == "C":
+		return nextTokenStartsR1C1Part(tokens, pos+1)
+	case strings.HasPrefix(text, "R[") || strings.HasPrefix(text, "C["):
+		return true
+	case r1c1CombinedPattern.MatchString(text) || r1c1RowThenCPattern.MatchString(text):
+		return true
+	case r1c1RowColumnOnly.MatchString(text):
+		return true
+	default:
+		return false
+	}
+}
+
+func nextTokenStartsR1C1Part(tokens []formula.Token, pos int) bool {
+	if pos >= len(tokens) {
+		return false
+	}
+	return tokens[pos].Text == "[" || tokens[pos].Kind == formula.TokenNumber || tokens[pos].Text == ":"
+}
+
+func renderExpandedR1C1(endpoint expandedR1C1Endpoint) (string, bool) {
+	if endpoint.row <= 0 || endpoint.row > maxExcelRows || endpoint.col <= 0 || endpoint.col > maxExcelCols {
+		return "", false
+	}
+	col, err := excelize.ColumnNumberToName(endpoint.col)
+	if err != nil {
+		return "", false
+	}
 	if endpoint.colAbs {
 		col = "$" + col
 	}
@@ -587,5 +662,5 @@ func renderExpandedR1C1(endpoint expandedR1C1Endpoint) string {
 	if endpoint.rowAbs {
 		row = "$" + row
 	}
-	return col + row
+	return col + row, true
 }
