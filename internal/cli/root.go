@@ -619,6 +619,7 @@ func (a *app) formulasCommand() *cobra.Command {
 		Short: "Manage workbook formula snapshots",
 	}
 	cmd.AddCommand(a.formulasPullCommand())
+	cmd.AddCommand(a.formulasInspectCommand())
 	return cmd
 }
 
@@ -663,6 +664,97 @@ func (a *app) formulasPullCommand() *cobra.Command {
 	cmd.Flags().StringVar(&srcPath, "src", "", "source workbook path; when omitted, use [excel].path from xlflow.toml")
 	cmd.Flags().StringVar(&outDir, "out", "formulas", "output directory for formula snapshots")
 	return cmd
+}
+
+func (a *app) formulasInspectCommand() *cobra.Command {
+	var dir string
+	var summary bool
+	var sheet string
+	var cell string
+	var cellRange string
+	cmd := &cobra.Command{
+		Use:   "inspect",
+		Short: "Inspect formula snapshot regions",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			view, err := buildFormulaInspectView(summary, sheet, cell, cellRange)
+			if err != nil {
+				return a.writeFailure("formulas inspect", output.ExitConfig, "formulas_inspect_args_invalid", err)
+			}
+			snapshotDir := workbookArgPath(a.cwd, strings.TrimSpace(dir))
+			if snapshotDir == "" {
+				snapshotDir = filepath.Join(a.cwd, "formulas")
+			}
+			var result formulaspkg.InspectResult
+			switch view.kind {
+			case "summary":
+				result, err = formulaspkg.InspectSummary(snapshotDir)
+			case "sheet":
+				result, err = formulaspkg.InspectSheet(snapshotDir, view.value)
+			case "cell":
+				result, err = formulaspkg.InspectCell(snapshotDir, view.value)
+			case "range":
+				result, err = formulaspkg.InspectRange(snapshotDir, view.value)
+			default:
+				err = fmt.Errorf("unsupported formula inspect view %q", view.kind)
+			}
+			if err != nil {
+				code := output.ExitEnvironment
+				if strings.Contains(err.Error(), "invalid ") || strings.Contains(err.Error(), "selector") {
+					code = output.ExitConfig
+				}
+				errCode := "formulas_inspect_failed"
+				if code == output.ExitConfig {
+					errCode = "formulas_inspect_args_invalid"
+				}
+				return a.writeFailure("formulas inspect", code, errCode, err)
+			}
+			result.Dir = displayPath(a.cwd, snapshotDir)
+			env := output.New("formulas inspect")
+			env.Output = map[string]any{"formulas_inspect": result}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "formulas", "formula snapshot directory")
+	cmd.Flags().BoolVar(&summary, "summary", false, "show workbook-level formula summary")
+	cmd.Flags().StringVar(&sheet, "sheet", "", "show formula regions for one sheet")
+	cmd.Flags().StringVar(&cell, "cell", "", "show the formula region containing a cell such as Invoice!E500")
+	cmd.Flags().StringVar(&cellRange, "range", "", "show formula regions overlapping a range such as Invoice!D2:F1001")
+	return cmd
+}
+
+type formulaInspectView struct {
+	kind  string
+	value string
+}
+
+func buildFormulaInspectView(summary bool, sheet, cell, cellRange string) (formulaInspectView, error) {
+	selected := 0
+	if summary {
+		selected++
+	}
+	if strings.TrimSpace(sheet) != "" {
+		selected++
+	}
+	if strings.TrimSpace(cell) != "" {
+		selected++
+	}
+	if strings.TrimSpace(cellRange) != "" {
+		selected++
+	}
+	if selected > 1 {
+		return formulaInspectView{}, fmt.Errorf("choose only one of --summary, --sheet, --cell, or --range")
+	}
+	switch {
+	case strings.TrimSpace(sheet) != "":
+		return formulaInspectView{kind: "sheet", value: strings.TrimSpace(sheet)}, nil
+	case strings.TrimSpace(cell) != "":
+		return formulaInspectView{kind: "cell", value: strings.TrimSpace(cell)}, nil
+	case strings.TrimSpace(cellRange) != "":
+		return formulaInspectView{kind: "range", value: strings.TrimSpace(cellRange)}, nil
+	default:
+		return formulaInspectView{kind: "summary"}, nil
+	}
 }
 
 func (a *app) formNewCommand() *cobra.Command {

@@ -454,6 +454,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderFmt(env))
 	case "diff":
 		b.WriteString(r.renderDiff(env))
+	case "formulas inspect":
+		b.WriteString(r.renderFormulaInspect(env))
 	case "inspect":
 		b.WriteString(r.renderInspect(env))
 	case "process list":
@@ -2222,6 +2224,159 @@ func (r renderer) renderDiff(env Envelope) string {
 	}
 	b.WriteString(r.renderLogs(env))
 	return b.String()
+}
+
+func (r renderer) renderFormulaInspect(env Envelope) string {
+	outputPayload := objectMap(env.Output)
+	payload := objectMap(outputPayload["formulas_inspect"])
+	if len(payload) == 0 {
+		return r.renderLogs(env)
+	}
+	switch stringValue(payload, "view") {
+	case "summary":
+		return r.renderFormulaInspectSummary(payload)
+	case "sheet":
+		return r.renderFormulaInspectSheet(payload)
+	case "cell":
+		return r.renderFormulaInspectCell(payload)
+	case "range":
+		return r.renderFormulaInspectRange(payload)
+	default:
+		return r.renderLogs(env)
+	}
+}
+
+func (r renderer) renderFormulaInspectSummary(payload map[string]any) string {
+	var b strings.Builder
+	b.WriteString("\nFormula summary\n\n")
+	if workbook := stringValue(payload, "workbook"); workbook != "" {
+		b.WriteString(kv("Workbook", workbook))
+	}
+	if dir := stringValue(payload, "dir"); dir != "" {
+		b.WriteString(kv("Snapshot", dir))
+	}
+	sheets := listOfObjects(payload["sheets"])
+	if len(sheets) == 0 {
+		b.WriteString("\nNo formula regions found.\n")
+	} else {
+		b.WriteString("\nSheets:\n")
+		for _, sheet := range sheets {
+			fmt.Fprintf(&b, "  %s\n", stringValue(sheet, "name"))
+			fmt.Fprintf(&b, "    formula regions: %d\n", intNumber(sheet, "formula_region_count"))
+			fmt.Fprintf(&b, "    formula cells: %d\n", intNumber(sheet, "formula_cell_count"))
+			b.WriteString("    parse: " + formulaParseStatusText(objectMap(sheet["parse_status"])) + "\n")
+			writeIndentedStringList(&b, "    features:", stringList(sheet["features"]), "      ")
+			writeIndentedStringList(&b, "    depends on sheets:", stringList(sheet["depends_on_sheets"]), "      ")
+			b.WriteString("\n")
+		}
+	}
+	names := listOfObjects(payload["defined_names"])
+	if len(names) > 0 {
+		b.WriteString("Defined names:\n")
+		for _, name := range names {
+			scope := stringValue(name, "scope")
+			label := stringValue(name, "name")
+			if scope != "" && scope != "workbook" {
+				label = scope + "!" + label
+			}
+			fmt.Fprintf(&b, "  %s -> %s\n", label, stringValue(name, "refers_to"))
+		}
+	}
+	return b.String()
+}
+
+func (r renderer) renderFormulaInspectSheet(payload map[string]any) string {
+	var b strings.Builder
+	sheet := stringValue(payload, "sheet")
+	if sheet == "" {
+		sheet = "Sheet"
+	}
+	fmt.Fprintf(&b, "\n%s formulas\n\n", sheet)
+	for _, region := range listOfObjects(payload["regions"]) {
+		writeFormulaInspectRegion(&b, region, true)
+	}
+	return b.String()
+}
+
+func (r renderer) renderFormulaInspectCell(payload map[string]any) string {
+	var b strings.Builder
+	cell := stringValue(payload, "cell")
+	fmt.Fprintf(&b, "\n%s\n\n", cell)
+	region := objectMap(payload["region"])
+	if len(region) == 0 {
+		fmt.Fprintf(&b, "%s is not part of any formula region.\n", cell)
+		return b.String()
+	}
+	b.WriteString("Region:\n")
+	fmt.Fprintf(&b, "  %s\n\n", stringValue(region, "range"))
+	if pattern := stringValue(region, "formula_r1c1"); pattern != "" {
+		b.WriteString("Formula pattern:\n")
+		fmt.Fprintf(&b, "  %s\n\n", pattern)
+	} else if formula := stringValue(region, "formula"); formula != "" {
+		b.WriteString("Formula:\n")
+		fmt.Fprintf(&b, "  %s\n\n", formula)
+	}
+	if exampleCell := stringValue(region, "example_cell"); exampleCell != "" {
+		b.WriteString("Example:\n")
+		fmt.Fprintf(&b, "  %s = %s\n\n", exampleCell, strings.TrimPrefix(stringValue(region, "example_formula"), "="))
+	}
+	if expanded := stringValue(payload, "expanded_formula"); expanded != "" {
+		fmt.Fprintf(&b, "Expanded formula at %s:\n", cell)
+		fmt.Fprintf(&b, "  %s\n\n", expanded)
+	}
+	b.WriteString("Parse:\n")
+	fmt.Fprintf(&b, "  %s\n", stringValue(region, "parse_status"))
+	writeIndentedStringList(&b, "Features:", stringList(region["features"]), "  ")
+	writeIndentedStringList(&b, "Depends on:", stringList(region["depends_on_sheets"]), "  ")
+	return b.String()
+}
+
+func (r renderer) renderFormulaInspectRange(payload map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nFormula regions overlapping %s\n\n", stringValue(payload, "range"))
+	regions := listOfObjects(payload["regions"])
+	if len(regions) == 0 {
+		b.WriteString("No formula regions overlap this range.\n")
+		return b.String()
+	}
+	for _, region := range regions {
+		writeFormulaInspectRegion(&b, region, false)
+	}
+	return b.String()
+}
+
+func writeFormulaInspectRegion(b *strings.Builder, region map[string]any, includeDetails bool) {
+	fmt.Fprintf(b, "%s\n", stringValue(region, "range"))
+	if pattern := stringValue(region, "formula_r1c1"); pattern != "" {
+		fmt.Fprintf(b, "  pattern: %s\n", pattern)
+	} else if formula := stringValue(region, "formula"); formula != "" {
+		fmt.Fprintf(b, "  formula: %s\n", formula)
+	}
+	if exampleCell := stringValue(region, "example_cell"); exampleCell != "" {
+		fmt.Fprintf(b, "  example: %s = %s\n", exampleCell, strings.TrimPrefix(stringValue(region, "example_formula"), "="))
+	}
+	if includeDetails {
+		fmt.Fprintf(b, "  cells: %d\n", intNumber(region, "count"))
+		fmt.Fprintf(b, "  parse: %s\n", stringValue(region, "parse_status"))
+		writeIndentedStringList(b, "  features:", stringList(region["features"]), "    ")
+		writeIndentedStringList(b, "  depends on:", stringList(region["depends_on_sheets"]), "    ")
+	}
+	b.WriteString("\n")
+}
+
+func writeIndentedStringList(b *strings.Builder, label string, values []string, itemIndent string) {
+	if len(values) == 0 {
+		return
+	}
+	b.WriteString(label)
+	b.WriteString("\n")
+	for _, value := range values {
+		fmt.Fprintf(b, "%s%s\n", itemIndent, value)
+	}
+}
+
+func formulaParseStatusText(status map[string]any) string {
+	return fmt.Sprintf("ok %d, partial %d, failed %d", intNumber(status, "ok"), intNumber(status, "partial"), intNumber(status, "failed"))
 }
 
 func (r renderer) renderInspectStandalone(env Envelope) string {

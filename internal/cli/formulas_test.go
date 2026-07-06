@@ -26,6 +26,13 @@ func TestRootCommandIncludesFormulasPullCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pull" {
 		t.Fatalf("expected formulas pull command, got %#v", cmd)
 	}
+	cmd, _, err = root.Find([]string{"formulas", "inspect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "inspect" {
+		t.Fatalf("expected formulas inspect command, got %#v", cmd)
+	}
 }
 
 func TestFormulasPullWritesStableSnapshotsAndRemovesStaleOutput(t *testing.T) {
@@ -139,6 +146,96 @@ func TestFormulasPullSupportsStandaloneSourceAndOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(err) {
 		t.Fatalf("test should not create or require xlflow.toml: %v", err)
+	}
+}
+
+func TestFormulasInspectViewsAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.ToSlash(filepath.Join("build", "Book.xlsm"))
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	writeFormulaWorkbookFixture(t, filepath.Join(dir, "build", "Book.xlsm"))
+	if stdout, err := runFormulasCommandForTest(dir, "--json", "formulas", "pull"); err != nil {
+		t.Fatalf("formulas pull error = %v\n%s", err, stdout)
+	}
+
+	stdout, err := runFormulasCommandForTest(dir, "formulas", "inspect")
+	if err != nil {
+		t.Fatalf("formulas inspect summary error = %v\n%s", err, stdout)
+	}
+	for _, want := range []string{"Formula summary", "Invoice", "formula regions: 3", "formula cells: 6", "Defined names:", "TaxRate -> =Config!$B$2"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("summary output missing %q:\n%s", want, stdout)
+		}
+	}
+
+	stdout, err = runFormulasCommandForTest(dir, "formulas", "inspect", "--sheet", "Invoice")
+	if err != nil {
+		t.Fatalf("formulas inspect sheet error = %v\n%s", err, stdout)
+	}
+	for _, want := range []string{"Invoice formulas", "C2:C4", "pattern: =RC[-2]*RC[-1]", "G4", "parse: partial", "structured_reference"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("sheet output missing %q:\n%s", want, stdout)
+		}
+	}
+
+	stdout, err = runFormulasCommandForTest(dir, "formulas", "inspect", "--cell", "Invoice!C3")
+	if err != nil {
+		t.Fatalf("formulas inspect cell error = %v\n%s", err, stdout)
+	}
+	for _, want := range []string{"Invoice!C3", "Region:", "C2:C4", "Expanded formula at Invoice!C3:", "=A3*B3"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("cell output missing %q:\n%s", want, stdout)
+		}
+	}
+
+	stdout, err = runFormulasCommandForTest(dir, "formulas", "inspect", "--range", "Invoice!C2:G4")
+	if err != nil {
+		t.Fatalf("formulas inspect range error = %v\n%s", err, stdout)
+	}
+	for _, want := range []string{"Formula regions overlapping Invoice!C2:G4", "C2:C4", "G2:G3", "G4"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("range output missing %q:\n%s", want, stdout)
+		}
+	}
+
+	stdout, err = runFormulasCommandForTest(dir, "--json", "formulas", "inspect", "--cell", "Invoice!C3")
+	if err != nil {
+		t.Fatalf("formulas inspect json error = %v\n%s", err, stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
+	}
+	outputPayload := cliObjectMap(env.Output)
+	inspectPayload := cliObjectMap(outputPayload["formulas_inspect"])
+	if inspectPayload["view"] != "cell" || inspectPayload["cell"] != "Invoice!C3" || inspectPayload["expanded_formula"] != "=A3*B3" {
+		t.Fatalf("inspect payload = %#v", inspectPayload)
+	}
+	region := cliObjectMap(inspectPayload["region"])
+	if region["range"] != "C2:C4" || region["formula_r1c1"] != "=RC[-2]*RC[-1]" {
+		t.Fatalf("region payload = %#v", region)
+	}
+}
+
+func TestFormulasInspectErrors(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runFormulasCommandForTest(dir, "--json", "formulas", "inspect", "--summary", "--sheet", "Invoice")
+	if err == nil {
+		t.Fatalf("expected conflicting selector error\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "formulas_inspect_args_invalid") {
+		t.Fatalf("conflicting selector output = %s", stdout)
+	}
+
+	stdout, err = runFormulasCommandForTest(dir, "--json", "formulas", "inspect", "--dir", "missing")
+	if err == nil {
+		t.Fatalf("expected missing snapshot error\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "formulas_inspect_failed") || !strings.Contains(stdout, "manifest not found") {
+		t.Fatalf("missing snapshot output = %s", stdout)
 	}
 }
 

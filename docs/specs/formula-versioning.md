@@ -158,6 +158,21 @@ If a formula cannot be fully normalized, xlflow keeps raw formula text and conti
 
 Cached calculated values from `<v>` elements are not part of the canonical snapshot.
 
+## Inspecting Snapshots
+
+`xlflow formulas inspect` reads the generated snapshot files without opening Excel or recalculating the workbook. It defaults to the `formulas/` directory and can inspect another snapshot directory with `--dir`.
+
+Supported views:
+
+- `xlflow formulas inspect` or `xlflow formulas inspect --summary` prints a workbook-level overview.
+- `xlflow formulas inspect --sheet <name>` prints all formula regions for one sheet.
+- `xlflow formulas inspect --cell <sheet!A1>` finds the formula region containing a cell.
+- `xlflow formulas inspect --range <sheet!A1:B2>` lists formula regions overlapping a range.
+
+The inspect command treats `partial` and `failed` parse statuses as inspectable snapshot data. They do not fail the command unless the snapshot file itself is missing or malformed. Defined names from `names.jsonl` are included in summary output when present.
+
+For cell inspection, xlflow attempts a best-effort expansion of supported normalized R1C1 patterns back to A1 references at the requested cell. Supported forms include relative and absolute cell references such as `RC[-2]`, `R1C1`, `R[1]C1`, ranges such as `R[-6]C[-2]:R[-1]C[-2]`, and sheet-qualified references including quoted sheet names. Absolute R1C1 rows and columns render with `$` in A1 output. If a formula pattern cannot be expanded safely, inspect still shows the matching region and raw formula fields without `expanded_formula`.
+
 ## Initial OOXML Scope
 
 The command parses:
