@@ -6,23 +6,26 @@ Keep Excel and the configured workbook open across repeated commands.
 
 ```bash
 xlflow session start
+xlflow session attach --active
 xlflow session status
 xlflow session stop
 ```
 
 ## Options and Arguments
 
-| Option / argument | Description                                     | Default |
-| ----------------- | ----------------------------------------------- | ------- |
-| `start`           | Open and register the managed workbook session. | -       |
-| `status`          | Show whether the session is running and dirty.  | -       |
-| `stop`            | Close or detach the managed session.            | -       |
-| `--json`          | Return machine-readable session state.          | false   |
+| Option / argument | Description                                                        | Default |
+| ----------------- | ------------------------------------------------------------------ | ------- |
+| `start`           | Open and register the managed workbook session.                    | -       |
+| `attach --active` | Adopt the already-open configured workbook as an external session. | -       |
+| `status`          | Show whether the session is running and dirty.                     | -       |
+| `stop`            | Close a managed session, or detach an external session.            | -       |
+| `--json`          | Return machine-readable session state.                             | false   |
 
 ## Examples
 
 ```bash
 xlflow session start --json
+xlflow session attach --active --json
 xlflow session status --json
 xlflow session stop --json
 ```
@@ -33,11 +36,17 @@ xlflow session stop --json
 Use sessions for fast AI-agent loops: `push --session --no-save`, `run --session`, inspect results, then `save --session`.
 :::
 
+::: tip
+When the workbook is already open in Excel, use `xlflow session attach --active` instead of `session start` so xlflow commands operate on the workbook you are viewing.
+:::
+
 ::: warning
 A dirty session may report `save_required`. That warning means disk does not yet contain the live workbook changes.
 :::
 
-`session` uses the `.NET` bridge on Windows in `auto` mode for `start`, `status`, `save`, and `stop`.
+`session start` creates a managed session owned by xlflow. `session attach --active` creates an external session for a workbook that was opened by a user. `session stop` closes and quits managed sessions, but only detaches external sessions; it does not close Excel.
+
+`session` uses the `.NET` bridge on Windows in `auto` mode for `start`, `attach`, `status`, `save`, and `stop`.
 
 ## JSON Output Example
 

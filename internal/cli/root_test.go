@@ -1044,6 +1044,22 @@ func TestRootCommandIncludesAttachActiveCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesSessionAttachActiveCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"session", "attach"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "attach" {
+		t.Fatalf("expected session attach command, got %#v", cmd)
+	}
+	if cmd.Flags().Lookup("active") == nil {
+		t.Fatal("expected session attach command to define --active")
+	}
+}
+
 func TestRootCommandRejectsRemovedTraceCommand(t *testing.T) {
 	a := &app{
 		stdout:         new(bytes.Buffer),

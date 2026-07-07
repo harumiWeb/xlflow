@@ -15,12 +15,13 @@ public sealed class ExcelSessionService : ISessionService
         return action switch
         {
             "start" => Start(request, args),
+            "attach" => Attach(request, args),
             "status" => Status(request, args),
             "save" => Save(request, args),
             "stop" => Stop(request, args),
             _ => BridgeResponse.Failed(request, new BridgeError(
                 Code: "session_args_invalid",
-                Message: "-Action must be start, status, stop, or save.",
+                Message: "-Action must be start, attach, status, stop, or save.",
                 Phase: "session",
                 Source: "xlflow")),
         };
@@ -39,7 +40,7 @@ public sealed class ExcelSessionService : ISessionService
             var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, true, disableAutomationMacros: false);
             excel = direct.Excel;
             workbook = direct.Workbook;
-            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath);
+            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, "managed");
 
             return new BridgeResponse
             {
@@ -87,6 +88,80 @@ public sealed class ExcelSessionService : ISessionService
         }
     }
 
+    private static BridgeResponse Attach(BridgeRequest request, SessionCommandArguments args)
+    {
+        object? excel = null;
+        object? workbook = null;
+        var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
+
+        if (!args.Active)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "session_args_invalid",
+                Message: "--active is required for session attach.",
+                Phase: "session",
+                Source: "xlflow"));
+        }
+
+        try
+        {
+            CloseExistingSession(args.MetadataPath);
+
+            var attachment = ExcelBridgeSupport.AttachToAlreadyOpenWorkbook(workbookPath);
+            excel = attachment.Excel;
+            workbook = attachment.Workbook;
+            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, "external");
+
+            bool? dirty;
+            var needsSave = false;
+            if (!ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var workbookDirty))
+            {
+                dirty = null;
+                needsSave = true;
+            }
+            else
+            {
+                dirty = workbookDirty;
+                needsSave = workbookDirty;
+            }
+
+            var session = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, "external", dirty, needsSave);
+            session["owner"] = "external";
+
+            return new BridgeResponse
+            {
+                RequestId = request.RequestId,
+                Command = request.Command,
+                Logs = ["attached xlflow session to already-open workbook"],
+                Extensions = new Dictionary<string, object?>
+                {
+                    ["target"] = ExcelBridgeSupport.BuildTargetPayload("live_session", workbookPath),
+                    ["session"] = session,
+                    ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, "external", true, false, dirty, needsSave),
+                },
+            };
+        }
+        catch (Exception ex)
+        {
+            var message = ExcelBridgeSupport.FormatExceptionDetail(ex);
+            var code = message.Contains("active_workbook_mismatch", StringComparison.OrdinalIgnoreCase)
+                ? "active_workbook_mismatch"
+                : message.Contains("active_workbook_not_found", StringComparison.OrdinalIgnoreCase)
+                    ? "active_workbook_not_found"
+                    : "session_attach_failed";
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: code,
+                Message: message,
+                Phase: "session.attach",
+                Source: ex.Source ?? "xlflow-excel-bridge"));
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
+    }
+
     private static BridgeResponse Status(BridgeRequest request, SessionCommandArguments args)
     {
         object? excel = null;
@@ -104,6 +179,7 @@ public sealed class ExcelSessionService : ISessionService
 
             if (metadata is not null)
             {
+                mode = string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase) ? "external" : "managed";
                 excel = ExcelBridgeSupport.GetExcelFromSessionMetadata(args.MetadataPath);
                 if (excel is not null)
                 {
@@ -114,7 +190,6 @@ public sealed class ExcelSessionService : ISessionService
                         open = workbook is not null;
                         if (open && workbook is not null)
                         {
-                            mode = "managed";
                             if (!ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var workbookDirty))
                             {
                                 dirty = null;
@@ -135,6 +210,7 @@ public sealed class ExcelSessionService : ISessionService
             var needsSave = running && open && (dirty is null || dirty == true);
             var logs = new[] { running && open ? "xlflow session is running" : "xlflow session is not running" };
             var sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, running && open, mode, dirty, needsSave);
+            sessionPayload["owner"] = metadata?.Owner ?? "managed";
             if (metadata is not null)
             {
                 sessionPayload["metadata"] = new Dictionary<string, object?>
@@ -142,6 +218,7 @@ public sealed class ExcelSessionService : ISessionService
                     ["hwnd"] = metadata.Hwnd,
                     ["pid"] = metadata.Pid,
                     ["workbook_path"] = metadata.WorkbookPath,
+                    ["owner"] = metadata.Owner,
                     ["poisoned"] = poisoned,
                     ["poisoned_at"] = metadata.PoisonedAt,
                     ["poison_reason"] = metadata.PoisonReason,
@@ -248,7 +325,9 @@ public sealed class ExcelSessionService : ISessionService
             excel = attached.Excel;
             workbook = attached.Workbook;
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
-            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath);
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(args.MetadataPath);
+            var owner = metadata?.Owner ?? "managed";
+            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, owner);
 
             var sessionLog = ExcelBridgeSupport.GetSessionUsageLog(attached.SessionMode);
             var logs = new List<string>();
@@ -302,6 +381,12 @@ public sealed class ExcelSessionService : ISessionService
                 throw new InvalidOperationException("xlflow session is not running");
             }
 
+            if (string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase))
+            {
+                ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
+                return BuildStopResponse(request, workbookPath, false, false, detachedExternal: true);
+            }
+
             excel = ExcelBridgeSupport.GetSessionExcel(args.MetadataPath);
             if (excel is null)
             {
@@ -350,9 +435,13 @@ public sealed class ExcelSessionService : ISessionService
         }
     }
 
-    private static BridgeResponse BuildStopResponse(BridgeRequest request, string workbookPath, bool autoSavedOnStop, bool removedStaleMetadata)
+    private static BridgeResponse BuildStopResponse(BridgeRequest request, string workbookPath, bool autoSavedOnStop, bool removedStaleMetadata, bool detachedExternal = false)
     {
         var logs = new List<string>();
+        if (detachedExternal)
+        {
+            logs.Add("detached external Excel session without closing workbook");
+        }
         if (autoSavedOnStop)
         {
             logs.Add("warning: session workbook had unsaved changes before stop");
@@ -362,7 +451,7 @@ public sealed class ExcelSessionService : ISessionService
         {
             logs.Add("cleaned stale xlflow session metadata");
         }
-        logs.Add("stopped xlflow Excel session");
+        logs.Add(detachedExternal ? "stopped xlflow external session" : "stopped xlflow Excel session");
 
         var extensions = new Dictionary<string, object?>
         {
@@ -378,6 +467,7 @@ public sealed class ExcelSessionService : ISessionService
                 ["needs_save"] = false,
                 ["dirty_before_stop"] = autoSavedOnStop,
                 ["auto_saved_on_stop"] = autoSavedOnStop,
+                ["detached_external"] = detachedExternal,
             },
         };
         if (autoSavedOnStop)
@@ -406,6 +496,11 @@ public sealed class ExcelSessionService : ISessionService
         var metadata = ExcelBridgeSupport.ReadSessionMetadata(metadataPath);
         if (metadata is null)
         {
+            return;
+        }
+        if (string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase))
+        {
+            ExcelBridgeSupport.DeleteSessionMetadata(metadataPath);
             return;
         }
 
