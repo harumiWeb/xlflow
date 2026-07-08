@@ -770,6 +770,22 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 }
 
+func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  s = \"\\\"\": Debug.Print \"x\"\nEnd Sub\n")
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB009")
+	if len(blocking) != 1 {
+		t.Fatalf("expected one push-blocking C-style escape issue, got %+v", blocking)
+	}
+	if blocking[0].Line != 3 {
+		t.Fatalf("unexpected C-style escape issue: %+v", blocking[0])
+	}
+}
+
 func TestLinterAllowsVBAJSONEscapedQuoteStrings(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "JsonConverter.bas", `Attribute VB_Name = "JsonConverter"
