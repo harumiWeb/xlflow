@@ -840,6 +840,109 @@ End Sub
 	}
 }
 
+func TestDiagnosticsResolveMeInWorkbookDocumentModules(t *testing.T) {
+	root := t.TempDir()
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	analyzer.Config = config.Default()
+
+	sheetDoc := Document{
+		Path:       filepath.Join(root, "src", "workbook", "Sheet1.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Sheet1"
+Option Explicit
+Private Sub HideTemplate()
+    Dim TemplateRow As Long
+    TemplateRow = 3
+    Me.Rows(TemplateRow).Hidden = True
+End Sub
+`,
+	}
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(sheetDoc, "Me.Rows(TemplateRow)", len(sheetDoc.Source)); !ok || got != "Excel.Range" {
+		t.Fatalf("Me.Rows(...) type = %q, %v; want Excel.Range", got, ok)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(sheetDoc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("worksheet Me should not produce undeclared diagnostics: %+v", diagnostics)
+	}
+
+	workbookDoc := Document{
+		Path:       filepath.Join(root, "src", "workbook", "ThisWorkbook.cls"),
+		ModuleKind: "standard",
+		Source: `VERSION 1.0 CLASS
+Attribute VB_Name = "ThisWorkbook"
+Option Explicit
+Private Sub Workbook_Open()
+    Me.Worksheets(1).Range("A1").Value = 1
+End Sub
+`,
+	}
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(workbookDoc, "Me.Worksheets(1)", len(workbookDoc.Source)); !ok || got != "Excel.Worksheet" {
+		t.Fatalf("Me.Worksheets(...) type = %q, %v; want Excel.Worksheet", got, ok)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(workbookDoc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("workbook Me should not produce undeclared diagnostics: %+v", diagnostics)
+	}
+
+	chartDoc := Document{
+		Path:       filepath.Join(root, "src", "workbook", "Chart1.cls"),
+		ModuleKind: "standard",
+		Source: `VERSION 1.0 CLASS
+Attribute VB_Name = "Chart1"
+Option Explicit
+Private Sub Chart_Activate()
+    Me.ChartArea.Select
+End Sub
+`,
+	}
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(chartDoc, "Me.ChartArea", len(chartDoc.Source)); !ok || got != "Excel.ChartArea" {
+		t.Fatalf("Me.ChartArea type = %q, %v; want Excel.ChartArea", got, ok)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(chartDoc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("chart Me should not produce undeclared diagnostics: %+v", diagnostics)
+	}
+
+	unknownHostDoc := Document{
+		Path:       filepath.Join(root, "src", "workbook", "Report.cls"),
+		ModuleKind: "standard",
+		Source: `VERSION 1.0 CLASS
+Attribute VB_Name = "Report"
+Option Explicit
+Private Sub Activate()
+    Me.ChartArea.Select
+End Sub
+`,
+	}
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(unknownHostDoc, "Me.ChartArea", len(unknownHostDoc.Source)); ok {
+		t.Fatalf("unknown document host should not resolve Me.ChartArea, got %q", got)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(unknownHostDoc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("unknown document host Me should not produce undeclared diagnostics: %+v", diagnostics)
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(unknownHostDoc), "VB033"); len(diagnostics) != 0 {
+		t.Fatalf("unknown document host Me should not produce unknown-member diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsTreatUnknownProjectMeAsCurrentInstanceFallback(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "PlainModule.bas"),
+		Source: `Option Explicit
+Private Sub Run()
+    Me.Anything
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	if got := diagnosticsByCode(diagnostics, "VB029"); len(got) != 0 {
+		t.Fatalf("fallback Me should not produce undeclared diagnostics: %+v", got)
+	}
+	if got := diagnosticsByCode(diagnostics, "VB033"); len(got) != 0 {
+		t.Fatalf("fallback Me should not produce unknown-member diagnostics: %+v", got)
+	}
+}
+
 func TestDiagnosticsIncludeUnusedLocalVariables(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
