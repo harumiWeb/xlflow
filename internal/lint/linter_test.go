@@ -770,6 +770,47 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 }
 
+func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  s = \"\\\"\": Debug.Print \"x\"\nEnd Sub\n")
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := issuesByCode(PushBlockingIssues(issues), "VB009")
+	if len(blocking) != 1 {
+		t.Fatalf("expected one push-blocking C-style escape issue, got %+v", blocking)
+	}
+	if blocking[0].Line != 3 {
+		t.Fatalf("unexpected C-style escape issue: %+v", blocking[0])
+	}
+}
+
+func TestLinterAllowsVBAJSONEscapedQuoteStrings(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "JsonConverter.bas", `Attribute VB_Name = "JsonConverter"
+Option Explicit
+Private Function JsonEscape(ByVal json_Char As String) As String
+  Select Case AscW(json_Char)
+  Case 34
+    json_Char = "\"""
+  Case 92
+    json_Char = "\\"
+  End Select
+  JsonEscape = json_Char
+End Function
+`)
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB009" {
+			t.Fatalf("valid VBA-JSON escaped quote strings should not trigger VB009: %+v", issues)
+		}
+	}
+}
+
 func TestLinterAllowsValidProcedureBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

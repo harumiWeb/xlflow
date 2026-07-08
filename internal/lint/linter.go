@@ -1629,16 +1629,26 @@ func containsTypographicQuote(line string) bool {
 }
 
 func containsLikelyCStyleQuoteEscape(line string) bool {
-	for i := 0; i < len(line)-2; i++ {
-		if line[i] != '\\' || line[i+1] != '"' {
+	inString := false
+	for i := 0; i < len(line); {
+		if line[i] != '"' {
+			i++
 			continue
 		}
-		quoteCount := 0
-		for j := i + 1; j < len(line) && line[j] == '"'; j++ {
-			quoteCount++
+		runStart := i
+		for i < len(line) && line[i] == '"' {
+			i++
 		}
-		if quoteCount >= 2 {
+		runLength := i - runStart
+		if !inString {
+			inString = (runLength-1)%2 == 0
+			continue
+		}
+		if runStart > 0 && line[runStart-1] == '\\' && runLength >= 2 && runLength%2 == 0 {
 			return true
+		}
+		if runLength%2 == 1 {
+			inString = false
 		}
 	}
 	return false
