@@ -278,6 +278,64 @@ func TestAttachDoctorProjectConfigDiagnosticsPreservesBridgeDiagnostics(t *testi
 	}
 }
 
+func TestAppendVBAObjectModelAccessMessagesFromDoctorDiagnostics(t *testing.T) {
+	env := output.New("doctor")
+	env.Diagnostics = map[string]any{
+		"excel": map[string]any{
+			"com_activation":      true,
+			"vbide_access":        true,
+			"trust_vba_access":    false,
+			"automation_security": 1,
+		},
+	}
+
+	appendVBAObjectModelAccessMessages(&env)
+
+	if !hasCodeFromAny(env.Warnings, vbaObjectModelAccessWarningCode) {
+		t.Fatalf("warnings = %#v, want %s", env.Warnings, vbaObjectModelAccessWarningCode)
+	}
+	if !hasCodeFromAny(env.Hints, "enable_vba_object_model_access") {
+		t.Fatalf("hints = %#v, want enable_vba_object_model_access", env.Hints)
+	}
+}
+
+func TestAppendVBAObjectModelAccessMessagesFromBootstrapFailure(t *testing.T) {
+	env := output.Failure("init", output.Error{
+		Code:    "vbproject_access_denied",
+		Message: "VBProject access is denied. Enable 'Trust access to the VBA project object model' in Excel Trust Center.",
+		Phase:   "open_workbook",
+	})
+
+	appendVBAObjectModelAccessMessages(&env)
+	appendVBAObjectModelAccessMessages(&env)
+
+	warnings := anySlice(env.Warnings)
+	if len(warnings) != 1 || cliObjectMap(warnings[0])["code"] != vbaObjectModelAccessWarningCode {
+		t.Fatalf("warnings = %#v, want one %s warning", env.Warnings, vbaObjectModelAccessWarningCode)
+	}
+	if !hasCodeFromAny(env.Hints, "enable_vba_object_model_access") {
+		t.Fatalf("hints = %#v, want enable_vba_object_model_access", env.Hints)
+	}
+}
+
+func TestAppendVBAObjectModelAccessMessagesFromLocalizedPushFailure(t *testing.T) {
+	env := output.Failure("push", output.Error{
+		Code:    "push_failed",
+		Message: "import_vba_components failed: get_vbproject failed: Exception has been thrown by the target of an invocation. (プログラミングによる Visual Basic プロジェクトへのアクセスは信頼性に欠けます)",
+		Phase:   "push",
+		Source:  "xlflow-excel-bridge",
+	})
+
+	appendVBAObjectModelAccessMessages(&env)
+
+	if !hasCodeFromAny(env.Warnings, vbaObjectModelAccessWarningCode) {
+		t.Fatalf("warnings = %#v, want %s", env.Warnings, vbaObjectModelAccessWarningCode)
+	}
+	if !hasCodeFromAny(env.Hints, "enable_vba_object_model_access") {
+		t.Fatalf("hints = %#v, want enable_vba_object_model_access", env.Hints)
+	}
+}
+
 func TestEnsureLSPTypeDBGeneratedSkipsCurrentDatabase(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(typedb.EnvDir, dir)
@@ -776,6 +834,15 @@ func hasCLIWarning(warnings []map[string]any, code string, rule string) bool {
 func hasCode(items []map[string]any, code string) bool {
 	for _, item := range items {
 		if item["code"] == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCodeFromAny(items any, code string) bool {
+	for _, item := range anySlice(items) {
+		if cliObjectMap(item)["code"] == code {
 			return true
 		}
 	}

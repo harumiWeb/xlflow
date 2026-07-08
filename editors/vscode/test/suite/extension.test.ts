@@ -16,6 +16,11 @@ import {
 } from "../../src/codeActions";
 import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
 import {
+  isVbaSourcePath,
+  mismatchedVbaLanguageDocuments,
+  vbaFilesAssociationUpdate,
+} from "../../src/languageAssociation";
+import {
   sessionQuickPickItems,
   sessionStateFromEnvelope,
   sessionStatusText,
@@ -32,7 +37,7 @@ import {
   userFormContextValue,
 } from "../../src/sidebar";
 import { sourceUri } from "../../src/testDiscovery";
-import { buildTerminalCommandLine } from "../../src/xlflow";
+import { buildTerminalCommandLine, containsVBAObjectModelAccessIssue } from "../../src/xlflow";
 import {
   cliVersionSummary,
   lastCheckedKey,
@@ -138,6 +143,21 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     '"C:\\Program Files\\xlflow\\xlflow.exe" run "Main.Hello World"',
   );
   assert.strictEqual(
+    containsVBAObjectModelAccessIssue(
+      "import_vba_components failed: get_vbproject failed: プログラミングによる Visual Basic プロジェクトへのアクセスは信頼性に欠けます",
+    ),
+    true,
+  );
+  assert.strictEqual(
+    containsVBAObjectModelAccessIssue("warning: vba_object_model_access_disabled"),
+    true,
+  );
+  assert.strictEqual(
+    containsVBAObjectModelAccessIssue("[ok] VBIDE access - VBA project object model is available"),
+    false,
+  );
+  assert.strictEqual(containsVBAObjectModelAccessIssue("ordinary xlflow output"), false);
+  assert.strictEqual(
     disableLineSuffix("    Dim staleValue As Long", "VB020"),
     " ' xlflow:disable-line VB020",
   );
@@ -200,6 +220,21 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: true }, undefined),
     ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
   );
+  assert.strictEqual(isVbaSourcePath("src/modules/Main.bas"), true);
+  assert.strictEqual(isVbaSourcePath("src/classes/Invoice.cls"), true);
+  assert.strictEqual(isVbaSourcePath("src/forms/Customer.frm"), true);
+  assert.strictEqual(isVbaSourcePath("README.md"), false);
+  assert.deepStrictEqual(
+    vbaFilesAssociationUpdate({ "*.txt": "plaintext", "*.bas": "other-vba" }),
+    { "*.txt": "plaintext", "*.bas": "vba", "*.cls": "vba", "*.frm": "vba" },
+  );
+  const mismatchedDocs = mismatchedVbaLanguageDocuments([
+    { uri: vscode.Uri.file("C:/tmp/Main.bas"), languageId: "vb" },
+    { uri: vscode.Uri.file("C:/tmp/Class.cls"), languageId: "vba" },
+    { uri: vscode.Uri.file("C:/tmp/readme.md"), languageId: "markdown" },
+  ]);
+  assert.strictEqual(mismatchedDocs.length, 1);
+  assert.strictEqual(mismatchedDocs[0].uri.fsPath, vscode.Uri.file("C:/tmp/Main.bas").fsPath);
   const lspProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "xlflow-vscode-lsp-"));
   try {
     fs.writeFileSync(path.join(lspProjectDir, "xlflow.toml"), '[project]\nname = "test"\n');

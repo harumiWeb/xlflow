@@ -16,6 +16,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
@@ -52,6 +54,8 @@ public sealed class DoctorCommandTests
         Assert.Equal("16.0", excel.GetProperty("version").GetString());
         Assert.Equal("17726.20160", excel.GetProperty("build").GetString());
         Assert.True(excel.GetProperty("vbide_access").GetBoolean());
+        Assert.True(excel.GetProperty("vbproject_access").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, excel.GetProperty("trust_vba_access").ValueKind);
         var systemProfileDesktop = excel.GetProperty("systemprofile_desktop");
         Assert.Equal("exists", systemProfileDesktop.GetProperty("system32").GetProperty("status").GetString());
         Assert.Equal("exists", systemProfileDesktop.GetProperty("syswow64").GetProperty("status").GetString());
@@ -66,6 +70,8 @@ public sealed class DoctorCommandTests
             Version: null,
             Build: null,
             VbideAccess: null,
+            VbProjectAccess: null,
+            VbProjectAccessError: null,
             AutomationSecurity: null,
             TrustVbaAccess: null,
             Error: "COM activation failed: HRESULT 0x80040154: Class not registered",
@@ -112,6 +118,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: false,
+            VbProjectAccess: false,
+            VbProjectAccessError: "VBProject access is denied.",
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: "VBIDE access unavailable",
@@ -133,6 +141,8 @@ public sealed class DoctorCommandTests
         var excel = json.RootElement.GetProperty("diagnostics").GetProperty("excel");
         Assert.True(excel.GetProperty("com_activation").GetBoolean());
         Assert.False(excel.GetProperty("vbide_access").GetBoolean());
+        Assert.False(excel.GetProperty("vbproject_access").GetBoolean());
+        Assert.Equal("VBProject access is denied.", excel.GetProperty("vbproject_access_error").GetString());
         Assert.Equal("VBIDE access unavailable", excel.GetProperty("error").GetString());
     }
 
@@ -144,6 +154,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
@@ -184,6 +196,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
@@ -218,6 +232,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
@@ -259,6 +275,8 @@ public sealed class DoctorCommandTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,
@@ -316,5 +334,66 @@ public sealed class DoctorCommandTests
         Assert.Equal("0x80040154", root.GetProperty("h_result").GetString());
         Assert.Equal(JsonValueKind.Object, root.GetProperty("details").ValueKind);
         Assert.Equal("test", root.GetProperty("details").GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public void HandleReportsTrustVbaAccessWhenProbeProvidesValue()
+    {
+        var probeResult = new ExcelDiagnosticsResult(
+            ComActivation: true,
+            Version: "16.0",
+            Build: "17726.20160",
+            VbideAccess: false,
+            VbProjectAccess: false,
+            VbProjectAccessError: "VBProject access is denied.",
+            AutomationSecurity: 1,
+            TrustVbaAccess: false,
+            Error: null,
+            SystemProfileDesktop: new SystemProfileDesktopDiagnostics(System32: true, SysWow64: true));
+
+        var command = new DoctorCommand(() => probeResult);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-doctor-trust-vba-access",
+            Command = "doctor",
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        var excel = json.RootElement.GetProperty("diagnostics").GetProperty("excel");
+        Assert.False(excel.GetProperty("trust_vba_access").GetBoolean());
+        Assert.False(excel.GetProperty("vbide_access").GetBoolean());
+    }
+
+    [Fact]
+    public void ReadTrustVbaAccessFromRegistryPrefersPolicyValue()
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [@"Software\Policies\Microsoft\Office\16.0\Excel\Security:AccessVBOM"] = 0,
+            [@"Software\Microsoft\Office\16.0\Excel\Security:AccessVBOM"] = 1,
+        };
+
+        var access = ExcelDiagnostics.ReadTrustVbaAccessFromRegistry(
+            "16.0",
+            (key, name) => values.TryGetValue(key + ":" + name, out var value) ? value : null);
+
+        Assert.False(access);
+    }
+
+    [Fact]
+    public void ReadTrustVbaAccessFromRegistryFallsBackToUserValueAndUnknown()
+    {
+        var enabled = ExcelDiagnostics.ReadTrustVbaAccessFromRegistry(
+            "15.1",
+            (key, name) => key == @"Software\Microsoft\Office\15.0\Excel\Security" && name == "AccessVBOM" ? "1" : null);
+        var unknown = ExcelDiagnostics.ReadTrustVbaAccessFromRegistry("16.0", (_, _) => null);
+        var inaccessible = ExcelDiagnostics.ReadTrustVbaAccessFromRegistry("16.0", (_, _) => throw new UnauthorizedAccessException());
+
+        Assert.True(enabled);
+        Assert.Null(unknown);
+        Assert.Null(inaccessible);
     }
 }

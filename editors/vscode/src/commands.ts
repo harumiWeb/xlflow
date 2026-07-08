@@ -7,6 +7,7 @@ import {
 } from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { readConfig } from "./config";
+import { checkVbaLanguageAssociation } from "./languageAssociation";
 import { XlflowChannels } from "./logging";
 import { XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
@@ -125,6 +126,7 @@ export function registerCommands(
       });
       if (code === 0) {
         await hooks.refreshAll();
+        await checkVbaLanguageAssociation(context, { force: true });
       }
     }),
     vscode.commands.registerCommand("xlflow.initProject", async () => {
@@ -153,6 +155,7 @@ export function registerCommands(
       );
       if (code === 0) {
         await hooks.refreshAll();
+        await checkVbaLanguageAssociation(context, { force: true });
       }
     }),
     vscode.commands.registerCommand("xlflow.skillInstall", async () => {

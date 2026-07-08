@@ -31,7 +31,7 @@ Run `doctor` before debugging workbook behavior on a new Windows or Excel instal
 :::
 
 ::: tip
-By default, `doctor` performs lightweight Excel COM, VBIDE, and systemprofile Desktop checks without opening the configured workbook. Use `--workbook` when you need to prove that the configured workbook can be opened by the selected bridge.
+By default, `doctor` performs Excel COM, VBIDE, temporary-workbook VBProject, and systemprofile Desktop checks without opening the configured workbook. Use `--workbook` when you need to prove that the configured workbook can be opened and its VBProject can be accessed by the selected bridge.
 :::
 
 ::: tip
@@ -43,7 +43,7 @@ By default, `doctor` performs lightweight Excel COM, VBIDE, and systemprofile De
 :::
 
 ::: warning
-VBIDE access must be enabled in Excel Trust Center before xlflow can import, export, or inspect VBA components.
+VBIDE access must be enabled in Excel Trust Center before xlflow can import, export, inspect, or run VBA components. When `doctor` can determine that access is disabled, it reports warning `vba_object_model_access_disabled` with a hint to enable **Trust access to the VBA project object model**.
 :::
 
 ## JSON Output Example

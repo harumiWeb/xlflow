@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v0.4.0
+
+- Added setup warnings for disabled Excel VBA object model access and for `.bas`, `.cls`, or `.frm` files that are not opened with xlflow's `vba` language mode.
 - Added a Project view session action to connect xlflow to an already-open workbook with `xlflow session attach`.
 - Open the configured workbook from the Project view in the associated desktop app instead of opening the binary workbook inside VS Code.
 
