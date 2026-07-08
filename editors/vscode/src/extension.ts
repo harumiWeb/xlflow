@@ -3,6 +3,7 @@ import { registerLineSuppressionCodeActions } from "./codeActions";
 import { showProjectCliUnavailableNotice, XlflowCliAvailabilityService } from "./cliAvailability";
 import { XlflowLanguageClientManager } from "./client";
 import { registerCommands } from "./commands";
+import { checkVbaLanguageAssociation } from "./languageAssociation";
 import { createChannels } from "./logging";
 import { selectedWorkspaceFolder, XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
@@ -114,9 +115,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.onDidChangeActiveTextEditor(() => {
       const key = selectedWorkspaceKey();
       if (key === lastSelectedWorkspaceKey) {
+        void checkVbaLanguageAssociation(context);
         return;
       }
       lastSelectedWorkspaceKey = key;
+      void checkVbaLanguageAssociation(context);
       void refreshSelectedProject({ restartLsp: true });
     }),
     configWatcher,
@@ -164,6 +167,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await cliAvailability.refresh();
   await updateService.checkAutomatic(cliAvailability.current());
   await refreshSelectedProject({ restartLsp: false });
+  await checkVbaLanguageAssociation(context);
 }
 
 export async function deactivate(): Promise<void> {

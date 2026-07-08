@@ -1648,6 +1648,75 @@ func appendDoctorConfigMessages(env *output.Envelope, result doctorConfigLoadRes
 	}
 }
 
+const vbaObjectModelAccessWarningCode = "vba_object_model_access_disabled"
+
+func appendVBAObjectModelAccessMessages(env *output.Envelope) {
+	if env == nil || !vbaObjectModelAccessLooksDisabled(env) {
+		return
+	}
+	appendUniqueMessage(&env.Warnings, vbaObjectModelAccessWarningCode, "Excel VBA object model access is disabled or unavailable. xlflow needs this setting to import, export, inspect, and run VBA components.")
+	appendUniqueMessage(&env.Hints, "enable_vba_object_model_access", "In Excel, open Trust Center -> Macro Settings and enable \"Trust access to the VBA project object model\", then rerun the xlflow command.")
+}
+
+func vbaObjectModelAccessLooksDisabled(env *output.Envelope) bool {
+	diag := cliObjectMap(env.Diagnostics)
+	excelDiag := cliObjectMap(diag["excel"])
+	if value, ok := boolValueInMap(excelDiag, "trust_vba_access"); ok && !value {
+		return true
+	}
+	if value, ok := boolValueInMap(excelDiag, "vbide_access"); ok && !value {
+		return true
+	}
+	if value, ok := boolValueInMap(excelDiag, "vbproject_access"); ok && !value {
+		return true
+	}
+	if env.Error == nil {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(env.Error.Code))
+	if strings.Contains(code, "vbproject_access_denied") || strings.Contains(code, "vbide") {
+		return true
+	}
+	message := strings.ToLower(env.Error.Message)
+	return strings.Contains(message, "vbproject access is denied") ||
+		strings.Contains(message, "vbide access") ||
+		strings.Contains(message, "trust access to the vba project object model") ||
+		strings.Contains(message, "get_vbproject failed") ||
+		strings.Contains(message, "import_vba_components failed") ||
+		strings.Contains(env.Error.Message, "プログラミングによる Visual Basic プロジェクトへのアクセス")
+}
+
+func boolValueInMap(m map[string]any, key string) (bool, bool) {
+	value, ok := m[key]
+	if !ok || value == nil {
+		return false, false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		if strings.EqualFold(v, "true") {
+			return true, true
+		}
+		if strings.EqualFold(v, "false") {
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func appendUniqueMessage(target *any, code string, message string) {
+	items := anySlice(*target)
+	for _, item := range items {
+		if cliObjectMap(item)["code"] == code {
+			*target = items
+			return
+		}
+	}
+	items = append(items, map[string]any{"code": code, "message": message})
+	*target = items
+}
+
 func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {
 	if env == nil {
 		return
@@ -6581,6 +6650,7 @@ func (a *app) write(env output.Envelope, code int) error {
 
 func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.Options) error {
 	a.addConfigWarnings(&env)
+	appendVBAObjectModelAccessMessages(&env)
 	if err := output.WriteWithOptions(a.stdoutWriter(), env, opts); err != nil {
 		return output.WithExitCode(code, err)
 	}

@@ -63,6 +63,8 @@ public sealed class BridgeHostTests
             Version: "16.0",
             Build: "17726.20160",
             VbideAccess: true,
+            VbProjectAccess: true,
+            VbProjectAccessError: null,
             AutomationSecurity: 1,
             TrustVbaAccess: null,
             Error: null,

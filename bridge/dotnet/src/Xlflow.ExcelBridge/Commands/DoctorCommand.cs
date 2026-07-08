@@ -68,6 +68,11 @@ public sealed class DoctorCommand : ICommandHandler
             };
             workbookProbe = ProbeWorkbookOpen(workbookPath, visible);
             diagnostics["workbook_openable"] = workbookProbe.Openable;
+            diagnostics["workbook_vbproject_access"] = workbookProbe.VbProjectAccessible;
+            if (workbookProbe.VbProjectMessage is not null)
+            {
+                diagnostics["workbook_vbproject_access_error"] = workbookProbe.VbProjectMessage;
+            }
         }
 
         if (excelProbe.SystemProfileDesktop is { Missing: true } systemProfileDesktop)
@@ -112,9 +117,14 @@ public sealed class DoctorCommand : ICommandHandler
             ["version"] = excelProbe.Version,
             ["build"] = excelProbe.Build,
             ["vbide_access"] = excelProbe.VbideAccess,
+            ["vbproject_access"] = excelProbe.VbProjectAccess,
             ["automation_security"] = excelProbe.AutomationSecurity,
             ["trust_vba_access"] = excelProbe.TrustVbaAccess,
         };
+        if (excelProbe.VbProjectAccessError is not null)
+        {
+            excel["vbproject_access_error"] = excelProbe.VbProjectAccessError;
+        }
         if (excelProbe.Error is not null)
         {
             excel["error"] = excelProbe.Error;
@@ -188,7 +198,14 @@ public sealed class DoctorCommand : ICommandHandler
         try
         {
             attachment = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
-            return new WorkbookOpenDiagnostics(Openable: true, Message: null, Number: null, HResult: null);
+            var vbProjectProbe = ProbeWorkbookVbProjectAccess(attachment.Workbook);
+            return new WorkbookOpenDiagnostics(
+                Openable: true,
+                Message: null,
+                Number: null,
+                HResult: null,
+                VbProjectAccessible: vbProjectProbe.Accessible,
+                VbProjectMessage: vbProjectProbe.Message);
         }
         catch (Exception ex)
         {
@@ -197,7 +214,9 @@ public sealed class DoctorCommand : ICommandHandler
                 Openable: false,
                 Message: failure.Message,
                 Number: failure.Number,
-                HResult: failure.HResult);
+                HResult: failure.HResult,
+                VbProjectAccessible: null,
+                VbProjectMessage: null);
         }
         finally
         {
@@ -208,6 +227,38 @@ public sealed class DoctorCommand : ICommandHandler
                 ExcelBridgeSupport.ReleaseComObject(attachment.Workbook);
                 ExcelBridgeSupport.ReleaseComObject(attachment.Excel);
             }
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Workbook doctor diagnostics normalize localized COM/reflection failures into structured output.")]
+    private static VbProjectAccessDiagnostics ProbeWorkbookVbProjectAccess(object workbook)
+    {
+        object? vbProject = null;
+        object? components = null;
+        try
+        {
+            vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
+            if (vbProject is null)
+            {
+                return new VbProjectAccessDiagnostics(false, "Workbook VBProject is unavailable.");
+            }
+            components = ExcelBridgeSupport.Get(vbProject, "VBComponents");
+            if (components is null)
+            {
+                return new VbProjectAccessDiagnostics(false, "Workbook VBComponents is unavailable.");
+            }
+            _ = ExcelBridgeSupport.Get(components, "Count");
+            return new VbProjectAccessDiagnostics(true, null);
+        }
+        catch (Exception ex)
+        {
+            var failure = ExcelBridgeSupport.ClassifyComFailure(ex);
+            return new VbProjectAccessDiagnostics(false, failure.Message);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(components);
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
         }
     }
 
@@ -227,5 +278,9 @@ public sealed class DoctorCommand : ICommandHandler
         bool Openable,
         string? Message,
         int? Number,
-        string? HResult);
+        string? HResult,
+        bool? VbProjectAccessible,
+        string? VbProjectMessage);
+
+    private sealed record VbProjectAccessDiagnostics(bool? Accessible, string? Message);
 }

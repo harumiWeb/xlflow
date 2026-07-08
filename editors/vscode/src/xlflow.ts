@@ -101,11 +101,20 @@ export async function runXlflowCommand(
       cwd,
       windowsHide: true,
     });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
 
-    child.stdout.on("data", (data: Buffer) => appendProcessOutput(outputChannel, "stdout", data));
-    child.stderr.on("data", (data: Buffer) => appendProcessOutput(outputChannel, "stderr", data));
+    child.stdout.on("data", (data: Buffer) => {
+      stdoutChunks.push(data);
+      appendProcessOutput(outputChannel, "stdout", data);
+    });
+    child.stderr.on("data", (data: Buffer) => {
+      stderrChunks.push(data);
+      appendProcessOutput(outputChannel, "stderr", data);
+    });
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
+      showVBAObjectModelAccessNotice(error.message);
       showCommandFailure(
         vscode.l10n.t("{label} failed: {message}", {
           label: uiLabel,
@@ -119,7 +128,9 @@ export async function runXlflowCommand(
         return;
       }
       const exitCode = code ?? -1;
+      const combinedOutput = Buffer.concat([...stdoutChunks, ...stderrChunks]).toString("utf8");
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
+      showVBAObjectModelAccessNotice(combinedOutput);
       if (!notify) {
         settle(exitCode);
         return;
@@ -312,4 +323,41 @@ function showCommandFailure(message: string): void {
       void vscode.commands.executeCommand("xlflow.openOutput");
     }
   });
+}
+
+export function containsVBAObjectModelAccessIssue(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("vba_object_model_access_disabled") ||
+    lower.includes("vbproject access is denied") ||
+    lower.includes("vbide access is not available") ||
+    lower.includes("vbide access unavailable") ||
+    lower.includes("trust access to the vba project object model") ||
+    lower.includes("get_vbproject failed") ||
+    lower.includes("import_vba_components failed") ||
+    text.includes("プログラミングによる Visual Basic プロジェクトへのアクセス")
+  );
+}
+
+function showVBAObjectModelAccessNotice(outputText: string): void {
+  if (!containsVBAObjectModelAccessIssue(outputText)) {
+    return;
+  }
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  const runDoctor = vscode.l10n.t("Run Doctor");
+  void vscode.window
+    .showWarningMessage(
+      vscode.l10n.t(
+        "Excel is blocking programmatic access to the VBA project object model. Enable Trust access to the VBA project object model in Excel Trust Center, then retry.",
+      ),
+      openOutput,
+      runDoctor,
+    )
+    .then((action) => {
+      if (action === openOutput) {
+        void vscode.commands.executeCommand("xlflow.openOutput");
+      } else if (action === runDoctor) {
+        void vscode.commands.executeCommand("xlflow.runDoctor");
+      }
+    });
 }

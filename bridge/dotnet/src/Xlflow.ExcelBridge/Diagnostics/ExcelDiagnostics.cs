@@ -2,6 +2,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security;
+using Microsoft.Win32;
 
 namespace Xlflow.ExcelBridge.Diagnostics;
 
@@ -10,6 +12,8 @@ public sealed record ExcelDiagnosticsResult(
     string? Version,
     string? Build,
     bool? VbideAccess,
+    bool? VbProjectAccess,
+    string? VbProjectAccessError,
     object? AutomationSecurity,
     bool? TrustVbaAccess,
     string? Error,
@@ -65,6 +69,8 @@ public static class ExcelDiagnostics
                     Version: null,
                     Build: null,
                     VbideAccess: null,
+                    VbProjectAccess: null,
+                    VbProjectAccessError: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
                     Error: "Excel.Application ProgID not registered",
@@ -82,6 +88,8 @@ public static class ExcelDiagnostics
                     Version: null,
                     Build: null,
                     VbideAccess: null,
+                    VbProjectAccess: null,
+                    VbProjectAccessError: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
                     Error: $"COM activation failed: {FormatComError(ex)}",
@@ -101,6 +109,8 @@ public static class ExcelDiagnostics
                     Version: null,
                     Build: null,
                     VbideAccess: null,
+                    VbProjectAccess: null,
+                    VbProjectAccessError: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
                     Error: $"COM activation failed: {ex.Message}",
@@ -114,6 +124,8 @@ public static class ExcelDiagnostics
                     Version: null,
                     Build: null,
                     VbideAccess: null,
+                    VbProjectAccess: null,
+                    VbProjectAccessError: null,
                     AutomationSecurity: null,
                     TrustVbaAccess: null,
                     Error: "COM activation returned null",
@@ -143,13 +155,11 @@ public static class ExcelDiagnostics
             }
 
             bool? vbideAccess = null;
-            bool? trustVbaAccess = null;
+            bool? trustVbaAccess = ReadTrustVbaAccessFromRegistry(version, ReadCurrentUserRegistryValue);
             try
             {
                 var vbe = InvokeProperty(app, "VBE");
                 vbideAccess = vbe is not null;
-                // trustVbaAccess is left null: "Trust access to VBA project object model"
-                // is a separate Trust Center setting that cannot be observed via VBE property.
                 if (vbe is not null)
                 {
                     Marshal.ReleaseComObject(vbe);
@@ -164,11 +174,15 @@ public static class ExcelDiagnostics
                 vbideAccess = false;
             }
 
+            var vbProjectProbe = ProbeTemporaryWorkbookVbProjectAccess(app);
+
             return new ExcelDiagnosticsResult(
                 ComActivation: true,
                 Version: version,
                 Build: build,
                 VbideAccess: vbideAccess,
+                VbProjectAccess: vbProjectProbe.Accessible,
+                VbProjectAccessError: vbProjectProbe.Message,
                 AutomationSecurity: automationSecurity,
                 TrustVbaAccess: trustVbaAccess,
                 Error: null,
@@ -200,6 +214,68 @@ public static class ExcelDiagnostics
         }
     }
 
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "VBProject diagnostics must normalize localized COM/reflection failures into a non-fatal probe result.")]
+    private static VbProjectAccessProbe ProbeTemporaryWorkbookVbProjectAccess(object app)
+    {
+        object? workbooks = null;
+        object? workbook = null;
+        object? vbProject = null;
+        object? components = null;
+        try
+        {
+            dynamic excel = app;
+            workbooks = (object?)excel.Workbooks;
+            if (workbooks is null)
+            {
+                return new VbProjectAccessProbe(null, "Excel Workbooks collection is unavailable.");
+            }
+            dynamic books = workbooks;
+            workbook = (object?)books.Add();
+            if (workbook is null)
+            {
+                return new VbProjectAccessProbe(null, "Temporary workbook could not be created.");
+            }
+            dynamic book = workbook;
+            vbProject = (object?)book.VBProject;
+            if (vbProject is null)
+            {
+                return new VbProjectAccessProbe(false, "Temporary workbook VBProject is unavailable.");
+            }
+            dynamic project = vbProject;
+            components = (object?)project.VBComponents;
+            if (components is null)
+            {
+                return new VbProjectAccessProbe(false, "Temporary workbook VBComponents is unavailable.");
+            }
+            dynamic vbComponents = components;
+            _ = vbComponents.Count;
+            return new VbProjectAccessProbe(true, null);
+        }
+        catch (Exception ex)
+        {
+            return new VbProjectAccessProbe(false, UnwrapExceptionMessage(ex));
+        }
+        finally
+        {
+            if (workbook is not null)
+            {
+                try
+                {
+                    dynamic book = workbook;
+                    book.Close(false);
+                }
+                catch
+                {
+                    // best-effort cleanup
+                }
+            }
+            TryReleaseComObject(components);
+            TryReleaseComObject(vbProject);
+            TryReleaseComObject(workbook);
+            TryReleaseComObject(workbooks);
+        }
+    }
+
     private static SystemProfileDesktopDiagnostics ProbeSystemProfileDesktop()
     {
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -214,6 +290,97 @@ public static class ExcelDiagnostics
         return new SystemProfileDesktopDiagnostics(
             System32: ProbeSystemProfileDesktopPath(system32),
             SysWow64: ProbeSystemProfileDesktopPath(sysWow64));
+    }
+
+    internal static bool? ReadTrustVbaAccessFromRegistry(string? excelVersion, Func<string, string, object?> readValue)
+    {
+        ArgumentNullException.ThrowIfNull(readValue);
+
+        foreach (var version in CandidateOfficeVersions(excelVersion))
+        {
+            foreach (var root in new[] { @"Software\Policies\Microsoft\Office", @"Software\Microsoft\Office" })
+            {
+                object? value;
+                try
+                {
+                    value = readValue($@"{root}\{version}\Excel\Security", "AccessVBOM");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+                catch (SecurityException)
+                {
+                    continue;
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                var parsed = ParseAccessVbomValue(value);
+                if (parsed is not null)
+                {
+                    return parsed;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<string> CandidateOfficeVersions(string? excelVersion)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalized = NormalizeOfficeVersion(excelVersion);
+        if (normalized is not null && seen.Add(normalized))
+        {
+            yield return normalized;
+            yield break;
+        }
+
+        foreach (var fallback in new[] { "16.0", "15.0", "14.0", "12.0" })
+        {
+            if (seen.Add(fallback))
+            {
+                yield return fallback;
+            }
+        }
+    }
+
+    private static string? NormalizeOfficeVersion(string? excelVersion)
+    {
+        if (string.IsNullOrWhiteSpace(excelVersion))
+        {
+            return null;
+        }
+        var parts = excelVersion.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var major))
+        {
+            return null;
+        }
+        return major.ToString(CultureInfo.InvariantCulture) + ".0";
+    }
+
+    private static bool? ParseAccessVbomValue(object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return null;
+            case int i:
+                return i != 0;
+            case long l:
+                return l != 0;
+            case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed):
+                return parsed != 0;
+            default:
+                return null;
+        }
+    }
+
+    private static object? ReadCurrentUserRegistryValue(string keyPath, string valueName)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+        return key?.GetValue(valueName);
     }
 
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Systemprofile Desktop diagnostics must classify inaccessible or unusual filesystem states without failing doctor.")]
@@ -266,6 +433,35 @@ public static class ExcelDiagnostics
         }
     }
 
+    private static string UnwrapExceptionMessage(Exception ex)
+    {
+        return ex.InnerException is null ? ex.Message : $"{ex.Message} ({ex.InnerException.Message})";
+    }
+
+    private static void TryReleaseComObject(object? value)
+    {
+        if (value is null || !Marshal.IsComObject(value))
+        {
+            return;
+        }
+        try
+        {
+            Marshal.ReleaseComObject(value);
+        }
+        catch (ArgumentException)
+        {
+            // best-effort cleanup
+        }
+        catch (InvalidComObjectException)
+        {
+            // best-effort cleanup
+        }
+        catch (COMException)
+        {
+            // best-effort cleanup
+        }
+    }
+
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Reflection on COM objects may throw various exceptions.")]
     private static string? InvokeStringProperty(object comObject, string name)
     {
@@ -293,4 +489,6 @@ public static class ExcelDiagnostics
         }
         return ex.Message;
     }
+
+    private sealed record VbProjectAccessProbe(bool? Accessible, string? Message);
 }

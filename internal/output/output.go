@@ -907,10 +907,24 @@ func (r renderer) renderDoctor(env Envelope) string {
 	}
 	if path := stringValue(workbook, "path"); path != "" {
 		b.WriteString(r.checkLine(boolValue(diag, "workbook_openable"), "Workbook", path))
+		if _, ok := boolValueOK(diag, "workbook_vbproject_access"); ok {
+			detail := "configured workbook VBProject is accessible"
+			if err := stringValue(diag, "workbook_vbproject_access_error"); err != "" {
+				detail = err
+			}
+			b.WriteString(r.checkLine(boolValue(diag, "workbook_vbproject_access"), "Workbook VBProject", detail))
+		}
 	} else {
 		b.WriteString(r.skipLine("Workbook", "Not checked; run xlflow doctor --workbook to open the configured workbook"))
 	}
 	b.WriteString(r.checkLine(r.doctorBool(diag, excel, "vbide_access", ""), "VBIDE access", "VBA project object model is available"))
+	if _, ok := boolValueOK(excel, "vbproject_access"); ok {
+		detail := "temporary workbook VBProject is accessible"
+		if err := stringValue(excel, "vbproject_access_error"); err != "" {
+			detail = err
+		}
+		b.WriteString(r.checkLine(boolValue(excel, "vbproject_access"), "VBProject access", detail))
+	}
 	if typeDBLine := r.doctorTypeDBLine(env); typeDBLine != "" {
 		b.WriteString(typeDBLine)
 	}
