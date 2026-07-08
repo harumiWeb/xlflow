@@ -6,6 +6,8 @@ All notable changes to xlflow will be documented in this file.
 
 - Added `xlflow session attach` to adopt an already-open configured workbook as an external xlflow session, and deprecated legacy `xlflow attach --active` validation-only usage.
 - Added VS Code extension actions to connect to an already-open workbook from the session menu and open the configured workbook in Excel from the Project view.
+- Fixed `VB009` false positives for valid VBA strings such as the official VBA-JSON `JsonConverter.bas` escaped quote output (`json_Char = "\"""`).
+- Fixed VBA LSP diagnostics so `Me` is recognized as the current instance in UserForm, workbook, sheet, class, and non-xlflow fallback modules, preventing false `VB029` undeclared warnings for sheet code such as `Me.Rows(...)`.
 
 ## v0.19.0
 
