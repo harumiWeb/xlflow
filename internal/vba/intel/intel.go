@@ -3036,13 +3036,22 @@ func (a Analyzer) currentInstanceType(doc Document) (currentInstanceInfo, bool) 
 		if strings.EqualFold(name, "ThisWorkbook") {
 			return currentInstanceInfo{Type: "Excel.Workbook", Source: "workbook document instance", Confidence: "high"}, true
 		}
-		return currentInstanceInfo{Type: "Excel.Worksheet", Source: "worksheet document instance", Confidence: "high"}, true
+		if looksLikeWorksheetModuleName(name) {
+			return currentInstanceInfo{Type: "Excel.Worksheet", Source: "worksheet document instance", Confidence: "high"}, true
+		}
+		if looksLikeChartModuleName(name) {
+			return currentInstanceInfo{Type: "Excel.Chart", Source: "chart document instance", Confidence: "high"}, true
+		}
+		return currentInstanceInfo{Type: "Object", Source: "document instance", Confidence: "low"}, true
 	}
 	if strings.EqualFold(name, "ThisWorkbook") {
 		return currentInstanceInfo{Type: "Excel.Workbook", Source: "inferred workbook document instance", Confidence: "medium"}, true
 	}
 	if looksLikeWorksheetModuleName(name) {
 		return currentInstanceInfo{Type: "Excel.Worksheet", Source: "inferred worksheet document instance", Confidence: "medium"}, true
+	}
+	if looksLikeChartModuleName(name) {
+		return currentInstanceInfo{Type: "Excel.Chart", Source: "inferred chart document instance", Confidence: "medium"}, true
 	}
 	if strings.EqualFold(doc.ModuleKind, "class") || strings.EqualFold(filepath.Ext(doc.Path), ".cls") {
 		return currentInstanceInfo{Type: "Object", Source: "class instance", Confidence: "low"}, true
@@ -3100,9 +3109,14 @@ func moduleNameForCurrentInstance(doc Document) string {
 
 var attrNameRe = regexp.MustCompile(`(?i)^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"`)
 var worksheetModuleNameRe = regexp.MustCompile(`(?i)^sheet\d+$`)
+var chartModuleNameRe = regexp.MustCompile(`(?i)^chart\d+$`)
 
 func looksLikeWorksheetModuleName(name string) bool {
 	return worksheetModuleNameRe.MatchString(strings.TrimSpace(name))
+}
+
+func looksLikeChartModuleName(name string) bool {
+	return chartModuleNameRe.MatchString(strings.TrimSpace(name))
 }
 
 func (a Analyzer) formName(doc Document) string {
