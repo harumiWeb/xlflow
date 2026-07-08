@@ -18,6 +18,7 @@ export interface XlflowSessionPayload {
   active?: boolean;
   workbook_path?: string;
   workbook_name?: string;
+  owner?: string;
   dirty?: boolean;
   save_required?: boolean;
   running?: boolean;
@@ -28,6 +29,7 @@ export interface XlflowSessionPayload {
     pid?: number;
     hwnd?: number;
     workbook_path?: string;
+    owner?: string;
   } | null;
 }
 
@@ -39,7 +41,7 @@ export interface SessionSnapshot {
   lastError?: string;
 }
 
-type SessionAction = "start" | "stop" | "restart" | "status" | "output" | "doctor";
+type SessionAction = "start" | "attach" | "stop" | "restart" | "status" | "output" | "doctor";
 
 export class SessionManager implements vscode.Disposable {
   private readonly statusBarItem: vscode.StatusBarItem;
@@ -133,6 +135,30 @@ export class SessionManager implements vscode.Disposable {
     );
   }
 
+  async attach(): Promise<void> {
+    if (this.snapshot.state === "active") {
+      const attachLabel = vscode.l10n.t("Connect Open Workbook");
+      const confirmed = await vscode.window.showWarningMessage(
+        vscode.l10n.t(
+          "Replace the current xlflow session connection with the already-open configured workbook?",
+        ),
+        { modal: true },
+        attachLabel,
+      );
+      if (confirmed !== attachLabel) {
+        return;
+      }
+    }
+    await this.runSessionCommand(
+      "starting",
+      ["session", "attach"],
+      "xlflow session attach",
+      vscode.l10n.t("xlflow session attach"),
+      "attached",
+      vscode.l10n.t("attached"),
+    );
+  }
+
   async stop(): Promise<void> {
     await this.runSessionCommand(
       "stopping",
@@ -218,6 +244,9 @@ export class SessionManager implements vscode.Disposable {
       case "start":
         await this.start();
         return;
+      case "attach":
+        await this.attach();
+        return;
       case "stop":
         await this.stop();
         return;
@@ -237,31 +266,7 @@ export class SessionManager implements vscode.Disposable {
   }
 
   private quickPickItems(): Array<vscode.QuickPickItem & { action: SessionAction }> {
-    const common: Array<vscode.QuickPickItem & { action: SessionAction }> = [
-      { label: vscode.l10n.t("Show Session Status"), action: "status" },
-      { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
-    ];
-    switch (this.snapshot.state) {
-      case "active":
-        return [
-          { label: vscode.l10n.t("Stop Session"), action: "stop" },
-          { label: vscode.l10n.t("Restart Session"), action: "restart" },
-          ...common,
-        ];
-      case "error":
-        return [
-          { label: vscode.l10n.t("Show Session Status"), action: "status" },
-          { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
-          { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
-          { label: vscode.l10n.t("Start Session"), action: "start" },
-        ];
-      default:
-        return [
-          { label: vscode.l10n.t("Start Session"), action: "start" },
-          ...common,
-          { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
-        ];
-    }
+    return sessionQuickPickItems(this.snapshot.state);
   }
 
   private async runSessionCommand(
@@ -435,6 +440,10 @@ function sessionStatusTooltip(snapshot: SessionSnapshot): string {
   } else if (snapshot.session?.dirty === true) {
     lines.push(vscode.l10n.t("Workbook dirty"));
   }
+  const owner = readNonEmpty(snapshot.session?.owner ?? snapshot.session?.metadata?.owner);
+  if (owner !== undefined) {
+    lines.push(vscode.l10n.t("Session owner: {owner}", { owner }));
+  }
   const startedAt = readNonEmpty(snapshot.session?.metadata?.started_at);
   if (startedAt !== undefined) {
     lines.push(vscode.l10n.t("Started: {startedAt}", { startedAt }));
@@ -460,6 +469,44 @@ function workbookDisplayName(session: XlflowSessionPayload | undefined): string 
   }
   const workbookPath = readNonEmpty(session?.workbook_path ?? session?.metadata?.workbook_path);
   return workbookPath === undefined ? undefined : path.basename(workbookPath);
+}
+
+export function sessionQuickPickItems(
+  state: SessionState,
+): Array<vscode.QuickPickItem & { action: SessionAction }> {
+  const attach = {
+    label: vscode.l10n.t("Connect Open Workbook"),
+    description: vscode.l10n.t("Run xlflow session attach"),
+    action: "attach" as const,
+  };
+  const common: Array<vscode.QuickPickItem & { action: SessionAction }> = [
+    { label: vscode.l10n.t("Show Session Status"), action: "status" },
+    { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
+  ];
+  switch (state) {
+    case "active":
+      return [
+        { label: vscode.l10n.t("Stop Session"), action: "stop" },
+        attach,
+        { label: vscode.l10n.t("Restart Session"), action: "restart" },
+        ...common,
+      ];
+    case "error":
+      return [
+        attach,
+        { label: vscode.l10n.t("Show Session Status"), action: "status" },
+        { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
+        { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
+        { label: vscode.l10n.t("Start Session"), action: "start" },
+      ];
+    default:
+      return [
+        { label: vscode.l10n.t("Start Session"), action: "start" },
+        attach,
+        ...common,
+        { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
+      ];
+  }
 }
 
 function statusErrorMessage(env: XlflowStatusEnvelope | undefined, stderr: string): string {

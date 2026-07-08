@@ -561,6 +561,50 @@ func TestRunnerDotNetAttachUsesDotNetProviderAndPreservesEnvelopeFields(t *testi
 	}
 }
 
+func TestRunnerDotNetSessionAttachUsesSessionCommand(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var dotNetCalls int
+	var dotNetRequests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:      string(excelbridge.ModeDotNet),
+			supports:  true,
+			callCount: &dotNetCalls,
+			requests:  &dotNetRequests,
+			response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"session","logs":["attached xlflow session to already-open workbook"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"external","owner":"external","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"external","session_requested":true,"auto_session":false,"saved":false,"dirty":false,"needs_save":false}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.SessionAttach(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if dotNetCalls != 1 {
+		t.Fatalf("dotnet calls = %d, want 1", dotNetCalls)
+	}
+	if len(dotNetRequests) != 1 {
+		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
+	}
+	args := dotNetRequests[0].Args
+	if args["Action"] != "attach" {
+		t.Fatalf("session attach args = %#v", args)
+	}
+	if _, ok := args["Active"]; ok {
+		t.Fatalf("session attach must not pass Active: %#v", args)
+	}
+	if args["MetadataPath"] == "" {
+		t.Fatalf("MetadataPath must be passed for session attach: %#v", args)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil {
+		t.Fatalf("expected session attach envelope fields to be populated: %+v", env)
+	}
+}
+
 func TestRunnerDotNetListFormsUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })

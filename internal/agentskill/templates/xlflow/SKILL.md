@@ -12,6 +12,7 @@ Use xlflow as the proof loop for Excel VBA work. Do not treat generated VBA as c
 Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
+- If the user says the workbook is already open in Excel, asks to work on the workbook they are viewing, or describes a human-centered Excel workflow, use `xlflow session attach --json` instead of `xlflow session start` so xlflow adopts the already-open configured workbook.
 - When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, lifecycle hooks, tags/filters, and failure diagnosis.
 - When workbook behavior may depend on worksheet formulas, defined names, or formula-driven sheet layout, load [references/formulas.md](references/formulas.md) before editing VBA or changing columns/ranges. Use `xlflow formulas pull --json` to extract Git-friendly region snapshots.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --json`.
@@ -40,7 +41,7 @@ Default safety rules for AI-agent work:
 
 For normal AI-agent development tasks, use an explicit xlflow session from task start to task end:
 
-1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions.
+1. Start with `xlflow session start` after reading `xlflow.toml` and resolving source-of-truth questions, or use `xlflow session attach --json` when the user has already opened the configured workbook in Excel.
 2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --json` while iterating, and use `xlflow run --session --json` or `xlflow run --headless --session --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
@@ -56,7 +57,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Read `xlflow.toml`.
    - Treat the configured source directories as authoritative when `xlflow.toml` exists and the user has not said the workbook contains newer VBA.
    - Run `xlflow doctor --json` when Excel, COM, VBIDE, or macro execution looks suspicious.
-   - Start `xlflow session start` for normal AI-agent development once the source of truth is clear.
+   - Start `xlflow session start` for normal AI-agent development once the source of truth is clear, unless the user has already opened the workbook in Excel; in that case run `xlflow session attach --json`.
    - Run `xlflow pull --session --json` before editing when the workbook is the current source of truth.
 
 2. Edit source files.
@@ -142,7 +143,7 @@ Before designing a CLI-run macro, decide how inputs are supplied:
 When the user asks to create or change VBA behavior:
 
 1. Read `xlflow.toml` and relevant source files.
-2. Start `xlflow session start` unless the task is a one-shot CI-style check, session state is suspect, or the user explicitly wants isolated commands.
+2. Start `xlflow session start` unless the task is a one-shot CI-style check, session state is suspect, the user explicitly wants isolated commands, or the user has already opened the configured workbook in Excel. For an already-open workbook, run `xlflow session attach --json`.
 3. If the current source of truth is unclear, run `xlflow pull --session --json` before editing.
 4. Edit `.bas`, `.cls`, or `.frm` source files.
 5. Run `xlflow push --fast --session --no-save --json`.
@@ -168,7 +169,7 @@ When the user reports a runtime failure:
 ## Command Usage
 
 - Use `xlflow doctor --json` before blaming VBA when Excel automation fails before user code starts.
-- Use `xlflow session start` at the beginning of normal AI-agent development tasks, and use `xlflow session stop` before finalizing.
+- Use `xlflow session start` at the beginning of normal AI-agent development tasks, or `xlflow session attach --json` when the configured workbook is already open in Excel. Use `xlflow session stop` before finalizing; external sessions are detached rather than closed.
 - Use `xlflow pull --session --json` to refresh editable source from the configured workbook during a session.
 - Use `xlflow push --fast --session --no-save` after source edits during a session.
 - Use plain `xlflow push` when you need the safe isolated path with backup and save.
@@ -206,7 +207,8 @@ When the user reports a runtime failure:
 - Use `xlflow run --fast --session --gui-compile-errors` only when a human explicitly accepts GUI compile dialogs and you intentionally want the direct fast path. Plain `xlflow run --direct` already opts out of default compile diagnostics automatically.
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
 - Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
-- Use `xlflow attach --active --json` before human-assisted sessions to confirm that the open Excel workbook matches `xlflow.toml`.
+- Use `xlflow session attach --json` before human-assisted sessions to adopt the open Excel workbook that matches `xlflow.toml`.
+- `xlflow attach --active --json` is deprecated and only validates the active workbook; do not use it when later `push`, `pull`, `run`, or `inspect` commands should target the already-open workbook.
 - Use `xlflow run --session --json` when tests are absent or the macro mutates workbook state. If more internal state is needed, add `XlflowDebug.Log` and rerun.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
 

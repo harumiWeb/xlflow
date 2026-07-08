@@ -313,6 +313,11 @@
         "enablement": "xlflow.sessionStartEnabled"
       },
       {
+        "command": "xlflow.sessionAttach",
+        "title": "%command.sessionAttach.title%",
+        "category": "%command.category%"
+      },
+      {
         "command": "xlflow.sessionStatus",
         "title": "%command.sessionStatus.title%",
         "category": "%command.category%"
@@ -395,6 +400,11 @@
       {
         "command": "xlflow.openDocumentation",
         "title": "%command.openDocumentation.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.openWorkbook",
+        "title": "%command.openWorkbook.title%",
         "category": "%command.category%"
       },
       {
@@ -804,6 +814,7 @@
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.openProcedure",
     "onCommand:xlflow.openUserFormArtifact",
+    "onCommand:xlflow.openWorkbook",
     "onCommand:xlflow.pull",
     "onCommand:xlflow.push",
     "onCommand:xlflow.refreshModules",
@@ -823,6 +834,7 @@
     "onCommand:xlflow.runTestProcedure",
     "onCommand:xlflow.saveWorkbook",
     "onCommand:xlflow.sessionActions",
+    "onCommand:xlflow.sessionAttach",
     "onCommand:xlflow.sessionRestart",
     "onCommand:xlflow.sessionStart",
     "onCommand:xlflow.sessionStatus",

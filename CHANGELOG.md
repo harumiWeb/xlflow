@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow session attach` to adopt an already-open configured workbook as an external xlflow session, and deprecated legacy `xlflow attach --active` validation-only usage.
+- Added VS Code extension actions to connect to an already-open workbook from the session menu and open the configured workbook in Excel from the Project view.
+
 ## v0.19.0
 
 - Added `xlflow formulas pull` to extract worksheet formulas and defined names from `.xlsx` / `.xlsm` files into deterministic region-based JSONL snapshots without launching Excel, including standalone `--src` and `--out` options, region dependency indexes, and parse status summaries.

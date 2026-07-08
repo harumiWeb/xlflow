@@ -277,6 +277,10 @@ export function registerCommands(
       await sessionManager.start();
       hooks.refreshProject();
     }),
+    vscode.commands.registerCommand("xlflow.sessionAttach", async () => {
+      await sessionManager.attach();
+      hooks.refreshProject();
+    }),
     vscode.commands.registerCommand("xlflow.sessionStatus", async () => {
       await sessionManager.showStatus();
     }),
@@ -335,6 +339,23 @@ export function registerCommands(
     }),
     vscode.commands.registerCommand("xlflow.openDocumentation", async () => {
       await vscode.env.openExternal(vscode.Uri.parse("https://harumiweb.github.io/xlflow/"));
+    }),
+    vscode.commands.registerCommand("xlflow.openWorkbook", async (value: unknown) => {
+      const uri = value instanceof vscode.Uri ? value : treeUri(value);
+      if (uri === undefined) {
+        vscode.window.showWarningMessage(
+          vscode.l10n.t("xlflow could not determine the workbook path."),
+        );
+        return;
+      }
+      const opened = await vscode.env.openExternal(uri);
+      if (!opened) {
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("Failed to open workbook in the associated desktop app: {path}", {
+            path: uri.fsPath,
+          }),
+        );
+      }
     }),
     vscode.commands.registerCommand("xlflow.openModule", async (value: unknown) => {
       const uri = treeUri(value);

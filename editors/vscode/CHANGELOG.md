@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a Project view session action to connect xlflow to an already-open workbook with `xlflow session attach`.
+- Open the configured workbook from the Project view in the associated desktop app instead of opening the binary workbook inside VS Code.
+
 ## v0.3.0
 
 - Added Quick Fix actions for xlflow diagnostics to insert `xlflow:disable-next-line` or `xlflow:disable-line` suppression comments.

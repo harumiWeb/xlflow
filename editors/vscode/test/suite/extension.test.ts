@@ -15,7 +15,11 @@ import {
   disableNextLineComment,
 } from "../../src/codeActions";
 import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
-import { sessionStateFromEnvelope, sessionStatusText } from "../../src/session";
+import {
+  sessionQuickPickItems,
+  sessionStateFromEnvelope,
+  sessionStatusText,
+} from "../../src/session";
 import {
   buildUserFormModels,
   moduleContextValue,
@@ -99,6 +103,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.formatProject",
     "xlflow.saveWorkbook",
     "xlflow.sessionStart",
+    "xlflow.sessionAttach",
     "xlflow.sessionStatus",
     "xlflow.sessionRestart",
     "xlflow.sessionStop",
@@ -115,6 +120,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.sessionToggle",
     "xlflow.setupActions",
     "xlflow.openDocumentation",
+    "xlflow.openWorkbook",
     "xlflow.openModule",
     "xlflow.openProcedure",
     "xlflow.openUserFormArtifact",
@@ -211,6 +217,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   }
   assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow: No Session");
   assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session Active");
+  assert.ok(
+    sessionQuickPickItems("inactive").some((item) => item.action === "attach"),
+    "inactive session QuickPick should offer attach",
+  );
+  assert.ok(
+    sessionQuickPickItems("active").some((item) => item.action === "attach"),
+    "active session QuickPick should offer attach",
+  );
   assert.strictEqual(
     sessionStatusText("inactive", "notInitialized"),
     "$(circle-slash) xlflow: No Project",

@@ -77,6 +77,7 @@ public sealed class SessionCommandTests
             Assert.Equal(123, metadata!.Hwnd);
             Assert.Equal(456, metadata.Pid);
             Assert.False(metadata.Poisoned);
+            Assert.Equal("managed", metadata.Owner);
             Assert.Equal("", metadata.HResult);
         }
         finally
@@ -104,6 +105,30 @@ public sealed class SessionCommandTests
 
             Assert.NotNull(metadata);
             Assert.Equal(workbookPath, metadata!.WorkbookPath);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadSessionMetadataPreservesExternalOwner()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            File.WriteAllText(path, """{"hwnd":123,"pid":456,"workbook_path":"C:\\work\\Book.xlsm","owner":"external"}""");
+
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.Equal("external", metadata!.Owner);
         }
         finally
         {
@@ -151,6 +176,7 @@ public sealed class SessionCommandTests
             Hwnd: 123,
             Pid: 456,
             WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: "managed",
             Poisoned: true,
             PoisonedAt: "2026-06-07T00:00:00.0000000Z",
             PoisonReason: "RPC failed",

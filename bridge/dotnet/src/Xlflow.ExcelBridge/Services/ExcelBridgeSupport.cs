@@ -74,6 +74,7 @@ internal sealed record SessionMetadata(
     long Hwnd,
     int Pid,
     string WorkbookPath,
+    string Owner = "managed",
     bool Poisoned = false,
     string PoisonedAt = "",
     string PoisonReason = "",
@@ -128,15 +129,20 @@ internal static class ExcelBridgeSupport
         var hwnd = TryGetInt64(root, "hwnd");
         var pid = TryGetInt32(root, "pid");
         var workbookPath = BridgePayload.GetString(root, "workbook_path") ?? "";
+        var owner = BridgePayload.GetString(root, "owner") ?? "managed";
+        if (string.IsNullOrWhiteSpace(owner))
+        {
+            owner = "managed";
+        }
         var poisoned = TryGetBool(root, "poisoned");
         var poisonedAt = BridgePayload.GetString(root, "poisoned_at") ?? "";
         var poisonReason = BridgePayload.GetString(root, "poison_reason") ?? "";
         var hResult = BridgePayload.GetString(root, "h_result") ?? "";
         var lastCommand = BridgePayload.GetString(root, "last_command") ?? "";
-        return new SessionMetadata(hwnd, pid, workbookPath, poisoned, poisonedAt, poisonReason, hResult, lastCommand);
+        return new SessionMetadata(hwnd, pid, workbookPath, owner, poisoned, poisonedAt, poisonReason, hResult, lastCommand);
     }
 
-    public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath)
+    public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath, string owner = "managed")
     {
         if (string.IsNullOrWhiteSpace(metadataPath))
         {
@@ -154,6 +160,7 @@ internal static class ExcelBridgeSupport
             ["hwnd"] = GetExcelMainHwnd(excel),
             ["pid"] = GetExcelProcessId(excel),
             ["workbook_path"] = NormalizePath(workbookPath),
+            ["owner"] = string.IsNullOrWhiteSpace(owner) ? "managed" : owner,
         };
 
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
@@ -189,6 +196,7 @@ internal static class ExcelBridgeSupport
             ["hwnd"] = metadata.Hwnd,
             ["pid"] = metadata.Pid,
             ["workbook_path"] = string.IsNullOrWhiteSpace(metadata.WorkbookPath) ? workbookPath : NormalizePath(metadata.WorkbookPath),
+            ["owner"] = string.IsNullOrWhiteSpace(metadata.Owner) ? "managed" : metadata.Owner,
             ["poisoned"] = true,
             ["poisoned_at"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             ["poison_reason"] = reason,
@@ -225,22 +233,26 @@ internal static class ExcelBridgeSupport
         if (useSession)
         {
             ThrowIfSessionPoisoned(metadataPath, workbookPath);
+            var metadata = ReadSessionMetadata(metadataPath);
+            var sessionMode = string.Equals(metadata?.Owner, "external", StringComparison.OrdinalIgnoreCase) ? "external" : "explicit";
             var excel = RunPhase("get_session_excel", () => GetSessionExcel(metadataPath))
                 ?? throw new InvalidOperationException("xlflow session is not running");
             var workbook = RunPhase("get_session_workbook", () => GetOpenWorkbook(excel, workbookPath));
-            return new ExcelSessionAttachment(excel, workbook, "explicit");
+            return new ExcelSessionAttachment(excel, workbook, sessionMode);
         }
 
         if (SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
         {
             ThrowIfSessionPoisoned(metadataPath, workbookPath);
+            var metadata = ReadSessionMetadata(metadataPath);
+            var sessionMode = string.Equals(metadata?.Owner, "external", StringComparison.OrdinalIgnoreCase) ? "external" : "auto";
             var excel = RunPhase("get_auto_session_excel", () => GetExcelFromSessionMetadata(metadataPath));
             if (excel is not null)
             {
                 try
                 {
                     var workbook = RunPhase("get_auto_session_workbook", () => GetOpenWorkbook(excel, workbookPath));
-                    return new ExcelSessionAttachment(excel, workbook, "auto");
+                    return new ExcelSessionAttachment(excel, workbook, sessionMode);
                 }
                 catch
                 {
@@ -299,6 +311,90 @@ internal static class ExcelBridgeSupport
             ReleaseComObject(excel);
             var detail = UnwrapComErrorMessage(ex);
             throw new InvalidOperationException($"bridge_file_not_openable: {detail}", ex);
+        }
+    }
+
+    public static ExcelSessionAttachment AttachToAlreadyOpenWorkbook(string workbookPath)
+    {
+        workbookPath = NormalizePath(workbookPath);
+        string? activePath = null;
+
+        var running = TryGetRunningExcelApplication();
+        if (running is not null)
+        {
+            if (TryGetMatchingOpenWorkbook(running, workbookPath, out var workbook))
+            {
+                return new ExcelSessionAttachment(running, workbook!, "external");
+            }
+            activePath ??= TryGetActiveWorkbookPath(running);
+            ReleaseComObject(running);
+        }
+
+        var foreground = TryGetForegroundExcel();
+        if (foreground is not null)
+        {
+            if (TryGetMatchingOpenWorkbook(foreground, workbookPath, out var workbook))
+            {
+                return new ExcelSessionAttachment(foreground, workbook!, "external");
+            }
+            activePath ??= TryGetActiveWorkbookPath(foreground);
+            ReleaseComObject(foreground);
+        }
+
+        foreach (var process in GetExcelProcesses())
+        {
+            var excel = TryGetExcelByProcessId(process.ProcessId);
+            if (excel is null)
+            {
+                continue;
+            }
+
+            if (TryGetMatchingOpenWorkbook(excel, workbookPath, out var workbook))
+            {
+                return new ExcelSessionAttachment(excel, workbook!, "external");
+            }
+
+            activePath ??= TryGetActiveWorkbookPath(excel);
+            ReleaseComObject(excel);
+        }
+
+        if (!string.IsNullOrWhiteSpace(activePath))
+        {
+            throw new InvalidOperationException("active_workbook_mismatch: Active workbook does not match configured workbook: " + activePath);
+        }
+
+        throw new InvalidOperationException("active_workbook_not_found: No open Excel workbook matches the configured workbook.");
+    }
+
+    private static bool TryGetMatchingOpenWorkbook(object excel, string workbookPath, out object? workbook)
+    {
+        try
+        {
+            workbook = GetOpenWorkbook(excel, workbookPath);
+            return true;
+        }
+        catch
+        {
+            workbook = null;
+            return false;
+        }
+    }
+
+    private static string? TryGetActiveWorkbookPath(object excel)
+    {
+        object? workbook = null;
+        try
+        {
+            workbook = TryGetActiveWorkbook(excel);
+            return TryGetWorkbookFullName(workbook);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            ReleaseComObject(workbook);
         }
     }
 
@@ -1126,7 +1222,7 @@ internal static class ExcelBridgeSupport
 
     public static Dictionary<string, object?> BuildSessionPayload(string workbookPath, bool active, string mode, bool? dirty, bool saveRequired)
     {
-        return new Dictionary<string, object?>
+        var payload = new Dictionary<string, object?>
         {
             ["active"] = active,
             ["workbook_path"] = NormalizePath(workbookPath),
@@ -1136,6 +1232,11 @@ internal static class ExcelBridgeSupport
             ["mode"] = mode,
             ["source_of_truth"] = saveRequired ? "live_workbook" : "saved_workbook",
         };
+        if (string.Equals(mode, "external", StringComparison.OrdinalIgnoreCase))
+        {
+            payload["owner"] = "external";
+        }
+        return payload;
     }
 
     public static Dictionary<string, object?> BuildWorkbookPayload(string workbookPath, bool sessionAttached, string sessionMode, bool sessionRequested, bool saved, bool? dirty, bool needsSave)
@@ -1168,6 +1269,7 @@ internal static class ExcelBridgeSupport
         {
             "explicit" => "attached to explicit xlflow session workbook",
             "auto" => "attached to matching xlflow session workbook",
+            "external" => "attached to external xlflow session workbook",
             _ => null,
         };
     }

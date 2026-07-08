@@ -343,7 +343,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
           workbookPath === undefined
             ? undefined
             : {
-                command: "vscode.open",
+                command: "xlflow.openWorkbook",
                 title: vscode.l10n.t("Open Workbook"),
                 arguments: [workbookUri(state.workspaceFolder, workbookPath)],
               },

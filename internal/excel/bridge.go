@@ -664,6 +664,19 @@ func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions
 	}, cmdOpts)
 }
 
+func (r Runner) SessionAttach(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+	cmdOpts := CommandOptions{}
+	if len(opts) > 0 {
+		cmdOpts = opts[0]
+	}
+	return r.run("session", map[string]string{
+		"Action":       "attach",
+		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+	}, cmdOpts)
+}
+
 func (r Runner) SaveSession(cfg config.Config, opts ...SessionCommandOptions) (output.Envelope, int, error) {
 	cmdOpts := SessionCommandOptions{}
 	if len(opts) > 0 {

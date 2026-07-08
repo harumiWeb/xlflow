@@ -1694,6 +1694,10 @@ func (a *app) attachCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			env.Warnings = append(anySlice(env.Warnings), map[string]any{
+				"code":    "attach_active_deprecated",
+				"message": "`xlflow attach --active` is deprecated and only validates the active workbook. Use `xlflow session attach` when you want xlflow commands to operate on an already-open workbook.",
+			})
 			return a.write(env, code)
 		},
 	}
@@ -2980,6 +2984,30 @@ func (a *app) sessionCommand() *cobra.Command {
 		}
 		session.AddCommand(cmd)
 	}
+	attach := &cobra.Command{
+		Use:   "attach",
+		Short: "Attach xlflow to an already-open Excel workbook",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			commandOpts := buildCommandOptions(a.stderrWriter())
+			cfg, err := a.loadConfig("session attach")
+			if err != nil {
+				return err
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Attaching open workbook", commandOpts, func() error {
+				var runErr error
+				env, code, runErr = a.excelRunnerForConfig(cfg).SessionAttach(cfg, commandOpts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	session.AddCommand(attach)
 	return session
 }
 
