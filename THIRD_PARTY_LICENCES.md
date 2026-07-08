@@ -49,7 +49,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/xo/terminfo`                |    `v0.0.0-20220910002029-abceb7e1c41e` | MIT          | `https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE`                |
 | `github.com/xuri/efp`                   |                                `v0.0.1` | BSD-3-Clause | `https://github.com/xuri/efp/blob/v0.0.1/LICENSE`                         |
 | `github.com/xuri/nfp`                   |  `v0.0.2-0.20250530014748-2ddeb826f9a9` | BSD-3-Clause | `https://github.com/xuri/nfp/blob/2ddeb826f9a9/LICENSE`                   |
-| `golang.org/x/crypto`                   |                               `v0.51.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.51.0:LICENSE`              |
+| `golang.org/x/crypto`                   |                               `v0.52.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.52.0:LICENSE`              |
 | `golang.org/x/net`                      |                               `v0.55.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.55.0:LICENSE`                 |
 | `golang.org/x/sys`                      |                               `v0.45.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.45.0:LICENSE`                 |
 | `golang.org/x/text`                     |                               `v0.37.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.37.0:LICENSE`                |
