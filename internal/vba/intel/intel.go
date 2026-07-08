@@ -887,7 +887,7 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 				continue
 			}
 			base := memberReceiverBase(receiver)
-			if base == "" || a.knownModuleOrNamespaceReceiver(doc, base) {
+			if base == "" || strings.EqualFold(base, "Me") || a.knownModuleOrNamespaceReceiver(doc, base) {
 				continue
 			}
 			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(base))
@@ -980,8 +980,12 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 	}
 	var current string
 	switch {
-	case strings.EqualFold(base, "Me") && a.isFormDocument(doc):
-		current = "MSForms.UserForm"
+	case strings.EqualFold(base, "Me"):
+		instance, ok := a.currentInstanceType(doc)
+		if !ok || currentInstanceLowConfidence(instance) {
+			return "", false
+		}
+		current = instance.Type
 	case a.DB != nil:
 		if typ, ok := a.DB.ResolveGlobal(base); ok {
 			current = typ.Name
@@ -2534,8 +2538,10 @@ func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string
 }
 
 func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (inferredType, bool) {
-	if strings.EqualFold(word, "Me") && a.isFormDocument(doc) {
-		return inferredType{Type: "MSForms.UserForm", Source: "UserForm instance"}, true
+	if strings.EqualFold(word, "Me") {
+		if instance, ok := a.currentInstanceType(doc); ok {
+			return inferredType{Type: instance.Type, Source: instance.Source}, true
+		}
 	}
 	if control, ok := a.resolveFormControl(doc, word); ok {
 		return inferredType{Type: control.Type, Source: "UserForm control"}, true
@@ -2734,9 +2740,14 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 		base = strings.TrimSpace(base[:idx])
 	}
 	var current string
-	formMode := useDocument && strings.EqualFold(base, "Me") && a.isFormDocument(doc)
-	if formMode {
-		current = "MSForms.UserForm"
+	formMode := false
+	if useDocument && strings.EqualFold(base, "Me") {
+		instance, ok := a.currentInstanceType(doc)
+		if !ok {
+			return "", false
+		}
+		current = instance.Type
+		formMode = strings.EqualFold(current, "MSForms.UserForm")
 	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
 		current = typ.Name
 	} else if typ, ok := a.DB.ResolveType(base); ok {
@@ -3008,6 +3019,90 @@ func (a Analyzer) resolveFormControl(doc Document, name string) (userforms.Contr
 
 func (a Analyzer) isFormDocument(doc Document) bool {
 	return strings.EqualFold(doc.ModuleKind, "form") || strings.EqualFold(filepath.Ext(doc.Path), ".frm") || a.formSource(doc) != ""
+}
+
+type currentInstanceInfo struct {
+	Type       string
+	Source     string
+	Confidence string
+}
+
+func (a Analyzer) currentInstanceType(doc Document) (currentInstanceInfo, bool) {
+	if a.isFormDocument(doc) {
+		return currentInstanceInfo{Type: "MSForms.UserForm", Source: "UserForm instance", Confidence: "high"}, true
+	}
+	name := moduleNameForCurrentInstance(doc)
+	if a.isWorkbookDocument(doc) {
+		if strings.EqualFold(name, "ThisWorkbook") {
+			return currentInstanceInfo{Type: "Excel.Workbook", Source: "workbook document instance", Confidence: "high"}, true
+		}
+		return currentInstanceInfo{Type: "Excel.Worksheet", Source: "worksheet document instance", Confidence: "high"}, true
+	}
+	if strings.EqualFold(name, "ThisWorkbook") {
+		return currentInstanceInfo{Type: "Excel.Workbook", Source: "inferred workbook document instance", Confidence: "medium"}, true
+	}
+	if looksLikeWorksheetModuleName(name) {
+		return currentInstanceInfo{Type: "Excel.Worksheet", Source: "inferred worksheet document instance", Confidence: "medium"}, true
+	}
+	if strings.EqualFold(doc.ModuleKind, "class") || strings.EqualFold(filepath.Ext(doc.Path), ".cls") {
+		return currentInstanceInfo{Type: "Object", Source: "class instance", Confidence: "low"}, true
+	}
+	return currentInstanceInfo{Type: "Object", Source: "current instance", Confidence: "low"}, true
+}
+
+func currentInstanceLowConfidence(instance currentInstanceInfo) bool {
+	return strings.EqualFold(instance.Confidence, "low") || lowConfidenceDiagnosticType(instance.Type)
+}
+
+func (a Analyzer) isWorkbookDocument(doc Document) bool {
+	if strings.EqualFold(doc.ModuleKind, "document") {
+		return true
+	}
+	if strings.TrimSpace(a.RootDir) == "" || strings.TrimSpace(a.Config.Src.Workbook) == "" || strings.TrimSpace(doc.Path) == "" {
+		return false
+	}
+	root := filepath.Join(a.RootDir, filepath.FromSlash(a.Config.Src.Workbook))
+	return pathInsideRoot(doc.Path, root)
+}
+
+func pathInsideRoot(path, root string) bool {
+	cleanPath, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		cleanPath = filepath.Clean(path)
+	}
+	cleanRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		cleanRoot = filepath.Clean(root)
+	}
+	if runtime.GOOS == "windows" {
+		cleanPath = strings.ToLower(cleanPath)
+		cleanRoot = strings.ToLower(cleanRoot)
+	}
+	if cleanPath == cleanRoot {
+		return true
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func moduleNameForCurrentInstance(doc Document) string {
+	for _, line := range strings.Split(doc.Source, "\n") {
+		match := attrNameRe.FindStringSubmatch(line)
+		if match != nil && strings.TrimSpace(match[1]) != "" {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return moduleNameForDocument(doc)
+}
+
+var attrNameRe = regexp.MustCompile(`(?i)^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"`)
+var worksheetModuleNameRe = regexp.MustCompile(`(?i)^sheet\d+$`)
+
+func looksLikeWorksheetModuleName(name string) bool {
+	return worksheetModuleNameRe.MatchString(strings.TrimSpace(name))
 }
 
 func (a Analyzer) formName(doc Document) string {
