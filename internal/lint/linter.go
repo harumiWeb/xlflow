@@ -1629,19 +1629,28 @@ func containsTypographicQuote(line string) bool {
 }
 
 func containsLikelyCStyleQuoteEscape(line string) bool {
-	for i := 0; i < len(line)-2; i++ {
-		if line[i] != '\\' || line[i+1] != '"' {
+	inString := false
+	sawBackslashEscapedQuote := false
+	for i := 0; i < len(line); i++ {
+		if line[i] != '"' {
 			continue
 		}
-		quoteCount := 0
-		for j := i + 1; j < len(line) && line[j] == '"'; j++ {
-			quoteCount++
+		if !inString {
+			inString = true
+			sawBackslashEscapedQuote = false
+			continue
 		}
-		if quoteCount >= 2 {
-			return true
+		if i+1 < len(line) && line[i+1] == '"' {
+			if i > 0 && line[i-1] == '\\' {
+				sawBackslashEscapedQuote = true
+			}
+			i++
+			continue
 		}
+		inString = false
+		sawBackslashEscapedQuote = false
 	}
-	return false
+	return inString && sawBackslashEscapedQuote
 }
 
 func repeatedQuestionShorthandColumns(line string) []int {

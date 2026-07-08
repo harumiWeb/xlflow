@@ -770,6 +770,31 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 }
 
+func TestLinterAllowsVBAJSONEscapedQuoteStrings(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "JsonConverter.bas", `Attribute VB_Name = "JsonConverter"
+Option Explicit
+Private Function JsonEscape(ByVal json_Char As String) As String
+  Select Case AscW(json_Char)
+  Case 34
+    json_Char = "\"""
+  Case 92
+    json_Char = "\\"
+  End Select
+  JsonEscape = json_Char
+End Function
+`)
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB009" {
+			t.Fatalf("valid VBA-JSON escaped quote strings should not trigger VB009: %+v", issues)
+		}
+	}
+}
+
 func TestLinterAllowsValidProcedureBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
