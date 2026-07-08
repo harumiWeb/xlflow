@@ -96,11 +96,20 @@ public sealed class ExcelSessionService : ISessionService
 
         try
         {
-            CloseExistingSession(args.MetadataPath);
-
             var attachment = ExcelBridgeSupport.AttachToAlreadyOpenWorkbook(workbookPath);
             excel = attachment.Excel;
             workbook = attachment.Workbook;
+
+            if (ExistingManagedSessionHasWorkbook(args.MetadataPath, workbookPath))
+            {
+                return BridgeResponse.Failed(request, new BridgeError(
+                    Code: "session_attach_conflict",
+                    Message: "A managed xlflow session is already active for the configured workbook. Run `xlflow session stop` before attaching it as an external session.",
+                    Phase: "session.attach",
+                    Source: "xlflow"));
+            }
+
+            CloseExistingSession(args.MetadataPath);
             ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, "external");
 
             bool? dirty;
@@ -145,6 +154,41 @@ public sealed class ExcelSessionService : ISessionService
                 Message: message,
                 Phase: "session.attach",
                 Source: ex.Source ?? "xlflow-excel-bridge"));
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
+    }
+
+    private static bool ExistingManagedSessionHasWorkbook(string metadataPath, string workbookPath)
+    {
+        var metadata = ExcelBridgeSupport.ReadSessionMetadata(metadataPath);
+        if (metadata is null || string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (!string.Equals(ExcelBridgeSupport.NormalizePath(metadata.WorkbookPath), workbookPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        object? excel = null;
+        object? workbook = null;
+        try
+        {
+            excel = ExcelBridgeSupport.GetSessionExcel(metadataPath);
+            if (excel is null)
+            {
+                return false;
+            }
+            workbook = ExcelBridgeSupport.GetOpenWorkbook(excel, workbookPath);
+            return workbook is not null;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
         finally
         {
