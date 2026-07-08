@@ -104,14 +104,16 @@ func TestDiagnosticsConvertLintByteColumnsToUTF16AfterJapaneseText(t *testing.T)
 	}
 
 	diagnostics := analyzer.Diagnostics(doc)
-	var selectDiag *Diagnostic
+	var selectDiag Diagnostic
+	foundSelectDiag := false
 	for i := range diagnostics {
 		if diagnostics[i].Code == "VB002" {
-			selectDiag = &diagnostics[i]
+			selectDiag = diagnostics[i]
+			foundSelectDiag = true
 			break
 		}
 	}
-	if selectDiag == nil {
+	if !foundSelectDiag {
 		t.Fatalf("VB002 diagnostic missing: %+v", diagnostics)
 	}
 	want := utf16Len(line[:strings.Index(line, "Select")])

@@ -104,15 +104,16 @@ func TestWriteFormEditCodeBehindKeepsDesigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var form *Module
+	formIndex := -1
 	for i := range p.Modules {
 		if p.Modules[i].Type == ModuleForm {
-			form = &p.Modules[i]
+			formIndex = i
 		}
 	}
-	if form == nil {
+	if formIndex < 0 {
 		t.Fatal("precondition: fixture has no form module")
 	}
+	form := &p.Modules[formIndex]
 	edited := form.Source + "\r\n' edited\r\n"
 	form.Source = edited
 	wantName := form.Name
