@@ -36,8 +36,7 @@ public sealed class SessionCommand : ICommandHandler
             WorkbookPath: workbookPath,
             MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
             Visible: BridgePayload.GetBool(request.Payload, "Visible"),
-            UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
-            Active: BridgePayload.GetBool(request.Payload, "Active"));
+            UseSession: BridgePayload.GetBool(request.Payload, "UseSession"));
         return _service.Execute(request, args, cancellationToken);
     }
 }

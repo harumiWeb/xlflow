@@ -561,7 +561,7 @@ func TestRunnerDotNetAttachUsesDotNetProviderAndPreservesEnvelopeFields(t *testi
 	}
 }
 
-func TestRunnerDotNetSessionAttachActiveUsesSessionCommand(t *testing.T) {
+func TestRunnerDotNetSessionAttachUsesSessionCommand(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 
@@ -577,7 +577,7 @@ func TestRunnerDotNetSessionAttachActiveUsesSessionCommand(t *testing.T) {
 		}
 	}
 
-	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.SessionAttachActive(config.Default())
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.SessionAttach(config.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,8 +591,11 @@ func TestRunnerDotNetSessionAttachActiveUsesSessionCommand(t *testing.T) {
 		t.Fatalf("dotnet request count = %d, want 1", len(dotNetRequests))
 	}
 	args := dotNetRequests[0].Args
-	if args["Action"] != "attach" || args["Active"] != "true" {
+	if args["Action"] != "attach" {
 		t.Fatalf("session attach args = %#v", args)
+	}
+	if _, ok := args["Active"]; ok {
+		t.Fatalf("session attach must not pass Active: %#v", args)
 	}
 	if args["MetadataPath"] == "" {
 		t.Fatalf("MetadataPath must be passed for session attach: %#v", args)

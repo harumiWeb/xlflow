@@ -94,15 +94,6 @@ public sealed class ExcelSessionService : ISessionService
         object? workbook = null;
         var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
 
-        if (!args.Active)
-        {
-            return BridgeResponse.Failed(request, new BridgeError(
-                Code: "session_args_invalid",
-                Message: "--active is required for session attach.",
-                Phase: "session",
-                Source: "xlflow"));
-        }
-
         try
         {
             CloseExistingSession(args.MetadataPath);

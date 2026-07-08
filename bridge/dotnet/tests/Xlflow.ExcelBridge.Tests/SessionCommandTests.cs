@@ -18,7 +18,6 @@ public sealed class SessionCommandTests
             Assert.Equal(@"C:\work\.xlflow\session.json", args.MetadataPath);
             Assert.True(args.Visible);
             Assert.False(args.UseSession);
-            Assert.False(args.Active);
             return BridgeResponse.Ok(request);
         });
 

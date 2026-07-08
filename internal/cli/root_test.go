@@ -1044,7 +1044,7 @@ func TestRootCommandIncludesAttachActiveCommand(t *testing.T) {
 	}
 }
 
-func TestRootCommandIncludesSessionAttachActiveCommand(t *testing.T) {
+func TestRootCommandIncludesSessionAttachCommand(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 
@@ -1055,8 +1055,8 @@ func TestRootCommandIncludesSessionAttachActiveCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "attach" {
 		t.Fatalf("expected session attach command, got %#v", cmd)
 	}
-	if cmd.Flags().Lookup("active") == nil {
-		t.Fatal("expected session attach command to define --active")
+	if cmd.Flags().Lookup("active") != nil {
+		t.Fatal("session attach command must not define --active")
 	}
 }
 

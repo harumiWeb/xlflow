@@ -3,7 +3,7 @@
 Validate that the active Excel workbook matches the configured workbook.
 
 ::: warning Deprecated
-`xlflow attach --active` is deprecated. Use `xlflow session attach --active` when you want xlflow commands to operate on an already-open workbook.
+`xlflow attach --active` is deprecated. Use `xlflow session attach` when you want xlflow commands to operate on an already-open workbook.
 :::
 
 ## Usage
@@ -34,7 +34,7 @@ xlflow attach --active --json
 `attach` uses the `.NET` bridge on Windows in `auto` mode.
 
 ::: tip
-Use `xlflow session attach --active` before manual Excel work when you want `push`, `pull`, `run`, `inspect`, or `save` to target the workbook that is already open.
+Use `xlflow session attach` before manual Excel work when you want `push`, `pull`, `run`, `inspect`, or `save` to target the workbook that is already open.
 :::
 
 ## JSON Output Example

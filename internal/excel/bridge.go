@@ -664,7 +664,7 @@ func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions
 	}, cmdOpts)
 }
 
-func (r Runner) SessionAttachActive(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
+func (r Runner) SessionAttach(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
 	cmdOpts := CommandOptions{}
 	if len(opts) > 0 {
 		cmdOpts = opts[0]
@@ -674,7 +674,6 @@ func (r Runner) SessionAttachActive(cfg config.Config, opts ...CommandOptions) (
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"Active":       "true",
 	}, cmdOpts)
 }
 
