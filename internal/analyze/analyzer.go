@@ -1247,6 +1247,7 @@ func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourc
 					"Split the Nothing guard and the member access into separate If statements.",
 				))
 			}
+			return
 		}
 		for i := uint(0); i < node.NamedChildCount(); i++ {
 			visit(node.NamedChild(i))

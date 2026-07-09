@@ -813,6 +813,36 @@ disabled_rules = ["VBA212"]
 	}
 }
 
+func TestAnalyzerNonShortCircuitObjectGuardDedupesMultilineExpression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  Dim hand As Collection
+  If deck Is Nothing Or deck.Count = 0 Or _
+     hand Is Nothing Or hand.Count = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) != 2 {
+		t.Fatalf("VBA212 findings = %+v, want one finding per guarded object", got)
+	}
+	counts := map[string]int{}
+	for _, finding := range got {
+		counts[finding.Message]++
+	}
+	for message, count := range counts {
+		if count != 1 {
+			t.Fatalf("VBA212 duplicate finding for %q: %+v", message, got)
+		}
+	}
+}
+
 func TestAnalyzerNonShortCircuitObjectGuardSupportsInlineSuppression(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
