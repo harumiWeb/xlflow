@@ -85,7 +85,7 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 
 Safety diagnostics `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
-Rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Disable `VB020` with `disabled_rules = ["VB020"]` when a project intentionally keeps scratch locals. Heavier project-wide rules such as `detect_unused_private_procedures = true` (`VB021`) stay conservative opt-ins; new `xlflow.toml` files include commented examples. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, and `Range.Find` `Nothing` guards.
+Rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Disable `VB020` with `disabled_rules = ["VB020"]` when a project intentionally keeps scratch locals. Heavier project-wide rules such as `detect_unused_private_procedures = true` (`VB021`) stay conservative opt-ins; new `xlflow.toml` files include commented examples. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, `Range.Find` `Nothing` guards, and object `Nothing` guards combined with dereferences in non-short-circuit boolean expressions.
 
 ## JSON Output Example
 

@@ -727,6 +727,141 @@ End Sub
 	assertFinding(t, findings, "VBA211", 5)
 }
 
+func TestAnalyzerDetectsNonShortCircuitObjectGuards(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  Dim hand As Collection
+  Dim bag As Collection
+  Dim cards As Collection
+  If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+  If hand Is Nothing Or hand.Item(1) Is Nothing Then Exit Sub
+  If Not bag Is Nothing And bag.Count > 0 Then Debug.Print bag.Count
+  If Not cards Is Nothing And cards.Item(1) Then Debug.Print cards.Count
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []int{7, 8, 9, 10} {
+		assertFinding(t, findings, "VBA212", line)
+	}
+	finding := findFinding(t, findings, "VBA212", 7)
+	if !containsAll(finding.Message, "deck", "non-short-circuit") ||
+		!containsAll(finding.Reason, "And/Or", "runtime error 91") ||
+		!containsAll(finding.Suggestion, "separate If statements") {
+		t.Fatalf("unexpected VBA212 text: %+v", finding)
+	}
+}
+
+func TestAnalyzerNonShortCircuitObjectGuardAllowsSeparateAndDifferentObjects(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  Dim other As Collection
+  If deck Is Nothing Then Exit Sub
+  If deck.Count = 0 Then Exit Sub
+  If other Is Nothing Or deck.Count = 0 Then Exit Sub
+  Debug.Print "If deck Is Nothing Or deck.Count = 0 Then"
+  ' If deck Is Nothing Or deck.Count = 0 Then
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA212"); len(got) != 0 {
+		t.Fatalf("VBA212 should allow safe or unrelated patterns, got %+v", got)
+	}
+}
+
+func TestAnalyzerNonShortCircuitObjectGuardCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`)
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+disabled_rules = ["VBA212"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA212"); len(got) != 0 {
+		t.Fatalf("VBA212 should be disabled: %+v", got)
+	}
+}
+
+func TestAnalyzerNonShortCircuitObjectGuardDedupesMultilineExpression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  Dim hand As Collection
+  If deck Is Nothing Or deck.Count = 0 Or _
+     hand Is Nothing Or hand.Count = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) != 2 {
+		t.Fatalf("VBA212 findings = %+v, want one finding per guarded object", got)
+	}
+	counts := map[string]int{}
+	for _, finding := range got {
+		counts[finding.Message]++
+	}
+	for message, count := range counts {
+		if count != 1 {
+			t.Fatalf("VBA212 duplicate finding for %q: %+v", message, got)
+		}
+	}
+}
+
+func TestAnalyzerNonShortCircuitObjectGuardSupportsInlineSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim deck As Collection
+  ' xlflow:disable-next-line VBA212
+  If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA212"); len(got) != 0 {
+		t.Fatalf("VBA212 should be suppressed: %+v", got)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesIgnoreCommentsAndStrings(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

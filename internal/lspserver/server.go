@@ -543,6 +543,9 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 		DeclarationSpacingSet: true,
 	})
 	if err != nil {
+		if vbafmt.IsFormatParseError(err) {
+			return []protocol.TextEdit{}, nil
+		}
 		return nil, err
 	}
 	if formatted == doc.Source {

@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added LSP diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
+- Fixed VBA LSP document formatting so incomplete or syntactically invalid buffers are skipped without surfacing an internal parser error notification in VS Code.
+
 ## v0.20.0
 
 - Added `xlflow session attach` to adopt an already-open configured workbook as an external xlflow session, and deprecated legacy `xlflow attach --active` validation-only usage.

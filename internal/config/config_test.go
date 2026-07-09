@@ -65,7 +65,8 @@ path = "build/Sales.xlsm"
 	if !cfg.Analyze.DetectRangeFindNothingCheck || !cfg.Analyze.DetectObjectUseBeforeSet ||
 		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
 		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
-		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch {
+		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch ||
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
 	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
@@ -196,7 +197,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -211,11 +212,14 @@ disabled_rules = ["VBA201", "vba205", "VBA201"]
 	if cfg.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected VBA205/forbid_unqualified_excel_objects to be disabled")
 	}
+	if cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		t.Fatal("expected VBA212/detect_non_short_circuit_object_guard to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212", got)
 	}
 }
 
@@ -631,6 +635,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !loaded.Analyze.DetectRangeFindNothingCheck {
 		t.Fatal("expected analyze defaults to be written and loaded")
+	}
+	if !loaded.Analyze.DetectNonShortCircuitObjectGuard {
+		t.Fatal("expected detect_non_short_circuit_object_guard=true after Write/Load")
 	}
 	if loaded.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected forbid_unqualified_excel_objects=false")

@@ -93,6 +93,75 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim deck As Collection
+    If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vba212 := diagnosticsByCode(diagnostics, "VBA212")
+	if len(vba212) != 1 || !strings.Contains(vba212[0].Message, "deck is guarded against Nothing") {
+		t.Fatalf("VBA212 diagnostic missing: %+v", diagnostics)
+	}
+	if vba212[0].Range.Start.Line != 3 {
+		t.Fatalf("VBA212 range line = %+v, want zero-based line 3", vba212[0].Range)
+	}
+}
+
+func TestDiagnosticsIncludeAnalyzerRealtimeRuntimeRiskRules(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim found As Range
+    Dim values() As Variant
+    Dim deck As Collection
+    Set found = Range("A:A").Find("x")
+    Debug.Print found.Address
+    ReDim Preserve values(1, 2)
+    If deck = Nothing Then Exit Sub
+    On Error GoTo Handler
+    Debug.Print "ok"
+Handler:
+    Debug.Print Err.Description
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	for _, code := range []string{"VBA201", "VBA204", "VBA208", "VBA209"} {
+		if got := diagnosticsByCode(diagnostics, code); len(got) != 1 {
+			t.Fatalf("%s diagnostic count = %d, want 1; all diagnostics: %+v", code, len(got), diagnostics)
+		}
+	}
+}
+
+func TestDiagnosticsSuppressAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim deck As Collection
+    ' xlflow:disable-next-line VBA212
+    If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VBA212"); len(diagnostics) != 0 {
+		t.Fatalf("VBA212 should be suppressed for unsaved LSP diagnostics, got %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsConvertLintByteColumnsToUTF16AfterJapaneseText(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	line := `    Debug.Print "😀日本": Range("A1").Select`

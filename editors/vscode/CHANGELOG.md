@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added editor diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
+- Suppressed Format Document failure notifications for incomplete or syntactically invalid VBA buffers; formatting now leaves the document unchanged instead.
+
 ## v0.4.0
 
 - Added setup warnings for disabled Excel VBA object model access and for `.bas`, `.cls`, or `.frm` files that are not opened with xlflow's `vba` language mode.

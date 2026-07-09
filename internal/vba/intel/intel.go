@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -156,6 +157,18 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 			Message:  issue.Message,
 			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
+	}
+	findings, err := analyze.SourceRealtimeFindings(a.RootDir, doc.Path, a.Config, []byte(doc.Source))
+	if err == nil {
+		for _, finding := range findings {
+			out = append(out, Diagnostic{
+				Code:     finding.Code,
+				Severity: finding.Severity,
+				Source:   "xlflow",
+				Message:  finding.Message,
+				Range:    issueRange(doc.Source, finding.Line, finding.Column),
+			})
+		}
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
 	out = append(out, a.unknownMemberDiagnostics(doc)...)

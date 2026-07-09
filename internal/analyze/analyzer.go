@@ -241,6 +241,119 @@ func closeParsedFiles(files []parsedFile) {
 	}
 }
 
+func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
+	if !cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		return nil, nil
+	}
+	parser, err := vbaast.NewParser()
+	if err != nil {
+		return nil, err
+	}
+	defer parser.Close()
+	parsed := parser.Parse(path, source)
+	defer parsed.Close()
+	file := parsedFile{
+		Path:   path,
+		Lines:  normalizedSourceLines(string(source)),
+		Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Root:   parsed.Root,
+		Result: parsed,
+	}
+	analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+	var findings []Finding
+	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
+	for _, proc := range procedures {
+		findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
+	if len(procedures) == 0 {
+		findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, sourceProcedure{StartLine: 1, EndLine: len(file.Lines)})...)
+	}
+	sortFindings(findings)
+	directives, _ := suppression.DirectivesForSource(rootDir, path, string(source))
+	findings, _ = applyInlineSuppressions(findings, directives)
+	return findings, nil
+}
+
+func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
+	if !cfg.Analyze.DetectRangeFindNothingCheck &&
+		!cfg.Analyze.DetectErrorHandlerFallthrough &&
+		!cfg.Analyze.DetectRedimPreserveDimension &&
+		!cfg.Analyze.DetectObjectArrayComparison &&
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		return nil, nil
+	}
+	parser, err := vbaast.NewParser()
+	if err != nil {
+		return nil, err
+	}
+	defer parser.Close()
+	parsed := parser.Parse(path, source)
+	defer parsed.Close()
+	file := parsedFile{
+		Path:   path,
+		Lines:  normalizedSourceLines(string(source)),
+		Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Root:   parsed.Root,
+		Result: parsed,
+	}
+	analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
+	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	if len(procedures) == 0 {
+		procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
+	}
+	var findings []Finding
+	for _, proc := range procedures {
+		findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
+	}
+	sortFindings(findings)
+	directives, _ := suppression.DirectivesForSource(rootDir, path, string(source))
+	findings, _ = applyInlineSuppressions(findings, directives)
+	return findings, nil
+}
+
+func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
+	decls := cloneDeclarations(moduleDecls)
+	for key, decl := range procedureDeclarations(file.Lines, proc) {
+		decls[key] = decl
+	}
+	for _, param := range proc.Params {
+		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
+	}
+	findAssignments := map[string]int{}
+	guardedFinds := map[string]bool{}
+	var findings []Finding
+	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
+		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
+	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
+		lineNo := i + 1
+		stmt := normalizedCodeLine(file.Lines[i])
+		if stmt == "" {
+			continue
+		}
+		if setAssignRe.MatchString(stmt) {
+			if name, ok := rangeFindAssignment(stmt); ok {
+				findAssignments[strings.ToLower(name)] = lineNo
+			}
+			continue
+		}
+		if a.Config.Analyze.DetectRangeFindNothingCheck {
+			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
+		}
+		if a.Config.Analyze.DetectRedimPreserveDimension {
+			findings = append(findings, a.redimPreserveFindings(file, proc, lineNo, stmt)...)
+		}
+		if a.Config.Analyze.DetectObjectArrayComparison {
+			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
+		}
+	}
+	if a.Config.Analyze.DetectErrorHandlerFallthrough {
+		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc, onErrorHandlerLabels(file.Lines, proc))...)
+	}
+	return findings
+}
+
 func (a Analyzer) files() ([]string, error) {
 	dirs := []string{a.Config.Src.Modules, a.Config.Src.Classes, a.Config.Src.Forms, a.Config.Src.Workbook, "tests"}
 	var files []string
@@ -348,6 +461,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	guardedFinds := map[string]bool{}
 	functionAssigned := false
 	var findings []Finding
+	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
+		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
 
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		lineNo := i + 1
@@ -1094,6 +1210,129 @@ func (a Analyzer) objectSetFinding(file parsedFile, proc sourceProcedure, line i
 		suggestion = "Use `Set " + target + " = ...` inside this function body when returning a " + typ + "."
 	}
 	return a.simpleFinding(file, proc, line, code, "warning", msg, reason, suggestion)
+}
+
+func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourceProcedure) []Finding {
+	seen := map[string]bool{}
+	var findings []Finding
+	var visit func(*tree_sitter.Node)
+	visit = func(node *tree_sitter.Node) {
+		if node == nil {
+			return
+		}
+		r := vbaast.NodeRange(node)
+		if r.StartLine >= proc.StartLine && (proc.EndLine == 0 || r.StartLine <= proc.EndLine) &&
+			isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Result.Source) {
+			guards := map[string]string{}
+			accesses := map[string]string{}
+			collectNothingGuards(node, file.Result.Source, guards)
+			collectDirectMemberAccesses(node, file.Result.Source, accesses)
+			for key, name := range guards {
+				if _, ok := accesses[key]; !ok {
+					continue
+				}
+				dedupeKey := strconvItoa(r.StartLine) + ":" + key
+				if seen[dedupeKey] {
+					continue
+				}
+				seen[dedupeKey] = true
+				findings = append(findings, a.simpleFinding(
+					file,
+					proc,
+					r.StartLine,
+					"VBA212",
+					"warning",
+					name+" is guarded against Nothing and dereferenced in the same non-short-circuit boolean expression.",
+					"VBA And/Or expressions do not short-circuit, so the member access can still run when the object is Nothing and raise runtime error 91.",
+					"Split the Nothing guard and the member access into separate If statements.",
+				))
+			}
+			return
+		}
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			visit(node.NamedChild(i))
+		}
+	}
+	visit(file.Root)
+	return findings
+}
+
+func isBooleanBinaryExpression(node *tree_sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Kind() {
+	case "condition_binary_expression", "binary_expression":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasTopLevelAndOrOperator(node *tree_sitter.Node, source []byte) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind() == "condition_binary_expression" {
+		return true
+	}
+	text := strings.ToLower(node.Utf8Text(source))
+	return hasWord(text, "And") || hasWord(text, "Or")
+}
+
+func collectNothingGuards(node *tree_sitter.Node, source []byte, guards map[string]string) {
+	if node == nil {
+		return
+	}
+	if node.Kind() == "comparison_expression" {
+		if name, ok := nothingGuardIdentifier(node, source); ok {
+			guards[strings.ToLower(name)] = name
+		}
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		collectNothingGuards(node.NamedChild(i), source, guards)
+	}
+}
+
+func nothingGuardIdentifier(node *tree_sitter.Node, source []byte) (string, bool) {
+	left := node.ChildByFieldName("left")
+	right := node.ChildByFieldName("right")
+	operator := node.ChildByFieldName("operator")
+	if left == nil || right == nil || operator == nil || !strings.EqualFold(strings.TrimSpace(operator.Utf8Text(source)), "Is") {
+		return "", false
+	}
+	if left.Kind() == "identifier" && right.Kind() == "nothing_literal" {
+		name := cleanIdentifier(left.Utf8Text(source))
+		return name, name != ""
+	}
+	if right.Kind() == "identifier" && left.Kind() == "nothing_literal" {
+		name := cleanIdentifier(right.Utf8Text(source))
+		return name, name != ""
+	}
+	return "", false
+}
+
+func collectDirectMemberAccesses(node *tree_sitter.Node, source []byte, accesses map[string]string) {
+	if node == nil {
+		return
+	}
+	if node.Kind() == "qualified_member_expression" {
+		if name, ok := directMemberReceiverIdentifier(node, source); ok {
+			accesses[strings.ToLower(name)] = name
+		}
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		collectDirectMemberAccesses(node.NamedChild(i), source, accesses)
+	}
+}
+
+func directMemberReceiverIdentifier(node *tree_sitter.Node, source []byte) (string, bool) {
+	receiver := node.ChildByFieldName("receiver")
+	if receiver == nil || receiver.Kind() != "identifier" {
+		return "", false
+	}
+	name := cleanIdentifier(receiver.Utf8Text(source))
+	return name, name != ""
 }
 
 func (a Analyzer) memberFinding(file parsedFile, proc sourceProcedure, line int, target, typ, member string, rule invalidMemberRule) Finding {

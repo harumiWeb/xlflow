@@ -707,6 +707,64 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
 }
 
+func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        protocol.DocumentUri(uri),
+			LanguageID: "vba",
+			Version:    1,
+			Text:       "Option Explicit\nSub Test()\n    Dim deck As Collection\n    Dim found As Range\n    Set found = Range(\"A:A\").Find(\"x\")\n    Debug.Print found.Address\n    If deck Is Nothing Or deck.Count = 0 Then Exit Sub\nEnd Sub\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		seenRangeFind := false
+		seenObjectGuard := false
+		for _, params := range recorder.publishDiagnostics() {
+			for _, diag := range params.Diagnostics {
+				if strings.Contains(diag.Message, "Range.Find result found is dereferenced") {
+					seenRangeFind = true
+				}
+				if strings.Contains(diag.Message, "non-short-circuit boolean expression") {
+					seenObjectGuard = true
+				}
+			}
+		}
+		if seenRangeFind && seenObjectGuard {
+			_ = serverConn.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = serverConn.Close()
+	t.Fatalf("analyzer publishDiagnostics missing VBA201 or VBA212: %+v", recorder.publishDiagnostics())
+}
+
 func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
@@ -766,6 +824,33 @@ func TestFormattingSkipsFrmDocuments(t *testing.T) {
 	}
 	if len(edits) != 0 {
 		t.Fatalf("frm formatting edits = %+v, want none", edits)
+	}
+}
+
+func TestFormattingSkipsInvalidSyntaxWithoutError(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    If Range(\"A1\").Value = Then\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatalf("formatting invalid syntax returned error: %v", err)
+	}
+	if len(edits) != 0 {
+		t.Fatalf("invalid syntax formatting edits = %+v, want none", edits)
 	}
 }
 
