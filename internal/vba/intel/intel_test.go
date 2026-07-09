@@ -115,6 +115,35 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeAnalyzerRealtimeRuntimeRiskRules(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim found As Range
+    Dim values() As Variant
+    Dim deck As Collection
+    Set found = Range("A:A").Find("x")
+    Debug.Print found.Address
+    ReDim Preserve values(1, 2)
+    If deck = Nothing Then Exit Sub
+    On Error GoTo Handler
+    Debug.Print "ok"
+Handler:
+    Debug.Print Err.Description
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	for _, code := range []string{"VBA201", "VBA204", "VBA208", "VBA209"} {
+		if got := diagnosticsByCode(diagnostics, code); len(got) != 1 {
+			t.Fatalf("%s diagnostic count = %d, want 1; all diagnostics: %+v", code, len(got), diagnostics)
+		}
+	}
+}
+
 func TestDiagnosticsSuppressAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

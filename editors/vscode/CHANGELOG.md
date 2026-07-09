@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added editor diagnostics for `VBA212`, warning when a `Nothing` guard and direct dereference of the same object are used in one non-short-circuit `And` / `Or` expression.
+- Added editor diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
 - Suppressed Format Document failure notifications for incomplete or syntactically invalid VBA buffers; formatting now leaves the document unchanged instead.
 
 ## v0.4.0

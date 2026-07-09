@@ -158,7 +158,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
 	}
-	findings, err := analyze.SourceNonShortCircuitObjectGuardFindings(a.RootDir, doc.Path, a.Config, []byte(doc.Source))
+	findings, err := analyze.SourceRealtimeFindings(a.RootDir, doc.Path, a.Config, []byte(doc.Source))
 	if err == nil {
 		for _, finding := range findings {
 			out = append(out, Diagnostic{

@@ -4,7 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added `VBA212` analyze/LSP warning for unsafe `Nothing` guards that dereference the same object in a non-short-circuit `And` / `Or` boolean expression.
+- Added LSP diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
 - Fixed VBA LSP document formatting so incomplete or syntactically invalid buffers are skipped without surfacing an internal parser error notification in VS Code.
 
 ## v0.20.0

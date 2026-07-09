@@ -735,7 +735,7 @@ func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
 			URI:        protocol.DocumentUri(uri),
 			LanguageID: "vba",
 			Version:    1,
-			Text:       "Option Explicit\nSub Test()\n    Dim deck As Collection\n    If deck Is Nothing Or deck.Count = 0 Then Exit Sub\nEnd Sub\n",
+			Text:       "Option Explicit\nSub Test()\n    Dim deck As Collection\n    Dim found As Range\n    Set found = Range(\"A:A\").Find(\"x\")\n    Debug.Print found.Address\n    If deck Is Nothing Or deck.Count = 0 Then Exit Sub\nEnd Sub\n",
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -743,18 +743,26 @@ func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
+		seenRangeFind := false
+		seenObjectGuard := false
 		for _, params := range recorder.publishDiagnostics() {
 			for _, diag := range params.Diagnostics {
+				if strings.Contains(diag.Message, "Range.Find result found is dereferenced") {
+					seenRangeFind = true
+				}
 				if strings.Contains(diag.Message, "non-short-circuit boolean expression") {
-					_ = serverConn.Close()
-					return
+					seenObjectGuard = true
 				}
 			}
+		}
+		if seenRangeFind && seenObjectGuard {
+			_ = serverConn.Close()
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	_ = serverConn.Close()
-	t.Fatalf("VBA212 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+	t.Fatalf("analyzer publishDiagnostics missing VBA201 or VBA212: %+v", recorder.publishDiagnostics())
 }
 
 func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {

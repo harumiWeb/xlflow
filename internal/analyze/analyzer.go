@@ -274,6 +274,86 @@ func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.C
 	return findings, nil
 }
 
+func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
+	if !cfg.Analyze.DetectRangeFindNothingCheck &&
+		!cfg.Analyze.DetectErrorHandlerFallthrough &&
+		!cfg.Analyze.DetectRedimPreserveDimension &&
+		!cfg.Analyze.DetectObjectArrayComparison &&
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		return nil, nil
+	}
+	parser, err := vbaast.NewParser()
+	if err != nil {
+		return nil, err
+	}
+	defer parser.Close()
+	parsed := parser.Parse(path, source)
+	defer parsed.Close()
+	file := parsedFile{
+		Path:   path,
+		Lines:  normalizedSourceLines(string(source)),
+		Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Root:   parsed.Root,
+		Result: parsed,
+	}
+	analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
+	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	if len(procedures) == 0 {
+		procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
+	}
+	var findings []Finding
+	for _, proc := range procedures {
+		findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
+	}
+	sortFindings(findings)
+	directives, _ := suppression.DirectivesForSource(rootDir, path, string(source))
+	findings, _ = applyInlineSuppressions(findings, directives)
+	return findings, nil
+}
+
+func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
+	decls := cloneDeclarations(moduleDecls)
+	for key, decl := range procedureDeclarations(file.Lines, proc) {
+		decls[key] = decl
+	}
+	for _, param := range proc.Params {
+		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
+	}
+	findAssignments := map[string]int{}
+	guardedFinds := map[string]bool{}
+	var findings []Finding
+	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
+		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
+	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
+		lineNo := i + 1
+		stmt := normalizedCodeLine(file.Lines[i])
+		if stmt == "" {
+			continue
+		}
+		if setAssignRe.MatchString(stmt) {
+			if name, ok := rangeFindAssignment(stmt); ok {
+				findAssignments[strings.ToLower(name)] = lineNo
+			}
+			continue
+		}
+		if a.Config.Analyze.DetectRangeFindNothingCheck {
+			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
+		}
+		if a.Config.Analyze.DetectRedimPreserveDimension {
+			findings = append(findings, a.redimPreserveFindings(file, proc, lineNo, stmt)...)
+		}
+		if a.Config.Analyze.DetectObjectArrayComparison {
+			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
+		}
+	}
+	if a.Config.Analyze.DetectErrorHandlerFallthrough {
+		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc, onErrorHandlerLabels(file.Lines, proc))...)
+	}
+	return findings
+}
+
 func (a Analyzer) files() ([]string, error) {
 	dirs := []string{a.Config.Src.Modules, a.Config.Src.Classes, a.Config.Src.Forms, a.Config.Src.Workbook, "tests"}
 	var files []string
