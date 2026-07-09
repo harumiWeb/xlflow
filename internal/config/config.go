@@ -62,6 +62,8 @@ type UserFormConfig struct {
 type FmtConfig struct {
 	OperatorSpacing    bool `toml:"operator_spacing"`
 	DeclarationSpacing bool `toml:"declaration_spacing"`
+	KeywordCasing      bool `toml:"keyword_casing"`
+	BuiltinCasing      bool `toml:"builtin_casing"`
 }
 
 type LintConfig struct {
@@ -242,6 +244,8 @@ func Default() Config {
 		Fmt: FmtConfig{
 			OperatorSpacing:    true,
 			DeclarationSpacing: true,
+			KeywordCasing:      true,
+			BuiltinCasing:      true,
 		},
 		Lint: LintConfig{
 			RequireOptionExplicit:           true,
@@ -753,6 +757,10 @@ code_source = %q
 operator_spacing = %t
 # Normalize spacing in safe VBA declarations in xlflow fmt.
 declaration_spacing = %t
+# Normalize VBA keyword casing in xlflow fmt.
+keyword_casing = %t
+# Normalize known VBA/Excel/Office built-in identifier casing in xlflow fmt.
+builtin_casing = %t
 
 # Static analysis rules.
 [lint]
@@ -768,7 +776,7 @@ declaration_spacing = %t
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
-		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing,
+		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
 		lintConfigText,
 		analyzeConfigText,
 	)

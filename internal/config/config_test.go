@@ -42,6 +42,12 @@ path = "build/Sales.xlsm"
 	if !cfg.Fmt.DeclarationSpacing {
 		t.Fatalf("expected fmt.declaration_spacing default to be enabled")
 	}
+	if !cfg.Fmt.KeywordCasing {
+		t.Fatalf("expected fmt.keyword_casing default to be enabled")
+	}
+	if !cfg.Fmt.BuiltinCasing {
+		t.Fatalf("expected fmt.builtin_casing default to be enabled")
+	}
 	if !cfg.Lint.RequireOptionExplicit {
 		t.Fatalf("lint defaults were not applied")
 	}
@@ -121,6 +127,36 @@ declaration_spacing = false
 	}
 	if !cfg.Fmt.OperatorSpacing {
 		t.Fatal("expected omitted fmt.operator_spacing to remain enabled")
+	}
+}
+
+func TestLoadSupportsDisablingFmtCasing(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[fmt]
+keyword_casing = false
+builtin_casing = false
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fmt.KeywordCasing {
+		t.Fatal("expected fmt.keyword_casing=false to be honored")
+	}
+	if cfg.Fmt.BuiltinCasing {
+		t.Fatal("expected fmt.builtin_casing=false to be honored")
+	}
+	if !cfg.Fmt.OperatorSpacing || !cfg.Fmt.DeclarationSpacing {
+		t.Fatal("expected omitted fmt spacing settings to remain enabled")
 	}
 }
 
@@ -595,7 +631,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, "[fmt]") ||
 		!strings.Contains(text, "operator_spacing = true") ||
-		!strings.Contains(text, "declaration_spacing = true") {
+		!strings.Contains(text, "declaration_spacing = true") ||
+		!strings.Contains(text, "keyword_casing = true") ||
+		!strings.Contains(text, "builtin_casing = true") {
 		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
 	}
 	for _, want := range []string{
@@ -626,6 +664,12 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !loaded.Fmt.DeclarationSpacing {
 		t.Fatal("expected fmt.declaration_spacing=true after Write/Load")
+	}
+	if !loaded.Fmt.KeywordCasing {
+		t.Fatal("expected fmt.keyword_casing=true after Write/Load")
+	}
+	if !loaded.Fmt.BuiltinCasing {
+		t.Fatal("expected fmt.builtin_casing=true after Write/Load")
 	}
 	if loaded.Lint.ForbidInteractiveInput {
 		t.Fatal("expected forbid_interactive_input=false")

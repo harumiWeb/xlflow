@@ -55,6 +55,10 @@ type FmtOptions struct {
 	OperatorSpacingSet    bool
 	DeclarationSpacing    bool
 	DeclarationSpacingSet bool
+	KeywordCasing         bool
+	KeywordCasingSet      bool
+	BuiltinCasing         bool
+	BuiltinCasingSet      bool
 }
 
 func Run(opts FmtOptions) (*Result, error) {
@@ -70,6 +74,10 @@ func Run(opts FmtOptions) (*Result, error) {
 		OperatorSpacingSet:    opts.OperatorSpacingSet,
 		DeclarationSpacing:    opts.DeclarationSpacing,
 		DeclarationSpacingSet: opts.DeclarationSpacingSet,
+		KeywordCasing:         opts.KeywordCasing,
+		KeywordCasingSet:      opts.KeywordCasingSet,
+		BuiltinCasing:         opts.BuiltinCasing,
+		BuiltinCasingSet:      opts.BuiltinCasingSet,
 	}
 	for _, path := range files {
 		fr, err := formatFile(path, formatCfg)
