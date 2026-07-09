@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added editor diagnostics for `VBA212`, warning when a `Nothing` guard and direct dereference of the same object are used in one non-short-circuit `And` / `Or` expression.
+- Suppressed Format Document failure notifications for incomplete or syntactically invalid VBA buffers; formatting now leaves the document unchanged instead.
+
 ## v0.4.0
 
 - Added setup warnings for disabled Excel VBA object model access and for `.bas`, `.cls`, or `.frm` files that are not opened with xlflow's `vba` language mode.
