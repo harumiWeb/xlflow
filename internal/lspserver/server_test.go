@@ -819,6 +819,33 @@ func TestFormattingSkipsFrmDocuments(t *testing.T) {
 	}
 }
 
+func TestFormattingSkipsInvalidSyntaxWithoutError(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Test()\n    If Range(\"A1\").Value = Then\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatalf("formatting invalid syntax returned error: %v", err)
+	}
+	if len(edits) != 0 {
+		t.Fatalf("invalid syntax formatting edits = %+v, want none", edits)
+	}
+}
+
 func TestInitializeAdvertisesSemanticTokensProvider(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

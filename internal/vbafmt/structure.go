@@ -19,6 +19,12 @@ func (e formatParseError) Error() string {
 }
 
 func isFormatParseError(err error) bool {
+	return IsFormatParseError(err)
+}
+
+// IsFormatParseError reports whether err means formatting was skipped because
+// the VBA parser found an incomplete or invalid syntax tree.
+func IsFormatParseError(err error) bool {
 	var target formatParseError
 	return errors.As(err, &target)
 }
