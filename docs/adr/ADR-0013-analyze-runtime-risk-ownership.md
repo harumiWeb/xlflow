@@ -23,7 +23,7 @@ The relevant lint/analyze rule set is still under `## Unreleased`, so xlflow doe
 
 The analyzer uses `tree-sitter-vba` through `internal/vba/ast` and keeps the existing analysis finding contract: `code`, `severity`, `file`, `module`, `procedure`, `line`, `message`, `reason`, `suggestion`, and `nearby_code`, with `column` included only when reliable.
 
-Stable analyzer codes include existing `VBA101` through `VBA106` plus runtime-risk `VBA201` through `VBA211`.
+Stable analyzer codes include existing `VBA101` through `VBA106` plus runtime-risk `VBA201` through `VBA212`.
 
 ## Consequences
 
@@ -43,7 +43,7 @@ Negative consequences:
 
 - Specs: `docs/specs/cli-contract.md`, `docs/specs/runtime-debugging.md`.
 - Docs: `vitepress/commands/lint.md`, `vitepress/commands/analyze.md`, `vitepress/reference/config-file.md`.
-- Tests: analyzer regression tests for `VBA101` through `VBA106` and runtime-risk tests for `VBA201` through `VBA211`.
+- Tests: analyzer regression tests for `VBA101` through `VBA106` and runtime-risk tests for `VBA201` through `VBA212`.
 - Code: `internal/analyze`, `internal/lint`, `internal/config`.
 
 ## Supersedes

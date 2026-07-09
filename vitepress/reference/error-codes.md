@@ -27,4 +27,4 @@ Common examples:
 - `wsl_path_translation_failed`
 - `windows_xlflow_execution_failed`
 
-Lint codes include `VB001` through `VB014`, `VB018` through `VB023`, `VB026` through `VB029`, `VB031`, and `VB032`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA211`.
+Lint codes include `VB001` through `VB014`, `VB018` through `VB023`, `VB026` through `VB029`, `VB031`, and `VB032`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA212`.

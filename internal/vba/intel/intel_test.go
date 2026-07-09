@@ -93,6 +93,46 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim deck As Collection
+    If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vba212 := diagnosticsByCode(diagnostics, "VBA212")
+	if len(vba212) != 1 || !strings.Contains(vba212[0].Message, "deck is guarded against Nothing") {
+		t.Fatalf("VBA212 diagnostic missing: %+v", diagnostics)
+	}
+	if vba212[0].Range.Start.Line != 3 {
+		t.Fatalf("VBA212 range line = %+v, want zero-based line 3", vba212[0].Range)
+	}
+}
+
+func TestDiagnosticsSuppressAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim deck As Collection
+    ' xlflow:disable-next-line VBA212
+    If deck Is Nothing Or deck.Count = 0 Then Exit Sub
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VBA212"); len(diagnostics) != 0 {
+		t.Fatalf("VBA212 should be suppressed for unsaved LSP diagnostics, got %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsConvertLintByteColumnsToUTF16AfterJapaneseText(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	line := `    Debug.Print "😀日本": Range("A1").Select`

@@ -707,6 +707,56 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
 }
 
+func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        protocol.DocumentUri(uri),
+			LanguageID: "vba",
+			Version:    1,
+			Text:       "Option Explicit\nSub Test()\n    Dim deck As Collection\n    If deck Is Nothing Or deck.Count = 0 Then Exit Sub\nEnd Sub\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, params := range recorder.publishDiagnostics() {
+			for _, diag := range params.Diagnostics {
+				if strings.Contains(diag.Message, "non-short-circuit boolean expression") {
+					_ = serverConn.Close()
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = serverConn.Close()
+	t.Fatalf("VBA212 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+}
+
 func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

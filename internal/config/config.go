@@ -84,18 +84,19 @@ type LintConfig struct {
 }
 
 type AnalyzeConfig struct {
-	DisabledRules                   []string `toml:"disabled_rules"`
-	DetectRangeFindNothingCheck     bool     `toml:"detect_range_find_nothing_check"`
-	DetectObjectUseBeforeSet        bool     `toml:"detect_object_use_before_set"`
-	DetectApplicationStateRestore   bool     `toml:"detect_application_state_restore"`
-	DetectErrorHandlerFallthrough   bool     `toml:"detect_error_handler_fallthrough"`
-	ForbidUnqualifiedExcelObjects   bool     `toml:"forbid_unqualified_excel_objects"`
-	DetectByRefArgumentMismatch     bool     `toml:"detect_byref_argument_mismatch"`
-	DetectDictionaryCollectionGuard bool     `toml:"detect_dictionary_collection_guard"`
-	DetectRedimPreserveDimension    bool     `toml:"detect_redim_preserve_dimension"`
-	DetectObjectArrayComparison     bool     `toml:"detect_object_array_comparison"`
-	DetectFunctionReturnPath        bool     `toml:"detect_function_return_path"`
-	DetectExcelObjectMemberMismatch bool     `toml:"detect_excel_object_member_mismatch"`
+	DisabledRules                    []string `toml:"disabled_rules"`
+	DetectRangeFindNothingCheck      bool     `toml:"detect_range_find_nothing_check"`
+	DetectObjectUseBeforeSet         bool     `toml:"detect_object_use_before_set"`
+	DetectApplicationStateRestore    bool     `toml:"detect_application_state_restore"`
+	DetectErrorHandlerFallthrough    bool     `toml:"detect_error_handler_fallthrough"`
+	ForbidUnqualifiedExcelObjects    bool     `toml:"forbid_unqualified_excel_objects"`
+	DetectByRefArgumentMismatch      bool     `toml:"detect_byref_argument_mismatch"`
+	DetectDictionaryCollectionGuard  bool     `toml:"detect_dictionary_collection_guard"`
+	DetectRedimPreserveDimension     bool     `toml:"detect_redim_preserve_dimension"`
+	DetectObjectArrayComparison      bool     `toml:"detect_object_array_comparison"`
+	DetectFunctionReturnPath         bool     `toml:"detect_function_return_path"`
+	DetectExcelObjectMemberMismatch  bool     `toml:"detect_excel_object_member_mismatch"`
+	DetectNonShortCircuitObjectGuard bool     `toml:"detect_non_short_circuit_object_guard"`
 }
 
 type lintRuleConfig struct {
@@ -144,6 +145,7 @@ var configurableAnalyzeRules = []analyzeRuleConfig{
 	{ID: "VBA209", Key: "detect_object_array_comparison", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectObjectArrayComparison }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectArrayComparison = v }},
 	{ID: "VBA210", Key: "detect_function_return_path", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnPath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnPath = v }},
 	{ID: "VBA211", Key: "detect_excel_object_member_mismatch", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectExcelObjectMemberMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelObjectMemberMismatch = v }},
+	{ID: "VBA212", Key: "detect_non_short_circuit_object_guard", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectNonShortCircuitObjectGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNonShortCircuitObjectGuard = v }},
 }
 
 var (
@@ -256,14 +258,15 @@ func Default() Config {
 			DetectDangerousResume:           true,
 		},
 		Analyze: AnalyzeConfig{
-			DetectRangeFindNothingCheck:     true,
-			DetectObjectUseBeforeSet:        true,
-			DetectApplicationStateRestore:   true,
-			DetectErrorHandlerFallthrough:   true,
-			ForbidUnqualifiedExcelObjects:   true,
-			DetectRedimPreserveDimension:    true,
-			DetectObjectArrayComparison:     true,
-			DetectExcelObjectMemberMismatch: true,
+			DetectRangeFindNothingCheck:      true,
+			DetectObjectUseBeforeSet:         true,
+			DetectApplicationStateRestore:    true,
+			DetectErrorHandlerFallthrough:    true,
+			ForbidUnqualifiedExcelObjects:    true,
+			DetectRedimPreserveDimension:     true,
+			DetectObjectArrayComparison:      true,
+			DetectExcelObjectMemberMismatch:  true,
+			DetectNonShortCircuitObjectGuard: true,
 		},
 	}
 }
