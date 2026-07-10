@@ -500,9 +500,7 @@ internal static class ExcelBridgeSupport
                 try
                 {
                     candidate = (object)books.Item(index);
-                    dynamic workbook = candidate;
-                    var fullName = (string?)workbook.FullName;
-                    if (!string.IsNullOrWhiteSpace(fullName) && PathsEqual(fullName, workbookPath))
+                    if (WorkbookPathMatches(candidate, workbookPath))
                     {
                         matched = true;
                         return candidate!;
@@ -516,6 +514,31 @@ internal static class ExcelBridgeSupport
                     }
                 }
             }
+
+            object? directCandidate = null;
+            var directMatched = false;
+            try
+            {
+                directCandidate = (object)books.Item(Path.GetFileName(workbookPath));
+                if (WorkbookPathMatches(directCandidate, workbookPath))
+                {
+                    directMatched = true;
+                    return directCandidate!;
+                }
+            }
+            catch
+            {
+                // Some workbook types, including add-ins, may not be available
+                // through normal enumeration. If direct lookup fails, preserve the
+                // same not-open behavior as the enumeration path.
+            }
+            finally
+            {
+                if (!directMatched)
+                {
+                    ReleaseComObject(directCandidate);
+                }
+            }
         }
         finally
         {
@@ -523,6 +546,25 @@ internal static class ExcelBridgeSupport
         }
 
         throw new InvalidOperationException($"xlflow session workbook is not open: {workbookPath}");
+    }
+
+    private static bool WorkbookPathMatches(object? workbook, string workbookPath)
+    {
+        if (workbook is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            dynamic workbookObject = workbook;
+            var fullName = (string?)workbookObject.FullName;
+            return !string.IsNullOrWhiteSpace(fullName) && PathsEqual(fullName, workbookPath);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static bool TryGetWorkbookDirtyState(object workbook, out bool dirty)
@@ -1032,6 +1074,11 @@ internal static class ExcelBridgeSupport
                 {
                     dynamic wb = workbook;
                     wb.Activate();
+                }
+                catch
+                {
+                    // Add-in workbooks may not expose a normal visible workbook
+                    // window. Lookup succeeded, so activation is only a readiness hint.
                 }
                 finally
                 {

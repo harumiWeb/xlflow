@@ -195,18 +195,174 @@ public static class MacroRunWorker
 
     internal static void ActivateTargetProject(object workbook, object vbProject, object vbe)
     {
-        dynamic workbookObject = workbook;
-        workbookObject.Activate();
+        TryActivateWorkbook(workbook);
 
+        if (IsActiveVbProject(vbe, vbProject))
+        {
+            return;
+        }
+
+        _ = TryActivateProjectCodePane(vbProject);
+    }
+
+    private static void TryActivateWorkbook(object workbook)
+    {
         try
         {
-            dynamic vbeObject = vbe;
-            vbeObject.ActiveVBProject = vbProject;
+            dynamic workbookObject = workbook;
+            workbookObject.Activate();
         }
         catch
         {
-            // Workbook activation usually selects the right project; setting
-            // ActiveVBProject is best-effort because some hosts reject it.
+            // Add-in workbooks may not expose a normal visible workbook window.
+        }
+    }
+
+    private static bool IsActiveVbProject(object vbe, object vbProject)
+    {
+        object? activeProject = null;
+        try
+        {
+            dynamic vbeObject = vbe;
+            activeProject = vbeObject.ActiveVBProject;
+            if (activeProject is null)
+            {
+                return false;
+            }
+
+            return ReferenceEquals(activeProject, vbProject) ||
+                   ProjectIdentityMatches(activeProject, vbProject);
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (!ReferenceEquals(activeProject, vbProject))
+            {
+                ExcelBridgeSupport.ReleaseComObject(activeProject);
+            }
+        }
+    }
+
+    private static bool ProjectIdentityMatches(object left, object right)
+    {
+        var leftFileName = TryGetStringProperty(left, "FileName");
+        var rightFileName = TryGetStringProperty(right, "FileName");
+        if (!string.IsNullOrWhiteSpace(leftFileName) &&
+            !string.IsNullOrWhiteSpace(rightFileName) &&
+            string.Equals(leftFileName, rightFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? TryGetStringProperty(object value, string propertyName)
+    {
+        try
+        {
+            return Convert.ToString(ExcelBridgeSupport.Get(value, propertyName), CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryActivateProjectCodePane(object vbProject)
+    {
+        object? components = null;
+        try
+        {
+            dynamic projectObject = vbProject;
+            components = projectObject.VBComponents;
+            dynamic componentsObject = components;
+            var count = Convert.ToInt32(componentsObject.Count, CultureInfo.InvariantCulture);
+            for (var index = 1; index <= count; index++)
+            {
+                object? component = null;
+                try
+                {
+                    component = componentsObject.Item(index);
+                    var activated = TryActivateComponent(component);
+                    var shown = TryShowComponentCodePane(component);
+                    if (activated || shown)
+                    {
+                        ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(50));
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Try the next component.
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(component);
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(components);
+        }
+
+        return false;
+    }
+
+    private static bool TryActivateComponent(object? component)
+    {
+        if (component is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            dynamic componentObject = component;
+            componentObject.Activate();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryShowComponentCodePane(object? component)
+    {
+        if (component is null)
+        {
+            return false;
+        }
+
+        object? codeModule = null;
+        object? codePane = null;
+        try
+        {
+            dynamic componentObject = component;
+            codeModule = componentObject.CodeModule;
+            dynamic codeModuleObject = codeModule;
+            codePane = codeModuleObject.CodePane;
+            dynamic codePaneObject = codePane;
+            codePaneObject.Show();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(codePane);
+            ExcelBridgeSupport.ReleaseComObject(codeModule);
         }
     }
 

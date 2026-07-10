@@ -156,14 +156,19 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Supports `--save`, `--save-as`, and default no-save behavior
 - Supports `--timeout` via bridge request timeout
 - Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
-- Stabilizes Excel before `Application.Run` by activating the target workbook,
-  waiting for the STA/COM caller to settle, and pumping messages around macro
-  invocation; generated harness runs also call `DoEvents` before and after the
-  target macro.
+- Stabilizes Excel before `Application.Run` by activating the target workbook
+  when possible, waiting for the STA/COM caller to settle, and pumping messages
+  around macro invocation; generated harness runs also call `DoEvents` before
+  and after the target macro. Add-in workbooks such as `.xlam` may not expose a
+  normal visible workbook window, so activation failure is recoverable after the
+  configured workbook has been resolved by full path.
 - Returns `excel_com_rpc_failure` with `h_result` and structured diagnostics for
   fatal COM/RPC disconnects such as `0x800706BE`
 - Runs VBE Compile in a disposable child bridge process, while `Application.Run`
   executes on the parent STA with a dialog watcher and COM message pumping.
+- Selects the VBE Compile target by resolving the configured workbook by full
+  path, then activating the workbook when possible or showing a code pane from
+  the target `VBProject` for add-in workbooks that cannot be normally activated.
 - Detects Excel/VBE dialogs through Win32 owner-chain polling with optional UI
   Automation metadata and button invocation
 - Captures dialog text, buttons, HWND/PID/thread identity, visibility, action,

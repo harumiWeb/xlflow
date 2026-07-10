@@ -17,61 +17,151 @@ public sealed class MacroRunWorkerTests
     }
 
     [Fact]
-    public void ActivateTargetProjectActivatesWorkbookAndSelectsProject()
+    public void ActivateTargetProjectUsesWorkbookActivationWhenAvailable()
     {
-        var workbook = new FakeWorkbook();
-        var vbProject = new FakeVbProject();
         var vbe = new FakeVbe();
+        var vbProject = new FakeVbProject(vbe);
+        var workbook = new FakeWorkbook(() => vbe.SetActiveProject(vbProject));
 
         MacroRunWorker.ActivateTargetProject(workbook, vbProject, vbe);
 
         Assert.True(workbook.Activated);
         Assert.Same(vbProject, vbe.ActiveVBProject);
+        Assert.Equal(0, vbe.ActiveVBProjectSetCalls);
     }
 
     [Fact]
-    public void ActivateTargetProjectStillActivatesWorkbookWhenProjectSelectionFails()
+    public void ActivateTargetProjectShowsTargetCodePaneWhenWorkbookActivationFails()
     {
-        var workbook = new FakeWorkbook();
-        var vbProject = new FakeVbProject();
-        var vbe = new FakeVbe { ThrowOnSetActiveProject = true };
+        var vbe = new FakeVbe();
+        var codePane = new FakeCodePane(() => vbe.SetActiveProjectFromCodePane());
+        var component = new FakeVbComponent(new FakeCodeModule(codePane), throwOnActivate: true);
+        var vbProject = new FakeVbProject(vbe, component);
+        vbe.CodePaneProject = vbProject;
+        var workbook = new FakeWorkbook(() => { }, throwOnActivate: true);
 
         MacroRunWorker.ActivateTargetProject(workbook, vbProject, vbe);
 
-        Assert.True(workbook.Activated);
-        Assert.Null(vbe.ActiveVBProject);
+        Assert.True(workbook.ActivateAttempted);
+        Assert.True(component.ActivateAttempted);
+        Assert.True(codePane.Shown);
+        Assert.Same(vbProject, vbe.ActiveVBProject);
+        Assert.Equal(0, vbe.ActiveVBProjectSetCalls);
     }
 
     public sealed class FakeWorkbook
     {
+        private readonly Action _onActivate;
+        private readonly bool _throwOnActivate;
+
+        public FakeWorkbook(Action? onActivate = null, bool throwOnActivate = false)
+        {
+            _onActivate = onActivate ?? (() => { });
+            _throwOnActivate = throwOnActivate;
+        }
+
+        public bool ActivateAttempted { get; private set; }
+
         public bool Activated { get; private set; }
 
         public void Activate()
         {
+            ActivateAttempted = true;
+            if (_throwOnActivate)
+            {
+                throw new InvalidOperationException("activation failed");
+            }
+
             Activated = true;
+            _onActivate();
         }
     }
 
-    public sealed class FakeVbProject;
+    public sealed class FakeVbProject
+    {
+        public FakeVbProject(FakeVbe vbe, params FakeVbComponent[] components)
+        {
+            VBE = vbe;
+            VBComponents = new FakeVbComponents(components);
+        }
+
+        public string Name => "VBAProject";
+
+        public string FileName => "C:\\project\\selfmacros.xlam";
+
+        public FakeVbe VBE { get; }
+
+        public FakeVbComponents VBComponents { get; }
+    }
+
+    public sealed class FakeVbComponents(IReadOnlyList<FakeVbComponent> components)
+    {
+        public int Count => components.Count;
+
+        public FakeVbComponent Item(int index)
+        {
+            return components[index - 1];
+        }
+    }
+
+    public sealed class FakeVbComponent(FakeCodeModule codeModule, bool throwOnActivate = false)
+    {
+        public bool ActivateAttempted { get; private set; }
+
+        public FakeCodeModule CodeModule { get; } = codeModule;
+
+        public void Activate()
+        {
+            ActivateAttempted = true;
+            if (throwOnActivate)
+            {
+                throw new InvalidOperationException("component activation failed");
+            }
+        }
+    }
+
+    public sealed class FakeCodeModule(FakeCodePane codePane)
+    {
+        public FakeCodePane CodePane { get; } = codePane;
+    }
+
+    public sealed class FakeCodePane(Action onShow)
+    {
+        public bool Shown { get; private set; }
+
+        public void Show()
+        {
+            Shown = true;
+            onShow();
+        }
+    }
 
     public sealed class FakeVbe
     {
-        public bool ThrowOnSetActiveProject { get; init; }
+        public int ActiveVBProjectSetCalls { get; private set; }
+
+        public FakeVbProject? CodePaneProject { get; set; }
 
         public object? ActiveVBProject
         {
             get => _activeVbProject;
             set
             {
-                if (ThrowOnSetActiveProject)
-                {
-                    throw new InvalidOperationException("selection failed");
-                }
-
-                _activeVbProject = value;
+                ActiveVBProjectSetCalls++;
+                throw new InvalidOperationException("ActiveVBProject is read-only");
             }
         }
 
         private object? _activeVbProject;
+
+        public void SetActiveProject(object vbProject)
+        {
+            _activeVbProject = vbProject;
+        }
+
+        public void SetActiveProjectFromCodePane()
+        {
+            _activeVbProject = CodePaneProject;
+        }
     }
 }

@@ -89,7 +89,59 @@ public sealed class ExcelBridgeSupportTests
         var actual = ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath);
 
         Assert.Same(expected, actual);
-        Assert.Equal(2, excel.Workbooks.ItemCalls);
+        Assert.Equal(2, excel.Workbooks.IntegerItemCalls);
+        Assert.Equal(0, excel.Workbooks.StringItemCalls);
+    }
+
+    [Fact]
+    public void GetOpenWorkbook_ResolvesHiddenAddInThroughDirectFilenameLookup()
+    {
+        var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "selfmacros.xlam"));
+        var expected = new FakeWorkbook(targetPath);
+        var collection = new FakeWorkbookCollection([], new Dictionary<string, FakeWorkbook>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["selfmacros.xlam"] = expected,
+        });
+        var excel = new FakeExcel(collection);
+
+        var actual = ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath);
+
+        Assert.Same(expected, actual);
+        Assert.Equal(0, excel.Workbooks.IntegerItemCalls);
+        Assert.Equal(1, excel.Workbooks.StringItemCalls);
+    }
+
+    [Fact]
+    public void GetOpenWorkbook_RejectsDirectFilenameLookupWhenFullPathDiffers()
+    {
+        var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-a", "selfmacros.xlam"));
+        var otherPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-b", "selfmacros.xlam"));
+        var collection = new FakeWorkbookCollection([], new Dictionary<string, FakeWorkbook>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["selfmacros.xlam"] = new(otherPath),
+        });
+        var excel = new FakeExcel(collection);
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath));
+
+        Assert.Contains("xlflow session workbook is not open", ex.Message);
+        Assert.Equal(0, excel.Workbooks.IntegerItemCalls);
+        Assert.Equal(1, excel.Workbooks.StringItemCalls);
+    }
+
+    [Fact]
+    public void GetOpenWorkbook_PreservesNotOpenErrorWhenDirectFilenameLookupFails()
+    {
+        var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "selfmacros.xlam"));
+        var excel = new FakeExcel(new FakeWorkbookCollection([]));
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath));
+
+        Assert.Contains("xlflow session workbook is not open", ex.Message);
+        Assert.Equal(0, excel.Workbooks.IntegerItemCalls);
+        Assert.Equal(1, excel.Workbooks.StringItemCalls);
     }
 
     [Fact]
@@ -105,21 +157,46 @@ public sealed class ExcelBridgeSupportTests
         Assert.True(chart.PasteCalled);
     }
 
-    public sealed class FakeExcel(params FakeWorkbook[] workbooks)
+    public sealed class FakeExcel
     {
-        public FakeWorkbookCollection Workbooks { get; } = new(workbooks);
+        public FakeExcel(params FakeWorkbook[] workbooks)
+            : this(new FakeWorkbookCollection(workbooks))
+        {
+        }
+
+        public FakeExcel(FakeWorkbookCollection workbooks)
+        {
+            Workbooks = workbooks;
+        }
+
+        public FakeWorkbookCollection Workbooks { get; }
     }
 
-    public sealed class FakeWorkbookCollection(params FakeWorkbook[] workbooks)
+    public sealed class FakeWorkbookCollection(
+        IReadOnlyList<FakeWorkbook> workbooks,
+        IReadOnlyDictionary<string, FakeWorkbook>? directWorkbooks = null)
     {
-        public int Count => workbooks.Length;
+        public int Count => workbooks.Count;
 
-        public int ItemCalls { get; private set; }
+        public int IntegerItemCalls { get; private set; }
+
+        public int StringItemCalls { get; private set; }
 
         public FakeWorkbook Item(int index)
         {
-            ItemCalls++;
+            IntegerItemCalls++;
             return workbooks[index - 1];
+        }
+
+        public FakeWorkbook Item(string name)
+        {
+            StringItemCalls++;
+            if (directWorkbooks is not null && directWorkbooks.TryGetValue(name, out var workbook))
+            {
+                return workbook;
+            }
+
+            throw new InvalidOperationException("workbook not found");
         }
     }
 
