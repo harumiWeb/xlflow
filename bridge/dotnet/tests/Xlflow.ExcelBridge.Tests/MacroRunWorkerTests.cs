@@ -49,6 +49,26 @@ public sealed class MacroRunWorkerTests
         Assert.Equal(0, vbe.ActiveVBProjectSetCalls);
     }
 
+    [Fact]
+    public void ActivateTargetProjectFailsWhenFallbackDoesNotSelectTargetProject()
+    {
+        var vbe = new FakeVbe();
+        var codePane = new FakeCodePane(() => { });
+        var component = new FakeVbComponent(new FakeCodeModule(codePane), throwOnActivate: true);
+        var vbProject = new FakeVbProject(vbe, component);
+        var workbook = new FakeWorkbook(() => { }, throwOnActivate: true);
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            MacroRunWorker.ActivateTargetProject(workbook, vbProject, vbe));
+
+        Assert.Contains("could not activate the target VBProject", ex.Message);
+        Assert.True(workbook.ActivateAttempted);
+        Assert.True(component.ActivateAttempted);
+        Assert.True(codePane.Shown);
+        Assert.Null(vbe.ActiveVBProject);
+        Assert.Equal(0, vbe.ActiveVBProjectSetCalls);
+    }
+
     public sealed class FakeWorkbook
     {
         private readonly Action _onActivate;

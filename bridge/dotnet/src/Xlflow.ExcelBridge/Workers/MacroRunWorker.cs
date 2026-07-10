@@ -203,6 +203,10 @@ public static class MacroRunWorker
         }
 
         _ = TryActivateProjectCodePane(vbProject);
+        if (!IsActiveVbProject(vbe, vbProject))
+        {
+            throw new InvalidOperationException("xlflow could not activate the target VBProject for VBE Compile.");
+        }
     }
 
     private static void TryActivateWorkbook(object workbook)
