@@ -30,7 +30,10 @@ type TreeNode =
   | UserFormNode
   | UserFormArtifactNode
   | TestCountNode
-  | TestNode;
+  | TestNode
+  | FormulaGroupNode
+  | FormulaFileNode
+  | FormulaEmptyNode;
 
 interface SetupNode {
   kind: "setup";
@@ -120,6 +123,36 @@ interface TestNode {
   uri?: vscode.Uri;
 }
 
+export interface FormulaGroupNode {
+  kind: "formulaGroup";
+  label: string;
+  children: FormulaFileNode[];
+}
+
+export interface FormulaFileNode {
+  kind: "formulaFile";
+  label: string;
+  uri: vscode.Uri;
+  relativePath: string;
+  fileKind: "names" | "sheet";
+}
+
+export interface FormulaEmptyNode {
+  kind: "formulaEmpty";
+  label: string;
+}
+
+export type FormulaSnapshotNode = FormulaGroupNode | FormulaFileNode | FormulaEmptyNode;
+
+interface FormulaManifest {
+  version?: unknown;
+  sheets?: FormulaManifestSheet[];
+}
+
+interface FormulaManifestSheet {
+  path?: unknown;
+}
+
 interface InspectSymbolsEnvelope {
   status?: string;
   inspect?: {
@@ -149,6 +182,7 @@ export class XlflowSidebar implements vscode.Disposable {
   private readonly modulesProvider: ModulesTreeProvider;
   private readonly userFormsProvider: UserFormsTreeProvider;
   private readonly testsProvider: TestsTreeProvider;
+  private readonly formulasProvider: FormulasTreeProvider;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -168,6 +202,7 @@ export class XlflowSidebar implements vscode.Disposable {
     this.modulesProvider = new ModulesTreeProvider(projectState, channels);
     this.userFormsProvider = new UserFormsTreeProvider(projectState);
     this.testsProvider = new TestsTreeProvider(projectState, channels);
+    this.formulasProvider = new FormulasTreeProvider(projectState);
 
     this.disposables.push(
       vscode.window.registerTreeDataProvider("xlflow.setup", this.setupProvider),
@@ -175,6 +210,7 @@ export class XlflowSidebar implements vscode.Disposable {
       vscode.window.registerTreeDataProvider("xlflow.modules", this.modulesProvider),
       vscode.window.registerTreeDataProvider("xlflow.userForms", this.userFormsProvider),
       vscode.window.registerTreeDataProvider("xlflow.tests", this.testsProvider),
+      vscode.window.registerTreeDataProvider("xlflow.formulas", this.formulasProvider),
       projectState.onDidChangeState((state) => {
         sessionManager.setProjectKind(state.kind);
         this.refreshProjectViews();
@@ -208,10 +244,19 @@ export class XlflowSidebar implements vscode.Disposable {
     await this.testsProvider.refresh();
   }
 
+  async refreshFormulas(): Promise<void> {
+    await this.formulasProvider.refresh();
+  }
+
   async refreshAll(): Promise<void> {
     await this.projectState.refresh();
     this.refreshProjectViews();
-    await Promise.all([this.refreshModules(), this.refreshUserForms(), this.refreshTests()]);
+    await Promise.all([
+      this.refreshModules(),
+      this.refreshUserForms(),
+      this.refreshTests(),
+      this.refreshFormulas(),
+    ]);
   }
 }
 
@@ -640,6 +685,170 @@ class TestsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   getChildren(element?: TreeNode): TreeNode[] {
     return element === undefined ? this.nodes : [];
+  }
+}
+
+class FormulasTreeProvider implements vscode.TreeDataProvider<TreeNode> {
+  private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  private nodes: TreeNode[] = [];
+
+  constructor(private readonly projectState: XlflowProjectStateService) {}
+
+  async refresh(): Promise<void> {
+    const folder = readyWorkspaceFolder(this.projectState.current());
+    if (folder === undefined) {
+      this.nodes = [];
+      this.emitter.fire(undefined);
+      return;
+    }
+    this.nodes = await discoverFormulaSnapshot(folder);
+    this.emitter.fire(undefined);
+  }
+
+  getTreeItem(element: TreeNode): vscode.TreeItem {
+    if (element.kind === "formulaGroup") {
+      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.Expanded);
+      item.iconPath = new vscode.ThemeIcon("folder");
+      return item;
+    }
+    if (element.kind === "formulaFile") {
+      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon("file-code");
+      item.resourceUri = element.uri;
+      item.tooltip = element.uri.fsPath;
+      item.contextValue = "xlflow.formulaFile";
+      item.command = {
+        command: "xlflow.openFormulaSnapshotFile",
+        title: vscode.l10n.t("Open Formula Snapshot File"),
+        arguments: [element],
+      };
+      return item;
+    }
+    if (element.kind === "formulaEmpty") {
+      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon("info");
+      return item;
+    }
+    return new vscode.TreeItem("");
+  }
+
+  getChildren(element?: TreeNode): TreeNode[] {
+    if (element === undefined) {
+      return this.nodes;
+    }
+    if (element.kind === "formulaGroup") {
+      return element.children;
+    }
+    return [];
+  }
+}
+
+async function discoverFormulaSnapshot(folder: vscode.WorkspaceFolder): Promise<TreeNode[]> {
+  const formulasRoot = vscode.Uri.joinPath(folder.uri, "formulas");
+  const namesUri = vscode.Uri.joinPath(formulasRoot, "names.jsonl");
+  const manifestUri = vscode.Uri.joinPath(formulasRoot, "manifest.json");
+  const [namesExists, manifestText] = await Promise.all([
+    fileExists(namesUri),
+    readTextFileSafe(manifestUri),
+  ]);
+  return buildFormulaSnapshotNodes(folder, manifestText, namesExists);
+}
+
+export function buildFormulaSnapshotNodes(
+  folder: vscode.WorkspaceFolder,
+  manifestText: string | undefined,
+  namesExists: boolean,
+): FormulaSnapshotNode[] {
+  const formulasRoot = vscode.Uri.joinPath(folder.uri, "formulas");
+  const nodes: FormulaSnapshotNode[] = [];
+  if (namesExists) {
+    nodes.push({
+      kind: "formulaFile",
+      label: "names.jsonl",
+      uri: vscode.Uri.joinPath(formulasRoot, "names.jsonl"),
+      relativePath: "formulas/names.jsonl",
+      fileKind: "names",
+    });
+  }
+
+  const sheetFiles = formulaSheetFiles(folder, manifestText);
+  if (sheetFiles.length > 0) {
+    nodes.push({
+      kind: "formulaGroup",
+      label: vscode.l10n.t("Sheets"),
+      children: sheetFiles,
+    });
+  }
+
+  if (nodes.length === 0) {
+    nodes.push({ kind: "formulaEmpty", label: vscode.l10n.t("No formula snapshot found") });
+  }
+  return nodes;
+}
+
+function formulaSheetFiles(
+  folder: vscode.WorkspaceFolder,
+  manifestText: string | undefined,
+): FormulaFileNode[] {
+  if (manifestText === undefined) {
+    return [];
+  }
+  let manifest: FormulaManifest;
+  try {
+    manifest = JSON.parse(manifestText) as FormulaManifest;
+  } catch {
+    return [];
+  }
+  if (manifest.version !== 1 || !Array.isArray(manifest.sheets)) {
+    return [];
+  }
+  const formulasRoot = vscode.Uri.joinPath(folder.uri, "formulas");
+  return manifest.sheets
+    .map((sheet) =>
+      typeof sheet.path === "string" ? normalizeFormulaManifestPath(sheet.path) : undefined,
+    )
+    .filter((value): value is string => value !== undefined)
+    .map((relativeToFormulas) => ({
+      kind: "formulaFile" as const,
+      label: basenameSlash(relativeToFormulas),
+      uri: vscode.Uri.joinPath(formulasRoot, ...relativeToFormulas.split("/")),
+      relativePath: joinSlash("formulas", relativeToFormulas),
+      fileKind: "sheet" as const,
+    }));
+}
+
+function normalizeFormulaManifestPath(value: string): string | undefined {
+  const normalized = trimSlashes(value.replace(/\\/g, "/"));
+  const parts = normalized.split("/");
+  if (
+    normalized.length === 0 ||
+    parts.some((part) => part.length === 0 || part === "." || part === "..")
+  ) {
+    return undefined;
+  }
+  const lower = normalized.toLowerCase();
+  if (!lower.endsWith(".regions.jsonl")) {
+    return undefined;
+  }
+  return normalized;
+}
+
+async function readTextFileSafe(uri: vscode.Uri): Promise<string | undefined> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    return Buffer.from(bytes).toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    const stat = await vscode.workspace.fs.stat(uri);
+    return (stat.type & vscode.FileType.File) !== 0;
+  } catch {
+    return false;
   }
 }
 
@@ -1179,6 +1388,10 @@ function basenameWithoutExtension(fileName: string): string {
   const base = fileName.split("/").pop() ?? fileName;
   const dot = base.lastIndexOf(".");
   return dot === -1 ? base : base.slice(0, dot);
+}
+
+function basenameSlash(fileName: string): string {
+  return fileName.split("/").pop() ?? fileName;
 }
 
 function relativeToFormsRoot(formsRoot: string, file: string): string | undefined {

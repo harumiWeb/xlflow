@@ -26,6 +26,7 @@ import {
   sessionStatusText,
 } from "../../src/session";
 import {
+  buildFormulaSnapshotNodes,
   buildUserFormModels,
   moduleContextValue,
   moduleGroups,
@@ -86,6 +87,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.newClassModule",
     "xlflow.newUserForm",
     "xlflow.pull",
+    "xlflow.pullFormulas",
     "xlflow.push",
     "xlflow.runMacro",
     "xlflow.runProcedure",
@@ -120,6 +122,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.refreshUserForms",
     "xlflow.collapseUserForms",
     "xlflow.refreshTests",
+    "xlflow.refreshFormulas",
     "xlflow.runAllTests",
     "xlflow.runDoctor",
     "xlflow.sessionToggle",
@@ -129,6 +132,8 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.openModule",
     "xlflow.openProcedure",
     "xlflow.openUserFormArtifact",
+    "xlflow.openFormulaSnapshotFile",
+    "xlflow.revealFormulaSnapshotFile",
   ]) {
     assert.ok(commands.includes(command), `${command} should be registered`);
   }
@@ -511,6 +516,46 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     userFormArtifactContextValue({ artifactKind: "spec", missing: true }),
     "xlflow.userFormMissingArtifact.spec",
   );
+  const formulaManifest = JSON.stringify({
+    version: 1,
+    sheets: [
+      { path: "sheets/001-Invoice.regions.jsonl" },
+      { path: "sheets/002-Summary.regions.jsonl" },
+    ],
+  });
+  const formulaNodes = buildFormulaSnapshotNodes(fakeFolder, formulaManifest, true);
+  assert.deepStrictEqual(
+    formulaNodes.map((node) => node.kind),
+    ["formulaFile", "formulaGroup"],
+  );
+  assert.strictEqual(
+    formulaNodes[0].kind === "formulaFile" ? formulaNodes[0].label : undefined,
+    "names.jsonl",
+  );
+  assert.deepStrictEqual(
+    formulaNodes[1].kind === "formulaGroup"
+      ? formulaNodes[1].children.map((node) => node.label)
+      : [],
+    ["001-Invoice.regions.jsonl", "002-Summary.regions.jsonl"],
+  );
+  assert.deepStrictEqual(
+    buildFormulaSnapshotNodes(fakeFolder, formulaManifest, false).map((node) => node.kind),
+    ["formulaGroup"],
+  );
+  assert.deepStrictEqual(
+    buildFormulaSnapshotNodes(fakeFolder, undefined, false).map((node) => node.kind),
+    ["formulaEmpty"],
+  );
+  assert.deepStrictEqual(
+    buildFormulaSnapshotNodes(fakeFolder, "{not-json", false).map((node) => node.kind),
+    ["formulaEmpty"],
+  );
+  assert.deepStrictEqual(
+    buildFormulaSnapshotNodes(fakeFolder, JSON.stringify({ version: 2, sheets: [] }), false).map(
+      (node) => node.kind,
+    ),
+    ["formulaEmpty"],
+  );
 }
 
 function assertLocalizationResources(extensionPath: string): void {
@@ -546,11 +591,43 @@ function assertLocalizationResources(extensionPath: string): void {
     "project view title menu should contribute xlflow.saveWorkbook only when save is required",
   );
   assert.ok(
+    hasView(manifest, "xlflow.formulas", "%view.formulas.name%"),
+    "xlflow.formulas view should be contributed",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/title", "xlflow.pullFormulas", {
+      when: "view == xlflow.formulas",
+      group: "navigation@1",
+    }),
+    "formulas view title menu should contribute xlflow.pullFormulas",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/title", "xlflow.refreshFormulas", {
+      when: "view == xlflow.formulas",
+      group: "navigation@2",
+    }),
+    "formulas view title menu should contribute xlflow.refreshFormulas",
+  );
+  assert.ok(
     hasMenuItem(manifest, "view/item/context", "xlflow.formatDocument", {
       when: "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
       group: "2_workspace@0",
     }),
     "module context menu should contribute xlflow.formatDocument",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/item/context", "xlflow.openFormulaSnapshotFile", {
+      when: "view == xlflow.formulas && viewItem == xlflow.formulaFile",
+      group: "navigation@1",
+    }),
+    "formula file context menu should contribute open action",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/item/context", "xlflow.revealFormulaSnapshotFile", {
+      when: "view == xlflow.formulas && viewItem == xlflow.formulaFile",
+      group: "3_file@1",
+    }),
+    "formula file context menu should contribute reveal action",
   );
   const placeholders = collectManifestPlaceholders(manifest);
   for (const key of placeholders) {
@@ -628,6 +705,18 @@ function menuWhen(manifest: Record<string, unknown>, menu: string, command: stri
   );
   assert.ok(item, `${command} should be contributed to ${menu}`);
   return (item as Record<string, unknown>).when;
+}
+
+function hasView(manifest: Record<string, unknown>, id: string, name: string): boolean {
+  const views = readPath(manifest, ["contributes", "views", "xlflow"]);
+  assert.ok(Array.isArray(views), "xlflow views should be an array");
+  return views.some((candidate) => {
+    if (typeof candidate !== "object" || candidate === null) {
+      return false;
+    }
+    const view = candidate as Record<string, unknown>;
+    return view.id === id && view.name === name;
+  });
 }
 
 function hasMenuItem(

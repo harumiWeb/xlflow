@@ -61,6 +61,7 @@ interface CommandRefreshHooks {
   refreshModules(): Promise<void>;
   refreshUserForms(): Promise<void>;
   refreshTests(): Promise<void>;
+  refreshFormulas(): Promise<void>;
 }
 
 export function registerCommands(
@@ -188,6 +189,20 @@ export function registerCommands(
           hooks.refreshUserForms(),
           hooks.refreshTests(),
         ]);
+      }
+    }),
+    vscode.commands.registerCommand("xlflow.pullFormulas", async () => {
+      const code = await runXlflowCommand(
+        ["formulas", "pull"],
+        "xlflow formulas pull",
+        channels.output,
+        {
+          requireWorkspace: true,
+          uiLabel: vscode.l10n.t("Pull Formulas"),
+        },
+      );
+      if (code === 0) {
+        await hooks.refreshFormulas();
       }
     }),
     vscode.commands.registerCommand("xlflow.push", async () => {
@@ -323,6 +338,9 @@ export function registerCommands(
     vscode.commands.registerCommand("xlflow.refreshTests", async () => {
       await hooks.refreshTests();
     }),
+    vscode.commands.registerCommand("xlflow.refreshFormulas", async () => {
+      await hooks.refreshFormulas();
+    }),
     vscode.commands.registerCommand("xlflow.runAllTests", async () => {
       await vscode.commands.executeCommand("xlflow.test");
     }),
@@ -436,6 +454,18 @@ export function registerCommands(
       const uri = treeUri(value);
       if (uri !== undefined) {
         await vscode.window.showTextDocument(uri);
+      }
+    }),
+    vscode.commands.registerCommand("xlflow.openFormulaSnapshotFile", async (value: unknown) => {
+      const uri = treeUri(value);
+      if (uri !== undefined) {
+        await vscode.window.showTextDocument(uri);
+      }
+    }),
+    vscode.commands.registerCommand("xlflow.revealFormulaSnapshotFile", async (value: unknown) => {
+      const uri = treeUri(value);
+      if (uri !== undefined) {
+        await vscode.commands.executeCommand("revealInExplorer", uri);
       }
     }),
   );

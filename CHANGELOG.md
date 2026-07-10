@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.21.0
+
 - Added conservative VBA keyword and known built-in identifier casing normalization to `xlflow fmt` and LSP document formatting, enabled by default with `[fmt].keyword_casing` and `[fmt].builtin_casing`.
 - Added LSP diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
 - Fixed VBA LSP document formatting so incomplete or syntactically invalid buffers are skipped without surfacing an internal parser error notification in VS Code.

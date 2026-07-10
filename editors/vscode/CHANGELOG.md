@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## v0.5.0
+
 - Added editor diagnostics for high-signal analyze warnings, including `VBA201`, `VBA204`, `VBA208`, `VBA209`, and `VBA212`.
 - Suppressed Format Document failure notifications for incomplete or syntactically invalid VBA buffers; formatting now leaves the document unchanged instead.
+- Added a VS Code Formulas sidebar view for discovering generated formula snapshots, opening `names.jsonl` and per-sheet region JSONL files, and running `xlflow formulas pull`.
 
 ## v0.4.0
 

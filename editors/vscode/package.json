@@ -172,6 +172,11 @@
           "id": "xlflow.tests",
           "name": "%view.tests.name%",
           "when": "xlflow.projectReady"
+        },
+        {
+          "id": "xlflow.formulas",
+          "name": "%view.formulas.name%",
+          "when": "xlflow.projectReady"
         }
       ]
     },
@@ -253,6 +258,12 @@
       {
         "command": "xlflow.pull",
         "title": "%command.pull.title%",
+        "category": "%command.category%",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "xlflow.pullFormulas",
+        "title": "%command.pullFormulas.title%",
         "category": "%command.category%",
         "icon": "$(cloud-download)"
       },
@@ -376,6 +387,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "xlflow.refreshFormulas",
+        "title": "%command.refreshFormulas.title%",
+        "category": "%command.category%",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "xlflow.runAllTests",
         "title": "%command.runAllTests.title%",
         "category": "%command.category%",
@@ -455,6 +472,16 @@
       {
         "command": "xlflow.openUserFormArtifact",
         "title": "%command.openUserFormArtifact.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.openFormulaSnapshotFile",
+        "title": "%command.openFormulaSnapshotFile.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.revealFormulaSnapshotFile",
+        "title": "%command.revealFormulaSnapshotFile.title%",
         "category": "%command.category%"
       },
       {
@@ -553,6 +580,16 @@
         {
           "command": "xlflow.refreshTests",
           "when": "view == xlflow.tests",
+          "group": "navigation@2"
+        },
+        {
+          "command": "xlflow.pullFormulas",
+          "when": "view == xlflow.formulas",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.refreshFormulas",
+          "when": "view == xlflow.formulas",
           "group": "navigation@2"
         }
       ],
@@ -689,6 +726,16 @@
           "command": "xlflow.copyUserFormRelativePath",
           "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userFormArtifact\\./",
           "group": "4_copy@1"
+        },
+        {
+          "command": "xlflow.openFormulaSnapshotFile",
+          "when": "view == xlflow.formulas && viewItem == xlflow.formulaFile",
+          "group": "navigation@1"
+        },
+        {
+          "command": "xlflow.revealFormulaSnapshotFile",
+          "when": "view == xlflow.formulas && viewItem == xlflow.formulaFile",
+          "group": "3_file@1"
         }
       ]
     },
@@ -809,6 +856,7 @@
     "onCommand:xlflow.newStandardModule",
     "onCommand:xlflow.newUserForm",
     "onCommand:xlflow.openDocumentation",
+    "onCommand:xlflow.openFormulaSnapshotFile",
     "onCommand:xlflow.openInstallGuide",
     "onCommand:xlflow.openModule",
     "onCommand:xlflow.openOutput",
@@ -816,7 +864,9 @@
     "onCommand:xlflow.openUserFormArtifact",
     "onCommand:xlflow.openWorkbook",
     "onCommand:xlflow.pull",
+    "onCommand:xlflow.pullFormulas",
     "onCommand:xlflow.push",
+    "onCommand:xlflow.refreshFormulas",
     "onCommand:xlflow.refreshModules",
     "onCommand:xlflow.refreshProject",
     "onCommand:xlflow.refreshTests",
@@ -825,6 +875,7 @@
     "onCommand:xlflow.renameUserForm",
     "onCommand:xlflow.restartLanguageServer",
     "onCommand:xlflow.retryCliDetection",
+    "onCommand:xlflow.revealFormulaSnapshotFile",
     "onCommand:xlflow.revealSourceFile",
     "onCommand:xlflow.revealUserFormSource",
     "onCommand:xlflow.runAllTests",
@@ -844,6 +895,7 @@
     "onCommand:xlflow.skillInstall",
     "onCommand:xlflow.test",
     "onLanguage:vba",
+    "onView:xlflow.formulas",
     "onView:xlflow.modules",
     "onView:xlflow.project",
     "onView:xlflow.setup",

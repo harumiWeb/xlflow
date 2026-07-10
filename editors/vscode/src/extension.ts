@@ -69,6 +69,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       sidebar?.refreshModules(),
       sidebar?.refreshUserForms(),
       sidebar?.refreshTests(),
+      sidebar?.refreshFormulas(),
     ]);
   };
   const refreshSelectedProject = async (
@@ -103,10 +104,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await testController?.refreshAuto();
         await sidebar?.refreshTests();
       },
+      refreshFormulas: async () => {
+        await sidebar?.refreshFormulas();
+      },
     },
   );
 
   const configWatcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
+  const formulasManifestWatcher = vscode.workspace.createFileSystemWatcher(
+    "**/formulas/manifest.json",
+  );
+  const formulasJsonlWatcher = vscode.workspace.createFileSystemWatcher("**/formulas/**/*.jsonl");
+  const refreshFormulas = () => {
+    void sidebar?.refreshFormulas();
+  };
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       lastSelectedWorkspaceKey = selectedWorkspaceKey();
@@ -123,6 +134,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void refreshSelectedProject({ restartLsp: true });
     }),
     configWatcher,
+    formulasManifestWatcher,
+    formulasJsonlWatcher,
     configWatcher.onDidCreate(() => {
       void refreshSelectedProject();
     }),
@@ -132,6 +145,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     configWatcher.onDidDelete(() => {
       void refreshSelectedProject();
     }),
+    formulasManifestWatcher.onDidCreate(refreshFormulas),
+    formulasManifestWatcher.onDidChange(refreshFormulas),
+    formulasManifestWatcher.onDidDelete(refreshFormulas),
+    formulasJsonlWatcher.onDidCreate(refreshFormulas),
+    formulasJsonlWatcher.onDidChange(refreshFormulas),
+    formulasJsonlWatcher.onDidDelete(refreshFormulas),
     vscode.workspace.onDidChangeTextDocument((event) => {
       clientManager?.scheduleSuggest(event.document);
     }),
