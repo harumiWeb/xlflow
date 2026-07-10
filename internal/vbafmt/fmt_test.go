@@ -360,6 +360,182 @@ func TestFormatBasDeclarationSpacingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestFormatBasKeywordAndBuiltinCasing(t *testing.T) {
+	input := strings.Join([]string{
+		"option explicit",
+		"",
+		"private sub Main()",
+		"    dim ws as worksheet",
+		"    dim lastrow as long",
+		"",
+		"    if ws is nothing then",
+		"        msgbox \"Sheet not found\", vbexclamation",
+		"        debug.print lastrow",
+		"        exit sub",
+		"    end if",
+		"",
+		"    lastrow = ws.cells(ws.rows.count, \"A\").end(xlup).row",
+		"end sub",
+		"",
+	}, "\n")
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"Option Explicit",
+		"",
+		"Private Sub Main()",
+		"    Dim ws As Worksheet",
+		"    Dim lastrow As Long",
+		"",
+		"    If ws Is Nothing Then",
+		"        MsgBox \"Sheet not found\", vbExclamation",
+		"        Debug.Print lastrow",
+		"        Exit Sub",
+		"    End If",
+		"",
+		"    lastrow = ws.Cells(ws.Rows.Count, \"A\").End(xlUp).Row",
+		"End Sub",
+		"",
+	}, "\n")
+	if got != want {
+		t.Fatalf("formatted:\n%s\nwant:\n%s", got, want)
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("formatting is not idempotent:\n%s", second)
+	}
+}
+
+func TestFormatBasCasingPreservesUnsafeText(t *testing.T) {
+	input := strings.Join([]string{
+		"Attribute VB_Name = \"lowercase module\"",
+		"option explicit",
+		"#if VBA7 then",
+		"Private Declare PtrSafe Sub sleep Lib \"kernel32\" Alias \"Sleep\" (ByVal dwMilliseconds As LongPtr)",
+		"#end if",
+		"",
+		"public sub Test()",
+		"    ' msgbox vbexclamation if then",
+		"    Debug.Print \"msgbox vbexclamation if then\"",
+		"    Dim value As String _",
+		"        = \"x\"",
+		"end sub",
+		"",
+	}, "\n")
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Attribute VB_Name = \"lowercase module\"",
+		"#if VBA7 then",
+		"Private Declare PtrSafe Sub sleep Lib \"kernel32\" Alias \"Sleep\" (ByVal dwMilliseconds As LongPtr)",
+		"    ' msgbox vbexclamation if then",
+		"Debug.Print \"msgbox vbexclamation if then\"",
+		"Dim value As String _",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected preserved text %q in:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "Public Sub Test()") || !strings.Contains(got, "End Sub") {
+		t.Fatalf("expected safe procedure keywords to be cased:\n%s", got)
+	}
+}
+
+func TestFormatBasCasingCanBeDisabledIndependently(t *testing.T) {
+	input := "option explicit\n\nsub Test()\n    msgbox vbexclamation\nend sub\n"
+	got, err := FormatTextWithOptions(input, false, FormatConfig{
+		KeywordCasing:    false,
+		KeywordCasingSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "option explicit") || !strings.Contains(got, "MsgBox vbExclamation") {
+		t.Fatalf("keyword casing disabled should preserve keywords but keep builtins enabled:\n%s", got)
+	}
+
+	got, err = FormatTextWithOptions(input, false, FormatConfig{
+		BuiltinCasing:    false,
+		BuiltinCasingSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Option Explicit") || !strings.Contains(got, "msgbox vbexclamation") {
+		t.Fatalf("builtin casing disabled should preserve builtins but keep keywords enabled:\n%s", got)
+	}
+}
+
+func TestFormatBasBuiltinCasingPreservesUserDefinedCollision(t *testing.T) {
+	input := strings.Join([]string{
+		"option explicit",
+		"",
+		"enum Directions",
+		"    xlup = 1",
+		"end enum",
+		"",
+		"sub msgbox(x as long)",
+		"end sub",
+		"",
+		"sub Test(vbexclamation as long)",
+		"    dim xlup as long",
+		"    msgbox xlup",
+		"    debug.print vbexclamation",
+		"end sub",
+		"",
+	}, "\n")
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"    xlup = 1",
+		"Sub msgbox(x As Long)",
+		"Sub Test(vbexclamation As Long)",
+		"    Dim xlup As Long",
+		"    msgbox xlup",
+		"    Debug.Print vbexclamation",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected user-defined collision text %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "xlUp") || strings.Contains(got, "vbExclamation") || strings.Contains(got, "MsgBox xlup") {
+		t.Fatalf("user-defined msgbox should not be builtin-cased:\n%s", got)
+	}
+}
+
+func TestFormatBasBuiltinCasingStatementHeadContexts(t *testing.T) {
+	input := strings.Join([]string{
+		"option explicit",
+		"",
+		"sub Test()",
+		"    if ok then msgbox \"ok\" else msgbox \"no\"",
+		"    call msgbox(\"done\")",
+		"end sub",
+		"",
+	}, "\n")
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"If ok Then MsgBox \"ok\" Else MsgBox \"no\"",
+		"Call MsgBox(\"done\")",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected builtin casing in statement-head context %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestFormatBasPreserveStringKeywords(t *testing.T) {
 	input := `Sub Main()
     Dim s As String

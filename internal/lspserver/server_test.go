@@ -802,6 +802,72 @@ func TestFormattingReturnsFullDocumentEditFromOpenDocument(t *testing.T) {
 	}
 }
 
+func TestFormattingAppliesCasingOptions(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "option explicit\n\nsub Test()\nmsgbox vbexclamation\nend sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 1 {
+		t.Fatalf("formatting edits = %+v, want one full-document edit", edits)
+	}
+	if !strings.Contains(edits[0].NewText, "Option Explicit") ||
+		!strings.Contains(edits[0].NewText, "MsgBox vbExclamation") {
+		t.Fatalf("formatted text did not apply casing:\n%s", edits[0].NewText)
+	}
+}
+
+func TestFormattingHonorsDisabledCasingOptions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Fmt.KeywordCasing = false
+	cfg.Fmt.BuiltinCasing = false
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "option explicit\n\nsub Test()\nmsgbox vbexclamation\nend sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	edits, err := s.formatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Options:      protocol.FormattingOptions{"tabSize": 4, "insertSpaces": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 1 {
+		t.Fatalf("formatting edits = %+v, want indentation edit only", edits)
+	}
+	if strings.Contains(edits[0].NewText, "Option Explicit") ||
+		strings.Contains(edits[0].NewText, "MsgBox") ||
+		strings.Contains(edits[0].NewText, "vbExclamation") {
+		t.Fatalf("disabled casing options should preserve casing:\n%s", edits[0].NewText)
+	}
+}
+
 func TestFormattingSkipsFrmDocuments(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

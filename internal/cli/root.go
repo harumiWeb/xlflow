@@ -5477,6 +5477,10 @@ func (a *app) fmtCommand() *cobra.Command {
 				OperatorSpacingSet:    formatCfg.OperatorSpacingSet,
 				DeclarationSpacing:    formatCfg.DeclarationSpacing,
 				DeclarationSpacingSet: formatCfg.DeclarationSpacingSet,
+				KeywordCasing:         formatCfg.KeywordCasing,
+				KeywordCasingSet:      formatCfg.KeywordCasingSet,
+				BuiltinCasing:         formatCfg.BuiltinCasing,
+				BuiltinCasingSet:      formatCfg.BuiltinCasingSet,
 			}
 			result, err := vbafmt.Run(opts)
 			if err != nil {
@@ -5692,6 +5696,10 @@ func fmtFormatConfigFromConfig(cfg config.Config) vbafmt.FormatConfig {
 		OperatorSpacingSet:    true,
 		DeclarationSpacing:    cfg.Fmt.DeclarationSpacing,
 		DeclarationSpacingSet: true,
+		KeywordCasing:         cfg.Fmt.KeywordCasing,
+		KeywordCasingSet:      true,
+		BuiltinCasing:         cfg.Fmt.BuiltinCasing,
+		BuiltinCasingSet:      true,
 	}
 }
 

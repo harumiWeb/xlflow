@@ -21,6 +21,10 @@ type FormatConfig struct {
 	OperatorSpacingSet    bool
 	DeclarationSpacing    bool
 	DeclarationSpacingSet bool
+	KeywordCasing         bool
+	KeywordCasingSet      bool
+	BuiltinCasing         bool
+	BuiltinCasingSet      bool
 }
 
 type LineNumberWarning struct {
@@ -91,6 +95,20 @@ func normalizeDeclarationSpacing(cfg FormatConfig) bool {
 		return true
 	}
 	return cfg.DeclarationSpacing
+}
+
+func normalizeKeywordCasing(cfg FormatConfig) bool {
+	if !cfg.KeywordCasingSet {
+		return true
+	}
+	return cfg.KeywordCasing
+}
+
+func normalizeBuiltinCasing(cfg FormatConfig) bool {
+	if !cfg.BuiltinCasingSet {
+		return true
+	}
+	return cfg.BuiltinCasing
 }
 
 func parseLineNumberDirective(line string) lineNumberDirective {
@@ -205,6 +223,13 @@ func formatTextDetailed(text string, isClass bool, cfg FormatConfig) (string, li
 			return "", lineNumberFileResult{}, err
 		}
 		text = spaced
+	}
+	if normalizeKeywordCasing(cfg) || normalizeBuiltinCasing(cfg) {
+		cased, err := formatCasing(text, isClass, normalizeKeywordCasing(cfg), normalizeBuiltinCasing(cfg))
+		if err != nil {
+			return "", lineNumberFileResult{}, err
+		}
+		text = cased
 	}
 
 	lines := splitLines(text)

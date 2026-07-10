@@ -541,6 +541,10 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 		OperatorSpacingSet:    true,
 		DeclarationSpacing:    s.opts.Config.Fmt.DeclarationSpacing,
 		DeclarationSpacingSet: true,
+		KeywordCasing:         s.opts.Config.Fmt.KeywordCasing,
+		KeywordCasingSet:      true,
+		BuiltinCasing:         s.opts.Config.Fmt.BuiltinCasing,
+		BuiltinCasingSet:      true,
 	})
 	if err != nil {
 		if vbafmt.IsFormatParseError(err) {
