@@ -9,7 +9,9 @@ import (
 )
 
 var (
-	casingVarTypeRe = regexp.MustCompile(`(?i)\b(?:Dim|Private|Public|Friend|Static)\s+([A-Za-z_][A-Za-z0-9_]*)\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)\b`)
+	casingVarTypeRe  = regexp.MustCompile(`(?i)\b(?:Dim|Private|Public|Friend|Static)\s+([A-Za-z_][A-Za-z0-9_]*)\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)\b`)
+	casingDeclNameRe = regexp.MustCompile(`(?i)\b(?:Dim|Private|Public|Friend|Static|Const)\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+	casingAsNameRe   = regexp.MustCompile(`(?i)\b([A-Za-z_][A-Za-z0-9_]*)\s+As\s+(?:New\s+)?[A-Za-z_][A-Za-z0-9_.]*\b`)
 
 	canonicalKeywords = canonicalMap([]string{
 		"Option", "Explicit",
@@ -152,19 +154,70 @@ func casingVariableTypes(lines []string) map[string]string {
 
 func casingUserNames(lines []string) map[string]bool {
 	out := map[string]bool{}
+	inEnum := false
 	for _, line := range lines {
 		code := strings.TrimSpace(stripStringLiterals(stripTrailingComment(parseLineNumberDirective(line).Content)))
+		if code == "" {
+			continue
+		}
+		upper := strings.ToUpper(code)
+		if strings.HasPrefix(upper, "END ENUM") {
+			inEnum = false
+			continue
+		}
+		if inEnum {
+			if name := firstIdentifier(code); name != "" {
+				out[strings.ToLower(name)] = true
+			}
+			continue
+		}
+		if strings.HasPrefix(upper, "ENUM ") || strings.Contains(upper, " ENUM ") {
+			inEnum = true
+		}
+		if strings.Contains(upper, "DECLARE ") {
+			continue
+		}
+		for _, match := range casingDeclNameRe.FindAllStringSubmatch(code, -1) {
+			if len(match) == 2 {
+				out[strings.ToLower(match[1])] = true
+			}
+		}
+		for _, match := range casingAsNameRe.FindAllStringSubmatch(code, -1) {
+			if len(match) == 2 {
+				out[strings.ToLower(match[1])] = true
+			}
+		}
 		fields := strings.Fields(code)
 		for i := 0; i+1 < len(fields); i++ {
 			word := strings.Trim(fields[i], " \t")
-			next := strings.Trim(fields[i+1], " \t()")
+			next := fields[i+1]
+			if idx := strings.IndexByte(next, '('); idx >= 0 {
+				next = next[:idx]
+			}
+			next = strings.TrimSpace(next)
 			switch strings.ToLower(word) {
-			case "sub", "function":
-				out[strings.ToLower(next)] = true
+			case "sub", "function", "get", "let", "set":
+				if next != "" {
+					out[strings.ToLower(next)] = true
+				}
 			}
 		}
 	}
 	return out
+}
+
+func firstIdentifier(code string) string {
+	for i := 0; i < len(code); i++ {
+		if !isIdentifierStartByte(code[i]) {
+			continue
+		}
+		j := i + 1
+		for j < len(code) && isIdentifierPartByte(code[j]) {
+			j++
+		}
+		return code[i:j]
+	}
+	return ""
 }
 
 func casingCanonicalType(raw string) (string, bool) {
@@ -346,7 +399,17 @@ func statementHeadBefore(code string, start int) bool {
 		return true
 	}
 	idx := strings.LastIndex(prefix, ":")
-	return idx >= 0 && strings.TrimSpace(prefix[idx+1:]) == ""
+	if idx >= 0 && strings.TrimSpace(prefix[idx+1:]) == "" {
+		return true
+	}
+	fields := strings.Fields(prefix)
+	if len(fields) > 0 {
+		switch strings.ToLower(fields[len(fields)-1]) {
+		case "then", "else", "call":
+			return true
+		}
+	}
+	return false
 }
 
 func skipStringLiteral(code string, start, end int) int {

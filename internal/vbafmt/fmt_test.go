@@ -474,13 +474,65 @@ func TestFormatBasCasingCanBeDisabledIndependently(t *testing.T) {
 }
 
 func TestFormatBasBuiltinCasingPreservesUserDefinedCollision(t *testing.T) {
-	input := "option explicit\n\nsub msgbox()\nend sub\n\nsub Test()\n    msgbox\nend sub\n"
+	input := strings.Join([]string{
+		"option explicit",
+		"",
+		"enum Directions",
+		"    xlup = 1",
+		"end enum",
+		"",
+		"sub msgbox(x as long)",
+		"end sub",
+		"",
+		"sub Test(vbexclamation as long)",
+		"    dim xlup as long",
+		"    msgbox xlup",
+		"    debug.print vbexclamation",
+		"end sub",
+		"",
+	}, "\n")
 	got, err := FormatText(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "Sub msgbox()") || !strings.Contains(got, "    msgbox") {
+	for _, want := range []string{
+		"    xlup = 1",
+		"Sub msgbox(x As Long)",
+		"Sub Test(vbexclamation As Long)",
+		"    Dim xlup As Long",
+		"    msgbox xlup",
+		"    Debug.Print vbexclamation",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected user-defined collision text %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "xlUp") || strings.Contains(got, "vbExclamation") || strings.Contains(got, "MsgBox xlup") {
 		t.Fatalf("user-defined msgbox should not be builtin-cased:\n%s", got)
+	}
+}
+
+func TestFormatBasBuiltinCasingStatementHeadContexts(t *testing.T) {
+	input := strings.Join([]string{
+		"option explicit",
+		"",
+		"sub Test()",
+		"    if ok then msgbox \"ok\" else msgbox \"no\"",
+		"    call msgbox(\"done\")",
+		"end sub",
+		"",
+	}, "\n")
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"If ok Then MsgBox \"ok\" Else MsgBox \"no\"",
+		"Call MsgBox(\"done\")",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected builtin casing in statement-head context %q in:\n%s", want, got)
+		}
 	}
 }
 
