@@ -907,5 +907,5 @@
   "engines": {
     "vscode": "^1.91.0"
   },
-  "packageManager": "pnpm@10.28.1"
+  "packageManager": "pnpm@11.11.0"
 }
