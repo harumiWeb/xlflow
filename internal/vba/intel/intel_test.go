@@ -362,8 +362,43 @@ End Function
 	if !ok {
 		t.Fatalf("documentation snippet missing: %+v", items)
 	}
-	if !item.Snippet || item.ReplaceRange == nil || !strings.Contains(item.InsertText, "customerCode: ${2:引数の説明。}") || !strings.Contains(item.InsertText, "Returns:") {
+	if !item.Snippet || item.ReplaceRange == nil || !strings.Contains(item.InsertText, "customerCode: ${2:Parameter description.}") || !strings.Contains(item.InsertText, "Returns:") {
 		t.Fatalf("unexpected documentation snippet: %+v", item)
+	}
+}
+
+func TestDocumentationMarkerSuppressesOrdinaryCompletionsWithoutTarget(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n'''\nPub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'''")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("doc marker should not fall through to ordinary completions: %+v", items)
+	}
+}
+
+func TestHoverUsesRubberduckDescriptionOnProjectCall(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+'@Description("This is documentation text.")
+Public Sub Run()
+End Sub
+
+Public Sub Caller()
+    Call Run
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hoverLine := "    Call Run"
+	hover, err := analyzer.Hover(doc, Position{Line: 6, Character: utf16Len(hoverLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "This is documentation text.") {
+		t.Fatalf("rubberduck description missing from hover: %+v", hover)
 	}
 }
 

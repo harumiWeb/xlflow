@@ -19,13 +19,208 @@ const unsupportedInlineSuppressionRules = new Set([
 ]);
 
 export function registerLineSuppressionCodeActions(): vscode.Disposable {
-  return vscode.languages.registerCodeActionsProvider(
-    { language: "vba", scheme: "file" },
-    new XlflowLineSuppressionCodeActionProvider(),
-    {
-      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
-    },
+  return vscode.Disposable.from(
+    vscode.languages.registerCodeActionsProvider(
+      { language: "vba", scheme: "file" },
+      new XlflowLineSuppressionCodeActionProvider(),
+      {
+        providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+      },
+    ),
   );
+}
+
+export function registerDocumentationCodeActions(): vscode.Disposable {
+  return vscode.Disposable.from(
+    vscode.commands.registerCommand(
+      "xlflow.generateDocumentationComment",
+      async (uri: vscode.Uri, range: vscode.Range, snippet: string) => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor === undefined || editor.document.uri.toString() !== uri.toString()) {
+          return;
+        }
+        await editor.insertSnippet(new vscode.SnippetString(snippet), range);
+      },
+    ),
+    vscode.languages.registerCodeActionsProvider(
+      { language: "vba", scheme: "file" },
+      new XlflowDocumentationCodeActionProvider(),
+      {
+        providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+      },
+    ),
+  );
+}
+
+class XlflowDocumentationCodeActionProvider implements vscode.CodeActionProvider {
+  public provideCodeActions(
+    document: vscode.TextDocument,
+    range: vscode.Range,
+  ): vscode.CodeAction[] {
+    const action = documentationCommentAction(document, range.start.line);
+    return action === undefined ? [] : [action];
+  }
+}
+
+export function documentationCommentAction(
+  document: vscode.TextDocument,
+  line: number,
+): vscode.CodeAction | undefined {
+  const marker = docCommentMarkerRange(document, line);
+  if (marker === undefined) {
+    return undefined;
+  }
+  const procedure = nextProcedureDeclaration(document, line + 1);
+  if (procedure === undefined) {
+    return undefined;
+  }
+  const snippet = documentationSnippet(procedure);
+  if (snippet === "") {
+    return undefined;
+  }
+  const action = new vscode.CodeAction(
+    vscode.l10n.t("Generate documentation comment for {0}", procedure.name),
+    vscode.CodeActionKind.QuickFix,
+  );
+  action.isPreferred = true;
+  action.command = {
+    command: "xlflow.generateDocumentationComment",
+    title: action.title,
+    arguments: [document.uri, marker, snippet],
+  };
+  return action;
+}
+
+function docCommentMarkerRange(
+  document: vscode.TextDocument,
+  line: number,
+): vscode.Range | undefined {
+  if (line < 0 || line >= document.lineCount) {
+    return undefined;
+  }
+  const text = document.lineAt(line).text;
+  if (!/^\s*'''$/.test(text)) {
+    return undefined;
+  }
+  return new vscode.Range(line, 0, line, text.length);
+}
+
+interface ProcedureDeclaration {
+  name: string;
+  kind: "sub" | "function" | "property_get" | "property_let" | "property_set";
+  parameters: string[];
+}
+
+function nextProcedureDeclaration(
+  document: vscode.TextDocument,
+  startLine: number,
+): ProcedureDeclaration | undefined {
+  for (let line = startLine; line < document.lineCount; line++) {
+    const logical = logicalDeclarationLine(document, line);
+    const trimmed = logical.text.trim();
+    if (
+      trimmed.length === 0 ||
+      /^'\s*@(?:ModuleDescription|Description|VariableDescription)\b/i.test(trimmed)
+    ) {
+      continue;
+    }
+    if (trimmed.startsWith("'")) {
+      return undefined;
+    }
+    return parseProcedureDeclaration(logical.text);
+  }
+  return undefined;
+}
+
+function logicalDeclarationLine(
+  document: vscode.TextDocument,
+  startLine: number,
+): { text: string; endLine: number } {
+  const parts: string[] = [];
+  let line = startLine;
+  for (; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const withoutContinuation = text.replace(/\s+_\s*$/, "");
+    parts.push(withoutContinuation);
+    if (withoutContinuation === text) {
+      break;
+    }
+  }
+  return { text: parts.join(" "), endLine: line };
+}
+
+export function parseProcedureDeclaration(text: string): ProcedureDeclaration | undefined {
+  const property =
+    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Property)\s+(Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?/i.exec(
+      text,
+    );
+  if (property !== null) {
+    const accessor = property[2].toLowerCase() as "get" | "let" | "set";
+    return {
+      name: property[3],
+      kind: `property_${accessor}`,
+      parameters: parseParameterNames(property[4] ?? ""),
+    };
+  }
+  const procedure =
+    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?/i.exec(
+      text,
+    );
+  if (procedure === null) {
+    return undefined;
+  }
+  return {
+    name: procedure[2],
+    kind: procedure[1].toLowerCase() === "sub" ? "sub" : "function",
+    parameters: parseParameterNames(procedure[3] ?? ""),
+  };
+}
+
+function parseParameterNames(parameters: string): string[] {
+  return parameters
+    .split(",")
+    .map((parameter) => {
+      const left = parameter.split("=")[0]?.trim() ?? "";
+      const withoutType = left.replace(/\s+As\s+.+$/i, "").trim();
+      const words = withoutType
+        .replace(/\([^)]*\)/g, "")
+        .trim()
+        .split(/\s+/)
+        .filter((word) => !/^(Optional|ByVal|ByRef|ParamArray)$/i.test(word));
+      return words.at(-1) ?? "";
+    })
+    .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+}
+
+export function documentationSnippet(procedure: ProcedureDeclaration): string {
+  return documentationSnippetText(procedure);
+}
+
+function documentationSnippetText(procedure: ProcedureDeclaration): string {
+  let index = 1;
+  const lines = [
+    `''' \${${index++}:${procedure.kind.startsWith("property_") ? "Property description." : "Summary."}}`,
+  ];
+  const args = procedure.kind === "property_get" ? [] : procedure.parameters;
+  if (args.length > 0) {
+    lines.push("'''", "''' Args:");
+    for (const arg of args) {
+      lines.push(
+        `'''     ${arg}: \${${index++}:${propertySetterKind(procedure.kind) ? "Value description." : "Parameter description."}}`,
+      );
+    }
+  }
+  if (procedure.kind === "function" || procedure.kind === "property_get") {
+    lines.push("'''", "''' Returns:");
+    lines.push(
+      `'''     \${${index++}:${procedure.kind === "property_get" ? "Returned property value description." : "Return value description."}}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function propertySetterKind(kind: ProcedureDeclaration["kind"]): boolean {
+  return kind === "property_let" || kind === "property_set";
 }
 
 class XlflowLineSuppressionCodeActionProvider implements vscode.CodeActionProvider {

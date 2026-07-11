@@ -127,6 +127,15 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
 
     const position = editor.selection.active;
     const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+    if (config.completionTriggerSuggestInStatements && isDocCommentSnippetPrefix(linePrefix)) {
+      this.clearPendingSuggest();
+      this.suggestTimer = setTimeout(() => {
+        this.suggestTimer = undefined;
+        void vscode.commands.executeCommand("editor.action.quickFix");
+      }, 75);
+      return;
+    }
+
     if (
       (config.completionTriggerSuggestInStatements && isStatementPrefix(linePrefix)) ||
       (config.completionProgIdsInStrings && isProgIdStringPrefix(linePrefix))
@@ -215,7 +224,7 @@ function toProtocolTrace(trace: TraceServer): Trace {
   }
 }
 
-function isStatementPrefix(linePrefix: string): boolean {
+export function isStatementPrefix(linePrefix: string): boolean {
   const typed = linePrefix.trimStart();
   if (typed.length === 0 || /[."'():=]/.test(typed)) {
     return false;
@@ -225,6 +234,10 @@ function isStatementPrefix(linePrefix: string): boolean {
   );
 }
 
-function isProgIdStringPrefix(linePrefix: string): boolean {
+export function isDocCommentSnippetPrefix(linePrefix: string): boolean {
+  return /^\s*'''$/.test(linePrefix);
+}
+
+export function isProgIdStringPrefix(linePrefix: string): boolean {
   return /\b(CreateObject|GetObject)\s*\(\s*"[^"]*$/i.test(linePrefix);
 }

@@ -9,12 +9,20 @@ import {
   normalizeAvailabilitySuccess,
 } from "../../src/cliAvailability";
 import {
+  documentationSnippet,
   diagnosticActionKey,
   diagnosticRuleCode,
   disableLineSuffix,
   disableNextLineComment,
+  parseProcedureDeclaration,
 } from "../../src/codeActions";
-import { lspCodeLensOptions, lspServerArgs } from "../../src/client";
+import {
+  isDocCommentSnippetPrefix,
+  isProgIdStringPrefix,
+  isStatementPrefix,
+  lspCodeLensOptions,
+  lspServerArgs,
+} from "../../src/client";
 import {
   isVbaSourcePath,
   mismatchedVbaLanguageDocuments,
@@ -225,6 +233,35 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: true }, undefined),
     ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
   );
+  assert.strictEqual(isStatementPrefix("Public Fu"), true);
+  assert.strictEqual(isStatementPrefix("    Dim "), true);
+  assert.strictEqual(isStatementPrefix("    ' comment"), false);
+  assert.strictEqual(isDocCommentSnippetPrefix("'''"), true);
+  assert.strictEqual(isDocCommentSnippetPrefix("    '''"), true);
+  assert.strictEqual(isDocCommentSnippetPrefix("    ''' summary"), false);
+  const parsedFunction = parseProcedureDeclaration(
+    "Public Function FindCustomer(ByVal customerCode As String) As Customer",
+  );
+  assert.ok(parsedFunction, "function declaration should parse");
+  assert.deepStrictEqual(parsedFunction, {
+    name: "FindCustomer",
+    kind: "function",
+    parameters: ["customerCode"],
+  });
+  assert.ok(
+    documentationSnippet(parsedFunction).includes("customerCode: ${2:Parameter description.}"),
+    "documentation snippet should include argument tab stop",
+  );
+  const parsedProperty = parseProcedureDeclaration(
+    "Public Property Get CurrentCustomer() As Customer",
+  );
+  assert.strictEqual(parsedProperty?.kind, "property_get");
+  assert.ok(
+    parsedProperty !== undefined && documentationSnippet(parsedProperty).includes("Returns:"),
+    "property get documentation snippet should include Returns",
+  );
+  assert.strictEqual(isProgIdStringPrefix('Set app = CreateObject("Excel.'), true);
+  assert.strictEqual(isProgIdStringPrefix('Debug.Print "Excel.'), false);
   assert.strictEqual(isVbaSourcePath("src/modules/Main.bas"), true);
   assert.strictEqual(isVbaSourcePath("src/classes/Invoice.cls"), true);
   assert.strictEqual(isVbaSourcePath("src/forms/Customer.frm"), true);

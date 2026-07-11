@@ -282,9 +282,9 @@ func GenerateSnippet(proc Procedure) Snippet {
 	if strings.TrimSpace(proc.Name) == "" || !snippetSupported(proc.Kind) {
 		return Snippet{}
 	}
-	placeholder := "処理の概要。"
+	placeholder := "Summary."
 	if strings.HasPrefix(strings.ToLower(proc.Kind), "property") {
-		placeholder = "プロパティの説明。"
+		placeholder = "Property description."
 	}
 	index := 1
 	var b strings.Builder
@@ -520,16 +520,16 @@ func snippetNeedsReturns(proc Procedure) bool {
 
 func argPlaceholder(kind string) string {
 	if strings.EqualFold(kind, "property_let") || strings.EqualFold(kind, "property_set") {
-		return "設定する値の説明。"
+		return "Value description."
 	}
-	return "引数の説明。"
+	return "Parameter description."
 }
 
 func returnPlaceholder(kind string) string {
 	if strings.EqualFold(kind, "property_get") {
-		return "取得される値の説明。"
+		return "Returned property value description."
 	}
-	return "戻り値の説明。"
+	return "Return value description."
 }
 
 func writeHeading(b *strings.Builder, heading string) {
