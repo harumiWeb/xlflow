@@ -19,7 +19,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/tliron/glsp`                |  `v0.2.2` | Apache-2.0        | `https://github.com/tliron/glsp/blob/v0.2.2/LICENSE`                 |
 | `github.com/tree-sitter/go-tree-sitter` | `v0.25.0` | MIT               | `https://github.com/tree-sitter/go-tree-sitter/blob/v0.25.0/LICENSE` |
 | `gopkg.in/yaml.v3`                      |  `v3.0.1` | MIT OR Apache-2.0 | `https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE`                |
-| `github.com/xuri/excelize/v2`           | `v2.10.1` | BSD-3-Clause      | `https://github.com/xuri/excelize/blob/v2.10.1/LICENSE`              |
+| `github.com/xuri/excelize/v2`           | `v2.11.0` | BSD-3-Clause      | `https://github.com/xuri/excelize/blob/v2.11.0/LICENSE`              |
 
 ## Indirect dependencies
 
@@ -41,7 +41,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/muesli/ansi`                |    `v0.0.0-20230316100256-276c6243b2f6` | MIT          | `https://github.com/muesli/ansi/blob/276c6243b2f6/LICENSE`                |
 | `github.com/muesli/cancelreader`        |                                `v0.2.2` | MIT          | `https://github.com/muesli/cancelreader/blob/v0.2.2/LICENSE`              |
 | `github.com/muesli/termenv`             |                               `v0.16.0` | MIT          | `https://github.com/muesli/termenv/blob/v0.16.0/LICENSE`                  |
-| `github.com/richardlehane/mscfb`        |                                `v1.0.6` | Apache-2.0   | `https://github.com/richardlehane/mscfb/blob/v1.0.6/LICENSE.txt`          |
+| `github.com/richardlehane/mscfb`        |                                `v1.0.7` | Apache-2.0   | `https://github.com/richardlehane/mscfb/blob/v1.0.7/LICENSE.txt`          |
 | `github.com/richardlehane/msoleps`      |                                `v1.0.6` | Apache-2.0   | `https://github.com/richardlehane/msoleps/blob/v1.0.6/LICENSE.txt`        |
 | `github.com/rivo/uniseg`                |                                `v0.4.7` | MIT          | `https://github.com/rivo/uniseg/blob/v0.4.7/LICENSE.txt`                  |
 | `github.com/spf13/pflag`                |                                `v1.0.9` | BSD-3-Clause | `https://github.com/spf13/pflag/blob/v1.0.9/LICENSE`                      |
@@ -49,10 +49,10 @@ This file is provided for attribution and licence review. It is not a substitute
 | `github.com/xo/terminfo`                |    `v0.0.0-20220910002029-abceb7e1c41e` | MIT          | `https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE`                |
 | `github.com/xuri/efp`                   |                                `v0.0.1` | BSD-3-Clause | `https://github.com/xuri/efp/blob/v0.0.1/LICENSE`                         |
 | `github.com/xuri/nfp`                   |  `v0.0.2-0.20250530014748-2ddeb826f9a9` | BSD-3-Clause | `https://github.com/xuri/nfp/blob/2ddeb826f9a9/LICENSE`                   |
-| `golang.org/x/crypto`                   |                               `v0.52.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.52.0:LICENSE`              |
-| `golang.org/x/net`                      |                               `v0.55.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.55.0:LICENSE`                 |
-| `golang.org/x/sys`                      |                               `v0.45.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.45.0:LICENSE`                 |
-| `golang.org/x/text`                     |                               `v0.37.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.37.0:LICENSE`                |
+| `golang.org/x/crypto`                   |                               `v0.53.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.53.0:LICENSE`              |
+| `golang.org/x/net`                      |                               `v0.56.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.56.0:LICENSE`                 |
+| `golang.org/x/sys`                      |                               `v0.46.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.46.0:LICENSE`                 |
+| `golang.org/x/text`                     |                               `v0.38.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.38.0:LICENSE`                |
 
 ## Scanner output notes
 
