@@ -584,6 +584,9 @@ func (a Analyzer) documentedSymbolHover(doc Document, pos Position, open []Docum
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
 	line := lineAt(doc.Source, pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
+	if annotationPrefix, replaceRange, ok := rubberduckAnnotationCompletionContext(line, prefix, pos); ok {
+		return rubberduckAnnotationCompletions(annotationPrefix, replaceRange), nil
+	}
 	if items, ok, err := a.documentationSnippetCompletions(doc, pos); ok || err != nil {
 		return items, err
 	}
@@ -760,6 +763,93 @@ func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([
 		Snippet:      true,
 		ReplaceRange: &replace,
 	}}, true, nil
+}
+
+func rubberduckAnnotationCompletionContext(line, prefix string, pos Position) (string, Range, bool) {
+	commentStart := commentStartIndex(prefix)
+	if commentStart < 0 {
+		return "", Range{}, false
+	}
+	commentPrefix := prefix[commentStart+1:]
+	trimmed := strings.TrimLeft(commentPrefix, " \t")
+	leading := len(commentPrefix) - len(trimmed)
+	if !strings.HasPrefix(trimmed, "@") {
+		return "", Range{}, false
+	}
+	annotationPrefix := currentAnnotationPrefix(trimmed)
+	if annotationPrefix == "" {
+		return "", Range{}, false
+	}
+	if len(trimmed) != len(annotationPrefix) {
+		return "", Range{}, false
+	}
+	startByte := commentStart + 1 + leading
+	endByte := startByte + len(annotationPrefix)
+	if endByte > len(prefix) {
+		endByte = len(prefix)
+	}
+	return annotationPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(line[:startByte])},
+		End:   Position{Line: pos.Line, Character: utf16Len(line[:endByte])},
+	}, true
+}
+
+func currentAnnotationPrefix(text string) string {
+	if !strings.HasPrefix(text, "@") {
+		return ""
+	}
+	end := 1
+	for end < len(text) {
+		r, size := utf8.DecodeRuneInString(text[end:])
+		if !isIdentRune(r) {
+			break
+		}
+		end += size
+	}
+	return text[:end]
+}
+
+func commentStartIndex(prefix string) int {
+	inString := false
+	for i := 0; i < len(prefix); i++ {
+		switch prefix[i] {
+		case '"':
+			if inString && i+1 < len(prefix) && prefix[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func rubberduckAnnotationCompletions(prefix string, replaceRange Range) []Completion {
+	specs := []syntaxCompletionSpec{
+		{
+			label:         "@Description",
+			detail:        "Rubberduck procedure description",
+			insertText:    `@Description("${1:Description.}")`,
+			documentation: "Adds a Rubberduck description annotation for the following procedure.",
+		},
+		{
+			label:         "@ModuleDescription",
+			detail:        "Rubberduck module description",
+			insertText:    `@ModuleDescription("${1:Module description.}")`,
+			documentation: "Adds a Rubberduck module description annotation.",
+		},
+		{
+			label:         "@VariableDescription",
+			detail:        "Rubberduck variable description",
+			insertText:    `@VariableDescription("${1:Variable description.}")`,
+			documentation: "Adds a Rubberduck variable description annotation for the following variable.",
+		},
+	}
+	return completionsFromSpecs(specs, prefix, replaceRange)
 }
 
 func (a Analyzer) nextDocumentationTarget(doc Document, line int) (Symbol, bool, error) {

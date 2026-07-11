@@ -360,6 +360,53 @@ func TestCompletionReturnsModuleDeclarationSnippet(t *testing.T) {
 	}
 }
 
+func TestCompletionReturnsRubberduckAnnotationSnippet(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\n'@D\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 1, Character: 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok := findCompletionItem(list.Items, "@Description")
+	if !ok {
+		t.Fatalf("@Description completion missing: %+v", list.Items)
+	}
+	if item.InsertTextFormat == nil || *item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("@Description insert text format = %+v, want snippet", item.InsertTextFormat)
+	}
+	edit, ok := item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("@Description text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.NewText != `@Description("${1:Description.}")` {
+		t.Fatalf("@Description new text = %q", edit.NewText)
+	}
+	if edit.Range.Start.Character != 1 || edit.Range.End.Character != 3 {
+		t.Fatalf("@Description text edit range = %+v", edit.Range)
+	}
+}
+
 func TestCompletionReturnsTypeCandidates(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
@@ -431,8 +478,9 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") ||
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "\"") ||
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "'") ||
+		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "@") ||
 		containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "P") {
-		t.Fatalf("completion trigger characters = %+v, want member and string-literal LSP completions only", initResult.Capabilities.CompletionProvider)
+		t.Fatalf("completion trigger characters = %+v, want supported LSP completion triggers", initResult.Capabilities.CompletionProvider)
 	}
 	if initResult.Capabilities.DocumentFormattingProvider == nil {
 		t.Fatalf("documentFormattingProvider was not advertised: %+v", initResult.Capabilities)

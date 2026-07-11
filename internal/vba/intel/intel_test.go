@@ -408,6 +408,63 @@ End Function
 	}
 }
 
+func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n'@D\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@D")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "@Description")
+	if !ok {
+		t.Fatalf("@Description completion missing: %+v", items)
+	}
+	if !item.Snippet || item.InsertText != `@Description("${1:Description.}")` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @Description completion: %+v", item)
+	}
+	if item.ReplaceRange.Start.Character != utf16Len("'") || item.ReplaceRange.End.Character != utf16Len("'@D") {
+		t.Fatalf("replace range = %+v", item.ReplaceRange)
+	}
+	if hasCompletion(items, "@ModuleDescription") {
+		t.Fatalf("@ModuleDescription should not match @D prefix: %+v", items)
+	}
+
+	source = "Option Explicit\n'@\n"
+	doc.Source = source
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing: %+v", want, items)
+		}
+	}
+}
+
+func TestRubberduckAnnotationCompletionIgnoresStrings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\nPublic Sub Run()\n    Debug.Print \"@D\"\nEnd Sub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(`    Debug.Print "@D`)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "@Description") {
+		t.Fatalf("annotation completion should not appear in strings: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\n'@Description(\"email@example.com\")\n"
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len(`'@Description("email@`)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "@Description") {
+		t.Fatalf("annotation completion should not appear inside annotation text: %+v", items)
+	}
+}
+
 func TestDocumentationMarkerSuppressesOrdinaryCompletionsWithoutTarget(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := "Option Explicit\n'''\nPub\n"

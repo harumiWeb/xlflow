@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added VS Code editor support for xlflow VBA documentation comments, including Quick Fix snippet generation from `'''`, doc-comment continuation on Enter, and highlighting for `'''` comments and Rubberduck description annotations.
+- Added VS Code editor support for xlflow VBA documentation comments, including Quick Fix snippet generation from `'''`, Rubberduck `@Description` annotation completions in comments, doc-comment continuation on Enter, and highlighting for `'''` comments and Rubberduck description annotations.
 
 ## v0.5.0
 
