@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -49,23 +50,25 @@ type ParseSummary struct {
 }
 
 type Symbol struct {
-	Name        string      `json:"name"`
-	Kind        string      `json:"kind"`
-	Visibility  string      `json:"visibility,omitempty"`
-	Module      string      `json:"module"`
-	File        string      `json:"file"`
-	Parent      string      `json:"parent,omitempty"`
-	StartLine   int         `json:"startLine"`
-	StartColumn int         `json:"startColumn"`
-	EndLine     int         `json:"endLine"`
-	EndColumn   int         `json:"endColumn"`
-	StartByte   int         `json:"startByte"`
-	EndByte     int         `json:"endByte"`
-	Signature   string      `json:"signature,omitempty"`
-	Attributes  []Attribute `json:"attributes,omitempty"`
-	Static      bool        `json:"static,omitempty"`
-	ReturnType  string      `json:"returnType,omitempty"`
-	Parameters  []Parameter `json:"parameters,omitempty"`
+	Name          string                          `json:"name"`
+	Kind          string                          `json:"kind"`
+	Visibility    string                          `json:"visibility,omitempty"`
+	Module        string                          `json:"module"`
+	File          string                          `json:"file"`
+	Parent        string                          `json:"parent,omitempty"`
+	StartLine     int                             `json:"startLine"`
+	StartColumn   int                             `json:"startColumn"`
+	EndLine       int                             `json:"endLine"`
+	EndColumn     int                             `json:"endColumn"`
+	StartByte     int                             `json:"startByte"`
+	EndByte       int                             `json:"endByte"`
+	Signature     string                          `json:"signature,omitempty"`
+	Attributes    []Attribute                     `json:"attributes,omitempty"`
+	Static        bool                            `json:"static,omitempty"`
+	ReturnType    string                          `json:"returnType,omitempty"`
+	Parameters    []Parameter                     `json:"parameters,omitempty"`
+	Documentation doccomments.SymbolDocumentation `json:"documentation,omitempty"`
+	DocStartLine  int                             `json:"docStartLine,omitempty"`
 }
 
 type Attribute struct {
@@ -394,6 +397,9 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 		Signature:   "Module " + e.moduleName,
 		Attributes:  e.attrs,
 	})
+	if doc, ok := doccomments.ModuleDocumentation(string(e.source)); ok {
+		e.symbols[len(e.symbols)-1].Documentation = doc
+	}
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		e.visit(root.NamedChild(i), "")
 	}
@@ -407,6 +413,7 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 	switch node.Kind() {
 	case "sub_declaration", "function_declaration", "property_declaration", "property_get_declaration", "property_let_declaration", "property_set_declaration":
 		sym := e.procedureSymbol(node)
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -432,16 +439,19 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		}
 		sym.ReturnType = typeText(node, e.source)
 		sym.Parameters = parameters(node, e.source)
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	case "type_declaration":
 		sym := e.simpleSymbol(node, "type", "")
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	case "enum_declaration":
 		sym := e.simpleSymbol(node, "enum", "")
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -527,6 +537,7 @@ func (e *extractor) constSymbols(node *tree_sitter.Node, parentProc string) {
 		sym.Visibility = visibilityText(node, e.source)
 		sym.Signature = firstLine(node.Utf8Text(e.source))
 		sym.ReturnType = typeText(child, e.source)
+		e.attachDocumentation(&sym, "variable")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -553,10 +564,23 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 		if hasField(node, "with_events_modifier") || hasWord(sym.Signature, "WithEvents") {
 			sym.Kind = "withevents_field"
 		}
+		e.attachDocumentation(&sym, "variable")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	}
+}
+
+func (e *extractor) attachDocumentation(sym *Symbol, rubberduckKinds ...string) {
+	if sym == nil || sym.StartLine <= 0 {
+		return
+	}
+	doc, startLine, ok := doccomments.DocumentationForTarget(string(e.source), sym.StartLine, rubberduckKinds...)
+	if !ok || !doccomments.HasDocumentation(doc) {
+		return
+	}
+	sym.Documentation = doc
+	sym.DocStartLine = startLine
 }
 
 func (e *extractor) parameterSymbols(node *tree_sitter.Node, parentProc string) []Symbol {

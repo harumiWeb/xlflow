@@ -430,6 +430,7 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if initResult.Capabilities.CompletionProvider == nil ||
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, ".") ||
 		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "\"") ||
+		!containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "'") ||
 		containsString(initResult.Capabilities.CompletionProvider.TriggerCharacters, "P") {
 		t.Fatalf("completion trigger characters = %+v, want member and string-literal LSP completions only", initResult.Capabilities.CompletionProvider)
 	}
@@ -581,6 +582,47 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	_ = serverConn.Close()
 	if !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) {
 		t.Fatalf("expected publishDiagnostics notification, got %v", recorder.methods())
+	}
+}
+
+func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "Option Explicit\nPublic Function FindCustomer(ByVal customerCode As String) As Customer\nEnd Function\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := pathToFileURI(path)
+
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 1, Character: 16},
+			End:   protocol.Position{Line: 1, Character: 28},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, ok := result.([]protocol.CodeAction)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("code actions = %T %+v, want one CodeAction", result, result)
+	}
+	edit := actions[0].Edit
+	if edit == nil || len(edit.Changes) != 1 {
+		t.Fatalf("code action edit = %+v", edit)
+	}
+	edits := edit.Changes[protocol.DocumentUri(uri)]
+	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "customerCode: ${2:引数の説明。}") || !strings.Contains(edits[0].NewText, "Returns:") {
+		t.Fatalf("unexpected code action edit: %+v", edits)
 	}
 }
 

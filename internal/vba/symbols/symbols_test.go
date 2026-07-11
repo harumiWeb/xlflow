@@ -109,6 +109,56 @@ End Sub
 	assertSymbol(t, privateFile.Symbols, "LocalLimit", "const")
 }
 
+func TestInspectAttachesDocCommentsAndRubberduckDescriptions(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:        t.TempDir(),
+		Path:           "Main.bas",
+		ModuleKind:     "standard",
+		IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+'@ModuleDescription("Provides sales aggregation.")
+Option Explicit
+
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     ws: Worksheet to aggregate.
+'''
+''' Returns:
+'''     Aggregated amount.
+'@Description("Rubberduck fallback")
+Public Function CalculateSales(ByVal ws As Worksheet) As Currency
+End Function
+
+'@Description("Legacy description.")
+Public Sub Legacy()
+End Sub
+
+'@VariableDescription("Current workbook.")
+Private currentWorkbook As Workbook
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	module := assertSymbol(t, file.Symbols, "Main", "module")
+	if module.Documentation.Summary != "Provides sales aggregation." {
+		t.Fatalf("module documentation = %+v", module.Documentation)
+	}
+	calc := assertSymbol(t, file.Symbols, "CalculateSales", "function")
+	if calc.Documentation.Summary != "Calculates sales for the requested sheet." || calc.Documentation.Parameters["ws"] == "" || calc.Documentation.Returns == "" {
+		t.Fatalf("function documentation = %+v", calc.Documentation)
+	}
+	legacy := assertSymbol(t, file.Symbols, "Legacy", "sub")
+	if legacy.Documentation.Summary != "Legacy description." || legacy.Documentation.Source != "rubberduck" {
+		t.Fatalf("legacy documentation = %+v", legacy.Documentation)
+	}
+	current := assertSymbol(t, file.Symbols, "currentWorkbook", "module_variable")
+	if current.Documentation.Summary != "Current workbook." {
+		t.Fatalf("variable documentation = %+v", current.Documentation)
+	}
+}
+
 func TestInspectExtractsSymbolsInsideConditionalCompilationBlocks(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

@@ -291,6 +291,82 @@ End Sub
 	}
 }
 
+func TestDocumentationFeedsHoverSignatureCompletionAndDiagnostics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     wss: typo.
+'''     ws: Worksheet to aggregate.
+'''     includeTax: True to include tax.
+'''
+''' Returns:
+'''     Aggregated amount.
+Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency
+End Function
+
+Public Sub Caller()
+    Dim ws As Worksheet
+    CalculateSales ws, 
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hover, err := analyzer.Hover(doc, Position{Line: 15, Character: utf16Len("    Calculate")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Calculates sales") || !strings.Contains(hover.Contents, "Worksheet to aggregate") || !strings.Contains(hover.Contents, "Aggregated amount") {
+		t.Fatalf("hover missing documentation: %+v", hover)
+	}
+
+	line := "    CalculateSales ws, "
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 15, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || help.ActiveParameter != 1 || !strings.Contains(help.Signatures[0].Documentation, "include tax") {
+		t.Fatalf("signature help documentation = %+v", help)
+	}
+
+	doc.Source = source + "\nSub Complete()\n    Calcul\nEnd Sub\n"
+	items, err := analyzer.Completions(doc, Position{Line: 19, Character: utf16Len("    Calcul")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "CalculateSales")
+	if !ok || !strings.Contains(item.Documentation, "Calculates sales") {
+		t.Fatalf("completion documentation missing: %+v", item)
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vb040 := diagnosticsByCode(diagnostics, "VB040")
+	if len(vb040) != 1 || !strings.Contains(vb040[0].Message, `Did you mean "ws"`) {
+		t.Fatalf("VB040 diagnostic missing suggestion: %+v", vb040)
+	}
+}
+
+func TestDocumentationSnippetCompletion(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+'''
+Public Function FindCustomer(ByVal customerCode As String) As Customer
+End Function
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'''")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "Generate documentation comment for FindCustomer")
+	if !ok {
+		t.Fatalf("documentation snippet missing: %+v", items)
+	}
+	if !item.Snippet || item.ReplaceRange == nil || !strings.Contains(item.InsertText, "customerCode: ${2:引数の説明。}") || !strings.Contains(item.InsertText, "Returns:") {
+		t.Fatalf("unexpected documentation snippet: %+v", item)
+	}
+}
+
 func TestSignatureHelpResolvesVBABuiltinFunction(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
