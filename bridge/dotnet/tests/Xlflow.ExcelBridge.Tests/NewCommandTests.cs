@@ -48,6 +48,25 @@ public sealed class NewCommandTests
         Assert.Equal("new_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
+    [Theory]
+    [InlineData(@"C:\work\Book.xlsm", 52)]
+    [InlineData(@"C:\work\Book.XLSM", 52)]
+    [InlineData(@"C:\work\Addin.xlam", 55)]
+    [InlineData(@"C:\work\Addin.XLAM", 55)]
+    public void FileFormatForWorkbookPathUsesWorkbookExtension(string workbookPath, int expected)
+    {
+        Assert.Equal(expected, ExcelNewService.FileFormatForWorkbookPath(workbookPath));
+    }
+
+    [Fact]
+    public void FileFormatForWorkbookPathRejectsUnsupportedExtension()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ExcelNewService.FileFormatForWorkbookPath(@"C:\work\Book.xlsx"));
+
+        Assert.Contains("unsupported workbook extension: .xlsx", ex.Message);
+    }
+
     private sealed class FakeNewService(Func<BridgeRequest, NewCommandArguments, BridgeResponse> handler) : INewService
     {
         public BridgeResponse Execute(BridgeRequest request, NewCommandArguments args, CancellationToken cancellationToken) => handler(request, args);

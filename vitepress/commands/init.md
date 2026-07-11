@@ -1,6 +1,6 @@
 # xlflow init
 
-Initialize an xlflow project from an existing workbook.
+Initialize an xlflow project from an existing workbook or Excel add-in.
 
 ## Usage
 
@@ -12,7 +12,7 @@ xlflow init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no
 
 | Option / argument    | Description                                                      | Default  |
 | -------------------- | ---------------------------------------------------------------- | -------- |
-| `workbook`           | Existing workbook to bind to the new project.                    | required |
+| `workbook`           | Existing workbook or add-in to bind to the new project.          | required |
 | `--with-module`      | Add bundled helper modules and push them to the copied workbook. | false    |
 | `--with-skill`       | Install the bundled AI-agent skill.                              | false    |
 | `--agent <provider>` | Choose the agent skill provider.                                 | -        |
@@ -22,6 +22,7 @@ xlflow init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no
 
 ```bash
 xlflow init LegacyBook.xlsm
+xlflow init LegacyAddin.xlam
 xlflow init LegacyBook.xlsm --with-module
 xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 ```
@@ -30,6 +31,8 @@ xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 
 > [!IMPORTANT]
 > Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
+
+`init` copies the input workbook into `build/` without changing its filename or extension. For example, `xlflow init LegacyAddin.xlam` writes `build/LegacyAddin.xlam` and records that path in `xlflow.toml`.
 
 ::: tip
 Use `--with-module` when the imported workbook should immediately gain `XlflowAssert`, `XlflowRuntime`, `XlflowUI`, and `XlflowDebug` helpers for workbook-side tests, headless runs, scripted dialogs, and terminal-visible logging.
@@ -47,7 +50,7 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 {
   "status": "ok",
   "command": "init",
-  "workbook": "LegacyBook.xlsm",
+  "workbook": "build/LegacyAddin.xlam",
   "config": "xlflow.toml"
 }
 ```

@@ -17,6 +17,8 @@ After `xlflow new Book.xlsm`, the project contains:
 - `xlflow.toml` as the project config
 - `src/` as the exported VBA source tree you edit
 
+Use `xlflow new MyAddin.xlam` when the managed file should be an Excel add-in instead of the default `.xlsm` workbook.
+
 Edit files under `src/`, then import those changes back into the workbook with:
 
 ```bash

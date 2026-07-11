@@ -1237,7 +1237,7 @@ func (a *app) newCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "new [workbook]",
-		Short: "Create a new xlflow project and macro workbook",
+		Short: "Create a new xlflow project and macro workbook or add-in",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.writeScaffoldWelcome("new", noUpdateCheck); err != nil {
@@ -1326,7 +1326,7 @@ func (a *app) initCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init <workbook>",
-		Short: "Create an xlflow project from an existing macro workbook",
+		Short: "Create an xlflow project from an existing macro workbook or add-in",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.writeScaffoldWelcome("init", noUpdateCheck); err != nil {

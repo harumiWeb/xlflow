@@ -32,7 +32,7 @@ public sealed class ExcelNewService : INewService
             app.Visible = false;
             app.DisplayAlerts = false;
             workbook = app.Workbooks.Add();
-            ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveAs", workbookPath, 52);
+            ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveAs", workbookPath, FileFormatForWorkbookPath(workbookPath));
 
             return new BridgeResponse
             {
@@ -67,5 +67,16 @@ public sealed class ExcelNewService : INewService
             ExcelBridgeSupport.ReleaseComObject(workbook);
             ExcelBridgeSupport.ReleaseComObject(excel);
         }
+    }
+
+    internal static int FileFormatForWorkbookPath(string workbookPath)
+    {
+        var extension = Path.GetExtension(workbookPath);
+        return extension.ToLowerInvariant() switch
+        {
+            ".xlsm" => 52,
+            ".xlam" => 55,
+            _ => throw new InvalidOperationException($"unsupported workbook extension: {extension}"),
+        };
     }
 }
