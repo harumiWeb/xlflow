@@ -96,6 +96,12 @@ The main features include:
 <small>Static type inference for objects created via late binding `CreateObject`.</small>
 </p>
 
+![Documentation string support](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/docstrings.png)
+
+<p align="center">
+<small>Generate and hover over documentation strings</small>
+</p>
+
 ## Target Use Cases
 
 This extension is designed for Excel VBA development scenarios such as:
