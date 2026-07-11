@@ -1,6 +1,6 @@
-ignoredBuiltDependencies:
-  - "@vscode/vsce-sign"
-  - esbuild
-  - keytar
+allowBuilds:
+  "@vscode/vsce-sign": true
+  esbuild: true
+  keytar: true
 
 minimumReleaseAge: 1440
