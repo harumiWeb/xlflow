@@ -767,6 +767,56 @@ func TestRunnerDotNetEditCellUsesDotNetProviderAndPreservesEnvelopeFields(t *tes
 	}
 }
 
+func TestRunnerDotNetEditSheetAddUsesDotNetProviderAndPreservesEnvelopeFields(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	var requests []excelbridge.Request
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			supports: true,
+			requests: &requests,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"edit","logs":["Created worksheet: Dashboard"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"dirty":true,"needs_save":true},"edit":{"kind":"sheet","sheet":"Dashboard","created":true,"after":"Invoices"}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.EditSheetAdd(config.Default(), EditSheetAddOptions{
+		Name:      "Dashboard",
+		After:     "Invoices",
+		IfMissing: true,
+		Session:   true,
+		Keepalive: CommandOptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("request count = %d, want 1", len(requests))
+	}
+	args := requests[0].Args
+	for key, want := range map[string]string{
+		"Action":     "sheet_add",
+		"Name":       "Dashboard",
+		"After":      "Invoices",
+		"IfMissing":  "true",
+		"UseSession": "true",
+	} {
+		if got := args[key]; got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if _, ok := args["Before"]; ok {
+		t.Fatalf("Before unexpectedly set: %#v", args)
+	}
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Edit == nil {
+		t.Fatalf("expected edit sheet add envelope fields to be populated: %+v", env)
+	}
+}
+
 func TestRunnerRejectsDotNetProtocolMismatch(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })

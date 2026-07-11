@@ -96,6 +96,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Use `xlflow edit range --sheet <name> --range <A1:B2> --fill <#RRGGBB> --session --json` or `--clear contents|formats|all` to reset workbook state between iterations.
    - Apply an explicit formula pattern derived from a snapshot with `xlflow edit formula --sheet <name> --range <A1:B2> --formula-r1c1 <formula> --session --json`.
    - Use `xlflow edit rows --sheet <name> --rows <1:31> --height <points> --session --json` and `xlflow edit columns --sheet <name> --columns <A:AE> --width <chars> --session --json` for visual tuning before `export-image`.
+   - Use `xlflow edit sheet add --name <name> --if-missing --session --json` to create workbook structure before writing ranges, formulas, buttons, or VBA.
 
 - Use `xlflow inspect workbook --json` for saved-file metadata, or `xlflow inspect workbook --session --json` for the live workbook state in Excel.
 - Use `xlflow inspect sheets --json` for saved-file sheet metadata, or `xlflow inspect sheets --session --json` for the live workbook state in Excel.

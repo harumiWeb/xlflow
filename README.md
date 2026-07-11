@@ -550,7 +550,7 @@ You can install it from the [Visual Studio Marketplace](https://marketplace.visu
 | `form export-image` | Export a runtime UserForm to a PNG image                                | `xlflow form export-image UserForm1 --out artifacts/UserForm1.png --json`    |
 | `run`               | Execute a macro from the CLI                                            | `xlflow run Main.Run --json`                                                 |
 | `export-image`      | Export a worksheet range to a PNG image                                 | `xlflow export-image --sheet QR --range A1:AE31 --json`                      |
-| `edit`              | Mutate a live session workbook for setup and tuning                     | `xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json`   |
+| `edit`              | Mutate a live session workbook for setup and tuning                     | `xlflow edit sheet add --name Config --if-missing --session --json`          |
 | `test`              | Run VBA tests                                                           | `xlflow test --json`                                                         |
 | `diff`              | Compare workbook content and optional VBA source                        | `xlflow diff before.xlsm after.xlsm --json`                                  |
 | `inspect`           | Inspect saved workbook snapshots or explicit live session state         | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |

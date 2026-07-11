@@ -16,7 +16,7 @@ public sealed class ExcelEditService : IEditService
         {
             return Failure(request, "edit_args_invalid", "-Action is required.");
         }
-        if (args.Action is not ("cell" or "range" or "formula" or "rows" or "columns"))
+        if (args.Action is not ("cell" or "range" or "formula" or "rows" or "columns" or "sheet_add"))
         {
             return Failure(request, "edit_args_invalid", "Unsupported edit action: " + args.Action);
         }
@@ -41,6 +41,11 @@ public sealed class ExcelEditService : IEditService
             workbook = attached.Workbook;
             sessionMode = attached.SessionMode;
             UpdateSaveState(workbook, ref dirty, ref needsSave);
+
+            if (args.Action == "sheet_add")
+            {
+                return EditSheetAdd(request, args, excel, workbook, workbookPath, sessionMode, dirty, needsSave);
+            }
 
             worksheet = GetWorksheet(workbook, args.Sheet);
             if (worksheet is null)
@@ -67,6 +72,124 @@ public sealed class ExcelEditService : IEditService
             ExcelBridgeSupport.ReleaseComObject(worksheet);
             ExcelBridgeSupport.ReleaseComObject(workbook);
             ExcelBridgeSupport.ReleaseComObject(excel);
+        }
+    }
+
+    private static BridgeResponse EditSheetAdd(BridgeRequest request, EditCommandArguments args, object excel, object workbook, string workbookPath, string sessionMode, bool? dirty, bool needsSave)
+    {
+        var name = (args.Name ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_args_invalid", "-Name is required.", "xlflow");
+        }
+        if (!string.IsNullOrWhiteSpace(args.Before) && !string.IsNullOrWhiteSpace(args.After))
+        {
+            return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_args_invalid", "-Before and -After cannot be combined.", "xlflow");
+        }
+
+        object? existing = null;
+        object? beforeTarget = null;
+        object? afterTarget = null;
+        object? worksheets = null;
+        object? newWorksheet = null;
+        try
+        {
+            existing = GetWorksheet(workbook, name);
+            if (existing is not null)
+            {
+                if (!args.IfMissing)
+                {
+                    return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "sheet_exists", $"Worksheet \"{name}\" already exists. Use --if-missing to treat this as success.", "Excel");
+                }
+
+                var existingExtensions = BaseSheetEditExtensions(workbookPath, sessionMode, dirty, needsSave, name);
+                existingExtensions["edit"] = MergeMutation(
+                    (Dictionary<string, object?>)existingExtensions["edit"]!,
+                    new Dictionary<string, object?>
+                    {
+                        ["created"] = false,
+                        ["message"] = "Worksheet already exists.",
+                    });
+                return Success(request, workbookPath, sessionMode, dirty, needsSave, existingExtensions, [$"Worksheet already exists: {name}"]);
+            }
+
+            var before = (args.Before ?? "").Trim();
+            var after = (args.After ?? "").Trim();
+            if (before.Length > 0)
+            {
+                beforeTarget = GetWorksheet(workbook, before);
+                if (beforeTarget is null)
+                {
+                    return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "sheet_not_found", $"Worksheet not found: {before}", "Excel");
+                }
+            }
+            if (after.Length > 0)
+            {
+                afterTarget = GetWorksheet(workbook, after);
+                if (afterTarget is null)
+                {
+                    return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "sheet_not_found", $"Worksheet not found: {after}", "Excel");
+                }
+            }
+
+            worksheets = ExcelBridgeSupport.Get(workbook, "Worksheets");
+            dynamic sheets = worksheets!;
+            if (beforeTarget is not null)
+            {
+                newWorksheet = (object?)sheets.Add(Before: beforeTarget);
+            }
+            else
+            {
+                if (afterTarget is null)
+                {
+                    var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(worksheets!, "Count"));
+                    afterTarget = (object?)sheets.Item(count);
+                }
+                newWorksheet = (object?)sheets.Add(After: afterTarget);
+            }
+
+            try
+            {
+                SetMember(newWorksheet!, "Name", name);
+            }
+            catch (Exception ex)
+            {
+                DeletePartialWorksheet(excel, newWorksheet);
+                return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_sheet_name", $"Worksheet name \"{name}\" is invalid: {ExcelBridgeSupport.FormatExceptionDetail(ex)}", ex.Source ?? "Excel");
+            }
+
+            UpdateSaveState(workbook, ref dirty, ref needsSave);
+            var extensions = BaseSheetEditExtensions(workbookPath, sessionMode, dirty, needsSave, name);
+            var edit = new Dictionary<string, object?>
+            {
+                ["created"] = true,
+                ["mutation"] = new Dictionary<string, object?>
+                {
+                    ["worksheet"] = new Dictionary<string, object?> { ["created"] = true, ["name"] = name },
+                },
+            };
+            if (before.Length > 0)
+            {
+                edit["before"] = before;
+            }
+            if (after.Length > 0)
+            {
+                edit["after"] = after;
+            }
+            extensions["edit"] = MergeMutation((Dictionary<string, object?>)extensions["edit"]!, edit);
+            return Success(request, workbookPath, sessionMode, dirty, needsSave, extensions, [$"Created worksheet: {name}", SaveHint]);
+        }
+        catch (Exception ex)
+        {
+            return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_failed", ExcelBridgeSupport.FormatExceptionDetail(ex), ex.Source ?? "xlflow-excel-bridge");
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(newWorksheet);
+            ExcelBridgeSupport.ReleaseComObject(afterTarget);
+            ExcelBridgeSupport.ReleaseComObject(beforeTarget);
+            ExcelBridgeSupport.ReleaseComObject(existing);
+            ExcelBridgeSupport.ReleaseComObject(worksheets);
         }
     }
 
@@ -554,6 +677,17 @@ public sealed class ExcelEditService : IEditService
         };
     }
 
+    private static Dictionary<string, object?> BaseSheetEditExtensions(string workbookPath, string sessionMode, bool? dirty, bool needsSave, string sheet)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["target"] = ExcelBridgeSupport.BuildTargetPayload("live_session", workbookPath),
+            ["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, sessionMode, dirty, needsSave),
+            ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, sessionMode, true, false, dirty, needsSave),
+            ["edit"] = new Dictionary<string, object?> { ["kind"] = "sheet", ["sheet"] = sheet },
+        };
+    }
+
     private static void RefreshEditStateExtensions(Dictionary<string, object?> extensions, string workbookPath, string sessionMode, bool? dirty, bool needsSave)
     {
         extensions["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, sessionMode, dirty, needsSave);
@@ -615,6 +749,46 @@ public sealed class ExcelEditService : IEditService
         catch (Exception)
         {
             return null;
+        }
+    }
+
+    private static void DeletePartialWorksheet(object excel, object? worksheet)
+    {
+        if (worksheet is null)
+        {
+            return;
+        }
+        bool? displayAlerts = null;
+        try
+        {
+            dynamic app = excel;
+            displayAlerts = Convert.ToBoolean(app.DisplayAlerts, CultureInfo.InvariantCulture);
+            app.DisplayAlerts = false;
+        }
+        catch (Exception)
+        {
+        }
+        try
+        {
+            dynamic ws = worksheet;
+            ws.Delete();
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            if (displayAlerts.HasValue)
+            {
+                try
+                {
+                    dynamic app = excel;
+                    app.DisplayAlerts = displayAlerts.Value;
+                }
+                catch (Exception)
+                {
+                }
+            }
         }
     }
 
@@ -847,6 +1021,9 @@ public sealed class ExcelEditService : IEditService
                 return;
             case "ColumnWidth":
                 dyn.ColumnWidth = value;
+                return;
+            case "Name":
+                dyn.Name = value;
                 return;
             default:
                 ExcelBridgeSupport.Set(comObject, memberName, value);

@@ -10,6 +10,7 @@ xlflow edit range --sheet <sheet> --range <addr> --fill <color> --session
 xlflow edit formula --sheet <sheet> --range <addr> --formula-r1c1 <formula> --session
 xlflow edit rows --sheet <sheet> --rows <rows> --height <points> --session
 xlflow edit columns --sheet <sheet> --columns <cols> --width <characters> --session
+xlflow edit sheet add --name <sheet> --session
 ```
 
 ## Options and Arguments
@@ -21,7 +22,12 @@ xlflow edit columns --sheet <sheet> --columns <cols> --width <characters> --sess
 | `formula`                  | Edit formulas across a rectangular range.                            | -                                  |
 | `rows`                     | Set row height on a worksheet.                                       | -                                  |
 | `columns`                  | Set column width on a worksheet.                                     | -                                  |
+| `sheet add`                | Create a worksheet.                                                  | -                                  |
 | `--sheet <name>`           | Target worksheet.                                                    | required                           |
+| `--name <name>`            | Worksheet name to create.                                            | required for `sheet add`           |
+| `--before <name>`          | Insert the new worksheet before an existing worksheet.               | -                                  |
+| `--after <name>`           | Insert the new worksheet after an existing worksheet.                | -                                  |
+| `--if-missing`             | Succeed without creating a duplicate when the worksheet exists.      | false                              |
 | `--cell <addr>`            | Single A1 cell address.                                              | required for `cell`                |
 | `--range <addr>`           | A1 range address.                                                    | required for `range` and `formula` |
 | `--rows <selector>`        | Row selector such as `1` or `1:31`.                                  | required for `rows`                |
@@ -44,6 +50,8 @@ xlflow edit cell --sheet Input --cell B2 --value ABC123 --session --json
 xlflow edit cell --sheet Input --cell C2 --formula "=LEN(B2)" --session --json
 xlflow edit range --sheet QR --range A1:AE31 --fill "#FFFFFF" --session --json
 xlflow edit formula --sheet Invoice --range D2:D1001 --formula-r1c1 "=RC[-2]*RC[-1]" --session --json
+xlflow edit sheet add --name Config --if-missing --session --json
+xlflow edit sheet add --name Dashboard --after Invoices --session --json
 ```
 
 ## Notes
@@ -53,7 +61,9 @@ xlflow edit formula --sheet Invoice --range D2:D1001 --formula-r1c1 "=RC[-2]*RC[
 
 `edit formula --formula-r1c1` is the recommended way to apply repeated formula patterns from `xlflow formulas pull` region snapshots. `--formula` assigns A1-style formulas using Excel's normal range formula semantics.
 
-`edit cell|range|formula|rows|columns` uses the `.NET` bridge on Windows in `auto` mode.
+`edit sheet add` appends the new worksheet after the last worksheet by default. Use exactly one of `--before` or `--after` for positioned insertion.
+
+`edit cell|range|formula|rows|columns|sheet add` uses the `.NET` bridge on Windows in `auto` mode.
 
 ::: warning
 Treat edit payloads as workbook mutations. Use disposable sessions or backups for destructive experiments.
@@ -75,6 +85,22 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
     "formula": "=RC[-2]*RC[-1]",
     "cells_updated": 1000,
     "calculated": false
+  },
+  "session": { "dirty": true }
+}
+```
+
+Worksheet creation success:
+
+```json
+{
+  "status": "ok",
+  "command": "edit",
+  "edit": {
+    "kind": "sheet",
+    "sheet": "Dashboard",
+    "created": true,
+    "after": "Invoices"
   },
   "session": { "dirty": true }
 }
