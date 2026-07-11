@@ -44,11 +44,14 @@ public sealed class EditCommand : ICommandHandler
             ValueSpecified: BridgePayload.HasProperty(request.Payload, "Value"),
             Formula: BridgePayload.GetString(request.Payload, "Formula") ?? "",
             FormulaSpecified: BridgePayload.HasProperty(request.Payload, "Formula"),
+            FormulaR1C1: BridgePayload.GetString(request.Payload, "FormulaR1C1") ?? "",
+            FormulaR1C1Specified: BridgePayload.HasProperty(request.Payload, "FormulaR1C1"),
             Fill: BridgePayload.GetString(request.Payload, "Fill") ?? "",
             Clear: BridgePayload.GetString(request.Payload, "Clear") ?? "",
             Height: BridgePayload.GetString(request.Payload, "Height") ?? "",
             Width: BridgePayload.GetString(request.Payload, "Width") ?? "",
             Events: BridgePayload.GetString(request.Payload, "Events") ?? "",
+            Calculate: BridgePayload.GetBool(request.Payload, "Calculate"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
             MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
         return _service.Execute(request, args, cancellationToken);

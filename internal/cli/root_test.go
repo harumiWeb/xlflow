@@ -2483,6 +2483,7 @@ func TestRootCommandIncludesEditCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"edit", "cell"},
 		{"edit", "range"},
+		{"edit", "formula"},
 		{"edit", "rows"},
 		{"edit", "columns"},
 	} {
@@ -2502,6 +2503,15 @@ func TestRootCommandIncludesEditCommands(t *testing.T) {
 	for _, name := range []string{"sheet", "cell", "value", "formula", "fill", "events", "session"} {
 		if cell.Flags().Lookup(name) == nil {
 			t.Fatalf("expected edit cell to define --%s", name)
+		}
+	}
+	formula, _, err := root.Find([]string{"edit", "formula"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sheet", "range", "formula", "formula-r1c1", "events", "calculate", "session"} {
+		if formula.Flags().Lookup(name) == nil {
+			t.Fatalf("expected edit formula to define --%s", name)
 		}
 	}
 }
@@ -2694,6 +2704,46 @@ func TestBuildEditRangeOptionsValidatesAndNormalizes(t *testing.T) {
 	}
 	if _, err := buildEditRangeOptions("", "QR", "A1:B2", "#fff", "", false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
 		t.Fatalf("expected session requirement error, got %v", err)
+	}
+}
+
+func TestBuildEditFormulaOptionsValidatesAndNormalizes(t *testing.T) {
+	formula := "=RC[-2]*RC[-1]"
+	opts, err := buildEditFormulaOptions(" build\\Book.xlsm ", " Invoice ", "d1001:d2", " off ", nil, &formula, true, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkbookPath != "build\\Book.xlsm" || opts.Sheet != "Invoice" || opts.Range != "D2:D1001" {
+		t.Fatalf("unexpected normalized edit formula opts: %#v", opts)
+	}
+	if opts.FormulaR1C1 == nil || *opts.FormulaR1C1 != "=RC[-2]*RC[-1]" {
+		t.Fatalf("formula-r1c1 = %#v", opts.FormulaR1C1)
+	}
+	if opts.Events != excel.EditEventOff || !opts.Calculate || !opts.Session {
+		t.Fatalf("unexpected formula event/calculate/session opts: %#v", opts)
+	}
+}
+
+func TestBuildEditFormulaOptionsRejectsInvalidCombinations(t *testing.T) {
+	formula := "=B2*C2"
+	formulaR1C1 := "=RC[-2]*RC[-1]"
+	if _, err := buildEditFormulaOptions("", "Invoice", "D2:D1001", "keep", nil, &formulaR1C1, false, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditFormulaOptions("", "", "D2:D1001", "keep", nil, &formulaR1C1, false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--sheet") {
+		t.Fatalf("expected sheet error, got %v", err)
+	}
+	if _, err := buildEditFormulaOptions("", "Invoice", "", "keep", nil, &formulaR1C1, false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--range") {
+		t.Fatalf("expected range error, got %v", err)
+	}
+	if _, err := buildEditFormulaOptions("", "Invoice", "D2:D1001", "keep", nil, nil, false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected missing formula error, got %v", err)
+	}
+	if _, err := buildEditFormulaOptions("", "Invoice", "D2:D1001", "keep", &formula, &formulaR1C1, false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected formula conflict, got %v", err)
+	}
+	if _, err := buildEditFormulaOptions("", "Invoice", "D2:D1001", "bad", nil, &formulaR1C1, false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--events") {
+		t.Fatalf("expected events error, got %v", err)
 	}
 }
 

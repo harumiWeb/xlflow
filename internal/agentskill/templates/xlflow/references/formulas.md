@@ -52,6 +52,14 @@ xlflow formulas inspect --dir ./formula-snapshot --summary --json
 
 `formulas inspect` reads existing snapshot files only. It does not open Excel, evaluate formulas, recalculate, or mutate workbook/source files.
 
+To apply a formula pattern to a live workbook range, use `edit formula` during an xlflow session:
+
+```bash
+xlflow edit formula --sheet Invoice --range D2:D1001 --formula-r1c1 '=RC[-2]*RC[-1]' --session --json
+```
+
+Prefer `--formula-r1c1` for repeated regions because it maps directly to `formula_r1c1` in `*.regions.jsonl`. Use `--formula` only when you intentionally want Excel's normal A1 range assignment semantics. Save the session before `formulas pull` if you need the refreshed snapshot to include the edit.
+
 ## Output Layout
 
 ```text

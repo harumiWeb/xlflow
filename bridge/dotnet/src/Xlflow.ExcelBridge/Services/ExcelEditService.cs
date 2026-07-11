@@ -16,7 +16,7 @@ public sealed class ExcelEditService : IEditService
         {
             return Failure(request, "edit_args_invalid", "-Action is required.");
         }
-        if (args.Action is not ("cell" or "range" or "rows" or "columns"))
+        if (args.Action is not ("cell" or "range" or "formula" or "rows" or "columns"))
         {
             return Failure(request, "edit_args_invalid", "Unsupported edit action: " + args.Action);
         }
@@ -52,6 +52,7 @@ public sealed class ExcelEditService : IEditService
             {
                 "cell" => EditCell(request, args, excel, workbook, worksheet, workbookPath, sessionMode, dirty, needsSave),
                 "range" => EditRange(request, args, workbook, worksheet, workbookPath, sessionMode, dirty, needsSave),
+                "formula" => EditFormula(request, args, excel, workbook, worksheet, workbookPath, sessionMode, dirty, needsSave),
                 "rows" => EditRows(request, args, workbook, worksheet, workbookPath, sessionMode, dirty, needsSave),
                 _ => EditColumns(request, args, workbook, worksheet, workbookPath, sessionMode, dirty, needsSave),
             };
@@ -217,6 +218,150 @@ public sealed class ExcelEditService : IEditService
 
             var mutationLabel = valueRequested ? "value" : "formula";
             return Success(request, workbookPath, sessionMode, dirty, needsSave, extensions, [$"edited {GetWorksheetName(worksheet)}!{cellAddress} {mutationLabel} in the live Excel session", SaveHint]);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(range);
+        }
+    }
+
+    private static BridgeResponse EditFormula(BridgeRequest request, EditCommandArguments args, object excel, object workbook, object worksheet, string workbookPath, string sessionMode, bool? dirty, bool needsSave)
+    {
+        object? range = null;
+        try
+        {
+            try
+            {
+                dynamic ws = worksheet;
+                range = (object?)ws.Range(args.RangeAddress);
+            }
+            catch (Exception)
+            {
+                return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_range", $"Range '{args.RangeAddress}' is invalid for sheet '{args.Sheet}'.", "Excel");
+            }
+
+            var a1Requested = args.FormulaSpecified;
+            var r1c1Requested = args.FormulaR1C1Specified;
+            if (a1Requested == r1c1Requested)
+            {
+                return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_args_invalid", "Exactly one of -Formula or -FormulaR1C1 is required.", "xlflow");
+            }
+
+            var eventMode = NormalizeEventMode(args.Events);
+            if (eventMode is null)
+            {
+                return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "edit_args_invalid", "-Events must be keep, on, or off.", "xlflow");
+            }
+
+            var normalizedRange = GetAddress(range!) ?? args.RangeAddress;
+            var affectedCells = RangeCellCount(range!);
+            var formulaMode = r1c1Requested ? "r1c1" : "a1";
+            var formulaText = r1c1Requested ? args.FormulaR1C1 : args.Formula;
+            var extensions = BaseEditExtensions(workbookPath, sessionMode, dirty, needsSave, "formula", GetWorksheetName(worksheet), "range", normalizedRange);
+
+            bool? enableEventsBefore = null;
+            bool? enableEventsAfter = null;
+            bool? restored = null;
+            try
+            {
+                enableEventsBefore = Convert.ToBoolean(GetMember(excel, "EnableEvents"), CultureInfo.InvariantCulture);
+                if (eventMode == "on")
+                {
+                    SetMember(excel, "EnableEvents", true);
+                }
+                else if (eventMode == "off")
+                {
+                    SetMember(excel, "EnableEvents", false);
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            try
+            {
+                try
+                {
+                    if (r1c1Requested)
+                    {
+                        SetMember(range!, "FormulaR1C1", args.FormulaR1C1);
+                    }
+                    else
+                    {
+                        SetMember(range!, "Formula", args.Formula);
+                    }
+                    if (args.Calculate)
+                    {
+                        ExcelBridgeSupport.InvokeMethod(range!, "Calculate");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_formula", "Formula assignment failed: " + ExcelBridgeSupport.FormatExceptionDetail(ex), ex.Source ?? "Excel");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    enableEventsAfter = Convert.ToBoolean(GetMember(excel, "EnableEvents"), CultureInfo.InvariantCulture);
+                    if (enableEventsBefore.HasValue && eventMode != "keep")
+                    {
+                        SetMember(excel, "EnableEvents", enableEventsBefore.Value);
+                        restored = true;
+                    }
+                    else
+                    {
+                        restored = true;
+                    }
+                }
+                catch (Exception)
+                {
+                    restored = false;
+                }
+            }
+
+            var events = new Dictionary<string, object?>
+            {
+                ["mode"] = eventMode,
+                ["enable_events_before"] = enableEventsBefore,
+                ["enable_events_after"] = enableEventsAfter,
+                ["restored"] = restored,
+            };
+            var mutation = new Dictionary<string, object?>
+            {
+                ["formula"] = new Dictionary<string, object?>
+                {
+                    ["formula_mode"] = formulaMode,
+                    ["formula"] = formulaText,
+                    ["after"] = formulaText,
+                    ["cells_updated"] = affectedCells,
+                    ["calculated"] = args.Calculate,
+                },
+                ["formula_mode"] = formulaMode,
+                ["formula_text"] = formulaText,
+                ["cells_updated"] = affectedCells,
+                ["calculated"] = args.Calculate,
+                ["events"] = events,
+            };
+
+            UpdateSaveState(workbook, ref dirty, ref needsSave);
+            RefreshEditStateExtensions(extensions, workbookPath, sessionMode, dirty, needsSave);
+            var edit = (Dictionary<string, object?>)extensions["edit"]!;
+            edit["formula_mode"] = formulaMode;
+            edit["formula"] = formulaText;
+            edit["cells_updated"] = affectedCells;
+            edit["calculated"] = args.Calculate;
+            edit["events"] = events;
+            extensions["edit"] = MergeMutation(
+                edit,
+                new Dictionary<string, object?>
+                {
+                    ["mutation"] = mutation,
+                    ["events"] = events,
+                });
+
+            return Success(request, workbookPath, sessionMode, dirty, needsSave, extensions, [$"edited formulas in {GetWorksheetName(worksheet)}!{normalizedRange} in the live Excel session", SaveHint]);
         }
         finally
         {
@@ -407,6 +552,12 @@ public sealed class ExcelEditService : IEditService
             ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, sessionMode, true, false, dirty, needsSave),
             ["edit"] = edit,
         };
+    }
+
+    private static void RefreshEditStateExtensions(Dictionary<string, object?> extensions, string workbookPath, string sessionMode, bool? dirty, bool needsSave)
+    {
+        extensions["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, sessionMode, dirty, needsSave);
+        extensions["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, sessionMode, true, false, dirty, needsSave);
     }
 
     private static BridgeResponse Success(BridgeRequest request, string workbookPath, string sessionMode, bool? dirty, bool needsSave, Dictionary<string, object?> extensions, IReadOnlyList<string> logs)
@@ -658,6 +809,7 @@ public sealed class ExcelEditService : IEditService
             "EnableEvents" => dyn.EnableEvents,
             "Value2" => dyn.Value2,
             "Formula" => dyn.Formula,
+            "FormulaR1C1" => dyn.FormulaR1C1,
             "Color" => dyn.Color,
             "Count" => dyn.Count,
             "RowHeight" => dyn.RowHeight,
@@ -680,6 +832,9 @@ public sealed class ExcelEditService : IEditService
                 return;
             case "Formula":
                 dyn.Formula = value;
+                return;
+            case "FormulaR1C1":
+                dyn.FormulaR1C1 = value;
                 return;
             case "Pattern":
                 dyn.Pattern = value;
