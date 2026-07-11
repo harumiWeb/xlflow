@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -49,23 +50,25 @@ type ParseSummary struct {
 }
 
 type Symbol struct {
-	Name        string      `json:"name"`
-	Kind        string      `json:"kind"`
-	Visibility  string      `json:"visibility,omitempty"`
-	Module      string      `json:"module"`
-	File        string      `json:"file"`
-	Parent      string      `json:"parent,omitempty"`
-	StartLine   int         `json:"startLine"`
-	StartColumn int         `json:"startColumn"`
-	EndLine     int         `json:"endLine"`
-	EndColumn   int         `json:"endColumn"`
-	StartByte   int         `json:"startByte"`
-	EndByte     int         `json:"endByte"`
-	Signature   string      `json:"signature,omitempty"`
-	Attributes  []Attribute `json:"attributes,omitempty"`
-	Static      bool        `json:"static,omitempty"`
-	ReturnType  string      `json:"returnType,omitempty"`
-	Parameters  []Parameter `json:"parameters,omitempty"`
+	Name          string                           `json:"name"`
+	Kind          string                           `json:"kind"`
+	Visibility    string                           `json:"visibility,omitempty"`
+	Module        string                           `json:"module"`
+	File          string                           `json:"file"`
+	Parent        string                           `json:"parent,omitempty"`
+	StartLine     int                              `json:"startLine"`
+	StartColumn   int                              `json:"startColumn"`
+	EndLine       int                              `json:"endLine"`
+	EndColumn     int                              `json:"endColumn"`
+	StartByte     int                              `json:"startByte"`
+	EndByte       int                              `json:"endByte"`
+	Signature     string                           `json:"signature,omitempty"`
+	Attributes    []Attribute                      `json:"attributes,omitempty"`
+	Static        bool                             `json:"static,omitempty"`
+	ReturnType    string                           `json:"returnType,omitempty"`
+	Parameters    []Parameter                      `json:"parameters,omitempty"`
+	Documentation *doccomments.SymbolDocumentation `json:"documentation,omitempty"`
+	DocStartLine  int                              `json:"docStartLine,omitempty"`
 }
 
 type Attribute struct {
@@ -95,14 +98,15 @@ type SourceOptions struct {
 }
 
 type extractor struct {
-	opts       Options
-	rootDir    string
-	source     []byte
-	file       string
-	moduleName string
-	moduleKind string
-	attrs      []Attribute
-	symbols    []Symbol
+	opts        Options
+	rootDir     string
+	source      []byte
+	sourceLines []string
+	file        string
+	moduleName  string
+	moduleKind  string
+	attrs       []Attribute
+	symbols     []Symbol
 }
 
 var attrRe = regexp.MustCompile(`(?i)^\s*Attribute\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$`)
@@ -149,13 +153,14 @@ func Inspect(opts Options) (*Result, error) {
 			continue
 		}
 		ext := extractor{
-			opts:       opts,
-			rootDir:    rootDir,
-			source:     parsed.Source,
-			file:       rel,
-			moduleName: moduleName,
-			moduleKind: file.moduleKind,
-			attrs:      attrs,
+			opts:        opts,
+			rootDir:     rootDir,
+			source:      parsed.Source,
+			sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
+			file:        rel,
+			moduleName:  moduleName,
+			moduleKind:  file.moduleKind,
+			attrs:       attrs,
 		}
 		fileSymbols := ext.extract(parsed.Root)
 		result.Files = append(result.Files, FileResult{
@@ -216,12 +221,13 @@ func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
 			IncludePrivate: opts.IncludePrivate,
 			IncludeLabels:  opts.IncludeLabels,
 		},
-		rootDir:    rootDir,
-		source:     parsed.Source,
-		file:       rel,
-		moduleName: moduleName,
-		moduleKind: moduleKind,
-		attrs:      attrs,
+		rootDir:     rootDir,
+		source:      parsed.Source,
+		sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
+		file:        rel,
+		moduleName:  moduleName,
+		moduleKind:  moduleKind,
+		attrs:       attrs,
 	}
 	return FileResult{
 		Path:       rel,
@@ -394,6 +400,9 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 		Signature:   "Module " + e.moduleName,
 		Attributes:  e.attrs,
 	})
+	if doc, ok := doccomments.ModuleDocumentationLines(e.sourceLines); ok {
+		e.symbols[len(e.symbols)-1].Documentation = &doc
+	}
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		e.visit(root.NamedChild(i), "")
 	}
@@ -407,6 +416,7 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 	switch node.Kind() {
 	case "sub_declaration", "function_declaration", "property_declaration", "property_get_declaration", "property_let_declaration", "property_set_declaration":
 		sym := e.procedureSymbol(node)
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -418,6 +428,7 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		parentProc = sym.Name
 	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		sym := e.simpleSymbol(node, "declare", "")
+		sym.Signature = declarationHeader(node.Utf8Text(e.source))
 		switch node.Kind() {
 		case "declare_sub_statement":
 			sym.Kind = "declare_sub"
@@ -432,16 +443,19 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		}
 		sym.ReturnType = typeText(node, e.source)
 		sym.Parameters = parameters(node, e.source)
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	case "type_declaration":
 		sym := e.simpleSymbol(node, "type", "")
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	case "enum_declaration":
 		sym := e.simpleSymbol(node, "enum", "")
+		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -511,6 +525,7 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 		}
 	}
 	sym := e.simpleSymbol(node, kind, "")
+	sym.Signature = declarationHeader(node.Utf8Text(e.source))
 	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 	sym.ReturnType = typeText(node, e.source)
 	sym.Parameters = parameters(node, e.source)
@@ -527,6 +542,7 @@ func (e *extractor) constSymbols(node *tree_sitter.Node, parentProc string) {
 		sym.Visibility = visibilityText(node, e.source)
 		sym.Signature = firstLine(node.Utf8Text(e.source))
 		sym.ReturnType = typeText(child, e.source)
+		e.attachDocumentation(&sym, "variable")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
@@ -553,10 +569,23 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 		if hasField(node, "with_events_modifier") || hasWord(sym.Signature, "WithEvents") {
 			sym.Kind = "withevents_field"
 		}
+		e.attachDocumentation(&sym, "variable")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
 	}
+}
+
+func (e *extractor) attachDocumentation(sym *Symbol, rubberduckKinds ...string) {
+	if sym == nil || sym.StartLine <= 0 {
+		return
+	}
+	doc, startLine, ok := doccomments.DocumentationForTargetLines(e.sourceLines, sym.StartLine, rubberduckKinds...)
+	if !ok || !doccomments.HasDocumentation(doc) {
+		return
+	}
+	sym.Documentation = &doc
+	sym.DocStartLine = startLine
 }
 
 func (e *extractor) parameterSymbols(node *tree_sitter.Node, parentProc string) []Symbol {
@@ -848,6 +877,35 @@ func firstLine(text string) string {
 		}
 	}
 	return ""
+}
+
+func declarationHeader(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	parts := make([]string, 0, 4)
+	started := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if started {
+				break
+			}
+			continue
+		}
+		started = true
+		continued := strings.HasSuffix(trimmed, "_")
+		if continued {
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "_"))
+		}
+		parts = append(parts, trimmed)
+		if !continued {
+			break
+		}
+	}
+	header := strings.Join(parts, " ")
+	header = strings.ReplaceAll(header, "( ", "(")
+	header = strings.ReplaceAll(header, " )", ")")
+	return strings.TrimSpace(header)
 }
 
 func hasWord(text, word string) bool {

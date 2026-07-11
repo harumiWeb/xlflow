@@ -291,6 +291,236 @@ End Sub
 	}
 }
 
+func TestDocumentationFeedsHoverSignatureCompletionAndDiagnostics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     wss: typo.
+'''     ws: Worksheet to aggregate.
+'''     includeTax: True to include tax.
+'''
+''' Returns:
+'''     Aggregated amount.
+Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency
+End Function
+
+Public Sub Caller()
+    Dim ws As Worksheet
+    CalculateSales ws, 
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hover, err := analyzer.Hover(doc, Position{Line: 15, Character: utf16Len("    Calculate")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Calculates sales") || !strings.Contains(hover.Contents, "Worksheet to aggregate") || !strings.Contains(hover.Contents, "Aggregated amount") {
+		t.Fatalf("hover missing documentation: %+v", hover)
+	}
+
+	line := "    CalculateSales ws, "
+	help, err := analyzer.SignatureHelp(doc, Position{Line: 15, Character: utf16Len(line)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if help == nil || help.ActiveParameter != 1 || !strings.Contains(help.Signatures[0].Documentation, "include tax") {
+		t.Fatalf("signature help documentation = %+v", help)
+	}
+
+	doc.Source = source + "\nSub Complete()\n    Calcul\nEnd Sub\n"
+	items, err := analyzer.Completions(doc, Position{Line: 19, Character: utf16Len("    Calcul")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "CalculateSales")
+	if !ok || !strings.Contains(item.Documentation, "Calculates sales") {
+		t.Fatalf("completion documentation missing: %+v", item)
+	}
+
+	diagnostics := analyzer.Diagnostics(doc)
+	vb040 := diagnosticsByCode(diagnostics, "VB040")
+	if len(vb040) != 1 || !strings.Contains(vb040[0].Message, `Did you mean "ws"`) {
+		t.Fatalf("VB040 diagnostic missing suggestion: %+v", vb040)
+	}
+}
+
+func TestHoverShowsFullMultilineProcedureDeclaration(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     ws: Worksheet to aggregate.
+'''     includeTax: True to include tax.
+'''
+''' Returns:
+'''     Aggregated amount.
+Public Function CalculateSales( _
+    ByVal ws As Worksheet, _
+    Optional ByVal includeTax As Boolean = False _
+) As Currency
+End Function
+
+Public Sub Caller()
+    CalculateSales
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hoverLine := "    CalculateSales"
+	hover, err := analyzer.Hover(doc, Position{Line: 16, Character: utf16Len(hoverLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("hover = nil")
+	}
+	for _, want := range []string{
+		"Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency",
+		"Worksheet to aggregate.",
+		"Aggregated amount.",
+	} {
+		if !strings.Contains(hover.Contents, want) {
+			t.Fatalf("hover contents missing %q:\n%s", want, hover.Contents)
+		}
+	}
+}
+
+func TestDocumentationSnippetCompletion(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+'''
+Public Function FindCustomer(ByVal customerCode As String) As Customer
+End Function
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'''")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "Generate documentation comment for FindCustomer")
+	if !ok {
+		t.Fatalf("documentation snippet missing: %+v", items)
+	}
+	if !item.Snippet || item.ReplaceRange == nil || !strings.Contains(item.InsertText, "customerCode: ${2:Parameter description.}") || !strings.Contains(item.InsertText, "Returns:") {
+		t.Fatalf("unexpected documentation snippet: %+v", item)
+	}
+}
+
+func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n'@D\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@D")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findCompletion(items, "@Description")
+	if !ok {
+		t.Fatalf("@Description completion missing: %+v", items)
+	}
+	if !item.Snippet || item.InsertText != `@Description("${1:Description.}")` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @Description completion: %+v", item)
+	}
+	if item.ReplaceRange.Start.Character != utf16Len("'") || item.ReplaceRange.End.Character != utf16Len("'@D") {
+		t.Fatalf("replace range = %+v", item.ReplaceRange)
+	}
+	if hasCompletion(items, "@ModuleDescription") {
+		t.Fatalf("@ModuleDescription should not match @D prefix: %+v", items)
+	}
+
+	source = "Option Explicit\n'@\n"
+	doc.Source = source
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription"} {
+		if !hasCompletion(items, want) {
+			t.Fatalf("%s completion missing: %+v", want, items)
+		}
+	}
+}
+
+func TestRubberduckAnnotationCompletionIgnoresStrings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\nPublic Sub Run()\n    Debug.Print \"@D\"\nEnd Sub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 2, Character: utf16Len(`    Debug.Print "@D`)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "@Description") {
+		t.Fatalf("annotation completion should not appear in strings: %+v", items)
+	}
+
+	doc.Source = "Option Explicit\n'@Description(\"email@example.com\")\n"
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len(`'@Description("email@`)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletion(items, "@Description") {
+		t.Fatalf("annotation completion should not appear inside annotation text: %+v", items)
+	}
+}
+
+func TestDocumentationMarkerSuppressesOrdinaryCompletionsWithoutTarget(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n'''\nPub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'''")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("doc marker should not fall through to ordinary completions: %+v", items)
+	}
+}
+
+func TestCommentCompletionSuppressesOrdinarySuggestions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n' TODO\nPublic Sub Run()\nEnd Sub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("' T")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("ordinary comment should not fall through to completions: %+v", items)
+	}
+
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("apostrophe trigger should not fall through to completions: %+v", items)
+	}
+}
+
+func TestHoverUsesRubberduckDescriptionOnProjectCall(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+'@Description("This is documentation text.")
+Public Sub Run()
+End Sub
+
+Public Sub Caller()
+    Call Run
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hoverLine := "    Call Run"
+	hover, err := analyzer.Hover(doc, Position{Line: 6, Character: utf16Len(hoverLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "This is documentation text.") {
+		t.Fatalf("rubberduck description missing from hover: %+v", hover)
+	}
+}
+
 func TestSignatureHelpResolvesVBABuiltinFunction(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit

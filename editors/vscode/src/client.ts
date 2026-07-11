@@ -127,6 +127,15 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
 
     const position = editor.selection.active;
     const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+    if (config.completionTriggerSuggestInStatements && isDocCommentSnippetPrefix(linePrefix)) {
+      this.clearPendingSuggest();
+      this.suggestTimer = setTimeout(() => {
+        this.suggestTimer = undefined;
+        void vscode.commands.executeCommand("editor.action.quickFix");
+      }, 75);
+      return;
+    }
+
     if (
       (config.completionTriggerSuggestInStatements && isStatementPrefix(linePrefix)) ||
       (config.completionProgIdsInStrings && isProgIdStringPrefix(linePrefix))
@@ -215,16 +224,20 @@ function toProtocolTrace(trace: TraceServer): Trace {
   }
 }
 
-function isStatementPrefix(linePrefix: string): boolean {
+export function isStatementPrefix(linePrefix: string): boolean {
   const typed = linePrefix.trimStart();
   if (typed.length === 0 || /[."'():=]/.test(typed)) {
     return false;
   }
-  return /^(o|op|opt|opti|optio|option|option\s+\w*|p|pu|pub|publ|publi|public|public\s+\w*|pr|pri|priv|priva|privat|private|private\s+\w*|f|fr|fri|frie|frien|friend|friend\s+\w*|s|su|sub|fu|fun|func|funct|functi|functio|function|d|di|dim|c|co|con|cons|const|t|ty|typ|type|e|en|enu|enum|declare|declare\s+\w*)$/i.test(
+  return /^(o|op|opt|opti|optio|option|option\s+\w*|p|pu|pub|publ|publi|public|public\s+\w*|pr|pri|priv|priva|privat|private|private\s+\w*|f|fr|fri|frie|frien|friend|friend\s+\w*|s|su|sub|fu|fun|func|funct|functi|functio|function|d|di|dim|dim\s+\w*|c|co|con|cons|const|t|ty|typ|type|e|en|enu|enum|declare|declare\s+\w*)$/i.test(
     typed,
   );
 }
 
-function isProgIdStringPrefix(linePrefix: string): boolean {
+export function isDocCommentSnippetPrefix(linePrefix: string): boolean {
+  return /^\s*'''$/.test(linePrefix);
+}
+
+export function isProgIdStringPrefix(linePrefix: string): boolean {
   return /\b(CreateObject|GetObject)\s*\(\s*"[^"]*$/i.test(linePrefix);
 }

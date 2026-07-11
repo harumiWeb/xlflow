@@ -1,8 +1,10 @@
 package symbols
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -107,6 +109,108 @@ End Sub
 	assertSymbol(t, privateFile.Symbols, "Start", "label")
 	assertSymbol(t, privateFile.Symbols, "10", "line_number_label")
 	assertSymbol(t, privateFile.Symbols, "LocalLimit", "const")
+}
+
+func TestInspectAttachesDocCommentsAndRubberduckDescriptions(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:        t.TempDir(),
+		Path:           "Main.bas",
+		ModuleKind:     "standard",
+		IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+'@ModuleDescription("Provides sales aggregation.")
+Option Explicit
+
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     ws: Worksheet to aggregate.
+'''
+''' Returns:
+'''     Aggregated amount.
+'@Description("Rubberduck fallback")
+Public Function CalculateSales(ByVal ws As Worksheet) As Currency
+End Function
+
+'@Description("Legacy description.")
+Public Sub Legacy()
+End Sub
+
+'@VariableDescription("Current workbook.")
+Private currentWorkbook As Workbook
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	module := assertSymbol(t, file.Symbols, "Main", "module")
+	if module.Documentation == nil || module.Documentation.Summary != "Provides sales aggregation." {
+		t.Fatalf("module documentation = %+v", module.Documentation)
+	}
+	calc := assertSymbol(t, file.Symbols, "CalculateSales", "function")
+	if calc.Documentation == nil || calc.Documentation.Summary != "Calculates sales for the requested sheet." || calc.Documentation.Parameters["ws"] == "" || calc.Documentation.Returns == "" {
+		t.Fatalf("function documentation = %+v", calc.Documentation)
+	}
+	legacy := assertSymbol(t, file.Symbols, "Legacy", "sub")
+	if legacy.Documentation == nil || legacy.Documentation.Summary != "Legacy description." || legacy.Documentation.Source != "rubberduck" {
+		t.Fatalf("legacy documentation = %+v", legacy.Documentation)
+	}
+	current := assertSymbol(t, file.Symbols, "currentWorkbook", "module_variable")
+	if current.Documentation == nil || current.Documentation.Summary != "Current workbook." {
+		t.Fatalf("variable documentation = %+v", current.Documentation)
+	}
+}
+
+func TestInspectOmitsEmptyDocumentationFromJSON(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:    t.TempDir(),
+		Path:       "Main.bas",
+		ModuleKind: "standard",
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if run.Documentation != nil {
+		t.Fatalf("documentation = %+v, want nil", run.Documentation)
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), `"documentation"`) {
+		t.Fatalf("payload should omit documentation: %s", payload)
+	}
+}
+
+func TestInspectKeepsFullProcedureSignatureAcrossLineContinuations(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:        t.TempDir(),
+		Path:           "Main.bas",
+		ModuleKind:     "standard",
+		IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+
+Public Function CalculateSales( _
+    ByVal ws As Worksheet, _
+    Optional ByVal includeTax As Boolean = False _
+) As Currency
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calc := assertSymbol(t, file.Symbols, "CalculateSales", "function")
+	want := "Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency"
+	if calc.Signature != want {
+		t.Fatalf("signature = %q, want %q", calc.Signature, want)
+	}
 }
 
 func TestInspectExtractsSymbolsInsideConditionalCompilationBlocks(t *testing.T) {

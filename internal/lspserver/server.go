@@ -131,6 +131,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentRename:             s.rename,
 		TextDocumentHover:              s.hover,
 		TextDocumentCompletion:         s.completion,
+		TextDocumentCodeAction:         s.codeAction,
 		TextDocumentSignatureHelp:      s.signatureHelp,
 		TextDocumentFormatting:         s.formatting,
 		TextDocumentSemanticTokensFull: s.semanticTokensFull,
@@ -496,6 +497,33 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
 }
 
+func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
+	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+	if err != nil {
+		return nil, err
+	}
+	actions, err := s.analyzer.DocumentationCodeActions(doc, fromProtocolRange(params.Range))
+	if err != nil {
+		return nil, err
+	}
+	kind := protocol.CodeActionKindRefactorRewrite
+	out := make([]protocol.CodeAction, 0, len(actions))
+	requestURI := protocol.DocumentUri(params.TextDocument.URI)
+	for _, action := range actions {
+		out = append(out, protocol.CodeAction{
+			Title: action.Title,
+			Kind:  &kind,
+			Edit: &protocol.WorkspaceEdit{Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+				requestURI: {{
+					Range:   toProtocolRange(action.Range),
+					NewText: action.NewText,
+				}},
+			}},
+		})
+	}
+	return out, nil
+}
+
 func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -514,9 +542,11 @@ func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpPa
 			info.Documentation = protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: sig.Documentation}
 		}
 		for _, param := range sig.Parameters {
-			info.Parameters = append(info.Parameters, protocol.ParameterInformation{
-				Label: parameterLabel(param),
-			})
+			paramInfo := protocol.ParameterInformation{Label: parameterLabel(param)}
+			if param.Documentation != "" {
+				paramInfo.Documentation = protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: param.Documentation}
+			}
+			info.Parameters = append(info.Parameters, paramInfo)
 		}
 		signatures = append(signatures, info)
 	}
@@ -1076,6 +1106,10 @@ func fromProtocolPosition(pos protocol.Position) intel.Position {
 	return intel.Position{Line: int(pos.Line), Character: int(pos.Character)}
 }
 
+func fromProtocolRange(r protocol.Range) intel.Range {
+	return intel.Range{Start: fromProtocolPosition(r.Start), End: fromProtocolPosition(r.End)}
+}
+
 func utf16Len(s string) int {
 	return len(utf16.Encode([]rune(s)))
 }
@@ -1209,7 +1243,7 @@ func parameterLabel(param intel.Parameter) string {
 }
 
 func completionTriggerCharacters() []string {
-	return []string{".", "\""}
+	return []string{".", "\"", "'", "@"}
 }
 
 func max(a, b int) int {

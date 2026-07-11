@@ -858,6 +858,33 @@ End Sub
 	}
 }
 
+func TestFormatPreservesDocCommentDeclarationAdjacency(t *testing.T) {
+	input := `Option Explicit
+''' 処理の概要。
+'''
+''' Args:
+'''     workbook: 対象ブック。
+'@Description("fallback")
+Public Sub Process(ByVal workbook As Workbook)
+Debug.Print workbook.Name
+End Sub
+`
+	got, err := FormatTextWithOptions(input, false, FormatConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "'@Description(\"fallback\")\n\nPublic Sub Process") {
+		t.Fatalf("formatter inserted blank line between doc block and declaration:\n%s", got)
+	}
+	second, err := FormatTextWithOptions(got, false, FormatConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("format not idempotent for doc comments:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
 func TestFormatBasForEachLoop(t *testing.T) {
 	input := `Sub Main()
 Dim v As Variant

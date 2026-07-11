@@ -11,7 +11,7 @@
   "configuration.xlflow.codeLens.runTests.description": "Show Run Test actions above VBA test procedures.",
   "configuration.xlflow.codeLens.userFormEvents.description": "Show Run actions above UserForm event handlers.",
   "configuration.xlflow.run.saveBeforeRun.description": "Save dirty VBA documents before running a procedure.",
-  "configuration.xlflow.completion.triggerSuggestInStatements.description": "Trigger VS Code suggestions while typing likely VBA statement and declaration prefixes.",
+  "configuration.xlflow.completion.triggerSuggestInStatements.description": "Trigger VS Code suggestions while typing likely VBA statement/declaration prefixes, and show Quick Fix generation for xlflow doc comment markers.",
   "configuration.xlflow.completion.progIdsInStrings.description": "Trigger VS Code suggestions inside CreateObject and GetObject ProgID string literals.",
   "configuration.xlflow.testing.autoDiscover.description": "Automatically discover VBA tests for VS Code Test Explorer when an xlflow workspace opens.",
   "viewsContainer.xlflow.title": "xlflow",

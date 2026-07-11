@@ -141,6 +141,29 @@ func TestNewScaffoldCreatesSampleTests(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldCreatesAppModuleWithDocComment(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "App.bas"))
+	if err != nil {
+		t.Fatalf("expected App module: %v", err)
+	}
+	content := string(body)
+	for _, want := range []string{
+		`Attribute VB_Name = "App"`,
+		"''' Runs the workbook automation entry point.",
+		"''' Args:",
+		"'''     wb: Workbook that xlflow passes from Main.Run.",
+		"Public Sub RunCore(ByVal wb As Workbook)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("App module missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 	dir := t.TempDir()
 	result, err := InstallHelperModules(dir, config.SourceConfig{Modules: filepath.ToSlash(filepath.Join("custom", "modules"))})
@@ -421,7 +444,7 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 	if !strings.Contains(got, "Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = \"\")") {
 		t.Fatalf("AssertEquals signature missing from helper:\n%s", got)
 	}
-	if !strings.Contains(got, "Minimal assertion helpers for workbook-side tests") {
+	if !strings.Contains(got, "''' Asserts that two scalar values are equal.") {
 		t.Fatalf("Assert helper should explain its intended use:\n%s", got)
 	}
 	if !strings.Contains(got, "Err.Raise vbObjectError + 513") {
@@ -440,6 +463,9 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 		"Public Sub AssertInconclusive(Optional ByVal message As String = \"\")",
 		"Public Sub AssertIsNothing(ByVal value As Variant",
 		"Public Sub AssertIsNotNothing(ByVal value As Variant",
+		"'''     expected: Expected scalar value.",
+		"'''     condition: Boolean condition to verify.",
+		"''' Marks the current test as inconclusive.",
 		"Err.Raise vbObjectError + 516",
 	} {
 		if !strings.Contains(got, want) {
@@ -461,6 +487,9 @@ func TestNewScaffoldCreatesRuntimeHelper(t *testing.T) {
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowRuntime"`,
 		"XlflowRuntime exposes the execution mode",
+		"''' Returns the current xlflow runtime mode as a stable numeric value.",
+		"''' Returns the normalized runtime mode name injected by xlflow.",
+		"''' Indicates whether the workbook is running without direct human interaction.",
 		"Private Const xlflowInteractive As Long = 0",
 		"Public Function Mode() As Long",
 		"Public Function ModeName() As String",
@@ -487,6 +516,13 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowUI"`,
 		"XlflowUI keeps one workbook-side dialog API",
+		"''' Shows a message box or resolves a scripted response in headless mode.",
+		"'''     Id: Stable dialog id used by xlflow --msgbox.",
+		"''' Shows an input box or resolves a scripted value in headless mode.",
+		"''' Opens Excel's file picker or resolves scripted file paths in headless mode.",
+		"''' Opens an Office file dialog or resolves scripted file paths in headless mode.",
+		"''' Opens Excel's Save As picker or resolves a scripted path in headless mode.",
+		"''' Opens a folder picker or resolves a scripted folder path in headless mode.",
 		"Public Function MsgBox(ByVal Id As String, ByVal Prompt As String",
 		"Optional ByVal DefaultResponse As String = \"\"",
 		"Public Function InputBox(ByVal Id As String, ByVal Prompt As String",
@@ -551,6 +587,8 @@ func TestNewScaffoldCreatesDebugHelper(t *testing.T) {
 	for _, want := range []string{
 		`Attribute VB_Name = "XlflowDebug"`,
 		"XlflowDebug mirrors workbook-side debug output to the terminal during xlflow runs",
+		"''' Writes workbook-side debug output to Debug.Print and xlflow run/test output when available.",
+		"'''     Parts: Values to stringify and join with spaces.",
 		"Public Sub Log(ParamArray Parts() As Variant)",
 		"Debug.Print message",
 		"Debug.Print",

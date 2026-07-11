@@ -109,6 +109,17 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.line.documentation.vba",
+          "match": "^\\s*'''.*$"
+        },
+        {
+          "name": "comment.line.annotation.rubberduck.vba",
+          "match": "^\\s*'\\s*(@(?:ModuleDescription|Description|VariableDescription))\\b.*$",
+          "captures": {
+            "1": { "name": "storage.type.annotation.rubberduck.vba" }
+          }
+        },
+        {
           "name": "comment.line.apostrophe.vba",
           "match": "'.*$"
         },

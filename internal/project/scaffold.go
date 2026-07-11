@@ -660,8 +660,12 @@ build/
 const defaultAssertModule = `Attribute VB_Name = "XlflowAssert"
 Option Explicit
 
-' Minimal assertion helpers for workbook-side tests.
-' Keep assertions scalar so failures stay easy to read from xlflow JSON and terminal output.
+''' Asserts that two scalar values are equal.
+'''
+''' Args:
+'''     expected: Expected scalar value.
+'''     actual: Actual scalar value.
+'''     message: Optional failure message prefix.
 Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = "")
   If IsObject(expected) Or IsObject(actual) Then
     Err.Raise vbObjectError + 514, "XlflowAssert.AssertEquals", "AssertEquals supports scalar values only. Compare object properties such as Range.Value2."
@@ -683,6 +687,12 @@ Public Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, Opti
   End If
 End Sub
 
+''' Asserts that two scalar values are different.
+'''
+''' Args:
+'''     expected: Value that should differ from actual.
+'''     actual: Value that should differ from expected.
+'''     message: Optional failure message prefix.
 Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant, Optional ByVal message As String = "")
   If IsObject(expected) Or IsObject(actual) Then
     Err.Raise vbObjectError + 514, "XlflowAssert.AssertNotEqual", "AssertNotEqual supports scalar values only."
@@ -702,22 +712,40 @@ Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant, Op
   End If
 End Sub
 
+''' Asserts that a condition is True.
+'''
+''' Args:
+'''     condition: Boolean condition to verify.
+'''     message: Optional failure message.
 Public Sub AssertTrue(ByVal condition As Boolean, Optional ByVal message As String = "")
   If Not condition Then
     RaiseAssertFailure message, "expected True but got False", "XlflowAssert.AssertTrue"
   End If
 End Sub
 
+''' Asserts that a condition is False.
+'''
+''' Args:
+'''     condition: Boolean condition to verify.
+'''     message: Optional failure message.
 Public Sub AssertFalse(ByVal condition As Boolean, Optional ByVal message As String = "")
   If condition Then
     RaiseAssertFailure message, "expected False but got True", "XlflowAssert.AssertFalse"
   End If
 End Sub
 
+''' Fails the current test immediately.
+'''
+''' Args:
+'''     message: Optional failure message.
 Public Sub AssertFail(Optional ByVal message As String = "")
   RaiseAssertFailure message, "assertion failed", "XlflowAssert.AssertFail"
 End Sub
 
+''' Marks the current test as inconclusive.
+'''
+''' Args:
+'''     message: Optional inconclusive reason.
 Public Sub AssertInconclusive(Optional ByVal message As String = "")
   Dim detail As String
   detail = "inconclusive"
@@ -727,6 +755,11 @@ Public Sub AssertInconclusive(Optional ByVal message As String = "")
   Err.Raise vbObjectError + 516, "XlflowAssert.AssertInconclusive", detail
 End Sub
 
+''' Asserts that an object reference is Nothing.
+'''
+''' Args:
+'''     value: Object reference to verify.
+'''     message: Optional failure message.
 Public Sub AssertIsNothing(ByVal value As Variant, Optional ByVal message As String = "")
   If Not IsObject(value) Then
     RaiseAssertFailure message, "expected an object but got a non-object", "XlflowAssert.AssertIsNothing"
@@ -737,6 +770,11 @@ Public Sub AssertIsNothing(ByVal value As Variant, Optional ByVal message As Str
   End If
 End Sub
 
+''' Asserts that an object reference is not Nothing.
+'''
+''' Args:
+'''     value: Object reference to verify.
+'''     message: Optional failure message.
 Public Sub AssertIsNotNothing(ByVal value As Variant, Optional ByVal message As String = "")
   If Not IsObject(value) Then
     RaiseAssertFailure message, "expected an object but got a non-object", "XlflowAssert.AssertIsNotNothing"
@@ -776,7 +814,10 @@ Private Const xlflowCI As Long = 2
 Private Const xlflowAgent As Long = 3
 Private Const xlflowTest As Long = 4
 
-' Returns a stable numeric mode value for lightweight branching.
+''' Returns the current xlflow runtime mode as a stable numeric value.
+'''
+''' Returns:
+'''     One of the internal xlflow mode constants.
 Public Function Mode() As Long
 	Select Case ModeName()
 		Case "headless"
@@ -792,7 +833,10 @@ Public Function Mode() As Long
 	End Select
 End Function
 
-' Returns the normalized mode name injected by xlflow.
+''' Returns the normalized runtime mode name injected by xlflow.
+'''
+''' Returns:
+'''     interactive, headless, ci, agent, or test.
 Public Function ModeName() As String
 	Dim raw As String
 	raw = ReadWorkbookModeName()
@@ -809,12 +853,18 @@ Public Function ModeName() As String
 	End Select
 End Function
 
-' True only for normal human-driven Excel usage.
+''' Indicates whether the workbook is running in normal human-driven Excel usage.
+'''
+''' Returns:
+'''     True when the runtime mode is interactive.
 Public Function IsInteractive() As Boolean
 	IsInteractive = (Mode() = xlflowInteractive)
 End Function
 
-' True for all unattended-style modes such as headless, CI, agent, and test.
+''' Indicates whether the workbook is running without direct human interaction.
+'''
+''' Returns:
+'''     True for headless, CI, agent, and test modes.
 Public Function IsHeadless() As Boolean
 	Select Case Mode()
 		Case xlflowHeadless, xlflowCI, xlflowAgent, xlflowTest
@@ -824,14 +874,26 @@ Public Function IsHeadless() As Boolean
 	End Select
 End Function
 
+''' Indicates whether the workbook is running in CI mode.
+'''
+''' Returns:
+'''     True when the runtime mode is ci.
 Public Function IsCI() As Boolean
 	IsCI = (Mode() = xlflowCI)
 End Function
 
+''' Indicates whether the workbook is running in agent mode.
+'''
+''' Returns:
+'''     True when the runtime mode is agent.
 Public Function IsAgent() As Boolean
 	IsAgent = (Mode() = xlflowAgent)
 End Function
 
+''' Indicates whether the workbook is running under xlflow test.
+'''
+''' Returns:
+'''     True when the runtime mode is test.
 Public Function IsTest() As Boolean
 	IsTest = (Mode() = xlflowTest)
 End Function
@@ -877,7 +939,17 @@ Private Const xlflowFileDialogCancelToken As String = "@cancel"
 Private Const xlflowStreamHelperName As String = "__XLFLOW_UI_STREAM_HELPER__"
 Private Const xlflowStreamRedactInputName As String = "__XLFLOW_UI_STREAM_REDACT_INPUT__"
 
-' Wrapper for VBA.MsgBox. In headless-like modes xlflow resolves the response from --msgbox.
+''' Shows a message box or resolves a scripted response in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --msgbox.
+'''     Prompt: Message shown to the user.
+'''     Buttons: VBA MsgBox button and icon flags.
+'''     Title: Optional dialog title.
+'''     DefaultResponse: Optional headless fallback response token.
+'''
+''' Returns:
+'''     The resolved VbMsgBoxResult value.
 Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "", Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
 	Dim responseSource As String
 	Dim responseToken As String
@@ -897,7 +969,17 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-' Wrapper for VBA.InputBox. Default is interactive-only UI text, while DefaultValue is the headless fallback.
+''' Shows an input box or resolves a scripted value in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --inputbox.
+'''     Prompt: Prompt shown to the user.
+'''     Title: Optional dialog title.
+'''     Default: Interactive Excel default text.
+'''     DefaultValue: Optional headless fallback value.
+'''
+''' Returns:
+'''     The entered or scripted input value.
 Public Function InputBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Title As String = "", Optional ByVal Default As String = "", Optional ByVal DefaultValue As String = "") As String
 	Dim responseSource As String
 	Dim responseValue As String
@@ -930,8 +1012,19 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-' Wrapper for Application.GetOpenFilename.
-' In headless mode, repeat --filedialog get-open:<id>=<path> to simulate multi-select results.
+''' Opens Excel's file picker or resolves scripted file paths in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --filedialog get-open.
+'''     FileFilter: Excel file filter string.
+'''     FilterIndex: Initial filter index.
+'''     Title: Optional dialog title.
+'''     ButtonText: Optional button text.
+'''     MultiSelect: True to allow multiple selected files.
+'''     DefaultValue: Optional headless fallback path or path array.
+'''
+''' Returns:
+'''     False for cancel, a string path, or an array of string paths.
 Public Function GetOpenFilename(ByVal Id As String, Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
 	Dim responseSource As String
 	Dim displayValue As String
@@ -951,8 +1044,17 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-' Wrapper for Application.FileDialog(msoFileDialogOpen).
-' In headless mode, this uses the same --filedialog file-open:<id>=<path> contract as other xlflow runs.
+''' Opens an Office file dialog or resolves scripted file paths in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --filedialog file-open.
+'''     Title: Optional dialog title.
+'''     ButtonText: Optional button text.
+'''     MultiSelect: True to allow multiple selected files.
+'''     DefaultValue: Optional headless fallback path or path array.
+'''
+''' Returns:
+'''     False for cancel, a string path, or an array of string paths.
 Public Function FileDialogOpen(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal MultiSelect As Boolean = False, Optional ByVal DefaultValue As Variant) As Variant
 	Dim responseSource As String
 	Dim displayValue As String
@@ -985,8 +1087,19 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-' Wrapper for Application.GetSaveAsFilename.
-' Use --filedialog save-as:<id>=<path> in unattended runs, or @cancel to simulate Cancel.
+''' Opens Excel's Save As picker or resolves a scripted path in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --filedialog save-as.
+'''     InitialFileName: Suggested file name for interactive Excel.
+'''     FileFilter: Excel file filter string.
+'''     FilterIndex: Initial filter index.
+'''     Title: Optional dialog title.
+'''     ButtonText: Optional button text.
+'''     DefaultValue: Optional headless fallback path or False for cancel.
+'''
+''' Returns:
+'''     False for cancel or the selected file path.
 Public Function GetSaveAsFilename(ByVal Id As String, Optional ByVal InitialFileName As String = "", Optional ByVal FileFilter As String = "", Optional ByVal FilterIndex As Long = 1, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal DefaultValue As Variant) As Variant
 	Dim responseSource As String
 	Dim displayValue As String
@@ -1006,8 +1119,17 @@ HandleHeadlessFailure:
 	Err.Raise Err.Number, Err.Source, Err.Description
 End Function
 
-' Wrapper for Application.FileDialog(msoFileDialogFolderPicker).
-' Use --filedialog folder:<id>=<path> in unattended runs, or @cancel to simulate Cancel.
+''' Opens a folder picker or resolves a scripted folder path in headless mode.
+'''
+''' Args:
+'''     Id: Stable dialog id used by xlflow --filedialog folder.
+'''     Title: Optional dialog title.
+'''     ButtonText: Optional button text.
+'''     InitialPath: Initial folder for interactive Excel.
+'''     DefaultValue: Optional headless fallback path or False for cancel.
+'''
+''' Returns:
+'''     False for cancel or the selected folder path.
 Public Function FolderPicker(ByVal Id As String, Optional ByVal Title As String = "", Optional ByVal ButtonText As String = "", Optional ByVal InitialPath As String = "", Optional ByVal DefaultValue As Variant) As Variant
 	Dim responseSource As String
 	Dim displayValue As String
@@ -1434,6 +1556,10 @@ End Sub
 const defaultAppModule = `Attribute VB_Name = "App"
 Option Explicit
 
+''' Runs the workbook automation entry point.
+'''
+''' Args:
+'''     wb: Workbook that xlflow passes from Main.Run.
 Public Sub RunCore(ByVal wb As Workbook)
   ' Put workbook automation here.
 End Sub
@@ -1472,6 +1598,10 @@ Private Const xlflowDebugPipeName As String = "__XLFLOW_DEBUG_PIPE__"
 Private Const xlflowGenericWrite As Long = &H40000000
 Private Const xlflowOpenExisting As Long = 3
 
+''' Writes workbook-side debug output to Debug.Print and xlflow run/test output when available.
+'''
+''' Args:
+'''     Parts: Values to stringify and join with spaces.
 Public Sub Log(ParamArray Parts() As Variant)
 	Dim index As Long
 	Dim lowerBound As Long

@@ -15,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -55,25 +56,28 @@ type Diagnostic struct {
 }
 
 type Symbol struct {
-	Name       string
-	Kind       string
-	Detail     string
-	ReturnType string
-	Parameters []Parameter
-	File       string
-	Module     string
-	ModuleKind string
-	Parent     string
-	Visibility string
-	Range      Range
-	Selection  Range
+	Name          string
+	Kind          string
+	Detail        string
+	ReturnType    string
+	Parameters    []Parameter
+	Documentation doccomments.SymbolDocumentation
+	DocStartLine  int
+	File          string
+	Module        string
+	ModuleKind    string
+	Parent        string
+	Visibility    string
+	Range         Range
+	Selection     Range
 }
 
 type Parameter struct {
-	Name       string
-	Type       string
-	Optional   bool
-	ParamArray bool
+	Name          string
+	Type          string
+	Optional      bool
+	ParamArray    bool
+	Documentation string
 }
 
 type Location struct {
@@ -123,9 +127,10 @@ type SignatureHelp struct {
 }
 
 type Signature struct {
-	Label         string
-	Parameters    []Parameter
-	Documentation string
+	Label              string
+	Parameters         []Parameter
+	Documentation      string
+	DocumentationModel doccomments.SymbolDocumentation
 }
 
 func (a Analyzer) Check() error {
@@ -175,6 +180,7 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 	out = append(out, a.propertyAccessDiagnostics(doc)...)
 	out = append(out, a.assignmentDiagnostics(doc)...)
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
+	out = append(out, a.documentationDiagnostics(doc)...)
 	return out
 }
 
@@ -519,6 +525,9 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if constant, ok := a.DB.ResolveConstant(word); ok {
 		return &Hover{Contents: constantHover(constant), Range: r}, nil
 	}
+	if hover, ok, err := a.documentedSymbolHover(doc, pos, open, word, r); err != nil || ok {
+		return hover, err
+	}
 	if inferred, ok := a.inferWordTypeInfoAt(doc, word, byteOffsetForPosition(doc.Source, pos)); ok {
 		typ := inferred.Type
 		if dbType, found := a.DB.ResolveType(typ); found {
@@ -532,11 +541,19 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	}
 	if len(syms) > 0 {
 		sym := syms[0]
+		if !doccomments.HasDocumentation(sym.Documentation) {
+			for _, candidate := range syms[1:] {
+				if strings.EqualFold(candidate.Name, sym.Name) && doccomments.HasDocumentation(candidate.Documentation) {
+					sym = candidate
+					break
+				}
+			}
+		}
 		detail := sym.Detail
 		if detail == "" {
 			detail = sym.Kind + " " + sym.Name
 		}
-		return &Hover{Contents: symbolHover(detail, symbolSource(sym)), Range: r}, nil
+		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, nil
 	}
 	if typ, ok := a.inferExpressionType(doc.Source, pos); ok {
 		if dbType, found := a.DB.ResolveType(typ); found {
@@ -546,9 +563,36 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	return nil, nil
 }
 
+func (a Analyzer) documentedSymbolHover(doc Document, pos Position, open []Document, word string, r Range) (*Hover, bool, error) {
+	syms, err := a.definitionSymbols(doc, pos, open, word)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, sym := range syms {
+		if !doccomments.HasDocumentation(sym.Documentation) {
+			continue
+		}
+		detail := sym.Detail
+		if detail == "" {
+			detail = sym.Kind + " " + sym.Name
+		}
+		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, true, nil
+	}
+	return nil, false, nil
+}
+
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
 	line := lineAt(doc.Source, pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
+	if annotationPrefix, replaceRange, ok := rubberduckAnnotationCompletionContext(line, prefix, pos); ok {
+		return rubberduckAnnotationCompletions(annotationPrefix, replaceRange), nil
+	}
+	if items, ok, err := a.documentationSnippetCompletions(doc, pos); ok || err != nil {
+		return items, err
+	}
+	if commentStartIndex(prefix) >= 0 {
+		return nil, nil
+	}
 	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.Source, pos) && moduleHasContent(doc.Source) {
 		return nil, nil
 	}
@@ -625,7 +669,12 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 		if !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
 			continue
 		}
-		items = append(items, Completion{Label: sym.Name, Kind: completionKindForSymbol(sym.Kind), Detail: sym.Detail})
+		items = append(items, Completion{
+			Label:         sym.Name,
+			Kind:          completionKindForSymbol(sym.Kind),
+			Detail:        sym.Detail,
+			Documentation: doccomments.Markdown(sym.Documentation, ""),
+		})
 	}
 	return uniqueCompletions(items), nil
 }
@@ -641,11 +690,188 @@ func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*S
 		return nil, err
 	}
 	active := call.ActiveParameter(sig.Parameters)
+	if active >= 0 && active < len(sig.Parameters) && sig.Parameters[active].Documentation != "" {
+		sig.Documentation = sig.Parameters[active].Documentation
+	}
 	return &SignatureHelp{
 		Signatures:      []Signature{sig},
 		ActiveSignature: 0,
 		ActiveParameter: active,
 	}, nil
+}
+
+type DocumentationAction struct {
+	Title   string
+	Range   Range
+	NewText string
+}
+
+func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]DocumentationAction, error) {
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return nil, err
+	}
+	var out []DocumentationAction
+	for _, sym := range syms {
+		if !documentationSnippetSymbol(sym) || doccomments.HasDocumentation(sym.Documentation) {
+			continue
+		}
+		if !rangeIntersects(selection, sym.Selection) && !rangeIntersects(selection, sym.Range) {
+			continue
+		}
+		snippet := doccomments.GenerateComment(procedureFromSymbol(sym))
+		if snippet.Text == "" {
+			continue
+		}
+		insert := Range{Start: Position{Line: sym.Range.Start.Line, Character: 0}, End: Position{Line: sym.Range.Start.Line, Character: 0}}
+		out = append(out, DocumentationAction{Title: snippet.Label, Range: insert, NewText: snippet.Text + "\n"})
+	}
+	return out, nil
+}
+
+func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([]Completion, bool, error) {
+	line := lineAt(doc.Source, pos.Line)
+	prefix := utf16Prefix(line, pos.Character)
+	if strings.TrimSpace(line) != "'''" || strings.TrimSpace(prefix) != "'''" || insideOpenString(prefix) {
+		return nil, false, nil
+	}
+	if !isModuleLevelPosition(doc.Source, pos) {
+		return nil, true, nil
+	}
+	sym, ok, err := a.nextDocumentationTarget(doc, pos.Line)
+	if err != nil || !ok {
+		return nil, true, err
+	}
+	if doccomments.HasDocumentation(sym.Documentation) {
+		return nil, true, nil
+	}
+	snippet := doccomments.GenerateSnippet(procedureFromSymbol(sym))
+	if snippet.Text == "" {
+		return nil, true, nil
+	}
+	start := strings.Index(line, "'''")
+	if start < 0 {
+		start = 0
+	}
+	replace := Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(line[:start])},
+		End:   Position{Line: pos.Line, Character: utf16Len(line[:start+3])},
+	}
+	return []Completion{{
+		Label:        snippet.Label,
+		Kind:         "snippet",
+		Detail:       "documentation comment",
+		InsertText:   snippet.Text,
+		SortText:     "0000",
+		Snippet:      true,
+		ReplaceRange: &replace,
+	}}, true, nil
+}
+
+func rubberduckAnnotationCompletionContext(line, prefix string, pos Position) (string, Range, bool) {
+	commentStart := commentStartIndex(prefix)
+	if commentStart < 0 {
+		return "", Range{}, false
+	}
+	commentPrefix := prefix[commentStart+1:]
+	trimmed := strings.TrimLeft(commentPrefix, " \t")
+	leading := len(commentPrefix) - len(trimmed)
+	if !strings.HasPrefix(trimmed, "@") {
+		return "", Range{}, false
+	}
+	annotationPrefix := currentAnnotationPrefix(trimmed)
+	if annotationPrefix == "" {
+		return "", Range{}, false
+	}
+	if len(trimmed) != len(annotationPrefix) {
+		return "", Range{}, false
+	}
+	startByte := commentStart + 1 + leading
+	endByte := startByte + len(annotationPrefix)
+	if endByte > len(prefix) {
+		endByte = len(prefix)
+	}
+	return annotationPrefix, Range{
+		Start: Position{Line: pos.Line, Character: utf16Len(line[:startByte])},
+		End:   Position{Line: pos.Line, Character: utf16Len(line[:endByte])},
+	}, true
+}
+
+func currentAnnotationPrefix(text string) string {
+	if !strings.HasPrefix(text, "@") {
+		return ""
+	}
+	end := 1
+	for end < len(text) {
+		r, size := utf8.DecodeRuneInString(text[end:])
+		if !isIdentRune(r) {
+			break
+		}
+		end += size
+	}
+	return text[:end]
+}
+
+func commentStartIndex(prefix string) int {
+	inString := false
+	for i := 0; i < len(prefix); i++ {
+		switch prefix[i] {
+		case '"':
+			if inString && i+1 < len(prefix) && prefix[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func rubberduckAnnotationCompletions(prefix string, replaceRange Range) []Completion {
+	specs := []syntaxCompletionSpec{
+		{
+			label:         "@Description",
+			detail:        "Rubberduck procedure description",
+			insertText:    `@Description("${1:Description.}")`,
+			documentation: "Adds a Rubberduck description annotation for the following procedure.",
+		},
+		{
+			label:         "@ModuleDescription",
+			detail:        "Rubberduck module description",
+			insertText:    `@ModuleDescription("${1:Module description.}")`,
+			documentation: "Adds a Rubberduck module description annotation.",
+		},
+		{
+			label:         "@VariableDescription",
+			detail:        "Rubberduck variable description",
+			insertText:    `@VariableDescription("${1:Variable description.}")`,
+			documentation: "Adds a Rubberduck variable description annotation for the following variable.",
+		},
+	}
+	return completionsFromSpecs(specs, prefix, replaceRange)
+}
+
+func (a Analyzer) nextDocumentationTarget(doc Document, line int) (Symbol, bool, error) {
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return Symbol{}, false, err
+	}
+	var best Symbol
+	found := false
+	for _, sym := range syms {
+		if !documentationSnippetSymbol(sym) || sym.Range.Start.Line <= line {
+			continue
+		}
+		if !found || comparePosition(sym.Range.Start, best.Range.Start) < 0 {
+			best = sym
+			found = true
+		}
+	}
+	return best, found, nil
 }
 
 type callContext struct {
@@ -863,7 +1089,8 @@ func signatureFromSymbol(sym Symbol) Signature {
 	if label == "" || !strings.Contains(label, "(") {
 		label = symbolSignatureLabel(sym)
 	}
-	return Signature{Label: label, Parameters: params}
+	params = parametersWithDocumentation(params, sym.Documentation)
+	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation}
 }
 
 func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
@@ -878,6 +1105,53 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 			}
 			out = append(out, diagnosticsForCallArguments(lineNo, call, sig)...)
 		}
+	}
+	return out
+}
+
+func (a Analyzer) documentationDiagnostics(doc Document) []Diagnostic {
+	syms, err := a.DocumentSymbols(doc)
+	if err != nil {
+		return nil
+	}
+	linked := map[int]bool{}
+	declarations := map[int]bool{}
+	var out []Diagnostic
+	for _, sym := range syms {
+		if sym.Range.Start.Line >= 0 {
+			declarations[sym.Range.Start.Line+1] = true
+		}
+		if sym.DocStartLine > 0 {
+			linked[sym.DocStartLine] = true
+		}
+		if !documentationValidSymbol(sym) || !doccomments.HasDocumentation(sym.Documentation) {
+			continue
+		}
+		proc := procedureFromSymbol(sym)
+		for _, diag := range doccomments.Validate(proc, sym.Documentation, max(1, sym.DocStartLine)) {
+			out = append(out, Diagnostic{
+				Code:     diag.Code,
+				Severity: "warning",
+				Source:   "xlflow",
+				Message:  diag.Message,
+				Range: Range{
+					Start: Position{Line: max(0, diag.Line-1), Character: max(0, diag.Column-1)},
+					End:   Position{Line: max(0, diag.Line-1), Character: max(1, diag.Column)},
+				},
+			})
+		}
+	}
+	for _, diag := range doccomments.UnlinkedDocDiagnostics(doc.Source, linked, declarations) {
+		out = append(out, Diagnostic{
+			Code:     diag.Code,
+			Severity: "warning",
+			Source:   "xlflow",
+			Message:  diag.Message,
+			Range: Range{
+				Start: Position{Line: max(0, diag.Line-1), Character: 0},
+				End:   Position{Line: max(0, diag.Line-1), Character: 3},
+			},
+		})
 	}
 	return out
 }
@@ -4330,17 +4604,23 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 		if strings.TrimSpace(sym.Name) == "" {
 			continue
 		}
+		var documentation doccomments.SymbolDocumentation
+		if sym.Documentation != nil {
+			documentation = *sym.Documentation
+		}
 		converted := Symbol{
-			Name:       sym.Name,
-			Kind:       sym.Kind,
-			Detail:     firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
-			ReturnType: sym.ReturnType,
-			Parameters: symbolParameters(sym.Parameters),
-			File:       firstNonEmpty(uri, file.Path, sym.File),
-			Module:     sym.Module,
-			ModuleKind: file.ModuleKind,
-			Parent:     sym.Parent,
-			Visibility: sym.Visibility,
+			Name:          sym.Name,
+			Kind:          sym.Kind,
+			Detail:        firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
+			ReturnType:    sym.ReturnType,
+			Parameters:    symbolParameters(sym.Parameters),
+			Documentation: documentation,
+			DocStartLine:  sym.DocStartLine,
+			File:          firstNonEmpty(uri, file.Path, sym.File),
+			Module:        sym.Module,
+			ModuleKind:    file.ModuleKind,
+			Parent:        sym.Parent,
+			Visibility:    sym.Visibility,
 			Range: Range{
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},
 				End:   Position{Line: sym.EndLine - 1, Character: max(0, sym.EndColumn-1)},
@@ -4648,6 +4928,14 @@ func symbolHover(signature, source string) string {
 	return b.String()
 }
 
+func symbolHoverWithDocumentation(signature, source string, doc doccomments.SymbolDocumentation) string {
+	hover := symbolHover(signature, source)
+	if md := doccomments.Markdown(doc, ""); md != "" {
+		hover += "\n\n" + md
+	}
+	return hover
+}
+
 func memberHover(receiverType string, member vbadb.MemberInfo, kind string) string {
 	var b strings.Builder
 	b.WriteString("```vb\n")
@@ -4712,6 +5000,48 @@ func symbolSource(sym Symbol) string {
 	default:
 		return ""
 	}
+}
+
+func parametersWithDocumentation(params []Parameter, doc doccomments.SymbolDocumentation) []Parameter {
+	if len(params) == 0 || len(doc.Parameters) == 0 {
+		return params
+	}
+	out := make([]Parameter, len(params))
+	copy(out, params)
+	for i := range out {
+		for name, text := range doc.Parameters {
+			if strings.EqualFold(name, out[i].Name) {
+				out[i].Documentation = strings.TrimSpace(text)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func procedureFromSymbol(sym Symbol) doccomments.Procedure {
+	params := make([]doccomments.Parameter, 0, len(sym.Parameters))
+	for _, param := range sym.Parameters {
+		params = append(params, doccomments.Parameter{Name: param.Name, Type: param.Type, Optional: param.Optional})
+	}
+	return doccomments.Procedure{Name: sym.Name, Kind: sym.Kind, Parameters: params, ReturnType: sym.ReturnType}
+}
+
+func documentationSnippetSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "property_get", "property_let", "property_set":
+		return true
+	default:
+		return false
+	}
+}
+
+func documentationValidSymbol(sym Symbol) bool {
+	return documentationSnippetSymbol(sym)
+}
+
+func rangeIntersects(a, b Range) bool {
+	return comparePosition(a.Start, b.End) <= 0 && comparePosition(b.Start, a.End) <= 0
 }
 
 func constantHover(c vbadb.ConstantInfo) string {

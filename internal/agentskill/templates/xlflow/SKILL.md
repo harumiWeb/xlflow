@@ -219,6 +219,8 @@ When the user reports a runtime failure:
 - Prefer explicit workbook and worksheet references.
 - Use `Long` instead of `Integer`.
 - Keep procedures small and move business logic into testable standard modules.
+- When the user asks for in-code documentation, or when a scaffold/example API should explicitly teach its usage, use xlflow-style doc comments with consecutive `'''` lines immediately before the declaration. A concise summary plus `Args:` for parameters and `Returns:` for functions or `Property Get` values is enough. These comments feed xlflow LSP Hover, Signature Help, Completion details, diagnostics, and agent understanding.
+- For new documentation comments, prefer `'''` doc comments over Rubberduck `@Description` annotations. Do not add documentation comments broadly unless the user requested them or the surrounding codebase already follows that style.
 - Restore `Application` state in cleanup paths.
 - Use `On Error GoTo ErrHandler`; avoid broad `On Error Resume Next`.
 - Do not pass object or array values to `AssertEquals`; compare scalar properties such as `Range.Value2`.

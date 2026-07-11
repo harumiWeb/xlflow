@@ -96,6 +96,12 @@ The main features include:
 <small>Static type inference for objects created via late binding `CreateObject`.</small>
 </p>
 
+![Documentation string support](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/docstrings.png)
+
+<p align="center">
+<small>Generate and hover over documentation strings</small>
+</p>
+
 ## Target Use Cases
 
 This extension is designed for Excel VBA development scenarios such as:
@@ -147,6 +153,8 @@ Common configuration options include:
 - `xlflow.completion.triggerSuggestInStatements`: Triggers VS Code suggestion functionality in contexts where VBA statements are likely to be written.
 - `xlflow.completion.progIdsInStrings`: Triggers VS Code suggestion functionality within strings containing `CreateObject("...")` and `GetObject("...")` syntax.
 - `xlflow.testing.autoDiscover`: Automatically discovers VBA tests when the xlflow workspace is opened.
+
+The VBA language server also understands xlflow documentation comments written with consecutive `'''` lines. Hover, Signature Help, Completion details, and diagnostics use those comments, along with Rubberduck-compatible `@Description` annotations when present. Type `'''` immediately before a procedure declaration, open the Quick Fix action, and accept `Generate documentation comment for ...` to insert a snippet with parameter and, where applicable, return placeholders. Type `@` inside an apostrophe comment to complete Rubberduck `@Description`, `@ModuleDescription`, and `@VariableDescription` snippets.
 
 ## About the Command
 
