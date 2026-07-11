@@ -13,10 +13,13 @@ public sealed record EditCommandArguments(
     bool ValueSpecified,
     string Formula,
     bool FormulaSpecified,
+    string FormulaR1C1,
+    bool FormulaR1C1Specified,
     string Fill,
     string Clear,
     string Height,
     string Width,
     string Events,
+    bool Calculate,
     bool UseSession,
     string MetadataPath);

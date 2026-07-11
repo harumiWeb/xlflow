@@ -3630,7 +3630,21 @@ func summarizeEditMutation(edit map[string]any) string {
 		return ""
 	}
 	if formula := objectMap(mutation["formula"]); len(formula) > 0 {
-		return "formula -> " + stringValue(formula, "after")
+		parts := []string{"formula"}
+		if mode := stringValue(formula, "formula_mode"); mode != "" {
+			parts = append(parts, "mode="+strings.ToUpper(mode))
+		}
+		if cells, ok := numberValue(formula, "cells_updated"); ok {
+			parts = append(parts, fmt.Sprintf("cells=%d", int(cells)))
+		}
+		if calculated, ok := boolValueOK(formula, "calculated"); ok {
+			parts = append(parts, "calculated="+yesNo(calculated))
+		}
+		after := stringValue(formula, "after")
+		if after == "" {
+			after = stringValue(formula, "formula")
+		}
+		return strings.Join(parts, ", ") + " -> " + after
 	}
 	if value := objectMap(mutation["value"]); len(value) > 0 {
 		return "value -> " + stringValue(value, "after")

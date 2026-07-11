@@ -20,6 +20,8 @@ xlflow formulas pull --src path/to/Book.xlsx --out path/to/formulas
 
 For workspace source sync, `xlflow pull --formulas` is a convenience path that runs the normal VBA `pull` first and then refreshes the default `formulas/` snapshot from the saved configured workbook if the VBA pull succeeds. The standalone `xlflow formulas pull` command remains the canonical formula extraction command and should be used for `--src` / `--out` workflows.
 
+Formula snapshots are read-only artifacts. To apply one explicit formula pattern to a live workbook range, use `xlflow edit formula --session --sheet <name> --range <A1:B2> --formula-r1c1 <formula>`. That command is a low-level live-session edit primitive, not a snapshot push/apply workflow.
+
 The command:
 
 - supports `.xlsx` and `.xlsm` files;

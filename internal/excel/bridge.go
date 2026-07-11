@@ -226,6 +226,18 @@ type EditRangeOptions struct {
 	Keepalive    CommandOptions
 }
 
+type EditFormulaOptions struct {
+	WorkbookPath string
+	Sheet        string
+	Range        string
+	Formula      *string
+	FormulaR1C1  *string
+	Events       EditEventMode
+	Calculate    bool
+	Session      bool
+	Keepalive    CommandOptions
+}
+
 type EditRowsOptions struct {
 	WorkbookPath string
 	Sheet        string
@@ -1126,6 +1138,15 @@ func (r Runner) EditRange(cfg config.Config, opts EditRangeOptions) (output.Enve
 	return r.run("edit", scriptArgs, opts.Keepalive)
 }
 
+func (r Runner) EditFormula(cfg config.Config, opts EditFormulaOptions) (output.Envelope, int, error) {
+	scriptArgs, err := buildEditFormulaScriptArgs(r.RootDir, cfg, opts)
+	if err != nil {
+		code, exitCode := editArgFailure(err)
+		return output.Failure("edit", output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
+	}
+	return r.run("edit", scriptArgs, opts.Keepalive)
+}
+
 func (r Runner) EditRows(cfg config.Config, opts EditRowsOptions) (output.Envelope, int, error) {
 	return r.run("edit", buildEditRowsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
 }
@@ -1200,6 +1221,37 @@ func buildEditRangeScriptArgs(root string, cfg config.Config, opts EditRangeOpti
 	}
 	if opts.Clear != "" {
 		args["Clear"] = opts.Clear
+	}
+	return args, nil
+}
+
+func buildEditFormulaScriptArgs(root string, cfg config.Config, opts EditFormulaOptions) (map[string]string, error) {
+	mutations := 0
+	if opts.Formula != nil {
+		mutations++
+	}
+	if opts.FormulaR1C1 != nil {
+		mutations++
+	}
+	if mutations != 1 {
+		return nil, editArgError{message: "exactly one of formula or formula-r1c1 is required"}
+	}
+	args := map[string]string{
+		"Action":       "formula",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Sheet":        opts.Sheet,
+		"RangeAddress": opts.Range,
+		"Events":       string(opts.Events),
+		"Calculate":    strconv.FormatBool(opts.Calculate),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+	if opts.Formula != nil {
+		args["Formula"] = *opts.Formula
+	}
+	if opts.FormulaR1C1 != nil {
+		args["FormulaR1C1"] = *opts.FormulaR1C1
 	}
 	return args, nil
 }
@@ -1840,7 +1892,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "invalid_formula", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
 		return output.ExitValidation
 	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
 		return output.ExitValidation

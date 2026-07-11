@@ -1439,6 +1439,44 @@ func TestWriteWithOptionsRendersFormulaMutationAheadOfCalculatedValue(t *testing
 	}
 }
 
+func TestWriteWithOptionsRendersEditFormulaSummary(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":          "formula",
+		"sheet":         "Invoice",
+		"range":         "D2:D1001",
+		"formula_mode":  "r1c1",
+		"formula":       "=RC[-2]*RC[-1]",
+		"cells_updated": float64(1000),
+		"calculated":    false,
+		"mutation": map[string]any{
+			"formula": map[string]any{
+				"formula_mode":  "r1c1",
+				"after":         "=RC[-2]*RC[-1]",
+				"cells_updated": float64(1000),
+				"calculated":    false,
+			},
+		},
+		"events": map[string]any{
+			"mode":     "off",
+			"restored": true,
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Selection:", "Invoice!D2:D1001", "Mutation:", "mode=R1C1", "cells=1000", "calculated=no", "=RC[-2]*RC[-1]", "Events:", "mode=off"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("edit formula output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersBridgeHost(t *testing.T) {
 	env := New("run")
 	env.Bridge = map[string]any{"host": "powershell.exe", "edition": "Desktop", "version": "5.1"}

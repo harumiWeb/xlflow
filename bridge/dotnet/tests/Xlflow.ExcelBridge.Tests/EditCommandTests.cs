@@ -21,6 +21,7 @@ public sealed class EditCommandTests
             Assert.Equal("42", args.Value);
             Assert.True(args.ValueSpecified);
             Assert.False(args.FormulaSpecified);
+            Assert.False(args.FormulaR1C1Specified);
             Assert.Equal("off", args.Events);
             Assert.True(args.UseSession);
             Assert.Equal(@".xlflow\session.json", args.MetadataPath);
@@ -76,6 +77,7 @@ public sealed class EditCommandTests
             Assert.Equal(string.Empty, args.Value);
             Assert.True(args.ValueSpecified);
             Assert.False(args.FormulaSpecified);
+            Assert.False(args.FormulaR1C1Specified);
             return BridgeResponse.Ok(request, new Dictionary<string, object?>());
         });
 
@@ -92,6 +94,83 @@ public sealed class EditCommandTests
                   "Sheet":"Sheet1",
                   "Cell":"C3",
                   "Value":"",
+                  "UseSession":"true",
+                  "MetadataPath":".xlflow\\session.json"
+                }
+                """).RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void HandleParsesFormulaEditArguments()
+    {
+        var service = new FakeEditService((request, args) =>
+        {
+            Assert.Equal("formula", args.Action);
+            Assert.Equal("Invoice", args.Sheet);
+            Assert.Equal("D2:D1001", args.RangeAddress);
+            Assert.Equal("=RC[-2]*RC[-1]", args.FormulaR1C1);
+            Assert.True(args.FormulaR1C1Specified);
+            Assert.False(args.FormulaSpecified);
+            Assert.Equal("off", args.Events);
+            Assert.True(args.Calculate);
+            Assert.True(args.UseSession);
+            return BridgeResponse.Ok(request, new Dictionary<string, object?>());
+        });
+
+        var command = new EditCommand(service);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-edit-formula",
+            Command = "edit",
+            Payload = JsonDocument.Parse("""
+                {
+                  "WorkbookPath":"C:\\work\\Book.xlsm",
+                  "Action":"formula",
+                  "Sheet":"Invoice",
+                  "RangeAddress":"D2:D1001",
+                  "FormulaR1C1":"=RC[-2]*RC[-1]",
+                  "Events":"off",
+                  "Calculate":"true",
+                  "UseSession":"true",
+                  "MetadataPath":".xlflow\\session.json"
+                }
+                """).RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void HandlePreservesExplicitEmptyFormula()
+    {
+        var service = new FakeEditService((request, args) =>
+        {
+            Assert.Equal("formula", args.Action);
+            Assert.Equal(string.Empty, args.Formula);
+            Assert.True(args.FormulaSpecified);
+            Assert.False(args.FormulaR1C1Specified);
+            return BridgeResponse.Ok(request, new Dictionary<string, object?>());
+        });
+
+        var command = new EditCommand(service);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-edit-empty-formula",
+            Command = "edit",
+            Payload = JsonDocument.Parse("""
+                {
+                  "WorkbookPath":"C:\\work\\Book.xlsm",
+                  "Action":"formula",
+                  "Sheet":"Invoice",
+                  "RangeAddress":"D2",
+                  "Formula":"",
                   "UseSession":"true",
                   "MetadataPath":".xlflow\\session.json"
                 }

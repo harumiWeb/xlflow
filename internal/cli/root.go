@@ -2563,6 +2563,48 @@ func buildEditRangeOptions(workbook, sheet, cellRange, fill, clear string, sessi
 	}, nil
 }
 
+func buildEditFormulaOptions(workbook, sheet, cellRange, events string, formula *string, formulaR1C1 *string, calculate bool, session bool, keepalive excel.CommandOptions) (excel.EditFormulaOptions, error) {
+	if !session {
+		return excel.EditFormulaOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	sheet = strings.TrimSpace(sheet)
+	if sheet == "" {
+		return excel.EditFormulaOptions{}, fmt.Errorf("--sheet is required")
+	}
+	normalizedRange, err := validateInspectRangeAddress(cellRange)
+	if err != nil {
+		return excel.EditFormulaOptions{}, fmt.Errorf("--range %w", err)
+	}
+	events = strings.ToLower(strings.TrimSpace(events))
+	if events == "" {
+		events = string(excel.EditEventKeep)
+	}
+	if events != string(excel.EditEventKeep) && events != string(excel.EditEventOn) && events != string(excel.EditEventOff) {
+		return excel.EditFormulaOptions{}, fmt.Errorf("--events must be keep, on, or off")
+	}
+	mutations := 0
+	if formula != nil {
+		mutations++
+	}
+	if formulaR1C1 != nil {
+		mutations++
+	}
+	if mutations != 1 {
+		return excel.EditFormulaOptions{}, fmt.Errorf("exactly one of --formula or --formula-r1c1 is required")
+	}
+	return excel.EditFormulaOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Sheet:        sheet,
+		Range:        normalizedRange,
+		Formula:      formula,
+		FormulaR1C1:  formulaR1C1,
+		Events:       excel.EditEventMode(events),
+		Calculate:    calculate,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
 func buildEditRowsOptions(workbook, sheet, rows string, height float64, session bool, keepalive excel.CommandOptions) (excel.EditRowsOptions, error) {
 	if !session {
 		return excel.EditRowsOptions{}, fmt.Errorf("`xlflow edit` requires --session")
@@ -3555,6 +3597,7 @@ func (a *app) editCommand() *cobra.Command {
 	cmd.AddCommand(
 		a.editCellCommand(),
 		a.editRangeCommand(),
+		a.editFormulaCommand(),
 		a.editRowsCommand(),
 		a.editColumnsCommand(),
 	)
@@ -3615,6 +3658,64 @@ func (a *app) editCellCommand() *cobra.Command {
 	cmd.Flags().StringVar(&formula, "formula", "", "set a formula such as =A1+B1")
 	cmd.Flags().StringVar(&fill, "fill", "", "set fill color using #RGB or #RRGGBB")
 	cmd.Flags().StringVar(&events, "events", string(excel.EditEventKeep), "event mode for value/formula edits: keep, on, or off")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
+	return cmd
+}
+
+func (a *app) editFormulaCommand() *cobra.Command {
+	var sheet string
+	var cellRange string
+	var formula string
+	var formulaR1C1 string
+	var events string
+	var calculate bool
+	var session bool
+
+	cmd := &cobra.Command{
+		Use:   "formula [workbook]",
+		Short: "Edit formulas in one live-session range",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			commandOpts := buildCommandOptions(a.stderrWriter())
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			var formulaPtr *string
+			if cmd.Flags().Changed("formula") {
+				formulaPtr = &formula
+			}
+			var formulaR1C1Ptr *string
+			if cmd.Flags().Changed("formula-r1c1") {
+				formulaR1C1Ptr = &formulaR1C1
+			}
+			opts, err := buildEditFormulaOptions(workbook, sheet, cellRange, events, formulaPtr, formulaR1C1Ptr, calculate, session, commandOpts)
+			if err != nil {
+				return a.writeFailure("edit", output.ExitConfig, "edit_args_invalid", err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Editing workbook formulas", commandOpts, func() error {
+				var runErr error
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditFormula(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&sheet, "sheet", "", "worksheet name")
+	cmd.Flags().StringVar(&cellRange, "range", "", "range address such as D2:D1001")
+	cmd.Flags().StringVar(&formula, "formula", "", "set an A1-style formula such as =B2*C2")
+	cmd.Flags().StringVar(&formulaR1C1, "formula-r1c1", "", "set an R1C1-style formula such as =RC[-2]*RC[-1]")
+	cmd.Flags().StringVar(&events, "events", string(excel.EditEventKeep), "event mode for formula edits: keep, on, or off")
+	cmd.Flags().BoolVar(&calculate, "calculate", false, "calculate the target range after editing formulas")
 	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
 	return cmd
 }

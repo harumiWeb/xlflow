@@ -1451,11 +1451,39 @@ func TestBuildEditRangeRowsAndColumnsScriptArgs(t *testing.T) {
 	}
 }
 
+func TestBuildEditFormulaScriptArgs(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	formulaR1C1 := "=RC[-2]*RC[-1]"
+	args, err := buildEditFormulaScriptArgs(root, cfg, EditFormulaOptions{
+		WorkbookPath: filepath.Join("fixtures", "Book.xlsm"),
+		Sheet:        "Invoice",
+		Range:        "D2:D1001",
+		FormulaR1C1:  &formulaR1C1,
+		Events:       EditEventOff,
+		Calculate:    true,
+		Session:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["Action"] != "formula" || args["WorkbookPath"] != filepath.Join(root, "fixtures", "Book.xlsm") {
+		t.Fatalf("unexpected edit formula args: %+v", args)
+	}
+	if args["Sheet"] != "Invoice" || args["RangeAddress"] != "D2:D1001" || args["FormulaR1C1"] != formulaR1C1 {
+		t.Fatalf("unexpected formula payload: %+v", args)
+	}
+	if args["Events"] != "off" || args["Calculate"] != "true" || args["UseSession"] != "true" {
+		t.Fatalf("unexpected formula session/event args: %+v", args)
+	}
+}
+
 func TestBuildEditScriptArgsRejectInvalidCombinations(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	value := "ABC123"
 	formula := "=A1+B1"
+	formulaR1C1 := "=RC[-2]*RC[-1]"
 	if _, err := buildEditCellScriptArgs(root, cfg, EditCellOptions{
 		Sheet:   "Input",
 		Cell:    "B2",
@@ -1473,6 +1501,15 @@ func TestBuildEditScriptArgsRejectInvalidCombinations(t *testing.T) {
 		Session: true,
 	}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("expected range mutation conflict, got %v", err)
+	}
+	if _, err := buildEditFormulaScriptArgs(root, cfg, EditFormulaOptions{
+		Sheet:       "Invoice",
+		Range:       "D2:D1001",
+		Formula:     &formula,
+		FormulaR1C1: &formulaR1C1,
+		Session:     true,
+	}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected formula mutation conflict, got %v", err)
 	}
 }
 
