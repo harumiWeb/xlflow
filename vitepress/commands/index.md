@@ -10,8 +10,8 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 
 | Command                        | Purpose                                                                          |
 | ------------------------------ | -------------------------------------------------------------------------------- |
-| [new](./new)                   | Create a new xlflow project and macro-enabled workbook.                          |
-| [init](./init)                 | Initialize an xlflow project from an existing workbook.                          |
+| [new](./new)                   | Create a new xlflow project and macro-enabled workbook or add-in.                |
+| [init](./init)                 | Initialize an xlflow project from an existing workbook or add-in.                |
 | [doctor](./doctor)             | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.        |
 | [attach](./attach)             | Validate that the active Excel workbook matches the configured workbook.         |
 | [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.              |

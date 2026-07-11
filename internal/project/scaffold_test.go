@@ -52,6 +52,46 @@ func TestInitScaffold(t *testing.T) {
 	}
 }
 
+func TestInitScaffoldPreservesXlamWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "ExistingAddin.xlam")
+	wantBody := []byte("fake add-in workbook")
+	if err := os.WriteFile(workbook, wantBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Init(dir, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/ExistingAddin.xlam" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+	gotBody, err := os.ReadFile(filepath.Join(dir, "build", "ExistingAddin.xlam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBody) != string(wantBody) {
+		t.Fatalf("copied workbook body = %q, want %q", string(gotBody), string(wantBody))
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Excel.Path != "build/ExistingAddin.xlam" {
+		t.Fatalf("excel path = %q", cfg.Excel.Path)
+	}
+	for _, path := range []string{
+		"src/modules",
+		"src/classes",
+		"src/forms",
+		"src/workbook",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+}
+
 func TestNewScaffoldCreatesGitignore(t *testing.T) {
 	dir := t.TempDir()
 	result, err := New(dir, "Book", fakeWorkbookCreator)
@@ -714,17 +754,42 @@ func TestNewScaffoldKeepsXlsmExtension(t *testing.T) {
 	}
 }
 
-func TestNewRejectsNonXlsmExtension(t *testing.T) {
+func TestNewScaffoldKeepsXlamExtension(t *testing.T) {
 	dir := t.TempDir()
-	_, err := New(dir, "Sales.xlsx", fakeWorkbookCreator)
-	if err == nil {
-		t.Fatal("expected extension validation error")
+	result, err := New(dir, "MyAddin.xlam", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), ".xlsm") {
-		t.Fatalf("unexpected error: %v", err)
+	if result.Workbook != "build/MyAddin.xlam" {
+		t.Fatalf("workbook path = %q", result.Workbook)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(statErr) {
-		t.Fatalf("expected config not to be created, got %v", statErr)
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Excel.Path != "build/MyAddin.xlam" {
+		t.Fatalf("excel path = %q", cfg.Excel.Path)
+	}
+	if cfg.Project.Name != "MyAddin" {
+		t.Fatalf("project name = %q", cfg.Project.Name)
+	}
+}
+
+func TestNewRejectsUnsupportedWorkbookExtensions(t *testing.T) {
+	for _, name := range []string{"Sales.xlsx", "Sales.txt"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, err := New(dir, name, fakeWorkbookCreator)
+			if err == nil {
+				t.Fatal("expected extension validation error")
+			}
+			if !strings.Contains(err.Error(), ".xlsm or .xlam") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(statErr) {
+				t.Fatalf("expected config not to be created, got %v", statErr)
+			}
+		})
 	}
 }
 

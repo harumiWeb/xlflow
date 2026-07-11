@@ -642,8 +642,8 @@ func normalizeWorkbookName(name string) (string, error) {
 	if ext == "" {
 		return name + ".xlsm", nil
 	}
-	if ext != ".xlsm" {
-		return "", fmt.Errorf("workbook name must use .xlsm extension: %s", name)
+	if ext != ".xlsm" && ext != ".xlam" {
+		return "", fmt.Errorf("workbook name must use .xlsm or .xlam extension: %s", name)
 	}
 	return name, nil
 }

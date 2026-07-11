@@ -27,7 +27,7 @@
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
 
-It turns `.xlsm` workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
+It turns `.xlsm` workbooks and `.xlam` Excel add-ins into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
 
 ![Ai-Driven Development](docs/images/ai-drive-develop.gif)
 
@@ -90,7 +90,7 @@ That works for small manual edits, but it becomes painful when you want repeatab
 
 | Pain in normal VBA development                       | What xlflow adds                                                  |
 | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| VBA code is trapped inside `.xlsm` files             | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
+| VBA code is trapped inside `.xlsm` / `.xlam` files   | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
 | UserForms cannot be handled declaratively            | Generate UserForms from YAML definitions with `xlflow form build` |
 | Runtime failures are hard to locate                  | Return structured errors, diagnostics, and terminal logs          |
 | Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source         |
@@ -323,12 +323,20 @@ Create a new xlflow project and macro-enabled workbook:
 xlflow new Book.xlsm
 ```
 
+Omit the extension to default to `.xlsm`, or request an Excel add-in project explicitly:
+
+```bash
+xlflow new Book
+xlflow new MyAddin.xlam
+```
+
 `new` automatically pushes the scaffolded VBA modules into the new workbook, so a later `pull` starts from the same initial source.
 
-Or start from an existing workbook:
+Or start from an existing workbook or add-in:
 
 ```bash
 xlflow init Book.xlsm
+xlflow init ExistingAddin.xlam
 ```
 
 `init` automatically pulls VBA out of the copied workbook into `src/`, so you can edit source files immediately without a separate bootstrap `pull`.
@@ -522,8 +530,8 @@ You can install it from the [Visual Studio Marketplace](https://marketplace.visu
 
 | Command             | Purpose                                                                 | Typical usage                                                                |
 | ------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `new`               | Create a new xlflow project and `.xlsm` workbook                        | `xlflow new Book.xlsm`                                                       |
-| `init`              | Initialize xlflow from an existing workbook                             | `xlflow init Book.xlsm`                                                      |
+| `new`               | Create a new xlflow project and `.xlsm` workbook or `.xlam` add-in      | `xlflow new Book.xlsm`                                                       |
+| `init`              | Initialize xlflow from an existing workbook or add-in                   | `xlflow init Book.xlsm`                                                      |
 | `doctor`            | Diagnose Excel, COM, `.NET` bridge, VBIDE, and optional workbook access | `xlflow doctor --workbook --json`                                            |
 | `attach`            | Validate the workbook currently active in Excel                         | `xlflow attach --active --json`                                              |
 | `backup list`       | List rollback-capable workbook backups                                  | `xlflow backup list --json`                                                  |

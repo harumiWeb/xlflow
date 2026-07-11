@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `.xlam` project creation to `xlflow new`, using Excel add-in file format `55` while keeping `.xlsm` as the default, and documented `.xlam` initialization through `xlflow init`.
 - Fixed `.xlam` session reuse in the .NET bridge by resolving open add-in workbooks through direct filename lookup with full-path validation, and by making VBE Compile target activation tolerate add-in workbooks without normal visible workbook windows.
 
 ## v0.21.0
