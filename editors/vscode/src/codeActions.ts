@@ -151,7 +151,7 @@ function logicalDeclarationLine(
 
 export function parseProcedureDeclaration(text: string): ProcedureDeclaration | undefined {
   const property =
-    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Property)\s+(Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?/i.exec(
+    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Property)\s+(Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\((.*)\))?/i.exec(
       text,
     );
   if (property !== null) {
@@ -163,7 +163,7 @@ export function parseProcedureDeclaration(text: string): ProcedureDeclaration | 
     };
   }
   const procedure =
-    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?/i.exec(
+    /^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\((.*)\))?/i.exec(
       text,
     );
   if (procedure === null) {
@@ -201,7 +201,7 @@ function documentationSnippetText(procedure: ProcedureDeclaration): string {
   const lines = [
     `''' \${${index++}:${procedure.kind.startsWith("property_") ? "Property description." : "Summary."}}`,
   ];
-  const args = procedure.kind === "property_get" ? [] : procedure.parameters;
+  const args = procedure.parameters;
   if (args.length > 0) {
     lines.push("'''", "''' Args:");
     for (const arg of args) {

@@ -478,6 +478,27 @@ func TestDocumentationMarkerSuppressesOrdinaryCompletionsWithoutTarget(t *testin
 	}
 }
 
+func TestCommentCompletionSuppressesOrdinarySuggestions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := "Option Explicit\n' TODO\nPublic Sub Run()\nEnd Sub\n"
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	items, err := analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("' T")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("ordinary comment should not fall through to completions: %+v", items)
+	}
+
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("apostrophe trigger should not fall through to completions: %+v", items)
+	}
+}
+
 func TestHoverUsesRubberduckDescriptionOnProjectCall(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit

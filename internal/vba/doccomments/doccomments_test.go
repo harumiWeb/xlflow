@@ -107,6 +107,60 @@ func TestGenerateSnippetByProcedureKind(t *testing.T) {
 	if strings.Contains(propertySnippet.Text, "Args:") || !strings.Contains(propertySnippet.Text, "Returns:") {
 		t.Fatalf("property get snippet = %q", propertySnippet.Text)
 	}
+
+	indexedPropertySnippet := GenerateSnippet(Procedure{
+		Name:       "Item",
+		Kind:       "property_get",
+		Parameters: []Parameter{{Name: "index"}},
+		ReturnType: "Variant",
+	})
+	if !strings.Contains(indexedPropertySnippet.Text, "Args:") || !strings.Contains(indexedPropertySnippet.Text, "index: ${2:Parameter description.}") || !strings.Contains(indexedPropertySnippet.Text, "Returns:") {
+		t.Fatalf("indexed property get snippet = %q", indexedPropertySnippet.Text)
+	}
+}
+
+func TestGenerateCommentOmitsSnippetPlaceholders(t *testing.T) {
+	comment := GenerateComment(Procedure{
+		Name:       "FindCustomer",
+		Kind:       "function",
+		Parameters: []Parameter{{Name: "customerCode"}},
+		ReturnType: "Customer",
+	})
+	if strings.Contains(comment.Text, "${") {
+		t.Fatalf("comment should not contain snippet placeholders: %q", comment.Text)
+	}
+	if !strings.Contains(comment.Text, "customerCode: Parameter description.") || !strings.Contains(comment.Text, "Return value description.") {
+		t.Fatalf("comment text = %q", comment.Text)
+	}
+}
+
+func TestMarkdownRendersUnknownSectionsDeterministically(t *testing.T) {
+	doc := SymbolDocumentation{
+		Summary: "Summary.",
+		UnknownSections: map[string]string{
+			"zeta":  "last",
+			"alpha": "first",
+		},
+	}
+	markdown := Markdown(doc, "")
+	alpha := strings.Index(markdown, "**alpha**")
+	zeta := strings.Index(markdown, "**zeta**")
+	if alpha < 0 || zeta < 0 || alpha > zeta {
+		t.Fatalf("unknown sections not sorted: %q", markdown)
+	}
+}
+
+func TestParseDocLinesRemovesCommonIndentation(t *testing.T) {
+	doc := ParseDocLines([]string{
+		"''' Summary.",
+		"'''",
+		"''' Remarks:",
+		"'''     First line.",
+		"'''         Nested line.",
+	})
+	if doc.Remarks != "First line.\n    Nested line." {
+		t.Fatalf("remarks = %q", doc.Remarks)
+	}
 }
 
 func hasDiagnostic(diagnostics []Diagnostic, code string) bool {

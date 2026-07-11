@@ -1,8 +1,10 @@
 package symbols
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -142,20 +144,46 @@ Private currentWorkbook As Workbook
 	}
 
 	module := assertSymbol(t, file.Symbols, "Main", "module")
-	if module.Documentation.Summary != "Provides sales aggregation." {
+	if module.Documentation == nil || module.Documentation.Summary != "Provides sales aggregation." {
 		t.Fatalf("module documentation = %+v", module.Documentation)
 	}
 	calc := assertSymbol(t, file.Symbols, "CalculateSales", "function")
-	if calc.Documentation.Summary != "Calculates sales for the requested sheet." || calc.Documentation.Parameters["ws"] == "" || calc.Documentation.Returns == "" {
+	if calc.Documentation == nil || calc.Documentation.Summary != "Calculates sales for the requested sheet." || calc.Documentation.Parameters["ws"] == "" || calc.Documentation.Returns == "" {
 		t.Fatalf("function documentation = %+v", calc.Documentation)
 	}
 	legacy := assertSymbol(t, file.Symbols, "Legacy", "sub")
-	if legacy.Documentation.Summary != "Legacy description." || legacy.Documentation.Source != "rubberduck" {
+	if legacy.Documentation == nil || legacy.Documentation.Summary != "Legacy description." || legacy.Documentation.Source != "rubberduck" {
 		t.Fatalf("legacy documentation = %+v", legacy.Documentation)
 	}
 	current := assertSymbol(t, file.Symbols, "currentWorkbook", "module_variable")
-	if current.Documentation.Summary != "Current workbook." {
+	if current.Documentation == nil || current.Documentation.Summary != "Current workbook." {
 		t.Fatalf("variable documentation = %+v", current.Documentation)
+	}
+}
+
+func TestInspectOmitsEmptyDocumentationFromJSON(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:    t.TempDir(),
+		Path:       "Main.bas",
+		ModuleKind: "standard",
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if run.Documentation != nil {
+		t.Fatalf("documentation = %+v, want nil", run.Documentation)
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), `"documentation"`) {
+		t.Fatalf("payload should omit documentation: %s", payload)
 	}
 }
 

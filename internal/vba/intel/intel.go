@@ -590,6 +590,9 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if items, ok, err := a.documentationSnippetCompletions(doc, pos); ok || err != nil {
 		return items, err
 	}
+	if commentStartIndex(prefix) >= 0 {
+		return nil, nil
+	}
 	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.Source, pos) && moduleHasContent(doc.Source) {
 		return nil, nil
 	}
@@ -716,7 +719,7 @@ func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]Doc
 		if !rangeIntersects(selection, sym.Selection) && !rangeIntersects(selection, sym.Range) {
 			continue
 		}
-		snippet := doccomments.GenerateSnippet(procedureFromSymbol(sym))
+		snippet := doccomments.GenerateComment(procedureFromSymbol(sym))
 		if snippet.Text == "" {
 			continue
 		}
@@ -4601,13 +4604,17 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 		if strings.TrimSpace(sym.Name) == "" {
 			continue
 		}
+		var documentation doccomments.SymbolDocumentation
+		if sym.Documentation != nil {
+			documentation = *sym.Documentation
+		}
 		converted := Symbol{
 			Name:          sym.Name,
 			Kind:          sym.Kind,
 			Detail:        firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
 			ReturnType:    sym.ReturnType,
 			Parameters:    symbolParameters(sym.Parameters),
-			Documentation: sym.Documentation,
+			Documentation: documentation,
 			DocStartLine:  sym.DocStartLine,
 			File:          firstNonEmpty(uri, file.Path, sym.File),
 			Module:        sym.Module,

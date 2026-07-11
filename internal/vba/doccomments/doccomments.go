@@ -157,7 +157,10 @@ func RubberduckDocumentation(text string) SymbolDocumentation {
 }
 
 func DocumentationForTarget(source string, targetLine int, acceptedRubberduckKinds ...string) (SymbolDocumentation, int, bool) {
-	lines := normalizedLines(source)
+	return DocumentationForTargetLines(normalizedLines(source), targetLine, acceptedRubberduckKinds...)
+}
+
+func DocumentationForTargetLines(lines []string, targetLine int, acceptedRubberduckKinds ...string) (SymbolDocumentation, int, bool) {
 	if targetLine <= 1 || targetLine > len(lines)+1 {
 		return SymbolDocumentation{}, 0, false
 	}
@@ -200,7 +203,11 @@ func DocumentationForTarget(source string, targetLine int, acceptedRubberduckKin
 }
 
 func ModuleDocumentation(source string) (SymbolDocumentation, bool) {
-	for _, line := range normalizedLines(source) {
+	return ModuleDocumentationLines(normalizedLines(source))
+}
+
+func ModuleDocumentationLines(lines []string) (SymbolDocumentation, bool) {
+	for _, line := range lines {
 		if annotation, ok := RubberduckDescription(line); ok && annotation.Kind == "module" {
 			return RubberduckDocumentation(annotation.Text), true
 		}
@@ -279,6 +286,14 @@ func Validate(proc Procedure, doc SymbolDocumentation, startLine int) []Diagnost
 }
 
 func GenerateSnippet(proc Procedure) Snippet {
+	return generateComment(proc, true)
+}
+
+func GenerateComment(proc Procedure) Snippet {
+	return generateComment(proc, false)
+}
+
+func generateComment(proc Procedure, snippet bool) Snippet {
 	if strings.TrimSpace(proc.Name) == "" || !snippetSupported(proc.Kind) {
 		return Snippet{}
 	}
@@ -288,21 +303,32 @@ func GenerateSnippet(proc Procedure) Snippet {
 	}
 	index := 1
 	var b strings.Builder
-	fmt.Fprintf(&b, "''' ${%d:%s}", index, placeholder)
+	b.WriteString("''' ")
+	writeGeneratedCommentText(&b, snippet, index, placeholder)
 	index++
 	args := snippetArgs(proc)
 	if len(args) > 0 {
 		b.WriteString("\n'''\n''' Args:")
 		for _, param := range args {
-			fmt.Fprintf(&b, "\n'''     %s: ${%d:%s}", param.Name, index, argPlaceholder(proc.Kind))
+			fmt.Fprintf(&b, "\n'''     %s: ", param.Name)
+			writeGeneratedCommentText(&b, snippet, index, argPlaceholder(proc.Kind))
 			index++
 		}
 	}
 	if snippetNeedsReturns(proc) {
 		b.WriteString("\n'''\n''' Returns:")
-		fmt.Fprintf(&b, "\n'''     ${%d:%s}", index, returnPlaceholder(proc.Kind))
+		b.WriteString("\n'''     ")
+		writeGeneratedCommentText(&b, snippet, index, returnPlaceholder(proc.Kind))
 	}
 	return Snippet{Label: "Generate documentation comment for " + proc.Name, Text: b.String()}
+}
+
+func writeGeneratedCommentText(b *strings.Builder, snippet bool, index int, text string) {
+	if snippet {
+		fmt.Fprintf(b, "${%d:%s}", index, text)
+		return
+	}
+	b.WriteString(text)
 }
 
 func HasDocumentation(doc SymbolDocumentation) bool {
@@ -344,8 +370,13 @@ func Markdown(doc SymbolDocumentation, activeParameter string) string {
 	writeSection(&b, "Examples", doc.Examples)
 	writeSection(&b, "See Also", doc.SeeAlso)
 	writeSection(&b, "Deprecated", doc.Deprecated)
-	for name, text := range doc.UnknownSections {
-		writeSection(&b, name, text)
+	names := make([]string, 0, len(doc.UnknownSections))
+	for name := range doc.UnknownSections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		writeSection(&b, name, doc.UnknownSections[name])
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -382,6 +413,11 @@ func normalizedLines(source string) []string {
 	return strings.Split(source, "\n")
 }
 
+// NormalizedLines returns source split into lines after normalizing CRLF and CR line endings.
+func NormalizedLines(source string) []string {
+	return normalizedLines(source)
+}
+
 func docBlockCanLink(lines []string, afterBlock int, declarationLines map[int]bool) bool {
 	for i := afterBlock; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "" {
@@ -407,11 +443,35 @@ func trimBlock(lines []string) string {
 	for end > start && strings.TrimSpace(lines[end-1]) == "" {
 		end--
 	}
+	commonIndent := -1
+	for _, line := range lines[start:end] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := leadingWhitespaceLen(line)
+		if commonIndent < 0 || indent < commonIndent {
+			commonIndent = indent
+		}
+	}
+	if commonIndent < 0 {
+		commonIndent = 0
+	}
 	out := make([]string, 0, end-start)
 	for _, line := range lines[start:end] {
+		if commonIndent > 0 && len(line) >= commonIndent {
+			line = line[commonIndent:]
+		}
 		out = append(out, strings.TrimRight(line, " \t"))
 	}
 	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func leadingWhitespaceLen(line string) int {
+	n := 0
+	for n < len(line) && (line[n] == ' ' || line[n] == '\t') {
+		n++
+	}
+	return n
 }
 
 func splitSummary(text string) (string, string) {
@@ -508,9 +568,6 @@ func snippetSupported(kind string) bool {
 }
 
 func snippetArgs(proc Procedure) []Parameter {
-	if strings.EqualFold(proc.Kind, "property_get") {
-		return nil
-	}
 	return proc.Parameters
 }
 

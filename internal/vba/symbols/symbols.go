@@ -50,25 +50,25 @@ type ParseSummary struct {
 }
 
 type Symbol struct {
-	Name          string                          `json:"name"`
-	Kind          string                          `json:"kind"`
-	Visibility    string                          `json:"visibility,omitempty"`
-	Module        string                          `json:"module"`
-	File          string                          `json:"file"`
-	Parent        string                          `json:"parent,omitempty"`
-	StartLine     int                             `json:"startLine"`
-	StartColumn   int                             `json:"startColumn"`
-	EndLine       int                             `json:"endLine"`
-	EndColumn     int                             `json:"endColumn"`
-	StartByte     int                             `json:"startByte"`
-	EndByte       int                             `json:"endByte"`
-	Signature     string                          `json:"signature,omitempty"`
-	Attributes    []Attribute                     `json:"attributes,omitempty"`
-	Static        bool                            `json:"static,omitempty"`
-	ReturnType    string                          `json:"returnType,omitempty"`
-	Parameters    []Parameter                     `json:"parameters,omitempty"`
-	Documentation doccomments.SymbolDocumentation `json:"documentation,omitempty"`
-	DocStartLine  int                             `json:"docStartLine,omitempty"`
+	Name          string                           `json:"name"`
+	Kind          string                           `json:"kind"`
+	Visibility    string                           `json:"visibility,omitempty"`
+	Module        string                           `json:"module"`
+	File          string                           `json:"file"`
+	Parent        string                           `json:"parent,omitempty"`
+	StartLine     int                              `json:"startLine"`
+	StartColumn   int                              `json:"startColumn"`
+	EndLine       int                              `json:"endLine"`
+	EndColumn     int                              `json:"endColumn"`
+	StartByte     int                              `json:"startByte"`
+	EndByte       int                              `json:"endByte"`
+	Signature     string                           `json:"signature,omitempty"`
+	Attributes    []Attribute                      `json:"attributes,omitempty"`
+	Static        bool                             `json:"static,omitempty"`
+	ReturnType    string                           `json:"returnType,omitempty"`
+	Parameters    []Parameter                      `json:"parameters,omitempty"`
+	Documentation *doccomments.SymbolDocumentation `json:"documentation,omitempty"`
+	DocStartLine  int                              `json:"docStartLine,omitempty"`
 }
 
 type Attribute struct {
@@ -98,14 +98,15 @@ type SourceOptions struct {
 }
 
 type extractor struct {
-	opts       Options
-	rootDir    string
-	source     []byte
-	file       string
-	moduleName string
-	moduleKind string
-	attrs      []Attribute
-	symbols    []Symbol
+	opts        Options
+	rootDir     string
+	source      []byte
+	sourceLines []string
+	file        string
+	moduleName  string
+	moduleKind  string
+	attrs       []Attribute
+	symbols     []Symbol
 }
 
 var attrRe = regexp.MustCompile(`(?i)^\s*Attribute\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$`)
@@ -152,13 +153,14 @@ func Inspect(opts Options) (*Result, error) {
 			continue
 		}
 		ext := extractor{
-			opts:       opts,
-			rootDir:    rootDir,
-			source:     parsed.Source,
-			file:       rel,
-			moduleName: moduleName,
-			moduleKind: file.moduleKind,
-			attrs:      attrs,
+			opts:        opts,
+			rootDir:     rootDir,
+			source:      parsed.Source,
+			sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
+			file:        rel,
+			moduleName:  moduleName,
+			moduleKind:  file.moduleKind,
+			attrs:       attrs,
 		}
 		fileSymbols := ext.extract(parsed.Root)
 		result.Files = append(result.Files, FileResult{
@@ -219,12 +221,13 @@ func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
 			IncludePrivate: opts.IncludePrivate,
 			IncludeLabels:  opts.IncludeLabels,
 		},
-		rootDir:    rootDir,
-		source:     parsed.Source,
-		file:       rel,
-		moduleName: moduleName,
-		moduleKind: moduleKind,
-		attrs:      attrs,
+		rootDir:     rootDir,
+		source:      parsed.Source,
+		sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
+		file:        rel,
+		moduleName:  moduleName,
+		moduleKind:  moduleKind,
+		attrs:       attrs,
 	}
 	return FileResult{
 		Path:       rel,
@@ -397,8 +400,8 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 		Signature:   "Module " + e.moduleName,
 		Attributes:  e.attrs,
 	})
-	if doc, ok := doccomments.ModuleDocumentation(string(e.source)); ok {
-		e.symbols[len(e.symbols)-1].Documentation = doc
+	if doc, ok := doccomments.ModuleDocumentationLines(e.sourceLines); ok {
+		e.symbols[len(e.symbols)-1].Documentation = &doc
 	}
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		e.visit(root.NamedChild(i), "")
@@ -577,11 +580,11 @@ func (e *extractor) attachDocumentation(sym *Symbol, rubberduckKinds ...string) 
 	if sym == nil || sym.StartLine <= 0 {
 		return
 	}
-	doc, startLine, ok := doccomments.DocumentationForTarget(string(e.source), sym.StartLine, rubberduckKinds...)
+	doc, startLine, ok := doccomments.DocumentationForTargetLines(e.sourceLines, sym.StartLine, rubberduckKinds...)
 	if !ok || !doccomments.HasDocumentation(doc) {
 		return
 	}
-	sym.Documentation = doc
+	sym.Documentation = &doc
 	sym.DocStartLine = startLine
 }
 

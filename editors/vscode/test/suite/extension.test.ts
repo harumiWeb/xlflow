@@ -252,6 +252,10 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     documentationSnippet(parsedFunction).includes("customerCode: ${2:Parameter description.}"),
     "documentation snippet should include argument tab stop",
   );
+  const parsedArrayProcedure = parseProcedureDeclaration(
+    "Public Sub AcceptItems(arr() As String, x As Long)",
+  );
+  assert.deepStrictEqual(parsedArrayProcedure?.parameters, ["arr", "x"]);
   const parsedProperty = parseProcedureDeclaration(
     "Public Property Get CurrentCustomer() As Customer",
   );
@@ -259,6 +263,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.ok(
     parsedProperty !== undefined && documentationSnippet(parsedProperty).includes("Returns:"),
     "property get documentation snippet should include Returns",
+  );
+  const parsedIndexedProperty = parseProcedureDeclaration(
+    "Public Property Get Item(index As Long) As Variant",
+  );
+  assert.ok(
+    parsedIndexedProperty !== undefined &&
+      documentationSnippet(parsedIndexedProperty).includes("index: ${2:Parameter description.}"),
+    "indexed property get documentation snippet should include Args",
   );
   assert.strictEqual(isProgIdStringPrefix('Set app = CreateObject("Excel.'), true);
   assert.strictEqual(isProgIdStringPrefix('Debug.Print "Excel.'), false);

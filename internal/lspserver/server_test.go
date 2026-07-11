@@ -669,7 +669,7 @@ func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 		t.Fatalf("code action edit = %+v", edit)
 	}
 	edits := edit.Changes[protocol.DocumentUri(uri)]
-	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "customerCode: ${2:Parameter description.}") || !strings.Contains(edits[0].NewText, "Returns:") {
+	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "customerCode: Parameter description.") || !strings.Contains(edits[0].NewText, "Returns:") || strings.Contains(edits[0].NewText, "${") {
 		t.Fatalf("unexpected code action edit: %+v", edits)
 	}
 }
