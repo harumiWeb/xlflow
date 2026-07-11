@@ -346,6 +346,7 @@ public sealed class ExcelEditService : IEditService
             };
 
             UpdateSaveState(workbook, ref dirty, ref needsSave);
+            RefreshEditStateExtensions(extensions, workbookPath, sessionMode, dirty, needsSave);
             var edit = (Dictionary<string, object?>)extensions["edit"]!;
             edit["formula_mode"] = formulaMode;
             edit["formula"] = formulaText;
@@ -551,6 +552,12 @@ public sealed class ExcelEditService : IEditService
             ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, sessionMode, true, false, dirty, needsSave),
             ["edit"] = edit,
         };
+    }
+
+    private static void RefreshEditStateExtensions(Dictionary<string, object?> extensions, string workbookPath, string sessionMode, bool? dirty, bool needsSave)
+    {
+        extensions["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, sessionMode, dirty, needsSave);
+        extensions["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, sessionMode, true, false, dirty, needsSave);
     }
 
     private static BridgeResponse Success(BridgeRequest request, string workbookPath, string sessionMode, bool? dirty, bool needsSave, Dictionary<string, object?> extensions, IReadOnlyList<string> logs)

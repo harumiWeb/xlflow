@@ -9,7 +9,7 @@ xlflow edit cell --sheet <sheet> --cell <addr> --value <value> --session
 xlflow edit range --sheet <sheet> --range <addr> --fill <color> --session
 xlflow edit formula --sheet <sheet> --range <addr> --formula-r1c1 <formula> --session
 xlflow edit rows --sheet <sheet> --rows <rows> --height <points> --session
-xlflow edit columns --sheet <sheet> --columns <cols> --width <points> --session
+xlflow edit columns --sheet <sheet> --columns <cols> --width <characters> --session
 ```
 
 ## Options and Arguments

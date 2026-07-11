@@ -94,7 +94,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Add `--initializer <MethodName>` to runtime or both mode when the form must be explicitly populated before inspection, such as workbook-scoped setup methods that mirror the visible UI.
    - Use `xlflow edit cell --sheet <name> --cell <A1> --value <text> --events on --session --json` to prepare input cells and trigger `Worksheet_Change` handlers during a session.
    - Use `xlflow edit range --sheet <name> --range <A1:B2> --fill <#RRGGBB> --session --json` or `--clear contents|formats|all` to reset workbook state between iterations.
-   - Use `xlflow edit formula --sheet <name> --range <A1:B2> --formula-r1c1 <formula> --session --json` to apply formula snapshot patterns back to a live workbook range.
+   - Apply an explicit formula pattern derived from a snapshot with `xlflow edit formula --sheet <name> --range <A1:B2> --formula-r1c1 <formula> --session --json`.
    - Use `xlflow edit rows --sheet <name> --rows <1:31> --height <points> --session --json` and `xlflow edit columns --sheet <name> --columns <A:AE> --width <chars> --session --json` for visual tuning before `export-image`.
 
 - Use `xlflow inspect workbook --json` for saved-file metadata, or `xlflow inspect workbook --session --json` for the live workbook state in Excel.
