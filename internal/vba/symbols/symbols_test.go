@@ -159,6 +159,32 @@ Private currentWorkbook As Workbook
 	}
 }
 
+func TestInspectKeepsFullProcedureSignatureAcrossLineContinuations(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir:        t.TempDir(),
+		Path:           "Main.bas",
+		ModuleKind:     "standard",
+		IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+
+Public Function CalculateSales( _
+    ByVal ws As Worksheet, _
+    Optional ByVal includeTax As Boolean = False _
+) As Currency
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calc := assertSymbol(t, file.Symbols, "CalculateSales", "function")
+	want := "Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency"
+	if calc.Signature != want {
+		t.Fatalf("signature = %q, want %q", calc.Signature, want)
+	}
+}
+
 func TestInspectExtractsSymbolsInsideConditionalCompilationBlocks(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

@@ -425,6 +425,7 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		parentProc = sym.Name
 	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		sym := e.simpleSymbol(node, "declare", "")
+		sym.Signature = declarationHeader(node.Utf8Text(e.source))
 		switch node.Kind() {
 		case "declare_sub_statement":
 			sym.Kind = "declare_sub"
@@ -521,6 +522,7 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 		}
 	}
 	sym := e.simpleSymbol(node, kind, "")
+	sym.Signature = declarationHeader(node.Utf8Text(e.source))
 	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 	sym.ReturnType = typeText(node, e.source)
 	sym.Parameters = parameters(node, e.source)
@@ -872,6 +874,35 @@ func firstLine(text string) string {
 		}
 	}
 	return ""
+}
+
+func declarationHeader(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	parts := make([]string, 0, 4)
+	started := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if started {
+				break
+			}
+			continue
+		}
+		started = true
+		continued := strings.HasSuffix(trimmed, "_")
+		if continued {
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "_"))
+		}
+		parts = append(parts, trimmed)
+		if !continued {
+			break
+		}
+	}
+	header := strings.Join(parts, " ")
+	header = strings.ReplaceAll(header, "( ", "(")
+	header = strings.ReplaceAll(header, " )", ")")
+	return strings.TrimSpace(header)
 }
 
 func hasWord(text, word string) bool {

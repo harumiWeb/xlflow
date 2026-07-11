@@ -346,6 +346,47 @@ End Sub
 	}
 }
 
+func TestHoverShowsFullMultilineProcedureDeclaration(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+''' Calculates sales for the requested sheet.
+'''
+''' Args:
+'''     ws: Worksheet to aggregate.
+'''     includeTax: True to include tax.
+'''
+''' Returns:
+'''     Aggregated amount.
+Public Function CalculateSales( _
+    ByVal ws As Worksheet, _
+    Optional ByVal includeTax As Boolean = False _
+) As Currency
+End Function
+
+Public Sub Caller()
+    CalculateSales
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	hoverLine := "    CalculateSales"
+	hover, err := analyzer.Hover(doc, Position{Line: 16, Character: utf16Len(hoverLine)}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("hover = nil")
+	}
+	for _, want := range []string{
+		"Public Function CalculateSales(ByVal ws As Worksheet, Optional ByVal includeTax As Boolean = False) As Currency",
+		"Worksheet to aggregate.",
+		"Aggregated amount.",
+	} {
+		if !strings.Contains(hover.Contents, want) {
+			t.Fatalf("hover contents missing %q:\n%s", want, hover.Contents)
+		}
+	}
+}
+
 func TestDocumentationSnippetCompletion(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
