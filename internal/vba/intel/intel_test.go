@@ -439,7 +439,7 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription", "@ExpectedError"} {
+	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription", "@ExpectedError", "@Skip", "@Todo"} {
 		if !hasCompletion(items, want) {
 			t.Fatalf("%s completion missing: %+v", want, items)
 		}
@@ -447,6 +447,31 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	item, ok = findCompletion(items, "@ExpectedError")
 	if !ok || !item.Snippet || item.InsertText != `@ExpectedError(${1:5})` || item.ReplaceRange == nil {
 		t.Fatalf("unexpected @ExpectedError completion: %+v", item)
+	}
+
+	source = "Option Explicit\n'@S\n"
+	doc.Source = source
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@S")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok = findCompletion(items, "@Skip")
+	if !ok || !item.Snippet || item.InsertText != `@Skip("${1:Reason}")` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @Skip completion: %+v", item)
+	}
+	if hasCompletion(items, "@Todo") {
+		t.Fatalf("@Todo should not match @S prefix: %+v", items)
+	}
+
+	source = "Option Explicit\n'@T\n"
+	doc.Source = source
+	items, err = analyzer.Completions(doc, Position{Line: 1, Character: utf16Len("'@T")}, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok = findCompletion(items, "@Todo")
+	if !ok || !item.Snippet || item.InsertText != `@Todo("${1:Reason}")` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @Todo completion: %+v", item)
 	}
 }
 

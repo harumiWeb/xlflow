@@ -118,6 +118,52 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void BuildErrorResponseIncludesSkipTodoDiscoveryMetadata()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-test-status-metadata",
+            Command = "test",
+        };
+        var args = new TestCommandArguments(
+            WorkbookPath: @"C:\work\book.xlsm",
+            Filter: "",
+            ModuleFilter: "",
+            TagFilter: "",
+            Visible: false,
+            RuntimeMode: "",
+            RuntimeSource: "",
+            MsgBoxResponsesJSON: "",
+            InputResponsesJSON: "",
+            FileDialogResponsesJSON: "",
+            DebugStreamEnabled: false,
+            DebugStreamPipeName: "",
+            UIStreamEnabled: false,
+            UIStreamPipeName: "",
+            UIStreamRedactInput: false,
+            UseSession: false,
+            MetadataPath: "");
+        var tests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestAccess", Module = "Module1", Skip = new ExcelTestService.StatusReasonMetadata { Reason = "Requires Access" } },
+            new() { Name = "TestExporter", Module = "Module1", Todo = new ExcelTestService.StatusReasonMetadata() },
+        };
+
+        var response = ExcelTestService.BuildErrorResponse(
+            request, args, "test_not_found", "test not found",
+            sessionAttached: false, sessionMode: "none", tests, runtimeState: null, runtimeInjected: false);
+
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+        var testsArray = json.RootElement.GetProperty("tests");
+
+        Assert.Equal("skipped", testsArray[0].GetProperty("status_hint").GetString());
+        Assert.Equal("Requires Access", testsArray[0].GetProperty("skip").GetProperty("reason").GetString());
+        Assert.Equal("todo", testsArray[1].GetProperty("status_hint").GetString());
+        Assert.Equal(JsonValueKind.Object, testsArray[1].GetProperty("todo").ValueKind);
+    }
+
+    [Fact]
     public void FindTestProceduresDiscoversTestPrefixAndSuffix()
     {
         const string code = """
@@ -209,6 +255,36 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void FindTestProceduresCollectsSkipAndTodoAnnotations()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @Skip("Requires Access")
+            Public Sub TestAccess()
+            End Sub
+
+            ' @Todo
+            Public Sub TestExporter()
+            End Sub
+
+            ' @Todo("実装待ち")
+            Public Sub TestUnicode()
+            End Sub
+            """;
+
+        var tests = ExcelTestService.FindTestProcedures("Module1", code);
+
+        Assert.Equal(3, tests.Count);
+        Assert.NotNull(tests[0].Skip);
+        Assert.Equal("Requires Access", tests[0].Skip!.Reason);
+        Assert.Null(tests[0].Todo);
+        Assert.NotNull(tests[1].Todo);
+        Assert.Null(tests[1].Todo!.Reason);
+        Assert.Equal("実装待ち", tests[2].Todo!.Reason);
+    }
+
+    [Fact]
     public void DuplicateTestQualifiedNamesAllowsSameNameInDifferentModules()
     {
         var allTests = new List<ExcelTestService.TestCase>
@@ -282,6 +358,28 @@ public sealed class ExcelTestServiceTests
 
         Assert.Contains("multiple @ExpectedError", ex.Message);
         Assert.Contains("Module1:3", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("' @Skip(\"a\")\r\n' @Skip(\"b\")", "multiple @Skip")]
+    [InlineData("' @Todo(\"a\")\r\n' @Todo(\"b\")", "multiple @Todo")]
+    [InlineData("' @Skip(\"a\")\r\n' @Todo(\"b\")", "test cannot be both skipped and todo")]
+    [InlineData("' @Skip()", "malformed @Skip reason")]
+    public void FindTestProceduresRejectsInvalidSkipTodoMetadata(string annotations, string expectedMessage)
+    {
+        var code = $$"""
+            Option Explicit
+
+            {{annotations}}
+            Public Sub TestInvalidMetadata()
+            End Sub
+            """;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestMetadataException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains(expectedMessage, ex.Message);
+        Assert.Contains("Module1:", ex.Message);
     }
 
     [Fact]
@@ -407,6 +505,8 @@ public sealed class ExcelTestServiceTests
                 {
                     new Dictionary<string, object?> { ["status"] = "passed" },
                     new Dictionary<string, object?> { ["status"] = "failed" },
+                    new Dictionary<string, object?> { ["status"] = "skipped" },
+                    new Dictionary<string, object?> { ["status"] = "todo" },
                     new Dictionary<string, object?> { ["status"] = "inconclusive" },
                 },
             },
@@ -442,12 +542,39 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void BuildNonExecutedTestResultOmitsErrorAndIncludesReason()
+    {
+        var skippedTest = new ExcelTestService.TestCase
+        {
+            Name = "TestAccess",
+            Module = "ParserTests",
+            Skip = new ExcelTestService.StatusReasonMetadata { Reason = "Requires Access" },
+        };
+        var todoTest = new ExcelTestService.TestCase
+        {
+            Name = "TestExporter",
+            Module = "ParserTests",
+            Todo = new ExcelTestService.StatusReasonMetadata(),
+        };
+
+        var skipped = ExcelTestService.BuildNonExecutedTestResult(skippedTest);
+        var todo = ExcelTestService.BuildNonExecutedTestResult(todoTest);
+
+        Assert.Equal("skipped", skipped["status"]);
+        Assert.Equal("Requires Access", skipped["reason"]);
+        Assert.False(skipped.ContainsKey("error"));
+        Assert.Equal("todo", todo["status"]);
+        Assert.False(todo.ContainsKey("reason"));
+        Assert.False(todo.ContainsKey("error"));
+    }
+
+    [Fact]
     public void SelectTestsFiltersByQualifiedNameNameModuleAndTag()
     {
         var allTests = new List<ExcelTestService.TestCase>
         {
             new() { Name = "TestA", Module = "Mod1", Tags = ["smoke"] },
-            new() { Name = "TestB", Module = "Mod2", Tags = ["fast"] },
+            new() { Name = "TestB", Module = "Mod2", Tags = ["fast"], Todo = new ExcelTestService.StatusReasonMetadata { Reason = "pending" } },
             new() { Name = "TestC", Module = "Mod1", Tags = ["slow"] },
         };
 
@@ -467,6 +594,7 @@ public sealed class ExcelTestServiceTests
         var byTag = ExcelTestService.SelectTests(allTests, "", "", "fast");
         Assert.Single(byTag.Tests);
         Assert.Equal("TestB", byTag.Tests[0].Name);
+        Assert.NotNull(byTag.Tests[0].Todo);
 
         var byAll = ExcelTestService.SelectTests(allTests, "TestC", "Mod1", "slow");
         Assert.Single(byAll.Tests);
@@ -557,6 +685,20 @@ public sealed class ExcelTestServiceTests
         ExcelTestService.AdjustCountsForAfterAllFailure("inconclusive", ref failed, ref inconclusive);
 
         Assert.Equal(1, failed);
+        Assert.Equal(0, inconclusive);
+    }
+
+    [Theory]
+    [InlineData("skipped")]
+    [InlineData("todo")]
+    public void AdjustCountsForAfterAllFailureIgnoresNonExecutedStatuses(string status)
+    {
+        var failed = 0;
+        var inconclusive = 0;
+
+        ExcelTestService.AdjustCountsForAfterAllFailure(status, ref failed, ref inconclusive);
+
+        Assert.Equal(0, failed);
         Assert.Equal(0, inconclusive);
     }
 

@@ -41,7 +41,7 @@ By default, `xlflow test` runs against a temporary copy of the configured workbo
 
 ## Source Test Discovery
 
-`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")` and `@ExpectedError(...)` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
+`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")`, `@ExpectedError(...)`, `@Skip`, and `@Todo` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
 
 The JSON envelope uses `command: "test list"` and returns discovery data under `tests`:
 
@@ -64,6 +64,10 @@ The JSON envelope uses `command: "test list"` and returns discovery data under `
         "source_path": "src/modules/SmokeTests.bas",
         "line": 5,
         "tags": ["smoke"],
+        "status_hint": "skipped",
+        "skip": {
+          "reason": "Requires Access"
+        },
         "expected_error": {
           "number": 5,
           "description": "Invalid value",
@@ -138,6 +142,24 @@ Only errors raised by the test procedure body can satisfy `@ExpectedError`. `Bef
 
 Malformed metadata, multiple `@ExpectedError` annotations on one test, unsupported argument counts, non-numeric error numbers, malformed string literals, and `@ExpectedError` on non-test procedures fail discovery with `invalid_test_metadata`.
 
+## Skipped and Todo Tests
+
+Use `@Skip` for tests that should remain visible but cannot execute in the current environment, and `@Todo` for planned behavior that is not ready to execute:
+
+```vb
+'@Skip("Requires Microsoft Access")
+Public Sub Test_AccessImport()
+End Sub
+
+'@Todo("Exporter implementation is pending")
+Public Sub Test_NewExporter()
+End Sub
+```
+
+The reason is recommended but optional, so bare `@Skip` and `@Todo` are accepted. `@Skip()` and `@Todo()` are invalid; use a quoted string or omit the parentheses.
+
+Skipped and todo tests are discovered, selectable by qualified name/module/tag, and returned in execution results with `status: "skipped"` or `status: "todo"` plus optional `reason`. They do not invoke the test body, `BeforeEach`, or `AfterEach`, and they do not fail the command by default. `BeforeAll` and `AfterAll` run only when the selected module has at least one executable test. Duplicate `@Skip`, duplicate `@Todo`, or combining both annotations on one test fails with `invalid_test_metadata`.
+
 ## Lifecycle Hooks
 
 xlflow recognizes these reserved procedure names in each test module:
@@ -193,6 +215,16 @@ xlflow test --isolation test --filter SmokeTests.TestSmoke --json
 xlflow test --filter SmokeTests.TestSmoke --session --no-save --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json
+```
+
+Typical terminal output distinguishes executed and non-executed statuses:
+
+```text
+PASS SmokeTests.TestSmoke
+SKIP AccessTests.Test_AccessImport: Requires Microsoft Access
+TODO ExportTests.Test_NewExporter: Exporter implementation is pending
+? DraftTests.TestDraft: inconclusive
+FAIL SmokeTests.TestBad: expected <110> but got <100>
 ```
 
 ## Notes
@@ -276,6 +308,26 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
         "source": "XlflowAssert.AssertInconclusive",
         "number": 51332
       }
+    },
+    {
+      "id": "AccessTests.Test_AccessImport",
+      "qualified_name": "AccessTests.Test_AccessImport",
+      "name": "Test_AccessImport",
+      "module": "AccessTests",
+      "status": "skipped",
+      "duration_ms": 0,
+      "tags": [],
+      "reason": "Requires Microsoft Access"
+    },
+    {
+      "id": "ExportTests.Test_NewExporter",
+      "qualified_name": "ExportTests.Test_NewExporter",
+      "name": "Test_NewExporter",
+      "module": "ExportTests",
+      "status": "todo",
+      "duration_ms": 0,
+      "tags": [],
+      "reason": "Exporter implementation is pending"
     },
     {
       "id": "SmokeTests.TestBad",

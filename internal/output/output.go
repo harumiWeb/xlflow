@@ -1292,6 +1292,8 @@ func (r renderer) renderTest(env Envelope) string {
 	runtime := objectMap(env.Runtime)
 	passed := 0
 	failed := 0
+	skipped := 0
+	todo := 0
 	inconclusive := 0
 	notRun := 0
 	for _, test := range tests {
@@ -1300,6 +1302,10 @@ func (r renderer) renderTest(env Envelope) string {
 			passed++
 		case "failed":
 			failed++
+		case "skipped":
+			skipped++
+		case "todo":
+			todo++
 		case "inconclusive":
 			inconclusive++
 		default:
@@ -1309,6 +1315,12 @@ func (r renderer) renderTest(env Envelope) string {
 	var b strings.Builder
 	b.WriteString(r.section("Summary"))
 	summary := fmt.Sprintf("%d passed, %d failed", passed, failed)
+	if skipped > 0 {
+		summary += fmt.Sprintf(", %d skipped", skipped)
+	}
+	if todo > 0 {
+		summary += fmt.Sprintf(", %d todo", todo)
+	}
 	if inconclusive > 0 {
 		summary += fmt.Sprintf(", %d inconclusive", inconclusive)
 	}
@@ -1344,6 +1356,9 @@ func (r renderer) renderTest(env Envelope) string {
 		if errMap := objectMap(test["error"]); len(errMap) > 0 {
 			errText = stringValue(errMap, "message")
 		}
+		if errText == "" {
+			errText = stringValue(test, "reason")
+		}
 		rows = append(rows, []string{marker + " " + strings.Trim(strings.Join([]string{module, name}, "."), "."), duration, errText})
 	}
 	b.WriteString(r.section("Tests"))
@@ -1360,6 +1375,16 @@ func testStatusMarker(r renderer, status string) string {
 		return r.statusBadge("passed")
 	case "failed":
 		return r.statusBadge("failed")
+	case "skipped":
+		if r.color {
+			return r.style("SKIP", "39", true)
+		}
+		return "[s]"
+	case "todo":
+		if r.color {
+			return r.style("TODO", "135", true)
+		}
+		return "[t]"
 	case "inconclusive":
 		if r.color {
 			return r.style("?", "214", true)

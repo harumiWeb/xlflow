@@ -47,6 +47,7 @@ import {
   userFormContextValue,
 } from "../../src/sidebar";
 import { sourceUri } from "../../src/testDiscovery";
+import { discoveredTestDescription } from "../../src/testing";
 import { buildTerminalCommandLine, containsVBAObjectModelAccessIssue } from "../../src/xlflow";
 import {
   cliVersionSummary,
@@ -539,6 +540,21 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(
     comparableFsPath(sourceUri(fakeFolder, "C:\\work\\project\\src\\modules\\Main.bas")),
     comparableFsPath(vscode.Uri.file("C:\\work\\project\\src\\modules\\Main.bas")),
+  );
+  assert.strictEqual(
+    discoveredTestDescription({
+      status_hint: "skipped",
+      skip: { reason: "Requires Access" },
+      tags: ["integration"],
+    }),
+    "skipped: Requires Access | integration",
+  );
+  assert.strictEqual(
+    discoveredTestDescription({
+      status_hint: "todo",
+      todo: {},
+    }),
+    "todo",
   );
   assert.deepStrictEqual(
     moduleGroups(fakeFolder, {

@@ -117,8 +117,7 @@ export class XlflowTestController implements vscode.Disposable {
       );
       const line = typeof test.line === "number" && test.line > 0 ? test.line - 1 : 0;
       item.range = new vscode.Range(line, 0, line, 0);
-      item.description =
-        Array.isArray(test.tags) && test.tags.length > 0 ? test.tags.join(", ") : undefined;
+      item.description = discoveredTestDescription(test);
       this.metadata.set(item.id, { workspaceFolder: folder, module, name, qualifiedName });
       moduleItem.children.add(item);
     }
@@ -181,7 +180,7 @@ export class XlflowTestController implements vscode.Disposable {
   ): Promise<void> {
     run.started(item);
     const result = await runXlflowJsonCommand<XlflowEnvelope>(
-      ["--json", "test", "--module", metadata.module, "--filter", metadata.name],
+      ["--json", "test", "--module", metadata.module, "--filter", metadata.qualifiedName],
       `xlflow test ${metadata.qualifiedName}`,
       this.channels.output,
       { requireWorkspace: true, workspaceFolder: metadata.workspaceFolder },
@@ -198,8 +197,37 @@ export class XlflowTestController implements vscode.Disposable {
       run.appendOutput(`${message.message}\r\n`, undefined, item);
       return;
     }
+    if (runItem?.status === "skipped" || runItem?.status === "todo") {
+      run.skipped(item);
+      const reason = readNonEmpty(runItem.reason);
+      if (reason !== undefined) {
+        run.appendOutput(`${runItem.status}: ${reason}\r\n`, undefined, item);
+      }
+      return;
+    }
     run.failed(item, message, runItem?.duration_ms);
   }
+}
+
+export function discoveredTestDescription(test: {
+  tags?: string[];
+  status_hint?: string;
+  skip?: { reason?: string };
+  todo?: { reason?: string };
+}): string | undefined {
+  const parts: string[] = [];
+  const hint = readNonEmpty(test.status_hint);
+  if (hint === "skipped") {
+    const reason = readNonEmpty(test.skip?.reason);
+    parts.push(reason === undefined ? "skipped" : `skipped: ${reason}`);
+  } else if (hint === "todo") {
+    const reason = readNonEmpty(test.todo?.reason);
+    parts.push(reason === undefined ? "todo" : `todo: ${reason}`);
+  }
+  if (Array.isArray(test.tags) && test.tags.length > 0) {
+    parts.push(test.tags.join(", "));
+  }
+  return parts.length === 0 ? undefined : parts.join(" | ");
 }
 
 async function discoverableWorkspaceFolders(

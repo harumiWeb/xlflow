@@ -30,6 +30,9 @@ export interface XlflowDiscoveredTest {
   source_path?: string;
   line?: number;
   tags?: string[];
+  status_hint?: string;
+  skip?: XlflowStatusReason;
+  todo?: XlflowStatusReason;
 }
 
 export interface XlflowTestRunPayload {
@@ -49,6 +52,7 @@ export interface XlflowTestRunItem {
   name?: string;
   status?: string;
   duration_ms?: number;
+  reason?: string;
   error?: {
     code?: string;
     message?: string;
@@ -56,6 +60,10 @@ export interface XlflowTestRunItem {
     number?: number;
     line?: number;
   };
+}
+
+export interface XlflowStatusReason {
+  reason?: string;
 }
 
 export async function discoverTests(

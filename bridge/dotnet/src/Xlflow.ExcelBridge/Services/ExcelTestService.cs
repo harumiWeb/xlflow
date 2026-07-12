@@ -98,6 +98,17 @@ public sealed class ExcelTestService : ITestService
             var failed = 0;
             foreach (var group in groups)
             {
+                if (group.All(IsNonExecutedTest))
+                {
+                    foreach (var test in group)
+                    {
+                        results.Add(BuildNonExecutedTestResult(test));
+                        logs.Add(NonExecutedLogLine(test));
+                    }
+
+                    continue;
+                }
+
                 var unitName = isolation == "module" ? group[0].Module : group[0].QualifiedName;
                 var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, SanitizeFileSegment(unitName));
                 var response = ExecuteSingleWorkbook(
@@ -342,9 +353,25 @@ public sealed class ExcelTestService : ITestService
                 }
             }
 
+            if (selected.All(IsNonExecutedTest))
+            {
+                var nonExecutedLogs = new List<string>();
+                var nonExecutedResults = new List<object>();
+                foreach (var test in selected)
+                {
+                    nonExecutedResults.Add(BuildNonExecutedTestResult(test));
+                    nonExecutedLogs.Add(NonExecutedLogLine(test));
+                }
+                var response = BuildSuccessfulTestResponse(request, args, displayWorkbookPath, sessionAttached, sessionMode, saveAfterRun, workbook, nonExecutedLogs, nonExecutedResults, runtimeState);
+                runtimeState = null;
+                return response;
+            }
+
+            var executableSelected = selected.Where(t => !IsNonExecutedTest(t)).ToList();
+
             // Build hooks map
             var hooksByModule = new Dictionary<string, ModuleHooks>(StringComparer.OrdinalIgnoreCase);
-            foreach (var moduleGroup in selected.GroupBy(t => t.Module, StringComparer.OrdinalIgnoreCase))
+            foreach (var moduleGroup in executableSelected.GroupBy(t => t.Module, StringComparer.OrdinalIgnoreCase))
             {
                 var moduleName = moduleGroup.Key;
                 var moduleCode = GetModuleCode(vbProject, moduleName);
@@ -352,9 +379,9 @@ public sealed class ExcelTestService : ITestService
             }
 
             // Assign sequential index
-            for (var i = 0; i < selected.Count; i++)
+            for (var i = 0; i < executableSelected.Count; i++)
             {
-                selected[i].Index = i;
+                executableSelected[i].Index = i;
             }
 
             // Generate and inject runner module
@@ -367,7 +394,7 @@ public sealed class ExcelTestService : ITestService
             var runnerCodeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                 ?? throw new InvalidOperationException("CodeModule is unavailable.");
             ExcelBridgeSupport.InvokeMethod(runnerCodeModule, "AddFromString",
-                BuildTestRunnerCode(selected, hooksByModule));
+                BuildTestRunnerCode(executableSelected, hooksByModule));
             ExcelBridgeSupport.ReleaseComObject(runnerCodeModule);
             ExcelBridgeSupport.ReleaseComObject(components);
 
@@ -380,6 +407,18 @@ public sealed class ExcelTestService : ITestService
             foreach (var moduleGroup in selected.GroupBy(t => t.Module, StringComparer.OrdinalIgnoreCase))
             {
                 var moduleName = moduleGroup.Key;
+                foreach (var test in moduleGroup.Where(IsNonExecutedTest))
+                {
+                    results.Add(BuildNonExecutedTestResult(test));
+                    logs.Add(NonExecutedLogLine(test));
+                }
+
+                var executableModuleGroup = moduleGroup.Where(t => !IsNonExecutedTest(t)).ToList();
+                if (executableModuleGroup.Count == 0)
+                {
+                    continue;
+                }
+
                 hooksByModule.TryGetValue(moduleName, out var hooks);
 
                 // BeforeAll
@@ -395,7 +434,7 @@ public sealed class ExcelTestService : ITestService
                         {
                             beforeAllFailed = true;
                             var message = Convert.ToString(arr[3], CultureInfo.InvariantCulture) ?? "";
-                            foreach (var test in moduleGroup)
+                            foreach (var test in executableModuleGroup)
                             {
                                 failed++;
                                 results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
@@ -408,7 +447,7 @@ public sealed class ExcelTestService : ITestService
                     {
                         sw.Stop();
                         beforeAllFailed = true;
-                        foreach (var test in moduleGroup)
+                        foreach (var test in executableModuleGroup)
                         {
                             failed++;
                             results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
@@ -420,7 +459,7 @@ public sealed class ExcelTestService : ITestService
 
                 if (!beforeAllFailed)
                 {
-                    foreach (var test in moduleGroup)
+                    foreach (var test in executableModuleGroup)
                     {
                         var sw = Stopwatch.StartNew();
                         try
@@ -480,7 +519,7 @@ public sealed class ExcelTestService : ITestService
                         if (runResult is object[] arr && arr.Length >= 5 && !Convert.ToBoolean(arr[0], CultureInfo.InvariantCulture))
                         {
                             var message = Convert.ToString(arr[3], CultureInfo.InvariantCulture) ?? "";
-                            var moduleTestNames = moduleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            var moduleTestNames = executableModuleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                             for (var i = 0; i < results.Count; i++)
                             {
                                 var resultObj = results[i];
@@ -503,7 +542,7 @@ public sealed class ExcelTestService : ITestService
                     catch (Exception ex)
                     {
                         sw.Stop();
-                        var moduleTestNames = moduleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var moduleTestNames = executableModuleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                         for (var i = 0; i < results.Count; i++)
                         {
                             var resultObj = results[i];
@@ -815,6 +854,8 @@ public sealed class ExcelTestService : ITestService
                 Module = moduleName,
                 Line = i + 1,
                 Tags = metadata.Tags.ToArray(),
+                Skip = metadata.Skip,
+                Todo = metadata.Todo,
                 ExpectedError = metadata.ExpectedError,
             });
         }
@@ -851,6 +892,40 @@ public sealed class ExcelTestService : ITestService
                 continue;
             }
 
+            if (Regex.IsMatch(prev, @"^'\s*@Skip\b", RegexOptions.IgnoreCase))
+            {
+                if (metadata.Skip is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, procedureIndex + 1, j + 1,
+                        "multiple @Skip annotations on one test procedure");
+                }
+                if (metadata.Todo is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, procedureIndex + 1, j + 1,
+                        "test cannot be both skipped and todo");
+                }
+                metadata.Skip = ParseSkipTodoAnnotation(prev, "Skip", moduleName, j + 1);
+                metadata.SkipLine = j + 1;
+                continue;
+            }
+
+            if (Regex.IsMatch(prev, @"^'\s*@Todo\b", RegexOptions.IgnoreCase))
+            {
+                if (metadata.Todo is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, procedureIndex + 1, j + 1,
+                        "multiple @Todo annotations on one test procedure");
+                }
+                if (metadata.Skip is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, procedureIndex + 1, j + 1,
+                        "test cannot be both skipped and todo");
+                }
+                metadata.Todo = ParseSkipTodoAnnotation(prev, "Todo", moduleName, j + 1);
+                metadata.TodoLine = j + 1;
+                continue;
+            }
+
             if (prev.StartsWith("''", StringComparison.Ordinal))
             {
                 continue;
@@ -859,6 +934,30 @@ public sealed class ExcelTestService : ITestService
             break;
         }
         return metadata;
+    }
+
+    internal static StatusReasonMetadata ParseSkipTodoAnnotation(string line, string annotationName, string moduleName = "", int lineNumber = 0)
+    {
+        var match = Regex.Match(line, @"^'\s*@(Skip|Todo)(?:\s*\((.*)\))?\s*$", RegexOptions.IgnoreCase);
+        if (!match.Success || !string.Equals(match.Groups[1].Value, annotationName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @{annotationName} annotation");
+        }
+
+        var reasonExpression = match.Groups[2].Success ? match.Groups[2].Value.Trim() : "";
+        if (reasonExpression == "" && line.Contains('('))
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @{annotationName} reason: expected a quoted string literal");
+        }
+        if (reasonExpression == "")
+        {
+            return new StatusReasonMetadata();
+        }
+
+        return new StatusReasonMetadata
+        {
+            Reason = ParseExpectedErrorStringArg(reasonExpression, moduleName, lineNumber, "reason", "@" + annotationName),
+        };
     }
 
     internal static ExpectedErrorMetadata ParseExpectedErrorAnnotation(string line, string moduleName = "", int lineNumber = 0)
@@ -927,12 +1026,12 @@ public sealed class ExcelTestService : ITestService
         return args;
     }
 
-    private static string ParseExpectedErrorStringArg(string input, string moduleName, int lineNumber, string name)
+    private static string ParseExpectedErrorStringArg(string input, string moduleName, int lineNumber, string name, string annotationName = "@ExpectedError")
     {
         input = input.Trim();
         if (input.Length < 2 || input[0] != '"' || input[^1] != '"')
         {
-            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @ExpectedError {name}: expected a quoted string literal");
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed {annotationName} {name}: expected a quoted string literal");
         }
         var body = input[1..^1];
         var builder = new StringBuilder();
@@ -946,7 +1045,7 @@ public sealed class ExcelTestService : ITestService
                     i++;
                     continue;
                 }
-                throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @ExpectedError {name}: unexpected quote");
+                throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed {annotationName} {name}: unexpected quote");
             }
             builder.Append(body[i]);
         }
@@ -1266,6 +1365,50 @@ public sealed class ExcelTestService : ITestService
         return result;
     }
 
+    internal static Dictionary<string, object?> BuildNonExecutedTestResult(TestCase test)
+    {
+        var status = test.Skip is not null ? "skipped" : "todo";
+        var result = new Dictionary<string, object?>
+        {
+            ["id"] = test.QualifiedName,
+            ["qualified_name"] = test.QualifiedName,
+            ["name"] = test.Name,
+            ["module"] = test.Module,
+            ["status"] = status,
+            ["duration_ms"] = 0,
+            ["tags"] = test.Tags,
+        };
+        var reason = NonExecutedReason(test);
+        if (!string.IsNullOrEmpty(reason))
+        {
+            result["reason"] = reason;
+        }
+        if (test.ExpectedError is not null)
+        {
+            result["expected_error"] = BuildExpectedError(test.ExpectedError);
+        }
+        return result;
+    }
+
+    private static string NonExecutedLogLine(TestCase test)
+    {
+        var status = test.Skip is not null ? "SKIP" : "TODO";
+        var reason = NonExecutedReason(test);
+        return string.IsNullOrEmpty(reason)
+            ? $"{status} {test.QualifiedName}"
+            : $"{status} {test.QualifiedName}: {reason}";
+    }
+
+    private static string NonExecutedReason(TestCase test)
+    {
+        return test.Skip?.Reason ?? test.Todo?.Reason ?? "";
+    }
+
+    private static bool IsNonExecutedTest(TestCase test)
+    {
+        return test.Skip is not null || test.Todo is not null;
+    }
+
     private static Dictionary<string, object?> BuildExpectedError(ExpectedErrorMetadata expected)
     {
         var payload = new Dictionary<string, object?> { ["number"] = expected.Number };
@@ -1338,6 +1481,60 @@ public sealed class ExcelTestService : ITestService
         };
     }
 
+    private static BridgeResponse BuildSuccessfulTestResponse(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string displayWorkbookPath,
+        bool sessionAttached,
+        string sessionMode,
+        bool saveAfterRun,
+        object workbook,
+        List<string> logs,
+        List<object> results,
+        RuntimeInjectionHelper.RuntimeInjectionState? runtimeState)
+    {
+        if (runtimeState is not null)
+        {
+            RuntimeInjectionHelper.RestoreRuntimeInjection(workbook, runtimeState);
+        }
+
+        var saved = false;
+        if (saveAfterRun)
+        {
+            ExcelBridgeSupport.RunPhase("save_workbook", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+            saved = true;
+        }
+
+        var sessionLog = GetSessionUsageLog(sessionMode);
+        if (sessionLog is not null)
+        {
+            logs.Insert(0, sessionLog);
+        }
+
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = BridgeStatus.Ok,
+            Logs = logs,
+            Extensions = new Dictionary<string, object?>
+            {
+                ["workbook"] = new
+                {
+                    path = displayWorkbookPath,
+                    session = sessionAttached,
+                    session_mode = sessionMode,
+                    session_requested = args.UseSession,
+                    auto_session = sessionAttached && !args.UseSession,
+                    saved,
+                    dirty = sessionAttached && !saved,
+                    needs_save = sessionAttached && !saved,
+                },
+                ["tests"] = results.ToArray(),
+            },
+        };
+    }
+
     private static object BuildDiscoveredTestPayload(TestCase test)
     {
         var payload = new Dictionary<string, object?>
@@ -1349,9 +1546,29 @@ public sealed class ExcelTestService : ITestService
             ["line"] = test.Line,
             ["tags"] = test.Tags,
         };
+        if (test.Skip is not null)
+        {
+            payload["status_hint"] = "skipped";
+            payload["skip"] = BuildStatusReason(test.Skip);
+        }
+        if (test.Todo is not null)
+        {
+            payload["status_hint"] = "todo";
+            payload["todo"] = BuildStatusReason(test.Todo);
+        }
         if (test.ExpectedError is not null)
         {
             payload["expected_error"] = BuildExpectedError(test.ExpectedError);
+        }
+        return payload;
+    }
+
+    private static Dictionary<string, object?> BuildStatusReason(StatusReasonMetadata metadata)
+    {
+        var payload = new Dictionary<string, object?>();
+        if (!string.IsNullOrEmpty(metadata.Reason))
+        {
+            payload["reason"] = metadata.Reason;
         }
         return payload;
     }
@@ -1605,8 +1822,15 @@ public sealed class ExcelTestService : ITestService
         public string Id => QualifiedName;
         public int Line { get; init; }
         public string[] Tags { get; init; } = [];
+        public StatusReasonMetadata? Skip { get; init; }
+        public StatusReasonMetadata? Todo { get; init; }
         public ExpectedErrorMetadata? ExpectedError { get; init; }
         public int Index { get; set; }
+    }
+
+    internal sealed class StatusReasonMetadata
+    {
+        public string? Reason { get; init; }
     }
 
     internal sealed class ExpectedErrorMetadata
@@ -1627,6 +1851,10 @@ public sealed class ExcelTestService : ITestService
     private sealed class TestMetadata
     {
         public List<string> Tags { get; } = [];
+        public StatusReasonMetadata? Skip { get; set; }
+        public int SkipLine { get; set; }
+        public StatusReasonMetadata? Todo { get; set; }
+        public int TodoLine { get; set; }
         public ExpectedErrorMetadata? ExpectedError { get; set; }
         public int ExpectedErrorLine { get; set; }
     }

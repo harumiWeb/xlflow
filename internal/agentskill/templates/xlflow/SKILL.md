@@ -13,7 +13,7 @@ Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
 - If the user says the workbook is already open in Excel, asks to work on the workbook they are viewing, or describes a human-centered Excel workflow, use `xlflow session attach --json` instead of `xlflow session start` so xlflow adopts the already-open configured workbook.
-- When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, `@ExpectedError` metadata for expected VBA runtime errors, lifecycle hooks, tags/filters, and failure diagnosis.
+- When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, `@ExpectedError` metadata for expected VBA runtime errors, `@Skip` / `@Todo` non-executed test metadata, lifecycle hooks, tags/filters, and failure diagnosis.
 - When workbook behavior may depend on worksheet formulas, defined names, or formula-driven sheet layout, load [references/formulas.md](references/formulas.md) before editing VBA or changing columns/ranges. Use `xlflow formulas pull --json` to extract Git-friendly region snapshots.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --json`.
 - When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.

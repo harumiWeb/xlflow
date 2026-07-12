@@ -840,6 +840,18 @@ func rubberduckAnnotationCompletions(prefix string, replaceRange Range) []Comple
 			documentation: "Marks the following xlflow VBA test as passing only when the test body raises the expected VBA error number.",
 		},
 		{
+			label:         "@Skip",
+			detail:        "xlflow skipped test",
+			insertText:    `@Skip("${1:Reason}")`,
+			documentation: "Marks the following xlflow VBA test as intentionally not executed.",
+		},
+		{
+			label:         "@Todo",
+			detail:        "xlflow todo test",
+			insertText:    `@Todo("${1:Reason}")`,
+			documentation: "Marks the following xlflow VBA test as planned behavior that is not ready to execute.",
+		},
+		{
 			label:         "@Description",
 			detail:        "Rubberduck procedure description",
 			insertText:    `@Description("${1:Description.}")`,
