@@ -1545,7 +1545,7 @@ public sealed class ExcelTestService : ITestService
         return value is bool saved ? saved : fallback;
     }
 
-    private static int CountFailedResults(BridgeResponse response)
+    internal static int CountFailedResults(BridgeResponse response)
     {
         if (!response.Extensions.TryGetValue("tests", out var testsPayload) || testsPayload is not IEnumerable<object> tests)
         {
@@ -1555,7 +1555,7 @@ public sealed class ExcelTestService : ITestService
         var failed = 0;
         foreach (var test in tests)
         {
-            var status = test.GetType().GetProperty("status")?.GetValue(test) as string;
+            var status = ResultString(test, "status");
             if (status == "failed")
             {
                 failed++;

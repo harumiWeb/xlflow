@@ -393,6 +393,39 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void CountFailedResultsReadsDictionaryTestPayloads()
+    {
+        var response = new BridgeResponse
+        {
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError("test_failed", "1 failed", "test", "xlflow"),
+            Extensions = new Dictionary<string, object?>
+            {
+                ["tests"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["status"] = "passed" },
+                    new Dictionary<string, object?> { ["status"] = "failed" },
+                    new Dictionary<string, object?> { ["status"] = "inconclusive" },
+                },
+            },
+        };
+
+        Assert.Equal(1, ExcelTestService.CountFailedResults(response));
+    }
+
+    [Fact]
+    public void CountFailedResultsFallsBackWhenTestsPayloadIsMissing()
+    {
+        var response = new BridgeResponse
+        {
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError("test_failed", "test failed", "test", "xlflow"),
+        };
+
+        Assert.Equal(1, ExcelTestService.CountFailedResults(response));
+    }
+
+    [Fact]
     public void SelectTestsFiltersByQualifiedNameNameModuleAndTag()
     {
         var allTests = new List<ExcelTestService.TestCase>
