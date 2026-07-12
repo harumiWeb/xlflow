@@ -25,6 +25,8 @@ xlflow diff before.xlsm after.xlsm --json
 xlflow diff before.xlsm after.xlsm --vba-before before/src --vba-after after/src --json
 ```
 
+Workbook cell diff supports OOXML workbook files (`.xlsx`, `.xlsm`, `.xltx`, `.xltm`). `.xlsb` workbook cell diff is not supported and fails with `workbook_format_unsupported`; compare exported VBA source separately when reviewing `.xlsb` projects.
+
 ## Notes
 
 > [!IMPORTANT]

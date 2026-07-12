@@ -45,6 +45,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
+	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
 
 type app struct {
@@ -746,9 +747,12 @@ func (a *app) formulasPullCommand() *cobra.Command {
 				workbookPath = cfg.Excel.Path
 			}
 			workbookPath = workbookArgPath(a.cwd, workbookPath)
-			ext := strings.ToLower(filepath.Ext(workbookPath))
-			if ext != ".xlsx" && ext != ".xlsm" {
-				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", fmt.Errorf("source workbook must end in .xlsx or .xlsm: %s", workbookPath))
+			if err := workbookformat.ValidateFormulaSnapshotWorkbook(workbookPath); err != nil {
+				var unsupported workbookformat.UnsupportedError
+				if errors.As(err, &unsupported) {
+					return a.writeUnsupportedWorkbookFormat("formulas pull", unsupported)
+				}
+				return a.writeFailure("formulas pull", output.ExitConfig, "formulas_pull_args_invalid", err)
 			}
 			outputDir := workbookArgPath(a.cwd, strings.TrimSpace(outDir))
 			if outputDir == "" {
@@ -1984,6 +1988,13 @@ func (a *app) packCommand() *cobra.Command {
 				return err
 			}
 			configuredWorkbook := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := workbookformat.ValidatePackTemplate(configuredWorkbook); err != nil {
+				var unsupported workbookformat.UnsupportedError
+				if errors.As(err, &unsupported) {
+					return a.writeUnsupportedWorkbookFormat("pack", unsupported)
+				}
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+			}
 			resolvedTemplate := strings.TrimSpace(templatePath)
 			if resolvedTemplate == "" {
 				resolvedTemplate = configuredWorkbook
@@ -1995,6 +2006,13 @@ func (a *app) packCommand() *cobra.Command {
 			}
 			if _, err := os.Stat(resolvedTemplate); err != nil {
 				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
+			}
+			if err := workbookformat.ValidatePackTemplate(resolvedTemplate); err != nil {
+				var unsupported workbookformat.UnsupportedError
+				if errors.As(err, &unsupported) {
+					return a.writeUnsupportedWorkbookFormat("pack", unsupported)
+				}
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
 			}
 
 			resolvedOut := workbookArgPath(a.cwd, outPath)
@@ -4694,6 +4712,10 @@ func (a *app) diffCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := buildDiffOptions(a.cwd, args[0], args[1], vbaBefore, vbaAfter)
 			if err != nil {
+				var unsupported workbookformat.UnsupportedError
+				if errors.As(err, &unsupported) {
+					return a.writeUnsupportedWorkbookFormat("diff", unsupported)
+				}
 				return a.writeFailure("diff", output.ExitConfig, "diff_args_invalid", err)
 			}
 			result, err := diff.Compare(opts)
@@ -4874,7 +4896,11 @@ func (a *app) inspectWorkbookCommand(flags *inspectSharedFlags) *cobra.Command {
 				}
 				return a.write(env, code)
 			}
-			workbook, err := workbookinspect.Workbook(workbookArgPath(a.cwd, cfg.Excel.Path))
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := a.rejectUnsupportedFileInspectWorkbook("inspect", "inspect workbook", workbookPath); err != nil {
+				return err
+			}
+			workbook, err := workbookinspect.Workbook(workbookPath)
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
@@ -4934,11 +4960,14 @@ func (a *app) inspectSheetsCommand(flags *inspectSharedFlags) *cobra.Command {
 				}
 				return a.write(env, code)
 			}
-			sheets, err := workbookinspect.Sheets(workbookArgPath(a.cwd, cfg.Excel.Path))
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := a.rejectUnsupportedFileInspectWorkbook("inspect", "inspect sheets", workbookPath); err != nil {
+				return err
+			}
+			sheets, err := workbookinspect.Sheets(workbookPath)
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
-			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
@@ -5082,6 +5111,9 @@ func (a *app) inspectRangeCommand(flags *inspectSharedFlags) *cobra.Command {
 				return a.write(env, code)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := a.rejectUnsupportedFileInspectWorkbook("inspect", "inspect range", workbookPath); err != nil {
+				return err
+			}
 			snapshot, err := workbookinspect.Range(workbookPath, selector.Sheet, selector.Address, workbookinspect.RangeOptions{
 				Limits:       limits,
 				IncludeStyle: includeStyle,
@@ -5312,6 +5344,9 @@ func (a *app) inspectUsedRangeCommand(flags *inspectSharedFlags) *cobra.Command 
 				return a.write(env, code)
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := a.rejectUnsupportedFileInspectWorkbook("inspect", "inspect used-range", workbookPath); err != nil {
+				return err
+			}
 			snapshot, err := workbookinspect.UsedRange(workbookPath, targetSheet, workbookinspect.RangeOptions{
 				Limits:       limits,
 				IncludeStyle: includeStyle,
@@ -5387,11 +5422,14 @@ func (a *app) inspectCellCommand(flags *inspectSharedFlags) *cobra.Command {
 				}
 				return a.write(env, code)
 			}
-			cell, err := workbookinspect.Cell(workbookArgPath(a.cwd, cfg.Excel.Path), selector.Sheet, selector.Address)
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if err := a.rejectUnsupportedFileInspectWorkbook("inspect", "inspect cell", workbookPath); err != nil {
+				return err
+			}
+			cell, err := workbookinspect.Cell(workbookPath, selector.Sheet, selector.Address)
 			if err != nil {
 				return a.writeFailure("inspect", output.ExitEnvironment, "inspect_failed", err)
 			}
-			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			target, sessionState, warnings := a.inspectStateForWorkbook(cfg, workbookPath)
 			formWarnings, formHints := inspectSourceUserFormMessages(a.cwd, cfg)
 			env := output.New("inspect")
@@ -5840,12 +5878,7 @@ func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter s
 }
 
 func validateWorkbookDiffExt(path string) error {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".xlsx", ".xlsm", ".xltx", ".xltm":
-		return nil
-	default:
-		return fmt.Errorf("unsupported extension %q; expected .xlsx, .xlsm, .xltx, or .xltm", filepath.Ext(path))
-	}
+	return workbookformat.ValidateDiffWorkbook(path)
 }
 
 func workbookArgPath(root, path string) string {
@@ -7201,6 +7234,33 @@ func (a *app) writeFailure(command string, code int, errCode string, err error) 
 		return output.WithExitCode(code, writeErr)
 	}
 	return output.WithExitCode(code, err)
+}
+
+func (a *app) writeUnsupportedWorkbookFormat(command string, err workbookformat.UnsupportedError) error {
+	env := output.Failure(command, output.Error{
+		Code:    workbookformat.UnsupportedErrorCode,
+		Message: err.Error(),
+	})
+	env.Workbook = map[string]any{
+		"format":     workbookformat.Format(err.Extension),
+		"capability": err.Capability,
+	}
+	a.addConfigWarnings(&env)
+	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
+		return output.WithExitCode(output.ExitConfig, writeErr)
+	}
+	return output.WithExitCode(output.ExitConfig, err)
+}
+
+func (a *app) rejectUnsupportedFileInspectWorkbook(command, capability, workbookPath string) error {
+	if err := workbookformat.ValidateFileInspectWorkbook(workbookPath, capability); err != nil {
+		var unsupported workbookformat.UnsupportedError
+		if errors.As(err, &unsupported) {
+			return a.writeUnsupportedWorkbookFormat(command, unsupported)
+		}
+		return a.writeFailure(command, output.ExitConfig, "inspect_args_invalid", err)
+	}
+	return nil
 }
 
 func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) error {

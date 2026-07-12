@@ -25,6 +25,7 @@ Formula snapshots are read-only artifacts. To apply one explicit formula pattern
 The command:
 
 - supports `.xlsx` and `.xlsm` files;
+- rejects `.xlsb` with `workbook_format_unsupported` because Excel Binary Workbook storage is not OOXML XML;
 - accepts `--src <workbook>` to override the configured workbook and skip `xlflow.toml` loading;
 - accepts `--out <dir>` to choose the output directory; the default is `formulas`;
 - reads workbook files directly as OOXML zip packages;
@@ -32,7 +33,7 @@ The command:
 - replaces the generated `formulas/` directory on each successful run;
 - omits volatile metadata such as generation timestamps.
 
-Unsupported workbook files or extraction failures return `formulas_pull_failed`. A source workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`.
+Unsupported workbook files or extraction failures return `formulas_pull_failed`. A source workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`, except `.xlsb`, which returns `workbook_format_unsupported` with `workbook.format = "xlsb"` and `workbook.capability = "formulas pull"`.
 
 ## Output Layout
 

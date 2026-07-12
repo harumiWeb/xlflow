@@ -11,6 +11,7 @@ public sealed class ExcelBridgeSupportTests
     [InlineData(".xlt", true)]
     [InlineData(".xla", true)]
     [InlineData(".xlam", true)]
+    [InlineData(".xlsb", true)]
     [InlineData(".xltx", true)]
     [InlineData(".xltm", true)]
     [InlineData(".txt", false)]
@@ -85,6 +86,26 @@ public sealed class ExcelBridgeSupportTests
         var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "Book.xlsm"));
         var expected = new FakeWorkbook(targetPath);
         var excel = new FakeExcel(new FakeWorkbook(Path.Combine(Path.GetTempPath(), "Other.xlsm")), expected);
+
+        var actual = ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath);
+
+        Assert.Same(expected, actual);
+        Assert.Equal(2, excel.Workbooks.IntegerItemCalls);
+        Assert.Equal(0, excel.Workbooks.StringItemCalls);
+    }
+
+    [Fact]
+    public void GetOpenWorkbook_ResolvesXlsbThroughNormalWorkbookEnumeration()
+    {
+        var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "Model.xlsb"));
+        var expected = new FakeWorkbook(targetPath);
+        var collection = new FakeWorkbookCollection(
+            [new FakeWorkbook(Path.Combine(Path.GetTempPath(), "Other.xlsm")), expected],
+            new Dictionary<string, FakeWorkbook>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Model.xlsb"] = expected,
+            });
+        var excel = new FakeExcel(collection);
 
         var actual = ExcelBridgeSupport.GetOpenWorkbook(excel, targetPath);
 

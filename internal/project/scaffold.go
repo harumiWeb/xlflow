@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
 
 type InitResult struct {
@@ -54,6 +55,9 @@ func Init(cwd, workbookPath string) (InitResult, error) {
 	var result InitResult
 	if workbookPath == "" {
 		return result, errors.New("workbook path is required")
+	}
+	if err := workbookformat.ValidateProjectWorkbookPath(workbookPath); err != nil {
+		return result, err
 	}
 	srcInfo, err := os.Stat(workbookPath)
 	if err != nil {
@@ -633,19 +637,7 @@ func projectName(path string) string {
 }
 
 func normalizeWorkbookName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "Book.xlsm", nil
-	}
-	name = filepath.Base(name)
-	ext := strings.ToLower(filepath.Ext(name))
-	if ext == "" {
-		return name + ".xlsm", nil
-	}
-	if ext != ".xlsm" && ext != ".xlam" {
-		return "", fmt.Errorf("workbook name must use .xlsm or .xlam extension: %s", name)
-	}
-	return name, nil
+	return workbookformat.NormalizeProjectWorkbookName(name)
 }
 
 const defaultGitignore = `# Excel

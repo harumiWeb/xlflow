@@ -38,7 +38,7 @@ xlflow backup prune --keep-last 20 --older-than 30d --max-total-size 2GB --json
 > [!IMPORTANT]
 > `backup list` only shows metadata-backed workbook backups that xlflow can restore with `rollback`. Older component-export backup directories are ignored.
 
-Manual `backup prune` is independent of `[backup.retention]`; it does not require automatic retention to be enabled. By default it is scoped to the configured workbook. Invalid entries and legacy directories are skipped unless explicitly included with cleanup flags.
+Manual `backup prune` is independent of `[backup.retention]`; it does not require automatic retention to be enabled. By default it is scoped to the configured workbook. Invalid entries and legacy directories are skipped unless explicitly included with cleanup flags. Backups preserve the configured workbook extension and file format, including `.xlsb`.
 
 Automatic pruning is configured separately in `xlflow.toml` under `[backup.retention]`. It is disabled by default and runs only after successful backup-producing `push` or `rollback` operations.
 

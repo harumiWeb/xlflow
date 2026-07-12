@@ -76,6 +76,7 @@ public sealed class ExcelNewService : INewService
         {
             ".xlsm" => 52,
             ".xlam" => 55,
+            ".xlsb" => 50,
             _ => throw new InvalidOperationException($"unsupported workbook extension: {extension}"),
         };
     }

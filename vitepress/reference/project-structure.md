@@ -14,7 +14,7 @@ build
 .xlflow
 ```
 
-The `build` directory contains the managed workbook file, typically `build/<name>.xlsm`. Excel add-in projects use the same source layout and store `build/<name>.xlam`.
+The `build` directory contains the managed workbook file, typically `build/<name>.xlsm`. Excel add-in and binary workbook projects use the same source layout and store `build/<name>.xlam` or `build/<name>.xlsb`.
 
 Tests are recommended to live under `src/modules/Tests/` (or any subdirectory under `src/modules`) so they are naturally imported by `push` alongside production code.
 

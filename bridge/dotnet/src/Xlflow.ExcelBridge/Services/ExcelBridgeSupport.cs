@@ -422,7 +422,7 @@ internal static class ExcelBridgeSupport
         }
 
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        return ext is ".xlsm" or ".xlsx" or ".xls" or ".xlt" or ".xla" or ".xlam" or ".xltx" or ".xltm";
+        return ext is ".xlsm" or ".xlsx" or ".xls" or ".xlt" or ".xla" or ".xlam" or ".xlsb" or ".xltx" or ".xltm";
     }
 
     private static string UnwrapComErrorMessage(Exception ex)

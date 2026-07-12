@@ -20,7 +20,7 @@ formulas/
 
 `manifest.json` lists workbook sheets, region files, formula region counts, and `ok` / `partial` / `failed` parse status summaries. `names.jsonl` contains workbook and sheet scoped defined names. Each sheet JSONL file contains logical formula regions grouped by normalized R1C1-like formula patterns. Region rows also include best-effort `refs`, `depends_on_sheets`, and `functions` indexes when xlflow can derive them from the formula text. OOXML shared formula group boundaries are coalesced when they differ only by storage metadata.
 
-`formulas pull` supports `.xlsx` and `.xlsm`, reads OOXML files directly, and does not use Excel COM. Cached calculated values are not included.
+`formulas pull` supports `.xlsx` and `.xlsm`, reads OOXML files directly, and does not use Excel COM. Cached calculated values are not included. `.xlsb` workbooks are rejected with `workbook_format_unsupported` because Excel Binary Workbook storage is not an OOXML XML package.
 
 Unsupported formula syntax is preserved as raw formula data with `partial` or `failed` parse status so one unsupported formula does not block the snapshot.
 

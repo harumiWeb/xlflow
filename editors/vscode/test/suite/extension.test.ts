@@ -9,6 +9,8 @@ import {
   compareBackupsNewestFirst,
   formatBackupTimestamp,
   formatBytes,
+  initWorkbookExtensions,
+  newProjectWorkbookPlaceholder,
   pruneSummary,
   validateKeepLastInput,
 } from "../../src/commands";
@@ -85,6 +87,9 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.ok(extension, "extension should be discoverable");
   await extension.activate();
   assertLocalizationResources(extension.extensionPath);
+  assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
+  assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
+  assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));
 
   const languages = await vscode.languages.getLanguages();
   assert.ok(languages.includes("vba"), "vba language should be registered");

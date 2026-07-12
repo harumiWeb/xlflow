@@ -29,6 +29,8 @@ xlflow rollback --backup 20260518-175330-push --json
 > [!IMPORTANT]
 > Rollback restores only the workbook file. It does not rewrite `src/` automatically.
 
+Rollback restores the backed-up file as-is, preserving the workbook extension and file format, including `.xlsb`.
+
 ::: warning
 If the workbook is attached to an active xlflow session, rollback fails with `workbook_in_use`. Stop the session first, then rerun rollback.
 :::

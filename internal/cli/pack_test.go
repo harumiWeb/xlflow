@@ -73,6 +73,31 @@ func TestPackCommandTemplateNotFound(t *testing.T) {
 	}
 }
 
+func TestPackCommandRejectsXlsbConfiguredWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.ToSlash(filepath.Join("build", "Model.xlsb"))
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "workbook_format_unsupported" {
+		t.Fatalf("error code = %q, want workbook_format_unsupported\n%s", got, stdout)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal([]byte(stdout), &env); decodeErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout)
+	}
+	workbook := cliObjectMap(env.Workbook)
+	if workbook["format"] != "xlsb" || workbook["capability"] != "pack" {
+		t.Fatalf("workbook payload = %+v", workbook)
+	}
+}
+
 func TestPackCommandInPlaceGuard(t *testing.T) {
 	dir := t.TempDir()
 	writePackProject(t, dir, false)

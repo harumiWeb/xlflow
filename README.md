@@ -27,7 +27,7 @@
 
 **xlflow** is an Excel VBA development framework for the AI agent era.
 
-It turns `.xlsm` workbooks and `.xlam` Excel add-ins into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
+It turns `.xlsm` workbooks, `.xlam` Excel add-ins, and `.xlsb` Excel Binary Workbooks into a source-controlled, CLI-driven development workflow where VBA can be exported, edited, linted, imported, tested, and executed from the command line.
 
 ![Ai-Driven Development](docs/images/ai-drive-develop.gif)
 
@@ -88,13 +88,13 @@ These [samples](example) were created by an AI agent using xlflow with only mini
 Traditional VBA development is still heavily tied to the Excel UI and the Visual Basic Editor.
 That works for small manual edits, but it becomes painful when you want repeatable development, source control, tests, diffs, or AI-agent-assisted changes.
 
-| Pain in normal VBA development                       | What xlflow adds                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------------------- |
-| VBA code is trapped inside `.xlsm` / `.xlam` files   | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
-| UserForms cannot be handled declaratively            | Generate UserForms from YAML definitions with `xlflow form build` |
-| Runtime failures are hard to locate                  | Return structured errors, diagnostics, and terminal logs          |
-| Workbook changes are hard to review                  | Compare values, formulas, sheets, and exported VBA source         |
-| AI agents cannot safely operate Excel through the UI | Provide stable CLI commands and JSON output                       |
+| Pain in normal VBA development                               | What xlflow adds                                                  |
+| ------------------------------------------------------------ | ----------------------------------------------------------------- |
+| VBA code is trapped inside `.xlsm` / `.xlam` / `.xlsb` files | Export/import VBA as `.bas`, `.cls`, and `.frm` source files      |
+| UserForms cannot be handled declaratively                    | Generate UserForms from YAML definitions with `xlflow form build` |
+| Runtime failures are hard to locate                          | Return structured errors, diagnostics, and terminal logs          |
+| Workbook changes are hard to review                          | Compare values, formulas, sheets, and exported VBA source         |
+| AI agents cannot safely operate Excel through the UI         | Provide stable CLI commands and JSON output                       |
 
 ```text
 pull → fmt → edit → push → lint → test/run → inspect
@@ -323,11 +323,12 @@ Create a new xlflow project and macro-enabled workbook:
 xlflow new Book.xlsm
 ```
 
-Omit the extension to default to `.xlsm`, or request an Excel add-in project explicitly:
+Omit the extension to default to `.xlsm`, or request an Excel add-in or binary workbook project explicitly:
 
 ```bash
 xlflow new Book
 xlflow new MyAddin.xlam
+xlflow new LargeModel.xlsb
 ```
 
 `new` automatically pushes the scaffolded VBA modules into the new workbook, so a later `pull` starts from the same initial source.
@@ -337,6 +338,7 @@ Or start from an existing workbook or add-in:
 ```bash
 xlflow init Book.xlsm
 xlflow init ExistingAddin.xlam
+xlflow init ExistingModel.xlsb
 ```
 
 `init` automatically pulls VBA out of the copied workbook into `src/`, so you can edit source files immediately without a separate bootstrap `pull`.

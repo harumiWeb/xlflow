@@ -1,7 +1,7 @@
 {
   "name": "xlflow-vscode",
   "displayName": "%extension.displayName%",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "%extension.description%",
   "categories": [
     "Formatters",
@@ -18,7 +18,9 @@
     "macro",
     "testing",
     "vba",
+    "xlam",
     "xlflow",
+    "xlsb",
     "xlsm"
   ],
   "license": "MIT",

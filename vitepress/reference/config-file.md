@@ -95,12 +95,12 @@ disabled_rules = []
 
 ### `[excel]`
 
-| Key              | Type   | Required | Default           | Description                                                               |
-| ---------------- | ------ | -------- | ----------------- | ------------------------------------------------------------------------- |
-| `path`           | string | **yes**  | `build/Book.xlsm` | Workbook or add-in path. May be relative to the project root or absolute. |
-| `visible`        | bool   | no       | `false`           | Whether the Excel application window is shown during automation.          |
-| `display_alerts` | bool   | no       | `false`           | Whether Excel shows its own alert dialogs (e.g. overwrite confirmation).  |
-| `bridge`         | string | no       | `"auto"`          | Excel bridge mode. Valid values are `"auto"` and `"dotnet"`.              |
+| Key              | Type   | Required | Default           | Description                                                                                 |
+| ---------------- | ------ | -------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `path`           | string | **yes**  | `build/Book.xlsm` | Workbook, binary workbook, or add-in path. May be relative to the project root or absolute. |
+| `visible`        | bool   | no       | `false`           | Whether the Excel application window is shown during automation.                            |
+| `display_alerts` | bool   | no       | `false`           | Whether Excel shows its own alert dialogs (e.g. overwrite confirmation).                    |
+| `bridge`         | string | no       | `"auto"`          | Excel bridge mode. Valid values are `"auto"` and `"dotnet"`.                                |
 
 ### `[src]`
 
@@ -225,8 +225,8 @@ Preflight-blocking analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VB
 
 - **`xlflow new`** writes `[userform].code_source = "sidecar"`.
 - **`xlflow init`** writes `[userform].code_source = "frm"`.
-- **`xlflow new`** defaults to `build/Book.xlsm` when the workbook argument is omitted or has no extension. Use an explicit `.xlam` filename to create an Excel add-in project.
-- **`xlflow init`** preserves the copied workbook filename and extension, including `.xlam`.
+- **`xlflow new`** defaults to `build/Book.xlsm` when the workbook argument is omitted or has no extension. Use an explicit `.xlam` filename to create an Excel add-in project or `.xlsb` for an Excel Binary Workbook VBA project.
+- **`xlflow init`** preserves the copied workbook filename and extension, including `.xlam` and `.xlsb`.
 
 All other sections use the same defaults regardless of how the project was created.
 

@@ -2418,6 +2418,33 @@ func TestRootCommandIncludesPullFormulasFlag(t *testing.T) {
 	}
 }
 
+func TestFormulasPullRejectsXlsbWithStructuredUnsupportedFormat(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte("[excel]\npath = \"build/Model.xlsb\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := new(bytes.Buffer)
+	a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "formulas", "pull"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config exit, got err=%v exit=%d output=%s", err, output.ExitCode(err), stdout.String())
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "workbook_format_unsupported" {
+		t.Fatalf("error = %+v, want workbook_format_unsupported", env.Error)
+	}
+	workbook := cliObjectMap(env.Workbook)
+	if workbook["format"] != "xlsb" || workbook["capability"] != "formulas pull" {
+		t.Fatalf("workbook payload = %+v", workbook)
+	}
+}
+
 func TestAttachFormulaPullResultAddsOutputSummary(t *testing.T) {
 	root := t.TempDir()
 	env := output.New("pull")
@@ -3718,6 +3745,67 @@ func TestBuildDiffOptionsRejectsUnsupportedWorkbookExtensions(t *testing.T) {
 	_, err := buildDiffOptions(".", "before.xls", "after.xlsx", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unsupported extension") {
 		t.Fatalf("expected extension error, got %v", err)
+	}
+}
+
+func TestDiffRejectsXlsbWithStructuredUnsupportedFormat(t *testing.T) {
+	dir := t.TempDir()
+	stdout := new(bytes.Buffer)
+	a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "diff", "before.xlsb", "after.xlsm"})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected config exit, got err=%v exit=%d output=%s", err, output.ExitCode(err), stdout.String())
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "workbook_format_unsupported" {
+		t.Fatalf("error = %+v, want workbook_format_unsupported", env.Error)
+	}
+	workbook := cliObjectMap(env.Workbook)
+	if workbook["format"] != "xlsb" || workbook["capability"] != "diff" {
+		t.Fatalf("workbook payload = %+v", workbook)
+	}
+}
+
+func TestInspectFileModeRejectsXlsbWithStructuredUnsupportedFormat(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte("[excel]\npath = \"build/Model.xlsb\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--json", "inspect", "workbook"},
+		{"--json", "inspect", "sheets"},
+		{"--json", "inspect", "range", "--sheet", "Sheet1", "--address", "A1:B2"},
+		{"--json", "inspect", "used-range", "Sheet1"},
+		{"--json", "inspect", "cell", "--sheet", "Sheet1", "--address", "A1"},
+	} {
+		t.Run(strings.Join(args[2:], "_"), func(t *testing.T) {
+			stdout := new(bytes.Buffer)
+			a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }}
+			root := a.rootCommand()
+			root.SetArgs(args)
+
+			err := root.Execute()
+			if err == nil || output.ExitCode(err) != output.ExitConfig {
+				t.Fatalf("expected config exit, got err=%v exit=%d output=%s", err, output.ExitCode(err), stdout.String())
+			}
+			var env output.Envelope
+			if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+				t.Fatalf("json output should be valid: %v\n%s", decodeErr, stdout.String())
+			}
+			if env.Error == nil || env.Error.Code != "workbook_format_unsupported" {
+				t.Fatalf("error = %+v, want workbook_format_unsupported", env.Error)
+			}
+			workbook := cliObjectMap(env.Workbook)
+			if workbook["format"] != "xlsb" {
+				t.Fatalf("workbook payload = %+v", workbook)
+			}
+		})
 	}
 }
 

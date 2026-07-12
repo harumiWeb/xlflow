@@ -93,6 +93,58 @@ func TestInitScaffoldPreservesXlamWorkbook(t *testing.T) {
 	}
 }
 
+func TestInitScaffoldPreservesXlsbWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "ExistingModel.xlsb")
+	wantBody := []byte("fake binary workbook")
+	if err := os.WriteFile(workbook, wantBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Init(dir, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/ExistingModel.xlsb" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+	gotBody, err := os.ReadFile(filepath.Join(dir, "build", "ExistingModel.xlsb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBody) != string(wantBody) {
+		t.Fatalf("copied workbook body = %q, want %q", string(gotBody), string(wantBody))
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Excel.Path != "build/ExistingModel.xlsb" {
+		t.Fatalf("excel path = %q", cfg.Excel.Path)
+	}
+}
+
+func TestInitRejectsUnsupportedWorkbookExtensions(t *testing.T) {
+	for _, name := range []string{"Existing.xlsx", "Existing.txt"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			workbook := filepath.Join(dir, name)
+			if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Init(dir, workbook)
+			if err == nil {
+				t.Fatal("expected extension validation error")
+			}
+			if !strings.Contains(err.Error(), ".xlsm, .xlam, or .xlsb") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(statErr) {
+				t.Fatalf("expected config not to be created, got %v", statErr)
+			}
+		})
+	}
+}
+
 func TestNewScaffoldCreatesGitignore(t *testing.T) {
 	dir := t.TempDir()
 	result, err := New(dir, "Book", fakeWorkbookCreator)
@@ -879,6 +931,59 @@ func TestNewScaffoldKeepsXlamExtension(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldKeepsXlsbExtension(t *testing.T) {
+	dir := t.TempDir()
+	result, err := New(dir, "LargeModel.xlsb", fakeWorkbookCreator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workbook != "build/LargeModel.xlsb" {
+		t.Fatalf("workbook path = %q", result.Workbook)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Excel.Path != "build/LargeModel.xlsb" {
+		t.Fatalf("excel path = %q", cfg.Excel.Path)
+	}
+	if cfg.Project.Name != "LargeModel" {
+		t.Fatalf("project name = %q", cfg.Project.Name)
+	}
+}
+
+func TestNormalizeWorkbookName(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    string
+		wantErr bool
+	}{
+		{name: "Book", want: "Book.xlsm"},
+		{name: "Book.xlsm", want: "Book.xlsm"},
+		{name: "Addin.xlam", want: "Addin.xlam"},
+		{name: "LargeModel.xlsb", want: "LargeModel.xlsb"},
+		{name: "Book.xlsx", wantErr: true},
+		{name: "Book.txt", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeWorkbookName(tt.name)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeWorkbookName(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewRejectsUnsupportedWorkbookExtensions(t *testing.T) {
 	for _, name := range []string{"Sales.xlsx", "Sales.txt"} {
 		t.Run(name, func(t *testing.T) {
@@ -887,7 +992,7 @@ func TestNewRejectsUnsupportedWorkbookExtensions(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected extension validation error")
 			}
-			if !strings.Contains(err.Error(), ".xlsm or .xlam") {
+			if !strings.Contains(err.Error(), ".xlsm, .xlam, or .xlsb") {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !os.IsNotExist(statErr) {
