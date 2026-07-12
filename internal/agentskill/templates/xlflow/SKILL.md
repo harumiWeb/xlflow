@@ -71,7 +71,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Run `xlflow lint --json` and fix reported issues before finalizing.
 
 4. Execute behavior.
-   - Prefer `xlflow test --session --json`.
+   - Prefer `xlflow test --session --json` while iterating against a live session; use plain `xlflow test --json` for isolated temporary-workbook validation.
    - Use `xlflow test --filter <Module.TestName> --session --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --session --json` before choosing a target.
    - If no tests exist and `project.entry` is the intended target, run `xlflow run --session --json`.
@@ -150,7 +150,7 @@ When the user asks to create or change VBA behavior:
 4. Edit `.bas`, `.cls`, or `.frm` source files.
 5. Run `xlflow push --fast --session --no-save --json`.
 6. Run `xlflow lint --json`.
-7. Run `xlflow test --session --json` when tests exist.
+7. Run `xlflow test --session --json` when tests exist and a live session is active; use plain `xlflow test --json` for isolated temporary-workbook validation.
    - Use `xlflow test --filter <Module.TestName> --session --json` for focused iteration.
    - Use `xlflow test --module <ModuleName> --session --json` to run one suite.
    - Use `xlflow test --tag <tag> --session --json` for tag-based subsets.
@@ -179,7 +179,7 @@ When the user reports a runtime failure:
 - Use `xlflow rollback --latest --json` or `xlflow rollback --backup <id> --json` only after the workbook is closed or the xlflow session has been stopped; then run `xlflow pull --json` if source files should match the restored workbook.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - When a lint or analyze finding is a deliberate one-line exception, prefer a narrow inline suppression comment over changing project-wide `disabled_rules`: use `' xlflow:disable-next-line VB002` before the target line, or `Range("A1").Select ' xlflow:disable-line VB002` for same-line suppression. Use stable IDs from CLI output, such as `VB002` or `VBA205`; list multiple IDs with spaces. Do not suppress preflight-blocking errors such as `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, `VB032`, `VBA104`, `VBA105`, `VBA106`, or `VBA211`.
-- Use `xlflow test --session --json` as the primary correctness signal when tests exist.
+- Use `xlflow test --session --json` as the primary live-session correctness signal when tests exist; use plain `xlflow test --json` when the configured workbook must remain protected by temporary-copy execution.
 - Use `xlflow test --module <ModuleName> --session --json` to run only the tests in one module.
 - Use `xlflow test --tag <tag> --session --json` to run only tests matching a tag.
 - Use `xlflow test --filter <Module.TestName> --session --json` for exact focused iteration; unqualified names only work when unique.

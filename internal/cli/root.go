@@ -3968,6 +3968,8 @@ func (a *app) testCommand() *cobra.Command {
 	var filter string
 	var moduleFilter string
 	var tagFilter string
+	var isolation string
+	var noSave bool
 	var msgBoxLiterals []string
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
@@ -3998,9 +4000,19 @@ func (a *app) testCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", err)
 			}
+			isolation = strings.ToLower(strings.TrimSpace(isolation))
+			if isolation == "" {
+				isolation = "none"
+			}
+			if isolation != "none" && isolation != "module" && isolation != "test" {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", fmt.Errorf("unsupported isolation mode %q; expected none, module, or test", isolation))
+			}
+			if session && isolation != "none" {
+				return a.writeFailure("test", output.ExitConfig, "unsupported_test_isolation", fmt.Errorf("isolation mode %q is not supported with --session", isolation))
+			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
+				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Isolation: isolation, NoSave: noSave, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -4012,6 +4024,8 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose qualified or unique procedure name exactly matches filter")
 	cmd.Flags().StringVar(&moduleFilter, "module", "", "run only tests in the module whose name exactly matches filter")
 	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag")
+	cmd.Flags().StringVar(&isolation, "isolation", "none", "workbook isolation mode: none, module, or test")
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "close the test workbook without explicitly saving changes")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")

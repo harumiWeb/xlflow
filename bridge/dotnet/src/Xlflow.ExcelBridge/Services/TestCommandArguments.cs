@@ -17,4 +17,10 @@ public sealed record TestCommandArguments(
     string UIStreamPipeName,
     bool UIStreamRedactInput,
     bool UseSession,
-    string MetadataPath);
+    string Isolation = "none",
+    bool NoSave = false,
+    bool DisableAutoSession = true,
+    string SourceWorkbookPath = "",
+    string ProjectRoot = "",
+    string TempRunRoot = "",
+    string MetadataPath = "");

@@ -337,4 +337,34 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(1, failed);
         Assert.Equal(0, inconclusive);
     }
+
+    [Fact]
+    public void CopyWorkbookForTestPreservesExtensionAndUsesUniqueNames()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var source = Path.Combine(dir, "Book.xlsm");
+            File.WriteAllText(source, "test workbook");
+            var runDir = Path.Combine(dir, ".xlflow", "test-runs", "abc123");
+
+            var first = ExcelTestService.CopyWorkbookForTest(source, runDir, "Module.Tests");
+            var second = ExcelTestService.CopyWorkbookForTest(source, runDir, "Module.Tests");
+
+            Assert.EndsWith(".xlsm", first);
+            Assert.EndsWith(".xlsm", second);
+            Assert.NotEqual(first, second);
+            Assert.StartsWith(runDir, first, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(first));
+            Assert.True(File.Exists(second));
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
 }

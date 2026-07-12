@@ -198,18 +198,20 @@ xlflow test --bridge dotnet --session --json
 xlflow test --bridge dotnet --filter TestSomething --json
 xlflow test --bridge dotnet --module Module1 --json
 xlflow test --bridge dotnet --tag smoke --json
+xlflow test --bridge dotnet --isolation module --json
+xlflow test --bridge dotnet --isolation test --filter Module1.TestSomething --json
 ```
 
 The command:
 
-1. Opens the workbook (or attaches to an active session)
+1. Opens a temporary workbook copy by default, or attaches to an active session with `--session`
 2. Injects runtime markers and UI/debug stream helpers
 3. Discovers test procedures (`Test*` or `*_Test` pattern, public/implicit `Sub`)
 4. Collects `@Tag("...")` annotations from preceding comment lines
 5. Discovers `BeforeAll`/`AfterAll`/`BeforeEach`/`AfterEach` hooks
 6. Generates and injects a runner module with per-test dispatch
-7. Executes BeforeAll, each test, AfterAll per module
-8. Restores runtime markers and saves the workbook
+
+Non-session runs report `test_run.temporary_workbook=true` and remove `.xlflow/test-runs/<run-id>/` after execution. `--isolation none` uses one workbook copy, `--isolation module` uses one fresh copy per selected module, and `--isolation test` uses one fresh copy per selected test case. Session runs support only `--isolation none`; unsupported combinations fail with `unsupported_test_isolation`. 7. Executes BeforeAll, each test, AfterAll per module 8. Restores runtime markers and saves the workbook
 
 Test results use `vbObjectError + 516` as the inconclusive sentinel. The response includes `workbook` and `tests` envelope fields.
 

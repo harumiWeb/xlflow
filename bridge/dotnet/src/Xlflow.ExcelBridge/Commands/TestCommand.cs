@@ -38,6 +38,12 @@ public sealed class TestCommand : ICommandHandler
             UIStreamPipeName: BridgePayload.GetString(request.Payload, "UIStreamPipeName") ?? "",
             UIStreamRedactInput: BridgePayload.GetBool(request.Payload, "UIStreamRedactInput", true),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
+            Isolation: BridgePayload.GetString(request.Payload, "Isolation") ?? "none",
+            NoSave: BridgePayload.GetBool(request.Payload, "NoSave"),
+            DisableAutoSession: BridgePayload.GetBool(request.Payload, "DisableAutoSession", true),
+            SourceWorkbookPath: BridgePayload.GetString(request.Payload, "SourceWorkbookPath") ?? "",
+            ProjectRoot: BridgePayload.GetString(request.Payload, "ProjectRoot") ?? "",
+            TempRunRoot: BridgePayload.GetString(request.Payload, "TempRunRoot") ?? "",
             MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
 
         if (string.IsNullOrWhiteSpace(args.WorkbookPath))

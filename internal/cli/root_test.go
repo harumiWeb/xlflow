@@ -104,6 +104,12 @@ func TestRootCommandIncludesTestCommand(t *testing.T) {
 	if flag := cmd.Flags().Lookup("ui-stream"); flag == nil {
 		t.Fatal("expected test command to define --ui-stream")
 	}
+	if flag := cmd.Flags().Lookup("isolation"); flag == nil {
+		t.Fatal("expected test command to define --isolation")
+	}
+	if flag := cmd.Flags().Lookup("no-save"); flag == nil {
+		t.Fatal("expected test command to define --no-save")
+	}
 }
 
 func TestRootCommandIncludesVersionCommand(t *testing.T) {
@@ -116,6 +122,41 @@ func TestRootCommandIncludesVersionCommand(t *testing.T) {
 	}
 	if cmd == nil || cmd.Name() != "version" {
 		t.Fatalf("expected version command, got %#v", cmd)
+	}
+}
+
+func TestTestCommandRejectsUnsupportedSessionIsolationBeforeBridge(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &stderr}
+	root := a.rootCommand()
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "test", "--session", "--isolation", "test"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("test command error = nil, want unsupported isolation error")
+	}
+	if code := output.ExitCode(err); code != output.ExitConfig {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse JSON output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "unsupported_test_isolation" {
+		t.Fatalf("unexpected output: %+v", got)
 	}
 }
 
