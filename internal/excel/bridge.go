@@ -282,6 +282,9 @@ type TestOptions struct {
 	Session       bool
 	Isolation     string
 	NoSave        bool
+	FailFast      bool
+	MaxFailures   int
+	RerunFailed   int
 	Keepalive     CommandOptions
 	RuntimeMode   string
 	RuntimeSource string
@@ -778,6 +781,9 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 		"UseSession":         strconv.FormatBool(opts.Session),
 		"Isolation":          isolation,
 		"NoSave":             strconv.FormatBool(opts.NoSave),
+		"FailFast":           strconv.FormatBool(opts.FailFast),
+		"MaxFailures":        strconv.Itoa(opts.MaxFailures),
+		"RerunFailed":        strconv.Itoa(opts.RerunFailed),
 		"DisableAutoSession": strconv.FormatBool(true),
 		"MetadataPath":       filepath.Join(root, ".xlflow", "session.json"),
 	}

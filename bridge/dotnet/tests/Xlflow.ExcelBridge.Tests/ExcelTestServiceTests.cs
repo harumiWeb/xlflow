@@ -607,6 +607,29 @@ public sealed class ExcelTestServiceTests
 
         Assert.False(passed.ContainsKey("error"));
         Assert.True(failed.ContainsKey("error"));
+        Assert.Equal(1, passed["attempts"]);
+        Assert.Equal(false, passed["flaky"]);
+        Assert.True(passed.ContainsKey("attempt_results"));
+    }
+
+    [Fact]
+    public void BuildNotRunTestResultOmitsErrorAndIncludesReason()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestLater",
+            Module = "ParserTests",
+            CaseId = "case-a",
+            AnnotationLine = 12,
+        };
+
+        var result = ExcelTestService.BuildNotRunTestResult(test, "maximum failure count reached");
+
+        Assert.Equal("ParserTests.TestLater[case-a]", result["qualified_name"]);
+        Assert.Equal("not_run", result["status"]);
+        Assert.Equal("maximum failure count reached", result["reason"]);
+        Assert.Equal(0, result["duration_ms"]);
+        Assert.False(result.ContainsKey("error"));
     }
 
     [Fact]
@@ -800,6 +823,7 @@ public sealed class ExcelTestServiceTests
     [Theory]
     [InlineData("skipped")]
     [InlineData("todo")]
+    [InlineData("not_run")]
     public void AdjustCountsForAfterAllFailureIgnoresNonExecutedStatuses(string status)
     {
         var failed = 0;

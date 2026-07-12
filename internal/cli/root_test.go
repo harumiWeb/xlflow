@@ -110,6 +110,15 @@ func TestRootCommandIncludesTestCommand(t *testing.T) {
 	if flag := cmd.Flags().Lookup("no-save"); flag == nil {
 		t.Fatal("expected test command to define --no-save")
 	}
+	if flag := cmd.Flags().Lookup("fail-fast"); flag == nil {
+		t.Fatal("expected test command to define --fail-fast")
+	}
+	if flag := cmd.Flags().Lookup("max-failures"); flag == nil {
+		t.Fatal("expected test command to define --max-failures")
+	}
+	if flag := cmd.Flags().Lookup("rerun-failed"); flag == nil {
+		t.Fatal("expected test command to define --rerun-failed")
+	}
 }
 
 func TestRootCommandIncludesVersionCommand(t *testing.T) {
@@ -157,6 +166,70 @@ func TestTestCommandRejectsUnsupportedSessionIsolationBeforeBridge(t *testing.T)
 	}
 	if got.Status != output.StatusFailed || got.Error.Code != "unsupported_test_isolation" {
 		t.Fatalf("unexpected output: %+v", got)
+	}
+}
+
+func TestTestCommandRejectsExecutionControlInvalidArgsBeforeBridge(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{
+			name: "fail_fast_with_max_failures",
+			args: []string{"--json", "test", "--fail-fast", "--max-failures", "1"},
+			code: "test_args_invalid",
+		},
+		{
+			name: "zero_max_failures",
+			args: []string{"--json", "test", "--max-failures", "0"},
+			code: "test_args_invalid",
+		},
+		{
+			name: "negative_rerun_failed",
+			args: []string{"--json", "test", "--rerun-failed", "-1"},
+			code: "test_args_invalid",
+		},
+		{
+			name: "session_rerun_failed",
+			args: []string{"--json", "test", "--session", "--rerun-failed", "1"},
+			code: "unsupported_test_rerun",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			a := &app{cwd: dir, stdout: &stdout, stderr: &stderr}
+			root := a.rootCommand()
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("test command error = nil, want validation error")
+			}
+			if code := output.ExitCode(err); code != output.ExitConfig {
+				t.Fatalf("exit code = %d, want %d", code, output.ExitConfig)
+			}
+
+			var got struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+				t.Fatalf("failed to parse JSON output: %v\n%s", unmarshalErr, stdout.String())
+			}
+			if got.Error.Code != tt.code {
+				t.Fatalf("error code = %q, want %q", got.Error.Code, tt.code)
+			}
+		})
 	}
 }
 

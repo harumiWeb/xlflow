@@ -3975,6 +3975,9 @@ func (a *app) testCommand() *cobra.Command {
 	var fileDialogLiterals []string
 	var session bool
 	var uiStream bool
+	var failFast bool
+	var maxFailures int
+	var rerunFailed int
 	cmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run workbook VBA tests",
@@ -4007,12 +4010,29 @@ func (a *app) testCommand() *cobra.Command {
 			if isolation != "none" && isolation != "module" && isolation != "test" {
 				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", fmt.Errorf("unsupported isolation mode %q; expected none, module, or test", isolation))
 			}
+			maxFailuresSet := cmd.Flags().Changed("max-failures")
+			if failFast && maxFailuresSet {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", fmt.Errorf("--fail-fast is equivalent to --max-failures 1 and cannot be combined with --max-failures"))
+			}
+			if maxFailuresSet && maxFailures <= 0 {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", fmt.Errorf("--max-failures must be greater than zero"))
+			}
+			if rerunFailed < 0 {
+				return a.writeFailure("test", output.ExitConfig, "test_args_invalid", fmt.Errorf("--rerun-failed must be zero or greater"))
+			}
+			resolvedMaxFailures := maxFailures
+			if failFast {
+				resolvedMaxFailures = 1
+			}
 			if session && isolation != "none" {
 				return a.writeFailure("test", output.ExitConfig, "unsupported_test_isolation", fmt.Errorf("isolation mode %q is not supported with --session", isolation))
 			}
+			if session && rerunFailed > 0 {
+				return a.writeFailure("test", output.ExitConfig, "unsupported_test_rerun", fmt.Errorf("--rerun-failed cannot be combined with --session because retries require a fresh workbook baseline"))
+			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Isolation: isolation, NoSave: noSave, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
+				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Isolation: isolation, NoSave: noSave, FailFast: failFast, MaxFailures: resolvedMaxFailures, RerunFailed: rerunFailed, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -4030,6 +4050,9 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
+	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "stop scheduling tests after the first final failure")
+	cmd.Flags().IntVar(&maxFailures, "max-failures", 0, "stop scheduling tests after N final failures")
+	cmd.Flags().IntVar(&rerunFailed, "rerun-failed", 0, "rerun failed tests up to N additional attempts")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.AddCommand(a.testListCommand())
 	return cmd

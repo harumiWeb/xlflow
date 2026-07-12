@@ -250,9 +250,14 @@ xlflow test --json
 xlflow test --session --json
 xlflow test --isolation module --json
 xlflow test --isolation test --filter TestOrders.Test_CreateWorksheet --json
+xlflow test --fail-fast --json
+xlflow test --max-failures 3 --json
+xlflow test --rerun-failed 1 --json
 ```
 
 Plain non-session `xlflow test` runs against temporary workbook copies under `.xlflow/test-runs/<run-id>/` and attempts best-effort cleanup after execution. Cleanup failures are surfaced through `test_run.cleanup.status`, with `path` and `message` when applicable. Prefer `--session` during normal AI-agent development when the live managed workbook is the intended target. Session mode supports `--isolation none`; `module` and `test` isolation are non-session modes.
+
+Use `--fail-fast` or `--max-failures N` when a setup problem would otherwise produce noisy cascades. Tests selected but not executed after the limit is reached are reported as `not_run` with reason `maximum failure count reached`. Use `--rerun-failed N` for intermittent failures; failed-then-passed tests are reported as flaky passes with `attempts` and `attempt_results`. `--session --rerun-failed N` with `N > 0` is rejected because live session state cannot provide a clean retry baseline.
 
 ### Filtering
 
@@ -296,6 +301,7 @@ xlflow session stop --json
 
 ```text
 PASS Test_CreateWorksheet
+FLAKY PASS Test_Intermittent after 2 attempts
 SKIP Test_AccessImport: Requires Microsoft Access
 TODO Test_NewExporter: Exporter implementation is pending
 FAIL Test_TotalPrice: expected <110> but got <100>
@@ -306,9 +312,10 @@ FAIL Test_TotalPrice: expected <110> but got <100>
 
 Each test entry includes:
 
-- `name`, `module`, `status` (`passed` | `failed` | `skipped` | `todo` | `inconclusive`)
+- `name`, `module`, `status` (`passed` | `failed` | `skipped` | `todo` | `inconclusive` | `not_run`)
 - `duration_ms`
-- `reason` for `skipped` and `todo` results when provided
+- `reason` for `skipped`, `todo`, and `not_run` results when provided
+- `attempts`, `flaky`, and `attempt_results` for executed tests
 - `expected_error` when `@ExpectedError` is present
 - `observed_error` when an expected-error test body raised an error
 - `error.code` (`test_failed`, `test_inconclusive`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)

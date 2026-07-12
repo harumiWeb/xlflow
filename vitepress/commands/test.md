@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--isolation none|module|test] [--no-save] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
+xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--isolation none|module|test] [--fail-fast] [--max-failures <n>] [--rerun-failed <n>] [--no-save] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
 xlflow test list [--module <name>] [--path <path>] --json
 
 ```
@@ -18,6 +18,9 @@ xlflow test list [--module <name>] [--path <path>] --json
 | `--module <name>`              | Run only tests in the module whose name exactly matches the filter.                         | -       |
 | `--tag <tag>`                  | Run only tests tagged with the given tag.                                                   | -       |
 | `--isolation <mode>`           | Workbook isolation mode: `none`, `module`, or `test`.                                       | none    |
+| `--fail-fast`                  | Stop scheduling new tests after the first final failure.                                    | false   |
+| `--max-failures <n>`           | Stop scheduling new tests after `n` final failures. Must be greater than zero.              | -       |
+| `--rerun-failed <n>`           | Rerun failed tests up to `n` additional attempts. Must be zero or greater.                  | 0       |
 | `--no-save`                    | Do not explicitly save the workbook used for test execution.                                | false   |
 | `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.                            | -       |
 | `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.                          | -       |
@@ -38,6 +41,14 @@ By default, `xlflow test` runs against a temporary copy of the configured workbo
 `--isolation test` creates a fresh workbook copy for each selected test. `BeforeAll`, `BeforeEach`, the test, `AfterEach`, and `AfterAll` all run inside that individual workbook copy.
 
 `--session` attaches to the live managed workbook and supports only `--isolation none`. `--session --isolation module` and `--session --isolation test` fail with `unsupported_test_isolation`. `--session --no-save` prevents xlflow from explicitly saving after tests, but mutations made by VBA remain visible in the live workbook.
+
+## Failure Controls and Retries
+
+Use `--fail-fast` to stop after the first final failure, or `--max-failures N` to stop after `N` final failures. `--fail-fast` is equivalent to `--max-failures 1`; the two flags cannot be combined. Tests selected but not executed because the limit was reached are returned as `status: "not_run"` with `reason: "maximum failure count reached"`.
+
+Use `--rerun-failed N` to allow `N` additional attempts after the first failed attempt. Passed, skipped, todo, inconclusive, not-run, discovery failures, `BeforeAll` failures, and `AfterAll` failures are not retried. A failed-then-passed test is reported as a flaky pass rather than a normal pass, with `flaky: true`, `attempts`, and `attempt_results` in JSON. `passed` summary counts include flaky passes; `flaky` is an additional subset count.
+
+Retries require a fresh workbook baseline. Non-session runs create fresh temporary workbook copies for retry attempts. `--session --rerun-failed N` with `N > 0` is rejected because a live session workbook cannot guarantee a clean retry baseline.
 
 ## Source Test Discovery
 
@@ -276,6 +287,9 @@ xlflow test list --json
 xlflow test --json
 xlflow test --isolation module --json
 xlflow test --isolation test --filter SmokeTests.TestSmoke --json
+xlflow test --fail-fast --json
+xlflow test --max-failures 3 --json
+xlflow test --rerun-failed 1 --json
 xlflow test --filter SmokeTests.TestSmoke --session --no-save --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json
@@ -285,6 +299,7 @@ Typical terminal output distinguishes executed and non-executed statuses:
 
 ```text
 PASS SmokeTests.TestSmoke
+FLAKY PASS FlakyTests.TestSometimes after 2 attempts
 SKIP AccessTests.Test_AccessImport: Requires Microsoft Access
 TODO ExportTests.Test_NewExporter: Exporter implementation is pending
 ? DraftTests.TestDraft: inconclusive
@@ -329,6 +344,12 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
     "workbook_saved": false,
     "cleanup": {
       "status": "completed"
+    },
+    "execution": {
+      "fail_fast": false,
+      "max_failures": 3,
+      "rerun_failed": 1,
+      "stopped_early": false
     }
   },
   "tests": [
@@ -339,7 +360,43 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
       "module": "SmokeTests",
       "status": "passed",
       "duration_ms": 12,
-      "tags": ["smoke"]
+      "tags": ["smoke"],
+      "attempts": 1,
+      "flaky": false,
+      "attempt_results": [
+        {
+          "attempt": 1,
+          "status": "passed",
+          "duration_ms": 12
+        }
+      ]
+    },
+    {
+      "id": "FlakyTests.TestSometimes",
+      "qualified_name": "FlakyTests.TestSometimes",
+      "name": "TestSometimes",
+      "module": "FlakyTests",
+      "status": "passed",
+      "duration_ms": 6,
+      "tags": [],
+      "attempts": 2,
+      "flaky": true,
+      "attempt_results": [
+        {
+          "attempt": 1,
+          "status": "failed",
+          "duration_ms": 8,
+          "error": {
+            "code": "test_failed",
+            "message": "expected <10> but got <9>"
+          }
+        },
+        {
+          "attempt": 2,
+          "status": "passed",
+          "duration_ms": 6
+        }
+      ]
     },
     {
       "id": "SmokeTests.TestInvalidArgument",
@@ -392,6 +449,16 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
       "duration_ms": 0,
       "tags": [],
       "reason": "Exporter implementation is pending"
+    },
+    {
+      "id": "LaterTests.TestNotScheduled",
+      "qualified_name": "LaterTests.TestNotScheduled",
+      "name": "TestNotScheduled",
+      "module": "LaterTests",
+      "status": "not_run",
+      "duration_ms": 0,
+      "tags": [],
+      "reason": "maximum failure count reached"
     },
     {
       "id": "SmokeTests.TestBad",

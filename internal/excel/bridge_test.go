@@ -2872,8 +2872,11 @@ func TestBuildTestScriptArgsIncludesIsolationAndTempMetadata(t *testing.T) {
 	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
 
 	args := buildTestScriptArgs(root, cfg, "SmokeTests.TestA", TestOptions{
-		Isolation: "test",
-		NoSave:    true,
+		Isolation:   "test",
+		NoSave:      true,
+		FailFast:    true,
+		MaxFailures: 1,
+		RerunFailed: 2,
 	})
 
 	workbook := filepath.Join(root, "build", "Book.xlsm")
@@ -2900,6 +2903,15 @@ func TestBuildTestScriptArgsIncludesIsolationAndTempMetadata(t *testing.T) {
 	}
 	if got := args["NoSave"]; got != "true" {
 		t.Fatalf("NoSave = %q, want true", got)
+	}
+	if got := args["FailFast"]; got != "true" {
+		t.Fatalf("FailFast = %q, want true", got)
+	}
+	if got := args["MaxFailures"]; got != "1" {
+		t.Fatalf("MaxFailures = %q, want 1", got)
+	}
+	if got := args["RerunFailed"]; got != "2" {
+		t.Fatalf("RerunFailed = %q, want 2", got)
 	}
 }
 
