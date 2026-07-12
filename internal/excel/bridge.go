@@ -256,6 +256,16 @@ type EditColumnsOptions struct {
 	Keepalive    CommandOptions
 }
 
+type EditSheetAddOptions struct {
+	WorkbookPath string
+	Name         string
+	Before       string
+	After        string
+	IfMissing    bool
+	Session      bool
+	Keepalive    CommandOptions
+}
+
 type SessionCommandOptions struct {
 	Session   bool
 	Keepalive CommandOptions
@@ -1155,6 +1165,10 @@ func (r Runner) EditColumns(cfg config.Config, opts EditColumnsOptions) (output.
 	return r.run("edit", buildEditColumnsScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
 }
 
+func (r Runner) EditSheetAdd(cfg config.Config, opts EditSheetAddOptions) (output.Envelope, int, error) {
+	return r.run("edit", buildEditSheetAddScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
 func buildUIButtonRemoveScriptArgs(root string, cfg config.Config, opts UIButtonRemoveOptions) map[string]string {
 	return map[string]string{
 		"Action":       "remove",
@@ -1280,6 +1294,25 @@ func buildEditColumnsScriptArgs(root string, cfg config.Config, opts EditColumns
 		"UseSession":   strconv.FormatBool(opts.Session),
 		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
 	}
+}
+
+func buildEditSheetAddScriptArgs(root string, cfg config.Config, opts EditSheetAddOptions) map[string]string {
+	args := map[string]string{
+		"Action":       "sheet_add",
+		"WorkbookPath": workbookPath(root, chooseEditWorkbook(cfg, opts.WorkbookPath)),
+		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
+		"Name":         opts.Name,
+		"IfMissing":    strconv.FormatBool(opts.IfMissing),
+		"UseSession":   strconv.FormatBool(opts.Session),
+		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+	}
+	if opts.Before != "" {
+		args["Before"] = opts.Before
+	}
+	if opts.After != "" {
+		args["After"] = opts.After
+	}
+	return args
 }
 
 func chooseEditWorkbook(cfg config.Config, workbook string) string {
@@ -1892,7 +1925,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "invalid_formula", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "sheet_exists", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "invalid_formula", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_sheet_name", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
 		return output.ExitValidation
 	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
 		return output.ExitValidation

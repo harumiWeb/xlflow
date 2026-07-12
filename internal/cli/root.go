@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/xuri/excelize/v2"
@@ -2655,6 +2656,53 @@ func buildEditColumnsOptions(workbook, sheet, columns string, width float64, ses
 	}, nil
 }
 
+var errInvalidWorksheetName = errors.New("invalid worksheet name")
+
+func buildEditSheetAddOptions(workbook, name, before, after string, ifMissing, session bool, keepalive excel.CommandOptions) (excel.EditSheetAddOptions, error) {
+	if !session {
+		return excel.EditSheetAddOptions{}, fmt.Errorf("`xlflow edit` requires --session")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return excel.EditSheetAddOptions{}, fmt.Errorf("--name is required")
+	}
+	if err := validateExcelWorksheetName(name); err != nil {
+		return excel.EditSheetAddOptions{}, err
+	}
+	before = strings.TrimSpace(before)
+	after = strings.TrimSpace(after)
+	if before != "" && after != "" {
+		return excel.EditSheetAddOptions{}, fmt.Errorf("--before and --after cannot be combined")
+	}
+	return excel.EditSheetAddOptions{
+		WorkbookPath: strings.TrimSpace(workbook),
+		Name:         name,
+		Before:       before,
+		After:        after,
+		IfMissing:    ifMissing,
+		Session:      session,
+		Keepalive:    keepalive,
+	}, nil
+}
+
+func validateExcelWorksheetName(name string) error {
+	if utf8.RuneCountInString(name) > 31 {
+		return fmt.Errorf("%w: --name must be 31 characters or fewer", errInvalidWorksheetName)
+	}
+	if strings.HasPrefix(name, "'") || strings.HasSuffix(name, "'") {
+		return fmt.Errorf("%w: --name cannot start or end with an apostrophe", errInvalidWorksheetName)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: --name cannot contain control characters", errInvalidWorksheetName)
+		}
+		if strings.ContainsRune(`:\/?*[]`, r) {
+			return fmt.Errorf("%w: --name cannot contain : \\ / ? * [ ]", errInvalidWorksheetName)
+		}
+	}
+	return nil
+}
+
 func normalizeEditColor(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -3600,7 +3648,69 @@ func (a *app) editCommand() *cobra.Command {
 		a.editFormulaCommand(),
 		a.editRowsCommand(),
 		a.editColumnsCommand(),
+		a.editSheetCommand(),
 	)
+	return cmd
+}
+
+func (a *app) editSheetCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sheet",
+		Short: "Mutate worksheets in a live-session workbook",
+	}
+	cmd.AddCommand(a.editSheetAddCommand())
+	return cmd
+}
+
+func (a *app) editSheetAddCommand() *cobra.Command {
+	var name string
+	var before string
+	var after string
+	var ifMissing bool
+	var session bool
+
+	cmd := &cobra.Command{
+		Use:   "add [workbook]",
+		Short: "Add a worksheet to a live-session workbook",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			commandOpts := buildCommandOptions(a.stderrWriter())
+			cfg, err := a.loadConfig("edit")
+			if err != nil {
+				return err
+			}
+			workbook := ""
+			if len(args) == 1 {
+				workbook = args[0]
+			}
+			opts, err := buildEditSheetAddOptions(workbook, name, before, after, ifMissing, session, commandOpts)
+			if err != nil {
+				code := "edit_args_invalid"
+				exitCode := output.ExitConfig
+				if errors.Is(err, errInvalidWorksheetName) {
+					code = "invalid_sheet_name"
+					exitCode = output.ExitValidation
+				}
+				return a.writeFailure("edit", exitCode, code, err)
+			}
+			var env output.Envelope
+			var code int
+			err = a.withExcelProgress("Adding worksheet", commandOpts, func() error {
+				var runErr error
+				env, code, runErr = a.excelRunnerForConfig(cfg).EditSheetAdd(cfg, opts)
+				return runErr
+			})
+			if err != nil {
+				return err
+			}
+			return a.write(env, code)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "worksheet name to create")
+	cmd.Flags().StringVar(&before, "before", "", "insert before this worksheet")
+	cmd.Flags().StringVar(&after, "after", "", "insert after this worksheet")
+	cmd.Flags().BoolVar(&ifMissing, "if-missing", false, "treat an existing worksheet with the same name as success")
+	cmd.Flags().BoolVar(&session, "session", false, "require a matching active xlflow session workbook")
 	return cmd
 }
 

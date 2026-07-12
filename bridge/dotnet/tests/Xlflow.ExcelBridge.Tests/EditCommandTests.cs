@@ -181,6 +181,43 @@ public sealed class EditCommandTests
         Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public void HandleParsesSheetAddArguments()
+    {
+        var service = new FakeEditService((request, args) =>
+        {
+            Assert.Equal("sheet_add", args.Action);
+            Assert.Equal("Dashboard", args.Name);
+            Assert.Equal(string.Empty, args.Before);
+            Assert.Equal("Invoices", args.After);
+            Assert.True(args.IfMissing);
+            Assert.True(args.UseSession);
+            return BridgeResponse.Ok(request, new Dictionary<string, object?>());
+        });
+
+        var command = new EditCommand(service);
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-edit-sheet-add",
+            Command = "edit",
+            Payload = JsonDocument.Parse("""
+                {
+                  "WorkbookPath":"C:\\work\\Book.xlsm",
+                  "Action":"sheet_add",
+                  "Name":"Dashboard",
+                  "After":"Invoices",
+                  "IfMissing":"true",
+                  "UseSession":"true",
+                  "MetadataPath":".xlflow\\session.json"
+                }
+                """).RootElement.Clone(),
+        };
+
+        var response = command.Handle(request, CancellationToken.None);
+        Assert.Equal("ok", JsonSerializer.SerializeToDocument(response, JsonOptions.Default).RootElement.GetProperty("status").GetString());
+    }
+
     private sealed class FakeEditService(Func<BridgeRequest, EditCommandArguments, BridgeResponse> handler) : IEditService
     {
         public BridgeResponse Execute(BridgeRequest request, EditCommandArguments args, CancellationToken cancellationToken) => handler(request, args);

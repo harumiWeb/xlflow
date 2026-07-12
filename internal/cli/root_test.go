@@ -2776,6 +2776,55 @@ func TestBuildEditRowsAndColumnsOptionsValidateSelectors(t *testing.T) {
 	}
 }
 
+func TestBuildEditSheetAddOptionsValidatesAndNormalizes(t *testing.T) {
+	opts, err := buildEditSheetAddOptions(" build\\Book.xlsm ", " Config ", " Products ", "", true, true, excel.CommandOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkbookPath != "build\\Book.xlsm" || opts.Name != "Config" || opts.Before != "Products" || opts.After != "" || !opts.IfMissing || !opts.Session {
+		t.Fatalf("unexpected edit sheet add opts: %#v", opts)
+	}
+}
+
+func TestBuildEditSheetAddOptionsRejectsInvalidCombinations(t *testing.T) {
+	if _, err := buildEditSheetAddOptions("", "Config", "", "", false, false, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("expected session requirement error, got %v", err)
+	}
+	if _, err := buildEditSheetAddOptions("", "", "", "", false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--name") {
+		t.Fatalf("expected name error, got %v", err)
+	}
+	if _, err := buildEditSheetAddOptions("", "Bad/Name", "", "", false, true, excel.CommandOptions{}); err == nil || !errors.Is(err, errInvalidWorksheetName) {
+		t.Fatalf("expected invalid worksheet name error, got %v", err)
+	}
+	if _, err := buildEditSheetAddOptions("", strings.Repeat("A", 32), "", "", false, true, excel.CommandOptions{}); err == nil || !errors.Is(err, errInvalidWorksheetName) {
+		t.Fatalf("expected long worksheet name error, got %v", err)
+	}
+	if _, err := buildEditSheetAddOptions("", "'Config", "", "", false, true, excel.CommandOptions{}); err == nil || !errors.Is(err, errInvalidWorksheetName) {
+		t.Fatalf("expected apostrophe worksheet name error, got %v", err)
+	}
+	if _, err := buildEditSheetAddOptions("", "Config", "Products", "Invoices", false, true, excel.CommandOptions{}); err == nil || !strings.Contains(err.Error(), "--before and --after") {
+		t.Fatalf("expected before/after conflict, got %v", err)
+	}
+}
+
+func TestRootCommandIncludesEditSheetAddCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"edit", "sheet", "add"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "add" {
+		t.Fatalf("expected edit sheet add command, got %#v", cmd)
+	}
+	for _, name := range []string{"name", "before", "after", "if-missing", "session"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected edit sheet add to define --%s", name)
+		}
+	}
+}
+
 func TestRootCommandIncludesUIButtonCommands(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()

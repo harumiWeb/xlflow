@@ -3625,9 +3625,32 @@ func summarizeEditSelector(edit map[string]any) string {
 }
 
 func summarizeEditMutation(edit map[string]any) string {
+	if stringValue(edit, "kind") == "sheet" {
+		if created, ok := boolValueOK(edit, "created"); ok {
+			if created {
+				parts := []string{"worksheet created"}
+				if before := stringValue(edit, "before"); before != "" {
+					parts = append(parts, "before="+before)
+				}
+				if after := stringValue(edit, "after"); after != "" {
+					parts = append(parts, "after="+after)
+				}
+				return strings.Join(parts, ", ")
+			}
+			return "worksheet already exists"
+		}
+	}
 	mutation := objectMap(edit["mutation"])
 	if len(mutation) == 0 {
 		return ""
+	}
+	if worksheet := objectMap(mutation["worksheet"]); len(worksheet) > 0 {
+		if boolValue(worksheet, "created") {
+			if name := stringValue(worksheet, "name"); name != "" {
+				return "worksheet created -> " + name
+			}
+			return "worksheet created"
+		}
 	}
 	if formula := objectMap(mutation["formula"]); len(formula) > 0 {
 		parts := []string{"formula"}

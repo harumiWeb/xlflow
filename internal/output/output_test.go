@@ -372,6 +372,30 @@ func TestWriteJSONEnvelopeIncludesEditFields(t *testing.T) {
 	}
 }
 
+func TestWriteJSONEnvelopeIncludesEditSheetAddFields(t *testing.T) {
+	env := New("edit")
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":    "sheet",
+		"sheet":   "Dashboard",
+		"created": true,
+		"after":   "Invoices",
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	edit := decoded["edit"].(map[string]any)
+	if edit["kind"] != "sheet" || edit["sheet"] != "Dashboard" || edit["created"] != true || edit["after"] != "Invoices" {
+		t.Fatalf("unexpected edit sheet payload: %#v", edit)
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesBackupAndRollbackFields(t *testing.T) {
 	env := New("rollback")
 	env.Backups = []map[string]any{{"id": "20260518-100000-push", "path": ".xlflow/backups/20260518-100000-push/Book.xlsm"}}
@@ -1411,6 +1435,51 @@ func TestWriteWithOptionsRendersEditSummary(t *testing.T) {
 	for _, want := range []string{"xlflow edit", "Edit target:", "Selection:", "Input!B2", "Mutation:", "ABC123", "Events:", "mode=on", "SAVE REQUIRED"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("edit output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersEditSheetAddSummary(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit", "needs_save": true}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Session = map[string]any{"active": true, "workbook_path": "build/Book.xlsm", "dirty": true, "save_required": true}
+	env.Edit = map[string]any{
+		"kind":    "sheet",
+		"sheet":   "Dashboard",
+		"created": true,
+		"after":   "Invoices",
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Selection:", "Dashboard", "Mutation:", "worksheet created", "after=Invoices", "SAVE REQUIRED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("edit sheet add output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersEditSheetAlreadyExistsSummary(t *testing.T) {
+	env := New("edit")
+	env.Workbook = map[string]any{"path": "build/Book.xlsm", "session": true, "session_mode": "explicit"}
+	env.Target = map[string]any{"kind": "live_session", "path": "build/Book.xlsm"}
+	env.Edit = map[string]any{
+		"kind":    "sheet",
+		"sheet":   "Config",
+		"created": false,
+		"message": "Worksheet already exists.",
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Selection:", "Config", "Mutation:", "worksheet already exists"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("edit sheet existing output missing %q:\n%s", want, got)
 		}
 	}
 }
