@@ -66,19 +66,27 @@ public sealed class ExcelTestService : ITestService
                     sessionAttached, sessionMode, [], runtimeState, runtimeInjected);
             }
 
-            var duplicates = discovered
-                .GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .ToList();
+            var duplicates = DuplicateTestQualifiedNames(discovered);
             if (duplicates.Count > 0)
             {
-                var names = string.Join(", ", duplicates.Select(g => g.Key));
+                var names = string.Join(", ", duplicates);
                 return BuildErrorResponse(request, args, "duplicate_test_name",
                     $"duplicate VBA test name(s): {names}",
                     sessionAttached, sessionMode, discovered, runtimeState, runtimeInjected);
             }
 
-            var selected = SelectTests(discovered, args.Filter, args.ModuleFilter, args.TagFilter);
+            var selection = SelectTests(discovered, args.Filter, args.ModuleFilter, args.TagFilter);
+            if (selection.Ambiguous)
+            {
+                var ambiguousName = args.Filter.Trim();
+                var ambiguousMatches = selection.Matches.Select(t => t.QualifiedName).ToArray();
+                return BuildErrorResponse(request, args, "ambiguous_test_name",
+                    $"test name is ambiguous: {ambiguousName}{Environment.NewLine}{Environment.NewLine}Matches:{Environment.NewLine}- {string.Join(Environment.NewLine + "- ", ambiguousMatches)}{Environment.NewLine}{Environment.NewLine}Use a qualified test name.",
+                    sessionAttached, sessionMode, selection.Matches, runtimeState, runtimeInjected,
+                    new Dictionary<string, object?> { ["matches"] = ambiguousMatches });
+            }
+
+            var selected = selection.Tests;
             if (selected.Count == 0)
             {
                 var filterDesc = args.Filter;
@@ -158,15 +166,9 @@ public sealed class ExcelTestService : ITestService
                             foreach (var test in moduleGroup)
                             {
                                 failed++;
-                                results.Add(new
-                                {
-                                    name = test.Name,
-                                    module = test.Module,
-                                    status = "failed",
-                                    duration_ms = (int)sw.ElapsedMilliseconds,
-                                    error = new { code = "before_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) },
-                                });
-                                logs.Add($"FAIL {test.Name}: before_all_failed: {message}");
+                                results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
+                                    new { code = "before_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) }));
+                                logs.Add($"FAIL {test.QualifiedName}: before_all_failed: {message}");
                             }
                         }
                     }
@@ -177,15 +179,9 @@ public sealed class ExcelTestService : ITestService
                         foreach (var test in moduleGroup)
                         {
                             failed++;
-                            results.Add(new
-                            {
-                                name = test.Name,
-                                module = test.Module,
-                                status = "failed",
-                                duration_ms = (int)sw.ElapsedMilliseconds,
-                                error = new { code = "before_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult },
-                            });
-                            logs.Add($"FAIL {test.Name}: before_all_failed: {ex.Message}");
+                            results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
+                                new { code = "before_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult }));
+                            logs.Add($"FAIL {test.QualifiedName}: before_all_failed: {ex.Message}");
                         }
                     }
                 }
@@ -239,45 +235,31 @@ public sealed class ExcelTestService : ITestService
                                 }
                             }
 
-                            results.Add(new
-                            {
-                                name = test.Name,
-                                module = test.Module,
-                                status,
-                                duration_ms = (int)sw.ElapsedMilliseconds,
-                                tags = test.Tags,
-                                error = new { code = errorCode, message = errorMessage, source = errorSource, number = errorNumber },
-                            });
+                            results.Add(BuildTestResult(test, status, (int)sw.ElapsedMilliseconds,
+                                new { code = errorCode, message = errorMessage, source = errorSource, number = errorNumber }));
 
                             if (status == "passed")
                             {
-                                logs.Add($"PASS {test.Name}");
+                                logs.Add($"PASS {test.QualifiedName}");
                             }
                             else if (status == "inconclusive")
                             {
                                 inconclusiveCount++;
-                                logs.Add($"? {test.Name}: inconclusive");
+                                logs.Add($"? {test.QualifiedName}: inconclusive");
                             }
                             else
                             {
                                 failed++;
-                                logs.Add($"FAIL {test.Name}: {errorMessage}");
+                                logs.Add($"FAIL {test.QualifiedName}: {errorMessage}");
                             }
                         }
                         catch (Exception ex)
                         {
                             sw.Stop();
                             failed++;
-                            results.Add(new
-                            {
-                                name = test.Name,
-                                module = test.Module,
-                                status = "failed",
-                                duration_ms = (int)sw.ElapsedMilliseconds,
-                                tags = test.Tags,
-                                error = new { code = "test_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult },
-                            });
-                            logs.Add($"FAIL {test.Name}: {ex.Message}");
+                            results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
+                                new { code = "test_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult }));
+                            logs.Add($"FAIL {test.QualifiedName}: {ex.Message}");
                         }
                     }
                 }
@@ -305,15 +287,18 @@ public sealed class ExcelTestService : ITestService
                                 {
                                     AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
                                     var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
+                                    var resultQualifiedName = (string)resultObj.GetType().GetProperty("qualified_name")!.GetValue(resultObj)!;
                                     results[i] = new
                                     {
+                                        id = resultQualifiedName,
+                                        qualified_name = resultQualifiedName,
                                         name = resultName,
                                         module = resultModule,
                                         status = "failed",
                                         duration_ms = resultDuration,
                                         error = new { code = "after_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) },
                                     };
-                                    logs.Add($"FAIL {resultName}: after_all_failed: {message}");
+                                    logs.Add($"FAIL {resultQualifiedName}: after_all_failed: {message}");
                                 }
                             }
                         }
@@ -332,15 +317,18 @@ public sealed class ExcelTestService : ITestService
                             {
                                 AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
                                 var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
+                                var resultQualifiedName = (string)resultObj.GetType().GetProperty("qualified_name")!.GetValue(resultObj)!;
                                 results[i] = new
                                 {
+                                    id = resultQualifiedName,
+                                    qualified_name = resultQualifiedName,
                                     name = resultName,
                                     module = resultModule,
                                     status = "failed",
                                     duration_ms = resultDuration,
                                     error = new { code = "after_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult },
                                 };
-                                logs.Add($"FAIL {resultName}: after_all_failed: {ex.Message}");
+                                logs.Add($"FAIL {resultQualifiedName}: after_all_failed: {ex.Message}");
                             }
                         }
                     }
@@ -677,16 +665,22 @@ public sealed class ExcelTestService : ITestService
         return hooks;
     }
 
-    internal static List<TestCase> SelectTests(List<TestCase> tests, string filter, string moduleFilter, string tagFilter)
+    internal static List<string> DuplicateTestQualifiedNames(List<TestCase> tests)
     {
-        var selected = new List<TestCase>();
+        return tests
+            .GroupBy(t => t.QualifiedName, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.First().QualifiedName)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    internal static TestSelection SelectTests(List<TestCase> tests, string filter, string moduleFilter, string tagFilter)
+    {
+        var candidates = new List<TestCase>();
         foreach (var test in tests)
         {
             var include = true;
-            if (!string.IsNullOrWhiteSpace(filter) && !string.Equals(test.Name, filter, StringComparison.OrdinalIgnoreCase))
-            {
-                include = false;
-            }
             if (!string.IsNullOrWhiteSpace(moduleFilter) && !string.Equals(test.Module, moduleFilter, StringComparison.OrdinalIgnoreCase))
             {
                 include = false;
@@ -701,10 +695,28 @@ public sealed class ExcelTestService : ITestService
             }
             if (include)
             {
-                selected.Add(test);
+                candidates.Add(test);
             }
         }
-        return selected;
+        filter = filter.Trim();
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return new TestSelection(candidates, [], false);
+        }
+        if (filter.Contains('.'))
+        {
+            return new TestSelection(
+                candidates.Where(t => string.Equals(t.QualifiedName, filter, StringComparison.OrdinalIgnoreCase)).ToList(),
+                [],
+                false);
+        }
+
+        var matches = candidates.Where(t => string.Equals(t.Name, filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matches.Count > 1)
+        {
+            return new TestSelection([], matches.OrderBy(t => t.QualifiedName, StringComparer.OrdinalIgnoreCase).ToList(), true);
+        }
+        return new TestSelection(matches, [], false);
     }
 
     internal static void AdjustCountsForAfterAllFailure(string resultStatus, ref int failed, ref int inconclusiveCount)
@@ -839,6 +851,21 @@ public sealed class ExcelTestService : ITestService
         return builder.ToString();
     }
 
+    private static object BuildTestResult(TestCase test, string status, int durationMs, object error)
+    {
+        return new
+        {
+            id = test.QualifiedName,
+            qualified_name = test.QualifiedName,
+            name = test.Name,
+            module = test.Module,
+            status,
+            duration_ms = durationMs,
+            tags = test.Tags,
+            error,
+        };
+    }
+
     internal static BridgeResponse BuildErrorResponse(
         BridgeRequest request,
         TestCommandArguments args,
@@ -848,7 +875,8 @@ public sealed class ExcelTestService : ITestService
         string sessionMode,
         List<TestCase> tests,
         RuntimeInjectionHelper.RuntimeInjectionState? runtimeState,
-        bool runtimeInjected)
+        bool runtimeInjected,
+        IReadOnlyDictionary<string, object?>? errorDetails = null)
     {
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
@@ -867,7 +895,7 @@ public sealed class ExcelTestService : ITestService
                 session_requested = args.UseSession,
                 auto_session = sessionAttached && !args.UseSession,
             },
-            ["tests"] = tests.Select(t => new { name = t.Name, module = t.Module, line = t.Line, tags = t.Tags }).ToArray(),
+            ["tests"] = tests.Select(t => new { id = t.QualifiedName, qualified_name = t.QualifiedName, name = t.Name, module = t.Module, line = t.Line, tags = t.Tags }).ToArray(),
         };
 
         return new BridgeResponse
@@ -879,7 +907,8 @@ public sealed class ExcelTestService : ITestService
                 Code: code,
                 Message: message,
                 Phase: "test",
-                Source: "xlflow"),
+                Source: "xlflow",
+                Details: errorDetails),
             Logs = logs,
             Extensions = extensions,
         };
@@ -939,10 +968,14 @@ public sealed class ExcelTestService : ITestService
     {
         public string Name { get; init; } = "";
         public string Module { get; init; } = "";
+        public string QualifiedName => Module + "." + Name;
+        public string Id => QualifiedName;
         public int Line { get; init; }
         public string[] Tags { get; init; } = [];
         public int Index { get; set; }
     }
+
+    internal sealed record TestSelection(List<TestCase> Tests, List<TestCase> Matches, bool Ambiguous);
 
     internal sealed class ModuleHooks
     {

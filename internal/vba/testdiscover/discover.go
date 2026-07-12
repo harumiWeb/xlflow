@@ -1,6 +1,7 @@
 package testdiscover
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,7 +30,21 @@ type Summary struct {
 	Tests int `json:"tests"`
 }
 
+type DuplicateTestError struct {
+	Module     string
+	Name       string
+	FirstPath  string
+	FirstLine  int
+	SecondPath string
+	SecondLine int
+}
+
+func (e DuplicateTestError) Error() string {
+	return fmt.Sprintf("duplicate VBA test procedure %s in module %s at %s:%d and %s:%d", e.Name, e.Module, e.FirstPath, e.FirstLine, e.SecondPath, e.SecondLine)
+}
+
 type Test struct {
+	ID            string   `json:"id"`
 	Module        string   `json:"module"`
 	Name          string   `json:"name"`
 	QualifiedName string   `json:"qualified_name"`
@@ -55,6 +70,7 @@ func Discover(opts Options) (*Result, error) {
 		Root:  symbolResult.Root,
 		Items: []Test{},
 	}
+	seen := map[string]Test{}
 	for _, file := range symbolResult.Files {
 		if !strings.EqualFold(file.ModuleKind, "standard") {
 			continue
@@ -68,14 +84,28 @@ func Discover(opts Options) (*Result, error) {
 			if !isTestProcedure(sym) {
 				continue
 			}
+			qualifiedName := file.ModuleName + "." + sym.Name
 			test := Test{
+				ID:            qualifiedName,
 				Module:        file.ModuleName,
 				Name:          sym.Name,
-				QualifiedName: file.ModuleName + "." + sym.Name,
+				QualifiedName: qualifiedName,
 				SourcePath:    file.Path,
 				Line:          sym.StartLine,
 				Tags:          tagsAbove(lines, sym.StartLine),
 			}
+			key := strings.ToLower(file.ModuleName) + "\x00" + strings.ToLower(sym.Name)
+			if previous, ok := seen[key]; ok {
+				return nil, DuplicateTestError{
+					Module:     file.ModuleName,
+					Name:       sym.Name,
+					FirstPath:  previous.SourcePath,
+					FirstLine:  previous.Line,
+					SecondPath: test.SourcePath,
+					SecondLine: test.Line,
+				}
+			}
+			seen[key] = test
 			result.Items = append(result.Items, test)
 		}
 	}

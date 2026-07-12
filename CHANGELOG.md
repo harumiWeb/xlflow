@@ -8,6 +8,7 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow edit formula` for live-session range formula edits, including R1C1 and A1 formula assignment, event control, optional target-range calculation, and structured edit summaries for AI-agent formula workflows.
 - Added VS Code editor support for xlflow VBA documentation comments, including Quick Fix snippet generation from `'''`, Rubberduck `@Description` annotation completions in comments, doc-comment continuation on Enter, and highlighting for `'''` comments and Rubberduck description annotations.
 - Added xlflow-style documentation comments to scaffolded `Xlflow*.bas` helper modules so their public APIs show useful Hover and Signature Help documentation.
+- Added stable qualified VBA test identifiers (`id` / `qualified_name`) to `xlflow test list --json` and `xlflow test --json`, allowing duplicate procedure names across modules and qualified `xlflow test --filter Module.TestName` selection.
 - Added `.xlam` project creation to `xlflow new`, using Excel add-in file format `55` while keeping `.xlsm` as the default, and documented `.xlam` initialization through `xlflow init`.
 - Fixed `.xlam` session reuse in the .NET bridge by resolving open add-in workbooks through direct filename lookup with full-path validation, and by making VBE Compile target activation tolerate add-in workbooks without normal visible workbook windows.
 

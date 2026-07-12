@@ -4009,7 +4009,7 @@ func (a *app) testCommand() *cobra.Command {
 			return a.write(env, code)
 		},
 	}
-	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose procedure name exactly matches filter")
+	cmd.Flags().StringVar(&filter, "filter", "", "run only the test whose qualified or unique procedure name exactly matches filter")
 	cmd.Flags().StringVar(&moduleFilter, "module", "", "run only tests in the module whose name exactly matches filter")
 	cmd.Flags().StringVar(&tagFilter, "tag", "", "run only tests tagged with the given tag")
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
@@ -4040,6 +4040,10 @@ func (a *app) testListCommand() *cobra.Command {
 				Module:  module,
 			})
 			if err != nil {
+				var duplicateErr testdiscover.DuplicateTestError
+				if errors.As(err, &duplicateErr) {
+					return a.writeFailure("test list", output.ExitValidation, "duplicate_test_name", err)
+				}
 				return a.writeFailure("test list", output.ExitEnvironment, "test_discovery_failed", err)
 			}
 			env := output.New("test list")

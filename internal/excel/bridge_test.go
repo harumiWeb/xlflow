@@ -1778,7 +1778,7 @@ func TestRunnerEditReturnsConfigFailureForInvalidMutations(t *testing.T) {
 }
 
 func TestTestFailureCodesAreValidationFailures(t *testing.T) {
-	for _, code := range []string{"test_failed", "no_tests_found", "test_not_found", "duplicate_test_name"} {
+	for _, code := range []string{"test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "ambiguous_test_name"} {
 		t.Run(code, func(t *testing.T) {
 			result := ScriptResult{
 				Status: output.StatusFailed,

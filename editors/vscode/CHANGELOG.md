@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added VS Code editor support for xlflow VBA documentation comments, including Quick Fix snippet generation from `'''`, Rubberduck `@Description` annotation completions in comments, doc-comment continuation on Enter, and highlighting for `'''` comments and Rubberduck description annotations.
+- Updated Test Explorer to use xlflow's stable qualified VBA test IDs and run focused tests with `xlflow test --filter Module.TestName`.
 
 ## v0.5.0
 

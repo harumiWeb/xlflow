@@ -23,6 +23,7 @@ export interface XlflowTestListPayload {
 }
 
 export interface XlflowDiscoveredTest {
+  id?: string;
   module?: string;
   name?: string;
   qualified_name?: string;
@@ -42,6 +43,8 @@ export interface XlflowTestRunPayload {
 }
 
 export interface XlflowTestRunItem {
+  id?: string;
+  qualified_name?: string;
   module?: string;
   name?: string;
   status?: string;

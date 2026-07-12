@@ -61,6 +61,8 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(1, testsArray.GetArrayLength());
         Assert.Equal("TestSomething", testsArray[0].GetProperty("name").GetString());
         Assert.Equal("Module1", testsArray[0].GetProperty("module").GetString());
+        Assert.Equal("Module1.TestSomething", testsArray[0].GetProperty("id").GetString());
+        Assert.Equal("Module1.TestSomething", testsArray[0].GetProperty("qualified_name").GetString());
         Assert.Equal(5, testsArray[0].GetProperty("line").GetInt32());
 
         var logs = json.RootElement.GetProperty("logs");
@@ -135,6 +137,8 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(2, tests.Count);
         Assert.Equal("TestAddition", tests[0].Name);
         Assert.Equal("Module1", tests[0].Module);
+        Assert.Equal("Module1.TestAddition", tests[0].Id);
+        Assert.Equal("Module1.TestAddition", tests[0].QualifiedName);
         Assert.Equal("Regression_Test", tests[1].Name);
     }
 
@@ -201,7 +205,22 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
-    public void SelectTestsFiltersByNameModuleAndTag()
+    public void DuplicateTestQualifiedNamesAllowsSameNameInDifferentModules()
+    {
+        var allTests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestExport", Module = "InvoiceTests" },
+            new() { Name = "TestExport", Module = "CustomerTests" },
+            new() { Name = "testexport", Module = "InvoiceTests" },
+        };
+
+        var duplicates = ExcelTestService.DuplicateTestQualifiedNames(allTests);
+
+        Assert.Equal(["InvoiceTests.TestExport"], duplicates);
+    }
+
+    [Fact]
+    public void SelectTestsFiltersByQualifiedNameNameModuleAndTag()
     {
         var allTests = new List<ExcelTestService.TestCase>
         {
@@ -211,19 +230,100 @@ public sealed class ExcelTestServiceTests
         };
 
         var byName = ExcelTestService.SelectTests(allTests, "TestA", "", "");
-        Assert.Single(byName);
-        Assert.Equal("TestA", byName[0].Name);
+        Assert.False(byName.Ambiguous);
+        Assert.Single(byName.Tests);
+        Assert.Equal("TestA", byName.Tests[0].Name);
+
+        var byQualifiedName = ExcelTestService.SelectTests(allTests, "mod1.testa", "", "");
+        Assert.False(byQualifiedName.Ambiguous);
+        Assert.Single(byQualifiedName.Tests);
+        Assert.Equal("Mod1.TestA", byQualifiedName.Tests[0].QualifiedName);
 
         var byModule = ExcelTestService.SelectTests(allTests, "", "Mod1", "");
-        Assert.Equal(2, byModule.Count);
+        Assert.Equal(2, byModule.Tests.Count);
 
         var byTag = ExcelTestService.SelectTests(allTests, "", "", "fast");
-        Assert.Single(byTag);
-        Assert.Equal("TestB", byTag[0].Name);
+        Assert.Single(byTag.Tests);
+        Assert.Equal("TestB", byTag.Tests[0].Name);
 
         var byAll = ExcelTestService.SelectTests(allTests, "TestC", "Mod1", "slow");
-        Assert.Single(byAll);
-        Assert.Equal("TestC", byAll[0].Name);
+        Assert.Single(byAll.Tests);
+        Assert.Equal("TestC", byAll.Tests[0].Name);
+    }
+
+    [Fact]
+    public void SelectTestsReportsAmbiguousUnqualifiedFilterAfterModuleAndTag()
+    {
+        var allTests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestExport", Module = "InvoiceTests", Tags = ["smoke"] },
+            new() { Name = "TestExport", Module = "CustomerTests", Tags = ["smoke"] },
+            new() { Name = "TestExport", Module = "DraftTests", Tags = ["slow"] },
+        };
+
+        var ambiguous = ExcelTestService.SelectTests(allTests, "testexport", "", "smoke");
+
+        Assert.True(ambiguous.Ambiguous);
+        Assert.Empty(ambiguous.Tests);
+        Assert.Equal(["CustomerTests.TestExport", "InvoiceTests.TestExport"], ambiguous.Matches.Select(t => t.QualifiedName).ToArray());
+
+        var narrowed = ExcelTestService.SelectTests(allTests, "testexport", "invoiceTests", "smoke");
+        Assert.False(narrowed.Ambiguous);
+        Assert.Single(narrowed.Tests);
+        Assert.Equal("InvoiceTests.TestExport", narrowed.Tests[0].QualifiedName);
+    }
+
+    [Fact]
+    public void BuildErrorResponseIncludesAmbiguousMatchesInErrorDetails()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-test-ambiguous",
+            Command = "test",
+        };
+        var args = new TestCommandArguments(
+            WorkbookPath: @"C:\work\book.xlsm",
+            Filter: "TestExport",
+            ModuleFilter: "",
+            TagFilter: "",
+            Visible: false,
+            RuntimeMode: "",
+            RuntimeSource: "",
+            MsgBoxResponsesJSON: "",
+            InputResponsesJSON: "",
+            FileDialogResponsesJSON: "",
+            DebugStreamEnabled: false,
+            DebugStreamPipeName: "",
+            UIStreamEnabled: false,
+            UIStreamPipeName: "",
+            UIStreamRedactInput: false,
+            UseSession: false,
+            MetadataPath: "");
+        var tests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestExport", Module = "InvoiceTests" },
+            new() { Name = "TestExport", Module = "CustomerTests" },
+        };
+
+        var response = ExcelTestService.BuildErrorResponse(
+            request,
+            args,
+            "ambiguous_test_name",
+            "test name is ambiguous: TestExport",
+            sessionAttached: false,
+            sessionMode: "none",
+            tests,
+            runtimeState: null,
+            runtimeInjected: false,
+            errorDetails: new Dictionary<string, object?> { ["matches"] = tests.Select(t => t.QualifiedName).ToArray() });
+
+        var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal("ambiguous_test_name", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        var matches = json.RootElement.GetProperty("error").GetProperty("details").GetProperty("matches");
+        Assert.Equal(2, matches.GetArrayLength());
+        Assert.Equal("InvoiceTests.TestExport", matches[0].GetString());
     }
 
     [Fact]

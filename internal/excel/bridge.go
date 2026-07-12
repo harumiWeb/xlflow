@@ -1925,7 +1925,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
-	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "active_workbook_mismatch", "sheet_not_found", "sheet_exists", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "invalid_formula", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_sheet_name", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
+	case "macro_failed", "macro_disabled", "macro_not_found", "macro_timeout", "vba_compile_failed", "test_failed", "no_tests_found", "test_not_found", "duplicate_test_name", "ambiguous_test_name", "active_workbook_mismatch", "sheet_not_found", "sheet_exists", "button_not_found", "ui_button_args_invalid", "duplicate_module_name", "invalid_range", "invalid_formula", "output_file_exists", "unsupported_image_format", "session_required", "invalid_color", "invalid_sheet_name", "invalid_cell_address", "invalid_row_selector", "invalid_column_selector", "vba_event_error", "form_not_found", "runtime_form_load_failed", "form_initializer_failed", "control_enumeration_failed", "window_not_found", "image_capture_failed":
 		return output.ExitValidation
 	case "form_already_exists", "unsupported_form_control", "designer_write_failed":
 		return output.ExitValidation
