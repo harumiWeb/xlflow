@@ -5789,6 +5789,162 @@ func TestBackupPruneHumanSummaryMentionsDryRun(t *testing.T) {
 	}
 }
 
+func TestAutomaticBackupRetentionPrunesAfterTriggeredOperation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Backup.Retention.Enabled = true
+	cfg.Backup.Retention.MaxCount = 1
+	cfg.Backup.Retention.MinKeep = 1
+	cfg.Backup.Retention.MaxAgeDays = 0
+	cfg.Backup.Retention.MaxTotalSizeMB = 0
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 11, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	env := output.New("push")
+	env.Backup = map[string]any{"id": "new"}
+	a := &app{cwd: dir}
+	a.applyAutomaticBackupRetention(cfg, workbookPath, &env, true)
+
+	prune, ok := env.BackupPrune.(map[string]any)
+	if !ok {
+		t.Fatalf("backup_prune = %#v, want map", env.BackupPrune)
+	}
+	if prune["automatic"] != true || prune["deleted"] != 1 {
+		t.Fatalf("backup_prune = %#v", prune)
+	}
+	if _, err := os.Stat(old.Directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old backup still exists or unexpected error: %v", err)
+	}
+	if len(env.Logs) == 0 || !strings.Contains(strings.Join(env.Logs, "\n"), "pruned 1 old backup") {
+		t.Fatalf("logs = %#v", env.Logs)
+	}
+}
+
+func TestAutomaticBackupRetentionDoesNotRunWhenNotTriggered(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Backup.Retention.Enabled = true
+	cfg.Backup.Retention.MaxCount = 0
+	cfg.Backup.Retention.MaxAgeDays = 0
+	cfg.Backup.Retention.MaxTotalSizeMB = 0
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env := output.New("push")
+	a := &app{cwd: dir}
+	a.applyAutomaticBackupRetention(cfg, workbookPath, &env, false)
+
+	if env.BackupPrune != nil {
+		t.Fatalf("backup_prune = %#v, want nil", env.BackupPrune)
+	}
+	if _, err := os.Stat(record.Directory); err != nil {
+		t.Fatalf("backup should remain when retention is not triggered: %v", err)
+	}
+}
+
+func TestAutomaticBackupRetentionFailureIsWarningOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Backup.Retention.Enabled = true
+	cfg.Backup.Retention.MaxCount = 1
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	original := automaticBackupPrune
+	t.Cleanup(func() { automaticBackupPrune = original })
+	automaticBackupPrune = func(rootDir, workbookPath string, opts backup.PruneOptions) (backup.PruneResult, error) {
+		return backup.PruneResult{Matched: 1, Failed: 1}, &backup.Error{Code: backup.ErrPruneFailed, Err: errors.New("prune boom")}
+	}
+
+	env := output.New("rollback")
+	a := &app{cwd: dir}
+	a.applyAutomaticBackupRetention(cfg, workbookPath, &env, true)
+
+	if env.Status != output.StatusOK {
+		t.Fatalf("status = %q, want ok", env.Status)
+	}
+	warnings := anySlice(env.Warnings)
+	if len(warnings) == 0 {
+		t.Fatalf("warnings = %#v, want backup prune warning", env.Warnings)
+	}
+	found := false
+	for _, raw := range warnings {
+		warning, _ := raw.(map[string]any)
+		if warning["code"] == backup.ErrPruneFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %#v, want %s", env.Warnings, backup.ErrPruneFailed)
+	}
+}
+
+func TestAutomaticBackupRetentionReportsSkippedInvalidAndLegacyEntries(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Backup.Retention.Enabled = true
+	cfg.Backup.Retention.MaxCount = 0
+	cfg.Backup.Retention.MaxAgeDays = 0
+	cfg.Backup.Retention.MaxTotalSizeMB = 0
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	invalidDir := filepath.Join(dir, ".xlflow", "backups", "invalid")
+	if err := os.MkdirAll(invalidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalidDir, "metadata.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(dir, ".xlflow", "backups", "legacy")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := output.New("push")
+	env.Backup = map[string]any{"id": "new"}
+	a := &app{cwd: dir}
+	a.applyAutomaticBackupRetention(cfg, workbookPath, &env, true)
+
+	prune, ok := env.BackupPrune.(map[string]any)
+	if !ok || prune["automatic"] != true {
+		t.Fatalf("backup_prune = %#v", env.BackupPrune)
+	}
+	if len(prune["skipped_invalid_entries"].([]map[string]any)) != 1 {
+		t.Fatalf("skipped invalid = %#v", prune["skipped_invalid_entries"])
+	}
+	if len(prune["skipped_legacy_entries"].([]map[string]any)) != 1 {
+		t.Fatalf("skipped legacy = %#v", prune["skipped_legacy_entries"])
+	}
+	warnings := anySlice(env.Warnings)
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %#v, want invalid and legacy warnings", env.Warnings)
+	}
+}
+
 func TestRollbackCommandRequiresBackupSelector(t *testing.T) {
 	dir := t.TempDir()
 	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {

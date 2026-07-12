@@ -535,6 +535,7 @@ You can install it from the [Visual Studio Marketplace](https://marketplace.visu
 | `doctor`            | Diagnose Excel, COM, `.NET` bridge, VBIDE, and optional workbook access | `xlflow doctor --workbook --json`                                            |
 | `attach`            | Validate the workbook currently active in Excel                         | `xlflow attach --active --json`                                              |
 | `backup list`       | List rollback-capable workbook backups                                  | `xlflow backup list --json`                                                  |
+| `backup prune`      | Preview or delete old managed workbook backups                          | `xlflow backup prune --keep-last 20 --dry-run --json`                        |
 | `pull`              | Export VBA components into `src/`                                       | `xlflow pull --json`                                                         |
 | `push`              | Import VBA source back into the workbook                                | `xlflow push --json`                                                         |
 | `rollback`          | Restore the workbook from a saved backup                                | `xlflow rollback --latest --json`                                            |
@@ -632,6 +633,14 @@ default_component_folders = true
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
+# Automatic backup retention is disabled by default.
+# [backup.retention]
+# enabled = false
+# max_count = 20
+# max_age_days = 30
+# min_keep = 5
+# max_total_size_mb = 2048
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
@@ -643,6 +652,8 @@ disabled_rules = []
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
+
+`[backup.retention]` enables automatic pruning after successful backup-producing `push` and `rollback` operations. It is disabled by default, affects only backups for the configured workbook, and never deletes invalid or legacy backup entries.
 
 Use `[lint].disabled_rules = ["VB007"]` when the project intentionally uses dialogs or UserForms and you want to suppress `VB007` warnings. This only affects lint output; `xlflow run --headless` still blocks GUI boundaries. Legacy per-rule booleans such as `forbid_interactive_input = false` are still accepted for compatibility, but are deprecated.
 

@@ -33,6 +33,8 @@ xlflow rollback --backup 20260518-175330-push --json
 If the workbook is attached to an active xlflow session, rollback fails with `workbook_in_use`. Stop the session first, then rerun rollback.
 :::
 
+If `[backup.retention].enabled = true`, rollback automatically prunes old backups only after the pre-rollback safety backup is created and the selected backup is restored successfully. The safety backup remains in the rollback result and participates in retention evaluation. Automatic pruning failures are warnings and do not fail the successful rollback.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.

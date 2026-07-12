@@ -39,6 +39,8 @@ xlflow push --session --fast --no-save --json
 The default backup is a workbook-file snapshot under `.xlflow/backups/<backup-id>/` with `metadata.json`. Use `xlflow backup list --json` to inspect rollback targets.
 :::
 
+If `[backup.retention].enabled = true`, `push` automatically prunes old backups after a successful workbook update only when a new backup was created. It does not run after `--backup never`, `--fast`, unchanged `--changed-only` no-op pushes, or failed pushes. Automatic pruning is scoped to the configured workbook, skips invalid and legacy entries, and reports pruning failures as warnings without failing the successful push.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.

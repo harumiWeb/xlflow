@@ -83,16 +83,19 @@ func (e *Error) Unwrap() error {
 }
 
 type PruneOptions struct {
-	KeepLast        *int
-	OlderThan       time.Duration
-	OlderThanSet    bool
-	MaxTotalSize    int64
-	MaxTotalSizeSet bool
-	DryRun          bool
-	AllWorkbooks    bool
-	IncludeInvalid  bool
-	IncludeLegacy   bool
-	Now             time.Time
+	KeepLast          *int
+	MaxCount          *int
+	MinKeep           int
+	OlderThan         time.Duration
+	OlderThanSet      bool
+	MaxTotalSize      int64
+	MaxTotalSizeSet   bool
+	DryRun            bool
+	AllWorkbooks      bool
+	IncludeInvalid    bool
+	IncludeLegacy     bool
+	AllowNoConditions bool
+	Now               time.Time
 }
 
 type PruneResult struct {
@@ -104,6 +107,8 @@ type PruneResult struct {
 	Candidates     []CandidateEntry
 	DeletedEntries []DeletedEntry
 	FailedEntries  []FailedEntry
+	SkippedInvalid []InvalidEntry
+	SkippedLegacy  []LegacyEntry
 }
 
 type DeleteResult struct {
@@ -301,9 +306,11 @@ func Prune(rootDir, workbookPath string, opts PruneOptions) (PruneResult, error)
 		return PruneResult{}, err
 	}
 	result := PruneResult{
-		DryRun:     opts.DryRun,
-		Matched:    len(candidates),
-		Candidates: candidates,
+		DryRun:         opts.DryRun,
+		Matched:        len(candidates),
+		Candidates:     candidates,
+		SkippedInvalid: skippedInvalidEntries(scan, opts),
+		SkippedLegacy:  skippedLegacyEntries(scan, opts),
 	}
 	if opts.DryRun {
 		return result, nil
@@ -384,13 +391,19 @@ func validatePruneOptions(opts PruneOptions) error {
 	if opts.KeepLast != nil && *opts.KeepLast < 0 {
 		return fmt.Errorf("--keep-last must be a non-negative integer")
 	}
+	if opts.MaxCount != nil && *opts.MaxCount < 0 {
+		return fmt.Errorf("max count must be a non-negative integer")
+	}
+	if opts.MinKeep < 0 {
+		return fmt.Errorf("min keep must be a non-negative integer")
+	}
 	if opts.OlderThan < 0 {
 		return fmt.Errorf("--older-than must be non-negative")
 	}
 	if opts.MaxTotalSize < 0 {
 		return fmt.Errorf("--max-total-size must be non-negative")
 	}
-	if opts.KeepLast == nil && !olderThanSet && !maxTotalSizeSet && !opts.IncludeInvalid && !opts.IncludeLegacy {
+	if opts.KeepLast == nil && opts.MaxCount == nil && !olderThanSet && !maxTotalSizeSet && !opts.IncludeInvalid && !opts.IncludeLegacy && !opts.AllowNoConditions {
 		return fmt.Errorf("at least one pruning condition or include flag is required")
 	}
 	return nil
@@ -404,14 +417,15 @@ func scanForPrune(rootDir, workbookPath string, allWorkbooks bool) (ScanResult, 
 }
 
 func selectPruneCandidates(rootDir string, scan ScanResult, opts PruneOptions, now time.Time) ([]CandidateEntry, error) {
+	opts = normalizePruneOptions(opts)
 	records := append([]Record{}, scan.Records...)
 	sortRecordsOldestFirst(records)
 	protected := map[string]bool{}
-	if opts.KeepLast != nil {
+	if opts.MinKeep > 0 {
 		newest := append([]Record{}, scan.Records...)
 		sortRecordsNewestFirst(newest)
 		for i, record := range newest {
-			if i >= *opts.KeepLast {
+			if i >= opts.MinKeep {
 				break
 			}
 			protected[record.ID] = true
@@ -419,12 +433,21 @@ func selectPruneCandidates(rootDir string, scan ScanResult, opts PruneOptions, n
 	}
 
 	candidateByID := map[string]*CandidateEntry{}
-	if opts.KeepLast != nil {
-		for _, record := range records {
+	if opts.MaxCount != nil {
+		reason := "exceeds_max_count"
+		if opts.KeepLast != nil {
+			reason = "exceeds_keep_last"
+		}
+		newest := append([]Record{}, scan.Records...)
+		sortRecordsNewestFirst(newest)
+		for i, record := range newest {
+			if i < *opts.MaxCount {
+				continue
+			}
 			if protected[record.ID] {
 				continue
 			}
-			addRecordCandidate(candidateByID, record, "exceeds_keep_last")
+			addRecordCandidate(candidateByID, record, reason)
 		}
 	}
 	if opts.OlderThanSet || opts.OlderThan > 0 {
@@ -515,6 +538,28 @@ func selectPruneCandidates(rootDir string, scan ScanResult, opts PruneOptions, n
 		return a.ID < b.ID
 	})
 	return candidates, nil
+}
+
+func normalizePruneOptions(opts PruneOptions) PruneOptions {
+	if opts.KeepLast != nil {
+		opts.MaxCount = opts.KeepLast
+		opts.MinKeep = *opts.KeepLast
+	}
+	return opts
+}
+
+func skippedInvalidEntries(scan ScanResult, opts PruneOptions) []InvalidEntry {
+	if opts.IncludeInvalid || len(scan.Invalid) == 0 {
+		return nil
+	}
+	return append([]InvalidEntry{}, scan.Invalid...)
+}
+
+func skippedLegacyEntries(scan ScanResult, opts PruneOptions) []LegacyEntry {
+	if opts.IncludeLegacy || len(scan.Legacy) == 0 {
+		return nil
+	}
+	return append([]LegacyEntry{}, scan.Legacy...)
 }
 
 func addRecordCandidate(candidates map[string]*CandidateEntry, record Record, reason string) {

@@ -176,7 +176,9 @@ When the user reports a runtime failure:
 - Use `xlflow push --fast --session --no-save` after source edits during a session.
 - Use plain `xlflow push` when you need the safe isolated path with backup and save.
 - Use `xlflow backup list --json` to find rollback targets after a broken `push` or workbook-level mistake.
+- Use `xlflow backup prune --dry-run --json` before manual cleanup. Manual pruning is independent of `[backup.retention]`; automatic retention is disabled by default and only runs after successful backup-producing `push` or `rollback` when enabled.
 - Use `xlflow rollback --latest --json` or `xlflow rollback --backup <id> --json` only after the workbook is closed or the xlflow session has been stopped; then run `xlflow pull --json` if source files should match the restored workbook.
+- If a successful `push` or `rollback` includes a `backup_prune_failed` warning, treat the workbook operation as successful and report the backup cleanup issue separately.
 - Use `xlflow lint` as the fast safety gate for generated VBA.
 - When a lint or analyze finding is a deliberate one-line exception, prefer a narrow inline suppression comment over changing project-wide `disabled_rules`: use `' xlflow:disable-next-line VB002` before the target line, or `Range("A1").Select ' xlflow:disable-line VB002` for same-line suppression. Use stable IDs from CLI output, such as `VB002` or `VBA205`; list multiple IDs with spaces. Do not suppress preflight-blocking errors such as `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, `VB032`, `VBA104`, `VBA105`, `VBA106`, or `VBA211`.
 - Use `xlflow test --session --json` as the primary live-session correctness signal when tests exist; use plain `xlflow test --json` when the configured workbook must remain protected by temporary-copy execution.

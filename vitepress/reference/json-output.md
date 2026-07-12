@@ -41,7 +41,9 @@ Unknown commands are also structured when `--json` appears before the invalid co
 }
 ```
 
-Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
+Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `backup_prune`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
+
+`backup_prune` is returned by `xlflow backup prune` and may also appear on successful `push` or `rollback` when automatic retention deleted entries, skipped invalid or legacy entries, or encountered a pruning failure. Automatic results include `"automatic": true`; pruning failures are warnings and do not change the successful workbook operation status.
 
 `xlflow run --json` uses a compact failure payload by default. This keeps the fields that are usually relevant for fixing user VBA code and hides xlflow-internal diagnostic detail unless `--verbose` is specified.
 

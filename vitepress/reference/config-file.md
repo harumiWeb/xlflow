@@ -57,6 +57,14 @@ default_component_folders = true
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
+# Automatic backup retention is disabled by default.
+# [backup.retention]
+# enabled = false
+# max_count = 20
+# max_age_days = 30
+# min_keep = 5
+# max_total_size_mb = 2048
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
@@ -120,6 +128,20 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 | `code_source` | string | no       | `"sidecar"`\* | Where UserForm code-behind lives in the source tree.<br>Valid values: `"frm"`, `"sidecar"` |
 
 \* `xlflow new` defaults to `"sidecar"`. `xlflow init` defaults to `"frm"` so that existing code inside `.frm` files remains authoritative.
+
+### `[backup.retention]`
+
+| Key                 | Type | Required | Default | Description                                                                 |
+| ------------------- | ---- | -------- | ------- | --------------------------------------------------------------------------- |
+| `enabled`           | bool | no       | `false` | Enable automatic pruning after successful backup-producing operations.      |
+| `max_count`         | int  | no       | `20`    | Keep total valid backups within this count. `0` disables the count limit.   |
+| `max_age_days`      | int  | no       | `30`    | Delete valid backups older than this many days. `0` disables the age limit. |
+| `min_keep`          | int  | no       | `5`     | Always protect the newest valid backups from all automatic limits.          |
+| `max_total_size_mb` | int  | no       | `2048`  | Keep total backup size within this decimal MB limit. `0` disables it.       |
+
+Automatic retention is disabled by default and only affects backups for the configured `[excel].path`. Manual `xlflow backup prune` does not require `enabled = true`.
+
+Negative numeric values are configuration errors. `min_keep > max_count` is also invalid when `max_count` is greater than zero. If all limits are disabled, automatic pruning performs no deletion. Invalid entries and legacy directories without metadata are skipped, not deleted.
 
 ### `[lint]`
 

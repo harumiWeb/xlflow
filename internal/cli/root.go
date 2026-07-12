@@ -61,6 +61,8 @@ type app struct {
 	updateChecker  releaseChecker
 }
 
+var automaticBackupPrune = backup.Prune
+
 type BuildInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
@@ -699,6 +701,7 @@ func (a *app) rollbackCommand() *cobra.Command {
 				{"code": "sync_source", "message": "Run `xlflow pull --json` if you want source files to match the restored workbook."},
 			}
 			env.Logs = []string{"restored workbook from backup"}
+			a.applyAutomaticBackupRetention(cfg, workbookPath, &env, true)
 			return a.write(env, output.ExitSuccess)
 		},
 	}
@@ -2106,6 +2109,8 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			a.applyAutomaticBackupRetention(cfg, workbookPath, &env, code == output.ExitSuccess && env.Backup != nil)
 			return a.write(env, code)
 		},
 	}
@@ -2392,6 +2397,86 @@ func resolveRollbackRecord(rootDir, workbookPath string, target rollbackTarget) 
 	return backup.Find(rootDir, workbookPath, target.BackupID)
 }
 
+func (a *app) applyAutomaticBackupRetention(cfg config.Config, workbookPath string, env *output.Envelope, trigger bool) {
+	if env == nil || !trigger || !cfg.Backup.Retention.Enabled {
+		return
+	}
+	opts := automaticBackupPruneOptions(cfg.Backup.Retention)
+	result, err := automaticBackupPrune(a.cwd, workbookPath, opts)
+	if shouldAttachAutomaticBackupPrune(result, err) {
+		env.BackupPrune = renderAutomaticBackupPruneResult(a.cwd, result)
+	}
+	for _, warning := range automaticBackupSkippedWarnings(a.cwd, result) {
+		env.Warnings = append(anySlice(env.Warnings), warning)
+	}
+	if err != nil {
+		env.Warnings = append(anySlice(env.Warnings), map[string]any{
+			"code":    backup.ErrPruneFailed,
+			"message": "The workbook operation succeeded, but old backups could not be pruned.",
+		})
+		env.Logs = append(env.Logs, "workbook operation succeeded, but automatic backup pruning failed")
+		return
+	}
+	if result.Deleted > 0 {
+		env.Logs = append(env.Logs, fmt.Sprintf("pruned %d old backup(s), freed %s", result.Deleted, formatBackupPruneBytes(result.FreedBytes)))
+	}
+	if len(result.SkippedInvalid) > 0 || len(result.SkippedLegacy) > 0 {
+		env.Logs = append(env.Logs, "automatic backup pruning skipped invalid or legacy backup entries")
+	}
+}
+
+func automaticBackupPruneOptions(retention config.BackupRetentionConfig) backup.PruneOptions {
+	opts := backup.PruneOptions{
+		MinKeep:           retention.MinKeep,
+		AllowNoConditions: true,
+	}
+	if retention.MaxCount > 0 {
+		maxCount := retention.MaxCount
+		opts.MaxCount = &maxCount
+	}
+	if retention.MaxAgeDays > 0 {
+		opts.OlderThan = time.Duration(retention.MaxAgeDays) * 24 * time.Hour
+		opts.OlderThanSet = true
+	}
+	if retention.MaxTotalSizeMB > 0 {
+		opts.MaxTotalSize = int64(retention.MaxTotalSizeMB) * 1000 * 1000
+		opts.MaxTotalSizeSet = true
+	}
+	return opts
+}
+
+func shouldAttachAutomaticBackupPrune(result backup.PruneResult, err error) bool {
+	return err != nil || result.Deleted > 0 || result.Failed > 0 || len(result.SkippedInvalid) > 0 || len(result.SkippedLegacy) > 0
+}
+
+func automaticBackupSkippedWarnings(rootDir string, result backup.PruneResult) []map[string]any {
+	warnings := make([]map[string]any, 0, len(result.SkippedInvalid)+len(result.SkippedLegacy))
+	for _, entry := range result.SkippedInvalid {
+		warnings = append(warnings, map[string]any{
+			"code":    "invalid_backup_entry",
+			"message": "An invalid backup entry was skipped during automatic pruning.",
+			"path":    displayPath(rootDir, entry.Directory),
+			"reason":  entry.Code,
+			"detail":  entry.Message,
+		})
+	}
+	for _, entry := range result.SkippedLegacy {
+		warnings = append(warnings, map[string]any{
+			"code":    "legacy_backup_entry",
+			"message": "A legacy backup entry without metadata was skipped during automatic pruning.",
+			"path":    displayPath(rootDir, entry.Directory),
+		})
+	}
+	return warnings
+}
+
+func formatBackupPruneBytes(bytes int64) string {
+	if bytes >= 1000*1000 {
+		return fmt.Sprintf("%.1f MB", float64(bytes)/1000/1000)
+	}
+	return fmt.Sprintf("%d bytes", bytes)
+}
+
 func renderBackupRecords(rootDir string, records []backup.Record) []map[string]any {
 	rendered := make([]map[string]any, 0, len(records))
 	for _, record := range records {
@@ -2410,15 +2495,23 @@ func renderBackupRecords(rootDir string, records []backup.Record) []map[string]a
 
 func renderBackupPruneResult(rootDir string, result backup.PruneResult) map[string]any {
 	return map[string]any{
-		"dry_run":         result.DryRun,
-		"matched":         result.Matched,
-		"deleted":         result.Deleted,
-		"failed":          result.Failed,
-		"freed_bytes":     result.FreedBytes,
-		"candidates":      renderBackupCandidates(rootDir, result.Candidates),
-		"deleted_entries": renderDeletedBackupEntries(rootDir, result.DeletedEntries),
-		"failed_entries":  renderFailedBackupEntries(rootDir, result.FailedEntries),
+		"dry_run":                 result.DryRun,
+		"matched":                 result.Matched,
+		"deleted":                 result.Deleted,
+		"failed":                  result.Failed,
+		"freed_bytes":             result.FreedBytes,
+		"candidates":              renderBackupCandidates(rootDir, result.Candidates),
+		"deleted_entries":         renderDeletedBackupEntries(rootDir, result.DeletedEntries),
+		"failed_entries":          renderFailedBackupEntries(rootDir, result.FailedEntries),
+		"skipped_invalid_entries": renderSkippedInvalidBackupEntries(rootDir, result.SkippedInvalid),
+		"skipped_legacy_entries":  renderSkippedLegacyBackupEntries(rootDir, result.SkippedLegacy),
 	}
+}
+
+func renderAutomaticBackupPruneResult(rootDir string, result backup.PruneResult) map[string]any {
+	rendered := renderBackupPruneResult(rootDir, result)
+	rendered["automatic"] = true
+	return rendered
 }
 
 func renderBackupCandidates(rootDir string, entries []backup.CandidateEntry) []map[string]any {
@@ -2468,6 +2561,30 @@ func renderFailedBackupEntries(rootDir string, entries []backup.FailedEntry) []m
 			"path":    displayPath(rootDir, entry.Directory),
 			"code":    entry.Code,
 			"message": entry.Message,
+		})
+	}
+	return rendered
+}
+
+func renderSkippedInvalidBackupEntries(rootDir string, entries []backup.InvalidEntry) []map[string]any {
+	rendered := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		rendered = append(rendered, map[string]any{
+			"path":    displayPath(rootDir, entry.Directory),
+			"code":    entry.Code,
+			"message": entry.Message,
+			"status":  "invalid",
+		})
+	}
+	return rendered
+}
+
+func renderSkippedLegacyBackupEntries(rootDir string, entries []backup.LegacyEntry) []map[string]any {
+	rendered := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		rendered = append(rendered, map[string]any{
+			"path":   displayPath(rootDir, entry.Directory),
+			"status": "legacy",
 		})
 	}
 	return rendered

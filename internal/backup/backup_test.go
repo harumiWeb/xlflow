@@ -307,6 +307,68 @@ func TestPruneKeepLastProtectsNewestAcrossConditions(t *testing.T) {
 	}
 }
 
+func TestPruneMaxCountAndMinKeepAreSeparate(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, "Book.xlsm", "book")
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	createBackupEntry(t, root, "oldest", workbook, "Book.xlsm", strings.Repeat("a", 10), now.Add(-96*time.Hour))
+	createBackupEntry(t, root, "old", workbook, "Book.xlsm", strings.Repeat("b", 10), now.Add(-72*time.Hour))
+	createBackupEntry(t, root, "middle", workbook, "Book.xlsm", strings.Repeat("c", 10), now.Add(-48*time.Hour))
+	createBackupEntry(t, root, "new", workbook, "Book.xlsm", strings.Repeat("d", 10), now.Add(-24*time.Hour))
+	maxCount := 3
+
+	result, err := Prune(root, workbook, PruneOptions{
+		MaxCount:     &maxCount,
+		MinKeep:      1,
+		OlderThan:    36 * time.Hour,
+		OlderThanSet: true,
+		DryRun:       true,
+		Now:          now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateIDs(result.Candidates)
+	want := []string{"oldest", "old", "middle"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("candidates = %v, want %v", got, want)
+	}
+	if strings.Contains(strings.Join(got, ","), "new") {
+		t.Fatalf("newest min_keep entry was not protected: %#v", result.Candidates)
+	}
+}
+
+func TestPruneAllowsNoConditionsForAutomaticRetention(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, "Book.xlsm", "book")
+	createBackupEntry(t, root, "valid", workbook, "Book.xlsm", "book", time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	invalidDir := filepath.Join(Root(root), "invalid")
+	if err := os.MkdirAll(invalidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalidDir, metadataFileName), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(Root(root), "legacy")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Prune(root, workbook, PruneOptions{AllowNoConditions: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 0 || result.Deleted != 0 {
+		t.Fatalf("result = %#v, want no deletion candidates", result)
+	}
+	if len(result.SkippedInvalid) != 1 || !samePath(result.SkippedInvalid[0].Directory, invalidDir) {
+		t.Fatalf("skipped invalid = %#v", result.SkippedInvalid)
+	}
+	if len(result.SkippedLegacy) != 1 || !samePath(result.SkippedLegacy[0].Directory, legacyDir) {
+		t.Fatalf("skipped legacy = %#v", result.SkippedLegacy)
+	}
+}
+
 func TestPruneUsesMetadataTimestampNotBackupID(t *testing.T) {
 	root := t.TempDir()
 	workbook := writeWorkbook(t, root, "Book.xlsm", "book")
@@ -550,6 +612,14 @@ func hasInvalidCode(entries []InvalidEntry, code string) bool {
 		}
 	}
 	return false
+}
+
+func candidateIDs(candidates []CandidateEntry) []string {
+	ids := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.ID)
+	}
+	return ids
 }
 
 func backupErrorCodeIs(err error, code string) bool {
