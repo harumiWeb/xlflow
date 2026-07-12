@@ -181,7 +181,7 @@ export class XlflowTestController implements vscode.Disposable {
   ): Promise<void> {
     run.started(item);
     const result = await runXlflowJsonCommand<XlflowEnvelope>(
-      ["--json", "test", "--filter", metadata.qualifiedName],
+      ["--json", "test", "--module", metadata.module, "--filter", metadata.name],
       `xlflow test ${metadata.qualifiedName}`,
       this.channels.output,
       { requireWorkspace: true, workspaceFolder: metadata.workspaceFolder },
