@@ -537,6 +537,28 @@ func TestRootCommandIncludesBackupAndRollbackCommands(t *testing.T) {
 	if backupCmd == nil || backupCmd.Name() != "list" {
 		t.Fatalf("expected backup list command, got %#v", backupCmd)
 	}
+	pruneCmd, _, err := root.Find([]string{"backup", "prune"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pruneCmd == nil || pruneCmd.Name() != "prune" {
+		t.Fatalf("expected backup prune command, got %#v", pruneCmd)
+	}
+	for _, name := range []string{"keep-last", "older-than", "max-total-size", "dry-run", "all-workbooks", "include-invalid", "include-legacy"} {
+		if pruneCmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected backup prune command to define --%s", name)
+		}
+	}
+	deleteCmd, _, err := root.Find([]string{"backup", "delete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleteCmd == nil || deleteCmd.Name() != "delete" {
+		t.Fatalf("expected backup delete command, got %#v", deleteCmd)
+	}
+	if deleteCmd.Flags().Lookup("backup") == nil {
+		t.Fatal("expected backup delete command to define --backup")
+	}
 	rollbackCmd, _, err := root.Find([]string{"rollback"})
 	if err != nil {
 		t.Fatal(err)
@@ -5560,6 +5582,210 @@ func TestBackupListCommandReturnsWorkbookBackupsOnly(t *testing.T) {
 	}
 	if len(got.Warnings) != 1 || got.Warnings[0]["code"] != "invalid_backup_entry" {
 		t.Fatalf("warnings = %#v, want invalid_backup_entry", got.Warnings)
+	}
+}
+
+func TestBackupPruneRequiresCondition(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "prune"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("backup prune err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var got output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &got); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if got.Error == nil || got.Error.Code != backup.ErrPruneArgsInvalid {
+		t.Fatalf("error = %#v, want %s", got.Error, backup.ErrPruneArgsInvalid)
+	}
+}
+
+func TestBackupPruneDryRunJSONDoesNotDelete(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 11, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "prune", "--keep-last", "1", "--dry-run"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("backup prune error = %v", err)
+	}
+	var got struct {
+		BackupPrune map[string]any `json:"backup_prune"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.BackupPrune["dry_run"] != true || got.BackupPrune["deleted"] != float64(0) {
+		t.Fatalf("backup_prune = %#v", got.BackupPrune)
+	}
+	candidates := got.BackupPrune["candidates"].([]any)
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %#v, want 1", candidates)
+	}
+	if _, err := os.Stat(old.Directory); err != nil {
+		t.Fatalf("dry-run deleted old backup: %v", err)
+	}
+}
+
+func TestBackupDeleteJSONDeletesSelectedBackup(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "delete", "--backup", record.ID})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("backup delete error = %v", err)
+	}
+	var got struct {
+		BackupDelete map[string]any `json:"backup_delete"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.BackupDelete["id"] != record.ID || got.BackupDelete["freed_bytes"].(float64) <= float64(len("book")) {
+		t.Fatalf("backup_delete = %#v", got.BackupDelete)
+	}
+	if _, err := os.Stat(record.Directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup directory still exists or unexpected error: %v", err)
+	}
+}
+
+func TestBackupDeleteRejectsUnknownAndScopeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	bookA := filepath.Join(dir, "build", "Book.xlsm")
+	bookB := filepath.Join(dir, "build", "Other.xlsm")
+	if err := os.MkdirAll(filepath.Dir(bookA), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bookA, []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bookB, []byte("B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other, err := backup.Create(dir, bookB, "before-push", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "delete"})
+	err = root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("missing flag delete err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var missingFlag output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &missingFlag); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if missingFlag.Error == nil || missingFlag.Error.Code != backup.ErrDeleteArgsInvalid {
+		t.Fatalf("missing flag error = %#v", missingFlag.Error)
+	}
+
+	stdout.Reset()
+	root = a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "delete", "--backup", "missing"})
+	err = root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("unknown delete err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var missing output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &missing); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if missing.Error == nil || missing.Error.Code != backup.ErrNotFound {
+		t.Fatalf("missing error = %#v", missing.Error)
+	}
+
+	stdout.Reset()
+	root = a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "delete", "--backup", other.ID})
+	err = root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("scope delete err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var scoped output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &scoped); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if scoped.Error == nil || scoped.Error.Code != backup.ErrDeleteScopeMismatch {
+		t.Fatalf("scope error = %#v", scoped.Error)
+	}
+}
+
+func TestBackupPruneHumanSummaryMentionsDryRun(t *testing.T) {
+	dir := t.TempDir()
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("book"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}, stdoutTerminal: func() bool { return false }}
+	root := a.rootCommand()
+	root.SetArgs([]string{"backup", "prune", "--keep-last", "0", "--dry-run"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("backup prune error = %v", err)
+	}
+	for _, want := range []string{"Dry run:", "yes", "Candidates:", "No files were deleted."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("human output missing %q:\n%s", want, stdout.String())
+		}
 	}
 }
 

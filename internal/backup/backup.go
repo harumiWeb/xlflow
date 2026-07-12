@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +20,16 @@ const metadataFileName = "metadata.json"
 var (
 	removeAll = os.RemoveAll
 	writeFile = os.WriteFile
+)
+
+const (
+	ErrPruneArgsInvalid    = "backup_prune_args_invalid"
+	ErrPruneFailed         = "backup_prune_failed"
+	ErrDeleteArgsInvalid   = "backup_delete_args_invalid"
+	ErrNotFound            = "backup_not_found"
+	ErrDeleteFailed        = "backup_delete_failed"
+	ErrDeleteUnsafePath    = "backup_delete_unsafe_path"
+	ErrDeleteScopeMismatch = "backup_delete_scope_mismatch"
 )
 
 type Metadata struct {
@@ -51,8 +63,144 @@ type LegacyEntry struct {
 	Directory string
 }
 
+type Error struct {
+	Code string
+	Err  error
+}
+
+func (e *Error) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+type PruneOptions struct {
+	KeepLast        *int
+	OlderThan       time.Duration
+	OlderThanSet    bool
+	MaxTotalSize    int64
+	MaxTotalSizeSet bool
+	DryRun          bool
+	AllWorkbooks    bool
+	IncludeInvalid  bool
+	IncludeLegacy   bool
+	Now             time.Time
+}
+
+type PruneResult struct {
+	DryRun         bool
+	Matched        int
+	Deleted        int
+	Failed         int
+	FreedBytes     int64
+	Candidates     []CandidateEntry
+	DeletedEntries []DeletedEntry
+	FailedEntries  []FailedEntry
+}
+
+type DeleteResult struct {
+	ID         string
+	Path       string
+	FreedBytes int64
+}
+
+type CandidateEntry struct {
+	ID        string
+	Directory string
+	CreatedAt time.Time
+	Reason    string
+	SizeBytes int64
+	Reasons   []string
+	Status    string
+	Code      string
+	Message   string
+}
+
+type DeletedEntry struct {
+	ID         string
+	Directory  string
+	FreedBytes int64
+}
+
+type FailedEntry struct {
+	ID        string
+	Directory string
+	Code      string
+	Message   string
+}
+
 func Root(rootDir string) string {
 	return filepath.Join(rootDir, ".xlflow", "backups")
+}
+
+func ParseRetentionDuration(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("duration is required")
+	}
+	unit := value[len(value)-1:]
+	rawNumber := strings.TrimSpace(value[:len(value)-1])
+	rawNumber = strings.TrimPrefix(rawNumber, "+")
+	n, err := strconv.ParseInt(rawNumber, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("duration must be a non-negative integer followed by h, d, or w")
+	}
+	switch unit {
+	case "h":
+		return time.Duration(n) * time.Hour, nil
+	case "d":
+		return time.Duration(n) * 24 * time.Hour, nil
+	case "w":
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("duration unit must be h, d, or w")
+	}
+}
+
+func ParseSize(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("size is required")
+	}
+	i := 0
+	for ; i < len(value); i++ {
+		ch := value[i]
+		if ch < '0' || ch > '9' {
+			break
+		}
+	}
+	if i == 0 {
+		return 0, fmt.Errorf("size must be a non-negative integer followed by KB, MB, or GB")
+	}
+	rawNumber := value[:i]
+	unit := strings.ToUpper(strings.TrimSpace(value[i:]))
+	n, err := strconv.ParseInt(rawNumber, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("size must be a non-negative integer followed by KB, MB, or GB")
+	}
+	multiplier := int64(0)
+	switch unit {
+	case "KB":
+		multiplier = 1000
+	case "MB":
+		multiplier = 1000 * 1000
+	case "GB":
+		multiplier = 1000 * 1000 * 1000
+	default:
+		return 0, fmt.Errorf("size unit must be KB, MB, or GB")
+	}
+	if n > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("size is too large")
+	}
+	return n * multiplier, nil
 }
 
 func Scan(rootDir, workbookPath string) (ScanResult, error) {
@@ -60,6 +208,16 @@ func Scan(rootDir, workbookPath string) (ScanResult, error) {
 	if err != nil {
 		return ScanResult{}, err
 	}
+	return scan(rootDir, func(record Record) bool {
+		return samePath(record.OriginalWorkbookPath, workbookAbs)
+	})
+}
+
+func ScanAll(rootDir string) (ScanResult, error) {
+	return scan(rootDir, nil)
+}
+
+func scan(rootDir string, includeRecord func(Record) bool) (ScanResult, error) {
 	backupRoot := Root(rootDir)
 	entries, err := os.ReadDir(backupRoot)
 	if errors.Is(err, os.ErrNotExist) {
@@ -82,7 +240,7 @@ func Scan(rootDir, workbookPath string) (ScanResult, error) {
 		record, state := scanRecord(backupRoot, dir)
 		switch state.kind {
 		case scanEntryValid:
-			if !samePath(record.OriginalWorkbookPath, workbookAbs) {
+			if includeRecord != nil && !includeRecord(record) {
 				continue
 			}
 			result.Records = append(result.Records, record)
@@ -126,6 +284,89 @@ func Find(rootDir, workbookPath, backupID string) (Record, error) {
 	return Record{}, fmt.Errorf("backup %q was not found for %s", backupID, workbookPath)
 }
 
+func Prune(rootDir, workbookPath string, opts PruneOptions) (PruneResult, error) {
+	if err := validatePruneOptions(opts); err != nil {
+		return PruneResult{}, &Error{Code: ErrPruneArgsInvalid, Err: err}
+	}
+	scan, err := scanForPrune(rootDir, workbookPath, opts.AllWorkbooks)
+	if err != nil {
+		return PruneResult{}, &Error{Code: ErrPruneFailed, Err: err}
+	}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	candidates, err := selectPruneCandidates(rootDir, scan, opts, now)
+	if err != nil {
+		return PruneResult{}, err
+	}
+	result := PruneResult{
+		DryRun:     opts.DryRun,
+		Matched:    len(candidates),
+		Candidates: candidates,
+	}
+	if opts.DryRun {
+		return result, nil
+	}
+	for _, candidate := range candidates {
+		deleted, err := deleteManagedDirectory(rootDir, candidate.ID, candidate.Directory)
+		if err != nil {
+			result.FailedEntries = append(result.FailedEntries, FailedEntry{
+				ID:        candidate.ID,
+				Directory: candidate.Directory,
+				Code:      codeForDeleteError(err),
+				Message:   err.Error(),
+			})
+			continue
+		}
+		result.DeletedEntries = append(result.DeletedEntries, deleted)
+		result.FreedBytes += deleted.FreedBytes
+	}
+	result.Deleted = len(result.DeletedEntries)
+	result.Failed = len(result.FailedEntries)
+	result.Candidates = nil
+	if result.Failed > 0 {
+		return result, &Error{Code: ErrPruneFailed, Err: fmt.Errorf("%d backup deletion(s) failed", result.Failed)}
+	}
+	return result, nil
+}
+
+func Delete(rootDir, workbookPath, backupID string) (DeleteResult, error) {
+	backupID = strings.TrimSpace(backupID)
+	if backupID == "" {
+		return DeleteResult{}, &Error{Code: ErrDeleteArgsInvalid, Err: fmt.Errorf("--backup is required")}
+	}
+	scan, err := ScanAll(rootDir)
+	if err != nil {
+		return DeleteResult{}, &Error{Code: ErrDeleteFailed, Err: err}
+	}
+	workbookAbs, err := filepath.Abs(workbookPath)
+	if err != nil {
+		return DeleteResult{}, &Error{Code: ErrDeleteFailed, Err: err}
+	}
+	var matches []Record
+	for _, record := range scan.Records {
+		if record.ID == backupID {
+			matches = append(matches, record)
+		}
+	}
+	if len(matches) == 0 {
+		return DeleteResult{}, &Error{Code: ErrNotFound, Err: fmt.Errorf("backup %q was not found", backupID)}
+	}
+	if len(matches) > 1 {
+		return DeleteResult{}, &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup %q is ambiguous", backupID)}
+	}
+	record := matches[0]
+	if !samePath(record.OriginalWorkbookPath, workbookAbs) {
+		return DeleteResult{}, &Error{Code: ErrDeleteScopeMismatch, Err: fmt.Errorf("backup %q does not belong to %s", backupID, workbookPath)}
+	}
+	deleted, err := deleteManagedDirectory(rootDir, record.ID, record.Directory)
+	if err != nil {
+		return DeleteResult{}, &Error{Code: codeForDeleteError(err), Err: err}
+	}
+	return DeleteResult{ID: deleted.ID, Path: deleted.Directory, FreedBytes: deleted.FreedBytes}, nil
+}
+
 func Latest(rootDir, workbookPath string) (Record, error) {
 	records, err := List(rootDir, workbookPath)
 	if err != nil {
@@ -135,6 +376,270 @@ func Latest(rootDir, workbookPath string) (Record, error) {
 		return Record{}, fmt.Errorf("no backups found for %s", workbookPath)
 	}
 	return records[0], nil
+}
+
+func validatePruneOptions(opts PruneOptions) error {
+	olderThanSet := opts.OlderThanSet || opts.OlderThan > 0
+	maxTotalSizeSet := opts.MaxTotalSizeSet || opts.MaxTotalSize > 0
+	if opts.KeepLast != nil && *opts.KeepLast < 0 {
+		return fmt.Errorf("--keep-last must be a non-negative integer")
+	}
+	if opts.OlderThan < 0 {
+		return fmt.Errorf("--older-than must be non-negative")
+	}
+	if opts.MaxTotalSize < 0 {
+		return fmt.Errorf("--max-total-size must be non-negative")
+	}
+	if opts.KeepLast == nil && !olderThanSet && !maxTotalSizeSet && !opts.IncludeInvalid && !opts.IncludeLegacy {
+		return fmt.Errorf("at least one pruning condition or include flag is required")
+	}
+	return nil
+}
+
+func scanForPrune(rootDir, workbookPath string, allWorkbooks bool) (ScanResult, error) {
+	if allWorkbooks {
+		return ScanAll(rootDir)
+	}
+	return Scan(rootDir, workbookPath)
+}
+
+func selectPruneCandidates(rootDir string, scan ScanResult, opts PruneOptions, now time.Time) ([]CandidateEntry, error) {
+	records := append([]Record{}, scan.Records...)
+	sortRecordsOldestFirst(records)
+	protected := map[string]bool{}
+	if opts.KeepLast != nil {
+		newest := append([]Record{}, scan.Records...)
+		sortRecordsNewestFirst(newest)
+		for i, record := range newest {
+			if i >= *opts.KeepLast {
+				break
+			}
+			protected[record.ID] = true
+		}
+	}
+
+	candidateByID := map[string]*CandidateEntry{}
+	if opts.KeepLast != nil {
+		for _, record := range records {
+			if protected[record.ID] {
+				continue
+			}
+			addRecordCandidate(candidateByID, record, "exceeds_keep_last")
+		}
+	}
+	if opts.OlderThanSet || opts.OlderThan > 0 {
+		cutoff := now.Add(-opts.OlderThan)
+		for _, record := range records {
+			if protected[record.ID] {
+				continue
+			}
+			if record.CreatedAt.Before(cutoff) {
+				addRecordCandidate(candidateByID, record, "older_than")
+			}
+		}
+	}
+	if opts.MaxTotalSizeSet || opts.MaxTotalSize > 0 {
+		total := int64(0)
+		for _, record := range records {
+			total += record.SizeBytes
+		}
+		for _, record := range records {
+			if total <= opts.MaxTotalSize {
+				break
+			}
+			if protected[record.ID] {
+				continue
+			}
+			addRecordCandidate(candidateByID, record, "exceeds_max_total_size")
+			total -= record.SizeBytes
+		}
+	}
+
+	candidates := make([]CandidateEntry, 0, len(candidateByID)+len(scan.Invalid)+len(scan.Legacy))
+	for _, candidate := range candidateByID {
+		candidates = append(candidates, *candidate)
+	}
+	if opts.IncludeInvalid {
+		for _, entry := range scan.Invalid {
+			if err := ensureManagedChild(rootDir, entry.Directory); err != nil {
+				return nil, &Error{Code: ErrDeleteUnsafePath, Err: err}
+			}
+			size, err := directorySize(entry.Directory)
+			if err != nil {
+				return nil, &Error{Code: ErrPruneFailed, Err: err}
+			}
+			candidates = append(candidates, CandidateEntry{
+				ID:        filepath.Base(entry.Directory),
+				Directory: entry.Directory,
+				SizeBytes: size,
+				Reasons:   []string{"invalid_entry"},
+				Status:    "invalid",
+				Code:      entry.Code,
+				Message:   entry.Message,
+			})
+		}
+	}
+	if opts.IncludeLegacy {
+		for _, entry := range scan.Legacy {
+			if err := ensureManagedChild(rootDir, entry.Directory); err != nil {
+				return nil, &Error{Code: ErrDeleteUnsafePath, Err: err}
+			}
+			size, err := directorySize(entry.Directory)
+			if err != nil {
+				return nil, &Error{Code: ErrPruneFailed, Err: err}
+			}
+			candidates = append(candidates, CandidateEntry{
+				ID:        filepath.Base(entry.Directory),
+				Directory: entry.Directory,
+				SizeBytes: size,
+				Reasons:   []string{"legacy_entry"},
+				Status:    "legacy",
+			})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		a := candidates[i]
+		b := candidates[j]
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			if a.CreatedAt.IsZero() {
+				return false
+			}
+			if b.CreatedAt.IsZero() {
+				return true
+			}
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		if a.Status != b.Status {
+			return a.Status < b.Status
+		}
+		return a.ID < b.ID
+	})
+	return candidates, nil
+}
+
+func addRecordCandidate(candidates map[string]*CandidateEntry, record Record, reason string) {
+	candidate := candidates[record.ID]
+	if candidate == nil {
+		candidate = &CandidateEntry{
+			ID:        record.ID,
+			Directory: record.Directory,
+			CreatedAt: record.CreatedAt,
+			Reason:    record.Reason,
+			SizeBytes: record.SizeBytes,
+			Status:    "valid",
+		}
+		candidates[record.ID] = candidate
+	}
+	for _, existing := range candidate.Reasons {
+		if existing == reason {
+			return
+		}
+	}
+	candidate.Reasons = append(candidate.Reasons, reason)
+	sort.Strings(candidate.Reasons)
+}
+
+func sortRecordsNewestFirst(records []Record) {
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].ID > records[j].ID
+		}
+		return records[i].CreatedAt.After(records[j].CreatedAt)
+	})
+}
+
+func sortRecordsOldestFirst(records []Record) {
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+}
+
+func deleteManagedDirectory(rootDir, id, dir string) (DeletedEntry, error) {
+	if err := ensureManagedChild(rootDir, dir); err != nil {
+		return DeletedEntry{}, err
+	}
+	size, err := directorySize(dir)
+	if err != nil {
+		return DeletedEntry{}, err
+	}
+	if err := removeAll(dir); err != nil {
+		return DeletedEntry{}, &Error{Code: ErrDeleteFailed, Err: err}
+	}
+	return DeletedEntry{ID: id, Directory: dir, FreedBytes: size}, nil
+}
+
+func ensureManagedChild(rootDir, dir string) error {
+	backupRootAbs, err := filepath.Abs(Root(rootDir))
+	if err != nil {
+		return &Error{Code: ErrDeleteUnsafePath, Err: err}
+	}
+	backupRootAbs = filepath.Clean(backupRootAbs)
+	dirAbs, err := filepath.Abs(dir)
+	if err != nil {
+		return &Error{Code: ErrDeleteUnsafePath, Err: err}
+	}
+	dirAbs = filepath.Clean(dirAbs)
+	if samePath(backupRootAbs, dirAbs) {
+		return &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup root cannot be deleted")}
+	}
+	if !samePath(filepath.Dir(dirAbs), backupRootAbs) {
+		return &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup target must be a direct child of the managed backup root")}
+	}
+	if !pathWithin(backupRootAbs, dirAbs) {
+		return &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup target must stay inside the managed backup root")}
+	}
+	info, err := os.Lstat(dirAbs)
+	if err != nil {
+		return &Error{Code: ErrDeleteUnsafePath, Err: err}
+	}
+	if !info.IsDir() {
+		return &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup target is not a directory")}
+	}
+	rootEval, err := filepath.EvalSymlinks(backupRootAbs)
+	if err != nil {
+		return &Error{Code: ErrDeleteUnsafePath, Err: err}
+	}
+	dirEval, err := filepath.EvalSymlinks(dirAbs)
+	if err != nil {
+		return &Error{Code: ErrDeleteUnsafePath, Err: err}
+	}
+	if !pathWithin(rootEval, dirEval) || samePath(rootEval, dirEval) {
+		return &Error{Code: ErrDeleteUnsafePath, Err: fmt.Errorf("backup target resolves outside the managed backup root")}
+	}
+	return nil
+}
+
+func directorySize(dir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != dir && d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
+}
+
+func codeForDeleteError(err error) string {
+	var backupErr *Error
+	if errors.As(err, &backupErr) && backupErr.Code != "" {
+		return backupErr.Code
+	}
+	return ErrDeleteFailed
 }
 
 func Create(rootDir, workbookPath, reason string, now time.Time) (Record, error) {

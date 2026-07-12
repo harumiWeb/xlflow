@@ -501,7 +501,7 @@ func (a *app) backupCommand() *cobra.Command {
 		Use:   "backup",
 		Short: "Manage workbook backups",
 	}
-	cmd.AddCommand(a.backupListCommand())
+	cmd.AddCommand(a.backupListCommand(), a.backupPruneCommand(), a.backupDeleteCommand())
 	return cmd
 }
 
@@ -527,6 +527,107 @@ func (a *app) backupListCommand() *cobra.Command {
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+}
+
+func (a *app) backupPruneCommand() *cobra.Command {
+	var keepLast int
+	var olderThan string
+	var maxTotalSize string
+	var dryRun bool
+	var allWorkbooks bool
+	var includeInvalid bool
+	var includeLegacy bool
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Preview or delete old workbook backups",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := backup.PruneOptions{
+				DryRun:         dryRun,
+				AllWorkbooks:   allWorkbooks,
+				IncludeInvalid: includeInvalid,
+				IncludeLegacy:  includeLegacy,
+			}
+			if cmd.Flags().Changed("keep-last") {
+				opts.KeepLast = &keepLast
+			}
+			if strings.TrimSpace(olderThan) != "" {
+				duration, err := backup.ParseRetentionDuration(olderThan)
+				if err != nil {
+					return a.writeFailure("backup prune", output.ExitConfig, backup.ErrPruneArgsInvalid, err)
+				}
+				opts.OlderThan = duration
+				opts.OlderThanSet = true
+			}
+			if strings.TrimSpace(maxTotalSize) != "" {
+				size, err := backup.ParseSize(maxTotalSize)
+				if err != nil {
+					return a.writeFailure("backup prune", output.ExitConfig, backup.ErrPruneArgsInvalid, err)
+				}
+				opts.MaxTotalSize = size
+				opts.MaxTotalSizeSet = true
+			}
+			cfg, err := a.loadConfig("backup prune")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			result, err := backup.Prune(a.cwd, workbookPath, opts)
+			env := output.New("backup prune")
+			env.BackupPrune = renderBackupPruneResult(a.cwd, result)
+			if err != nil {
+				code := output.ExitEnvironment
+				if backupErrorCode(err) == backup.ErrPruneArgsInvalid {
+					code = output.ExitConfig
+				}
+				env.Status = output.StatusFailed
+				env.Error = &output.Error{Code: backupErrorCode(err), Message: err.Error()}
+				return a.write(env, code)
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().IntVar(&keepLast, "keep-last", 0, "retain the newest N backups")
+	cmd.Flags().StringVar(&olderThan, "older-than", "", "delete backups older than a duration such as 30d")
+	cmd.Flags().StringVar(&maxTotalSize, "max-total-size", "", "delete oldest backups until total storage is below a size such as 2GB")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview candidates without deleting files")
+	cmd.Flags().BoolVar(&allWorkbooks, "all-workbooks", false, "evaluate backups for all managed workbooks")
+	cmd.Flags().BoolVar(&includeInvalid, "include-invalid", false, "include invalid managed backup directories")
+	cmd.Flags().BoolVar(&includeLegacy, "include-legacy", false, "include legacy managed backup directories without metadata")
+	return cmd
+}
+
+func (a *app) backupDeleteCommand() *cobra.Command {
+	var backupID string
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete one managed workbook backup",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(backupID) == "" {
+				return a.writeFailure("backup delete", output.ExitConfig, backup.ErrDeleteArgsInvalid, fmt.Errorf("--backup is required"))
+			}
+			cfg, err := a.loadConfig("backup delete")
+			if err != nil {
+				return err
+			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			result, err := backup.Delete(a.cwd, workbookPath, backupID)
+			if err != nil {
+				return a.writeFailure("backup delete", backupDeleteExitCode(err), backupErrorCode(err), err)
+			}
+			env := output.New("backup delete")
+			env.BackupDelete = map[string]any{
+				"id":          result.ID,
+				"path":        displayPath(a.cwd, result.Path),
+				"freed_bytes": result.FreedBytes,
+			}
+			env.Logs = []string{"deleted backup " + result.ID}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&backupID, "backup", "", "delete a specific backup ID")
+	return cmd
 }
 
 func (a *app) rollbackCommand() *cobra.Command {
@@ -2305,6 +2406,90 @@ func renderBackupRecords(rootDir string, records []backup.Record) []map[string]a
 		})
 	}
 	return rendered
+}
+
+func renderBackupPruneResult(rootDir string, result backup.PruneResult) map[string]any {
+	return map[string]any{
+		"dry_run":         result.DryRun,
+		"matched":         result.Matched,
+		"deleted":         result.Deleted,
+		"failed":          result.Failed,
+		"freed_bytes":     result.FreedBytes,
+		"candidates":      renderBackupCandidates(rootDir, result.Candidates),
+		"deleted_entries": renderDeletedBackupEntries(rootDir, result.DeletedEntries),
+		"failed_entries":  renderFailedBackupEntries(rootDir, result.FailedEntries),
+	}
+}
+
+func renderBackupCandidates(rootDir string, entries []backup.CandidateEntry) []map[string]any {
+	rendered := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		item := map[string]any{
+			"id":         entry.ID,
+			"path":       displayPath(rootDir, entry.Directory),
+			"size_bytes": entry.SizeBytes,
+			"reasons":    entry.Reasons,
+			"status":     entry.Status,
+		}
+		if !entry.CreatedAt.IsZero() {
+			item["created_at"] = entry.CreatedAt.Format(time.RFC3339)
+		}
+		if entry.Reason != "" {
+			item["reason"] = entry.Reason
+		}
+		if entry.Code != "" {
+			item["code"] = entry.Code
+		}
+		if entry.Message != "" {
+			item["message"] = entry.Message
+		}
+		rendered = append(rendered, item)
+	}
+	return rendered
+}
+
+func renderDeletedBackupEntries(rootDir string, entries []backup.DeletedEntry) []map[string]any {
+	rendered := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		rendered = append(rendered, map[string]any{
+			"id":          entry.ID,
+			"path":        displayPath(rootDir, entry.Directory),
+			"freed_bytes": entry.FreedBytes,
+		})
+	}
+	return rendered
+}
+
+func renderFailedBackupEntries(rootDir string, entries []backup.FailedEntry) []map[string]any {
+	rendered := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		rendered = append(rendered, map[string]any{
+			"id":      entry.ID,
+			"path":    displayPath(rootDir, entry.Directory),
+			"code":    entry.Code,
+			"message": entry.Message,
+		})
+	}
+	return rendered
+}
+
+func backupErrorCode(err error) string {
+	var backupErr *backup.Error
+	if errors.As(err, &backupErr) && backupErr.Code != "" {
+		return backupErr.Code
+	}
+	return backup.ErrDeleteFailed
+}
+
+func backupDeleteExitCode(err error) int {
+	switch backupErrorCode(err) {
+	case backup.ErrDeleteArgsInvalid:
+		return output.ExitConfig
+	case backup.ErrNotFound, backup.ErrDeleteScopeMismatch, backup.ErrDeleteUnsafePath:
+		return output.ExitValidation
+	default:
+		return output.ExitEnvironment
+	}
 }
 
 func renderInvalidBackupWarnings(rootDir string, entries []backup.InvalidEntry) []map[string]any {

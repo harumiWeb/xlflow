@@ -399,6 +399,8 @@ func TestWriteJSONEnvelopeIncludesEditSheetAddFields(t *testing.T) {
 func TestWriteJSONEnvelopeIncludesBackupAndRollbackFields(t *testing.T) {
 	env := New("rollback")
 	env.Backups = []map[string]any{{"id": "20260518-100000-push", "path": ".xlflow/backups/20260518-100000-push/Book.xlsm"}}
+	env.BackupPrune = map[string]any{"matched": 1}
+	env.BackupDelete = map[string]any{"id": "20260518-100000-push"}
 	env.Rollback = map[string]any{
 		"restored_from": map[string]any{"id": "20260518-100000-push"},
 		"safety_backup": map[string]any{"id": "20260518-110000-pre-rollback"},
@@ -411,7 +413,7 @@ func TestWriteJSONEnvelopeIncludesBackupAndRollbackFields(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"backups", "rollback"} {
+	for _, key := range []string{"backups", "backup_prune", "backup_delete", "rollback"} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("expected %s in JSON envelope: %s", key, buf.String())
 		}
@@ -433,6 +435,51 @@ func TestWriteWithOptionsRendersBackupListSummary(t *testing.T) {
 	for _, want := range []string{"Backups:", "2", "20260518-100000-push", "before-push", "20260518-110000-pre-rollback", "Warnings:", "refresh backup metadata"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("backup list output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersBackupPruneSummary(t *testing.T) {
+	env := New("backup prune")
+	env.BackupPrune = map[string]any{
+		"dry_run":     true,
+		"matched":     1,
+		"deleted":     0,
+		"failed":      0,
+		"freed_bytes": int64(0),
+		"candidates": []map[string]any{{
+			"id":      "20260518-100000-push",
+			"path":    ".xlflow/backups/20260518-100000-push",
+			"reasons": []string{"exceeds_keep_last"},
+		}},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Dry run:", "yes", "Candidates:", "1", "No files were deleted.", "20260518-100000-push"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("backup prune output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersBackupDeleteSummary(t *testing.T) {
+	env := New("backup delete")
+	env.BackupDelete = map[string]any{
+		"id":          "20260518-100000-push",
+		"path":        ".xlflow/backups/20260518-100000-push",
+		"freed_bytes": int64(42),
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Backup ID:", "20260518-100000-push", "Deleted:", "Freed:", "42 bytes"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("backup delete output missing %q:\n%s", want, got)
 		}
 	}
 }
