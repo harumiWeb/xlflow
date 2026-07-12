@@ -55,11 +55,14 @@ public sealed class ExcelTestService : ITestService
     {
         var sourceWorkbook = SourceWorkbookPath(args);
         var runDir = Path.Combine(TempRunRoot(args), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(runDir);
+        var runDirCreated = false;
         CleanupInfo? cleanup = null;
 
         try
         {
+            Directory.CreateDirectory(runDir);
+            runDirCreated = true;
+
             if (isolation == "none")
             {
                 var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
@@ -153,7 +156,9 @@ public sealed class ExcelTestService : ITestService
         }
         catch (Exception ex)
         {
-            cleanup ??= CleanupRunDirectory(runDir, args.ProjectRoot);
+            cleanup ??= runDirCreated
+                ? CleanupRunDirectory(runDir, args.ProjectRoot)
+                : new CleanupInfo("failed", DisplayCleanupPath(runDir, args.ProjectRoot), ex.Message);
             var response = BridgeResponse.Failed(request, new BridgeError(
                 Code: "test_environment_failed",
                 Message: ExcelBridgeSupport.FormatExceptionDetail(ex),

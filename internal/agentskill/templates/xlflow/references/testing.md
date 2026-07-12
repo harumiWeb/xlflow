@@ -168,7 +168,7 @@ xlflow test --isolation module --json
 xlflow test --isolation test --filter TestOrders.Test_CreateWorksheet --json
 ```
 
-Plain non-session `xlflow test` runs against temporary workbook copies under `.xlflow/test-runs/<run-id>/` and removes them after execution. Prefer `--session` during normal AI-agent development when the live managed workbook is the intended target. Session mode supports `--isolation none`; `module` and `test` isolation are non-session modes.
+Plain non-session `xlflow test` runs against temporary workbook copies under `.xlflow/test-runs/<run-id>/` and attempts best-effort cleanup after execution. Cleanup failures are surfaced through `test_run.cleanup.status`, with `path` and `message` when applicable. Prefer `--session` during normal AI-agent development when the live managed workbook is the intended target. Session mode supports `--isolation none`; `module` and `test` isolation are non-session modes.
 
 ### Filtering
 

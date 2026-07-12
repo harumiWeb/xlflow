@@ -322,6 +322,7 @@ Command-specific fields are added at the top level:
 - `macro` for `run`
 - `macros` for `macros`
 - `tests` for `test`
+- `test_run` for `test`, including `isolation`, `session`, `temporary_workbook`, `source_workbook`, `workbook_saved`, and `cleanup` metadata with `status`, plus `path` and `message` when cleanup fails
 - `diff` for `diff`
 - `inspect` for `inspect`
 - `issues` for `lint`

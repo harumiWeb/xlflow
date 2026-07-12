@@ -210,10 +210,12 @@ The command:
 4. Collects `@Tag("...")` annotations from preceding comment lines
 5. Discovers `BeforeAll`/`AfterAll`/`BeforeEach`/`AfterEach` hooks
 6. Generates and injects a runner module with per-test dispatch
+7. Executes hooks according to isolation mode: per module for `none` and `module`, and inside each test's fresh workbook copy for `test`
+8. Restores runtime markers and saves only when the selected mode explicitly saves the workbook
 
-Non-session runs report `test_run.temporary_workbook=true` and remove `.xlflow/test-runs/<run-id>/` after execution. `--isolation none` uses one workbook copy, `--isolation module` uses one fresh copy per selected module, and `--isolation test` uses one fresh copy per selected test case. Session runs support only `--isolation none`; unsupported combinations fail with `unsupported_test_isolation`. 7. Executes BeforeAll, each test, AfterAll per module 8. Restores runtime markers and saves the workbook
+Non-session runs report `test_run.temporary_workbook=true` and attempt to remove `.xlflow/test-runs/<run-id>/` after execution. `--isolation none` uses one workbook copy, `--isolation module` uses one fresh copy per selected module, and `--isolation test` uses one fresh copy per selected test case. Session runs support only `--isolation none`; unsupported combinations fail with `unsupported_test_isolation`. Cleanup failures are reported through `test_run.cleanup` rather than replacing the test result.
 
-Test results use `vbObjectError + 516` as the inconclusive sentinel. The response includes `workbook` and `tests` envelope fields.
+Test results use `vbObjectError + 516` as the inconclusive sentinel. The response includes `workbook`, `tests`, and `test_run` envelope fields.
 
 On timeout, the bridge returns `macro_timeout`, does not save the workbook, and
 includes actionable suggestions plus the dialog and worker state available at

@@ -29,7 +29,7 @@ xlflow test list [--module <name>] [--path <path>] --json
 
 ## Workbook Isolation
 
-By default, `xlflow test` runs against a temporary copy of the configured workbook under `.xlflow/test-runs/<run-id>/` and removes that directory after the run. The configured project workbook is not opened for mutation or explicitly saved.
+By default, `xlflow test` runs against a temporary copy of the configured workbook under `.xlflow/test-runs/<run-id>/` and attempts to remove that directory after the run. Cleanup failures are reported in `test_run.cleanup` with the retained path and message when available. The configured project workbook is not opened for mutation or explicitly saved.
 
 `--isolation none` uses one temporary workbook for the whole selected run. This is the fastest mode, but tests can share workbook state with later tests in the same run.
 
