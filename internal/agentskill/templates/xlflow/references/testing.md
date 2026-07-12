@@ -9,9 +9,31 @@ xlflow discovers tests by scanning every standard module in the workbook for `Pu
 - `Test*`
 - `*_Test`
 
-Test procedures must take **no arguments**. Subs with arguments, `Private Sub`, and `Function` procedures are ignored during discovery.
+Parameterless tests run once. Tests with `ByVal` scalar parameters must declare one or more `@TestCase` annotations directly above the procedure; each annotation becomes a separate executable case. Unsupported parameterized tests fail discovery with `invalid_test_case`. `Private Sub` and `Function` procedures are ignored during discovery.
 
 Tests can live in any standard module. The recommended layout is `src/modules/Tests/` with one module per test suite (e.g., `TestOrders.bas`). There is no separate `tests/` directory in the scaffold; tests are source modules like everything else.
+
+## Parameterized Tests
+
+Use `@TestCase` for data-driven tests:
+
+```vb
+'@TestCase(1, 2, 3)
+'@TestCase("cancels-out"; -1, 1, 0)
+Public Sub Test_Add( _
+    ByVal leftValue As Long, _
+    ByVal rightValue As Long, _
+    ByVal expected As Long)
+
+    XlflowAssert.AssertEquals expected, Add(leftValue, rightValue)
+End Sub
+```
+
+Unnamed cases use argument literals in the ID, for example `MathTests.Test_Add[1,2,3]`. Named cases use the string before the semicolon, for example `MathTests.Test_Add[cancels-out]`; the name is not passed to the VBA procedure.
+
+Supported literals are integer, floating-point/scientific notation, string, `True`, `False`, `Empty`, `Null`, and VBA date literals such as `#2026-07-12#`. Supported parameter types are `Boolean`, `Byte`, `Integer`, `Long`, `LongLong`, `LongPtr`, `Single`, `Double`, `Currency`, `Date`, `String`, and `Variant`.
+
+Do not use constants, enum members, function calls, member expressions, arrays, object creation, workbook references, object parameters, `ByRef`, `Optional`, or `ParamArray` in parameterized tests. xlflow rejects these during discovery rather than evaluating arbitrary VBA expressions.
 
 ## Naming Conventions
 

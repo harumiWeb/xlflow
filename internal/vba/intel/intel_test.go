@@ -439,7 +439,7 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription", "@ExpectedError", "@Skip", "@Todo"} {
+	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription", "@ExpectedError", "@TestCase", "@Skip", "@Todo"} {
 		if !hasCompletion(items, want) {
 			t.Fatalf("%s completion missing: %+v", want, items)
 		}
@@ -472,6 +472,10 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	item, ok = findCompletion(items, "@Todo")
 	if !ok || !item.Snippet || item.InsertText != `@Todo("${1:Reason}")` || item.ReplaceRange == nil {
 		t.Fatalf("unexpected @Todo completion: %+v", item)
+	}
+	item, ok = findCompletion(items, "@TestCase")
+	if !ok || !item.Snippet || item.InsertText != `@TestCase(${1:1, 2, 3})` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @TestCase completion: %+v", item)
 	}
 }
 

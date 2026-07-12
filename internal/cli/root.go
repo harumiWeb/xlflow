@@ -4062,6 +4062,10 @@ func (a *app) testListCommand() *cobra.Command {
 				if errors.As(err, &metadataErr) {
 					return a.writeFailure("test list", output.ExitValidation, "invalid_test_metadata", err)
 				}
+				var testCaseErr testdiscover.InvalidTestCaseError
+				if errors.As(err, &testCaseErr) {
+					return a.writeFailure("test list", output.ExitValidation, "invalid_test_case", err)
+				}
 				return a.writeFailure("test list", output.ExitEnvironment, "test_discovery_failed", err)
 			}
 			env := output.New("test list")

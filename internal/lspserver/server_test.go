@@ -498,6 +498,17 @@ func TestCompletionReturnsRubberduckAnnotationSnippet(t *testing.T) {
 	if edit.NewText != `@Todo("${1:Reason}")` {
 		t.Fatalf("@Todo new text = %q", edit.NewText)
 	}
+	item, ok = findCompletionItem(list.Items, "@TestCase")
+	if !ok {
+		t.Fatalf("@TestCase completion missing: %+v", list.Items)
+	}
+	edit, ok = item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("@TestCase text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.NewText != `@TestCase(${1:1, 2, 3})` {
+		t.Fatalf("@TestCase new text = %q", edit.NewText)
+	}
 }
 
 func TestCompletionReturnsTypeCandidates(t *testing.T) {

@@ -41,7 +41,7 @@ By default, `xlflow test` runs against a temporary copy of the configured workbo
 
 ## Source Test Discovery
 
-`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")`, `@ExpectedError(...)`, `@Skip`, and `@Todo` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
+`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")`, `@ExpectedError(...)`, `@Skip`, `@Todo`, and `@TestCase(...)` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and unsupported parameterized procedures are not listed.
 
 The JSON envelope uses `command: "test list"` and returns discovery data under `tests`:
 
@@ -61,8 +61,10 @@ The JSON envelope uses `command: "test list"` and returns discovery data under `
         "module": "SmokeTests",
         "name": "TestSmoke",
         "qualified_name": "SmokeTests.TestSmoke",
+        "qualified_procedure": "SmokeTests.TestSmoke",
         "source_path": "src/modules/SmokeTests.bas",
         "line": 5,
+        "procedure_line": 5,
         "tags": ["smoke"],
         "status_hint": "skipped",
         "skip": {
@@ -83,13 +85,42 @@ This command is intended for editor integrations such as VS Code Testing API dis
 
 ## Test Identity and Filtering
 
-Each test has a stable qualified identifier in `<Module>.<Procedure>` form. JSON output includes this value as both `id` and `qualified_name`, while keeping the existing `module` and `name` fields.
+Parameterless tests have a stable qualified identifier in `<Module>.<Procedure>` form. Parameterized tests have one identifier per case in `<Module>.<Procedure>[<case>]` form. JSON output includes the executable identifier as both `id` and `qualified_name`, and includes the owning procedure as `qualified_procedure`.
 
 ```bash
 xlflow test --filter SmokeTests.TestSmoke --session --json
 ```
 
-Unqualified procedure names still work when they identify exactly one test after any `--module` and `--tag` filters. If the same procedure name exists in multiple modules, use the qualified name. Ambiguous unqualified filters fail with `ambiguous_test_name` and list matching qualified names in `error.details.matches`.
+For parameterized tests, filter by the qualified procedure to run all cases, or by the exact case ID to run one case:
+
+```bash
+xlflow test --filter MathTests.Test_Add --json
+xlflow test --filter "MathTests.Test_Add[1,2,3]" --json
+```
+
+Quote exact case filters in shells that treat brackets specially. Unqualified procedure names still work when they identify exactly one discovered item after any `--module` and `--tag` filters. If the same procedure name exists in multiple modules or expands to multiple cases, use the qualified procedure or exact case ID. Ambiguous unqualified filters fail with `ambiguous_test_name` and list matching qualified names in `error.details.matches`.
+
+## Parameterized Tests
+
+Use `@TestCase` directly above a public test procedure with `ByVal` scalar parameters:
+
+```vb
+'@TestCase(1, 2, 3)
+'@TestCase("cancels-out"; -1, 1, 0)
+Public Sub Test_Add( _
+    ByVal leftValue As Long, _
+    ByVal rightValue As Long, _
+    ByVal expected As Long)
+
+    XlflowAssert.AssertEquals expected, Add(leftValue, rightValue)
+End Sub
+```
+
+Each annotation becomes an independent test case. Supported argument literals are integer, floating-point/scientific notation, string literals with doubled VBA quotes, `True`, `False`, `Empty`, `Null`, and VBA date literals such as `#2026-07-12#`. Supported parameter types are `Boolean`, `Byte`, `Integer`, `Long`, `LongLong`, `LongPtr`, `Single`, `Double`, `Currency`, `Date`, `String`, and `Variant`.
+
+xlflow does not evaluate constants, enum members, function calls, member expressions, arrays, object creation, workbook references, or object parameters. `ByRef`, `Optional`, and `ParamArray` parameters are rejected during discovery with `invalid_test_case`.
+
+Unnamed case IDs use a lexical canonical form. Whitespace and string escaping are normalized, but semantically equivalent numeric spellings such as `1.0` and `1#` are not currently treated as identical.
 
 ## Test Location
 
