@@ -5520,6 +5520,13 @@ func TestBackupListCommandReturnsWorkbookBackupsOnly(t *testing.T) {
 	if _, err := backup.Create(dir, workbookPath, "before-push", time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
+	corruptDir := filepath.Join(dir, ".xlflow", "backups", "corrupt")
+	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(corruptDir, "metadata.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	legacyDir := filepath.Join(dir, ".xlflow", "backups", "legacy")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -5536,13 +5543,23 @@ func TestBackupListCommandReturnsWorkbookBackupsOnly(t *testing.T) {
 		t.Fatalf("backup list error = %v", err)
 	}
 	var got struct {
-		Backups []map[string]any `json:"backups"`
+		Backups  []map[string]any `json:"backups"`
+		Warnings []map[string]any `json:"warnings"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Backups) != 1 {
 		t.Fatalf("backups = %#v, want 1", got.Backups)
+	}
+	if got.Backups[0]["size_bytes"] != float64(len("book")) {
+		t.Fatalf("size_bytes = %#v, want %d", got.Backups[0]["size_bytes"], len("book"))
+	}
+	if got.Backups[0]["status"] != "valid" {
+		t.Fatalf("status = %#v, want valid", got.Backups[0]["status"])
+	}
+	if len(got.Warnings) != 1 || got.Warnings[0]["code"] != "invalid_backup_entry" {
+		t.Fatalf("warnings = %#v, want invalid_backup_entry", got.Warnings)
 	}
 }
 

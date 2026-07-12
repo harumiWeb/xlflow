@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Services;
 using Xlflow.ExcelBridge.Windows;
@@ -241,6 +242,147 @@ public sealed class ExcelPushServiceTests
         Assert.True(diagnostic.ContainsKey("location_capture"));
     }
 
+    [Fact]
+    public void BuildCompileFailureResponseIncludesCreatedBackup()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-compile-failed-backup",
+            Command = "push",
+        };
+        var args = PushArgs(backupMode: "always");
+        var invocation = new WorkerInvocationResult(
+            Result: null,
+            Dialog: null,
+            Dialogs: [],
+            LocationCapture: new VbeSelectionCapture(null, []),
+            TimedOut: true,
+            WorkerProcessId: 1234);
+        var backup = new ExcelPushService.BackupRef(
+            "20260712-134201-123-push-a1b2c3",
+            @"C:\work\.xlflow\backups\20260712-134201-123-push-a1b2c3\Book.xlsm",
+            "before-push",
+            "always");
+
+        var response = ExcelPushService.BuildCompileFailureResponse(
+            request,
+            args,
+            @"C:\work\Book.xlsm",
+            sessionAttached: false,
+            sessionMode: "none",
+            backup,
+            invocation);
+
+        var payload = Assert.IsType<Dictionary<string, object?>>(response.Extensions["backup"]);
+        Assert.Equal(backup.Id, payload["id"]);
+        Assert.Equal(backup.Path, payload["path"]);
+        Assert.Equal("before-push", payload["reason"]);
+        Assert.Equal("always", payload["mode"]);
+    }
+
+    [Fact]
+    public void WithBackupAddsBackupToGenericFailureResponse()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-failed-backup",
+            Command = "push",
+        };
+        var response = BridgeResponse.Failed(request, new BridgeError(
+            Code: "push_failed",
+            Message: "import failed",
+            Phase: "push",
+            Source: "xlflow-excel-bridge"));
+        var backup = new ExcelPushService.BackupRef("backup-id", @"C:\work\.xlflow\backups\backup-id\Book.xlsm", "before-push", "always");
+
+        var enriched = ExcelPushService.WithBackup(response, backup);
+
+        Assert.Equal("push_failed", enriched.Error?.Code);
+        var payload = Assert.IsType<Dictionary<string, object?>>(enriched.Extensions["backup"]);
+        Assert.Equal("backup-id", payload["id"]);
+        Assert.Equal(@"C:\work\.xlflow\backups\backup-id\Book.xlsm", payload["path"]);
+    }
+
+    [Fact]
+    public void CreateBackupRemovesDirectoryWhenSaveCopyAsFails()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-backup-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workbook = new FakeBackupWorkbook(_ => throw new InvalidOperationException("save copy failed"));
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                ExcelPushService.CreateBackup(workbook, Path.Combine(root, ".xlflow", "backups"), Path.Combine(root, "Book.xlsm")));
+
+            Assert.Contains("save copy failed", ex.Message);
+            var backupRoot = Path.Combine(root, ".xlflow", "backups");
+            Assert.Empty(Directory.Exists(backupRoot) ? Directory.GetDirectories(backupRoot) : []);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void CreateBackupRemovesDirectoryWhenMetadataWriteFails()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-backup-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workbook = new FakeBackupWorkbook(path => Directory.CreateDirectory(path));
+
+            Assert.ThrowsAny<Exception>(() =>
+                ExcelPushService.CreateBackup(workbook, Path.Combine(root, ".xlflow", "backups"), Path.Combine(root, "metadata.json")));
+
+            var backupRoot = Path.Combine(root, ".xlflow", "backups");
+            Assert.Empty(Directory.Exists(backupRoot) ? Directory.GetDirectories(backupRoot) : []);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void CreateBackupKeepsCompleteBackupAfterSuccess()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-backup-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workbook = new FakeBackupWorkbook(path => File.WriteAllText(path, "book"));
+
+            var (id, path) = ExcelPushService.CreateBackup(
+                workbook,
+                Path.Combine(root, ".xlflow", "backups"),
+                Path.Combine(root, "Book.xlsm"));
+
+            Assert.True(File.Exists(path));
+            Assert.True(File.Exists(Path.Combine(root, ".xlflow", "backups", id, "metadata.json")));
+            using var metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, ".xlflow", "backups", id, "metadata.json")));
+            Assert.Equal(id, metadata.RootElement.GetProperty("id").GetString());
+            Assert.Equal("Book.xlsm", metadata.RootElement.GetProperty("backup_file_path").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(2500, 1500)]
     [InlineData(1000, 1000)]
@@ -303,5 +445,36 @@ public sealed class ExcelPushServiceTests
             ImportedPaths.Add((string)path);
             return new object();
         }
+    }
+
+    public sealed class FakeBackupWorkbook(Action<string> saveCopyAs)
+    {
+        public object? SaveCopyAs(object path)
+        {
+            saveCopyAs((string)path);
+            return null;
+        }
+    }
+
+    private static PushCommandArguments PushArgs(string backupMode)
+    {
+        return new PushCommandArguments(
+            WorkbookPath: @"C:\work\Book.xlsm",
+            ModulesDir: @"C:\work\src\modules",
+            ClassesDir: @"C:\work\src\classes",
+            FormsDir: @"C:\work\src\forms",
+            WorkbookDir: @"C:\work\src\workbook",
+            CodeSource: "",
+            BackupRoot: @"C:\work\.xlflow\backups",
+            Folders: false,
+            FolderAnnotation: "ignore",
+            DefaultComponentFolders: false,
+            StatePath: @"C:\work\.xlflow\state\push.json",
+            Visible: false,
+            BackupMode: backupMode,
+            ChangedOnly: false,
+            UseSession: false,
+            NoSave: false,
+            MetadataPath: @"C:\work\.xlflow\session.json");
     }
 }

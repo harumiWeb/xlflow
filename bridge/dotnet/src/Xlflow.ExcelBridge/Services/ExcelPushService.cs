@@ -19,12 +19,15 @@ public sealed class ExcelPushService : IPushService
 
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
+    internal sealed record BackupRef(string Id, string Path, string Reason, string Mode);
+
     public BridgeResponse Execute(BridgeRequest request, PushCommandArguments args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         object? excel = null;
         object? workbook = null;
+        BackupRef? backupRef = null;
         var sessionAttached = false;
         var tmpImportDir = Path.Combine(Path.GetTempPath(), "xlflow-push-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
 
@@ -86,11 +89,6 @@ public sealed class ExcelPushService : IPushService
                         ["dirty"] = false,
                         ["needs_save"] = false,
                     },
-                    ["backup"] = new Dictionary<string, object?>
-                    {
-                        ["path"] = (string?)null,
-                        ["mode"] = args.BackupMode,
-                    },
                     ["source"] = new Dictionary<string, object?>
                     {
                         ["changed_only"] = true,
@@ -126,17 +124,14 @@ public sealed class ExcelPushService : IPushService
 
             var sessionMode = ResolveSessionMode(attached, args.UseSession);
 
-            string? backupId = null;
-            string? backupPath = null;
             const string backupReason = "before-push";
 
             if (args.BackupMode != "never" && !string.IsNullOrWhiteSpace(args.BackupRoot))
             {
-                var (id, path) = ExcelBridgeSupport.RunPhase(
+                var backup = ExcelBridgeSupport.RunPhase(
                     "create_backup",
                     () => CreateBackup(workbook, args.BackupRoot, workbookPath));
-                backupId = id;
-                backupPath = path;
+                backupRef = new BackupRef(backup.Id, backup.Path, backupReason, args.BackupMode);
             }
 
             Directory.CreateDirectory(tmpImportDir);
@@ -183,6 +178,7 @@ public sealed class ExcelPushService : IPushService
                     workbookPath,
                     sessionAttached,
                     sessionMode,
+                    backupRef,
                     compileInvocation);
             }
 
@@ -261,13 +257,6 @@ public sealed class ExcelPushService : IPushService
                         ["dirty"] = needsSave,
                         ["needs_save"] = needsSave,
                     },
-                    ["backup"] = new Dictionary<string, object?>
-                    {
-                        ["id"] = args.BackupMode == "always" ? backupId : null,
-                        ["path"] = args.BackupMode == "always" ? backupPath : null,
-                        ["reason"] = args.BackupMode == "always" ? backupReason : null,
-                        ["mode"] = args.BackupMode,
-                    },
                     ["source"] = new Dictionary<string, object?>
                     {
                         ["changed_only"] = args.ChangedOnly,
@@ -277,6 +266,8 @@ public sealed class ExcelPushService : IPushService
                     ["logs"] = logs,
                 },
             };
+
+            AddBackupPayload(response.Extensions, backupRef);
 
             if (warnings.Count > 0)
             {
@@ -291,28 +282,28 @@ public sealed class ExcelPushService : IPushService
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("xlflow session", StringComparison.OrdinalIgnoreCase))
         {
-            return BridgeResponse.Failed(request, new BridgeError(
+            return WithBackup(BridgeResponse.Failed(request, new BridgeError(
                 Code: "session_required",
                 Message: ex.Message,
                 Phase: "push",
-                Source: "xlflow"));
+                Source: "xlflow")), backupRef);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("bridge_file_not_openable", StringComparison.OrdinalIgnoreCase))
         {
-            return BridgeResponse.Failed(request, new BridgeError(
+            return WithBackup(BridgeResponse.Failed(request, new BridgeError(
                 Code: "bridge_file_not_openable",
                 Message: ex.Message.Replace("bridge_file_not_openable: ", "", StringComparison.OrdinalIgnoreCase),
                 Phase: "push",
-                Source: "xlflow-excel-bridge"));
+                Source: "xlflow-excel-bridge")), backupRef);
         }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
-            return BridgeResponse.Failed(request, new BridgeError(
+            return WithBackup(BridgeResponse.Failed(request, new BridgeError(
                 Code: "push_failed",
                 Message: detail,
                 Phase: "push",
-                Source: "xlflow-excel-bridge"));
+                Source: "xlflow-excel-bridge")), backupRef);
         }
         finally
         {
@@ -707,7 +698,7 @@ public sealed class ExcelPushService : IPushService
         return null;
     }
 
-    private static (string Id, string Path) CreateBackup(object workbook, string backupRoot, string workbookPath)
+    internal static (string Id, string Path) CreateBackup(object workbook, string backupRoot, string workbookPath)
     {
         if (!Directory.Exists(backupRoot))
         {
@@ -720,11 +711,41 @@ public sealed class ExcelPushService : IPushService
         var backupDir = Path.Combine(backupRoot, backupId);
         Directory.CreateDirectory(backupDir);
 
-        var backupFileName = Path.GetFileName(workbookPath);
-        var backupFilePath = Path.Combine(backupDir, backupFileName);
+        var complete = false;
+        try
+        {
+            var backupFileName = Path.GetFileName(workbookPath);
+            var backupFilePath = Path.Combine(backupDir, backupFileName);
 
-        ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", backupFilePath);
+            ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", backupFilePath);
 
+            WriteBackupMetadata(backupDir, backupId, workbookPath, backupFileName);
+
+            complete = true;
+            return (backupId, backupFilePath);
+        }
+        catch (Exception ex)
+        {
+            if (!complete)
+            {
+                try
+                {
+                    Directory.Delete(backupDir, true);
+                }
+                catch (Exception cleanupEx)
+                {
+                    throw new InvalidOperationException(
+                        ex.Message + " (backup_cleanup_failed: " + cleanupEx.Message + ")",
+                        ex);
+                }
+            }
+
+            throw;
+        }
+    }
+
+    internal static void WriteBackupMetadata(string backupDir, string backupId, string workbookPath, string backupFileName)
+    {
         var metadata = new Dictionary<string, object?>
         {
             ["id"] = backupId,
@@ -736,8 +757,6 @@ public sealed class ExcelPushService : IPushService
         var metadataJson = JsonSerializer.Serialize(metadata, IndentedJsonOptions);
         File.WriteAllText(Path.Combine(backupDir, "metadata.json"), metadataJson + "\n",
             new System.Text.UTF8Encoding(false));
-
-        return (backupId, backupFilePath);
     }
 
     private static void CloseComInstance(object? workbook, object? excel)
@@ -818,6 +837,18 @@ public sealed class ExcelPushService : IPushService
         string sessionMode,
         WorkerInvocationResult invocation)
     {
+        return BuildCompileFailureResponse(request, args, workbookPath, sessionAttached, sessionMode, null, invocation);
+    }
+
+    internal static BridgeResponse BuildCompileFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        string workbookPath,
+        bool sessionAttached,
+        string sessionMode,
+        BackupRef? backup,
+        WorkerInvocationResult invocation)
+    {
         var message = invocation.Dialog is not null
             ? DialogMessage(invocation.Dialog)
             : invocation.TimedOut
@@ -854,6 +885,7 @@ public sealed class ExcelPushService : IPushService
             },
             ["push_diagnostic"] = BuildPushDiagnostic(invocation),
         };
+        AddBackupPayload(extensions, backup);
 
         if (dirty)
         {
@@ -946,5 +978,30 @@ public sealed class ExcelPushService : IPushService
             return "none";
         }
         return useSession ? "explicit" : "auto";
+    }
+
+    private static Dictionary<string, object?> BuildBackupPayload(BackupRef backup)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["id"] = backup.Id,
+            ["path"] = backup.Path,
+            ["reason"] = backup.Reason,
+            ["mode"] = backup.Mode,
+        };
+    }
+
+    private static void AddBackupPayload(IDictionary<string, object?> extensions, BackupRef? backup)
+    {
+        if (backup is not null)
+        {
+            extensions["backup"] = BuildBackupPayload(backup);
+        }
+    }
+
+    internal static BridgeResponse WithBackup(BridgeResponse response, BackupRef? backup)
+    {
+        AddBackupPayload(response.Extensions, backup);
+        return response;
     }
 }

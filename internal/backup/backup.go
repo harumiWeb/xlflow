@@ -15,6 +15,11 @@ import (
 
 const metadataFileName = "metadata.json"
 
+var (
+	removeAll = os.RemoveAll
+	writeFile = os.WriteFile
+)
+
 type Metadata struct {
 	ID                   string    `json:"id"`
 	CreatedAt            time.Time `json:"created_at"`
@@ -27,50 +32,85 @@ type Record struct {
 	Metadata
 	Directory         string
 	BackupFileAbsPath string
+	SizeBytes         int64
+}
+
+type ScanResult struct {
+	Records []Record
+	Invalid []InvalidEntry
+	Legacy  []LegacyEntry
+}
+
+type InvalidEntry struct {
+	Directory string
+	Code      string
+	Message   string
+}
+
+type LegacyEntry struct {
+	Directory string
 }
 
 func Root(rootDir string) string {
 	return filepath.Join(rootDir, ".xlflow", "backups")
 }
 
-func List(rootDir, workbookPath string) ([]Record, error) {
+func Scan(rootDir, workbookPath string) (ScanResult, error) {
 	workbookAbs, err := filepath.Abs(workbookPath)
 	if err != nil {
-		return nil, err
+		return ScanResult{}, err
 	}
 	backupRoot := Root(rootDir)
 	entries, err := os.ReadDir(backupRoot)
 	if errors.Is(err, os.ErrNotExist) {
-		return []Record{}, nil
+		return ScanResult{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return ScanResult{}, err
 	}
 
-	records := make([]Record, 0, len(entries))
+	result := ScanResult{
+		Records: make([]Record, 0, len(entries)),
+		Invalid: []InvalidEntry{},
+		Legacy:  []LegacyEntry{},
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		record, ok, err := readRecord(filepath.Join(backupRoot, entry.Name()))
-		if err != nil {
-			return nil, err
+		dir := filepath.Join(backupRoot, entry.Name())
+		record, state := scanRecord(backupRoot, dir)
+		switch state.kind {
+		case scanEntryValid:
+			if !samePath(record.OriginalWorkbookPath, workbookAbs) {
+				continue
+			}
+			result.Records = append(result.Records, record)
+		case scanEntryInvalid:
+			result.Invalid = append(result.Invalid, InvalidEntry{
+				Directory: dir,
+				Code:      state.code,
+				Message:   state.message,
+			})
+		case scanEntryLegacy:
+			result.Legacy = append(result.Legacy, LegacyEntry{Directory: dir})
 		}
-		if !ok {
-			continue
-		}
-		if !samePath(record.OriginalWorkbookPath, workbookAbs) {
-			continue
-		}
-		records = append(records, record)
 	}
-	sort.Slice(records, func(i, j int) bool {
-		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
-			return records[i].ID > records[j].ID
+	sort.Slice(result.Records, func(i, j int) bool {
+		if result.Records[i].CreatedAt.Equal(result.Records[j].CreatedAt) {
+			return result.Records[i].ID > result.Records[j].ID
 		}
-		return records[i].CreatedAt.After(records[j].CreatedAt)
+		return result.Records[i].CreatedAt.After(result.Records[j].CreatedAt)
 	})
-	return records, nil
+	return result, nil
+}
+
+func List(rootDir, workbookPath string) ([]Record, error) {
+	result, err := Scan(rootDir, workbookPath)
+	if err != nil {
+		return nil, err
+	}
+	return result.Records, nil
 }
 
 func Find(rootDir, workbookPath, backupID string) (Record, error) {
@@ -116,7 +156,7 @@ func Create(rootDir, workbookPath, reason string, now time.Time) (Record, error)
 	backupName := filepath.Base(workbookAbs)
 	backupAbs := filepath.Join(dir, backupName)
 	if err := copyFile(workbookAbs, backupAbs); err != nil {
-		return Record{}, err
+		return Record{}, cleanupCreateDir(dir, err)
 	}
 	metadata := Metadata{
 		ID:                   id,
@@ -126,12 +166,17 @@ func Create(rootDir, workbookPath, reason string, now time.Time) (Record, error)
 		BackupFilePath:       backupName,
 	}
 	if err := writeMetadata(filepath.Join(dir, metadataFileName), metadata); err != nil {
-		return Record{}, err
+		return Record{}, cleanupCreateDir(dir, err)
+	}
+	info, err := os.Stat(backupAbs)
+	if err != nil {
+		return Record{}, cleanupCreateDir(dir, err)
 	}
 	return Record{
 		Metadata:          metadata,
 		Directory:         dir,
 		BackupFileAbsPath: backupAbs,
+		SizeBytes:         info.Size(),
 	}, nil
 }
 
@@ -164,47 +209,101 @@ func Restore(targetWorkbookPath string, record Record) error {
 	return nil
 }
 
-func readRecord(dir string) (Record, bool, error) {
+type scanEntryKind int
+
+const (
+	scanEntryInvalid scanEntryKind = iota
+	scanEntryLegacy
+	scanEntryValid
+)
+
+type scanEntryState struct {
+	kind    scanEntryKind
+	code    string
+	message string
+}
+
+func scanRecord(backupRoot, dir string) (Record, scanEntryState) {
 	metadataPath := filepath.Join(dir, metadataFileName)
 	body, err := os.ReadFile(metadataPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return Record{}, false, nil
+		return Record{}, scanEntryState{kind: scanEntryLegacy}
 	}
 	if err != nil {
-		return Record{}, false, err
+		return Record{}, invalidState("metadata_read_failed", err)
 	}
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 	var metadata Metadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
-		return Record{}, false, fmt.Errorf("parse %s: %w", metadataPath, err)
+		return Record{}, invalidState("invalid_metadata_json", err)
 	}
-	if strings.TrimSpace(metadata.ID) == "" ||
-		metadata.CreatedAt.IsZero() ||
-		strings.TrimSpace(metadata.Reason) == "" ||
-		strings.TrimSpace(metadata.OriginalWorkbookPath) == "" ||
-		strings.TrimSpace(metadata.BackupFilePath) == "" {
-		return Record{}, false, nil
+	if strings.TrimSpace(metadata.ID) == "" {
+		return Record{}, invalidMessage("missing_required_field", "metadata field id is required")
+	}
+	if metadata.CreatedAt.IsZero() {
+		return Record{}, invalidMessage("invalid_created_at", "metadata field created_at is required and must be a valid timestamp")
+	}
+	if strings.TrimSpace(metadata.Reason) == "" {
+		return Record{}, invalidMessage("missing_required_field", "metadata field reason is required")
+	}
+	if strings.TrimSpace(metadata.OriginalWorkbookPath) == "" {
+		return Record{}, invalidMessage("missing_required_field", "metadata field original_workbook_path is required")
+	}
+	if strings.TrimSpace(metadata.BackupFilePath) == "" {
+		return Record{}, invalidMessage("missing_required_field", "metadata field backup_file_path is required")
 	}
 	backupAbs := metadata.BackupFilePath
 	if !filepath.IsAbs(backupAbs) {
 		backupAbs = filepath.Join(dir, metadata.BackupFilePath)
 	}
-	if _, err := os.Stat(backupAbs); err != nil {
+	backupAbs = filepath.Clean(backupAbs)
+	backupRootAbs, err := filepath.Abs(backupRoot)
+	if err != nil {
+		return Record{}, invalidState("backup_root_invalid", err)
+	}
+	backupAbsFull, err := filepath.Abs(backupAbs)
+	if err != nil {
+		return Record{}, invalidState("unsafe_backup_file_path", err)
+	}
+	if !pathWithin(backupRootAbs, backupAbsFull) {
+		return Record{}, invalidMessage("unsafe_backup_file_path", "backup file path must stay inside the managed backup directory")
+	}
+	info, err := os.Stat(backupAbsFull)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Record{}, false, nil
+			return Record{}, invalidMessage("missing_backup_file", "referenced backup file does not exist")
 		}
-		return Record{}, false, err
+		return Record{}, invalidState("backup_file_stat_failed", err)
+	}
+	if info.IsDir() {
+		return Record{}, invalidMessage("missing_backup_file", "referenced backup file is a directory")
 	}
 	originalAbs, err := filepath.Abs(metadata.OriginalWorkbookPath)
 	if err != nil {
-		return Record{}, false, err
+		return Record{}, invalidState("unsafe_original_workbook_path", err)
 	}
 	metadata.OriginalWorkbookPath = originalAbs
 	return Record{
 		Metadata:          metadata,
 		Directory:         dir,
-		BackupFileAbsPath: filepath.Clean(backupAbs),
-	}, true, nil
+		BackupFileAbsPath: filepath.Clean(backupAbsFull),
+		SizeBytes:         info.Size(),
+	}, scanEntryState{kind: scanEntryValid}
+}
+
+func invalidState(code string, err error) scanEntryState {
+	return invalidMessage(code, err.Error())
+}
+
+func invalidMessage(code, message string) scanEntryState {
+	return scanEntryState{kind: scanEntryInvalid, code: code, message: message}
+}
+
+func cleanupCreateDir(dir string, primary error) error {
+	if cleanupErr := removeAll(dir); cleanupErr != nil {
+		return errors.Join(primary, fmt.Errorf("backup_cleanup_failed: %w", cleanupErr))
+	}
+	return primary
 }
 
 func writeMetadata(path string, metadata Metadata) error {
@@ -213,7 +312,7 @@ func writeMetadata(path string, metadata Metadata) error {
 		return err
 	}
 	body = append(body, '\n')
-	return os.WriteFile(path, body, 0o644)
+	return writeFile(path, body, 0o644)
 }
 
 func uniqueID(rootDir string, now time.Time, reason string) string {
@@ -282,4 +381,17 @@ func samePath(a, b string) bool {
 	aa := filepath.Clean(a)
 	bb := filepath.Clean(b)
 	return strings.EqualFold(aa, bb)
+}
+
+func pathWithin(parent, child string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	if samePath(parent, child) {
+		return true
+	}
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." && !filepath.IsAbs(rel)
 }
