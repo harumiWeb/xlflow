@@ -5715,6 +5715,21 @@ func TestBackupDeleteRejectsUnknownAndScopeMismatch(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
 	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "backup", "delete"})
+	err = root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("missing flag delete err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var missingFlag output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &missingFlag); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if missingFlag.Error == nil || missingFlag.Error.Code != backup.ErrDeleteArgsInvalid {
+		t.Fatalf("missing flag error = %#v", missingFlag.Error)
+	}
+
+	stdout.Reset()
+	root = a.rootCommand()
 	root.SetArgs([]string{"--json", "backup", "delete", "--backup", "missing"})
 	err = root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {

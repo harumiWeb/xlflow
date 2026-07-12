@@ -416,6 +416,9 @@ func TestDeleteRejectsScopeMismatchAndUnsafeManagedDirectory(t *testing.T) {
 	root := t.TempDir()
 	bookA := writeWorkbook(t, root, "A.xlsm", "A")
 	bookB := writeWorkbook(t, root, "B.xlsm", "B")
+	if _, err := Delete(root, bookA, " "); err == nil || !backupErrorCodeIs(err, ErrDeleteArgsInvalid) {
+		t.Fatalf("Delete empty ID err = %v, want %s", err, ErrDeleteArgsInvalid)
+	}
 	record := createBackupEntry(t, root, "backup-a", bookA, "A.xlsm", "A", time.Now())
 	if _, err := Delete(root, bookB, record.ID); err == nil || !backupErrorCodeIs(err, ErrDeleteScopeMismatch) {
 		t.Fatalf("Delete scope err = %v, want %s", err, ErrDeleteScopeMismatch)

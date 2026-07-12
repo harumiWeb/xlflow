@@ -25,6 +25,7 @@ var (
 const (
 	ErrPruneArgsInvalid    = "backup_prune_args_invalid"
 	ErrPruneFailed         = "backup_prune_failed"
+	ErrDeleteArgsInvalid   = "backup_delete_args_invalid"
 	ErrNotFound            = "backup_not_found"
 	ErrDeleteFailed        = "backup_delete_failed"
 	ErrDeleteUnsafePath    = "backup_delete_unsafe_path"
@@ -333,7 +334,7 @@ func Prune(rootDir, workbookPath string, opts PruneOptions) (PruneResult, error)
 func Delete(rootDir, workbookPath, backupID string) (DeleteResult, error) {
 	backupID = strings.TrimSpace(backupID)
 	if backupID == "" {
-		return DeleteResult{}, &Error{Code: ErrPruneArgsInvalid, Err: fmt.Errorf("--backup is required")}
+		return DeleteResult{}, &Error{Code: ErrDeleteArgsInvalid, Err: fmt.Errorf("--backup is required")}
 	}
 	scan, err := ScanAll(rootDir)
 	if err != nil {

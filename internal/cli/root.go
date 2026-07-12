@@ -605,7 +605,7 @@ func (a *app) backupDeleteCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(backupID) == "" {
-				return a.writeFailure("backup delete", output.ExitConfig, backup.ErrNotFound, fmt.Errorf("--backup is required"))
+				return a.writeFailure("backup delete", output.ExitConfig, backup.ErrDeleteArgsInvalid, fmt.Errorf("--backup is required"))
 			}
 			cfg, err := a.loadConfig("backup delete")
 			if err != nil {
@@ -2483,6 +2483,8 @@ func backupErrorCode(err error) string {
 
 func backupDeleteExitCode(err error) int {
 	switch backupErrorCode(err) {
+	case backup.ErrDeleteArgsInvalid:
+		return output.ExitConfig
 	case backup.ErrNotFound, backup.ErrDeleteScopeMismatch, backup.ErrDeleteUnsafePath:
 		return output.ExitValidation
 	default:
