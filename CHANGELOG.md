@@ -16,6 +16,7 @@ All notable changes to xlflow will be documented in this file.
 - Added stable qualified VBA test identifiers (`id` / `qualified_name`) to `xlflow test list --json` and `xlflow test --json`, allowing duplicate procedure names across modules and qualified `xlflow test --filter Module.TestName` selection.
 - Added isolated temporary workbook execution for `xlflow test`, including `--isolation none|module|test`, `--no-save`, and JSON `test_run` metadata. Plain non-session test runs now protect the configured workbook by running against `.xlflow/test-runs/<run-id>/` copies.
 - Added `xlflow test --fail-fast`, `--max-failures`, and `--rerun-failed`, including `not_run` results for early termination, flaky pass reporting, attempt history, and execution metadata in JSON output.
+- Expanded the scaffolded `SampleTests.bas` to demonstrate smoke tags, parameterized `@TestCase(...)`, `@ExpectedError(...)`, `@Todo(...)`, common assertions, and test execution commands without introducing failing sample tests.
 - Added `.xlam` project creation to `xlflow new`, using Excel add-in file format `55` while keeping `.xlsm` as the default, and documented `.xlam` initialization through `xlflow init`.
 - Fixed `.xlam` session reuse in the .NET bridge by resolving open add-in workbooks through direct filename lookup with full-path validation, and by making VBE Compile target activation tolerate add-in workbooks without normal visible workbook windows.
 

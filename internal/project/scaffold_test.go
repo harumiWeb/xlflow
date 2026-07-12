@@ -10,6 +10,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
 )
 
 func TestInitScaffold(t *testing.T) {
@@ -126,18 +127,43 @@ func TestNewScaffoldCreatesSampleTests(t *testing.T) {
 		`Attribute VB_Name = "SampleTests"`,
 		"Option Explicit",
 		"xlflow tests are public parameterless Sub procedures",
+		"xlflow test --rerun-failed 1",
 		"'@Tag(\"smoke\")",
-		"Public Sub BeforeAll()",
-		"Public Sub AfterAll()",
-		"Public Sub BeforeEach()",
-		"Public Sub AfterEach()",
 		"Public Sub Test_Sample_Pass()",
+		"'@TestCase(\"adds positives\"; 1, 2, 3)",
+		"Public Sub Test_Adds_Numbers(ByVal leftValue As Long, ByVal rightValue As Long, ByVal expected As Long)",
+		"'@ExpectedError(5)",
+		"Public Sub Test_Expected_Error()",
 		"'@Todo(\"not implemented yet\")",
 		"Public Sub Test_Sample_Todo()",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("sample test module missing %q:\n%s", want, content)
 		}
+	}
+
+	discovered, err := testdiscover.Discover(testdiscover.Options{RootDir: dir, Config: config.Default()})
+	if err != nil {
+		t.Fatalf("sample test module should be discoverable: %v", err)
+	}
+	if discovered.Summary.Tests != 5 {
+		t.Fatalf("sample test count = %d, want 5: %+v", discovered.Summary.Tests, discovered.Items)
+	}
+	byID := map[string]testdiscover.Test{}
+	for _, item := range discovered.Items {
+		byID[item.ID] = item
+	}
+	if pass := byID["SampleTests.Test_Sample_Pass"]; len(pass.Tags) != 1 || pass.Tags[0] != "smoke" {
+		t.Fatalf("sample pass tags = %v, want [smoke]", pass.Tags)
+	}
+	if positive := byID["SampleTests.Test_Adds_Numbers[adds positives]"]; len(positive.Arguments) != 3 {
+		t.Fatalf("parameterized sample arguments = %v, want 3 args", positive.Arguments)
+	}
+	if expected := byID["SampleTests.Test_Expected_Error"]; expected.ExpectedError == nil || expected.ExpectedError.Number != 5 {
+		t.Fatalf("expected-error sample metadata = %+v, want error 5", expected.ExpectedError)
+	}
+	if todo := byID["SampleTests.Test_Sample_Todo"]; todo.StatusHint != "todo" || todo.Todo == nil {
+		t.Fatalf("todo sample metadata = status %q todo %+v, want todo", todo.StatusHint, todo.Todo)
 	}
 }
 
