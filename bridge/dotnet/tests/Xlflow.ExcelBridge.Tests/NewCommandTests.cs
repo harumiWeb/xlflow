@@ -53,6 +53,8 @@ public sealed class NewCommandTests
     [InlineData(@"C:\work\Book.XLSM", 52)]
     [InlineData(@"C:\work\Addin.xlam", 55)]
     [InlineData(@"C:\work\Addin.XLAM", 55)]
+    [InlineData(@"C:\work\Model.xlsb", 50)]
+    [InlineData(@"C:\work\Model.XLSB", 50)]
     public void FileFormatForWorkbookPathUsesWorkbookExtension(string workbookPath, int expected)
     {
         Assert.Equal(expected, ExcelNewService.FileFormatForWorkbookPath(workbookPath));

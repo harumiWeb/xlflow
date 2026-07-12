@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.22.0
+
 - Added configurable automatic backup retention through `[backup.retention]`, disabled by default, with workbook-scoped pruning after successful backup-producing `push` and `rollback` operations.
 - Expanded bundled `XlflowAssert.bas` with strict equality, `Null` / `Empty`, numeric tolerance, string, regex, array, `Range.Value2`, and object identity assertions, plus typed assertion failure formatting for terminal and JSON output.
 - Added parameterized VBA tests with `@TestCase(...)`, including named cases, per-case `id` / `qualified_name`, source/runtime discovery JSON, exact case filtering, scalar literal validation, and `invalid_test_case` diagnostics.
@@ -21,6 +23,8 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow test --fail-fast`, `--max-failures`, and `--rerun-failed`, including `not_run` results for early termination, flaky pass reporting, attempt history, and execution metadata in JSON output.
 - Improved backup handling so corrupted backup entries no longer block `backup list`, valid backup JSON now includes `size_bytes`, incomplete backup creation is cleaned up, and failed `.NET` pushes report successfully created pre-push backups.
 - Expanded the scaffolded `SampleTests.bas` to demonstrate smoke tags, parameterized `@TestCase(...)`, `@ExpectedError(...)`, `@Todo(...)`, common assertions, and test execution commands without introducing failing sample tests.
+- Added first-class `.xlsb` support for Excel COM/VBIDE-backed VBA workflows, including `new`, `init`, source pull/push, sessions, run/test/save, backup/rollback, and UserForm operations, while keeping `.xlsm` as the default project format.
+- Added stable `workbook_format_unsupported` failures for `.xlsb` on direct OOXML/file-level features such as `formulas pull`, workbook inspect, workbook cell diff, and pure-Go `pack`.
 - Added `.xlam` project creation to `xlflow new`, using Excel add-in file format `55` while keeping `.xlsm` as the default, and documented `.xlam` initialization through `xlflow init`.
 - Fixed `.xlam` session reuse in the .NET bridge by resolving open add-in workbooks through direct filename lookup with full-path validation, and by making VBE Compile target activation tolerate add-in workbooks without normal visible workbook windows.
 

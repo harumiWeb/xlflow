@@ -81,6 +81,9 @@ interface XlflowBackupRef {
   mode?: string;
 }
 
+export const newProjectWorkbookPlaceholder = "Book.xlsm, Addin.xlam, or Model.xlsb";
+export const initWorkbookExtensions = ["xlsm", "xlam", "xlsb"] as const;
+
 export interface XlflowPushEnvelope {
   status?: string;
   error?: {
@@ -206,7 +209,7 @@ export function registerCommands(
         prompt: vscode.l10n.t(
           "Workbook filename or project name. Leave empty to use xlflow's default.",
         ),
-        placeHolder: "Book.xlsm",
+        placeHolder: newProjectWorkbookPlaceholder,
         value: "Book.xlsm",
       });
       if (workbook === undefined) {
@@ -232,7 +235,7 @@ export function registerCommands(
         canSelectFolders: false,
         canSelectMany: false,
         filters: {
-          [vscode.l10n.t("Excel workbooks")]: ["xlsm", "xlsb", "xlsx", "xls"],
+          [vscode.l10n.t("Excel workbooks")]: [...initWorkbookExtensions],
           [vscode.l10n.t("All files")]: ["*"],
         },
       });

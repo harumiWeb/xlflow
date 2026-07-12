@@ -6,7 +6,7 @@ Experimental. This spec defines the contract for the pure-Go `pack` path, now im
 
 ## Scope
 
-`pack` builds a macro-enabled workbook artifact (`.xlsm`) from the xlflow source tree plus a workbook template, entirely in Go at the file level. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces that single entry inside the workbook zip. It never opens Excel and never uses COM or VBIDE, and it performs no VBE compile or runtime validation.
+`pack` builds a macro-enabled workbook artifact (`.xlsm`) from the xlflow source tree plus a workbook template, entirely in Go at the file level. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces that single entry inside the workbook zip. It never opens Excel and never uses COM or VBIDE, and it performs no VBE compile or runtime validation. `.xlsb` templates or configured workbooks are rejected with `workbook_format_unsupported` because this path expects an OOXML ZIP package.
 
 `pack` does not change `push`. `push` remains the Excel/VBIDE-backed live-session path on Windows.
 
@@ -51,6 +51,7 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | missing `--out`, bad extension, other arg errors   | `pack_args_invalid`                    | 2    |
 | missing `--experimental`                           | `pack_experimental_required`           | 2    |
 | template/source workbook not found or unreadable   | `pack_template_not_found`              | 2    |
+| `.xlsb` template or configured workbook            | `workbook_format_unsupported`          | 2    |
 
 ## Output / JSON contract
 

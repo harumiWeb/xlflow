@@ -20,7 +20,7 @@ This makes Excel VBA macro development more secure while simplifying integration
 ## What is xlflow?
 
 [xlflow](https://github.com/harumiWeb/xlflow) is a development support CLI tool originally created to enable AI agents to autonomously develop Excel VBA macros.
-It extracts VBA code from Excel workbooks as individual files (such as .bas, .cls, and .frm), allows them to be managed via Git, and then reapplied back to the workbook after editing.
+It extracts VBA code from Excel `.xlsm`, `.xlam`, and `.xlsb` workbooks as individual files (such as .bas, .cls, and .frm), allows them to be managed via Git, and then reapplied back to the workbook after editing.
 Additionally, it supports running VBA macro execution, testing, linting, formatting, and static analysis directly from the CLI, making it equally suitable for both human development and AI agent-assisted Excel VBA development.
 In **xlflow for VSCode**, we **GUI-ify these functionalities while also providing a Language Server Protocol (LSP) server to deliver an exceptionally streamlined development experience for humans.**
 
@@ -120,7 +120,7 @@ This extension is designed for Excel VBA development scenarios such as:
 
 - To create a new xlflow project, click `New Project` from the extension sidebar, enter a file name, and press Enter.
   ![New Project](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/new_proj.png)
-- To convert an existing macro workbook into an xlflow project, click `Init Existing Workbook` from the extension sidebar and select the macro book.
+- To convert an existing `.xlsm`, `.xlam`, or `.xlsb` macro workbook into an xlflow project, click `Init Existing Workbook` from the extension sidebar and select the macro book.
   ![Init Project](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/init_proj.png)
 
 ### Workflow Operations

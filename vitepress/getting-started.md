@@ -1,6 +1,6 @@
 # Getting Started
 
-xlflow turns an Excel VBA workbook or add-in into a source-controlled project that can be edited, checked, and executed from the command line.
+xlflow turns an Excel VBA workbook, add-in, or binary workbook into a source-controlled project that can be edited, checked, and executed from the command line.
 
 ## Requirements
 
@@ -19,13 +19,14 @@ Create a new macro-enabled workbook:
 xlflow new Book.xlsm
 ```
 
-Omit the extension to default to `.xlsm`, or use an explicit `.xlam` filename for an Excel add-in project.
+Omit the extension to default to `.xlsm`, or use an explicit `.xlam` filename for an Excel add-in project or `.xlsb` for an Excel Binary Workbook VBA project.
 
 Or initialize from an existing workbook or add-in:
 
 ```bash
 xlflow init Book.xlsm
 xlflow init ExistingAddin.xlam
+xlflow init ExistingModel.xlsb
 ```
 
 Install the bundled agent skill during scaffolding when you want an AI coding agent to follow xlflow workflows:

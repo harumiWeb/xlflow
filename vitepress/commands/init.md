@@ -23,6 +23,7 @@ xlflow init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no
 ```bash
 xlflow init LegacyBook.xlsm
 xlflow init LegacyAddin.xlam
+xlflow init LegacyModel.xlsb
 xlflow init LegacyBook.xlsm --with-module
 xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 ```
@@ -32,7 +33,9 @@ xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 > [!IMPORTANT]
 > Imported UserForm projects may use compatibility form code handling. New scaffolds use the safer sidecar layout for form code.
 
-`init` copies the input workbook into `build/` without changing its filename or extension. For example, `xlflow init LegacyAddin.xlam` writes `build/LegacyAddin.xlam` and records that path in `xlflow.toml`.
+`init` accepts `.xlsm`, `.xlam`, and `.xlsb` files. It copies the input workbook into `build/` without changing its filename, extension, or workbook format. For example, `xlflow init LegacyModel.xlsb` writes `build/LegacyModel.xlsb` and records that path in `xlflow.toml`.
+
+`.xlsb` projects use the normal VBA source layout and Excel COM/VBIDE workflow. Direct OOXML worksheet features such as formula snapshots, workbook cell diff, and pure-Go `pack` are not supported for `.xlsb`.
 
 ::: tip
 Use `--with-module` when the imported workbook should immediately gain `XlflowAssert`, `XlflowRuntime`, `XlflowUI`, and `XlflowDebug` helpers for workbook-side tests, headless runs, scripted dialogs, and terminal-visible logging.
