@@ -861,6 +861,29 @@ func TestUpdateUserFormCodeSourceAddsMissingSection(t *testing.T) {
 	}
 }
 
+func TestUpdateUserFormCodeSourceHandlesTableCommentsAndQuotedKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	body := "[project]\nname = \"demo\"\n\n[userform] # settings\n\"code_source\" = \"frm\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserFormCodeSource(path, "sidecar"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if strings.Count(text, "[userform]") != 1 {
+		t.Fatalf("expected one userform table, got:\n%s", text)
+	}
+	if !strings.Contains(text, "[userform] # settings\ncode_source = \"sidecar\"") {
+		t.Fatalf("expected quoted key to be replaced in existing table:\n%s", text)
+	}
+}
+
 func hasConfigWarning(warnings []map[string]any, code string, rule string) bool {
 	for _, warning := range warnings {
 		if warning["code"] == code && warning["rule"] == rule {

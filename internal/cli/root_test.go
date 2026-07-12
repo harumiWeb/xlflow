@@ -3805,6 +3805,114 @@ func TestValidateFormMigrationConflictsRejectsExistingSpec(t *testing.T) {
 	}
 }
 
+func TestValidateFormMigrationConflictsChecksSpecWhenCodeMatches(t *testing.T) {
+	dir := t.TempDir()
+	codePath := filepath.Join(dir, "src", "forms", "code", "CustomerForm.bas")
+	specPath := filepath.Join(dir, "src", "forms", "specs", "CustomerForm.yaml")
+	if err := os.MkdirAll(filepath.Dir(codePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codePath, []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := validateFormMigrationConflicts(formMigrationFile{
+		Name:     "CustomerForm",
+		CodePath: codePath,
+		SpecPath: specPath,
+		Code:     "Option Explicit",
+	}, false)
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "Designer spec") {
+		t.Fatalf("expected spec conflict, got %v", err)
+	}
+}
+
+func TestCollectUserFormMigrationCandidatesRejectsDuplicateBasenames(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	for _, rel := range []string{
+		filepath.Join("CalendarPicker.frm"),
+		filepath.Join("Nested", "calendarpicker.frm"),
+	} {
+		path := filepath.Join(formsDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("VERSION 5.00"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := collectUserFormMigrationCandidates(dir, formsDir, "")
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "duplicate UserForm basename") {
+		t.Fatalf("expected duplicate basename conflict, got %v", err)
+	}
+}
+
+func TestRejectStaleSourceForFormMigration(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	frmPath := filepath.Join(dir, "src", "forms", "CustomerForm.frm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(frmPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(frmPath, []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	newTime := time.Now()
+	if err := os.Chtimes(workbookPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(frmPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	err := (&app{cwd: dir}).rejectStaleSourceForFormMigration(cfg)
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "source files are newer") {
+		t.Fatalf("expected stale source conflict, got %v", err)
+	}
+}
+
+func TestWriteUserFormSidecarMigrationRollsBackOnConfigFailure(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	item := formMigrationFile{
+		Name:     "CustomerForm",
+		CodePath: filepath.Join(formsDir, "code", "CustomerForm.bas"),
+		SpecPath: filepath.Join(formsDir, "specs", "CustomerForm.yaml"),
+		Code:     "Option Explicit",
+		Spec: forms.FormSpec{
+			SchemaVersion:    1,
+			Kind:             "xlflow.userform",
+			Basis:            "designer",
+			CoordinateSystem: "parent-relative",
+			Form:             forms.FormSpecForm{Name: "CustomerForm"},
+			Controls:         []forms.FormSpecControl{},
+			Warnings:         []forms.FormSpecWarning{},
+		},
+	}
+	_, _, _, err := (&app{cwd: dir}).writeUserFormSidecarMigration("frm", []formMigrationFile{item}, false)
+	if err == nil {
+		t.Fatal("expected config update failure")
+	}
+	for _, path := range []string{item.CodePath, item.SpecPath} {
+		if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("expected rollback to remove %s, stat err=%v", path, statErr)
+		}
+	}
+}
+
 func TestSkillInstallCommandRefusesOverwriteUnlessForced(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cwd: dir}

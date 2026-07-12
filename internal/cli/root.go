@@ -127,6 +127,12 @@ type formMigrationFile struct {
 	Spec     forms.FormSpec
 }
 
+type formMigrationRollback struct {
+	Path    string
+	Existed bool
+	Body    []byte
+}
+
 type inspectBridgeOptions struct {
 	Session   bool
 	Keepalive excel.CommandOptions
@@ -767,6 +773,9 @@ func (a *app) formMigrateSidecarCommand() *cobra.Command {
 			before := cfg.UserForm.CodeSource
 			if before != "frm" && before != "sidecar" {
 				return a.writeFailure("form migrate sidecar", output.ExitConfig, "form_migrate_args_invalid", fmt.Errorf("userform.code_source must be one of frm, sidecar"))
+			}
+			if err := a.rejectStaleSourceForFormMigration(cfg); err != nil {
+				return a.writeFailure("form migrate sidecar", output.ExitValidation, "form_migrate_conflict", err)
 			}
 			result, err := a.prepareUserFormSidecarMigration(cfg, target, overwrite, session, buildCommandOptions(a.stderrWriter()))
 			if err != nil {
@@ -5855,6 +5864,22 @@ func (a *app) prepareUserFormSidecarMigration(cfg config.Config, target string, 
 	return candidates, nil
 }
 
+func (a *app) rejectStaleSourceForFormMigration(cfg config.Config) error {
+	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+	state := buildStatusState(a.cwd, cfg, workbookPath)
+	if !boolValueForCLI(state, "src_newer_than_workbook") {
+		return nil
+	}
+	message := "source files are newer than the configured workbook; run xlflow push or xlflow pull before migrating UserForms to sidecar mode"
+	if latest := stringValueForCLI(state, "latest_source_modified_at"); latest != "" {
+		message += "; latest source modified at " + latest
+	}
+	if workbook := stringValueForCLI(state, "workbook_last_modified_at"); workbook != "" {
+		message += "; workbook modified at " + workbook
+	}
+	return fmt.Errorf("%w: %s", errFormMigrateConflict, message)
+}
+
 func collectUserFormMigrationCandidates(root string, formsDir string, target string) ([]formMigrationFile, error) {
 	if strings.TrimSpace(formsDir) == "" {
 		return nil, nil
@@ -5868,6 +5893,7 @@ func collectUserFormMigrationCandidates(root string, formsDir string, target str
 	codeDir := filepath.Join(formsDir, "code")
 	specDir := filepath.Join(formsDir, "specs")
 	var out []formMigrationFile
+	seen := map[string]string{}
 	err := filepath.WalkDir(formsDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -5885,6 +5911,11 @@ func collectUserFormMigrationCandidates(root string, formsDir string, target str
 		if target != "" && !strings.EqualFold(name, target) {
 			return nil
 		}
+		normalizedName := strings.ToLower(name)
+		if first, ok := seen[normalizedName]; ok {
+			return fmt.Errorf("%w: duplicate UserForm basename %q at %s and %s", errFormMigrateConflict, name, first, path)
+		}
+		seen[normalizedName] = path
 		frxPath := filepath.Join(filepath.Dir(path), name+".frx")
 		if _, err := os.Stat(frxPath); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -5913,10 +5944,7 @@ func collectUserFormMigrationCandidates(root string, formsDir string, target str
 
 func validateFormMigrationConflicts(item formMigrationFile, overwrite bool) error {
 	if body, err := os.ReadFile(item.CodePath); err == nil {
-		if forms.NormalizeUserFormCodeText(string(body)) == item.Code {
-			return nil
-		}
-		if !overwrite {
+		if forms.NormalizeUserFormCodeText(string(body)) != item.Code && !overwrite {
 			return fmt.Errorf("%w: refusing to overwrite existing sidecar code %s", errFormMigrateConflict, item.CodePath)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -5965,29 +5993,42 @@ func (a *app) writeUserFormSidecarMigration(before string, items []formMigration
 	created := make([]string, 0)
 	updated := make([]string, 0)
 	skipped := make([]string, 0)
+	rollback := make([]formMigrationRollback, 0)
+	fail := func(err error) ([]string, []string, []string, error) {
+		if rollbackErr := rollbackFormMigrationWrites(rollback); rollbackErr != nil {
+			err = fmt.Errorf("%w; rollback failed: %v", err, rollbackErr)
+		}
+		return nil, nil, nil, err
+	}
 	for _, item := range items {
 		if err := os.MkdirAll(filepath.Dir(item.CodePath), 0o755); err != nil {
-			return nil, nil, nil, err
+			return fail(err)
 		}
 		if body, err := os.ReadFile(item.CodePath); err == nil && forms.NormalizeUserFormCodeText(string(body)) == item.Code {
 			skipped = append(skipped, displayPath(a.cwd, item.CodePath))
 		} else {
 			existed := false
+			var oldBody []byte
 			if _, err := os.Stat(item.CodePath); err == nil {
 				existed = true
+				oldBody, err = os.ReadFile(item.CodePath)
+				if err != nil {
+					return fail(err)
+				}
 			} else if !errors.Is(err, os.ErrNotExist) {
-				return nil, nil, nil, err
+				return fail(err)
 			}
 			if existed && !overwrite {
-				return nil, nil, nil, fmt.Errorf("%w: refusing to overwrite existing sidecar code %s", errFormMigrateConflict, item.CodePath)
+				return fail(fmt.Errorf("%w: refusing to overwrite existing sidecar code %s", errFormMigrateConflict, item.CodePath))
 			}
 			body := item.Code
 			if body != "" {
 				body += "\n"
 			}
 			if err := os.WriteFile(item.CodePath, []byte(body), 0o644); err != nil {
-				return nil, nil, nil, err
+				return fail(err)
 			}
+			rollback = append(rollback, formMigrationRollback{Path: item.CodePath, Existed: existed, Body: oldBody})
 			if existed {
 				updated = append(updated, displayPath(a.cwd, item.CodePath))
 			} else {
@@ -5996,17 +6037,23 @@ func (a *app) writeUserFormSidecarMigration(before string, items []formMigration
 		}
 		specOutput := forms.SnapshotOutput{Path: item.SpecPath, DisplayPath: displayPath(a.cwd, item.SpecPath), Format: "yaml"}
 		specExisted := false
+		var oldSpecBody []byte
 		if _, err := os.Stat(item.SpecPath); err == nil {
 			specExisted = true
+			oldSpecBody, err = os.ReadFile(item.SpecPath)
+			if err != nil {
+				return fail(err)
+			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil, err
+			return fail(err)
 		}
 		if specExisted && !overwrite {
-			return nil, nil, nil, fmt.Errorf("%w: refusing to overwrite existing Designer spec %s", errFormMigrateConflict, item.SpecPath)
+			return fail(fmt.Errorf("%w: refusing to overwrite existing Designer spec %s", errFormMigrateConflict, item.SpecPath))
 		}
 		if err := forms.WriteSnapshot(specOutput, item.Spec); err != nil {
-			return nil, nil, nil, err
+			return fail(err)
 		}
+		rollback = append(rollback, formMigrationRollback{Path: item.SpecPath, Existed: specExisted, Body: oldSpecBody})
 		if specExisted {
 			updated = append(updated, displayPath(a.cwd, item.SpecPath))
 		} else {
@@ -6015,11 +6062,28 @@ func (a *app) writeUserFormSidecarMigration(before string, items []formMigration
 	}
 	if before != "sidecar" {
 		if err := config.UpdateUserFormCodeSource(filepath.Join(a.cwd, config.FileName), "sidecar"); err != nil {
-			return nil, nil, nil, err
+			return fail(err)
 		}
 		updated = append(updated, config.FileName)
 	}
 	return created, updated, skipped, nil
+}
+
+func rollbackFormMigrationWrites(items []formMigrationRollback) error {
+	var errs []error
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		if item.Existed {
+			if err := os.WriteFile(item.Path, item.Body, 0o644); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if err := os.Remove(item.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func renderFormMigrationFiles(root string, items []formMigrationFile) []map[string]any {

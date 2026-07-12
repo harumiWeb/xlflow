@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -856,11 +857,10 @@ func UpdateUserFormCodeSource(path string, codeSource string) error {
 	userFormStart := -1
 	userFormEnd := len(lines)
 	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+		section, ok := tomlSectionName(line)
+		if !ok {
 			continue
 		}
-		section := strings.TrimSpace(strings.Trim(trimmed, "[]"))
 		if userFormStart >= 0 {
 			userFormEnd = i
 			break
@@ -892,6 +892,26 @@ func UpdateUserFormCodeSource(path string, codeSource string) error {
 	return os.WriteFile(path, []byte(joinConfigLines(lines, newline, true)), 0o644)
 }
 
+func tomlSectionName(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return "", false
+	}
+	end := strings.Index(trimmed, "]")
+	if end < 0 {
+		return "", false
+	}
+	rest := strings.TrimSpace(trimmed[end+1:])
+	if rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", false
+	}
+	section := strings.TrimSpace(trimmed[1:end])
+	if section == "" || strings.HasPrefix(section, "[") || strings.Contains(section, "]") {
+		return "", false
+	}
+	return section, true
+}
+
 func tomlKeyName(line string) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -901,7 +921,11 @@ func tomlKeyName(line string) string {
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(key)
+	key = strings.TrimSpace(key)
+	if unquoted, err := strconv.Unquote(key); err == nil {
+		return unquoted
+	}
+	return key
 }
 
 func joinConfigLines(lines []string, newline string, trailing bool) string {

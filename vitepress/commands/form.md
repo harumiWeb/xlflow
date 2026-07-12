@@ -31,7 +31,9 @@ xlflow form export-image <name> --out <png>
 
 `form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); it does not create `.frm` or `.frx` artifacts.
 
-`form migrate sidecar` converts existing tracked `src/forms/*.frm` UserForms to the sidecar layout. It extracts code-behind to `src/forms/code/<Name>.bas`, writes a non-executing Designer spec to `src/forms/specs/<Name>.yaml`, and switches `[userform].code_source` to `"sidecar"` after all selected forms succeed. Pass a form name to migrate one form. Existing sidecar/spec files require `--overwrite` unless the sidecar code already matches the extracted `.frm` code.
+`form migrate sidecar` converts existing tracked `src/forms/*.frm` UserForms to the sidecar layout. It extracts code-behind to `src/forms/code/<Name>.bas`, writes a non-executing Designer spec to `src/forms/specs/<Name>.yaml`, and switches `[userform].code_source` to `"sidecar"` after all selected forms succeed. Pass a form name to migrate one form. Existing Designer spec files always require `--overwrite`; existing sidecar code can be skipped only when it already matches the extracted `.frm` code.
+
+Because the Designer spec is captured from the configured workbook, migration refuses to run when source files are newer than the workbook. Run `xlflow push` to apply source-only UserForm edits first, or `xlflow pull` if the workbook should remain authoritative.
 
 ## Examples
 
