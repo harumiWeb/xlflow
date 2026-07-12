@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -828,4 +829,109 @@ builtin_casing = %t
 		analyzeConfigText,
 	)
 	return err
+}
+
+func UpdateUserFormCodeSource(path string, codeSource string) error {
+	codeSource = strings.TrimSpace(codeSource)
+	switch codeSource {
+	case "frm", "sidecar":
+	default:
+		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := string(body)
+	newline := "\n"
+	if strings.Contains(text, "\r\n") {
+		newline = "\r\n"
+	}
+	hadTrailingNewline := strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
+	normalized := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" && hadTrailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+
+	userFormStart := -1
+	userFormEnd := len(lines)
+	for i, line := range lines {
+		section, ok := tomlSectionName(line)
+		if !ok {
+			continue
+		}
+		if userFormStart >= 0 {
+			userFormEnd = i
+			break
+		}
+		if section == "userform" {
+			userFormStart = i
+		}
+	}
+
+	replacement := fmt.Sprintf("code_source = %q", codeSource)
+	if userFormStart >= 0 {
+		for i := userFormStart + 1; i < userFormEnd; i++ {
+			if tomlKeyName(lines[i]) == "code_source" {
+				lines[i] = replacement
+				return os.WriteFile(path, []byte(joinConfigLines(lines, newline, hadTrailingNewline)), 0o644)
+			}
+		}
+		insertAt := userFormEnd
+		lines = append(lines, "")
+		copy(lines[insertAt+1:], lines[insertAt:])
+		lines[insertAt] = replacement
+		return os.WriteFile(path, []byte(joinConfigLines(lines, newline, hadTrailingNewline)), 0o644)
+	}
+
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+		lines = append(lines, "")
+	}
+	lines = append(lines, "[userform]", replacement)
+	return os.WriteFile(path, []byte(joinConfigLines(lines, newline, true)), 0o644)
+}
+
+func tomlSectionName(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return "", false
+	}
+	end := strings.Index(trimmed, "]")
+	if end < 0 {
+		return "", false
+	}
+	rest := strings.TrimSpace(trimmed[end+1:])
+	if rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", false
+	}
+	section := strings.TrimSpace(trimmed[1:end])
+	if section == "" || strings.HasPrefix(section, "[") || strings.Contains(section, "]") {
+		return "", false
+	}
+	return section, true
+}
+
+func tomlKeyName(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	key, _, ok := strings.Cut(trimmed, "=")
+	if !ok {
+		return ""
+	}
+	key = strings.TrimSpace(key)
+	if unquoted, err := strconv.Unquote(key); err == nil {
+		return unquoted
+	}
+	return key
+}
+
+func joinConfigLines(lines []string, newline string, trailing bool) string {
+	out := strings.Join(lines, newline)
+	if trailing && !strings.HasSuffix(out, newline) {
+		out += newline
+	}
+	return out
 }

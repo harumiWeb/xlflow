@@ -127,7 +127,7 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 | ------------- | ------ | -------- | ------------- | ------------------------------------------------------------------------------------------ |
 | `code_source` | string | no       | `"sidecar"`\* | Where UserForm code-behind lives in the source tree.<br>Valid values: `"frm"`, `"sidecar"` |
 
-\* `xlflow new` defaults to `"sidecar"`. `xlflow init` defaults to `"frm"` so that existing code inside `.frm` files remains authoritative.
+\* `xlflow new` defaults to `"sidecar"`. `xlflow init` defaults to `"frm"` so that existing code inside `.frm` files remains authoritative. Use `xlflow init --userform-code-source sidecar` for imported workbooks that should start with sidecar code and Designer specs.
 
 ### `[backup.retention]`
 
@@ -224,7 +224,9 @@ Preflight-blocking analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VB
 ## Defaults differ between `new` and `init`
 
 - **`xlflow new`** writes `[userform].code_source = "sidecar"`.
-- **`xlflow init`** writes `[userform].code_source = "frm"`.
+- **`xlflow init`** writes `[userform].code_source = "frm"` by default.
+- **`xlflow init --userform-code-source sidecar`** writes `[userform].code_source = "sidecar"` and generates imported UserForm specs under `src/forms/specs`.
+- **`xlflow form migrate sidecar`** converts an existing imported project from `frm` to `sidecar` after creating sidecar code and Designer specs.
 - **`xlflow new`** defaults to `build/Book.xlsm` when the workbook argument is omitted or has no extension. Use an explicit `.xlam` filename to create an Excel add-in project or `.xlsb` for an Excel Binary Workbook VBA project.
 - **`xlflow init`** preserves the copied workbook filename and extension, including `.xlam` and `.xlsb`.
 

@@ -51,10 +51,25 @@ type bundledModuleTemplate struct {
 
 type WorkbookCreator func(path string) error
 
+type InitOptions struct {
+	UserFormCodeSource string
+}
+
 func Init(cwd, workbookPath string) (InitResult, error) {
+	return InitWithOptions(cwd, workbookPath, InitOptions{UserFormCodeSource: "frm"})
+}
+
+func InitWithOptions(cwd, workbookPath string, opts InitOptions) (InitResult, error) {
 	var result InitResult
 	if workbookPath == "" {
 		return result, errors.New("workbook path is required")
+	}
+	codeSource := strings.TrimSpace(opts.UserFormCodeSource)
+	if codeSource == "" {
+		codeSource = "frm"
+	}
+	if codeSource != "frm" && codeSource != "sidecar" {
+		return result, fmt.Errorf("userform code source must be one of frm, sidecar")
 	}
 	if err := workbookformat.ValidateProjectWorkbookPath(workbookPath); err != nil {
 		return result, err
@@ -69,7 +84,7 @@ func Init(cwd, workbookPath string) (InitResult, error) {
 	destPath := filepath.Join(cwd, "build", filepath.Base(workbookPath))
 	result, err = createScaffold(cwd, destPath, projectName(workbookPath), func(path string) error {
 		return copyFile(workbookPath, path)
-	}, "frm", false, false)
+	}, codeSource, false, false)
 	if err != nil {
 		return InitResult{}, err
 	}

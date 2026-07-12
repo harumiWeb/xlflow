@@ -819,6 +819,71 @@ func TestWriteOmitsOptionalLintHintsForEnabledOptIns(t *testing.T) {
 	}
 }
 
+func TestUpdateUserFormCodeSourcePreservesUnrelatedConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	body := "# top\r\n[project]\r\nname = \"demo\"\r\n\r\n[userform]\r\n# keep\r\ncode_source = \"frm\"\r\n\r\n[excel]\r\npath = \"build/Book.xlsm\"\r\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserFormCodeSource(path, "sidecar"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "# top\r\n[project]") || !strings.Contains(text, "# keep\r\ncode_source = \"sidecar\"") || !strings.Contains(text, "\r\n[excel]\r\n") {
+		t.Fatalf("updated config did not preserve unrelated text/newlines:\n%s", text)
+	}
+	if strings.Contains(text, "code_source = \"frm\"") {
+		t.Fatalf("old code_source remained:\n%s", text)
+	}
+}
+
+func TestUpdateUserFormCodeSourceAddsMissingSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("[project]\nname = \"demo\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserFormCodeSource(path, "sidecar"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "\n[userform]\ncode_source = \"sidecar\"\n") {
+		t.Fatalf("missing inserted userform section:\n%s", text)
+	}
+}
+
+func TestUpdateUserFormCodeSourceHandlesTableCommentsAndQuotedKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	body := "[project]\nname = \"demo\"\n\n[userform] # settings\n\"code_source\" = \"frm\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserFormCodeSource(path, "sidecar"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if strings.Count(text, "[userform]") != 1 {
+		t.Fatalf("expected one userform table, got:\n%s", text)
+	}
+	if !strings.Contains(text, "[userform] # settings\ncode_source = \"sidecar\"") {
+		t.Fatalf("expected quoted key to be replaced in existing table:\n%s", text)
+	}
+}
+
 func hasConfigWarning(warnings []map[string]any, code string, rule string) bool {
 	for _, warning := range warnings {
 		if warning["code"] == code && warning["rule"] == rule {

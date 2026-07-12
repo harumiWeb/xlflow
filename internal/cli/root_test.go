@@ -3354,6 +3354,24 @@ func TestRootCommandIncludesFormNewCommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesFormMigrateSidecarCommand(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+
+	cmd, _, err := root.Find([]string{"form", "migrate", "sidecar", "CustomerForm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil || cmd.Name() != "sidecar" {
+		t.Fatalf("expected form migrate sidecar command, got %#v", cmd)
+	}
+	for _, name := range []string{"overwrite", "session"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected form migrate sidecar command to define --%s", name)
+		}
+	}
+}
+
 func TestNewAndInitIncludeWithSkillFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
@@ -3471,6 +3489,9 @@ func TestInitCommandIncludesWithModuleFlag(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("with-module") == nil {
 		t.Fatal("expected init command to define --with-module")
+	}
+	if cmd.Flags().Lookup("userform-code-source") == nil {
+		t.Fatal("expected init command to define --userform-code-source")
 	}
 }
 
@@ -3697,6 +3718,198 @@ func TestFormNewCommandReturnsValidationForExistingArtifact(t *testing.T) {
 	}
 	if env.Error == nil || env.Error.Code != "form_new_failed" {
 		t.Fatalf("unexpected error payload: %+v", env.Error)
+	}
+}
+
+func TestWriteUserFormSidecarMigrationCreatesArtifactsAndUpdatesConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	formsDir := filepath.Join(dir, "src", "forms")
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frmPath := filepath.Join(formsDir, "CustomerForm.frm")
+	frmBody := "VERSION 5.00\nBegin VB.UserForm CustomerForm\nEnd\nAttribute VB_Name = \"CustomerForm\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\nPrivate Sub UserForm_Initialize()\nEnd Sub\n"
+	if err := os.WriteFile(frmPath, []byte(frmBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item := formMigrationFile{
+		Name:     "CustomerForm",
+		FRMPath:  frmPath,
+		CodePath: filepath.Join(formsDir, "code", "CustomerForm.bas"),
+		SpecPath: filepath.Join(formsDir, "specs", "CustomerForm.yaml"),
+		Code:     forms.NormalizeUserFormCodeText(forms.ExtractUserFormCodeFromFRM(frmBody)),
+		Spec: forms.FormSpec{
+			SchemaVersion:    1,
+			Kind:             "xlflow.userform",
+			Basis:            "designer",
+			CoordinateSystem: "parent-relative",
+			Form:             forms.FormSpecForm{Name: "CustomerForm"},
+			Controls:         []forms.FormSpecControl{},
+			Warnings:         []forms.FormSpecWarning{},
+		},
+	}
+	a := &app{cwd: dir}
+	created, updated, skipped, err := a.writeUserFormSidecarMigration("frm", []formMigrationFile{item}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want none", skipped)
+	}
+	for _, want := range []string{"src/forms/code/CustomerForm.bas", "src/forms/specs/CustomerForm.yaml"} {
+		if !stringSliceContains(created, want) {
+			t.Fatalf("created = %#v, missing %s", created, want)
+		}
+	}
+	if !stringSliceContains(updated, config.FileName) {
+		t.Fatalf("updated = %#v, missing xlflow.toml", updated)
+	}
+	sidecar, err := os.ReadFile(item.CodePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(sidecar), "Attribute VB_") || !strings.Contains(string(sidecar), "Private Sub UserForm_Initialize") {
+		t.Fatalf("unexpected sidecar code:\n%s", string(sidecar))
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UserForm.CodeSource != "sidecar" {
+		t.Fatalf("code_source = %q, want sidecar", loaded.UserForm.CodeSource)
+	}
+}
+
+func TestValidateFormMigrationConflictsRejectsExistingSpec(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "src", "forms", "specs", "CustomerForm.yaml")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := validateFormMigrationConflicts(formMigrationFile{
+		Name:     "CustomerForm",
+		CodePath: filepath.Join(dir, "src", "forms", "code", "CustomerForm.bas"),
+		SpecPath: specPath,
+		Code:     "Option Explicit",
+	}, false)
+	if !errors.Is(err, errFormMigrateConflict) {
+		t.Fatalf("expected migration conflict, got %v", err)
+	}
+}
+
+func TestValidateFormMigrationConflictsChecksSpecWhenCodeMatches(t *testing.T) {
+	dir := t.TempDir()
+	codePath := filepath.Join(dir, "src", "forms", "code", "CustomerForm.bas")
+	specPath := filepath.Join(dir, "src", "forms", "specs", "CustomerForm.yaml")
+	if err := os.MkdirAll(filepath.Dir(codePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codePath, []byte("Option Explicit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := validateFormMigrationConflicts(formMigrationFile{
+		Name:     "CustomerForm",
+		CodePath: codePath,
+		SpecPath: specPath,
+		Code:     "Option Explicit",
+	}, false)
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "Designer spec") {
+		t.Fatalf("expected spec conflict, got %v", err)
+	}
+}
+
+func TestCollectUserFormMigrationCandidatesRejectsDuplicateBasenames(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	for _, rel := range []string{
+		filepath.Join("CalendarPicker.frm"),
+		filepath.Join("Nested", "calendarpicker.frm"),
+	} {
+		path := filepath.Join(formsDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("VERSION 5.00"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := collectUserFormMigrationCandidates(dir, formsDir, "")
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "duplicate UserForm basename") {
+		t.Fatalf("expected duplicate basename conflict, got %v", err)
+	}
+}
+
+func TestRejectStaleSourceForFormMigration(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	workbookPath := filepath.Join(dir, "build", "Book.xlsm")
+	frmPath := filepath.Join(dir, "src", "forms", "CustomerForm.frm")
+	if err := os.MkdirAll(filepath.Dir(workbookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(frmPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workbookPath, []byte("workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(frmPath, []byte("VERSION 5.00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	newTime := time.Now()
+	if err := os.Chtimes(workbookPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(frmPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	err := (&app{cwd: dir}).rejectStaleSourceForFormMigration(cfg)
+	if !errors.Is(err, errFormMigrateConflict) || !strings.Contains(err.Error(), "source files are newer") {
+		t.Fatalf("expected stale source conflict, got %v", err)
+	}
+}
+
+func TestWriteUserFormSidecarMigrationRollsBackOnConfigFailure(t *testing.T) {
+	dir := t.TempDir()
+	formsDir := filepath.Join(dir, "src", "forms")
+	item := formMigrationFile{
+		Name:     "CustomerForm",
+		CodePath: filepath.Join(formsDir, "code", "CustomerForm.bas"),
+		SpecPath: filepath.Join(formsDir, "specs", "CustomerForm.yaml"),
+		Code:     "Option Explicit",
+		Spec: forms.FormSpec{
+			SchemaVersion:    1,
+			Kind:             "xlflow.userform",
+			Basis:            "designer",
+			CoordinateSystem: "parent-relative",
+			Form:             forms.FormSpecForm{Name: "CustomerForm"},
+			Controls:         []forms.FormSpecControl{},
+			Warnings:         []forms.FormSpecWarning{},
+		},
+	}
+	_, _, _, err := (&app{cwd: dir}).writeUserFormSidecarMigration("frm", []formMigrationFile{item}, false)
+	if err == nil {
+		t.Fatal("expected config update failure")
+	}
+	for _, path := range []string{item.CodePath, item.SpecPath} {
+		if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("expected rollback to remove %s, stat err=%v", path, statErr)
+		}
 	}
 }
 
@@ -7254,4 +7467,13 @@ func TestConfirmPromptRejectsNo(t *testing.T) {
 	if result {
 		t.Fatalf("confirmPrompt should return false for 'n'")
 	}
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
