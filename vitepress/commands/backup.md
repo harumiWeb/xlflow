@@ -6,20 +6,23 @@ List rollback-capable workbook backups managed by xlflow.
 
 ```bash
 xlflow backup list
-xlflow backup prune [--keep-last <n>] [--older-than <duration>] [--max-total-size <size>] [--dry-run]
+xlflow backup prune [--keep-last <n>] [--older-than <duration>] [--max-total-size <size>] [--dry-run] [--all-workbooks] [--include-invalid] [--include-legacy]
 ```
 
 ## Options and Arguments
 
-| Option / argument  | Description                                             | Default  |
-| ------------------ | ------------------------------------------------------- | -------- |
-| `list`             | List workbook-file backups for the configured workbook. | required |
-| `prune`            | Preview or delete backups matching an explicit policy.  | optional |
-| `--keep-last <n>`  | Protect the newest `n` valid backups.                   | none     |
-| `--older-than`     | Delete valid backups older than a duration like `30d`.  | none     |
-| `--max-total-size` | Delete oldest backups until total size is within limit. | none     |
-| `--dry-run`        | Preview candidates without deleting files.              | false    |
-| `--json`           | Return backup metadata for scripts and agent workflows. | false    |
+| Option / argument   | Description                                              | Default  |
+| ------------------- | -------------------------------------------------------- | -------- |
+| `list`              | List workbook-file backups for the configured workbook.  | required |
+| `prune`             | Preview or delete backups matching an explicit policy.   | optional |
+| `--keep-last <n>`   | Protect the newest `n` valid backups.                    | none     |
+| `--older-than`      | Delete valid backups older than a duration like `30d`.   | none     |
+| `--max-total-size`  | Delete oldest backups until total size is within limit.  | none     |
+| `--dry-run`         | Preview candidates without deleting files.               | false    |
+| `--all-workbooks`   | Evaluate valid backups for all managed workbooks.        | false    |
+| `--include-invalid` | Include invalid managed backup directories for cleanup.  | false    |
+| `--include-legacy`  | Include legacy directories without metadata for cleanup. | false    |
+| `--json`            | Return backup metadata for scripts and agent workflows.  | false    |
 
 ## Examples
 
