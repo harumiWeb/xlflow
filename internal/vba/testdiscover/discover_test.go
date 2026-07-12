@@ -32,7 +32,7 @@ End Sub
 Public Function TestFunction() As Boolean
 End Function
 
-Public Sub TestWithArg(ByVal value As Long)
+Public Sub HelperWithArg(ByVal value As Long)
 End Sub
 `)
 	writeModule(t, dir, filepath.Join("src", "classes", "Ignored.cls"), `VERSION 1.0 CLASS
@@ -209,6 +209,135 @@ End Sub
 	third := result.Items[2]
 	if third.StatusHint != "todo" || third.Todo == nil || third.Todo.Reason == nil || *third.Todo.Reason != "実装待ち" {
 		t.Fatalf("unexpected unicode todo metadata: %+v", third)
+	}
+}
+
+func TestDiscoverParameterizedTestCases(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, filepath.Join("src", "modules", "MathTests.bas"), `Attribute VB_Name = "MathTests"
+Option Explicit
+
+'@Tag("fast")
+'@TestCase("positive"; 1, 2.5, True, "a ""quote""", Empty, Null, #2026-07-12#)
+'@TestCase(-1, 1.2E-3, False, "", Empty, Null, #2026-07-12#)
+Public Sub Test_Add( _
+    ByVal leftValue As Long, _
+    ByVal rightValue As Double, _
+    ByVal enabled As Boolean, _
+    ByVal label As String, _
+    ByVal emptyValue As Variant, _
+    ByVal nullValue As Variant, _
+    ByVal dayValue As Date)
+End Sub
+`)
+
+	result, err := Discover(Options{RootDir: dir, Config: config.Default()})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if result.Summary.Tests != 2 || len(result.Items) != 2 {
+		t.Fatalf("unexpected parameterized result: %+v", result)
+	}
+	first := result.Items[0]
+	if first.ID != "MathTests.Test_Add[positive]" || first.QualifiedName != first.ID || first.QualifiedProc != "MathTests.Test_Add" || first.CaseID != "positive" {
+		t.Fatalf("unexpected named case identity: %+v", first)
+	}
+	if first.AnnotationLine != 5 || first.ProcedureLine != 7 || first.Line != 7 {
+		t.Fatalf("unexpected locations: %+v", first)
+	}
+	if len(first.Arguments) != 7 || first.Arguments[0].Type != "Long" || first.Arguments[0].Value != int64(1) || first.Arguments[3].Value != `a "quote"` {
+		t.Fatalf("unexpected arguments: %+v", first.Arguments)
+	}
+	second := result.Items[1]
+	if second.ID != `MathTests.Test_Add[-1,1.2E-3,False,"",Empty,Null,#2026-07-12#]` {
+		t.Fatalf("unexpected unnamed case id: %s", second.ID)
+	}
+	if second.Arguments[5].Value != nil || second.Arguments[6].Value != "2026-07-12" {
+		t.Fatalf("unexpected null/date arguments: %+v", second.Arguments)
+	}
+}
+
+func TestDiscoverRejectsInvalidTestCases(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "missing_test_case",
+			body: `Public Sub Test_Add(ByVal value As Long)
+End Sub
+`,
+			want: "requires at least one @TestCase",
+		},
+		{
+			name: "argument_count",
+			body: `'@TestCase(1)
+Public Sub Test_Add(ByVal leftValue As Long, ByVal rightValue As Long)
+End Sub
+`,
+			want: "provides 1 arguments",
+		},
+		{
+			name: "invalid_conversion",
+			body: `'@TestCase("abc")
+Public Sub Test_Parse(ByVal value As Long)
+End Sub
+`,
+			want: "cannot be passed to Long",
+		},
+		{
+			name: "unsupported_parameter_type",
+			body: `'@TestCase("A1")
+Public Sub Test_Range(ByVal value As Range)
+End Sub
+`,
+			want: "unsupported parameter type Range",
+		},
+		{
+			name: "byref",
+			body: `'@TestCase(1)
+Public Sub Test_ByRef(ByRef value As Long)
+End Sub
+`,
+			want: "must be ByVal",
+		},
+		{
+			name: "duplicate_case_id",
+			body: `'@TestCase("same"; 1)
+'@TestCase("same"; 2)
+Public Sub Test_Dupe(ByVal value As Long)
+End Sub
+`,
+			want: "duplicate generated test case id",
+		},
+		{
+			name: "unsupported_literal",
+			body: `'@TestCase(SomeConstant)
+Public Sub Test_Constant(ByVal value As Long)
+End Sub
+`,
+			want: "unsupported @TestCase literal",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeModule(t, dir, filepath.Join("src", "modules", "CaseTests.bas"), "Attribute VB_Name = \"CaseTests\"\nOption Explicit\n\n"+c.body)
+
+			_, err := Discover(Options{RootDir: dir, Config: config.Default()})
+			if err == nil {
+				t.Fatal("Discover() error = nil, want invalid test case")
+			}
+			var testCaseErr InvalidTestCaseError
+			if !errors.As(err, &testCaseErr) {
+				t.Fatalf("error = %T %v, want InvalidTestCaseError", err, err)
+			}
+			if !strings.Contains(testCaseErr.Message, c.want) {
+				t.Fatalf("message = %q, want %q", testCaseErr.Message, c.want)
+			}
+		})
 	}
 }
 

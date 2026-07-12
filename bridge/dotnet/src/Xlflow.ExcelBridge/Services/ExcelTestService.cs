@@ -13,6 +13,7 @@ public sealed class ExcelTestService : ITestService
 {
     private const int VbObjectError = unchecked((int)0x80040000);
     private const int InconclusiveErrorNumber = VbObjectError + 516;
+    private static readonly string[] SupportedTestParameterTypes = ["Boolean", "Byte", "Integer", "Long", "LongLong", "LongPtr", "Single", "Double", "Currency", "Date", "String", "Variant"];
 
     public BridgeResponse Execute(BridgeRequest request, TestCommandArguments args, CancellationToken cancellationToken)
     {
@@ -242,6 +243,11 @@ public sealed class ExcelTestService : ITestService
         catch (InvalidTestMetadataException ex)
         {
             return ([], BuildErrorResponse(request, args, "invalid_test_metadata", ex.Message,
+                sessionAttached: false, sessionMode: "none", [], runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
+        }
+        catch (InvalidTestCaseException ex)
+        {
+            return ([], BuildErrorResponse(request, args, "invalid_test_case", ex.Message,
                 sessionAttached: false, sessionMode: "none", [], runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
         }
         catch (Exception ex)
@@ -649,6 +655,11 @@ public sealed class ExcelTestService : ITestService
             return BuildErrorResponse(request, args, "invalid_test_metadata", ex.Message,
                 sessionAttached, sessionMode, [], runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
         }
+        catch (InvalidTestCaseException ex)
+        {
+            return BuildErrorResponse(request, args, "invalid_test_case", ex.Message,
+                sessionAttached, sessionMode, [], runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
@@ -824,19 +835,20 @@ public sealed class ExcelTestService : ITestService
         {
             var line = lines[i].Trim();
             var procedureMatch = Regex.Match(line,
-                $@"^(?:(?:Public|Private)\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+({VbaIdentifierPattern.Identifier})\b",
+                $@"^(?:(?<visibility>Public|Private)\s+)?(?<kind>Sub|Function|Property\s+(?:Get|Let|Set))\s+(?<name>{VbaIdentifierPattern.Identifier})\b",
                 RegexOptions.IgnoreCase);
             if (!procedureMatch.Success)
             {
                 continue;
             }
 
-            var name = procedureMatch.Groups[1].Value;
+            var name = procedureMatch.Groups["name"].Value;
+            var visibility = procedureMatch.Groups["visibility"].Value;
+            var kind = procedureMatch.Groups["kind"].Value;
+            var header = DeclarationHeader(lines, i);
             var metadata = MetadataAbove(lines, i, moduleName);
-            var testMatch = Regex.Match(line,
-                $@"^(?:Public\s+)?Sub\s+({VbaIdentifierPattern.Identifier})\s*(?:\(\s*\))?\s*(?:'.*)?$",
-                RegexOptions.IgnoreCase);
-            var isTest = testMatch.Success &&
+            var isTest = kind.Equals("Sub", StringComparison.OrdinalIgnoreCase) &&
+                !visibility.Equals("Private", StringComparison.OrdinalIgnoreCase) &&
                 (name.StartsWith("Test", StringComparison.OrdinalIgnoreCase) || name.EndsWith("_Test", StringComparison.OrdinalIgnoreCase));
             if (!isTest)
             {
@@ -845,19 +857,16 @@ public sealed class ExcelTestService : ITestService
                     throw new InvalidTestMetadataException(moduleName, i + 1, metadata.ExpectedErrorLine,
                         "@ExpectedError annotation is only supported on test procedures");
                 }
+                if (metadata.TestCases.Count > 0)
+                {
+                    throw new InvalidTestCaseException(moduleName, i + 1, metadata.TestCases[0].Line,
+                        "@TestCase annotation is only supported on test procedures");
+                }
                 continue;
             }
 
-            tests.Add(new TestCase
-            {
-                Name = name,
-                Module = moduleName,
-                Line = i + 1,
-                Tags = metadata.Tags.ToArray(),
-                Skip = metadata.Skip,
-                Todo = metadata.Todo,
-                ExpectedError = metadata.ExpectedError,
-            });
+            var parameters = ParseProcedureParameters(header, moduleName, i + 1);
+            tests.AddRange(ExpandTestCases(moduleName, name, i + 1, parameters, metadata));
         }
         return tests;
     }
@@ -877,6 +886,14 @@ public sealed class ExcelTestService : ITestService
             if (tagMatch.Success)
             {
                 metadata.Tags.Add(tagMatch.Groups[1].Value);
+                continue;
+            }
+
+            if (Regex.IsMatch(prev, @"^'\s*@TestCase\b", RegexOptions.IgnoreCase))
+            {
+                var testCase = ParseTestCaseAnnotation(prev, moduleName, j + 1);
+                testCase.Line = j + 1;
+                metadata.TestCases.Add(testCase);
                 continue;
             }
 
@@ -933,6 +950,7 @@ public sealed class ExcelTestService : ITestService
 
             break;
         }
+        metadata.TestCases.Reverse();
         return metadata;
     }
 
@@ -958,6 +976,435 @@ public sealed class ExcelTestService : ITestService
         {
             Reason = ParseExpectedErrorStringArg(reasonExpression, moduleName, lineNumber, "reason", "@" + annotationName),
         };
+    }
+
+    private static string DeclarationHeader(string[] lines, int startIndex)
+    {
+        var builder = new StringBuilder();
+        for (var i = startIndex; i < lines.Length; i++)
+        {
+            var line = StripComment(lines[i]).Trim();
+            if (line.EndsWith('_'))
+            {
+                builder.Append(line[..^1].TrimEnd());
+                builder.Append(' ');
+                continue;
+            }
+            builder.Append(line);
+            break;
+        }
+        return builder.ToString();
+    }
+
+    private static string StripComment(string line)
+    {
+        var inString = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '"')
+            {
+                if (inString && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    i++;
+                    continue;
+                }
+                inString = !inString;
+            }
+            else if (line[i] == '\'' && !inString)
+            {
+                return line[..i];
+            }
+        }
+        return line;
+    }
+
+    private static List<TestParameter> ParseProcedureParameters(string header, string moduleName, int lineNumber)
+    {
+        var open = header.IndexOf('(');
+        if (open < 0)
+        {
+            return [];
+        }
+        var close = header.LastIndexOf(')');
+        if (close < open)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed test procedure parameter list");
+        }
+        var body = header[(open + 1)..close].Trim();
+        if (body.Length == 0)
+        {
+            return [];
+        }
+        var parts = SplitAnnotationArgs(body, "@TestCase", moduleName, lineNumber);
+        var parameters = new List<TestParameter>();
+        foreach (var part in parts)
+        {
+            parameters.Add(ParseProcedureParameter(part, moduleName, lineNumber));
+        }
+        return parameters;
+    }
+
+    private static TestParameter ParseProcedureParameter(string input, string moduleName, int lineNumber)
+    {
+        var text = input.Trim();
+        var paramArray = Regex.IsMatch(text, @"\bParamArray\b", RegexOptions.IgnoreCase);
+        var optional = Regex.IsMatch(text, @"\bOptional\b", RegexOptions.IgnoreCase);
+        var passingMatch = Regex.Match(text, @"\b(ByVal|ByRef)\b", RegexOptions.IgnoreCase);
+        var passing = passingMatch.Success ? NormalizeKeyword(passingMatch.Value) : "";
+        var cleaned = Regex.Replace(text, @"\b(Optional|ByVal|ByRef|ParamArray)\b", "", RegexOptions.IgnoreCase).Trim();
+        var asMatch = Regex.Match(cleaned, $@"^(?<name>{VbaIdentifierPattern.Identifier})(?:\(\))?\s*(?:As\s+(?<type>[A-Za-z][A-Za-z0-9_]*))?(?:\s*=.*)?$", RegexOptions.IgnoreCase);
+        if (!asMatch.Success)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, $"unsupported test parameter declaration {input}");
+        }
+        var type = NormalizeParameterType(asMatch.Groups["type"].Success ? asMatch.Groups["type"].Value : "Variant");
+        return new TestParameter(asMatch.Groups["name"].Value, type, passing, optional, paramArray);
+    }
+
+    private static List<TestCase> ExpandTestCases(string moduleName, string name, int line, List<TestParameter> parameters, TestMetadata metadata)
+    {
+        var qualifiedProcedure = moduleName + "." + name;
+        if (parameters.Count == 0)
+        {
+            if (metadata.TestCases.Count > 0)
+            {
+                var first = metadata.TestCases[0];
+                if (first.HasName || first.Arguments.Count > 0)
+                {
+                    throw new InvalidTestCaseException(moduleName, line, first.Line, "parameterless test must not declare @TestCase arguments");
+                }
+            }
+            return
+            [
+                new TestCase
+                {
+                    Name = name,
+                    Module = moduleName,
+                    Line = line,
+                    Tags = metadata.Tags.ToArray(),
+                    Skip = metadata.Skip,
+                    Todo = metadata.Todo,
+                    ExpectedError = metadata.ExpectedError,
+                },
+            ];
+        }
+
+        if (metadata.TestCases.Count == 0)
+        {
+            throw new InvalidTestCaseException(moduleName, line, line, $"parameterized test {name} requires at least one @TestCase");
+        }
+        ValidateTestParameters(parameters, moduleName, line);
+
+        var tests = new List<TestCase>();
+        foreach (var testCase in metadata.TestCases)
+        {
+            if (testCase.Arguments.Count != parameters.Count)
+            {
+                throw new InvalidTestCaseException(moduleName, line, testCase.Line,
+                    $"@TestCase provides {testCase.Arguments.Count} arguments, but {name} requires {parameters.Count}");
+            }
+            var caseId = testCase.HasName
+                ? testCase.Name
+                : string.Join(",", testCase.Arguments.Select(a => a.Canonical));
+            var args = new List<TestArgument>();
+            for (var i = 0; i < testCase.Arguments.Count; i++)
+            {
+                ValidateLiteralForType(testCase.Arguments[i], parameters[i], moduleName, testCase.Line, i + 1, name);
+                args.Add(new TestArgument
+                {
+                    Type = parameters[i].Type,
+                    Value = testCase.Arguments[i].Value,
+                    VbaLiteral = testCase.Arguments[i].VbaLiteral,
+                });
+            }
+            tests.Add(new TestCase
+            {
+                Name = name,
+                Module = moduleName,
+                CaseId = caseId,
+                Line = line,
+                AnnotationLine = testCase.Line,
+                Arguments = args.ToArray(),
+                Tags = metadata.Tags.ToArray(),
+                Skip = metadata.Skip,
+                Todo = metadata.Todo,
+                ExpectedError = metadata.ExpectedError,
+            });
+        }
+
+        var duplicate = tests.GroupBy(t => t.QualifiedName, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw new InvalidTestCaseException(moduleName, line, duplicate.Skip(1).First().AnnotationLine,
+                $"duplicate generated test case id {duplicate.Key}");
+        }
+        return tests;
+    }
+
+    private static void ValidateTestParameters(List<TestParameter> parameters, string moduleName, int line)
+    {
+        foreach (var parameter in parameters)
+        {
+            if (parameter.Optional)
+            {
+                throw new InvalidTestCaseException(moduleName, line, line, "optional parameters are not supported in parameterized tests");
+            }
+            if (parameter.ParamArray)
+            {
+                throw new InvalidTestCaseException(moduleName, line, line, "ParamArray parameters are not supported in parameterized tests");
+            }
+            if (!parameter.Passing.Equals("ByVal", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidTestCaseException(moduleName, line, line, $"parameter {parameter.Name} must be ByVal");
+            }
+            if (!IsSupportedParameterType(parameter.Type))
+            {
+                throw new InvalidTestCaseException(moduleName, line, line, $"unsupported parameter type {parameter.Type} for {parameter.Name}");
+            }
+        }
+    }
+
+    private static ParsedTestCase ParseTestCaseAnnotation(string line, string moduleName = "", int lineNumber = 0)
+    {
+        var match = Regex.Match(line, @"^'\s*@TestCase\s*\((.*)\)\s*$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed @TestCase annotation");
+        }
+        var body = match.Groups[1].Value.Trim();
+        var (nameExpr, argsExpr, hasName) = SplitTestCaseName(body, moduleName, lineNumber);
+        var parsed = new ParsedTestCase { HasName = hasName };
+        if (hasName)
+        {
+            var name = ParseExpectedErrorStringArg(nameExpr, moduleName, lineNumber, "name", "@TestCase");
+            name = CanonicalCaseName(name);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "@TestCase name must not be empty");
+            }
+            parsed.Name = name;
+        }
+        if (string.IsNullOrWhiteSpace(argsExpr))
+        {
+            return parsed;
+        }
+        foreach (var part in SplitAnnotationArgs(argsExpr, "@TestCase", moduleName, lineNumber))
+        {
+            parsed.Arguments.Add(ParseTestLiteral(part, moduleName, lineNumber));
+        }
+        return parsed;
+    }
+
+    private static (string NameExpr, string ArgsExpr, bool HasName) SplitTestCaseName(string input, string moduleName, int lineNumber)
+    {
+        var inString = false;
+        var inDate = false;
+        for (var i = 0; i < input.Length; i++)
+        {
+            var ch = input[i];
+            if (ch == '"' && !inDate)
+            {
+                if (inString && i + 1 < input.Length && input[i + 1] == '"')
+                {
+                    i++;
+                    continue;
+                }
+                inString = !inString;
+                continue;
+            }
+            if (ch == '#' && !inString)
+            {
+                inDate = !inDate;
+                continue;
+            }
+            if (ch == ';' && !inString && !inDate)
+            {
+                return (input[..i].Trim(), input[(i + 1)..].Trim(), true);
+            }
+        }
+        if (inString)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed string literal");
+        }
+        if (inDate)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed date literal");
+        }
+        return ("", input, false);
+    }
+
+    private static List<string> SplitAnnotationArgs(string input, string annotationName, string moduleName, int lineNumber)
+    {
+        var args = new List<string>();
+        var current = new StringBuilder();
+        var inString = false;
+        var inDate = false;
+        for (var i = 0; i < input.Length; i++)
+        {
+            var ch = input[i];
+            if (ch == '"' && !inDate)
+            {
+                current.Append(ch);
+                if (inString && i + 1 < input.Length && input[i + 1] == '"')
+                {
+                    i++;
+                    current.Append(input[i]);
+                    continue;
+                }
+                inString = !inString;
+                continue;
+            }
+            if (ch == '#' && !inString)
+            {
+                inDate = !inDate;
+                current.Append(ch);
+                continue;
+            }
+            if (ch == ',' && !inString && !inDate)
+            {
+                args.Add(current.ToString().Trim());
+                current.Clear();
+                continue;
+            }
+            current.Append(ch);
+        }
+        if (inString)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed string literal");
+        }
+        if (inDate)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed date literal");
+        }
+        args.Add(current.ToString().Trim());
+        if (args.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, $"{annotationName} arguments must not be empty");
+        }
+        return args;
+    }
+
+    private static TestLiteral ParseTestLiteral(string input, string moduleName, int lineNumber)
+    {
+        var raw = input.Trim();
+        if (raw.StartsWith('"'))
+        {
+            var value = ParseExpectedErrorStringArg(raw, moduleName, lineNumber, "argument", "@TestCase");
+            return new TestLiteral("string", CanonicalStringLiteral(value), value, CanonicalStringLiteral(value));
+        }
+        if (raw.StartsWith('#'))
+        {
+            if (raw.Length < 2 || raw[^1] != '#')
+            {
+                throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed date literal");
+            }
+            var value = raw[1..^1].Trim();
+            if (value.Length == 0)
+            {
+                throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, "malformed date literal");
+            }
+            return new TestLiteral("date", "#" + value + "#", value, "#" + value + "#");
+        }
+        if (raw.Equals("True", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TestLiteral("boolean", "True", true, "True");
+        }
+        if (raw.Equals("False", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TestLiteral("boolean", "False", false, "False");
+        }
+        if (raw.Equals("Empty", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TestLiteral("empty", "Empty", "Empty", "Empty");
+        }
+        if (raw.Equals("Null", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TestLiteral("null", "Null", null, "Null");
+        }
+        var numeric = raw;
+        var suffix = '\0';
+        if (raw.Length > 0 && "#!@&^%".Contains(raw[^1], StringComparison.Ordinal))
+        {
+            suffix = raw[^1];
+            numeric = raw[..^1];
+        }
+        if (Regex.IsMatch(numeric, @"^[+-]?\d+$"))
+        {
+            if (!long.TryParse(numeric, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            {
+                throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, $"integer literal {raw} is out of range");
+            }
+            if (suffix is '#' or '!' or '@')
+            {
+                return new TestLiteral("float", raw, (double)value, raw);
+            }
+            return new TestLiteral("integer", raw, value, raw);
+        }
+        if (Regex.IsMatch(numeric, @"^[+-]?(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+|\d+\.\d*[eE][+-]?\d+|\.\d+[eE][+-]?\d+)$"))
+        {
+            if (!double.TryParse(numeric, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            {
+                throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, $"floating-point literal {raw} is invalid");
+            }
+            return new TestLiteral("float", raw, value, raw);
+        }
+        throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber, $"unsupported @TestCase literal {raw}");
+    }
+
+    private static void ValidateLiteralForType(TestLiteral literal, TestParameter parameter, string moduleName, int lineNumber, int argumentIndex, string procedureName)
+    {
+        if (parameter.Type.Equals("Variant", StringComparison.OrdinalIgnoreCase) || literal.Kind is "empty" or "null")
+        {
+            return;
+        }
+        var ok = parameter.Type.ToLowerInvariant() switch
+        {
+            "boolean" => literal.Kind == "boolean",
+            "byte" or "integer" or "long" or "longlong" or "longptr" => literal.Kind == "integer",
+            "single" or "double" or "currency" => literal.Kind is "integer" or "float",
+            "date" => literal.Kind == "date",
+            "string" => literal.Kind == "string",
+            _ => false,
+        };
+        if (!ok)
+        {
+            throw new InvalidTestCaseException(moduleName, lineNumber, lineNumber,
+                $"argument {argumentIndex} for {procedureName}: literal {literal.Canonical} cannot be passed to {parameter.Type}");
+        }
+    }
+
+    private static string NormalizeParameterType(string input)
+    {
+        foreach (var type in SupportedTestParameterTypes)
+        {
+            if (input.Equals(type, StringComparison.OrdinalIgnoreCase))
+            {
+                return type;
+            }
+        }
+        return input;
+    }
+
+    private static bool IsSupportedParameterType(string type)
+    {
+        return SupportedTestParameterTypes
+            .Contains(type, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeKeyword(string value)
+    {
+        return value.Equals("ByVal", StringComparison.OrdinalIgnoreCase) ? "ByVal" :
+            value.Equals("ByRef", StringComparison.OrdinalIgnoreCase) ? "ByRef" : value;
+    }
+
+    private static string CanonicalStringLiteral(string value)
+    {
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string CanonicalCaseName(string value)
+    {
+        return value.Trim().Replace("[", "_", StringComparison.Ordinal).Replace("]", "_", StringComparison.Ordinal);
     }
 
     internal static ExpectedErrorMetadata ParseExpectedErrorAnnotation(string line, string moduleName = "", int lineNumber = 0)
@@ -1125,7 +1572,9 @@ public sealed class ExcelTestService : ITestService
         if (filter.Contains('.'))
         {
             return new TestSelection(
-                candidates.Where(t => string.Equals(t.QualifiedName, filter, StringComparison.OrdinalIgnoreCase)).ToList(),
+                candidates.Where(t =>
+                    string.Equals(t.QualifiedName, filter, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.QualifiedProcedure, filter, StringComparison.OrdinalIgnoreCase)).ToList(),
                 [],
                 false);
         }
@@ -1228,7 +1677,8 @@ public sealed class ExcelTestService : ITestService
             }
 
             builder.AppendLine("      If IsEmpty(beforeEachErr) Then");
-            builder.AppendLine(CultureInfo.InvariantCulture, $"        {test.Module}.{test.Name}");
+            var argumentList = test.Arguments.Length == 0 ? "" : " " + string.Join(", ", test.Arguments.Select(a => a.VbaLiteral));
+            builder.AppendLine(CultureInfo.InvariantCulture, $"        {test.Module}.{test.Name}{argumentList}");
             builder.AppendLine("        If Err.Number <> 0 Then");
             builder.AppendLine("          If Err.Number = vbObjectError + 516 Then");
             builder.AppendLine("            statusHint = \"inconclusive\"");
@@ -1348,8 +1798,16 @@ public sealed class ExcelTestService : ITestService
             ["module"] = test.Module,
             ["status"] = status,
             ["duration_ms"] = durationMs,
+            ["qualified_procedure"] = test.QualifiedProcedure,
+            ["procedure_line"] = test.ProcedureLine,
             ["tags"] = test.Tags,
         };
+        if (!string.IsNullOrEmpty(test.CaseId))
+        {
+            result["case_id"] = test.CaseId;
+            result["annotation_line"] = test.AnnotationLine;
+            result["arguments"] = test.Arguments.Select(BuildTestArgument).ToArray();
+        }
         if (status != "passed")
         {
             result["error"] = error;
@@ -1376,8 +1834,16 @@ public sealed class ExcelTestService : ITestService
             ["module"] = test.Module,
             ["status"] = status,
             ["duration_ms"] = 0,
+            ["qualified_procedure"] = test.QualifiedProcedure,
+            ["procedure_line"] = test.ProcedureLine,
             ["tags"] = test.Tags,
         };
+        if (!string.IsNullOrEmpty(test.CaseId))
+        {
+            result["case_id"] = test.CaseId;
+            result["annotation_line"] = test.AnnotationLine;
+            result["arguments"] = test.Arguments.Select(BuildTestArgument).ToArray();
+        }
         var reason = NonExecutedReason(test);
         if (!string.IsNullOrEmpty(reason))
         {
@@ -1544,8 +2010,16 @@ public sealed class ExcelTestService : ITestService
             ["name"] = test.Name,
             ["module"] = test.Module,
             ["line"] = test.Line,
+            ["qualified_procedure"] = test.QualifiedProcedure,
+            ["procedure_line"] = test.ProcedureLine,
             ["tags"] = test.Tags,
         };
+        if (!string.IsNullOrEmpty(test.CaseId))
+        {
+            payload["case_id"] = test.CaseId;
+            payload["annotation_line"] = test.AnnotationLine;
+            payload["arguments"] = test.Arguments.Select(BuildTestArgument).ToArray();
+        }
         if (test.Skip is not null)
         {
             payload["status_hint"] = "skipped";
@@ -1561,6 +2035,15 @@ public sealed class ExcelTestService : ITestService
             payload["expected_error"] = BuildExpectedError(test.ExpectedError);
         }
         return payload;
+    }
+
+    private static Dictionary<string, object?> BuildTestArgument(TestArgument argument)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["type"] = argument.Type,
+            ["value"] = argument.Value,
+        };
     }
 
     private static Dictionary<string, object?> BuildStatusReason(StatusReasonMetadata metadata)
@@ -1818,14 +2301,27 @@ public sealed class ExcelTestService : ITestService
     {
         public string Name { get; init; } = "";
         public string Module { get; init; } = "";
-        public string QualifiedName => Module + "." + Name;
+        public string ProcedureName => Name;
+        public string QualifiedProcedure => Module + "." + ProcedureName;
+        public string CaseId { get; init; } = "";
+        public string QualifiedName => string.IsNullOrEmpty(CaseId) ? QualifiedProcedure : QualifiedProcedure + "[" + CaseId + "]";
         public string Id => QualifiedName;
         public int Line { get; init; }
+        public int AnnotationLine { get; init; }
+        public int ProcedureLine => Line;
+        public TestArgument[] Arguments { get; init; } = [];
         public string[] Tags { get; init; } = [];
         public StatusReasonMetadata? Skip { get; init; }
         public StatusReasonMetadata? Todo { get; init; }
         public ExpectedErrorMetadata? ExpectedError { get; init; }
         public int Index { get; set; }
+    }
+
+    internal sealed class TestArgument
+    {
+        public string Type { get; init; } = "";
+        public object? Value { get; init; }
+        public string VbaLiteral { get; init; } = "";
     }
 
     internal sealed class StatusReasonMetadata
@@ -1851,6 +2347,7 @@ public sealed class ExcelTestService : ITestService
     private sealed class TestMetadata
     {
         public List<string> Tags { get; } = [];
+        public List<ParsedTestCase> TestCases { get; } = [];
         public StatusReasonMetadata? Skip { get; set; }
         public int SkipLine { get; set; }
         public StatusReasonMetadata? Todo { get; set; }
@@ -1859,9 +2356,50 @@ public sealed class ExcelTestService : ITestService
         public int ExpectedErrorLine { get; set; }
     }
 
+    private sealed class ParsedTestCase
+    {
+        public string Name { get; set; } = "";
+        public bool HasName { get; set; }
+        public List<TestLiteral> Arguments { get; } = [];
+        public int Line { get; set; }
+    }
+
+    private sealed record TestLiteral(string Kind, string Canonical, object? Value, string VbaLiteral);
+
+    private sealed record TestParameter(string Name, string Type, string Passing, bool Optional, bool ParamArray);
+
     internal sealed class InvalidTestMetadataException : Exception
     {
         public InvalidTestMetadataException(string module, int procedureLine, int metadataLine, string message)
+            : base(BuildMessage(module, procedureLine, metadataLine, message))
+        {
+            Module = module;
+            ProcedureLine = procedureLine;
+            MetadataLine = metadataLine;
+        }
+
+        public string Module { get; }
+        public int ProcedureLine { get; }
+        public int MetadataLine { get; }
+
+        private static string BuildMessage(string module, int procedureLine, int metadataLine, string message)
+        {
+            var locationLine = metadataLine > 0 ? metadataLine : procedureLine;
+            if (!string.IsNullOrWhiteSpace(module) && locationLine > 0)
+            {
+                return $"module {module}:{locationLine}: {message}";
+            }
+            if (!string.IsNullOrWhiteSpace(module))
+            {
+                return $"module {module}: {message}";
+            }
+            return message;
+        }
+    }
+
+    internal sealed class InvalidTestCaseException : Exception
+    {
+        public InvalidTestCaseException(string module, int procedureLine, int metadataLine, string message)
             : base(BuildMessage(module, procedureLine, metadataLine, message))
         {
             Module = module;

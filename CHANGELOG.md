@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added parameterized VBA tests with `@TestCase(...)`, including named cases, per-case `id` / `qualified_name`, source/runtime discovery JSON, exact case filtering, scalar literal validation, and `invalid_test_case` diagnostics.
 - Added `@Skip("reason")` and `@Todo("reason")` metadata for VBA tests, including discovery `status_hint`, non-executed `skipped` / `todo` results, separate CLI summary counts, and VS Code Testing API surfacing.
 - Added editor annotation completion for xlflow `@Skip(...)` and `@Todo(...)` test metadata alongside `@ExpectedError(...)`.
 - Added `@ExpectedError(number[, description[, source]])` metadata for VBA tests, including source/runtime discovery JSON, expected-error execution matching, `observed_error` JSON for expected-error results, and `invalid_test_metadata` diagnostics for malformed annotations.

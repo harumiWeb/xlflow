@@ -4724,7 +4724,7 @@ End Sub
 Private Sub TestPrivate()
 End Sub
 
-Public Sub TestWithArg(ByVal value As Long)
+Public Sub HelperWithArg(ByVal value As Long)
 End Sub
 `
 	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "SmokeTests.bas"), []byte(body), 0o644); err != nil {

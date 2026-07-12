@@ -77,11 +77,12 @@ type Attribute struct {
 }
 
 type Parameter struct {
-	Name     string  `json:"name"`
-	Type     string  `json:"type,omitempty"`
-	Passing  string  `json:"passing,omitempty"`
-	Optional bool    `json:"optional,omitempty"`
-	Default  *string `json:"default"`
+	Name       string  `json:"name"`
+	Type       string  `json:"type,omitempty"`
+	Passing    string  `json:"passing,omitempty"`
+	Optional   bool    `json:"optional,omitempty"`
+	ParamArray bool    `json:"param_array,omitempty"`
+	Default    *string `json:"default"`
 }
 
 type fileCandidate struct {
@@ -831,6 +832,7 @@ func parameters(node *tree_sitter.Node, source []byte) []Parameter {
 			}
 		}
 		param.Optional = hasField(child, "optional_modifier") || hasWord(child.Utf8Text(source), "Optional")
+		param.ParamArray = hasWord(child.Utf8Text(source), "ParamArray")
 		initializer := child.ChildByFieldName("default_value")
 		if initializer == nil {
 			initializer = firstNamedChildKind(child, "initializer")

@@ -237,6 +237,74 @@ public sealed class ExcelTestServiceTests
     }
 
     [Fact]
+    public void FindTestProceduresExpandsParameterizedTestCases()
+    {
+        const string code = "Option Explicit\r\n\r\n" +
+            "' @Tag(\"fast\")\r\n" +
+            "' @TestCase(\"positive\"; 1, 2.5, True, \"a \"\"quote\"\"\", Empty, Null, #2026-07-12#)\r\n" +
+            "' @TestCase(-1, 1.2E-3, False, \"\", Empty, Null, #2026-07-12#)\r\n" +
+            "Public Sub Test_Add( _\r\n" +
+            "    ByVal leftValue As Long, _\r\n" +
+            "    ByVal rightValue As Double, _\r\n" +
+            "    ByVal enabled As Boolean, _\r\n" +
+            "    ByVal label As String, _\r\n" +
+            "    ByVal emptyValue As Variant, _\r\n" +
+            "    ByVal nullValue As Variant, _\r\n" +
+            "    ByVal dayValue As Date)\r\n" +
+            "End Sub\r\n";
+
+        var tests = ExcelTestService.FindTestProcedures("MathTests", code);
+
+        Assert.Equal(2, tests.Count);
+        Assert.Equal("MathTests.Test_Add[positive]", tests[0].QualifiedName);
+        Assert.Equal("MathTests.Test_Add", tests[0].QualifiedProcedure);
+        Assert.Equal("positive", tests[0].CaseId);
+        Assert.Equal(4, tests[0].AnnotationLine);
+        Assert.Equal(6, tests[0].ProcedureLine);
+        Assert.Equal(7, tests[0].Arguments.Length);
+        Assert.Equal("Long", tests[0].Arguments[0].Type);
+        Assert.Equal(1L, tests[0].Arguments[0].Value);
+        Assert.Equal("a \"quote\"", tests[0].Arguments[3].Value);
+        Assert.Null(tests[0].Arguments[5].Value);
+        Assert.Equal("2026-07-12", tests[0].Arguments[6].Value);
+        Assert.Equal("MathTests.Test_Add[-1,1.2E-3,False,\"\",Empty,Null,#2026-07-12#]", tests[1].QualifiedName);
+    }
+
+    [Theory]
+    [InlineData("' @TestCase(1)\r\nPublic Sub Test_Add(ByVal leftValue As Long, ByVal rightValue As Long)\r\nEnd Sub", "provides 1 arguments")]
+    [InlineData("' @TestCase(\"abc\")\r\nPublic Sub Test_Parse(ByVal value As Long)\r\nEnd Sub", "cannot be passed to Long")]
+    [InlineData("' @TestCase(\"A1\")\r\nPublic Sub Test_Range(ByVal value As Range)\r\nEnd Sub", "unsupported parameter type Range")]
+    [InlineData("' @TestCase(1)\r\nPublic Sub Test_ByRef(ByRef value As Long)\r\nEnd Sub", "must be ByVal")]
+    [InlineData("' @TestCase(SomeConstant)\r\nPublic Sub Test_Constant(ByVal value As Long)\r\nEnd Sub", "unsupported @TestCase literal")]
+    public void FindTestProceduresRejectsInvalidTestCases(string body, string expectedMessage)
+    {
+        var code = "Option Explicit\r\n\r\n" + body;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestCaseException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains(expectedMessage, ex.Message);
+    }
+
+    [Fact]
+    public void FindTestProceduresRejectsDuplicateGeneratedCaseIds()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @TestCase("same"; 1)
+            ' @TestCase("same"; 2)
+            Public Sub Test_Dupe(ByVal value As Long)
+            End Sub
+            """;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestCaseException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains("duplicate generated test case id", ex.Message);
+    }
+
+    [Fact]
     public void FindTestProceduresCollectsUnicodeTagAnnotations()
     {
         const string code = """
@@ -599,6 +667,47 @@ public sealed class ExcelTestServiceTests
         var byAll = ExcelTestService.SelectTests(allTests, "TestC", "Mod1", "slow");
         Assert.Single(byAll.Tests);
         Assert.Equal("TestC", byAll.Tests[0].Name);
+    }
+
+    [Fact]
+    public void SelectTestsFiltersParameterizedCasesByProcedureOrExactCase()
+    {
+        var allTests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestAdd", Module = "MathTests", CaseId = "1,2,3" },
+            new() { Name = "TestAdd", Module = "MathTests", CaseId = "-1,1,0" },
+            new() { Name = "TestOther", Module = "MathTests" },
+        };
+
+        var procedure = ExcelTestService.SelectTests(allTests, "MathTests.TestAdd", "", "");
+        Assert.Equal(2, procedure.Tests.Count);
+
+        var exactCase = ExcelTestService.SelectTests(allTests, "MathTests.TestAdd[1,2,3]", "", "");
+        Assert.Single(exactCase.Tests);
+        Assert.Equal("1,2,3", exactCase.Tests[0].CaseId);
+    }
+
+    [Fact]
+    public void BuildTestRunnerCodePassesParameterizedArguments()
+    {
+        var tests = new List<ExcelTestService.TestCase>
+        {
+            new()
+            {
+                Name = "TestAdd",
+                Module = "MathTests",
+                CaseId = "positive",
+                Arguments =
+                [
+                    new ExcelTestService.TestArgument { Type = "Long", Value = 1L, VbaLiteral = "1" },
+                    new ExcelTestService.TestArgument { Type = "String", Value = "a \"quote\"", VbaLiteral = "\"a \"\"quote\"\"\"" },
+                ],
+            },
+        };
+
+        var code = ExcelTestService.BuildTestRunnerCode(tests, []);
+
+        Assert.Contains("MathTests.TestAdd 1, \"a \"\"quote\"\"\"", code);
     }
 
     [Fact]
