@@ -107,40 +107,21 @@ public sealed class ExcelTestService : ITestService
                     }
 
                     var selectedWithRetries = retryDiscovery.Tests;
-                    var tempWorkbookWithRetries = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
-                    var firstAttemptArgs = args with { MaxFailures = 0, FailFast = false };
-                    var responseWithRetries = ExecuteSingleWorkbook(
-                        request,
-                        firstAttemptArgs,
-                        tempWorkbookWithRetries,
-                        sourceWorkbook,
-                        explicitTests: selectedWithRetries,
-                        saveAfterRun: false,
-                        cancellationToken);
-                    if (responseWithRetries.Extensions.TryGetValue("tests", out var retryTestsPayload) && retryTestsPayload is IEnumerable<object> retryTests)
-                    {
-                        var retryLogs = new List<string>(responseWithRetries.Logs);
-                        var mergedResults = RetryFailedResults(request, args, sourceWorkbook, runDir, isolation, selectedWithRetries, retryTests.ToList(), retryLogs, cancellationToken);
-                        var finalFailed = CountFailedResultObjects(mergedResults);
-                        responseWithRetries.Extensions["tests"] = mergedResults.ToArray();
-                        responseWithRetries.Extensions["execution"] = BuildExecutionPayload(args, stoppedEarly: false, stopReason: "");
-                        var finalError = finalFailed > 0 ? new BridgeError(
-                            Code: "test_failed",
-                            Message: $"{finalFailed} of {selectedWithRetries.Count} test(s) failed",
-                            Phase: "test",
-                            Source: "xlflow") : null;
-                        if (finalFailed == 0)
-                        {
-                            responseWithRetries.Extensions.Remove("error");
-                            responseWithRetries.Extensions.Remove("status");
-                        }
-                        responseWithRetries = responseWithRetries with
-                        {
-                            Logs = retryLogs,
-                            Status = finalFailed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
-                            Error = finalError,
-                        };
-                    }
+                    var responseWithRetries = args.MaxFailures > 0
+                        ? ExecuteRetryingIsolatedNoneWithFailureLimit(
+                            request,
+                            args,
+                            sourceWorkbook,
+                            runDir,
+                            selectedWithRetries,
+                            cancellationToken)
+                        : ExecuteRetryingIsolatedNoneBatch(
+                            request,
+                            args,
+                            sourceWorkbook,
+                            runDir,
+                            selectedWithRetries,
+                            cancellationToken);
                     cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
                     AttachTestRunMetadata(responseWithRetries, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
                     return responseWithRetries;
@@ -364,6 +345,154 @@ public sealed class ExcelTestService : ITestService
             ExcelBridgeSupport.ReleaseComObject(vbProject);
             CloseWorkbook(workbook, excel, excelProcessId);
         }
+    }
+
+    private static BridgeResponse ExecuteRetryingIsolatedNoneWithFailureLimit(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        string runDir,
+        List<TestCase> selected,
+        CancellationToken cancellationToken)
+    {
+        var logs = new List<string>();
+        var results = new List<object>();
+        var failed = 0;
+        var stoppedEarly = false;
+        var stopReason = "";
+        var attemptArgs = args with { RerunFailed = 0, MaxFailures = 0, FailFast = false };
+        var executableIndex = 0;
+
+        foreach (var test in selected)
+        {
+            if (IsNonExecutedTest(test))
+            {
+                results.Add(BuildNonExecutedTestResult(test));
+                logs.Add(NonExecutedLogLine(test));
+                continue;
+            }
+
+            if (ShouldStopAfterFailures(args, failed))
+            {
+                stoppedEarly = true;
+                stopReason = StopReasonMaximumFailures;
+                results.Add(BuildNotRunTestResult(test, stopReason));
+                logs.Add($"NOT RUN {test.QualifiedName}: {stopReason}");
+                continue;
+            }
+
+            executableIndex++;
+            var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run-" + executableIndex.ToString(CultureInfo.InvariantCulture));
+            var response = ExecuteSingleWorkbook(
+                request,
+                attemptArgs,
+                tempWorkbook,
+                sourceWorkbook,
+                explicitTests: [test],
+                saveAfterRun: false,
+                cancellationToken);
+            logs.AddRange(response.Logs);
+
+            if (response.Error is not null && response.Error.Code != "test_failed")
+            {
+                return response with { Logs = logs };
+            }
+
+            if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> testItems)
+            {
+                var testResults = RetryFailedResults(request, args, sourceWorkbook, runDir, "none", [test], testItems.ToList(), logs, cancellationToken);
+                results.AddRange(testResults);
+                failed = CountFailedResultObjects(results);
+            }
+        }
+
+        return BuildIsolatedAggregateResponse(request, args, sourceWorkbook, selected.Count, results, logs, failed, stoppedEarly, stopReason);
+    }
+
+    private static BridgeResponse ExecuteRetryingIsolatedNoneBatch(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        string runDir,
+        List<TestCase> selected,
+        CancellationToken cancellationToken)
+    {
+        var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
+        var firstAttemptArgs = args with { MaxFailures = 0, FailFast = false };
+        var response = ExecuteSingleWorkbook(
+            request,
+            firstAttemptArgs,
+            tempWorkbook,
+            sourceWorkbook,
+            explicitTests: selected,
+            saveAfterRun: false,
+            cancellationToken);
+        if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> tests)
+        {
+            var logs = new List<string>(response.Logs);
+            var mergedResults = RetryFailedResults(request, args, sourceWorkbook, runDir, "none", selected, tests.ToList(), logs, cancellationToken);
+            var finalFailed = CountFailedResultObjects(mergedResults);
+            response.Extensions["tests"] = mergedResults.ToArray();
+            response.Extensions["execution"] = BuildExecutionPayload(args, stoppedEarly: false, stopReason: "");
+            var finalError = finalFailed > 0 ? new BridgeError(
+                Code: "test_failed",
+                Message: $"{finalFailed} of {selected.Count} test(s) failed",
+                Phase: "test",
+                Source: "xlflow") : null;
+            if (finalFailed == 0)
+            {
+                response.Extensions.Remove("error");
+                response.Extensions.Remove("status");
+            }
+            response = response with
+            {
+                Logs = logs,
+                Status = finalFailed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
+                Error = finalError,
+            };
+        }
+        return response;
+    }
+
+    private static BridgeResponse BuildIsolatedAggregateResponse(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        int selectedCount,
+        List<object> results,
+        List<string> logs,
+        int failed,
+        bool stoppedEarly,
+        string stopReason)
+    {
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = failed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
+            Error = failed > 0 ? new BridgeError(
+                Code: "test_failed",
+                Message: $"{failed} of {selectedCount} test(s) failed",
+                Phase: "test",
+                Source: "xlflow") : null,
+            Logs = logs,
+            Extensions = new Dictionary<string, object?>
+            {
+                ["workbook"] = new
+                {
+                    path = sourceWorkbook,
+                    session = false,
+                    session_mode = "none",
+                    session_requested = false,
+                    auto_session = false,
+                    saved = false,
+                    dirty = false,
+                    needs_save = false,
+                },
+                ["tests"] = results.ToArray(),
+                ["execution"] = BuildExecutionPayload(args, stoppedEarly, stopReason),
+            },
+        };
     }
 
     private static BridgeResponse ExecuteSingleWorkbook(
@@ -1993,6 +2122,9 @@ public sealed class ExcelTestService : ITestService
         {
             result["expected_error"] = BuildExpectedError(test.ExpectedError);
         }
+        result["attempts"] = 1;
+        result["flaky"] = false;
+        result["attempt_results"] = new[] { BuildAttemptResult(1, "not_run", 0, null) };
         return result;
     }
 

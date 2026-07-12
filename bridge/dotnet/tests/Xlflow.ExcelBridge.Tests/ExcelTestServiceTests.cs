@@ -630,6 +630,13 @@ public sealed class ExcelTestServiceTests
         Assert.Equal("maximum failure count reached", result["reason"]);
         Assert.Equal(0, result["duration_ms"]);
         Assert.False(result.ContainsKey("error"));
+        Assert.Equal(1, result["attempts"]);
+        Assert.Equal(false, result["flaky"]);
+        var attempts = Assert.IsAssignableFrom<IEnumerable<object>>(result["attempt_results"]);
+        var attempt = Assert.Single(attempts);
+        var attemptPayload = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(attempt);
+        Assert.Equal("not_run", attemptPayload["status"]);
+        Assert.Equal(0, attemptPayload["duration_ms"]);
     }
 
     [Fact]
