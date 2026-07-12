@@ -33,7 +33,7 @@ The command:
 - replaces the generated `formulas/` directory on each successful run;
 - omits volatile metadata such as generation timestamps.
 
-Unsupported workbook files or extraction failures return `formulas_pull_failed`. A source workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`, except `.xlsb`, which returns `workbook_format_unsupported` with `workbook.format = "xlsb"` and `workbook.capability = "formulas pull"`.
+Extraction failures for valid `.xlsx` or `.xlsm` files return `formulas_pull_failed`. A source workbook path that is not `.xlsx` or `.xlsm` returns `formulas_pull_args_invalid`, except project workbook formats that are not supported by the formula snapshot backend, such as `.xlam` and `.xlsb`, which return `workbook_format_unsupported` with `workbook.format` and `workbook.capability = "formulas pull"`.
 
 ## Output Layout
 

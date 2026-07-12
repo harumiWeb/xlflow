@@ -76,8 +76,8 @@ func ValidateFormulaSnapshotWorkbook(path string) error {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ExtXLSX, ExtXLSM:
 		return nil
-	case ExtXLSB:
-		return UnsupportedError{Capability: "formulas pull", Extension: ExtXLSB}
+	case ExtXLAM, ExtXLSB:
+		return UnsupportedError{Capability: "formulas pull", Extension: strings.ToLower(filepath.Ext(path))}
 	default:
 		return fmt.Errorf("source workbook must end in .xlsx or .xlsm: %s", path)
 	}
@@ -87,8 +87,8 @@ func ValidateFileInspectWorkbook(path, capability string) error {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ExtXLSX, ExtXLSM, ExtXLTX, ExtXLTM:
 		return nil
-	case ExtXLSB:
-		return UnsupportedError{Capability: capability, Extension: ExtXLSB}
+	case ExtXLAM, ExtXLSB:
+		return UnsupportedError{Capability: capability, Extension: strings.ToLower(filepath.Ext(path))}
 	default:
 		return fmt.Errorf("unsupported extension %q; expected .xlsx, .xlsm, .xltx, or .xltm", filepath.Ext(path))
 	}

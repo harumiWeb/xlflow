@@ -51,6 +51,7 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | missing `--out`, bad extension, other arg errors   | `pack_args_invalid`                    | 2    |
 | missing `--experimental`                           | `pack_experimental_required`           | 2    |
 | template/source workbook not found or unreadable   | `pack_template_not_found`              | 2    |
+| `.xlsb` template or configured workbook            | `workbook_format_unsupported`          | 2    |
 
 ## Output / JSON contract
 
