@@ -98,6 +98,17 @@ public sealed class ExcelTestService : ITestService
             var failed = 0;
             foreach (var group in groups)
             {
+                if (group.All(IsNonExecutedTest))
+                {
+                    foreach (var test in group)
+                    {
+                        results.Add(BuildNonExecutedTestResult(test));
+                        logs.Add(NonExecutedLogLine(test));
+                    }
+
+                    continue;
+                }
+
                 var unitName = isolation == "module" ? group[0].Module : group[0].QualifiedName;
                 var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, SanitizeFileSegment(unitName));
                 var response = ExecuteSingleWorkbook(
