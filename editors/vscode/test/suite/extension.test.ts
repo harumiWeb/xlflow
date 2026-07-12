@@ -4,6 +4,15 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
+  backupIDFromPushEnvelope,
+  backupQuickPickItems,
+  compareBackupsNewestFirst,
+  formatBackupTimestamp,
+  formatBytes,
+  pruneSummary,
+  validateKeepLastInput,
+} from "../../src/commands";
+import {
   cliNotificationSuppressionKey,
   normalizeAvailabilityFailure,
   normalizeAvailabilitySuccess,
@@ -99,6 +108,9 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     "xlflow.pull",
     "xlflow.pullFormulas",
     "xlflow.push",
+    "xlflow.rollbackWorkbook",
+    "xlflow.pruneBackups",
+    "xlflow.inspectWorkbook",
     "xlflow.runMacro",
     "xlflow.runProcedure",
     "xlflow.runTestProcedure",
@@ -172,6 +184,79 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     false,
   );
   assert.strictEqual(containsVBAObjectModelAccessIssue("ordinary xlflow output"), false);
+  const backupFolder = {
+    uri: vscode.Uri.file("C:/tmp/xlflow"),
+    name: "xlflow",
+    index: 0,
+  };
+  assert.strictEqual(formatBackupTimestamp("2026-07-12T13:42:01+09:00"), "2026-07-12 13:42");
+  assert.strictEqual(formatBackupTimestamp("not-a-date"), "not-a-date");
+  assert.strictEqual(formatBytes(31.4 * 1024 * 1024), "31.4 MB");
+  assert.strictEqual(formatBytes(42), "42 bytes");
+  assert.strictEqual(validateKeepLastInput("3"), undefined);
+  assert.strictEqual(validateKeepLastInput("0"), "Enter a positive whole number.");
+  assert.strictEqual(validateKeepLastInput("1.5"), "Enter a positive whole number.");
+  assert.strictEqual(
+    backupIDFromPushEnvelope({ status: "failed", backup: { id: "20260712-push-a1b2c3" } }),
+    "20260712-push-a1b2c3",
+  );
+  assert.strictEqual(
+    backupIDFromPushEnvelope({ status: "failed", backup: { id: "  " } }),
+    undefined,
+  );
+  assert.deepStrictEqual(
+    [
+      { id: "older", created_at: "2026-07-12T10:00:00+09:00" },
+      { id: "newer", created_at: "2026-07-12T11:00:00+09:00" },
+    ]
+      .sort(compareBackupsNewestFirst)
+      .map((record) => record.id),
+    ["newer", "older"],
+  );
+  const backupItems = backupQuickPickItems(
+    [
+      {
+        id: "20260712-134201-123-push-a1b2c3",
+        created_at: "2026-07-12T13:42:01+09:00",
+        reason: "before-push",
+        workbook: "build/Book.xlsm",
+        path: ".xlflow/backups/20260712-134201-123-push-a1b2c3/Book.xlsm",
+        size_bytes: 31.4 * 1024 * 1024,
+      },
+      { id: "", created_at: "2026-07-12T14:00:00+09:00" },
+      { id: "malformed", created_at: "bad", size_bytes: -1 },
+    ],
+    backupFolder,
+  );
+  assert.strictEqual(backupItems.length, 2);
+  assert.strictEqual(backupItems[0].record.id, "20260712-134201-123-push-a1b2c3");
+  assert.ok(backupItems[0].label.includes("before-push"));
+  assert.ok(backupItems[0].detail?.includes("31.4 MB"));
+  assert.deepStrictEqual(
+    pruneSummary({
+      backup_prune: {
+        matched: 2,
+        deleted: 1,
+        failed: 1,
+        freed_bytes: 2048,
+        candidates: [{ id: "old", size_bytes: 2048 }],
+      },
+    }),
+    {
+      matched: 2,
+      deleted: 1,
+      failed: 1,
+      freedBytes: 2048,
+      candidates: [{ id: "old", size_bytes: 2048 }],
+    },
+  );
+  assert.deepStrictEqual(pruneSummary(undefined), {
+    matched: 0,
+    deleted: 0,
+    failed: 0,
+    freedBytes: 0,
+    candidates: [],
+  });
   assert.strictEqual(
     disableLineSuffix("    Dim staleValue As Long", "VB020"),
     " ' xlflow:disable-line VB020",
@@ -656,9 +741,23 @@ function assertLocalizationResources(extensionPath: string): void {
   assert.ok(
     hasMenuItem(manifest, "view/title", "xlflow.saveWorkbook", {
       when: "view == xlflow.project && xlflow.saveRequired",
-      group: "navigation@4",
+      group: "navigation@6",
     }),
     "project view title menu should contribute xlflow.saveWorkbook only when save is required",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/title", "xlflow.rollbackWorkbook", {
+      when: "view == xlflow.project",
+      group: "navigation@4",
+    }),
+    "project view title menu should contribute xlflow.rollbackWorkbook",
+  );
+  assert.ok(
+    hasMenuItem(manifest, "view/title", "xlflow.pruneBackups", {
+      when: "view == xlflow.project",
+      group: "navigation@5",
+    }),
+    "project view title menu should contribute xlflow.pruneBackups",
   );
   assert.ok(
     hasView(manifest, "xlflow.formulas", "%view.formulas.name%"),

@@ -50,6 +50,101 @@ interface XlflowStatusEnvelope {
   }>;
 }
 
+export interface XlflowBackupRecord {
+  id?: string;
+  created_at?: string;
+  reason?: string;
+  workbook?: string;
+  path?: string;
+  size_bytes?: number;
+  status?: string;
+}
+
+interface XlflowBackupListEnvelope {
+  status?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  backups?: XlflowBackupRecord[];
+  warnings?: Array<{
+    code?: string;
+    message?: string;
+    path?: string;
+  }>;
+}
+
+interface XlflowBackupRef {
+  id?: string;
+  path?: string;
+  reason?: string;
+  mode?: string;
+}
+
+export interface XlflowPushEnvelope {
+  status?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  backup?: XlflowBackupRef;
+}
+
+interface XlflowRollbackEnvelope {
+  status?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  rollback?: {
+    restored_from?: XlflowBackupRecord;
+    safety_backup?: XlflowBackupRecord;
+    target?: {
+      path?: string;
+    };
+  };
+  warnings?: Array<{
+    code?: string;
+    message?: string;
+  }>;
+  hints?: Array<{
+    code?: string;
+    message?: string;
+  }>;
+}
+
+export interface XlflowBackupPruneEnvelope {
+  status?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  backup_prune?: XlflowBackupPrunePayload;
+}
+
+export interface XlflowBackupPrunePayload {
+  dry_run?: boolean;
+  matched?: number;
+  deleted?: number;
+  failed?: number;
+  freed_bytes?: number;
+  candidates?: XlflowBackupPruneEntry[];
+  deleted_entries?: XlflowBackupPruneEntry[];
+  failed_entries?: XlflowBackupPruneEntry[];
+}
+
+export interface XlflowBackupPruneEntry {
+  id?: string;
+  path?: string;
+  created_at?: string;
+  reason?: string;
+  size_bytes?: number;
+  reasons?: string[];
+  status?: string;
+  code?: string;
+  message?: string;
+}
+
 interface RunArgsChoice {
   args: string[];
   workspaceFolder?: vscode.WorkspaceFolder;
@@ -205,6 +300,12 @@ export function registerCommands(
         await hooks.refreshFormulas();
       }
     }),
+    vscode.commands.registerCommand("xlflow.rollbackWorkbook", async () => {
+      await rollbackWorkbook(channels, sessionManager, hooks);
+    }),
+    vscode.commands.registerCommand("xlflow.pruneBackups", async () => {
+      await pruneBackups(channels);
+    }),
     vscode.commands.registerCommand("xlflow.push", async () => {
       const pushLabel = vscode.l10n.t("Push");
       const confirmed = await vscode.window.showWarningMessage(
@@ -215,18 +316,52 @@ export function registerCommands(
       if (confirmed !== pushLabel) {
         return;
       }
-      const code = await runXlflowCommand(["push"], "xlflow push", channels.output, {
-        requireWorkspace: true,
-        uiLabel: vscode.l10n.t("xlflow push"),
-      });
-      if (code === 0) {
+      const workspaceFolder = await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: false });
+      if (workspaceFolder === undefined) {
+        vscode.window.showWarningMessage(
+          vscode.l10n.t("{label} requires an open workspace folder.", {
+            label: vscode.l10n.t("xlflow push"),
+          }),
+        );
+        return;
+      }
+      const result = await runJsonWithProgress<XlflowPushEnvelope>(
+        ["--json", "push"],
+        "xlflow push",
+        channels.output,
+        vscode.l10n.t("xlflow push"),
+        workspaceFolder,
+      );
+      if (result.exitCode === 0) {
+        vscode.window.showInformationMessage(
+          vscode.l10n.t("{label} completed.", { label: vscode.l10n.t("xlflow push") }),
+        );
         await Promise.all([
           hooks.refreshProject(),
           hooks.refreshModules(),
           hooks.refreshUserForms(),
           hooks.refreshTests(),
         ]);
+        return;
       }
+      await handlePushFailure(
+        result.json,
+        result.stderr,
+        result.exitCode,
+        channels,
+        sessionManager,
+        hooks,
+      );
+    }),
+    vscode.commands.registerCommand("xlflow.inspectWorkbook", async () => {
+      channels.output.show(true);
+      await runJsonWithProgress<Record<string, unknown>>(
+        ["--json", "inspect", "workbook"],
+        "xlflow inspect workbook",
+        channels.output,
+        vscode.l10n.t("Inspect Workbook"),
+        undefined,
+      );
     }),
     vscode.commands.registerCommand("xlflow.runMacro", async () => {
       const runChoice = await runArgsWithOptionalPush(
@@ -469,6 +604,512 @@ export function registerCommands(
       }
     }),
   );
+}
+
+async function rollbackWorkbook(
+  channels: XlflowChannels,
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: false });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: vscode.l10n.t("Roll Back Workbook"),
+      }),
+    );
+    return;
+  }
+
+  const result = await runJsonWithProgress<XlflowBackupListEnvelope>(
+    ["--json", "backup", "list"],
+    "xlflow backup list",
+    channels.output,
+    vscode.l10n.t("Load Backups"),
+    workspaceFolder,
+  );
+  if (result.exitCode !== 0 || result.json === undefined) {
+    showStructuredCommandFailure(
+      vscode.l10n.t("Failed to list backups."),
+      result.json?.error?.message ?? result.stderr,
+      channels,
+    );
+    return;
+  }
+
+  await summarizeBackupWarnings(result.json.warnings, channels);
+  const items = backupQuickPickItems(result.json.backups, workspaceFolder);
+  if (items.length === 0) {
+    vscode.window.showInformationMessage(vscode.l10n.t("No xlflow backups were found."));
+    return;
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    title: vscode.l10n.t("xlflow: Roll Back Workbook"),
+    placeHolder: vscode.l10n.t("Select the backup to restore"),
+  });
+  if (selected === undefined) {
+    return;
+  }
+
+  await rollbackBackup(selected.record, channels, sessionManager, hooks, workspaceFolder);
+}
+
+async function rollbackBackup(
+  record: XlflowBackupRecord,
+  channels: XlflowChannels,
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): Promise<void> {
+  const backupID = readNonEmpty(record.id);
+  if (backupID === undefined) {
+    return;
+  }
+  if (!(await stopActiveSessionForRollback(sessionManager))) {
+    return;
+  }
+  if (!(await confirmRollback(record))) {
+    return;
+  }
+
+  const result = await runJsonWithProgress<XlflowRollbackEnvelope>(
+    ["--json", "rollback", "--backup", backupID],
+    "xlflow rollback",
+    channels.output,
+    vscode.l10n.t("Roll Back Workbook"),
+    workspaceFolder,
+  );
+  if (result.exitCode !== 0) {
+    const code = result.json?.error?.code;
+    const fallback =
+      code === "workbook_in_use"
+        ? vscode.l10n.t(
+            "The workbook is still in use. Close Excel or stop the xlflow session, then retry rollback.",
+          )
+        : vscode.l10n.t("Rollback failed.");
+    showStructuredCommandFailure(fallback, result.json?.error?.message ?? result.stderr, channels);
+    return;
+  }
+
+  await Promise.all([
+    hooks.refreshProject(),
+    sessionManager.refreshStatus(),
+    hooks.refreshModules(),
+    hooks.refreshUserForms(),
+    hooks.refreshTests(),
+    hooks.refreshFormulas(),
+  ]);
+  await offerPostRollbackActions();
+}
+
+async function stopActiveSessionForRollback(sessionManager: SessionManager): Promise<boolean> {
+  await sessionManager.refreshStatus({ prompt: true });
+  const snapshot = sessionManager.currentSnapshot();
+  if (snapshot.state !== "active") {
+    return true;
+  }
+  const unsaved = snapshot.session?.save_required === true || snapshot.session?.dirty === true;
+  const action = unsaved
+    ? vscode.l10n.t("Discard Session Changes and Roll Back")
+    : vscode.l10n.t("Stop Session and Roll Back");
+  const message = unsaved
+    ? vscode.l10n.t(
+        "The active xlflow session contains unsaved workbook changes.\nStopping the session may discard them before rollback.",
+      )
+    : vscode.l10n.t("The workbook is open in an xlflow session.");
+  const confirmed = await vscode.window.showWarningMessage(message, { modal: true }, action);
+  if (confirmed !== action) {
+    return false;
+  }
+  await sessionManager.stop();
+  await sessionManager.refreshStatus({ prompt: true });
+  return true;
+}
+
+async function confirmRollback(record: XlflowBackupRecord): Promise<boolean> {
+  const rollbackLabel = vscode.l10n.t("Roll Back");
+  const created = formatBackupTimestamp(record.created_at);
+  const reason = readNonEmpty(record.reason) ?? vscode.l10n.t("Unknown reason");
+  const id = readNonEmpty(record.id) ?? vscode.l10n.t("Unknown backup");
+  const workbook = readNonEmpty(record.workbook) ?? vscode.l10n.t("Unknown workbook");
+  const confirmed = await vscode.window.showWarningMessage(
+    vscode.l10n.t(
+      "Roll back workbook from this backup?\n\nCreated: {created}\nReason: {reason}\nBackup ID: {id}\nWorkbook: {workbook}\n\nThe workbook file will be replaced. Source files under src/ will not be updated automatically.",
+      { created, reason, id, workbook },
+    ),
+    { modal: true },
+    rollbackLabel,
+  );
+  return confirmed === rollbackLabel;
+}
+
+async function offerPostRollbackActions(): Promise<void> {
+  const pull = vscode.l10n.t("Pull from Workbook");
+  const inspect = vscode.l10n.t("Inspect Workbook");
+  const dismiss = vscode.l10n.t("Dismiss");
+  const action = await vscode.window.showInformationMessage(
+    vscode.l10n.t("Workbook rollback completed. Source files under src/ were not updated."),
+    pull,
+    inspect,
+    dismiss,
+  );
+  if (action === pull) {
+    await vscode.commands.executeCommand("xlflow.pull");
+  } else if (action === inspect) {
+    await vscode.commands.executeCommand("xlflow.inspectWorkbook");
+  }
+}
+
+async function pruneBackups(channels: XlflowChannels): Promise<void> {
+  const workspaceFolder = await resolveWorkspaceRoot({ prompt: true, fallbackToFirst: false });
+  if (workspaceFolder === undefined) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t("{label} requires an open workspace folder.", {
+        label: vscode.l10n.t("Prune Backups"),
+      }),
+    );
+    return;
+  }
+  const keepLastText = await vscode.window.showInputBox({
+    title: vscode.l10n.t("xlflow: Prune Backups"),
+    prompt: vscode.l10n.t("Keep the newest N backups and delete older backups."),
+    placeHolder: "5",
+    validateInput: validateKeepLastInput,
+  });
+  if (keepLastText === undefined) {
+    return;
+  }
+  const keepLast = Number.parseInt(keepLastText.trim(), 10);
+  const dryRun = await runJsonWithProgress<XlflowBackupPruneEnvelope>(
+    ["--json", "backup", "prune", "--keep-last", String(keepLast), "--dry-run"],
+    "xlflow backup prune",
+    channels.output,
+    vscode.l10n.t("Preview Backup Pruning"),
+    workspaceFolder,
+  );
+  if (dryRun.exitCode !== 0 || dryRun.json === undefined) {
+    showStructuredCommandFailure(
+      vscode.l10n.t("Failed to preview backup pruning."),
+      dryRun.json?.error?.message ?? dryRun.stderr,
+      channels,
+    );
+    return;
+  }
+  const summary = pruneSummary(dryRun.json);
+  const showCandidates = vscode.l10n.t("Show Candidates");
+  const continueLabel = vscode.l10n.t("Continue");
+  const previewAction = await vscode.window.showInformationMessage(
+    vscode.l10n.t(
+      "Backup pruning preview: {matched} candidate(s), approximately {size} removable. Policy: keep newest {keepLast}. Invalid and legacy entries are excluded.",
+      { matched: summary.matched, size: formatBytes(summary.freedBytes), keepLast },
+    ),
+    showCandidates,
+    continueLabel,
+  );
+  if (previewAction === showCandidates) {
+    await showPruneCandidates(summary.candidates);
+  }
+  if (previewAction === undefined) {
+    return;
+  }
+
+  const deleteLabel = vscode.l10n.t("Delete Backups");
+  const confirmed = await vscode.window.showWarningMessage(
+    vscode.l10n.t("Delete {matched} old backup(s) and free approximately {size}?", {
+      matched: summary.matched,
+      size: formatBytes(summary.freedBytes),
+    }),
+    { modal: true },
+    deleteLabel,
+  );
+  if (confirmed !== deleteLabel) {
+    return;
+  }
+
+  const result = await runJsonWithProgress<XlflowBackupPruneEnvelope>(
+    ["--json", "backup", "prune", "--keep-last", String(keepLast)],
+    "xlflow backup prune",
+    channels.output,
+    vscode.l10n.t("Prune Backups"),
+    workspaceFolder,
+  );
+  const resultSummary = pruneSummary(result.json);
+  if (result.json === undefined || (result.exitCode !== 0 && resultSummary.failed === 0)) {
+    showStructuredCommandFailure(
+      vscode.l10n.t("Backup pruning failed."),
+      result.json?.error?.message ?? result.stderr,
+      channels,
+    );
+    return;
+  }
+  if (resultSummary.failed > 0) {
+    const openOutput = vscode.l10n.t("Open xlflow Output");
+    const action = await vscode.window.showWarningMessage(
+      vscode.l10n.t(
+        "Backup pruning deleted {deleted} backup(s), failed to delete {failed}, and freed {size}.",
+        {
+          deleted: resultSummary.deleted,
+          failed: resultSummary.failed,
+          size: formatBytes(resultSummary.freedBytes),
+        },
+      ),
+      openOutput,
+    );
+    if (action === openOutput) {
+      channels.output.show(true);
+    }
+    return;
+  }
+  vscode.window.showInformationMessage(
+    vscode.l10n.t("Backup pruning deleted {deleted} backup(s) and freed {size}.", {
+      deleted: resultSummary.deleted,
+      size: formatBytes(resultSummary.freedBytes),
+    }),
+  );
+}
+
+async function handlePushFailure(
+  envelope: XlflowPushEnvelope | undefined,
+  stderr: string,
+  exitCode: number,
+  channels: XlflowChannels,
+  sessionManager: SessionManager,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
+  const backupID = backupIDFromPushEnvelope(envelope);
+  if (backupID !== undefined) {
+    const rollback = vscode.l10n.t("Roll Back");
+    const openOutput = vscode.l10n.t("Open xlflow Output");
+    const dismiss = vscode.l10n.t("Dismiss");
+    const action = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Push failed after a backup was created."),
+      rollback,
+      openOutput,
+      dismiss,
+    );
+    if (action === rollback) {
+      await rollbackBackup(
+        {
+          id: backupID,
+          path: envelope?.backup?.path,
+          reason: envelope?.backup?.reason,
+        },
+        channels,
+        sessionManager,
+        hooks,
+        undefined,
+      );
+    } else if (action === openOutput) {
+      channels.output.show(true);
+    }
+    return;
+  }
+  const message =
+    readNonEmpty(envelope?.error?.message) ??
+    readNonEmpty(stderr) ??
+    vscode.l10n.t("xlflow push failed with exit code {exitCode}.", { exitCode });
+  showStructuredCommandFailure(message, undefined, channels);
+}
+
+async function summarizeBackupWarnings(
+  warnings: XlflowBackupListEnvelope["warnings"],
+  channels: XlflowChannels,
+): Promise<void> {
+  const count = Array.isArray(warnings) ? warnings.length : 0;
+  if (count === 0) {
+    return;
+  }
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  const action = await vscode.window.showWarningMessage(
+    vscode.l10n.t("xlflow found {count} invalid backup entries. See output for details.", {
+      count,
+    }),
+    openOutput,
+  );
+  if (action === openOutput) {
+    channels.output.show(true);
+  }
+}
+
+async function showPruneCandidates(candidates: XlflowBackupPruneEntry[]): Promise<void> {
+  if (candidates.length === 0) {
+    vscode.window.showInformationMessage(vscode.l10n.t("No backups match the pruning policy."));
+    return;
+  }
+  await vscode.window.showQuickPick(
+    candidates.map((candidate) => ({
+      label: readNonEmpty(candidate.id) ?? readNonEmpty(candidate.path) ?? vscode.l10n.t("Unknown"),
+      description: formatBytes(candidate.size_bytes),
+      detail: [
+        formatBackupTimestamp(candidate.created_at),
+        readNonEmpty(candidate.reason),
+        readNonEmpty(candidate.path),
+        Array.isArray(candidate.reasons) ? candidate.reasons.join(", ") : undefined,
+      ]
+        .filter((part) => part !== undefined && part !== "")
+        .join(" · "),
+    })),
+    {
+      title: vscode.l10n.t("Backup Pruning Candidates"),
+      placeHolder: vscode.l10n.t("Backups selected by the CLI pruning preview"),
+    },
+  );
+}
+
+function showStructuredCommandFailure(
+  message: string,
+  detail: string | undefined,
+  channels: XlflowChannels,
+): void {
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  const text = detail === undefined || detail.trim() === "" ? message : `${message} ${detail}`;
+  void vscode.window.showErrorMessage(text, openOutput).then((action) => {
+    if (action === openOutput) {
+      channels.output.show(true);
+    }
+  });
+}
+
+async function runJsonWithProgress<T>(
+  args: string[],
+  label: string,
+  outputChannel: vscode.OutputChannel,
+  uiLabel: string,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+) {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: uiLabel,
+      cancellable: false,
+    },
+    () =>
+      runXlflowJsonCommand<T>(args, label, outputChannel, {
+        requireWorkspace: true,
+        workspaceFolder,
+      }),
+  );
+}
+
+export interface BackupQuickPickItem extends vscode.QuickPickItem {
+  record: XlflowBackupRecord;
+}
+
+export function backupQuickPickItems(
+  records: XlflowBackupRecord[] | undefined,
+  workspaceFolder?: vscode.WorkspaceFolder,
+): BackupQuickPickItem[] {
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => readNonEmpty(record.id) !== undefined)
+    .sort(compareBackupsNewestFirst)
+    .map((record) => ({
+      label: `${formatBackupTimestamp(record.created_at)} · ${
+        readNonEmpty(record.reason) ?? vscode.l10n.t("Unknown reason")
+      }`,
+      description: readNonEmpty(record.id),
+      detail: [formatBytes(record.size_bytes), relativeBackupPath(record.path, workspaceFolder)]
+        .filter((part) => part !== undefined && part !== "")
+        .join(" · "),
+      record,
+    }));
+}
+
+export function compareBackupsNewestFirst(
+  left: XlflowBackupRecord,
+  right: XlflowBackupRecord,
+): number {
+  const leftTime = timestampMillis(left.created_at);
+  const rightTime = timestampMillis(right.created_at);
+  if (leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  return (readNonEmpty(right.id) ?? "").localeCompare(readNonEmpty(left.id) ?? "");
+}
+
+export function formatBackupTimestamp(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    return vscode.l10n.t("Unknown time");
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const pad = (part: number): string => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
+export function formatBytes(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return vscode.l10n.t("Unknown size");
+  }
+  const units = ["bytes", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return vscode.l10n.t("{count} bytes", { count: value });
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+export function backupIDFromPushEnvelope(
+  envelope: XlflowPushEnvelope | undefined,
+): string | undefined {
+  return readNonEmpty(envelope?.backup?.id);
+}
+
+export function validateKeepLastInput(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed) || Number.parseInt(trimmed, 10) <= 0) {
+    return vscode.l10n.t("Enter a positive whole number.");
+  }
+  return undefined;
+}
+
+export function pruneSummary(envelope: XlflowBackupPruneEnvelope | undefined): {
+  matched: number;
+  deleted: number;
+  failed: number;
+  freedBytes: number;
+  candidates: XlflowBackupPruneEntry[];
+} {
+  const prune = envelope?.backup_prune;
+  return {
+    matched: nonNegativeInteger(prune?.matched),
+    deleted: nonNegativeInteger(prune?.deleted),
+    failed: nonNegativeInteger(prune?.failed),
+    freedBytes: nonNegativeInteger(prune?.freed_bytes),
+    candidates: Array.isArray(prune?.candidates) ? prune.candidates : [],
+  };
+}
+
+function timestampMillis(value: unknown): number {
+  if (typeof value !== "string") {
+    return 0;
+  }
+  const millis = new Date(value).getTime();
+  return Number.isNaN(millis) ? 0 : millis;
+}
+
+function nonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function relativeBackupPath(
+  backupPath: string | undefined,
+  workspaceFolder: vscode.WorkspaceFolder | undefined,
+): string | undefined {
+  const candidate = readNonEmpty(backupPath);
+  if (candidate === undefined || workspaceFolder === undefined || !path.isAbsolute(candidate)) {
+    return candidate;
+  }
+  return path.relative(workspaceFolder.uri.fsPath, candidate).replace(/\\/g, "/");
 }
 
 async function showSetupActions(): Promise<void> {
