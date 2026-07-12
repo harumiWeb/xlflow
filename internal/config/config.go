@@ -24,6 +24,7 @@ type Config struct {
 	Src      SourceConfig     `toml:"src"`
 	VBA      VBAConfig        `toml:"vba"`
 	UserForm UserFormConfig   `toml:"userform"`
+	Backup   BackupConfig     `toml:"backup"`
 	Fmt      FmtConfig        `toml:"fmt"`
 	Lint     LintConfig       `toml:"lint"`
 	Analyze  AnalyzeConfig    `toml:"analyze"`
@@ -57,6 +58,18 @@ type VBAConfig struct {
 
 type UserFormConfig struct {
 	CodeSource string `toml:"code_source"`
+}
+
+type BackupConfig struct {
+	Retention BackupRetentionConfig `toml:"retention"`
+}
+
+type BackupRetentionConfig struct {
+	Enabled        bool `toml:"enabled"`
+	MaxCount       int  `toml:"max_count"`
+	MaxAgeDays     int  `toml:"max_age_days"`
+	MinKeep        int  `toml:"min_keep"`
+	MaxTotalSizeMB int  `toml:"max_total_size_mb"`
 }
 
 type FmtConfig struct {
@@ -241,6 +254,15 @@ func Default() Config {
 		UserForm: UserFormConfig{
 			CodeSource: "sidecar",
 		},
+		Backup: BackupConfig{
+			Retention: BackupRetentionConfig{
+				Enabled:        false,
+				MaxCount:       20,
+				MaxAgeDays:     30,
+				MinKeep:        5,
+				MaxTotalSizeMB: 2048,
+			},
+		},
 		Fmt: FmtConfig{
 			OperatorSpacing:    true,
 			DeclarationSpacing: true,
@@ -356,6 +378,21 @@ func validate(cfg Config) error {
 	case "frm", "sidecar":
 	default:
 		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
+	}
+	if cfg.Backup.Retention.MaxCount < 0 {
+		return errors.New("backup.retention.max_count must be zero or greater")
+	}
+	if cfg.Backup.Retention.MaxAgeDays < 0 {
+		return errors.New("backup.retention.max_age_days must be zero or greater")
+	}
+	if cfg.Backup.Retention.MinKeep < 0 {
+		return errors.New("backup.retention.min_keep must be zero or greater")
+	}
+	if cfg.Backup.Retention.MaxTotalSizeMB < 0 {
+		return errors.New("backup.retention.max_total_size_mb must be zero or greater")
+	}
+	if cfg.Backup.Retention.MaxCount > 0 && cfg.Backup.Retention.MinKeep > cfg.Backup.Retention.MaxCount {
+		return errors.New("backup.retention.min_keep must be less than or equal to backup.retention.max_count when max_count is enabled")
 	}
 	return nil
 }
@@ -750,6 +787,16 @@ default_component_folders = %t
 #   "frm"     – code is kept inside the exported .frm file.
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = %q
+
+# Automatic backup retention is disabled by default. Uncomment to prune old
+# metadata-backed backups for the configured workbook after successful backup-
+# producing push and rollback operations.
+# [backup.retention]
+# enabled = false
+# max_count = 20
+# max_age_days = 30
+# min_keep = 5
+# max_total_size_mb = 2048
 
 # VBA formatter settings.
 [fmt]

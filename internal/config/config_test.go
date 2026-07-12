@@ -36,6 +36,13 @@ path = "build/Sales.xlsm"
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("unexpected userform defaults: %+v", cfg.UserForm)
 	}
+	if cfg.Backup.Retention.Enabled ||
+		cfg.Backup.Retention.MaxCount != 20 ||
+		cfg.Backup.Retention.MaxAgeDays != 30 ||
+		cfg.Backup.Retention.MinKeep != 5 ||
+		cfg.Backup.Retention.MaxTotalSizeMB != 2048 {
+		t.Fatalf("unexpected backup retention defaults: %+v", cfg.Backup.Retention)
+	}
 	if !cfg.Fmt.OperatorSpacing {
 		t.Fatalf("expected fmt.operator_spacing default to be enabled")
 	}
@@ -78,6 +85,98 @@ path = "build/Sales.xlsm"
 	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
 		cfg.Analyze.DetectFunctionReturnPath {
 		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
+	}
+}
+
+func TestLoadParsesBackupRetention(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[backup.retention]
+enabled = true
+max_count = 10
+max_age_days = 7
+min_keep = 3
+max_total_size_mb = 512
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := BackupRetentionConfig{Enabled: true, MaxCount: 10, MaxAgeDays: 7, MinKeep: 3, MaxTotalSizeMB: 512}
+	if cfg.Backup.Retention != want {
+		t.Fatalf("backup.retention = %+v, want %+v", cfg.Backup.Retention, want)
+	}
+}
+
+func TestLoadBackupRetentionOmittedFieldsKeepDefaultsAndLimitsCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[backup.retention]
+enabled = true
+max_count = 0
+max_age_days = 0
+max_total_size_mb = 0
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Backup.Retention.Enabled ||
+		cfg.Backup.Retention.MaxCount != 0 ||
+		cfg.Backup.Retention.MaxAgeDays != 0 ||
+		cfg.Backup.Retention.MinKeep != 5 ||
+		cfg.Backup.Retention.MaxTotalSizeMB != 0 {
+		t.Fatalf("backup.retention = %+v", cfg.Backup.Retention)
+	}
+}
+
+func TestLoadRejectsInvalidBackupRetention(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"negative max_count", "max_count = -1", "backup.retention.max_count"},
+		{"negative max_age_days", "max_age_days = -1", "backup.retention.max_age_days"},
+		{"negative min_keep", "min_keep = -1", "backup.retention.min_keep"},
+		{"negative max_total_size_mb", "max_total_size_mb = -1", "backup.retention.max_total_size_mb"},
+		{"min_keep exceeds max_count", "max_count = 2\nmin_keep = 3", "backup.retention.min_keep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[backup.retention]
+` + tt.body + "\n")
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load error = %v, want key %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -635,6 +734,16 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		!strings.Contains(text, "keyword_casing = true") ||
 		!strings.Contains(text, "builtin_casing = true") {
 		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
+	}
+	for _, want := range []string{
+		"# [backup.retention]",
+		"# enabled = false",
+		"# max_count = 20",
+		"# min_keep = 5",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
 	}
 	for _, want := range []string{
 		"# VB020 unused-local-variable warnings are enabled by default.",
