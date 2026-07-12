@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Expanded bundled `XlflowAssert.bas` with strict equality, `Null` / `Empty`, numeric tolerance, string, regex, array, `Range.Value2`, and object identity assertions, plus typed assertion failure formatting for terminal and JSON output.
 - Added parameterized VBA tests with `@TestCase(...)`, including named cases, per-case `id` / `qualified_name`, source/runtime discovery JSON, exact case filtering, scalar literal validation, and `invalid_test_case` diagnostics.
 - Added `@Skip("reason")` and `@Todo("reason")` metadata for VBA tests, including discovery `status_hint`, non-executed `skipped` / `todo` results, separate CLI summary counts, and VS Code Testing API surfacing.
 - Added editor annotation completion for xlflow `@Skip(...)` and `@Todo(...)` test metadata alongside `@ExpectedError(...)`.

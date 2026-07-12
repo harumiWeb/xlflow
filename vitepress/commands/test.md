@@ -122,6 +122,39 @@ xlflow does not evaluate constants, enum members, function calls, member express
 
 Unnamed case IDs use a lexical canonical form. Whitespace and string escaping are normalized, but semantically equivalent numeric spellings such as `1.0` and `1#` are not currently treated as identical.
 
+## XlflowAssert
+
+New projects and `xlflow module install` include `XlflowAssert.bas` for JSON-friendly workbook-side assertions.
+
+```vb
+XlflowAssert.AssertEquals expected, actual, "optional context message"
+XlflowAssert.AssertStrictEquals expected, actual, "optional context message"
+XlflowAssert.AssertNotEqual forbidden, actual, "optional context message"
+XlflowAssert.AssertTrue condition, "optional context message"
+XlflowAssert.AssertFalse condition, "optional context message"
+XlflowAssert.AssertNull value, "optional context message"
+XlflowAssert.AssertNotNull value, "optional context message"
+XlflowAssert.AssertEmpty value, "optional context message"
+XlflowAssert.AssertNotEmpty value, "optional context message"
+XlflowAssert.AssertNear expected, actual, 0.000001, "optional context message"
+XlflowAssert.AssertContains "needle", actualText, "optional context message"
+XlflowAssert.AssertStartsWith "prefix", actualText, "optional context message"
+XlflowAssert.AssertEndsWith "suffix", actualText, "optional context message"
+XlflowAssert.AssertMatches "^[A-Z]{3}-\d+$", actualText, "optional context message"
+XlflowAssert.AssertArrayEquals expectedArray, actualArray, "optional context message"
+XlflowAssert.AssertRangeEquals expectedValues, Sheet1.Range("A1:B2"), "optional context message"
+XlflowAssert.AssertSame expectedObject, actualObject, "optional context message"
+XlflowAssert.AssertNotSame firstObject, secondObject, "optional context message"
+XlflowAssert.AssertFail "unconditional failure message"
+XlflowAssert.AssertInconclusive "reason this test is not ready"
+XlflowAssert.AssertIsNothing objectRef, "optional context message"
+XlflowAssert.AssertIsNotNothing objectRef, "optional context message"
+```
+
+`AssertEquals` remains non-strict scalar equality. Use `AssertStrictEquals` when both `VarType` and value must match. Failure messages format values as `<Long: 1>`, `<String: "1">`, `<Empty>`, `<Null>`, and `<Nothing>`.
+
+String contains, starts-with, and ends-with assertions use binary comparison. `AssertMatches` uses `VBScript.RegExp` with `IgnoreCase = False` and no multiline mode. `AssertArrayEquals` compares one- and two-dimensional scalar arrays, including bounds. `AssertRangeEquals` compares `Range.Value2` values only and reports the first differing cell address.
+
 ## Test Location
 
 Tests should live under the configured module source directory (for example `src/modules/Tests/`). This keeps tests under the same source tree as production code so `push` naturally imports them into the workbook without a separate folder convention.
@@ -265,7 +298,7 @@ FAIL SmokeTests.TestBad: expected <110> but got <100>
 > `test` reports progress on stderr. Interactive terminals show a spinner, while non-interactive or `--json` runs emit a single progress line so stdout stays parseable.
 
 ::: tip
-Keep VBA assertions simple and scalar so failures are easy for agents to parse.
+Use `XlflowAssert` helpers for workbook-side tests so failures keep stable error numbers, sources, and parseable formatted values.
 :::
 
 ::: tip

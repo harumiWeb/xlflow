@@ -666,7 +666,7 @@ The purpose of each module is as follows:
 - `XlflowRuntime` is used for branching execution modes: `interactive`, `headless`, `ci`, `agent`, and `test`.
 - `XlflowUI` wraps `MsgBox`, `InputBox`, `Application.GetOpenFilename`, `Application.FileDialog`, `Application.GetSaveAsFilename`, and folder pickers, allowing the same VBA to be used for both interactive and unattended execution.
 - `XlflowDebug` mirrors `XlflowDebug.Log` to the terminal during `xlflow run` / `xlflow test` while maintaining standard VBA Immediate Window output.
-- `XlflowAssert` is a minimal scalar assertion helper used for workbook-side testing.
+- `XlflowAssert` provides workbook-side assertions for scalar equality, strict type-sensitive equality, `Null` / `Empty`, numeric tolerances, strings, arrays, `Range.Value2`, and object identity.
 
 Example:
 

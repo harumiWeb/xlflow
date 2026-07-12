@@ -468,13 +468,17 @@ When no Excel processes are running, `process` is an empty array and the command
 
 ## VBA Test Rules
 
-New and initialized projects include `src/modules/XlflowAssert.bas` with `AssertEquals expected, actual, [message]`. The helper is scalar-only: it compares normal scalar values, treats `Null` as equal only to `Null`, and raises a clear assertion error for object or array inputs. Compare object properties such as `Range.Value2` instead of passing object references.
+New and initialized projects include `src/modules/XlflowAssert.bas`. The helper keeps `AssertEquals expected, actual, [message]` backward-compatible as non-strict scalar equality, and adds strict scalar equality, `Null` / `Empty` assertions, numeric tolerance assertions, binary string assertions, regex matching, one- and two-dimensional array equality, `Range.Value2` equality, and object reference identity assertions. Assertion failures use the xlflow assertion error number (`vbObjectError + 513`), a stable `Err.Source` of `XlflowAssert.<AssertionName>`, and formatted values such as `<Long: 1>`, `<String: "1">`, `<Empty>`, `<Null>`, and `<Nothing>`.
+
+Use `AssertStrictEquals` when `VarType` must match. Use `AssertRangeEquals` for Excel range values instead of passing a `Range` object to `AssertEquals`. `AssertRangeEquals` compares values only; formulas, number formats, styles, merged-cell state, row heights, and column widths are out of scope. String contains / starts-with / ends-with assertions use binary comparison. `AssertMatches` uses late-bound `VBScript.RegExp` with `IgnoreCase = False` and no multiline mode.
 
 Example:
 
 ```vb
 Public Sub TestCreateReport()
     AssertEquals 10, Sheets("Result").Range("A1").Value
+    AssertStrictEquals CDbl(10), Sheets("Result").Range("A1").Value2
+    AssertRangeEquals 10, Sheets("Result").Range("A1")
 End Sub
 ```
 
