@@ -64,6 +64,12 @@ type app struct {
 
 var automaticBackupPrune = backup.Prune
 
+var (
+	errFormMigrateArgs     = errors.New("userform migration arguments invalid")
+	errFormMigrateConflict = errors.New("userform migration conflict")
+	errFormMigrateInspect  = errors.New("userform designer inspection failed")
+)
+
 type BuildInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
@@ -109,6 +115,16 @@ type formWriteCommandOptions struct {
 	Session   bool
 	NoSave    bool
 	Keepalive excel.CommandOptions
+}
+
+type formMigrationFile struct {
+	Name     string
+	FRMPath  string
+	FRXPath  string
+	CodePath string
+	SpecPath string
+	Code     string
+	Spec     forms.FormSpec
 }
 
 type inspectBridgeOptions struct {
@@ -716,7 +732,83 @@ func (a *app) formCommand() *cobra.Command {
 		Use:   "form",
 		Short: "Manage workbook UserForms",
 	}
-	cmd.AddCommand(a.formNewCommand(), a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	cmd.AddCommand(a.formNewCommand(), a.formMigrateCommand(), a.formSnapshotCommand(), a.formBuildCommand(), a.formApplyCommand(), a.formExportImageCommand())
+	return cmd
+}
+
+func (a *app) formMigrateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Migrate UserForm source layouts",
+	}
+	cmd.AddCommand(a.formMigrateSidecarCommand())
+	return cmd
+}
+
+func (a *app) formMigrateSidecarCommand() *cobra.Command {
+	var overwrite bool
+	var session bool
+	cmd := &cobra.Command{
+		Use:   "sidecar [FormName]",
+		Short: "Migrate frm-mode UserForms to sidecar code and Designer specs",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := ""
+			if len(args) > 0 {
+				target = strings.TrimSpace(args[0])
+			}
+			if target != "" && !isBareComponentName(target) {
+				return a.writeFailure("form migrate sidecar", output.ExitConfig, "form_migrate_args_invalid", fmt.Errorf("form name must be a bare VBA component name"))
+			}
+			cfg, err := a.loadConfig("form migrate sidecar")
+			if err != nil {
+				return err
+			}
+			before := cfg.UserForm.CodeSource
+			if before != "frm" && before != "sidecar" {
+				return a.writeFailure("form migrate sidecar", output.ExitConfig, "form_migrate_args_invalid", fmt.Errorf("userform.code_source must be one of frm, sidecar"))
+			}
+			result, err := a.prepareUserFormSidecarMigration(cfg, target, overwrite, session, buildCommandOptions(a.stderrWriter()))
+			if err != nil {
+				if errors.Is(err, errFormMigrateArgs) {
+					return a.writeFailure("form migrate sidecar", output.ExitConfig, "form_migrate_args_invalid", err)
+				}
+				if errors.Is(err, errFormMigrateConflict) {
+					return a.writeFailure("form migrate sidecar", output.ExitValidation, "form_migrate_conflict", err)
+				}
+				if errors.Is(err, errFormMigrateInspect) {
+					return a.writeFailure("form migrate sidecar", output.ExitEnvironment, "form_migrate_inspect_failed", err)
+				}
+				return a.writeFailure("form migrate sidecar", output.ExitEnvironment, "form_migrate_failed", err)
+			}
+			created, updated, skipped, err := a.writeUserFormSidecarMigration(before, result, overwrite)
+			if err != nil {
+				if errors.Is(err, errFormMigrateConflict) {
+					return a.writeFailure("form migrate sidecar", output.ExitValidation, "form_migrate_conflict", err)
+				}
+				return a.writeFailure("form migrate sidecar", output.ExitEnvironment, "form_migrate_failed", err)
+			}
+			env := output.New("form migrate sidecar")
+			env.Source = map[string]any{
+				"operation":          "userform.migrate_sidecar",
+				"code_source_before": before,
+				"code_source_after":  "sidecar",
+				"forms":              renderFormMigrationFiles(a.cwd, result),
+				"created":            created,
+				"updated":            updated,
+				"skipped":            skipped,
+				"config_path":        config.FileName,
+				"requires_push":      false,
+			}
+			env.Logs = []string{fmt.Sprintf("migrated %d UserForm(s) to sidecar mode", len(result))}
+			if before != "sidecar" {
+				env.Logs = append(env.Logs, "updated [userform].code_source to sidecar")
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing sidecar code or Designer spec files")
+	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	return cmd
 }
 
@@ -1433,6 +1525,7 @@ func (a *app) initCommand() *cobra.Command {
 	var withModule bool
 	var skillAgent string
 	var noUpdateCheck bool
+	var userFormCodeSource string
 
 	cmd := &cobra.Command{
 		Use:   "init <workbook>",
@@ -1453,7 +1546,11 @@ func (a *app) initCommand() *cobra.Command {
 			}
 			{
 				runOpts := commandOpts
-				result, err := project.Init(a.cwd, args[0])
+				codeSource := strings.TrimSpace(userFormCodeSource)
+				if codeSource == "" {
+					codeSource = "frm"
+				}
+				result, err := project.InitWithOptions(a.cwd, args[0], project.InitOptions{UserFormCodeSource: codeSource})
 				if err != nil {
 					return a.writeFailure("init", output.ExitConfig, "init_failed", err)
 				}
@@ -1463,6 +1560,17 @@ func (a *app) initCommand() *cobra.Command {
 				}
 				if bootstrapCode != output.ExitSuccess {
 					return a.write(bootstrapEnv, bootstrapCode)
+				}
+				var sidecarSpecs []string
+				if codeSource == "sidecar" {
+					cfg, err := a.loadConfig("init")
+					if err != nil {
+						return err
+					}
+					sidecarSpecs, err = a.writeImportedUserFormSpecs(cfg, runOpts)
+					if err != nil {
+						return a.writeFailure("init", output.ExitEnvironment, "init_failed", err)
+					}
 				}
 				var installedModules project.InstallModulesResult
 				if withModule {
@@ -1500,8 +1608,12 @@ func (a *app) initCommand() *cobra.Command {
 					"copied workbook to " + result.Workbook,
 					"pulled workbook VBA into source",
 				}
+				if len(sidecarSpecs) > 0 {
+					env.Source = map[string]any{"created": sidecarSpecs}
+					env.Logs = append(env.Logs, fmt.Sprintf("wrote %d UserForm Designer spec(s)", len(sidecarSpecs)))
+				}
 				if withModule {
-					env.Source = map[string]any{"created": installedModules.Created}
+					env.Source = mergeCreatedSource(env.Source, installedModules.Created)
 					env.Logs = append(env.Logs,
 						fmt.Sprintf("installed %d bundled helper module(s) into source", len(installedModules.Created)),
 						"pushed bundled helper modules to workbook",
@@ -1519,6 +1631,7 @@ func (a *app) initCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&withModule, "with-module", false, "install bundled xlflow helper modules and push them to the workbook")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
+	cmd.Flags().StringVar(&userFormCodeSource, "userform-code-source", "frm", "UserForm code source for imported projects: frm or sidecar")
 	return cmd
 }
 
@@ -1545,6 +1658,63 @@ func (a *app) bootstrapScaffoldPull(keepaliveOpts excel.CommandOptions) (output.
 			Keepalive: keepaliveOpts,
 		})
 	})
+}
+
+func (a *app) writeImportedUserFormSpecs(cfg config.Config, commandOpts excel.CommandOptions) ([]string, error) {
+	formsDir := workbookArgPath(a.cwd, cfg.Src.Forms)
+	candidates, err := collectUserFormMigrationCandidates(a.cwd, formsDir, "")
+	if err != nil {
+		return nil, err
+	}
+	var created []string
+	for _, item := range candidates {
+		if _, err := os.Stat(item.SpecPath); err == nil {
+			return nil, fmt.Errorf("refusing to overwrite existing Designer spec %s", item.SpecPath)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		spec, err := a.inspectUserFormSpecForMigration(cfg, item.Name, false, commandOpts)
+		if err != nil {
+			return nil, err
+		}
+		output := forms.SnapshotOutput{Path: item.SpecPath, DisplayPath: displayPath(a.cwd, item.SpecPath), Format: "yaml"}
+		if err := forms.WriteSnapshot(output, spec); err != nil {
+			return nil, err
+		}
+		created = append(created, displayPath(a.cwd, item.SpecPath))
+	}
+	return created, nil
+}
+
+func mergeCreatedSource(source any, created []string) map[string]any {
+	out := map[string]any{}
+	for key, value := range cliObjectMap(source) {
+		out[key] = value
+	}
+	existing := stringSliceForCLI(out["created"])
+	existing = append(existing, created...)
+	out["created"] = existing
+	return out
+}
+
+func stringSliceForCLI(value any) []string {
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case []string:
+		return append([]string{}, v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
@@ -5637,6 +5807,292 @@ func collectSourceUserFormNames(formsDir string) []string {
 	}
 	slices.Sort(result)
 	return result
+}
+
+func (a *app) prepareUserFormSidecarMigration(cfg config.Config, target string, overwrite bool, session bool, commandOpts excel.CommandOptions) ([]formMigrationFile, error) {
+	formsDir := workbookArgPath(a.cwd, cfg.Src.Forms)
+	candidates, err := collectUserFormMigrationCandidates(a.cwd, formsDir, target)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		if target != "" {
+			return nil, fmt.Errorf("%w: UserForm %q was not found under %s", errFormMigrateArgs, target, displayPath(a.cwd, formsDir))
+		}
+		return nil, fmt.Errorf("%w: no UserForm .frm files found under %s", errFormMigrateArgs, displayPath(a.cwd, formsDir))
+	}
+	for i := range candidates {
+		body, err := os.ReadFile(candidates[i].FRMPath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", candidates[i].FRMPath, err)
+		}
+		code := forms.NormalizeUserFormCodeText(forms.ExtractUserFormCodeFromFRM(string(body)))
+		if firstAttributeLine(code) > 0 {
+			return nil, fmt.Errorf("%w: extracted sidecar code for %s contains Attribute VB_* header lines", errFormMigrateConflict, candidates[i].Name)
+		}
+		candidates[i].Code = code
+		if err := validateFormMigrationConflicts(candidates[i], overwrite); err != nil {
+			return nil, err
+		}
+	}
+	for i := range candidates {
+		spec, err := a.inspectUserFormSpecForMigration(cfg, candidates[i].Name, session, commandOpts)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(spec.Form.Name, candidates[i].Name) {
+			return nil, fmt.Errorf("UserForm spec name %q does not match .frm basename %q", spec.Form.Name, candidates[i].Name)
+		}
+		vbName, err := userFormVBNameFromFRM(candidates[i].FRMPath)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(vbName, candidates[i].Name) {
+			return nil, fmt.Errorf("UserForm artifact %s declares Attribute VB_Name = %q, want %q", candidates[i].FRMPath, vbName, candidates[i].Name)
+		}
+		candidates[i].Spec = spec
+	}
+	return candidates, nil
+}
+
+func collectUserFormMigrationCandidates(root string, formsDir string, target string) ([]formMigrationFile, error) {
+	if strings.TrimSpace(formsDir) == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(formsDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	codeDir := filepath.Join(formsDir, "code")
+	specDir := filepath.Join(formsDir, "specs")
+	var out []formMigrationFile
+	err := filepath.WalkDir(formsDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if sameCLIPath(path, codeDir) || sameCLIPath(path, specDir) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".frm") {
+			return nil
+		}
+		name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+		if target != "" && !strings.EqualFold(name, target) {
+			return nil
+		}
+		frxPath := filepath.Join(filepath.Dir(path), name+".frx")
+		if _, err := os.Stat(frxPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				frxPath = ""
+			} else {
+				return err
+			}
+		}
+		out = append(out, formMigrationFile{
+			Name:     name,
+			FRMPath:  path,
+			FRXPath:  frxPath,
+			CodePath: filepath.Join(formsDir, "code", name+".bas"),
+			SpecPath: filepath.Join(formsDir, "specs", name+".yaml"),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(out, func(a, b formMigrationFile) int {
+		return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+	return out, nil
+}
+
+func validateFormMigrationConflicts(item formMigrationFile, overwrite bool) error {
+	if body, err := os.ReadFile(item.CodePath); err == nil {
+		if forms.NormalizeUserFormCodeText(string(body)) == item.Code {
+			return nil
+		}
+		if !overwrite {
+			return fmt.Errorf("%w: refusing to overwrite existing sidecar code %s", errFormMigrateConflict, item.CodePath)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if _, err := os.Stat(item.SpecPath); err == nil {
+		if !overwrite {
+			return fmt.Errorf("%w: refusing to overwrite existing Designer spec %s", errFormMigrateConflict, item.SpecPath)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (a *app) inspectUserFormSpecForMigration(cfg config.Config, name string, session bool, commandOpts excel.CommandOptions) (forms.FormSpec, error) {
+	opts, err := buildInspectFormOptions(name, "designer", "", session, commandOpts)
+	if err != nil {
+		return forms.FormSpec{}, err
+	}
+	var env output.Envelope
+	var code int
+	err = a.withExcelProgress("Inspecting workbook form", opts.Keepalive, func() error {
+		var runErr error
+		env, code, runErr = a.excelRunnerForConfig(cfg).InspectForm(cfg, opts)
+		return runErr
+	})
+	if err != nil {
+		return forms.FormSpec{}, fmt.Errorf("%w: %v", errFormMigrateInspect, err)
+	}
+	if code != output.ExitSuccess {
+		message := "inspect form failed"
+		if env.Error != nil && strings.TrimSpace(env.Error.Message) != "" {
+			message = env.Error.Message
+		}
+		return forms.FormSpec{}, fmt.Errorf("%w: %s", errFormMigrateInspect, message)
+	}
+	spec, err := forms.FormSpecFromInspectSnapshot(env.Forms)
+	if err != nil {
+		return forms.FormSpec{}, fmt.Errorf("%w: %v", errFormMigrateInspect, err)
+	}
+	return spec, nil
+}
+
+func (a *app) writeUserFormSidecarMigration(before string, items []formMigrationFile, overwrite bool) ([]string, []string, []string, error) {
+	created := make([]string, 0)
+	updated := make([]string, 0)
+	skipped := make([]string, 0)
+	for _, item := range items {
+		if err := os.MkdirAll(filepath.Dir(item.CodePath), 0o755); err != nil {
+			return nil, nil, nil, err
+		}
+		if body, err := os.ReadFile(item.CodePath); err == nil && forms.NormalizeUserFormCodeText(string(body)) == item.Code {
+			skipped = append(skipped, displayPath(a.cwd, item.CodePath))
+		} else {
+			existed := false
+			if _, err := os.Stat(item.CodePath); err == nil {
+				existed = true
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, nil, nil, err
+			}
+			if existed && !overwrite {
+				return nil, nil, nil, fmt.Errorf("%w: refusing to overwrite existing sidecar code %s", errFormMigrateConflict, item.CodePath)
+			}
+			body := item.Code
+			if body != "" {
+				body += "\n"
+			}
+			if err := os.WriteFile(item.CodePath, []byte(body), 0o644); err != nil {
+				return nil, nil, nil, err
+			}
+			if existed {
+				updated = append(updated, displayPath(a.cwd, item.CodePath))
+			} else {
+				created = append(created, displayPath(a.cwd, item.CodePath))
+			}
+		}
+		specOutput := forms.SnapshotOutput{Path: item.SpecPath, DisplayPath: displayPath(a.cwd, item.SpecPath), Format: "yaml"}
+		specExisted := false
+		if _, err := os.Stat(item.SpecPath); err == nil {
+			specExisted = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil, err
+		}
+		if specExisted && !overwrite {
+			return nil, nil, nil, fmt.Errorf("%w: refusing to overwrite existing Designer spec %s", errFormMigrateConflict, item.SpecPath)
+		}
+		if err := forms.WriteSnapshot(specOutput, item.Spec); err != nil {
+			return nil, nil, nil, err
+		}
+		if specExisted {
+			updated = append(updated, displayPath(a.cwd, item.SpecPath))
+		} else {
+			created = append(created, displayPath(a.cwd, item.SpecPath))
+		}
+	}
+	if before != "sidecar" {
+		if err := config.UpdateUserFormCodeSource(filepath.Join(a.cwd, config.FileName), "sidecar"); err != nil {
+			return nil, nil, nil, err
+		}
+		updated = append(updated, config.FileName)
+	}
+	return created, updated, skipped, nil
+}
+
+func renderFormMigrationFiles(root string, items []formMigrationFile) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		entry := map[string]any{
+			"name":      item.Name,
+			"frm_path":  displayPath(root, item.FRMPath),
+			"code_path": displayPath(root, item.CodePath),
+			"spec_path": displayPath(root, item.SpecPath),
+		}
+		if item.FRXPath != "" {
+			entry["frx_path"] = displayPath(root, item.FRXPath)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func firstAttributeLine(text string) int {
+	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "Attribute VB_") {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func userFormVBNameFromFRM(path string) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(string(body), "\r\n", "\n"), "\r", "\n"), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(trimmed), "attribute vb_name") {
+			continue
+		}
+		_, value, ok := strings.Cut(trimmed, "=")
+		if !ok {
+			break
+		}
+		name := strings.Trim(strings.TrimSpace(value), `"`)
+		if name != "" {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("read %s: Attribute VB_Name was not found", path)
+}
+
+func isBareComponentName(name string) bool {
+	if name == "" || name != filepath.Base(name) || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' {
+				continue
+			}
+			return false
+		}
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func sameCLIPath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceModule, error) {

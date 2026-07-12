@@ -17,4 +17,4 @@ build/*.xlsm, build/*.xlam, or build/*.xlsb
 
 `xlflow.toml` defines the workbook path, source roots, lint behavior, and UserForm source mode. `src/` is the normal editing surface. `build/` contains the workbook, add-in, or binary workbook file, and `.xlflow/` contains generated state, workbook-file backups with metadata, and session metadata.
 
-New projects default UserForm code authority to sidecar code files. Initialized projects preserve the imported `.frm` code model until the user intentionally migrates.
+New projects default UserForm code authority to sidecar code files. Initialized projects preserve the imported `.frm` code model until the user intentionally migrates with `xlflow form migrate sidecar`, or opts in during import with `xlflow init --userform-code-source sidecar`.

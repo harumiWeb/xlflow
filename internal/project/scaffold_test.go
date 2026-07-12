@@ -53,6 +53,35 @@ func TestInitScaffold(t *testing.T) {
 	}
 }
 
+func TestInitScaffoldAcceptsSidecarCodeSource(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitWithOptions(dir, workbook, InitOptions{UserFormCodeSource: "sidecar"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UserForm.CodeSource != "sidecar" {
+		t.Fatalf("init userform code source = %q, want sidecar", cfg.UserForm.CodeSource)
+	}
+}
+
+func TestInitScaffoldRejectsInvalidCodeSource(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "Input.xlsm")
+	if err := os.WriteFile(workbook, []byte("fake workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitWithOptions(dir, workbook, InitOptions{UserFormCodeSource: "broken"}); err == nil || !strings.Contains(err.Error(), "frm, sidecar") {
+		t.Fatalf("expected invalid code source error, got %v", err)
+	}
+}
+
 func TestInitScaffoldPreservesXlamWorkbook(t *testing.T) {
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "ExistingAddin.xlam")
