@@ -154,8 +154,22 @@ public sealed class ExcelEditService : IEditService
             }
             catch (Exception ex)
             {
-                DeletePartialWorksheet(excel, newWorksheet);
-                return FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_sheet_name", $"Worksheet name \"{name}\" is invalid: {ExcelBridgeSupport.FormatExceptionDetail(ex)}", ex.Source ?? "Excel");
+                var cleanup = DeletePartialWorksheet(excel, newWorksheet);
+                UpdateSaveState(workbook, ref dirty, ref needsSave);
+                var failure = FailureWithState(request, workbookPath, sessionMode, dirty, needsSave, "invalid_sheet_name", $"Worksheet name \"{name}\" is invalid: {ExcelBridgeSupport.FormatExceptionDetail(ex)}", ex.Source ?? "Excel");
+                if (!cleanup.Deleted)
+                {
+                    failure.Extensions["warnings"] = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["code"] = "partial_sheet_cleanup_failed",
+                            ["message"] = "xlflow could not delete the partially created worksheet after the requested worksheet name was rejected. Inspect the live workbook before continuing.",
+                            ["details"] = cleanup.Error,
+                        },
+                    };
+                }
+                return failure;
             }
 
             UpdateSaveState(workbook, ref dirty, ref needsSave);
@@ -752,13 +766,16 @@ public sealed class ExcelEditService : IEditService
         }
     }
 
-    private static void DeletePartialWorksheet(object excel, object? worksheet)
+    private sealed record PartialWorksheetCleanupResult(bool Deleted, string Error);
+
+    private static PartialWorksheetCleanupResult DeletePartialWorksheet(object excel, object? worksheet)
     {
         if (worksheet is null)
         {
-            return;
+            return new PartialWorksheetCleanupResult(true, "");
         }
         bool? displayAlerts = null;
+        string restoreError = "";
         try
         {
             dynamic app = excel;
@@ -773,8 +790,9 @@ public sealed class ExcelEditService : IEditService
             dynamic ws = worksheet;
             ws.Delete();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            return new PartialWorksheetCleanupResult(false, ExcelBridgeSupport.FormatExceptionDetail(ex));
         }
         finally
         {
@@ -785,11 +803,13 @@ public sealed class ExcelEditService : IEditService
                     dynamic app = excel;
                     app.DisplayAlerts = displayAlerts.Value;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    restoreError = ExcelBridgeSupport.FormatExceptionDetail(ex);
                 }
             }
         }
+        return new PartialWorksheetCleanupResult(true, restoreError);
     }
 
     private static void UpdateSaveState(object workbook, ref bool? dirty, ref bool needsSave)
