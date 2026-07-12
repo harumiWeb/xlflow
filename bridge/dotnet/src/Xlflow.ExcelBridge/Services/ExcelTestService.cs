@@ -16,8 +16,243 @@ public sealed class ExcelTestService : ITestService
 
     public BridgeResponse Execute(BridgeRequest request, TestCommandArguments args, CancellationToken cancellationToken)
     {
+        var isolation = NormalizeIsolation(args.Isolation);
+        if (isolation is null)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_args_invalid",
+                Message: $"unsupported isolation mode \"{args.Isolation}\"; expected none, module, or test",
+                Phase: "test",
+                Source: "xlflow"));
+        }
+        if (args.UseSession && isolation != "none")
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "unsupported_test_isolation",
+                Message: $"isolation mode \"{isolation}\" is not supported with --session",
+                Phase: "test",
+                Source: "xlflow"));
+        }
+
+        if (args.UseSession)
+        {
+            var response = ExecuteSingleWorkbook(
+                request,
+                args,
+                args.WorkbookPath,
+                DisplayWorkbookPath(args),
+                explicitTests: null,
+                saveAfterRun: !args.NoSave,
+                cancellationToken);
+            AttachTestRunMetadata(response, args, isolation, session: true, temporaryWorkbook: false, workbookSaved: WorkbookSaved(response, fallback: false), cleanup: null);
+            return response;
+        }
+
+        return ExecuteIsolated(request, args, isolation, cancellationToken);
+    }
+
+    private static BridgeResponse ExecuteIsolated(BridgeRequest request, TestCommandArguments args, string isolation, CancellationToken cancellationToken)
+    {
+        var sourceWorkbook = SourceWorkbookPath(args);
+        var runDir = Path.Combine(TempRunRoot(args), Guid.NewGuid().ToString("N"));
+        var runDirCreated = false;
+        CleanupInfo? cleanup = null;
+
+        try
+        {
+            Directory.CreateDirectory(runDir);
+            runDirCreated = true;
+
+            if (isolation == "none")
+            {
+                var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
+                var response = ExecuteSingleWorkbook(
+                    request,
+                    args,
+                    tempWorkbook,
+                    sourceWorkbook,
+                    explicitTests: null,
+                    saveAfterRun: false,
+                    cancellationToken);
+                cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+                AttachTestRunMetadata(response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+                return response;
+            }
+
+            var discoveryWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "discovery");
+            var discovery = DiscoverSelectedTests(request, args, discoveryWorkbook, sourceWorkbook, cancellationToken);
+            if (discovery.Response is not null)
+            {
+                cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+                AttachTestRunMetadata(discovery.Response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+                return discovery.Response;
+            }
+
+            var selected = discovery.Tests;
+            var groups = isolation == "module"
+                ? selected.GroupBy(t => t.Module, StringComparer.OrdinalIgnoreCase).Select(g => g.ToList()).ToList()
+                : selected.Select(t => new List<TestCase> { t }).ToList();
+
+            var logs = new List<string>();
+            var results = new List<object>();
+            var failed = 0;
+            foreach (var group in groups)
+            {
+                var unitName = isolation == "module" ? group[0].Module : group[0].QualifiedName;
+                var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, SanitizeFileSegment(unitName));
+                var response = ExecuteSingleWorkbook(
+                    request,
+                    args,
+                    tempWorkbook,
+                    sourceWorkbook,
+                    explicitTests: group,
+                    saveAfterRun: false,
+                    cancellationToken);
+                logs.AddRange(response.Logs);
+                if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> testItems)
+                {
+                    results.AddRange(testItems);
+                }
+
+                if (response.Error is not null && response.Error.Code != "test_failed")
+                {
+                    cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+                    AttachTestRunMetadata(response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+                    return response;
+                }
+                failed += CountFailedResults(response);
+            }
+
+            cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+            var aggregate = new BridgeResponse
+            {
+                RequestId = request.RequestId,
+                Command = request.Command,
+                Status = failed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
+                Error = failed > 0 ? new BridgeError(
+                    Code: "test_failed",
+                    Message: $"{failed} of {selected.Count} test(s) failed",
+                    Phase: "test",
+                    Source: "xlflow") : null,
+                Logs = logs,
+                Extensions = new Dictionary<string, object?>
+                {
+                    ["workbook"] = new
+                    {
+                        path = sourceWorkbook,
+                        session = false,
+                        session_mode = "none",
+                        session_requested = false,
+                        auto_session = false,
+                        saved = false,
+                        dirty = false,
+                        needs_save = false,
+                    },
+                    ["tests"] = results.ToArray(),
+                },
+            };
+            AttachTestRunMetadata(aggregate, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+            return aggregate;
+        }
+        catch (Exception ex)
+        {
+            cleanup ??= runDirCreated
+                ? CleanupRunDirectory(runDir, args.ProjectRoot)
+                : new CleanupInfo("failed", DisplayCleanupPath(runDir, args.ProjectRoot), ex.Message);
+            var response = BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_environment_failed",
+                Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
+                Phase: "test",
+                Source: "xlflow-excel-bridge"));
+            AttachTestRunMetadata(response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+            return response;
+        }
+    }
+
+    private static (List<TestCase> Tests, BridgeResponse? Response) DiscoverSelectedTests(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string workbookPath,
+        string displayWorkbookPath,
+        CancellationToken cancellationToken)
+    {
+        object? excel = null;
+        object? workbook = null;
+        object? vbProject = null;
+        var excelProcessId = 0;
+        try
+        {
+            var openResult = ExcelBridgeSupport.RunPhase("open_workbook", () =>
+                OpenWorkbookForTest(workbookPath, args.MetadataPath, useSession: false, args.Visible, disableAutoSession: true));
+            excel = openResult.Excel;
+            workbook = openResult.Workbook;
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            vbProject = ExcelBridgeSupport.RunPhase("get_vbproject", () => ExcelBridgeSupport.Get(workbook, "VBProject"))
+                ?? throw new InvalidOperationException("VBIDE access is not available.");
+
+            var discovered = DiscoverTests(vbProject, cancellationToken);
+            if (discovered.Count == 0)
+            {
+                return ([], BuildErrorResponse(request, args, "no_tests_found", "no VBA tests found",
+                    sessionAttached: false, sessionMode: "none", [], runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
+            }
+
+            var duplicates = DuplicateTestQualifiedNames(discovered);
+            if (duplicates.Count > 0)
+            {
+                var names = string.Join(", ", duplicates);
+                return ([], BuildErrorResponse(request, args, "duplicate_test_name",
+                    $"duplicate VBA test name(s): {names}",
+                    sessionAttached: false, sessionMode: "none", discovered, runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
+            }
+
+            var selection = SelectTests(discovered, args.Filter, args.ModuleFilter, args.TagFilter);
+            if (selection.Ambiguous)
+            {
+                var ambiguousName = args.Filter.Trim();
+                var ambiguousMatches = selection.Matches.Select(t => t.QualifiedName).ToArray();
+                return ([], BuildErrorResponse(request, args, "ambiguous_test_name",
+                    $"test name is ambiguous: {ambiguousName}{Environment.NewLine}{Environment.NewLine}Matches:{Environment.NewLine}- {string.Join(Environment.NewLine + "- ", ambiguousMatches)}{Environment.NewLine}{Environment.NewLine}Use a qualified test name.",
+                    sessionAttached: false, sessionMode: "none", selection.Matches, runtimeState: null, runtimeInjected: false,
+                    errorDetails: new Dictionary<string, object?> { ["matches"] = ambiguousMatches },
+                    displayWorkbookPath: displayWorkbookPath));
+            }
+
+            if (selection.Tests.Count == 0)
+            {
+                var filterDesc = FirstNonEmpty(args.Filter, args.ModuleFilter, args.TagFilter, "(no filter)");
+                return ([], BuildErrorResponse(request, args, "test_not_found",
+                    $"test not found: {filterDesc}",
+                    sessionAttached: false, sessionMode: "none", [], runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
+            }
+
+            return (selection.Tests, null);
+        }
+        catch (Exception ex)
+        {
+            return ([], BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_environment_failed",
+                Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
+                Phase: "test",
+                Source: "xlflow-excel-bridge")));
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
+            CloseWorkbook(workbook, excel, excelProcessId);
+        }
+    }
+
+    private static BridgeResponse ExecuteSingleWorkbook(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string workbookPath,
+        string displayWorkbookPath,
+        List<TestCase>? explicitTests,
+        bool saveAfterRun,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
-        var commandStopwatch = Stopwatch.StartNew();
 
         object? excel = null;
         object? workbook = null;
@@ -31,7 +266,7 @@ public sealed class ExcelTestService : ITestService
         try
         {
             var openResult = ExcelBridgeSupport.RunPhase("open_workbook", () =>
-                OpenWorkbookForTest(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
+                OpenWorkbookForTest(workbookPath, args.MetadataPath, args.UseSession, args.Visible, args.DisableAutoSession));
             excel = openResult.Excel;
             workbook = openResult.Workbook;
             sessionAttached = openResult.SessionAttached;
@@ -58,56 +293,47 @@ public sealed class ExcelTestService : ITestService
 
             RuntimeInjectionHelper.EnableUIStreamInjection(workbook, vbProject, runtimeState);
 
-            var discovered = DiscoverTests(vbProject, cancellationToken);
+            var discovered = explicitTests is null ? DiscoverTests(vbProject, cancellationToken) : explicitTests;
 
             if (discovered.Count == 0)
             {
                 return BuildErrorResponse(request, args, "no_tests_found", "no VBA tests found",
-                    sessionAttached, sessionMode, [], runtimeState, runtimeInjected);
+                    sessionAttached, sessionMode, [], runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
             }
 
-            var duplicates = DuplicateTestQualifiedNames(discovered);
-            if (duplicates.Count > 0)
+            var selected = discovered;
+            if (explicitTests is null)
             {
-                var names = string.Join(", ", duplicates);
-                return BuildErrorResponse(request, args, "duplicate_test_name",
-                    $"duplicate VBA test name(s): {names}",
-                    sessionAttached, sessionMode, discovered, runtimeState, runtimeInjected);
-            }
-
-            var selection = SelectTests(discovered, args.Filter, args.ModuleFilter, args.TagFilter);
-            if (selection.Ambiguous)
-            {
-                var ambiguousName = args.Filter.Trim();
-                var ambiguousMatches = selection.Matches.Select(t => t.QualifiedName).ToArray();
-                return BuildErrorResponse(request, args, "ambiguous_test_name",
-                    $"test name is ambiguous: {ambiguousName}{Environment.NewLine}{Environment.NewLine}Matches:{Environment.NewLine}- {string.Join(Environment.NewLine + "- ", ambiguousMatches)}{Environment.NewLine}{Environment.NewLine}Use a qualified test name.",
-                    sessionAttached, sessionMode, selection.Matches, runtimeState, runtimeInjected,
-                    new Dictionary<string, object?> { ["matches"] = ambiguousMatches });
-            }
-
-            var selected = selection.Tests;
-            if (selected.Count == 0)
-            {
-                var filterDesc = args.Filter;
-                if (string.IsNullOrWhiteSpace(filterDesc))
+                var duplicates = DuplicateTestQualifiedNames(discovered);
+                if (duplicates.Count > 0)
                 {
-                    filterDesc = args.ModuleFilter;
+                    var names = string.Join(", ", duplicates);
+                    return BuildErrorResponse(request, args, "duplicate_test_name",
+                        $"duplicate VBA test name(s): {names}",
+                        sessionAttached, sessionMode, discovered, runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
                 }
 
-                if (string.IsNullOrWhiteSpace(filterDesc))
+                var selection = SelectTests(discovered, args.Filter, args.ModuleFilter, args.TagFilter);
+                if (selection.Ambiguous)
                 {
-                    filterDesc = args.TagFilter;
+                    var ambiguousName = args.Filter.Trim();
+                    var ambiguousMatches = selection.Matches.Select(t => t.QualifiedName).ToArray();
+                    return BuildErrorResponse(request, args, "ambiguous_test_name",
+                        $"test name is ambiguous: {ambiguousName}{Environment.NewLine}{Environment.NewLine}Matches:{Environment.NewLine}- {string.Join(Environment.NewLine + "- ", ambiguousMatches)}{Environment.NewLine}{Environment.NewLine}Use a qualified test name.",
+                        sessionAttached, sessionMode, selection.Matches, runtimeState, runtimeInjected,
+                        new Dictionary<string, object?> { ["matches"] = ambiguousMatches },
+                        displayWorkbookPath: displayWorkbookPath);
                 }
 
-                if (string.IsNullOrWhiteSpace(filterDesc))
+                selected = selection.Tests;
+                if (selected.Count == 0)
                 {
-                    filterDesc = "(no filter)";
-                }
+                    var filterDesc = FirstNonEmpty(args.Filter, args.ModuleFilter, args.TagFilter, "(no filter)");
 
-                return BuildErrorResponse(request, args, "test_not_found",
-                    $"test not found: {filterDesc}",
-                    sessionAttached, sessionMode, [], runtimeState, runtimeInjected);
+                    return BuildErrorResponse(request, args, "test_not_found",
+                        $"test not found: {filterDesc}",
+                        sessionAttached, sessionMode, [], runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
+                }
             }
 
             // Build hooks map
@@ -362,8 +588,12 @@ public sealed class ExcelTestService : ITestService
                 runtimeState = null;
             }
 
-            // Save workbook
-            ExcelBridgeSupport.RunPhase("save_workbook", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+            var saved = false;
+            if (saveAfterRun)
+            {
+                ExcelBridgeSupport.RunPhase("save_workbook", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+                saved = true;
+            }
 
             var sessionLog = GetSessionUsageLog(sessionMode);
             if (sessionLog is not null)
@@ -375,14 +605,14 @@ public sealed class ExcelTestService : ITestService
             {
                 ["workbook"] = new
                 {
-                    path = args.WorkbookPath,
+                    path = displayWorkbookPath,
                     session = sessionAttached,
                     session_mode = sessionMode,
                     session_requested = args.UseSession,
                     auto_session = sessionAttached && !args.UseSession,
-                    saved = true,
-                    dirty = false,
-                    needs_save = false,
+                    saved,
+                    dirty = sessionAttached && !saved,
+                    needs_save = sessionAttached && !saved,
                 },
                 ["tests"] = results.ToArray(),
             };
@@ -876,7 +1106,8 @@ public sealed class ExcelTestService : ITestService
         List<TestCase> tests,
         RuntimeInjectionHelper.RuntimeInjectionState? runtimeState,
         bool runtimeInjected,
-        IReadOnlyDictionary<string, object?>? errorDetails = null)
+        IReadOnlyDictionary<string, object?>? errorDetails = null,
+        string? displayWorkbookPath = null)
     {
         var logs = new List<string>();
         var sessionLog = GetSessionUsageLog(sessionMode);
@@ -889,7 +1120,7 @@ public sealed class ExcelTestService : ITestService
         {
             ["workbook"] = new
             {
-                path = args.WorkbookPath,
+                path = displayWorkbookPath ?? DisplayWorkbookPath(args),
                 session = sessionAttached,
                 session_mode = sessionMode,
                 session_requested = args.UseSession,
@@ -925,14 +1156,14 @@ public sealed class ExcelTestService : ITestService
     }
 
     private static (object Excel, object Workbook, bool SessionAttached, string SessionMode) OpenWorkbookForTest(
-        string workbookPath, string metadataPath, bool useSession, bool visible)
+        string workbookPath, string metadataPath, bool useSession, bool visible, bool disableAutoSession)
     {
         if (useSession)
         {
             var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(workbookPath, metadataPath, true);
             return (attachment.Excel, attachment.Workbook, true, attachment.SessionMode);
         }
-        if (ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
+        if (!disableAutoSession && ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
         {
             try
             {
@@ -947,6 +1178,171 @@ public sealed class ExcelTestService : ITestService
         var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible, disableAutomationMacros: false);
         return (direct.Excel, direct.Workbook, false, "none");
     }
+
+    private static string? NormalizeIsolation(string isolation)
+    {
+        var normalized = string.IsNullOrWhiteSpace(isolation) ? "none" : isolation.Trim().ToLowerInvariant();
+        return normalized is "none" or "module" or "test" ? normalized : null;
+    }
+
+    private static string SourceWorkbookPath(TestCommandArguments args)
+    {
+        return string.IsNullOrWhiteSpace(args.SourceWorkbookPath) ? args.WorkbookPath : args.SourceWorkbookPath;
+    }
+
+    private static string DisplayWorkbookPath(TestCommandArguments args)
+    {
+        return SourceWorkbookPath(args);
+    }
+
+    private static string TempRunRoot(TestCommandArguments args)
+    {
+        if (!string.IsNullOrWhiteSpace(args.TempRunRoot))
+        {
+            return args.TempRunRoot;
+        }
+        var root = string.IsNullOrWhiteSpace(args.ProjectRoot)
+            ? Path.GetDirectoryName(SourceWorkbookPath(args)) ?? "."
+            : args.ProjectRoot;
+        return Path.Combine(root, ".xlflow", "test-runs");
+    }
+
+    internal static string CopyWorkbookForTest(string sourceWorkbook, string runDir, string segment)
+    {
+        Directory.CreateDirectory(runDir);
+        var extension = Path.GetExtension(sourceWorkbook);
+        var fileName = SanitizeFileSegment(segment);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "workbook";
+        }
+        var destination = Path.Combine(runDir, fileName + extension);
+        var suffix = 1;
+        while (File.Exists(destination))
+        {
+            destination = Path.Combine(runDir, fileName + "-" + suffix.ToString(CultureInfo.InvariantCulture) + extension);
+            suffix++;
+        }
+        File.Copy(sourceWorkbook, destination);
+        return destination;
+    }
+
+    internal static string SanitizeFileSegment(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder();
+        foreach (var ch in value)
+        {
+            builder.Append(invalid.Contains(ch) ? '_' : ch);
+        }
+        return builder.ToString().Trim();
+    }
+
+    private static CleanupInfo CleanupRunDirectory(string runDir, string projectRoot)
+    {
+        try
+        {
+            Directory.Delete(runDir, recursive: true);
+            return new CleanupInfo("completed", null, null);
+        }
+        catch (Exception ex)
+        {
+            return new CleanupInfo("failed", DisplayCleanupPath(runDir, projectRoot), ex.Message);
+        }
+    }
+
+    private static string DisplayCleanupPath(string path, string projectRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(projectRoot))
+        {
+            try
+            {
+                var relative = Path.GetRelativePath(projectRoot, path);
+                if (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+                {
+                    return relative;
+                }
+            }
+            catch
+            {
+                // fall through to the original path
+            }
+        }
+        return path;
+    }
+
+    private static void AttachTestRunMetadata(
+        BridgeResponse response,
+        TestCommandArguments args,
+        string isolation,
+        bool session,
+        bool temporaryWorkbook,
+        bool workbookSaved,
+        CleanupInfo? cleanup)
+    {
+        var cleanupPayload = new Dictionary<string, object?>
+        {
+            ["status"] = cleanup?.Status ?? "not_applicable",
+        };
+        if (cleanup is not null && cleanup.Status != "completed")
+        {
+            cleanupPayload["path"] = cleanup.Path;
+            cleanupPayload["message"] = cleanup.Message;
+        }
+
+        response.Extensions["test_run"] = new
+        {
+            isolation,
+            session,
+            temporary_workbook = temporaryWorkbook,
+            source_workbook = SourceWorkbookPath(args),
+            workbook_saved = workbookSaved,
+            cleanup = cleanupPayload,
+        };
+    }
+
+    private static bool WorkbookSaved(BridgeResponse response, bool fallback)
+    {
+        if (!response.Extensions.TryGetValue("workbook", out var workbook) || workbook is null)
+        {
+            return fallback;
+        }
+        var value = workbook.GetType().GetProperty("saved")?.GetValue(workbook);
+        return value is bool saved ? saved : fallback;
+    }
+
+    private static int CountFailedResults(BridgeResponse response)
+    {
+        if (!response.Extensions.TryGetValue("tests", out var testsPayload) || testsPayload is not IEnumerable<object> tests)
+        {
+            return response.Error?.Code == "test_failed" ? 1 : 0;
+        }
+
+        var failed = 0;
+        foreach (var test in tests)
+        {
+            var status = test.GetType().GetProperty("status")?.GetValue(test) as string;
+            if (status == "failed")
+            {
+                failed++;
+            }
+        }
+        return failed;
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    internal sealed record CleanupInfo(string Status, string? Path, string? Message);
 
     private static void CloseWorkbook(object? workbook, object? excel, int ownedProcessId)
     {

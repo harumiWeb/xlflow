@@ -2866,6 +2866,70 @@ func TestRunnerAutoBridgeUsesDotNetForPull(t *testing.T) {
 	}
 }
 
+func TestBuildTestScriptArgsIncludesIsolationAndTempMetadata(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
+
+	args := buildTestScriptArgs(root, cfg, "SmokeTests.TestA", TestOptions{
+		Isolation: "test",
+		NoSave:    true,
+	})
+
+	workbook := filepath.Join(root, "build", "Book.xlsm")
+	if got := args["WorkbookPath"]; got != workbook {
+		t.Fatalf("WorkbookPath = %q, want %q", got, workbook)
+	}
+	if got := args["SourceWorkbookPath"]; got != workbook {
+		t.Fatalf("SourceWorkbookPath = %q, want %q", got, workbook)
+	}
+	if got := args["ProjectRoot"]; got != root {
+		t.Fatalf("ProjectRoot = %q, want %q", got, root)
+	}
+	if got := args["TempRunRoot"]; got != filepath.Join(root, ".xlflow", "test-runs") {
+		t.Fatalf("TempRunRoot = %q", got)
+	}
+	if got := args["UseSession"]; got != "false" {
+		t.Fatalf("UseSession = %q, want false", got)
+	}
+	if got := args["DisableAutoSession"]; got != "true" {
+		t.Fatalf("DisableAutoSession = %q, want true", got)
+	}
+	if got := args["Isolation"]; got != "test" {
+		t.Fatalf("Isolation = %q, want test", got)
+	}
+	if got := args["NoSave"]; got != "true" {
+		t.Fatalf("NoSave = %q, want true", got)
+	}
+}
+
+func TestRunnerPromotesTestRunPayload(t *testing.T) {
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+
+	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
+		return fakeBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"test","logs":[],"tests":[],"test_run":{"isolation":"none","session":false,"temporary_workbook":true,"source_workbook":"build/Book.xlsm","workbook_saved":false,"cleanup":{"status":"completed"}}}`)},
+		}
+	}
+
+	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.TestWithOptions(config.Default(), "", TestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	payload, ok := env.TestRun.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected test_run payload: %#v", env.TestRun)
+	}
+	if payload["temporary_workbook"] != true || payload["workbook_saved"] != false {
+		t.Fatalf("unexpected test_run metadata: %#v", payload)
+	}
+}
+
 func TestRunnerAutoBridgeUsesDotNetForPush(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })

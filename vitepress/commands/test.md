@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
+xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--isolation none|module|test] [--no-save] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
 xlflow test list [--module <name>] [--path <path>] --json
 
 ```
@@ -17,6 +17,8 @@ xlflow test list [--module <name>] [--path <path>] --json
 | `--filter <pattern>`           | Run only the test whose qualified name or unique procedure name exactly matches the filter. | -       |
 | `--module <name>`              | Run only tests in the module whose name exactly matches the filter.                         | -       |
 | `--tag <tag>`                  | Run only tests tagged with the given tag.                                                   | -       |
+| `--isolation <mode>`           | Workbook isolation mode: `none`, `module`, or `test`.                                       | none    |
+| `--no-save`                    | Do not explicitly save the workbook used for test execution.                                | false   |
 | `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.                            | -       |
 | `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.                          | -       |
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed.                       | -       |
@@ -24,6 +26,18 @@ xlflow test list [--module <name>] [--path <path>] --json
 | `--session`                    | Run tests in the managed live workbook.                                                     | false   |
 | `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`).                                        | auto    |
 | `--json`                       | Return structured test results.                                                             | false   |
+
+## Workbook Isolation
+
+By default, `xlflow test` runs against a temporary copy of the configured workbook under `.xlflow/test-runs/<run-id>/` and attempts to remove that directory after the run. Cleanup failures are reported in `test_run.cleanup` with the retained path and message when available. The configured project workbook is not opened for mutation or explicitly saved.
+
+`--isolation none` uses one temporary workbook for the whole selected run. This is the fastest mode, but tests can share workbook state with later tests in the same run.
+
+`--isolation module` creates a fresh workbook copy for each selected test module. Tests in one module share state, but different modules cannot affect each other. `BeforeAll` and `AfterAll` run once for that module's isolated workbook.
+
+`--isolation test` creates a fresh workbook copy for each selected test. `BeforeAll`, `BeforeEach`, the test, `AfterEach`, and `AfterAll` all run inside that individual workbook copy.
+
+`--session` attaches to the live managed workbook and supports only `--isolation none`. `--session --isolation module` and `--session --isolation test` fail with `unsupported_test_isolation`. `--session --no-save` prevents xlflow from explicitly saving after tests, but mutations made by VBA remain visible in the live workbook.
 
 ## Source Test Discovery
 
@@ -147,9 +161,9 @@ Best-effort hook cleanup with `On Error Resume Next` can reduce cascading failur
 ```bash
 xlflow test list --json
 xlflow test --json
-xlflow test --filter SmokeTests.TestSmoke --session --json
-xlflow test --module SmokeTests --session --json
-xlflow test --tag smoke --session --json
+xlflow test --isolation module --json
+xlflow test --isolation test --filter SmokeTests.TestSmoke --json
+xlflow test --filter SmokeTests.TestSmoke --session --no-save --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json
 ```
@@ -184,6 +198,16 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 {
   "status": "ok",
   "command": "test",
+  "test_run": {
+    "isolation": "none",
+    "session": false,
+    "temporary_workbook": true,
+    "source_workbook": "build/Book.xlsm",
+    "workbook_saved": false,
+    "cleanup": {
+      "status": "completed"
+    }
+  },
   "tests": [
     {
       "id": "SmokeTests.TestSmoke",

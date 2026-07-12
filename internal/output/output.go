@@ -51,6 +51,7 @@ type Envelope struct {
 	Forms          any `json:"forms,omitempty"`
 	Issues         any `json:"issues,omitempty"`
 	Tests          any `json:"tests,omitempty"`
+	TestRun        any `json:"test_run,omitempty"`
 	Diff           any `json:"diff,omitempty"`
 	Inspect        any `json:"inspect,omitempty"`
 	Runtime        any `json:"runtime,omitempty"`

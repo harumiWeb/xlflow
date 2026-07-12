@@ -280,6 +280,8 @@ type MacrosOptions struct {
 
 type TestOptions struct {
 	Session       bool
+	Isolation     string
+	NoSave        bool
 	Keepalive     CommandOptions
 	RuntimeMode   string
 	RuntimeSource string
@@ -402,6 +404,7 @@ type ScriptResult struct {
 	Macros          any           `json:"macros,omitempty"`
 	Forms           any           `json:"forms,omitempty"`
 	Tests           any           `json:"tests,omitempty"`
+	TestRun         any           `json:"test_run,omitempty"`
 	Runtime         any           `json:"runtime,omitempty"`
 	GUIBoundaries   any           `json:"gui_boundaries,omitempty"`
 	UI              any           `json:"ui,omitempty"`
@@ -760,12 +763,23 @@ func (r Runner) TestWithOptions(cfg config.Config, filter string, opts TestOptio
 }
 
 func buildTestScriptArgs(root string, cfg config.Config, filter string, opts TestOptions) map[string]string {
+	isolation := strings.TrimSpace(opts.Isolation)
+	if isolation == "" {
+		isolation = "none"
+	}
+	workbook := workbookPath(root, cfg.Excel.Path)
 	args := map[string]string{
-		"WorkbookPath": workbookPath(root, cfg.Excel.Path),
-		"Filter":       filter,
-		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-		"UseSession":   strconv.FormatBool(opts.Session),
-		"MetadataPath": filepath.Join(root, ".xlflow", "session.json"),
+		"WorkbookPath":       workbook,
+		"SourceWorkbookPath": workbook,
+		"ProjectRoot":        root,
+		"TempRunRoot":        filepath.Join(root, ".xlflow", "test-runs"),
+		"Filter":             filter,
+		"Visible":            strconv.FormatBool(cfg.Excel.Visible),
+		"UseSession":         strconv.FormatBool(opts.Session),
+		"Isolation":          isolation,
+		"NoSave":             strconv.FormatBool(opts.NoSave),
+		"DisableAutoSession": strconv.FormatBool(true),
+		"MetadataPath":       filepath.Join(root, ".xlflow", "session.json"),
 	}
 	if strings.TrimSpace(opts.RuntimeMode) != "" {
 		args["RuntimeMode"] = strings.TrimSpace(opts.RuntimeMode)
@@ -1731,6 +1745,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.Macros = result.Macros
 	env.Forms = result.Forms
 	env.Tests = result.Tests
+	env.TestRun = result.TestRun
 	env.Runtime = result.Runtime
 	env.GUIBoundaries = result.GUIBoundaries
 	env.Debug = mergeDebugResult(result.Debug, debugResult)
