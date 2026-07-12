@@ -13,10 +13,39 @@ public sealed class ExcelTestService : ITestService
 {
     private const int VbObjectError = unchecked((int)0x80040000);
     private const int InconclusiveErrorNumber = VbObjectError + 516;
+    private const string StopReasonMaximumFailures = "maximum failure count reached";
     private static readonly string[] SupportedTestParameterTypes = ["Boolean", "Byte", "Integer", "Long", "LongLong", "LongPtr", "Single", "Double", "Currency", "Date", "String", "Variant"];
 
     public BridgeResponse Execute(BridgeRequest request, TestCommandArguments args, CancellationToken cancellationToken)
     {
+        if (args.FailFast && args.MaxFailures > 0 && args.MaxFailures != 1)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_args_invalid",
+                Message: "--fail-fast is equivalent to --max-failures 1 and cannot be combined with --max-failures",
+                Phase: "test",
+                Source: "xlflow"));
+        }
+        if (args.MaxFailures < 0)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_args_invalid",
+                Message: "--max-failures must be greater than zero",
+                Phase: "test",
+                Source: "xlflow"));
+        }
+        if (args.RerunFailed < 0)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "test_args_invalid",
+                Message: "--rerun-failed must be zero or greater",
+                Phase: "test",
+                Source: "xlflow"));
+        }
+        if (args.FailFast && args.MaxFailures == 0)
+        {
+            args = args with { MaxFailures = 1 };
+        }
         var isolation = NormalizeIsolation(args.Isolation);
         if (isolation is null)
         {
@@ -66,10 +95,43 @@ public sealed class ExcelTestService : ITestService
 
             if (isolation == "none")
             {
+                if (args.RerunFailed > 0)
+                {
+                    var retryDiscoveryWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "discovery");
+                    var retryDiscovery = DiscoverSelectedTests(request, args, retryDiscoveryWorkbook, sourceWorkbook, cancellationToken);
+                    if (retryDiscovery.Response is not null)
+                    {
+                        cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+                        AttachTestRunMetadata(retryDiscovery.Response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+                        return retryDiscovery.Response;
+                    }
+
+                    var selectedWithRetries = retryDiscovery.Tests;
+                    var responseWithRetries = args.MaxFailures > 0
+                        ? ExecuteRetryingIsolatedNoneWithFailureLimit(
+                            request,
+                            args,
+                            sourceWorkbook,
+                            runDir,
+                            selectedWithRetries,
+                            cancellationToken)
+                        : ExecuteRetryingIsolatedNoneBatch(
+                            request,
+                            args,
+                            sourceWorkbook,
+                            runDir,
+                            selectedWithRetries,
+                            cancellationToken);
+                    cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
+                    AttachTestRunMetadata(responseWithRetries, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
+                    return responseWithRetries;
+                }
+
                 var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
+                var groupArgs = args.RerunFailed > 0 ? args with { MaxFailures = 0, FailFast = false } : args;
                 var response = ExecuteSingleWorkbook(
                     request,
-                    args,
+                    groupArgs,
                     tempWorkbook,
                     sourceWorkbook,
                     explicitTests: null,
@@ -97,6 +159,8 @@ public sealed class ExcelTestService : ITestService
             var logs = new List<string>();
             var results = new List<object>();
             var failed = 0;
+            var stoppedEarly = false;
+            var stopReason = "";
             foreach (var group in groups)
             {
                 if (group.All(IsNonExecutedTest))
@@ -109,12 +173,24 @@ public sealed class ExcelTestService : ITestService
 
                     continue;
                 }
+                if (ShouldStopAfterFailures(args, failed))
+                {
+                    stoppedEarly = true;
+                    stopReason = StopReasonMaximumFailures;
+                    foreach (var test in group)
+                    {
+                        results.Add(BuildNotRunTestResult(test, stopReason));
+                        logs.Add($"NOT RUN {test.QualifiedName}: {stopReason}");
+                    }
+                    continue;
+                }
 
                 var unitName = isolation == "module" ? group[0].Module : group[0].QualifiedName;
                 var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, SanitizeFileSegment(unitName));
+                var groupArgs = args.RerunFailed > 0 ? args with { MaxFailures = 0, FailFast = false } : args;
                 var response = ExecuteSingleWorkbook(
                     request,
-                    args,
+                    groupArgs,
                     tempWorkbook,
                     sourceWorkbook,
                     explicitTests: group,
@@ -123,7 +199,12 @@ public sealed class ExcelTestService : ITestService
                 logs.AddRange(response.Logs);
                 if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> testItems)
                 {
-                    results.AddRange(testItems);
+                    var groupResults = testItems.ToList();
+                    if (args.RerunFailed > 0)
+                    {
+                        groupResults = RetryFailedResults(request, args, sourceWorkbook, runDir, isolation, group, groupResults, logs, cancellationToken);
+                    }
+                    results.AddRange(groupResults);
                 }
 
                 if (response.Error is not null && response.Error.Code != "test_failed")
@@ -132,7 +213,7 @@ public sealed class ExcelTestService : ITestService
                     AttachTestRunMetadata(response, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
                     return response;
                 }
-                failed += CountFailedResults(response);
+                failed = CountFailedResultObjects(results);
             }
 
             cleanup = CleanupRunDirectory(runDir, args.ProjectRoot);
@@ -161,6 +242,7 @@ public sealed class ExcelTestService : ITestService
                         needs_save = false,
                     },
                     ["tests"] = results.ToArray(),
+                    ["execution"] = BuildExecutionPayload(args, stoppedEarly, stopReason),
                 },
             };
             AttachTestRunMetadata(aggregate, args, isolation, session: false, temporaryWorkbook: true, workbookSaved: false, cleanup);
@@ -263,6 +345,154 @@ public sealed class ExcelTestService : ITestService
             ExcelBridgeSupport.ReleaseComObject(vbProject);
             CloseWorkbook(workbook, excel, excelProcessId);
         }
+    }
+
+    private static BridgeResponse ExecuteRetryingIsolatedNoneWithFailureLimit(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        string runDir,
+        List<TestCase> selected,
+        CancellationToken cancellationToken)
+    {
+        var logs = new List<string>();
+        var results = new List<object>();
+        var failed = 0;
+        var stoppedEarly = false;
+        var stopReason = "";
+        var attemptArgs = args with { RerunFailed = 0, MaxFailures = 0, FailFast = false };
+        var executableIndex = 0;
+
+        foreach (var test in selected)
+        {
+            if (IsNonExecutedTest(test))
+            {
+                results.Add(BuildNonExecutedTestResult(test));
+                logs.Add(NonExecutedLogLine(test));
+                continue;
+            }
+
+            if (ShouldStopAfterFailures(args, failed))
+            {
+                stoppedEarly = true;
+                stopReason = StopReasonMaximumFailures;
+                results.Add(BuildNotRunTestResult(test, stopReason));
+                logs.Add($"NOT RUN {test.QualifiedName}: {stopReason}");
+                continue;
+            }
+
+            executableIndex++;
+            var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run-" + executableIndex.ToString(CultureInfo.InvariantCulture));
+            var response = ExecuteSingleWorkbook(
+                request,
+                attemptArgs,
+                tempWorkbook,
+                sourceWorkbook,
+                explicitTests: [test],
+                saveAfterRun: false,
+                cancellationToken);
+            logs.AddRange(response.Logs);
+
+            if (response.Error is not null && response.Error.Code != "test_failed")
+            {
+                return response with { Logs = logs };
+            }
+
+            if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> testItems)
+            {
+                var testResults = RetryFailedResults(request, args, sourceWorkbook, runDir, "none", [test], testItems.ToList(), logs, cancellationToken);
+                results.AddRange(testResults);
+                failed = CountFailedResultObjects(results);
+            }
+        }
+
+        return BuildIsolatedAggregateResponse(request, args, sourceWorkbook, selected.Count, results, logs, failed, stoppedEarly, stopReason);
+    }
+
+    private static BridgeResponse ExecuteRetryingIsolatedNoneBatch(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        string runDir,
+        List<TestCase> selected,
+        CancellationToken cancellationToken)
+    {
+        var tempWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, "run");
+        var firstAttemptArgs = args with { MaxFailures = 0, FailFast = false };
+        var response = ExecuteSingleWorkbook(
+            request,
+            firstAttemptArgs,
+            tempWorkbook,
+            sourceWorkbook,
+            explicitTests: selected,
+            saveAfterRun: false,
+            cancellationToken);
+        if (response.Extensions.TryGetValue("tests", out var testsPayload) && testsPayload is IEnumerable<object> tests)
+        {
+            var logs = new List<string>(response.Logs);
+            var mergedResults = RetryFailedResults(request, args, sourceWorkbook, runDir, "none", selected, tests.ToList(), logs, cancellationToken);
+            var finalFailed = CountFailedResultObjects(mergedResults);
+            response.Extensions["tests"] = mergedResults.ToArray();
+            response.Extensions["execution"] = BuildExecutionPayload(args, stoppedEarly: false, stopReason: "");
+            var finalError = finalFailed > 0 ? new BridgeError(
+                Code: "test_failed",
+                Message: $"{finalFailed} of {selected.Count} test(s) failed",
+                Phase: "test",
+                Source: "xlflow") : null;
+            if (finalFailed == 0)
+            {
+                response.Extensions.Remove("error");
+                response.Extensions.Remove("status");
+            }
+            response = response with
+            {
+                Logs = logs,
+                Status = finalFailed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
+                Error = finalError,
+            };
+        }
+        return response;
+    }
+
+    private static BridgeResponse BuildIsolatedAggregateResponse(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        int selectedCount,
+        List<object> results,
+        List<string> logs,
+        int failed,
+        bool stoppedEarly,
+        string stopReason)
+    {
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = failed > 0 ? BridgeStatus.Failed : BridgeStatus.Ok,
+            Error = failed > 0 ? new BridgeError(
+                Code: "test_failed",
+                Message: $"{failed} of {selectedCount} test(s) failed",
+                Phase: "test",
+                Source: "xlflow") : null,
+            Logs = logs,
+            Extensions = new Dictionary<string, object?>
+            {
+                ["workbook"] = new
+                {
+                    path = sourceWorkbook,
+                    session = false,
+                    session_mode = "none",
+                    session_requested = false,
+                    auto_session = false,
+                    saved = false,
+                    dirty = false,
+                    needs_save = false,
+                },
+                ["tests"] = results.ToArray(),
+                ["execution"] = BuildExecutionPayload(args, stoppedEarly, stopReason),
+            },
+        };
     }
 
     private static BridgeResponse ExecuteSingleWorkbook(
@@ -409,6 +639,9 @@ public sealed class ExcelTestService : ITestService
             var logs = new List<string>();
             var failed = 0;
             var inconclusiveCount = 0;
+            var stoppedEarly = false;
+            var stopReason = "";
+            var scheduledExecutable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var moduleGroup in selected.GroupBy(t => t.Module, StringComparer.OrdinalIgnoreCase))
             {
@@ -422,6 +655,17 @@ public sealed class ExcelTestService : ITestService
                 var executableModuleGroup = moduleGroup.Where(t => !IsNonExecutedTest(t)).ToList();
                 if (executableModuleGroup.Count == 0)
                 {
+                    continue;
+                }
+                if (ShouldStopAfterFailures(args, failed))
+                {
+                    stoppedEarly = true;
+                    stopReason = StopReasonMaximumFailures;
+                    foreach (var test in executableModuleGroup)
+                    {
+                        results.Add(BuildNotRunTestResult(test, stopReason));
+                        logs.Add($"NOT RUN {test.QualifiedName}: {stopReason}");
+                    }
                     continue;
                 }
 
@@ -442,6 +686,7 @@ public sealed class ExcelTestService : ITestService
                             var message = Convert.ToString(arr[3], CultureInfo.InvariantCulture) ?? "";
                             foreach (var test in executableModuleGroup)
                             {
+                                scheduledExecutable.Add(test.QualifiedName);
                                 failed++;
                                 results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
                                     new { code = "before_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) }));
@@ -455,6 +700,7 @@ public sealed class ExcelTestService : ITestService
                         beforeAllFailed = true;
                         foreach (var test in executableModuleGroup)
                         {
+                            scheduledExecutable.Add(test.QualifiedName);
                             failed++;
                             results.Add(BuildTestResult(test, "failed", (int)sw.ElapsedMilliseconds,
                                 new { code = "before_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult }));
@@ -467,6 +713,15 @@ public sealed class ExcelTestService : ITestService
                 {
                     foreach (var test in executableModuleGroup)
                     {
+                        if (ShouldStopAfterFailures(args, failed))
+                        {
+                            stoppedEarly = true;
+                            stopReason = StopReasonMaximumFailures;
+                            results.Add(BuildNotRunTestResult(test, stopReason));
+                            logs.Add($"NOT RUN {test.QualifiedName}: {stopReason}");
+                            continue;
+                        }
+                        scheduledExecutable.Add(test.QualifiedName);
                         var sw = Stopwatch.StartNew();
                         try
                         {
@@ -525,11 +780,11 @@ public sealed class ExcelTestService : ITestService
                         if (runResult is object[] arr && arr.Length >= 5 && !Convert.ToBoolean(arr[0], CultureInfo.InvariantCulture))
                         {
                             var message = Convert.ToString(arr[3], CultureInfo.InvariantCulture) ?? "";
-                            var moduleTestNames = executableModuleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            var moduleTestNames = executableModuleGroup.Where(t => scheduledExecutable.Contains(t.QualifiedName)).Select(t => t.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
                             for (var i = 0; i < results.Count; i++)
                             {
                                 var resultObj = results[i];
-                                var resultName = ResultString(resultObj, "name");
+                                var resultName = ResultString(resultObj, "qualified_name");
                                 var resultModule = ResultString(resultObj, "module");
                                 var resultStatus = ResultString(resultObj, "status");
                                 if (resultModule == moduleName && moduleTestNames.Contains(resultName))
@@ -548,11 +803,11 @@ public sealed class ExcelTestService : ITestService
                     catch (Exception ex)
                     {
                         sw.Stop();
-                        var moduleTestNames = executableModuleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var moduleTestNames = executableModuleGroup.Where(t => scheduledExecutable.Contains(t.QualifiedName)).Select(t => t.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
                         for (var i = 0; i < results.Count; i++)
                         {
                             var resultObj = results[i];
-                            var resultName = ResultString(resultObj, "name");
+                            var resultName = ResultString(resultObj, "qualified_name");
                             var resultModule = ResultString(resultObj, "module");
                             var resultStatus = ResultString(resultObj, "status");
                             if (resultModule == moduleName && moduleTestNames.Contains(resultName))
@@ -624,6 +879,7 @@ public sealed class ExcelTestService : ITestService
                     needs_save = sessionAttached && !saved,
                 },
                 ["tests"] = results.ToArray(),
+                ["execution"] = BuildExecutionPayload(args, stoppedEarly, stopReason),
             };
 
             if (failed > 0)
@@ -1801,6 +2057,8 @@ public sealed class ExcelTestService : ITestService
             ["qualified_procedure"] = test.QualifiedProcedure,
             ["procedure_line"] = test.ProcedureLine,
             ["tags"] = test.Tags,
+            ["attempts"] = 1,
+            ["flaky"] = false,
         };
         if (!string.IsNullOrEmpty(test.CaseId))
         {
@@ -1820,6 +2078,53 @@ public sealed class ExcelTestService : ITestService
         {
             result["observed_error"] = observedError;
         }
+        result["attempt_results"] = new[] { BuildAttemptResult(1, status, durationMs, status != "passed" ? error : null) };
+        return result;
+    }
+
+    private static Dictionary<string, object?> BuildAttemptResult(int attempt, string status, int durationMs, object? error)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["attempt"] = attempt,
+            ["status"] = status,
+            ["duration_ms"] = durationMs,
+        };
+        if (error is not null)
+        {
+            result["error"] = error;
+        }
+        return result;
+    }
+
+    internal static Dictionary<string, object?> BuildNotRunTestResult(TestCase test, string reason)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["id"] = test.QualifiedName,
+            ["qualified_name"] = test.QualifiedName,
+            ["name"] = test.Name,
+            ["module"] = test.Module,
+            ["status"] = "not_run",
+            ["duration_ms"] = 0,
+            ["qualified_procedure"] = test.QualifiedProcedure,
+            ["procedure_line"] = test.ProcedureLine,
+            ["tags"] = test.Tags,
+            ["reason"] = reason,
+        };
+        if (!string.IsNullOrEmpty(test.CaseId))
+        {
+            result["case_id"] = test.CaseId;
+            result["annotation_line"] = test.AnnotationLine;
+            result["arguments"] = test.Arguments.Select(BuildTestArgument).ToArray();
+        }
+        if (test.ExpectedError is not null)
+        {
+            result["expected_error"] = BuildExpectedError(test.ExpectedError);
+        }
+        result["attempts"] = 1;
+        result["flaky"] = false;
+        result["attempt_results"] = new[] { BuildAttemptResult(1, "not_run", 0, null) };
         return result;
     }
 
@@ -1873,6 +2178,30 @@ public sealed class ExcelTestService : ITestService
     private static bool IsNonExecutedTest(TestCase test)
     {
         return test.Skip is not null || test.Todo is not null;
+    }
+
+    private static bool ShouldStopAfterFailures(TestCommandArguments args, int failed)
+    {
+        return args.MaxFailures > 0 && failed >= args.MaxFailures;
+    }
+
+    private static Dictionary<string, object?> BuildExecutionPayload(TestCommandArguments args, bool stoppedEarly, string stopReason)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["fail_fast"] = args.FailFast,
+            ["rerun_failed"] = args.RerunFailed,
+            ["stopped_early"] = stoppedEarly,
+        };
+        if (args.MaxFailures > 0)
+        {
+            payload["max_failures"] = args.MaxFailures;
+        }
+        if (!string.IsNullOrWhiteSpace(stopReason))
+        {
+            payload["stop_reason"] = stopReason;
+        }
+        return payload;
     }
 
     private static Dictionary<string, object?> BuildExpectedError(ExpectedErrorMetadata expected)
@@ -1997,6 +2326,7 @@ public sealed class ExcelTestService : ITestService
                     needs_save = sessionAttached && !saved,
                 },
                 ["tests"] = results.ToArray(),
+                ["execution"] = BuildExecutionPayload(args, stoppedEarly: false, stopReason: ""),
             },
         };
     }
@@ -2227,6 +2557,10 @@ public sealed class ExcelTestService : ITestService
             cleanupPayload["message"] = cleanup.Message;
         }
 
+        var execution = response.Extensions.TryGetValue("execution", out var executionPayload) && executionPayload is not null
+            ? executionPayload
+            : BuildExecutionPayload(args, stoppedEarly: false, stopReason: "");
+
         response.Extensions["test_run"] = new
         {
             isolation,
@@ -2235,6 +2569,7 @@ public sealed class ExcelTestService : ITestService
             source_workbook = SourceWorkbookPath(args),
             workbook_saved = workbookSaved,
             cleanup = cleanupPayload,
+            execution,
         };
     }
 
@@ -2265,6 +2600,158 @@ public sealed class ExcelTestService : ITestService
             }
         }
         return failed;
+    }
+
+    private static int CountFailedResultObjects(IEnumerable<object> tests)
+    {
+        var failed = 0;
+        foreach (var test in tests)
+        {
+            if (ResultString(test, "status") == "failed")
+            {
+                failed++;
+            }
+        }
+        return failed;
+    }
+
+    private static List<object> RetryFailedResults(
+        BridgeRequest request,
+        TestCommandArguments args,
+        string sourceWorkbook,
+        string runDir,
+        string isolation,
+        List<TestCase> selected,
+        List<object> initialResults,
+        List<string> logs,
+        CancellationToken cancellationToken)
+    {
+        var current = initialResults.ToDictionary(result => ResultString(result, "qualified_name"), result => result, StringComparer.OrdinalIgnoreCase);
+        var testsByName = selected.ToDictionary(test => test.QualifiedName, StringComparer.OrdinalIgnoreCase);
+        var retryArgs = args with { RerunFailed = 0, MaxFailures = 0, FailFast = false };
+
+        for (var attempt = 2; attempt <= args.RerunFailed + 1; attempt++)
+        {
+            var failedTests = selected
+                .Where(test => current.TryGetValue(test.QualifiedName, out var result) && IsRetryableFinalFailure(result))
+                .ToList();
+            if (failedTests.Count == 0)
+            {
+                break;
+            }
+
+            var unitName = isolation == "module" && failedTests.Count > 0 ? failedTests[0].Module : "retry-" + attempt.ToString(CultureInfo.InvariantCulture);
+            var retryWorkbook = CopyWorkbookForTest(sourceWorkbook, runDir, SanitizeFileSegment(unitName + "-attempt-" + attempt.ToString(CultureInfo.InvariantCulture)));
+            var retryResponse = ExecuteSingleWorkbook(
+                request,
+                retryArgs,
+                retryWorkbook,
+                sourceWorkbook,
+                explicitTests: failedTests,
+                saveAfterRun: false,
+                cancellationToken);
+            logs.AddRange(retryResponse.Logs);
+
+            if (!retryResponse.Extensions.TryGetValue("tests", out var testsPayload) || testsPayload is not IEnumerable<object> retryItems)
+            {
+                continue;
+            }
+
+            foreach (var retryItem in retryItems)
+            {
+                var qualifiedName = ResultString(retryItem, "qualified_name");
+                if (qualifiedName == "" || !testsByName.ContainsKey(qualifiedName) || !current.TryGetValue(qualifiedName, out var previous))
+                {
+                    continue;
+                }
+                current[qualifiedName] = MergeAttemptResult(previous, retryItem, attempt);
+            }
+        }
+
+        return initialResults
+            .Select(result => current.TryGetValue(ResultString(result, "qualified_name"), out var merged) ? merged : result)
+            .ToList();
+    }
+
+    private static bool IsRetryableFinalFailure(object result)
+    {
+        if (ResultString(result, "status") != "failed")
+        {
+            return false;
+        }
+        var code = ResultErrorCode(result);
+        return code is not "before_all_failed" and not "after_all_failed";
+    }
+
+    private static Dictionary<string, object?> MergeAttemptResult(object previous, object retry, int attempt)
+    {
+        var merged = CloneResultDictionary(retry);
+        var history = ResultAttemptHistory(previous);
+        history.Add(BuildAttemptResult(attempt, ResultString(retry, "status"), ResultInt(retry, "duration_ms"), ResultError(retry)));
+        var hadFailedAttempt = history.Any(item => ResultString(item, "status") == "failed");
+        var finalStatus = ResultString(retry, "status");
+        merged["attempts"] = history.Count;
+        merged["flaky"] = finalStatus == "passed" && hadFailedAttempt;
+        merged["attempt_results"] = history.ToArray();
+        return merged;
+    }
+
+    private static Dictionary<string, object?> CloneResultDictionary(object result)
+    {
+        if (result is IReadOnlyDictionary<string, object?> readOnly)
+        {
+            return readOnly.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        }
+        if (result is IDictionary<string, object?> dictionary)
+        {
+            return dictionary.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        }
+        return result.GetType().GetProperties().ToDictionary(property => property.Name, property => property.GetValue(result), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<object> ResultAttemptHistory(object result)
+    {
+        if (ResultValue(result, "attempt_results") is IEnumerable<object> attempts)
+        {
+            return attempts.ToList();
+        }
+        return [BuildAttemptResult(1, ResultString(result, "status"), ResultInt(result, "duration_ms"), ResultError(result))];
+    }
+
+    private static object? ResultError(object result)
+    {
+        return ResultValue(result, "error");
+    }
+
+    private static string ResultErrorCode(object result)
+    {
+        var error = ResultError(result);
+        if (error is null)
+        {
+            return "";
+        }
+        if (error is IReadOnlyDictionary<string, object?> readOnly && readOnly.TryGetValue("code", out var readOnlyValue))
+        {
+            return Convert.ToString(readOnlyValue, CultureInfo.InvariantCulture) ?? "";
+        }
+        if (error is IDictionary<string, object?> dictionary && dictionary.TryGetValue("code", out var value))
+        {
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+        }
+        return Convert.ToString(error.GetType().GetProperty("code")?.GetValue(error) ?? error.GetType().GetProperty("Code")?.GetValue(error), CultureInfo.InvariantCulture) ?? "";
+    }
+
+    private static object? ResultValue(object result, string key)
+    {
+        if (result is IReadOnlyDictionary<string, object?> readOnly && readOnly.TryGetValue(key, out var readOnlyValue))
+        {
+            return readOnlyValue;
+        }
+        if (result is IDictionary<string, object?> dictionary && dictionary.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+        return result.GetType().GetProperty(key)?.GetValue(result);
     }
 
     private static string FirstNonEmpty(params string[] values)

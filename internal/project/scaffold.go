@@ -2193,40 +2193,37 @@ const sampleTestModule = `Attribute VB_Name = "SampleTests"
 Option Explicit
 
 ' xlflow tests are public parameterless Sub procedures whose names match
-' Test* or *_Test.  xlflow discovers them automatically at run time.
+' Test* or *_Test.  Parameterized tests use ByVal scalar arguments plus
+' @TestCase(...) comments.
 '
 ' Use XlflowAssert helpers to raise clear, JSON-friendly failures.
 '
-' Tags: add '@Tag("name")' comment lines directly above a test sub
-' and run only matching tests with  xlflow test --tag <name>.
+' Useful commands:
+'   xlflow test
+'   xlflow test --json
+'   xlflow test --fail-fast
+'   xlflow test --max-failures 3
+'   xlflow test --rerun-failed 1
 '
-' Hooks: BeforeAll / AfterAll / BeforeEach / AfterEach are optional
-' reserved names.  They must be public parameterless Subs and they
-' affect only tests in the same module.
-'
-' Keep tests independent.  Use BeforeEach / AfterEach for isolation
-' and BeforeAll for expensive one-time setup.
-
-Public Sub BeforeAll()
-    ' Runs once before the first test in this module.
-End Sub
-
-Public Sub AfterAll()
-    ' Runs once after the last test in this module.
-End Sub
-
-Public Sub BeforeEach()
-    ' Runs before every test in this module.
-End Sub
-
-Public Sub AfterEach()
-    ' Runs after every test in this module.
-End Sub
+' Optional hooks named BeforeAll / AfterAll / BeforeEach / AfterEach run
+' around tests in this module.  Keep tests independent; use hooks only
+' when setup or cleanup is actually needed.
 
 '@Tag("smoke")
 Public Sub Test_Sample_Pass()
-    ' A passing test demonstrates the AssertEquals helper.
-    XlflowAssert.AssertEquals 1 + 1, 2, "basic arithmetic should work"
+    XlflowAssert.AssertEquals 2, 1 + 1, "basic arithmetic should work"
+    XlflowAssert.AssertTrue Len("xlflow") > 0, "strings should have length"
+End Sub
+
+'@TestCase("adds positives"; 1, 2, 3)
+'@TestCase("adds negatives"; -1, -2, -3)
+Public Sub Test_Adds_Numbers(ByVal leftValue As Long, ByVal rightValue As Long, ByVal expected As Long)
+    XlflowAssert.AssertEquals expected, leftValue + rightValue, "sum should match"
+End Sub
+
+'@ExpectedError(5)
+Public Sub Test_Expected_Error()
+    Err.Raise 5, "SampleTests", "Invalid procedure call or argument"
 End Sub
 
 '@Todo("not implemented yet")

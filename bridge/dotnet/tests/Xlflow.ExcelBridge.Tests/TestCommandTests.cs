@@ -17,6 +17,9 @@ public sealed class TestCommandTests
             Assert.Equal(@"C:\work\Book.xlsm", args.WorkbookPath);
             Assert.Equal("module", args.Isolation);
             Assert.True(args.NoSave);
+            Assert.True(args.FailFast);
+            Assert.Equal(3, args.MaxFailures);
+            Assert.Equal(2, args.RerunFailed);
             Assert.True(args.DisableAutoSession);
             Assert.Equal(@"C:\work\Book.xlsm", args.SourceWorkbookPath);
             Assert.Equal(@"C:\work", args.ProjectRoot);
@@ -33,6 +36,9 @@ public sealed class TestCommandTests
                   "WorkbookPath": "C:\\work\\Book.xlsm",
                   "Isolation": "module",
                   "NoSave": "true",
+                  "FailFast": "true",
+                  "MaxFailures": "3",
+                  "RerunFailed": "2",
                   "DisableAutoSession": "true",
                   "SourceWorkbookPath": "C:\\work\\Book.xlsm",
                   "ProjectRoot": "C:\\work",

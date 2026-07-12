@@ -1296,6 +1296,8 @@ func (r renderer) renderTest(env Envelope) string {
 	todo := 0
 	inconclusive := 0
 	notRun := 0
+	flaky := 0
+	attempts := 0
 	for _, test := range tests {
 		switch stringValue(test, "status") {
 		case "passed":
@@ -1308,8 +1310,16 @@ func (r renderer) renderTest(env Envelope) string {
 			todo++
 		case "inconclusive":
 			inconclusive++
+		case "not_run":
+			notRun++
 		default:
 			notRun++
+		}
+		if boolValue(test, "flaky") {
+			flaky++
+		}
+		if n, ok := numberValue(test, "attempts"); ok {
+			attempts += int(n)
 		}
 	}
 	var b strings.Builder
@@ -1326,6 +1336,12 @@ func (r renderer) renderTest(env Envelope) string {
 	}
 	if notRun > 0 {
 		summary += fmt.Sprintf(", %d not run", notRun)
+	}
+	if flaky > 0 {
+		summary += fmt.Sprintf(", %d flaky", flaky)
+	}
+	if attempts > 0 {
+		summary += fmt.Sprintf(", %d attempts", attempts)
 	}
 	summary += fmt.Sprintf(", %d total", len(tests))
 	b.WriteString(r.kvRows(kvRow{"Tests", summary}))
@@ -1346,11 +1362,19 @@ func (r renderer) renderTest(env Envelope) string {
 	for _, test := range tests {
 		status := stringValue(test, "status")
 		marker := testStatusMarker(r, status)
+		if status == "passed" && boolValue(test, "flaky") {
+			marker = "FLAKY PASS"
+		}
 		name := stringValue(test, "name")
 		module := stringValue(test, "module")
 		duration := ""
 		if n, ok := numberValue(test, "duration_ms"); ok {
 			duration = fmt.Sprintf("%dms", int(n))
+		}
+		if boolValue(test, "flaky") {
+			if n, ok := numberValue(test, "attempts"); ok {
+				duration = fmt.Sprintf("after %d attempts", int(n))
+			}
 		}
 		errText := ""
 		if errMap := objectMap(test["error"]); len(errMap) > 0 {
@@ -1390,6 +1414,11 @@ func testStatusMarker(r renderer, status string) string {
 			return r.style("?", "214", true)
 		}
 		return "[?]"
+	case "not_run":
+		if r.color {
+			return r.style("NOT RUN", "244", true)
+		}
+		return "[-]"
 	default:
 		return r.statusBadge("info")
 	}
