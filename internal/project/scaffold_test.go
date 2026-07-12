@@ -186,6 +186,13 @@ func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "custom", "modules", "Main.bas")); !os.IsNotExist(err) {
 		t.Fatalf("expected Main.bas not to be installed for helper bundle, got %v", err)
 	}
+	body, err := os.ReadFile(filepath.Join(dir, "custom", "modules", "XlflowAssert.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Public Sub AssertStrictEquals") || !strings.Contains(string(body), "Public Sub AssertRangeEquals") {
+		t.Fatalf("installed helper should include expanded assertions:\n%s", string(body))
+	}
 	if len(result.Created) != 4 {
 		t.Fatalf("created count = %d, want 4", len(result.Created))
 	}
@@ -447,7 +454,7 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 	if !strings.Contains(got, "''' Asserts that two scalar values are equal.") {
 		t.Fatalf("Assert helper should explain its intended use:\n%s", got)
 	}
-	if !strings.Contains(got, "Err.Raise vbObjectError + 513") {
+	if !strings.Contains(got, "Private Const assertFailureNumber As Long = vbObjectError + 513") {
 		t.Fatalf("AssertEquals should raise a VBA error on mismatch:\n%s", got)
 	}
 	for _, want := range []string{
@@ -455,10 +462,43 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 		"IsArray(expected) Or IsArray(actual)",
 		"IsNull(expected) Or IsNull(actual)",
 		"AssertEquals supports scalar values only",
-		"Private Function DescribeAssertValue",
+		"Private Function FormatAssertValue",
+		"Private Function EscapeAssertString",
+		"Private Function AssertValueTypeName",
+		"Private Const assertFailureNumber As Long = vbObjectError + 513",
+		"Err.Raise assertFailureNumber, source, detail",
+		"FormatAssertValue = \"<Null>\"",
+		"FormatAssertValue = \"<Empty>\"",
+		"FormatAssertValue = \"<Nothing>\"",
+		"FormatAssertValue = \"<String: \"\"\"",
+		"AssertValueTypeName = \"Long\"",
+		"AssertValueTypeName = \"Double\"",
 		"Public Sub AssertTrue(ByVal condition As Boolean",
 		"Public Sub AssertFalse(ByVal condition As Boolean",
 		"Public Sub AssertNotEqual(ByVal expected As Variant, ByVal actual As Variant",
+		"Public Sub AssertStrictEquals(ByVal expected As Variant, ByVal actual As Variant",
+		"Public Sub AssertNull(ByVal value As Variant",
+		"Public Sub AssertNotNull(ByVal value As Variant",
+		"Public Sub AssertEmpty(ByVal value As Variant",
+		"Public Sub AssertNotEmpty(ByVal value As Variant",
+		"Public Sub AssertNear(ByVal expected As Variant, ByVal actual As Variant, ByVal tolerance As Double",
+		"Public Sub AssertContains(ByVal expectedSubstring As Variant, ByVal actual As Variant",
+		"Public Sub AssertStartsWith(ByVal prefix As Variant, ByVal actual As Variant",
+		"Public Sub AssertEndsWith(ByVal suffix As Variant, ByVal actual As Variant",
+		"Public Sub AssertMatches(ByVal pattern As Variant, ByVal actual As Variant",
+		`Set regex = CreateObject("VBScript.RegExp")`,
+		"regex.IgnoreCase = False",
+		"regex.MultiLine = False",
+		"Public Sub AssertArrayEquals(ByVal expected As Variant, ByVal actual As Variant",
+		"array bounds differ on dimension",
+		"array mismatch at (",
+		"Private Function ArrayDimensionCount",
+		"Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Object",
+		"actualValues = actualRange.Value2",
+		"range mismatch at ",
+		"Private Function RangeCellLabel",
+		"Public Sub AssertSame(ByVal expected As Variant, ByVal actual As Variant",
+		"Public Sub AssertNotSame(ByVal expected As Variant, ByVal actual As Variant",
 		"Public Sub AssertFail(Optional ByVal message As String = \"\")",
 		"Public Sub AssertInconclusive(Optional ByVal message As String = \"\")",
 		"Public Sub AssertIsNothing(ByVal value As Variant",

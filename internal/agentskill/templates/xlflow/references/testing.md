@@ -52,18 +52,40 @@ Tests should use `XlflowAssert` helpers instead of raw `Err.Raise` so failures a
 
 ```vb
 XlflowAssert.AssertEquals expected, actual, "optional context message"
+XlflowAssert.AssertStrictEquals expected, actual, "optional context message"
 XlflowAssert.AssertNotEqual forbidden, actual, "optional context message"
 XlflowAssert.AssertTrue condition, "optional context message"
 XlflowAssert.AssertFalse condition, "optional context message"
 XlflowAssert.AssertFail "unconditional failure message"
 XlflowAssert.AssertInconclusive "reason this test is not ready"
+XlflowAssert.AssertNull value, "optional context message"
+XlflowAssert.AssertNotNull value, "optional context message"
+XlflowAssert.AssertEmpty value, "optional context message"
+XlflowAssert.AssertNotEmpty value, "optional context message"
+XlflowAssert.AssertNear expected, actual, 0.000001, "optional context message"
+XlflowAssert.AssertContains "needle", actualText, "optional context message"
+XlflowAssert.AssertStartsWith "prefix", actualText, "optional context message"
+XlflowAssert.AssertEndsWith "suffix", actualText, "optional context message"
+XlflowAssert.AssertMatches "^[A-Z]{3}-\d+$", actualText, "optional context message"
+XlflowAssert.AssertArrayEquals expectedArray, actualArray, "optional context message"
+XlflowAssert.AssertRangeEquals expectedValues, Sheet1.Range("A1:B2"), "optional context message"
+XlflowAssert.AssertSame expectedObject, actualObject, "optional context message"
+XlflowAssert.AssertNotSame firstObject, secondObject, "optional context message"
 XlflowAssert.AssertIsNothing objectRef, "optional context message"
 XlflowAssert.AssertIsNotNothing objectRef, "optional context message"
 ```
 
 Important constraints:
 
-- `AssertEquals` / `AssertNotEqual` support **scalar values only**. Do not pass objects or arrays; compare scalar properties such as `Range.Value2`.
+- `AssertEquals` / `AssertNotEqual` support **scalar values only** and keep VBA's non-strict comparison behavior. Use `AssertStrictEquals` when `VarType` must match.
+- Assertion failures use formatted values such as `<Long: 1>`, `<String: "1">`, `<Empty>`, `<Null>`, and `<Nothing>` so terminal and JSON output remain parseable.
+- `AssertNull` and `AssertEmpty` are distinct. `Null`, `Empty`, `Nothing`, `""`, and `0` should be asserted with the helper that matches the intended value.
+- `AssertNear` accepts numeric scalars only and rejects negative tolerances.
+- `AssertContains`, `AssertStartsWith`, and `AssertEndsWith` use binary string comparison.
+- `AssertMatches` uses late-bound `VBScript.RegExp` with `IgnoreCase = False` and no multiline mode.
+- `AssertArrayEquals` supports one- and two-dimensional arrays containing scalar values. It compares dimensions, bounds, and the first differing element. It does not recursively compare nested arrays or objects.
+- `AssertRangeEquals` compares expected scalar or two-dimensional array values against `Range.Value2` only. It does not compare formulas, formats, styles, merged cells, row heights, or column widths.
+- `AssertSame` / `AssertNotSame` compare object reference identity. `Nothing` and `Nothing` are the same reference; `Nothing` and an object are different.
 - `AssertIsNothing` / `AssertIsNotNothing` require an object reference. Pass `Nothing` explicitly when testing for it.
 - `AssertInconclusive` raises a dedicated error number (`vbObjectError + 516`). xlflow maps this to the `inconclusive` status instead of `failed`.
 

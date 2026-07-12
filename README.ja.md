@@ -644,7 +644,7 @@ analyzer ルールは `[analyze].disabled_rules = ["VBA205"]` のように無効
 - `XlflowRuntime` は `interactive` / `headless` / `ci` / `agent` / `test` の実行モード分岐に使います。
 - `XlflowUI` は `MsgBox`、`InputBox`、`Application.GetOpenFilename`、open `Application.FileDialog`、`Application.GetSaveAsFilename`、folder picker を包み、同じ VBA を対話実行と無人実行の両方で使えるようにします。
 - `XlflowDebug` は `XlflowDebug.Log` を `xlflow run` / `xlflow test` 中のターミナルへミラーしつつ、通常の VBA Immediate Window 出力も維持します。
-- `XlflowAssert` は workbook 側 test で使う最小限の scalar assertion helper です。
+- `XlflowAssert` は workbook 側 test で使う assertion helper で、scalar equality、strict equality、`Null` / `Empty`、数値許容誤差、文字列、配列、`Range.Value2`、object identity を検証できます。
 
 例:
 
