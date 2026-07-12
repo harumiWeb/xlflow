@@ -95,6 +95,21 @@ func TestShouldDelegateTestListCommand(t *testing.T) {
 	}
 }
 
+func TestShouldNotDelegateBackupSubcommands(t *testing.T) {
+	root := &cobra.Command{Use: "xlflow"}
+	backupCmd := &cobra.Command{Use: "backup"}
+	pruneCmd := &cobra.Command{Use: "prune"}
+	deleteCmd := &cobra.Command{Use: "delete"}
+	root.AddCommand(backupCmd)
+	backupCmd.AddCommand(pruneCmd, deleteCmd)
+
+	for _, cmd := range []*cobra.Command{backupCmd, pruneCmd, deleteCmd} {
+		if shouldDelegateCommand(cmd, topLevelCommandName(cmd)) {
+			t.Fatalf("%s should remain local under WSL", cmd.CommandPath())
+		}
+	}
+}
+
 func TestShouldDelegateFormNewCommand(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	formCmd := &cobra.Command{Use: "form"}

@@ -67,6 +67,8 @@ type Envelope struct {
 	RunDiagnostic  any `json:"run_diagnostic,omitempty"`
 	PushDiagnostic any `json:"push_diagnostic,omitempty"`
 	Backups        any `json:"backups,omitempty"`
+	BackupPrune    any `json:"backup_prune,omitempty"`
+	BackupDelete   any `json:"backup_delete,omitempty"`
 	Rollback       any `json:"rollback,omitempty"`
 	Target         any `json:"target,omitempty"`
 	Output         any `json:"output,omitempty"`
@@ -227,6 +229,8 @@ func runJSONPayload(env Envelope, verbose bool) map[string]any {
 		addPayloadField(payload, "version", env.Version)
 		addPayloadField(payload, "push_diagnostic", env.PushDiagnostic)
 		addPayloadField(payload, "backups", env.Backups)
+		addPayloadField(payload, "backup_prune", env.BackupPrune)
+		addPayloadField(payload, "backup_delete", env.BackupDelete)
 		addPayloadField(payload, "rollback", env.Rollback)
 		addPayloadField(payload, "output", env.Output)
 		addPayloadField(payload, "spec", env.Spec)
@@ -417,6 +421,10 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderList(env))
 	case "backup list":
 		b.WriteString(r.renderBackupList(env))
+	case "backup prune":
+		b.WriteString(r.renderBackupPrune(env))
+	case "backup delete":
+		b.WriteString(r.renderBackupDelete(env))
 	case "rollback":
 		b.WriteString(r.renderRollback(env))
 	case "session":
@@ -1806,6 +1814,59 @@ func (r renderer) renderBackupList(env Envelope) string {
 		b.WriteString(strings.Join(line, " | "))
 		b.WriteString("\n")
 	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderBackupPrune(env Envelope) string {
+	prune := objectMap(env.BackupPrune)
+	if len(prune) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	dryRun := boolValue(prune, "dry_run")
+	b.WriteString(kv("Dry run", yesNo(dryRun)))
+	b.WriteString(kv("Candidates", fmt.Sprintf("%d", intNumber(prune, "matched"))))
+	b.WriteString(kv("Deleted", fmt.Sprintf("%d", intNumber(prune, "deleted"))))
+	b.WriteString(kv("Failed", fmt.Sprintf("%d", intNumber(prune, "failed"))))
+	b.WriteString(kv("Freed", formatBytes(int64Number(prune, "freed_bytes"))))
+	if dryRun {
+		b.WriteString("No files were deleted.\n")
+	}
+	candidates := listOfObjects(prune["candidates"])
+	for _, item := range candidates {
+		line := []string{stringValue(item, "id")}
+		if reasons := stringList(item["reasons"]); len(reasons) > 0 {
+			line = append(line, strings.Join(reasons, ","))
+		}
+		if path := stringValue(item, "path"); path != "" {
+			line = append(line, path)
+		}
+		b.WriteString("- ")
+		b.WriteString(strings.Join(line, " | "))
+		b.WriteString("\n")
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderBackupDelete(env Envelope) string {
+	deleted := objectMap(env.BackupDelete)
+	if len(deleted) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if id := stringValue(deleted, "id"); id != "" {
+		b.WriteString(kv("Backup ID", id))
+	}
+	if path := stringValue(deleted, "path"); path != "" {
+		b.WriteString(kv("Deleted", path))
+	}
+	b.WriteString(kv("Freed", formatBytes(int64Number(deleted, "freed_bytes"))))
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
@@ -3899,6 +3960,11 @@ func intNumber(m map[string]any, key string) int {
 	return int(n)
 }
 
+func int64Number(m map[string]any, key string) int64 {
+	n, _ := numberValue(m, key)
+	return int64(n)
+}
+
 func matrixStrings(value any) [][]string {
 	if value == nil {
 		return nil
@@ -4023,6 +4089,10 @@ func yesNo(v bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func formatBytes(v int64) string {
+	return fmt.Sprintf("%d bytes", v)
 }
 
 func (r renderer) errorBlock(env Envelope) string {
