@@ -477,7 +477,7 @@ Example:
 ```vb
 Public Sub TestCreateReport()
     AssertEquals 10, Sheets("Result").Range("A1").Value
-    AssertStrictEquals CLng(10), Sheets("Result").Range("A1").Value2
+    AssertStrictEquals CDbl(10), Sheets("Result").Range("A1").Value2
     AssertRangeEquals 10, Sheets("Result").Range("A1")
 End Sub
 ```

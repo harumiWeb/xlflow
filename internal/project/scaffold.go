@@ -1181,16 +1181,13 @@ End Function
 
 Private Function ArrayDimensionCount(ByVal value As Variant) As Long
   Dim dimension As Long
-  Dim lowerBound As Long
+  Dim lowerBound As Long ' xlflow:disable-line VB020
   ' xlflow:disable-next-line VB004
   On Error Resume Next
   For dimension = 1 To 60
     Err.Clear
     lowerBound = LBound(value, dimension)
     If Err.Number <> 0 Then
-      Exit For
-    End If
-    If lowerBound > UBound(value, dimension) Then
       Exit For
     End If
   Next dimension
