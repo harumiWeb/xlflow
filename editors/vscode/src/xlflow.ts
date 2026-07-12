@@ -285,6 +285,7 @@ export async function runXlflowJsonCommand<T>(
     });
     child.on("error", (error) => {
       outputChannel.appendLine(`[error] ${error.message}`);
+      showVBAObjectModelAccessNotice(error.message);
       settle({ exitCode: -1, stdout: "", stderr: error.message });
     });
     child.on("close", (code) => {
@@ -304,6 +305,7 @@ export async function runXlflowJsonCommand<T>(
         }
       }
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
+      showVBAObjectModelAccessNotice(`${stdout}\n${stderr}`);
       settle({ exitCode, stdout, stderr, json });
     });
   });

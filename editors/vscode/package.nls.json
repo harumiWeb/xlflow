@@ -39,6 +39,8 @@
   "command.pull.title": "Pull Workbook",
   "command.pullFormulas.title": "Pull Formulas",
   "command.push.title": "Push Sources",
+  "command.rollbackWorkbook.title": "Roll Back Workbook",
+  "command.pruneBackups.title": "Prune Backups",
   "command.runMacro.title": "Run Macro",
   "command.runProcedure.title": "Run Procedure",
   "command.runTestProcedure.title": "Run Test Procedure",

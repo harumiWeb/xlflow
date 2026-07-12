@@ -39,6 +39,8 @@
   "command.pull.title": "ブックから取り込み",
   "command.pullFormulas.title": "数式を取り込み",
   "command.push.title": "ブックへ反映",
+  "command.rollbackWorkbook.title": "ブックをロールバック",
+  "command.pruneBackups.title": "バックアップを整理",
   "command.runMacro.title": "マクロを実行",
   "command.runProcedure.title": "プロシージャを実行",
   "command.runTestProcedure.title": "テストプロシージャを実行",
