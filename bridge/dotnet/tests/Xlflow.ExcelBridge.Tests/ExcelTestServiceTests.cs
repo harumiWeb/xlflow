@@ -183,10 +183,11 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(2, tests[0].Tags.Length);
         Assert.Contains("smoke", tests[0].Tags);
         Assert.Contains("fast", tests[0].Tags);
-        Assert.NotNull(tests[0].ExpectedError);
-        Assert.Equal(5, tests[0].ExpectedError.Number);
-        Assert.Equal("Invalid \"value\"", tests[0].ExpectedError.Description);
-        Assert.Equal("ParserModule", tests[0].ExpectedError.Source);
+        var expectedError = tests[0].ExpectedError;
+        Assert.NotNull(expectedError);
+        Assert.Equal(5, expectedError.Number);
+        Assert.Equal("Invalid \"value\"", expectedError.Description);
+        Assert.Equal("ParserModule", expectedError.Source);
     }
 
     [Fact]
@@ -236,10 +237,11 @@ public sealed class ExcelTestServiceTests
         var tests = ExcelTestService.FindTestProcedures("Module1", code);
 
         Assert.Single(tests);
-        Assert.NotNull(tests[0].ExpectedError);
-        Assert.Equal(5, tests[0].ExpectedError.Number);
-        Assert.Null(tests[0].ExpectedError.Description);
-        Assert.Null(tests[0].ExpectedError.Source);
+        var expectedError = tests[0].ExpectedError;
+        Assert.NotNull(expectedError);
+        Assert.Equal(5, expectedError.Number);
+        Assert.Null(expectedError.Description);
+        Assert.Null(expectedError.Source);
     }
 
     [Theory]
@@ -423,6 +425,20 @@ public sealed class ExcelTestServiceTests
         };
 
         Assert.Equal(1, ExcelTestService.CountFailedResults(response));
+    }
+
+    [Fact]
+    public void BuildTestResultOmitsErrorForPassedTests()
+    {
+        var test = new ExcelTestService.TestCase { Name = "TestOk", Module = "ParserTests" };
+
+        var passed = ExcelTestService.BuildTestResult(test, "passed", 5,
+            new { code = "", message = "", source = "", number = 0 });
+        var failed = ExcelTestService.BuildTestResult(test, "failed", 5,
+            new { code = "test_failed", message = "failed", source = "ParserTests", number = 5 });
+
+        Assert.False(passed.ContainsKey("error"));
+        Assert.True(failed.ContainsKey("error"));
     }
 
     [Fact]

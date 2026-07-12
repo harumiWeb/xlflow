@@ -1239,7 +1239,7 @@ public sealed class ExcelTestService : ITestService
         return "";
     }
 
-    private static Dictionary<string, object?> BuildTestResult(TestCase test, string status, int durationMs, object error, object? observedError = null)
+    internal static Dictionary<string, object?> BuildTestResult(TestCase test, string status, int durationMs, object error, object? observedError = null)
     {
         var result = new Dictionary<string, object?>
         {
@@ -1250,8 +1250,11 @@ public sealed class ExcelTestService : ITestService
             ["status"] = status,
             ["duration_ms"] = durationMs,
             ["tags"] = test.Tags,
-            ["error"] = error,
         };
+        if (status != "passed")
+        {
+            result["error"] = error;
+        }
         if (test.ExpectedError is not null)
         {
             result["expected_error"] = BuildExpectedError(test.ExpectedError);
