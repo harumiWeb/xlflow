@@ -1582,6 +1582,26 @@ func TestWriteWithOptionsRendersTestFailures(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersSkippedTodoAndInconclusiveCounts(t *testing.T) {
+	env := New("test")
+	env.Tests = []map[string]any{
+		{"name": "TestOk", "module": "Tests", "status": "passed", "duration_ms": 3},
+		{"name": "TestAccess", "module": "Tests", "status": "skipped", "duration_ms": 0, "reason": "Requires Access"},
+		{"name": "TestExporter", "module": "Tests", "status": "todo", "duration_ms": 0, "reason": "実装待ち"},
+		{"name": "TestDraft", "module": "Tests", "status": "inconclusive", "duration_ms": 1, "error": map[string]any{"message": "not ready"}},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"1 passed, 0 failed, 1 skipped, 1 todo, 1 inconclusive, 4 total", "Tests.TestAccess", "Requires Access", "Tests.TestExporter", "実装待ち", "Tests.TestDraft"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("test output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersTestRuntimeSummary(t *testing.T) {
 	env := New("test")
 	env.Runtime = map[string]any{"mode": "test", "source": "command", "injected": true}

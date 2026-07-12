@@ -4636,6 +4636,65 @@ End Sub
 	}
 }
 
+func TestTestListJSONIncludesSkipTodoMetadata(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte("[excel]\npath = \"build/Book.xlsm\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "StatusTests"
+Option Explicit
+
+'@Skip("Requires Access")
+Public Sub TestAccess()
+End Sub
+
+'@Todo
+Public Sub TestExporter()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "StatusTests.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "test", "list"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("test list json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Tests struct {
+			Items []struct {
+				ID         string `json:"id"`
+				StatusHint string `json:"status_hint"`
+				Skip       *struct {
+					Reason string `json:"reason"`
+				} `json:"skip"`
+				Todo *struct {
+					Reason string `json:"reason"`
+				} `json:"todo"`
+			} `json:"items"`
+		} `json:"tests"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse test list output: %v\n%s", err, stdout.String())
+	}
+	if len(got.Tests.Items) != 2 {
+		t.Fatalf("items = %+v", got.Tests.Items)
+	}
+	if got.Tests.Items[0].StatusHint != "skipped" || got.Tests.Items[0].Skip == nil || got.Tests.Items[0].Skip.Reason != "Requires Access" {
+		t.Fatalf("unexpected skip item: %+v", got.Tests.Items[0])
+	}
+	if got.Tests.Items[1].StatusHint != "todo" || got.Tests.Items[1].Todo == nil || got.Tests.Items[1].Todo.Reason != "" {
+		t.Fatalf("unexpected todo item: %+v", got.Tests.Items[1])
+	}
+}
+
 func writeTestListFixture(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "src", "modules"), 0o755); err != nil {

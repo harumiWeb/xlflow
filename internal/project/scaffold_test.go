@@ -132,8 +132,8 @@ func TestNewScaffoldCreatesSampleTests(t *testing.T) {
 		"Public Sub BeforeEach()",
 		"Public Sub AfterEach()",
 		"Public Sub Test_Sample_Pass()",
-		"Public Sub Test_Sample_Inconclusive()",
-		"XlflowAssert.AssertInconclusive",
+		"'@Todo(\"not implemented yet\")",
+		"Public Sub Test_Sample_Todo()",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("sample test module missing %q:\n%s", want, content)

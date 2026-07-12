@@ -1818,10 +1818,9 @@ Public Sub Test_Sample_Pass()
     XlflowAssert.AssertEquals 1 + 1, 2, "basic arithmetic should work"
 End Sub
 
-Public Sub Test_Sample_Inconclusive()
-    ' Mark not-yet-implemented tests as inconclusive instead of
-    ' commenting them out.  They appear as [?] in terminal output.
-    XlflowAssert.AssertInconclusive "not implemented yet"
+'@Todo("not implemented yet")
+Public Sub Test_Sample_Todo()
+    ' Keep planned tests visible without executing them.
 End Sub
 `
 

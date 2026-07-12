@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -168,6 +169,49 @@ End Sub
 	}
 }
 
+func TestDiscoverSkipAndTodoMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, filepath.Join("src", "modules", "PlannerTests.bas"), `Attribute VB_Name = "PlannerTests"
+Option Explicit
+
+'@Skip("Requires Access")
+'@Tag("integration")
+Public Sub Test_AccessImport()
+End Sub
+
+'@Todo
+Public Sub Test_NewExporter()
+End Sub
+
+'@Todo("実装待ち")
+Public Sub Test_UnicodeReason()
+End Sub
+`)
+
+	result, err := Discover(Options{RootDir: dir, Config: config.Default()})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if result.Summary.Tests != 3 {
+		t.Fatalf("tests = %d, want 3: %+v", result.Summary.Tests, result.Items)
+	}
+	first := result.Items[0]
+	if first.StatusHint != "skipped" || first.Skip == nil || first.Skip.Reason == nil || *first.Skip.Reason != "Requires Access" {
+		t.Fatalf("unexpected skip metadata: %+v", first)
+	}
+	if first.Todo != nil || !reflect.DeepEqual(first.Tags, []string{"integration"}) {
+		t.Fatalf("unexpected skip test shape: %+v", first)
+	}
+	second := result.Items[1]
+	if second.StatusHint != "todo" || second.Todo == nil || second.Todo.Reason != nil {
+		t.Fatalf("unexpected bare todo metadata: %+v", second)
+	}
+	third := result.Items[2]
+	if third.StatusHint != "todo" || third.Todo == nil || third.Todo.Reason == nil || *third.Todo.Reason != "実装待ち" {
+		t.Fatalf("unexpected unicode todo metadata: %+v", third)
+	}
+}
+
 func TestDiscoverRejectsInvalidExpectedErrorMetadata(t *testing.T) {
 	cases := []struct {
 		name string
@@ -226,6 +270,69 @@ End Sub
 			}
 			if metadataErr.Path == "" || metadataErr.Line == 0 || metadataErr.Module != "ParserTests" {
 				t.Fatalf("metadata location missing: %+v", metadataErr)
+			}
+		})
+	}
+}
+
+func TestDiscoverRejectsInvalidSkipTodoMetadata(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "duplicate_skip",
+			body: `'@Skip("a")
+'@Skip("b")
+Public Sub Test_Skip()
+End Sub
+`,
+			want: "multiple @Skip",
+		},
+		{
+			name: "duplicate_todo",
+			body: `'@Todo("a")
+'@Todo("b")
+Public Sub Test_Todo()
+End Sub
+`,
+			want: "multiple @Todo",
+		},
+		{
+			name: "conflict",
+			body: `'@Skip("a")
+'@Todo("b")
+Public Sub Test_Conflict()
+End Sub
+`,
+			want: "both skipped and todo",
+		},
+		{
+			name: "empty_parentheses",
+			body: `'@Skip()
+Public Sub Test_Bad()
+End Sub
+`,
+			want: "malformed @Skip reason",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeModule(t, dir, filepath.Join("src", "modules", "PlannerTests.bas"), "Attribute VB_Name = \"PlannerTests\"\nOption Explicit\n\n"+c.body)
+
+			_, err := Discover(Options{RootDir: dir, Config: config.Default()})
+			if err == nil {
+				t.Fatal("Discover() error = nil, want invalid metadata")
+			}
+			var metadataErr InvalidMetadataError
+			if !errors.As(err, &metadataErr) {
+				t.Fatalf("error = %T %v, want InvalidMetadataError", err, err)
+			}
+			if !strings.Contains(metadataErr.Message, c.want) {
+				t.Fatalf("message = %q, want %q", metadataErr.Message, c.want)
 			}
 		})
 	}

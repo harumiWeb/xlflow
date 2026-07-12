@@ -70,7 +70,14 @@ type Test struct {
 	SourcePath    string         `json:"source_path"`
 	Line          int            `json:"line"`
 	Tags          []string       `json:"tags"`
+	StatusHint    string         `json:"status_hint,omitempty"`
+	Skip          *StatusReason  `json:"skip,omitempty"`
+	Todo          *StatusReason  `json:"todo,omitempty"`
 	ExpectedError *ExpectedError `json:"expected_error,omitempty"`
+}
+
+type StatusReason struct {
+	Reason *string `json:"reason,omitempty"`
 }
 
 type ExpectedError struct {
@@ -82,6 +89,9 @@ type ExpectedError struct {
 var tagLineRE = regexp.MustCompile(`(?i)^'\s*@Tag\s*\("([^"]+)"\)`)
 var expectedErrorLineRE = regexp.MustCompile(`(?i)^'\s*@ExpectedError\s*\((.*)\)\s*$`)
 var expectedErrorPrefixRE = regexp.MustCompile(`(?i)^'\s*@ExpectedError\b`)
+var skipTodoLineRE = regexp.MustCompile(`(?i)^'\s*@(Skip|Todo)(?:\s*\((.*)\))?\s*$`)
+var skipPrefixRE = regexp.MustCompile(`(?i)^'\s*@Skip\b`)
+var todoPrefixRE = regexp.MustCompile(`(?i)^'\s*@Todo\b`)
 
 func Discover(opts Options) (*Result, error) {
 	symbolResult, err := symbols.Inspect(symbols.Options{
@@ -133,6 +143,9 @@ func Discover(opts Options) (*Result, error) {
 				SourcePath:    file.Path,
 				Line:          sym.StartLine,
 				Tags:          metadata.Tags,
+				StatusHint:    metadata.StatusHint(),
+				Skip:          metadata.Skip,
+				Todo:          metadata.Todo,
 				ExpectedError: metadata.ExpectedError,
 			}
 			key := strings.ToLower(file.ModuleName) + "\x00" + strings.ToLower(sym.Name)
@@ -185,8 +198,22 @@ func readSourceLines(rootDir, sourcePath string) ([]string, error) {
 
 type testMetadata struct {
 	Tags              []string
+	Skip              *StatusReason
+	SkipLine          int
+	Todo              *StatusReason
+	TodoLine          int
 	ExpectedError     *ExpectedError
 	ExpectedErrorLine int
+}
+
+func (m testMetadata) StatusHint() string {
+	if m.Skip != nil {
+		return "skipped"
+	}
+	if m.Todo != nil {
+		return "todo"
+	}
+	return ""
 }
 
 func metadataAbove(lines []string, startLine int, sourcePath string, module string) (testMetadata, error) {
@@ -225,12 +252,94 @@ func metadataAbove(lines []string, startLine int, sourcePath string, module stri
 			metadata.ExpectedErrorLine = i + 1
 			continue
 		}
+		if skipPrefixRE.MatchString(prev) {
+			if metadata.Skip != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: "multiple @Skip annotations on one test procedure",
+				}
+			}
+			if metadata.Todo != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: "test cannot be both skipped and todo",
+				}
+			}
+			status, err := parseSkipTodoAnnotation(prev)
+			if err != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: err.Error(),
+				}
+			}
+			metadata.Skip = status
+			metadata.SkipLine = i + 1
+			continue
+		}
+		if todoPrefixRE.MatchString(prev) {
+			if metadata.Todo != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: "multiple @Todo annotations on one test procedure",
+				}
+			}
+			if metadata.Skip != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: "test cannot be both skipped and todo",
+				}
+			}
+			status, err := parseSkipTodoAnnotation(prev)
+			if err != nil {
+				return metadata, InvalidMetadataError{
+					Path:    sourcePath,
+					Line:    i + 1,
+					Module:  module,
+					Message: err.Error(),
+				}
+			}
+			metadata.Todo = status
+			metadata.TodoLine = i + 1
+			continue
+		}
 		if strings.HasPrefix(prev, "''") {
 			continue
 		}
 		break
 	}
 	return metadata, nil
+}
+
+func parseSkipTodoAnnotation(line string) (*StatusReason, error) {
+	match := skipTodoLineRE.FindStringSubmatch(line)
+	if match == nil {
+		return nil, fmt.Errorf("malformed @Skip/@Todo annotation")
+	}
+	reasonExpr := ""
+	if len(match) >= 3 {
+		reasonExpr = strings.TrimSpace(match[2])
+	}
+	if reasonExpr == "" && strings.Contains(line, "(") {
+		return nil, fmt.Errorf("malformed @%s reason: expected a quoted string literal", match[1])
+	}
+	if reasonExpr == "" {
+		return &StatusReason{}, nil
+	}
+	reason, err := parseExpectedErrorStringArg(reasonExpr)
+	if err != nil {
+		return nil, fmt.Errorf("malformed @%s reason: %w", match[1], err)
+	}
+	return &StatusReason{Reason: &reason}, nil
 }
 
 func parseExpectedErrorAnnotation(line string) (*ExpectedError, error) {

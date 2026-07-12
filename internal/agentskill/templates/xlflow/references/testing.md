@@ -84,6 +84,22 @@ Prefer `@ExpectedError` for ordinary error-path tests because VBA has no ergonom
 
 Malformed `@ExpectedError` metadata, multiple expected-error annotations on one procedure, non-numeric error numbers, unsupported argument counts, malformed string literals, or attaching the annotation to a non-test procedure fail discovery with `invalid_test_metadata`. Fix metadata before changing production VBA.
 
+## Skipped and Todo Tests
+
+Use `@Skip` for tests that are intentionally not executable in the current environment, and `@Todo` for planned behavior that should stay visible before it is ready to run:
+
+```vb
+'@Skip("Requires Microsoft Access")
+Public Sub Test_AccessImport()
+End Sub
+
+'@Todo("Exporter implementation is pending")
+Public Sub Test_NewExporter()
+End Sub
+```
+
+Bare `@Skip` and `@Todo` are accepted, but a reason is preferred. `@Skip()` and `@Todo()` are invalid. Skipped and todo tests are discoverable and selectable by qualified name, module, and tag, but they do not invoke the test body, `BeforeEach`, or `AfterEach`. `BeforeAll` and `AfterAll` run only when the selected module has at least one executable test. Duplicate `@Skip`, duplicate `@Todo`, or combining both annotations on one test fails with `invalid_test_metadata`.
+
 ## Lifecycle Hooks
 
 Each standard module can optionally define up to four hook subs. They must take **no arguments** and match these exact names:
@@ -104,7 +120,7 @@ Hook behavior:
 | `BeforeEach` | Before every test in the module          | The individual test is marked `failed` with `before_each_failed`; the test body is skipped                                                                   |
 | `AfterEach`  | After every test in the module           | The individual test is marked `failed` with `after_each_failed`; if the test body already failed, the `after_each` failure is still reported in `error.code` |
 
-`BeforeEach` failure skips the test body, but `AfterEach` still runs for cleanup. `AfterAll` runs even when some tests in the module failed.
+`BeforeEach` failure skips the test body, but `AfterEach` still runs for cleanup. `AfterAll` runs even when some executable tests in the module failed. Skipped and todo tests are not hook targets.
 
 ### Hook state sharing
 
@@ -213,6 +229,8 @@ Filters can be combined. `--filter` is exact match on a qualified test name such
 
 Tests that call `XlflowAssert.AssertInconclusive` are reported with `[?]` in terminal output and `"status": "inconclusive"` in JSON. They do not count as failures, but they also do not count as passes.
 
+Use `inconclusive` only when the test body actually ran and could not determine a result. Use `@Skip` or `@Todo` for tests that should not execute.
+
 ### Session workflow
 
 For repeated test-and-fix cycles, use the session-first pattern:
@@ -234,6 +252,8 @@ xlflow session stop --json
 
 ```text
 PASS Test_CreateWorksheet
+SKIP Test_AccessImport: Requires Microsoft Access
+TODO Test_NewExporter: Exporter implementation is pending
 FAIL Test_TotalPrice: expected <110> but got <100>
 ? Test_ImportLargeFile: inconclusive
 ```
@@ -242,8 +262,9 @@ FAIL Test_TotalPrice: expected <110> but got <100>
 
 Each test entry includes:
 
-- `name`, `module`, `status` (`passed` | `failed` | `inconclusive`)
+- `name`, `module`, `status` (`passed` | `failed` | `skipped` | `todo` | `inconclusive`)
 - `duration_ms`
+- `reason` for `skipped` and `todo` results when provided
 - `expected_error` when `@ExpectedError` is present
 - `observed_error` when an expected-error test body raised an error
 - `error.code` (`test_failed`, `test_inconclusive`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)
@@ -263,7 +284,7 @@ For `expected_error_mismatch`, inspect `expected_error`, `observed_error`, and `
 | `error.code`              | Meaning                                                  | Action                                                                       |
 | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `test_failed`             | Assertion failed or runtime error in test body           | Read `error.message` and `error.source`; fix the test or the code under test |
-| `test_inconclusive`       | `AssertInconclusive` was called                          | Expected if the test is intentionally incomplete                             |
+| `test_inconclusive`       | `AssertInconclusive` was called                          | Use when an executed test cannot determine a result                          |
 | `expected_error_mismatch` | `@ExpectedError` was missing, different, or too specific | Compare `expected_error`, `observed_error`, and `error.message`              |
 | `before_all_failed`       | `BeforeAll` raised an error                              | Fix the `BeforeAll` setup logic; no module test body ran                     |
 | `after_all_failed`        | `AfterAll` raised an error                               | Fix the `AfterAll` cleanup logic; the test body may have passed              |
@@ -295,7 +316,7 @@ For `expected_error_mismatch`, inspect `expected_error`, `observed_error`, and `
 - **Use `BeforeAll` sparingly**. It is appropriate for expensive one-time setup (e.g., loading a large fixture). Prefer `BeforeEach` for state reset.
 - **Do not use `Application` state assumptions in tests**. Avoid `ActiveSheet`, `Selection`, and `ActiveWorkbook`. Create explicit worksheet references.
 - **Tag slow or fragile tests** with `' @tag slow` or `' @tag flaky` so CI or quick-check runs can exclude them.
-- **Use `AssertInconclusive`** for tests that describe desired behavior not yet implemented, rather than commenting them out.
+- **Use `@Todo`** for planned tests that should stay visible but not execute yet. Use `AssertInconclusive` only when the test body must run before it can determine a result.
 - **Use `@ExpectedError` for error paths** instead of hand-written error handlers when the only assertion is that a specific VBA error should be raised.
 - **Remove E2E-only test modules** before committing. If you create intentional-failure modules to verify hook behavior, do not check them into version control.
 - **Use `xlflow generate test <ModuleName>`** to scaffold a new test module with hook stubs and a sample test sub. This is faster than writing the boilerplate by hand and keeps the module structure consistent.
