@@ -405,6 +405,41 @@ func TestCompletionReturnsRubberduckAnnotationSnippet(t *testing.T) {
 	if edit.Range.Start.Character != 1 || edit.Range.End.Character != 3 {
 		t.Fatalf("@Description text edit range = %+v", edit.Range)
 	}
+
+	source = "Option Explicit\n'@Ex\n"
+	if _, err := s.docs.change(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err = s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok = result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok = findCompletionItem(list.Items, "@ExpectedError")
+	if !ok {
+		t.Fatalf("@ExpectedError completion missing: %+v", list.Items)
+	}
+	if item.InsertTextFormat == nil || *item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("@ExpectedError insert text format = %+v, want snippet", item.InsertTextFormat)
+	}
+	edit, ok = item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("@ExpectedError text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.NewText != `@ExpectedError(${1:5})` {
+		t.Fatalf("@ExpectedError new text = %q", edit.NewText)
+	}
+	if edit.Range.Start.Character != 1 || edit.Range.End.Character != 4 {
+		t.Fatalf("@ExpectedError text edit range = %+v", edit.Range)
+	}
 }
 
 func TestCompletionReturnsTypeCandidates(t *testing.T) {
