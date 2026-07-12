@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed non-executing UserForm Designer snapshots to capture top-level form width and height from VBComponent properties when available.
+
 ## v0.22.0
 
 - Added configurable automatic backup retention through `[backup.retention]`, disabled by default, with workbook-scoped pruning after successful backup-producing `push` and `rollback` operations.

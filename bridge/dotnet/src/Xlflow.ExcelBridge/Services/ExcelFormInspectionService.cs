@@ -382,8 +382,8 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                 ["name"] = formName,
                 ["basis"] = "designer",
                 ["caption"] = ExcelBridgeSupport.GetString(designer, "Caption") ?? "",
-                ["width"] = TryGetDouble(designer, "Width"),
-                ["height"] = TryGetDouble(designer, "Height"),
+                ["width"] = TryGetDesignerFormDimension(component, designer, "Width"),
+                ["height"] = TryGetDesignerFormDimension(component, designer, "Height"),
                 ["coordinate_system"] = "parent-relative",
                 ["controls"] = rootControls,
             };
@@ -817,6 +817,44 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         catch
         {
             return null;
+        }
+    }
+
+    internal static double? TryGetDesignerFormDimension(object component, object designer, string memberName)
+    {
+        return TryGetComponentPropertyDouble(component, memberName)
+            ?? TryGetDouble(designer, memberName);
+    }
+
+    private static double? TryGetComponentPropertyDouble(object component, string propertyName)
+    {
+        object? properties = null;
+        object? property = null;
+        try
+        {
+            properties = ExcelBridgeSupport.Get(component, "Properties");
+            if (properties is null)
+            {
+                return null;
+            }
+
+            property = ExcelBridgeSupport.Get(properties, "Item", propertyName);
+            if (property is null)
+            {
+                return null;
+            }
+
+            var value = ExcelBridgeSupport.Get(property, "Value");
+            return value is null ? null : Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(property);
+            ExcelBridgeSupport.ReleaseComObject(properties);
         }
     }
 

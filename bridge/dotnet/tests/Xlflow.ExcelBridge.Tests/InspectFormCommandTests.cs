@@ -53,6 +53,28 @@ public sealed class InspectFormCommandTests
     }
 
     [Fact]
+    public void TryGetDesignerFormDimension_PrefersComponentProperty()
+    {
+        var actual = ExcelFormInspectionService.TryGetDesignerFormDimension(
+            new DesignerComponentWithProperties(),
+            new DesignerFormWithDimensions(width: 0, height: 0),
+            "Width");
+
+        Assert.Equal(300.0, actual);
+    }
+
+    [Fact]
+    public void TryGetDesignerFormDimension_FallsBackToDesignerMember()
+    {
+        var actual = ExcelFormInspectionService.TryGetDesignerFormDimension(
+            new DesignerComponentWithoutProperties(),
+            new DesignerFormWithDimensions(width: 280.5, height: 240.25),
+            "Height");
+
+        Assert.Equal(240.25, actual);
+    }
+
+    [Fact]
     public void HandleParsesPayloadAndReturnsExpectedExtensions()
     {
         var service = new FakeInspectFormService((request, args) =>
@@ -192,6 +214,40 @@ public sealed class InspectFormCommandTests
     private sealed class DesignerControlWithBrokenChildren
     {
         public BrokenControls Controls => new();
+    }
+
+    private sealed class DesignerFormWithDimensions(double width, double height)
+    {
+        public double Width { get; } = width;
+
+        public double Height { get; } = height;
+    }
+
+    private sealed class DesignerComponentWithProperties
+    {
+        public DesignerProperties Properties { get; } = new();
+    }
+
+    private sealed class DesignerComponentWithoutProperties
+    {
+    }
+
+    private sealed class DesignerProperties
+    {
+        public DesignerProperty Item(string name)
+        {
+            return name switch
+            {
+                "Width" => new DesignerProperty(300.0),
+                "Height" => new DesignerProperty(262.2),
+                _ => throw new ArgumentException("unknown designer property", nameof(name)),
+            };
+        }
+    }
+
+    private sealed class DesignerProperty(double value)
+    {
+        public double Value { get; } = value;
     }
 
     private sealed class BrokenControls
