@@ -80,6 +80,10 @@ Supported forms are `@ExpectedError(number)`, `@ExpectedError(number, descriptio
 
 Only the test body can satisfy `@ExpectedError`. Hook failures (`BeforeAll`, `BeforeEach`, `AfterEach`, `AfterAll`) keep their hook-specific failure codes, and cleanup failures still fail the test. `AssertInconclusive` remains `inconclusive` even if its internal error number matches `@ExpectedError`.
 
+Prefer `@ExpectedError` for ordinary error-path tests because VBA has no ergonomic `AssertThrows` callback pattern. Use a manual `On Error GoTo` test only when the test must recover from the error and then assert additional workbook or object state.
+
+Malformed `@ExpectedError` metadata, multiple expected-error annotations on one procedure, non-numeric error numbers, unsupported argument counts, malformed string literals, or attaching the annotation to a non-test procedure fail discovery with `invalid_test_metadata`. Fix metadata before changing production VBA.
+
 ## Lifecycle Hooks
 
 Each standard module can optionally define up to four hook subs. They must take **no arguments** and match these exact names:
@@ -247,6 +251,13 @@ Each test entry includes:
 
 When `status` is `failed`, inspect `error.code` and `error.message` first. The message comes from `XlflowAssert` helpers or the VBA runtime error description.
 
+For `expected_error_mismatch`, inspect `expected_error`, `observed_error`, and `error.message` together:
+
+- If `observed_error` is absent, the test body did not raise an error.
+- If `observed_error.number` differs, the wrong VBA error path ran.
+- If only description or source differs, decide whether the implementation should raise the documented detail or the test metadata is too strict.
+- If the failure code is a hook code, do not treat it as an expected-error mismatch; fix setup/cleanup first.
+
 ### Common failure codes
 
 | `error.code`              | Meaning                                                  | Action                                                                       |
@@ -285,6 +296,7 @@ When `status` is `failed`, inspect `error.code` and `error.message` first. The m
 - **Do not use `Application` state assumptions in tests**. Avoid `ActiveSheet`, `Selection`, and `ActiveWorkbook`. Create explicit worksheet references.
 - **Tag slow or fragile tests** with `' @tag slow` or `' @tag flaky` so CI or quick-check runs can exclude them.
 - **Use `AssertInconclusive`** for tests that describe desired behavior not yet implemented, rather than commenting them out.
+- **Use `@ExpectedError` for error paths** instead of hand-written error handlers when the only assertion is that a specific VBA error should be raised.
 - **Remove E2E-only test modules** before committing. If you create intentional-failure modules to verify hook behavior, do not check them into version control.
 - **Use `xlflow generate test <ModuleName>`** to scaffold a new test module with hook stubs and a sample test sub. This is faster than writing the boilerplate by hand and keeps the module structure consistent.
 - **Run `xlflow lint --json` after editing test source**. xlflow lint validates both production and test VBA.
