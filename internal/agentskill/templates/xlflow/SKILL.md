@@ -72,7 +72,7 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
 
 4. Execute behavior.
    - Prefer `xlflow test --session --json`.
-   - Use `xlflow test --filter <name> --session --json` while iterating on one failing test.
+   - Use `xlflow test --filter <Module.TestName> --session --json` while iterating on one failing test.
    - If the macro entrypoint is unclear, run `xlflow macros --session --json` before choosing a target.
    - If no tests exist and `project.entry` is the intended target, run `xlflow run --session --json`.
    - Use `xlflow run <MacroName> --session --json` when you need a non-default entrypoint.
@@ -151,7 +151,7 @@ When the user asks to create or change VBA behavior:
 5. Run `xlflow push --fast --session --no-save --json`.
 6. Run `xlflow lint --json`.
 7. Run `xlflow test --session --json` when tests exist.
-   - Use `xlflow test --filter <name> --session --json` for focused iteration.
+   - Use `xlflow test --filter <Module.TestName> --session --json` for focused iteration.
    - Use `xlflow test --module <ModuleName> --session --json` to run one suite.
    - Use `xlflow test --tag <tag> --session --json` for tag-based subsets.
    - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, or debugging test failures.
@@ -182,7 +182,7 @@ When the user reports a runtime failure:
 - Use `xlflow test --session --json` as the primary correctness signal when tests exist.
 - Use `xlflow test --module <ModuleName> --session --json` to run only the tests in one module.
 - Use `xlflow test --tag <tag> --session --json` to run only tests matching a tag.
-- Use `xlflow test --filter <TestName> --session --json` for exact-name focused iteration.
+- Use `xlflow test --filter <Module.TestName> --session --json` for exact focused iteration; unqualified names only work when unique.
 - Read [references/testing.md](references/testing.md) for detailed guidance on `XlflowAssert`, lifecycle hooks, tag conventions, and failure diagnosis.
 - Use `xlflow macros --session --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
 - Use `xlflow inspect workbook --json` to confirm saved workbook metadata after save, or `xlflow inspect workbook --session --json` to inspect the live workbook before saving.

@@ -100,7 +100,8 @@ export class XlflowTestController implements vscode.Disposable {
       if (module === undefined || name === undefined) {
         continue;
       }
-      const qualifiedName = readNonEmpty(test.qualified_name) ?? `${module}.${name}`;
+      const qualifiedName =
+        readNonEmpty(test.id) ?? readNonEmpty(test.qualified_name) ?? `${module}.${name}`;
       const moduleId = `${folder.uri.toString()}::module::${module}`;
       let moduleItem = modules.get(module);
       if (moduleItem === undefined) {
@@ -180,7 +181,7 @@ export class XlflowTestController implements vscode.Disposable {
   ): Promise<void> {
     run.started(item);
     const result = await runXlflowJsonCommand<XlflowEnvelope>(
-      ["--json", "test", "--module", metadata.module, "--filter", metadata.name],
+      ["--json", "test", "--filter", metadata.qualifiedName],
       `xlflow test ${metadata.qualifiedName}`,
       this.channels.output,
       { requireWorkspace: true, workspaceFolder: metadata.workspaceFolder },
@@ -232,10 +233,15 @@ function findRunResult(
 ): XlflowTestRunItem | undefined {
   const tests = env?.tests;
   const items = Array.isArray(tests) ? tests : isTestRunPayload(tests) ? tests.items : undefined;
-  return items?.find(
-    (item) =>
-      readNonEmpty(item.module) === metadata.module && readNonEmpty(item.name) === metadata.name,
-  );
+  return items?.find((item) => {
+    const itemId = readNonEmpty(item.id) ?? readNonEmpty(item.qualified_name);
+    if (itemId !== undefined) {
+      return itemId === metadata.qualifiedName;
+    }
+    return (
+      readNonEmpty(item.module) === metadata.module && readNonEmpty(item.name) === metadata.name
+    );
+  });
 }
 
 function testFailureMessage(

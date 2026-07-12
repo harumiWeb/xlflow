@@ -4320,6 +4320,7 @@ func TestTestListJSONEnvelope(t *testing.T) {
 				Tests int `json:"tests"`
 			} `json:"summary"`
 			Items []struct {
+				ID            string   `json:"id"`
 				Module        string   `json:"module"`
 				Name          string   `json:"name"`
 				QualifiedName string   `json:"qualified_name"`
@@ -4339,7 +4340,7 @@ func TestTestListJSONEnvelope(t *testing.T) {
 		t.Fatalf("unexpected test payload: %+v", got.Tests)
 	}
 	first := got.Tests.Items[0]
-	if first.Module != "SmokeTests" || first.Name != "TestAlpha" || first.QualifiedName != "SmokeTests.TestAlpha" {
+	if first.ID != "SmokeTests.TestAlpha" || first.Module != "SmokeTests" || first.Name != "TestAlpha" || first.QualifiedName != "SmokeTests.TestAlpha" {
 		t.Fatalf("unexpected first test: %+v", first)
 	}
 	if first.SourcePath != "src/modules/SmokeTests.bas" || first.Line <= 0 {
@@ -4347,6 +4348,48 @@ func TestTestListJSONEnvelope(t *testing.T) {
 	}
 	if strings.Join(first.Tags, ",") != "fast,smoke" {
 		t.Fatalf("unexpected tags: %+v", first.Tags)
+	}
+}
+
+func TestTestListJSONDuplicateProcedureInSameModuleIsValidationFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeTestListFixture(t, dir)
+	body := `Attribute VB_Name = "SmokeTests"
+Option Explicit
+
+Public Sub TestAlpha()
+End Sub
+
+Public Sub testalpha()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "SmokeTests.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "test", "list"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("test list json error = nil, want duplicate validation error")
+	}
+	if got := output.ExitCode(err); got != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", got, output.ExitValidation)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse test list failure output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "duplicate_test_name" {
+		t.Fatalf("unexpected failure envelope: %+v", got)
 	}
 }
 

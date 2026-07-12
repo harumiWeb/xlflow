@@ -53,7 +53,7 @@ End Sub
 		t.Fatalf("items = %d, want 2: %+v", len(result.Items), result.Items)
 	}
 	first := result.Items[0]
-	if first.Module != "SmokeTests" || first.Name != "Test足し算" || first.QualifiedName != "SmokeTests.Test足し算" {
+	if first.ID != "SmokeTests.Test足し算" || first.Module != "SmokeTests" || first.Name != "Test足し算" || first.QualifiedName != "SmokeTests.Test足し算" {
 		t.Fatalf("unexpected first test identity: %+v", first)
 	}
 	if first.SourcePath != "src/modules/SmokeTests.bas" || first.Line != 7 {
@@ -65,6 +65,56 @@ End Sub
 	second := result.Items[1]
 	if second.Name != "EndsWith_Test" || len(second.Tags) != 0 {
 		t.Fatalf("unexpected second test: %+v", second)
+	}
+}
+
+func TestDiscoverAllowsSameProcedureNameInDifferentModules(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, filepath.Join("src", "modules", "InvoiceTests.bas"), `Attribute VB_Name = "InvoiceTests"
+Option Explicit
+Public Sub Test_Export()
+End Sub
+`)
+	writeModule(t, dir, filepath.Join("src", "modules", "CustomerTests.bas"), `Attribute VB_Name = "CustomerTests"
+Option Explicit
+Public Sub Test_Export()
+End Sub
+`)
+
+	result, err := Discover(Options{RootDir: dir, Config: config.Default()})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if result.Summary.Tests != 2 {
+		t.Fatalf("tests = %d, want 2: %+v", result.Summary.Tests, result.Items)
+	}
+	got := map[string]bool{}
+	for _, item := range result.Items {
+		got[item.ID] = true
+		if item.ID != item.QualifiedName {
+			t.Fatalf("id and qualified_name diverged: %+v", item)
+		}
+	}
+	for _, want := range []string{"InvoiceTests.Test_Export", "CustomerTests.Test_Export"} {
+		if !got[want] {
+			t.Fatalf("missing qualified id %q in %+v", want, result.Items)
+		}
+	}
+}
+
+func TestDiscoverRejectsDuplicateProcedureNameInSameModule(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, filepath.Join("src", "modules", "InvoiceTests.bas"), `Attribute VB_Name = "InvoiceTests"
+Option Explicit
+Public Sub Test_Export()
+End Sub
+Public Sub test_export()
+End Sub
+`)
+
+	_, err := Discover(Options{RootDir: dir, Config: config.Default()})
+	if err == nil {
+		t.Fatal("expected duplicate test procedure error")
 	}
 }
 

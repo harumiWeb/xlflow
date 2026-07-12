@@ -171,8 +171,8 @@ Prefer `--session` during normal AI-agent development to reuse an open workbook.
 ### Filtering
 
 ```bash
-# Exact test name
-xlflow test --filter Test_CreateWorksheet --session --json
+# Exact qualified test name
+xlflow test --filter TestOrders.Test_CreateWorksheet --session --json
 
 # Module filter (all tests in one module)
 xlflow test --module TestOrders --session --json
@@ -181,7 +181,7 @@ xlflow test --module TestOrders --session --json
 xlflow test --tag smoke --session --json
 ```
 
-Filters can be combined. `--filter` is exact match on test name. `--module` is exact match on module name. `--tag` matches if the test has at least one matching tag (case-insensitive).
+Filters can be combined. `--filter` is exact match on a qualified test name such as `TestOrders.Test_CreateWorksheet`; an unqualified procedure name works only when it resolves to exactly one test. `--module` is exact match on module name. `--tag` matches if the test has at least one matching tag (case-insensitive).
 
 ### Inconclusive tests
 
@@ -238,11 +238,11 @@ When `status` is `failed`, inspect `error.code` and `error.message` first. The m
 
 1. Reproduce with the exact failing filter:
    ```bash
-   xlflow test --filter <TestName> --session --json
+   xlflow test --filter <Module.TestName> --session --json
    ```
 2. If the failure is a runtime error rather than an assertion, add `XlflowDebug.Log` calls around the suspected path and rerun:
    ```bash
-   xlflow test --filter <TestName> --session --json
+   xlflow test --filter <Module.TestName> --session --json
    ```
    Read the `debug` array in JSON output.
 3. If the error originates in workbook code (not the test itself), add targeted `XlflowDebug.Log` calls if needed and run the relevant macro as normal:

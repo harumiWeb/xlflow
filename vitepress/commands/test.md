@@ -12,18 +12,18 @@ xlflow test list [--module <name>] [--path <path>] --json
 
 ## Options and Arguments
 
-| Option / argument              | Description                                                           | Default |
-| ------------------------------ | --------------------------------------------------------------------- | ------- |
-| `--filter <pattern>`           | Run only the test whose procedure name exactly matches the filter.    | -       |
-| `--module <name>`              | Run only tests in the module whose name exactly matches the filter.   | -       |
-| `--tag <tag>`                  | Run only tests tagged with the given tag.                             | -       |
-| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.      | -       |
-| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.    | -       |
-| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed. | -       |
-| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.    | false   |
-| `--session`                    | Run tests in the managed live workbook.                               | false   |
-| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`).                  | auto    |
-| `--json`                       | Return structured test results.                                       | false   |
+| Option / argument              | Description                                                                                 | Default |
+| ------------------------------ | ------------------------------------------------------------------------------------------- | ------- |
+| `--filter <pattern>`           | Run only the test whose qualified name or unique procedure name exactly matches the filter. | -       |
+| `--module <name>`              | Run only tests in the module whose name exactly matches the filter.                         | -       |
+| `--tag <tag>`                  | Run only tests tagged with the given tag.                                                   | -       |
+| `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.                            | -       |
+| `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.                          | -       |
+| `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed.                       | -       |
+| `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                          | false   |
+| `--session`                    | Run tests in the managed live workbook.                                                     | false   |
+| `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`).                                        | auto    |
+| `--json`                       | Return structured test results.                                                             | false   |
 
 ## Source Test Discovery
 
@@ -43,6 +43,7 @@ The JSON envelope uses `command: "test list"` and returns discovery data under `
     },
     "items": [
       {
+        "id": "SmokeTests.TestSmoke",
         "module": "SmokeTests",
         "name": "TestSmoke",
         "qualified_name": "SmokeTests.TestSmoke",
@@ -56,6 +57,16 @@ The JSON envelope uses `command: "test list"` and returns discovery data under `
 ```
 
 This command is intended for editor integrations such as VS Code Testing API discovery. Running tests remains the responsibility of `xlflow test`.
+
+## Test Identity and Filtering
+
+Each test has a stable qualified identifier in `<Module>.<Procedure>` form. JSON output includes this value as both `id` and `qualified_name`, while keeping the existing `module` and `name` fields.
+
+```bash
+xlflow test --filter SmokeTests.TestSmoke --session --json
+```
+
+Unqualified procedure names still work when they identify exactly one test after any `--module` and `--tag` filters. If the same procedure name exists in multiple modules, use the qualified name. Ambiguous unqualified filters fail with `ambiguous_test_name` and list matching qualified names in `error.details.matches`.
 
 ## Test Location
 
@@ -136,7 +147,7 @@ Best-effort hook cleanup with `On Error Resume Next` can reduce cascading failur
 ```bash
 xlflow test list --json
 xlflow test --json
-xlflow test --filter TestSmoke --session --json
+xlflow test --filter SmokeTests.TestSmoke --session --json
 xlflow test --module SmokeTests --session --json
 xlflow test --tag smoke --session --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
@@ -175,6 +186,8 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
   "command": "test",
   "tests": [
     {
+      "id": "SmokeTests.TestSmoke",
+      "qualified_name": "SmokeTests.TestSmoke",
       "name": "TestSmoke",
       "module": "SmokeTests",
       "status": "passed",
@@ -182,6 +195,8 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
       "tags": ["smoke"]
     },
     {
+      "id": "SmokeTests.TestDraft",
+      "qualified_name": "SmokeTests.TestDraft",
       "name": "TestDraft",
       "module": "SmokeTests",
       "status": "inconclusive",
@@ -195,6 +210,8 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
       }
     },
     {
+      "id": "SmokeTests.TestBad",
+      "qualified_name": "SmokeTests.TestBad",
       "name": "TestBad",
       "module": "SmokeTests",
       "status": "failed",
