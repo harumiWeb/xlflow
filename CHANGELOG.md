@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added `@Skip[("reason")]` and `@Todo[("reason")]` metadata for VBA tests, including discovery `status_hint`, non-executed `skipped` / `todo` results, separate CLI summary counts, and VS Code Testing API surfacing.
+- Added editor annotation completion for xlflow `@Skip(...)` and `@Todo(...)` test metadata alongside `@ExpectedError(...)`.
 - Added `@ExpectedError(number[, description[, source]])` metadata for VBA tests, including source/runtime discovery JSON, expected-error execution matching, `observed_error` JSON for expected-error results, and `invalid_test_metadata` diagnostics for malformed annotations.
 - Added `xlflow edit sheet add` for live-session worksheet creation, including idempotent `--if-missing` usage and positioned `--before` / `--after` insertion.
 - Added `xlflow edit formula` for live-session range formula edits, including R1C1 and A1 formula assignment, event control, optional target-range calculation, and structured edit summaries for AI-agent formula workflows.

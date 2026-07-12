@@ -440,6 +440,64 @@ func TestCompletionReturnsRubberduckAnnotationSnippet(t *testing.T) {
 	if edit.Range.Start.Character != 1 || edit.Range.End.Character != 4 {
 		t.Fatalf("@ExpectedError text edit range = %+v", edit.Range)
 	}
+
+	source = "Option Explicit\n'@S\n"
+	if _, err := s.docs.change(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err = s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 1, Character: 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok = result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok = findCompletionItem(list.Items, "@Skip")
+	if !ok {
+		t.Fatalf("@Skip completion missing: %+v", list.Items)
+	}
+	edit, ok = item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("@Skip text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.NewText != `@Skip("${1:Reason}")` {
+		t.Fatalf("@Skip new text = %q", edit.NewText)
+	}
+
+	source = "Option Explicit\n'@T\n"
+	if _, err := s.docs.change(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err = s.completion(nil, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 1, Character: 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok = result.(protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want CompletionList", result)
+	}
+	item, ok = findCompletionItem(list.Items, "@Todo")
+	if !ok {
+		t.Fatalf("@Todo completion missing: %+v", list.Items)
+	}
+	edit, ok = item.TextEdit.(protocol.TextEdit)
+	if !ok {
+		t.Fatalf("@Todo text edit = %T, want TextEdit", item.TextEdit)
+	}
+	if edit.NewText != `@Todo("${1:Reason}")` {
+		t.Fatalf("@Todo new text = %q", edit.NewText)
+	}
 }
 
 func TestCompletionReturnsTypeCandidates(t *testing.T) {
