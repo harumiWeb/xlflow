@@ -189,7 +189,13 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     name: "xlflow",
     index: 0,
   };
-  assert.strictEqual(formatBackupTimestamp("2026-07-12T13:42:01+09:00"), "2026-07-12 13:42");
+  const backupDate = new Date("2026-07-12T13:42:01+09:00");
+  assert.strictEqual(
+    formatBackupTimestamp("2026-07-12T13:42:01+09:00"),
+    `${backupDate.getFullYear()}-${pad2(backupDate.getMonth() + 1)}-${pad2(
+      backupDate.getDate(),
+    )} ${pad2(backupDate.getHours())}:${pad2(backupDate.getMinutes())}`,
+  );
   assert.strictEqual(formatBackupTimestamp("not-a-date"), "not-a-date");
   assert.strictEqual(formatBytes(31.4 * 1024 * 1024), "31.4 MB");
   assert.strictEqual(formatBytes(42), "42 bytes");
@@ -247,6 +253,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
       deleted: 1,
       failed: 1,
       freedBytes: 2048,
+      candidateBytes: 2048,
       candidates: [{ id: "old", size_bytes: 2048 }],
     },
   );
@@ -255,6 +262,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     deleted: 0,
     failed: 0,
     freedBytes: 0,
+    candidateBytes: 0,
     candidates: [],
   });
   assert.strictEqual(
@@ -919,4 +927,8 @@ function comparableFsPath(value: vscode.Uri | string | undefined): string | unde
         ? value
         : value.fsPath;
   return path.normalize(fsPath).toLowerCase();
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }

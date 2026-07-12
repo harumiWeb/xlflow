@@ -351,6 +351,7 @@ export function registerCommands(
         channels,
         sessionManager,
         hooks,
+        workspaceFolder,
       );
     }),
     vscode.commands.registerCommand("xlflow.inspectWorkbook", async () => {
@@ -802,7 +803,7 @@ async function pruneBackups(channels: XlflowChannels): Promise<void> {
   const previewAction = await vscode.window.showInformationMessage(
     vscode.l10n.t(
       "Backup pruning preview: {matched} candidate(s), approximately {size} removable. Policy: keep newest {keepLast}. Invalid and legacy entries are excluded.",
-      { matched: summary.matched, size: formatBytes(summary.freedBytes), keepLast },
+      { matched: summary.matched, size: formatBytes(summary.candidateBytes), keepLast },
     ),
     showCandidates,
     continueLabel,
@@ -818,7 +819,7 @@ async function pruneBackups(channels: XlflowChannels): Promise<void> {
   const confirmed = await vscode.window.showWarningMessage(
     vscode.l10n.t("Delete {matched} old backup(s) and free approximately {size}?", {
       matched: summary.matched,
-      size: formatBytes(summary.freedBytes),
+      size: formatBytes(summary.candidateBytes),
     }),
     { modal: true },
     deleteLabel,
@@ -876,6 +877,7 @@ async function handlePushFailure(
   channels: XlflowChannels,
   sessionManager: SessionManager,
   hooks: CommandRefreshHooks,
+  workspaceFolder: vscode.WorkspaceFolder,
 ): Promise<void> {
   const backupID = backupIDFromPushEnvelope(envelope);
   if (backupID !== undefined) {
@@ -898,7 +900,7 @@ async function handlePushFailure(
         channels,
         sessionManager,
         hooks,
-        undefined,
+        workspaceFolder,
       );
     } else if (action === openOutput) {
       channels.output.show(true);
@@ -1077,15 +1079,21 @@ export function pruneSummary(envelope: XlflowBackupPruneEnvelope | undefined): {
   deleted: number;
   failed: number;
   freedBytes: number;
+  candidateBytes: number;
   candidates: XlflowBackupPruneEntry[];
 } {
   const prune = envelope?.backup_prune;
+  const candidates = Array.isArray(prune?.candidates) ? prune.candidates : [];
   return {
     matched: nonNegativeInteger(prune?.matched),
     deleted: nonNegativeInteger(prune?.deleted),
     failed: nonNegativeInteger(prune?.failed),
     freedBytes: nonNegativeInteger(prune?.freed_bytes),
-    candidates: Array.isArray(prune?.candidates) ? prune.candidates : [],
+    candidateBytes: candidates.reduce(
+      (total, entry) => total + nonNegativeInteger(entry.size_bytes),
+      0,
+    ),
+    candidates,
   };
 }
 
