@@ -429,6 +429,9 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	if hasCompletion(items, "@ModuleDescription") {
 		t.Fatalf("@ModuleDescription should not match @D prefix: %+v", items)
 	}
+	if hasCompletion(items, "@ExpectedError") {
+		t.Fatalf("@ExpectedError should not match @D prefix: %+v", items)
+	}
 
 	source = "Option Explicit\n'@\n"
 	doc.Source = source
@@ -436,10 +439,14 @@ func TestRubberduckAnnotationCompletionInComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription"} {
+	for _, want := range []string{"@Description", "@ModuleDescription", "@VariableDescription", "@ExpectedError"} {
 		if !hasCompletion(items, want) {
 			t.Fatalf("%s completion missing: %+v", want, items)
 		}
+	}
+	item, ok = findCompletion(items, "@ExpectedError")
+	if !ok || !item.Snippet || item.InsertText != `@ExpectedError(${1:5})` || item.ReplaceRange == nil {
+		t.Fatalf("unexpected @ExpectedError completion: %+v", item)
 	}
 }
 

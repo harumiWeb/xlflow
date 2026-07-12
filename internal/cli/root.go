@@ -4058,6 +4058,10 @@ func (a *app) testListCommand() *cobra.Command {
 				if errors.As(err, &duplicateErr) {
 					return a.writeFailure("test list", output.ExitValidation, "duplicate_test_name", err)
 				}
+				var metadataErr testdiscover.InvalidMetadataError
+				if errors.As(err, &metadataErr) {
+					return a.writeFailure("test list", output.ExitValidation, "invalid_test_metadata", err)
+				}
 				return a.writeFailure("test list", output.ExitEnvironment, "test_discovery_failed", err)
 			}
 			env := output.New("test list")

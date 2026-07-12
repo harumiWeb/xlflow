@@ -36,7 +36,7 @@ public sealed class ExcelTestServiceTests
             MetadataPath: "");
         var tests = new List<ExcelTestService.TestCase>
         {
-            new() { Name = "TestSomething", Module = "Module1", Line = 5, Tags = ["smoke"] },
+            new() { Name = "TestSomething", Module = "Module1", Line = 5, Tags = ["smoke"], ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = 5 } },
         };
 
         var response = ExcelTestService.BuildErrorResponse(
@@ -64,6 +64,7 @@ public sealed class ExcelTestServiceTests
         Assert.Equal("Module1.TestSomething", testsArray[0].GetProperty("id").GetString());
         Assert.Equal("Module1.TestSomething", testsArray[0].GetProperty("qualified_name").GetString());
         Assert.Equal(5, testsArray[0].GetProperty("line").GetInt32());
+        Assert.Equal(5, testsArray[0].GetProperty("expected_error").GetProperty("number").GetInt32());
 
         var logs = json.RootElement.GetProperty("logs");
         Assert.Equal(1, logs.GetArrayLength());
@@ -168,14 +169,12 @@ public sealed class ExcelTestServiceTests
     [Fact]
     public void FindTestProceduresCollectsTagAnnotations()
     {
-        const string code = """
-            Option Explicit
-
-            ' @Tag("smoke")
-            ' @Tag("fast")
-            Public Sub TestWithTags()
-            End Sub
-            """;
+        const string code = "Option Explicit\r\n\r\n" +
+            "' @Tag(\"smoke\")\r\n" +
+            "' @ExpectedError(5, \"Invalid \"\"value\"\"\", \"ParserModule\")\r\n" +
+            "' @Tag(\"fast\")\r\n" +
+            "Public Sub TestWithTags()\r\n" +
+            "End Sub\r\n";
 
         var tests = ExcelTestService.FindTestProcedures("Module1", code);
 
@@ -184,6 +183,11 @@ public sealed class ExcelTestServiceTests
         Assert.Equal(2, tests[0].Tags.Length);
         Assert.Contains("smoke", tests[0].Tags);
         Assert.Contains("fast", tests[0].Tags);
+        var expectedError = tests[0].ExpectedError;
+        Assert.NotNull(expectedError);
+        Assert.Equal(5, expectedError.Number);
+        Assert.Equal("Invalid \"value\"", expectedError.Description);
+        Assert.Equal("ParserModule", expectedError.Source);
     }
 
     [Fact]
@@ -217,6 +221,224 @@ public sealed class ExcelTestServiceTests
         var duplicates = ExcelTestService.DuplicateTestQualifiedNames(allTests);
 
         Assert.Equal(["InvoiceTests.TestExport"], duplicates);
+    }
+
+    [Fact]
+    public void FindTestProceduresCollectsExpectedErrorNumberOnly()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @ExpectedError(5)
+            Public Sub TestInvalidArgument()
+            End Sub
+            """;
+
+        var tests = ExcelTestService.FindTestProcedures("Module1", code);
+
+        Assert.Single(tests);
+        var expectedError = tests[0].ExpectedError;
+        Assert.NotNull(expectedError);
+        Assert.Equal(5, expectedError.Number);
+        Assert.Null(expectedError.Description);
+        Assert.Null(expectedError.Source);
+    }
+
+    [Theory]
+    [InlineData("' @ExpectedError(foo)", "@ExpectedError error number must be numeric")]
+    [InlineData("' @ExpectedError(5, \"a\", \"b\", \"c\")", "@ExpectedError supports 1 to 3 arguments")]
+    [InlineData("' @ExpectedError(5, \"unterminated)", "malformed string literal")]
+    public void FindTestProceduresRejectsMalformedExpectedError(string annotation, string expectedMessage)
+    {
+        var code = $$"""
+            Option Explicit
+
+            {{annotation}}
+            Public Sub TestInvalidArgument()
+            End Sub
+            """;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestMetadataException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains(expectedMessage, ex.Message);
+        Assert.Contains("Module1:3", ex.Message);
+    }
+
+    [Fact]
+    public void FindTestProceduresRejectsDuplicateExpectedError()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @ExpectedError(5)
+            ' @ExpectedError(6)
+            Public Sub TestInvalidArgument()
+            End Sub
+            """;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestMetadataException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains("multiple @ExpectedError", ex.Message);
+        Assert.Contains("Module1:3", ex.Message);
+    }
+
+    [Fact]
+    public void FindTestProceduresRejectsExpectedErrorOnNonTestProcedure()
+    {
+        const string code = """
+            Option Explicit
+
+            ' @ExpectedError(5)
+            Public Sub Helper()
+            End Sub
+            """;
+
+        var ex = Assert.Throws<ExcelTestService.InvalidTestMetadataException>(() =>
+            ExcelTestService.FindTestProcedures("Module1", code));
+
+        Assert.Contains("only supported on test procedures", ex.Message);
+        Assert.Contains("Module1:3", ex.Message);
+    }
+
+    [Fact]
+    public void ClassifyTestOutcomeMatchesExpectedError()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestInvalidArgument",
+            Module = "ParserTests",
+            ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = 5 },
+        };
+
+        var result = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: 5, errSource: "ParserModule", errDescription: "Invalid value", statusHint: "", phaseHint: "test");
+
+        Assert.Equal("passed", result.Status);
+        Assert.NotNull(result.ObservedError);
+    }
+
+    [Fact]
+    public void ClassifyTestOutcomeFailsWhenExpectedErrorIsMissing()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestInvalidArgument",
+            Module = "ParserTests",
+            ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = 5 },
+        };
+
+        var result = ExcelTestService.ClassifyTestOutcome(test, success: true, errNumber: 0, errSource: "", errDescription: "", statusHint: "", phaseHint: "");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("expected_error_mismatch", result.ErrorCode);
+        Assert.Equal("expected VBA error 5 but no error was raised", result.ErrorMessage);
+    }
+
+    [Fact]
+    public void ClassifyTestOutcomeFailsExpectedErrorNumberDescriptionAndSourceMismatches()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestInvalidArgument",
+            Module = "ParserTests",
+            ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = 5, Description = "Invalid value", Source = "InvoiceParser" },
+        };
+
+        var wrongNumber = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: 9, errSource: "InvoiceParser", errDescription: "Subscript out of range", statusHint: "", phaseHint: "test");
+        Assert.Equal("expected_error_mismatch", wrongNumber.ErrorCode);
+        Assert.Contains("expected VBA error 5 but got error 9", wrongNumber.ErrorMessage);
+
+        var wrongDescription = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: 5, errSource: "InvoiceParser", errDescription: "Value is invalid", statusHint: "", phaseHint: "test");
+        Assert.Equal("expected error description <Invalid value> but got <Value is invalid>", wrongDescription.ErrorMessage);
+
+        var wrongSource = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: 5, errSource: "ParserModule", errDescription: "Invalid value", statusHint: "", phaseHint: "test");
+        Assert.Equal("expected error source <InvoiceParser> but got <ParserModule>", wrongSource.ErrorMessage);
+    }
+
+    [Fact]
+    public void ClassifyTestOutcomeMatchesSourceCaseInsensitively()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestInvalidArgument",
+            Module = "ParserTests",
+            ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = 5, Source = "InvoiceParser" },
+        };
+
+        var result = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: 5, errSource: "invoiceparser", errDescription: "Invalid value", statusHint: "", phaseHint: "test");
+
+        Assert.Equal("passed", result.Status);
+    }
+
+    [Fact]
+    public void ClassifyTestOutcomeKeepsHookAndInconclusivePrecedence()
+    {
+        var test = new ExcelTestService.TestCase
+        {
+            Name = "TestInvalidArgument",
+            Module = "ParserTests",
+            ExpectedError = new ExcelTestService.ExpectedErrorMetadata { Number = unchecked((int)0x80040000) + 516 },
+        };
+
+        var inconclusive = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: unchecked((int)0x80040000) + 516, errSource: "XlflowAssert.AssertInconclusive", errDescription: "not ready", statusHint: "inconclusive", phaseHint: "test");
+        Assert.Equal("inconclusive", inconclusive.Status);
+        Assert.Equal("test_inconclusive", inconclusive.ErrorCode);
+
+        var beforeEach = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: unchecked((int)0x80040000) + 516, errSource: "BeforeEach", errDescription: "setup failed", statusHint: "", phaseHint: "before_each");
+        Assert.Equal("failed", beforeEach.Status);
+        Assert.Equal("before_each_failed", beforeEach.ErrorCode);
+
+        var afterEach = ExcelTestService.ClassifyTestOutcome(test, success: false, errNumber: unchecked((int)0x80040000) + 516, errSource: "AfterEach", errDescription: "cleanup failed", statusHint: "failed", phaseHint: "after_each");
+        Assert.Equal("failed", afterEach.Status);
+        Assert.Equal("after_each_failed", afterEach.ErrorCode);
+    }
+
+    [Fact]
+    public void CountFailedResultsReadsDictionaryTestPayloads()
+    {
+        var response = new BridgeResponse
+        {
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError("test_failed", "1 failed", "test", "xlflow"),
+            Extensions = new Dictionary<string, object?>
+            {
+                ["tests"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["status"] = "passed" },
+                    new Dictionary<string, object?> { ["status"] = "failed" },
+                    new Dictionary<string, object?> { ["status"] = "inconclusive" },
+                },
+            },
+        };
+
+        Assert.Equal(1, ExcelTestService.CountFailedResults(response));
+    }
+
+    [Fact]
+    public void CountFailedResultsFallsBackWhenTestsPayloadIsMissing()
+    {
+        var response = new BridgeResponse
+        {
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError("test_failed", "test failed", "test", "xlflow"),
+        };
+
+        Assert.Equal(1, ExcelTestService.CountFailedResults(response));
+    }
+
+    [Fact]
+    public void BuildTestResultOmitsErrorForPassedTests()
+    {
+        var test = new ExcelTestService.TestCase { Name = "TestOk", Module = "ParserTests" };
+
+        var passed = ExcelTestService.BuildTestResult(test, "passed", 5,
+            new { code = "", message = "", source = "", number = 0 });
+        var failed = ExcelTestService.BuildTestResult(test, "failed", 5,
+            new { code = "test_failed", message = "failed", source = "ParserTests", number = 5 });
+
+        Assert.False(passed.ContainsKey("error"));
+        Assert.True(failed.ContainsKey("error"));
     }
 
     [Fact]

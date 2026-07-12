@@ -137,6 +137,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     }
 
     if (
+      (config.completionTriggerSuggestInStatements && isAnnotationCommentPrefix(linePrefix)) ||
       (config.completionTriggerSuggestInStatements && isStatementPrefix(linePrefix)) ||
       (config.completionProgIdsInStrings && isProgIdStringPrefix(linePrefix))
     ) {
@@ -236,6 +237,10 @@ export function isStatementPrefix(linePrefix: string): boolean {
 
 export function isDocCommentSnippetPrefix(linePrefix: string): boolean {
   return /^\s*'''$/.test(linePrefix);
+}
+
+export function isAnnotationCommentPrefix(linePrefix: string): boolean {
+  return /^\s*'\s*@\w*$/.test(linePrefix);
 }
 
 export function isProgIdStringPrefix(linePrefix: string): boolean {

@@ -13,7 +13,7 @@ Default safety rules for AI-agent work:
 
 - Usually start with `xlflow session start` and stay in that session until the task is done.
 - If the user says the workbook is already open in Excel, asks to work on the workbook they are viewing, or describes a human-centered Excel workflow, use `xlflow session attach --json` instead of `xlflow session start` so xlflow adopts the already-open configured workbook.
-- When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, lifecycle hooks, tags/filters, and failure diagnosis.
+- When a task involves creating, fixing, or reasoning about workbook-side tests, load [references/testing.md](references/testing.md) before editing test VBA. It covers discovery rules, `XlflowAssert` helpers, `@ExpectedError` metadata for expected VBA runtime errors, lifecycle hooks, tags/filters, and failure diagnosis.
 - When workbook behavior may depend on worksheet formulas, defined names, or formula-driven sheet layout, load [references/formulas.md](references/formulas.md) before editing VBA or changing columns/ranges. Use `xlflow formulas pull --json` to extract Git-friendly region snapshots.
 - If it is unclear whether source files or the workbook are newer, start the session and run `xlflow pull --session --json`.
 - When `[vba].folders=true`, treat the filesystem layout under each configured `[src]` root as meaningful architecture. Nested directories map to Rubberduck-compatible `@Folder(...)` annotations during `push`.
@@ -154,7 +154,7 @@ When the user asks to create or change VBA behavior:
    - Use `xlflow test --filter <Module.TestName> --session --json` for focused iteration.
    - Use `xlflow test --module <ModuleName> --session --json` to run one suite.
    - Use `xlflow test --tag <tag> --session --json` for tag-based subsets.
-   - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, or debugging test failures.
+   - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, using `@ExpectedError`, or debugging test failures.
 8. If tests do not cover the behavior, run `xlflow macros --session --json`, then `xlflow run --headless --session --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --json` for non-default entrypoints. Add `XlflowDebug.Log` before rerunning if internal runtime state is still unclear.
 9. When workbook output matters, run `xlflow save --json` if needed, then inspect the result with `xlflow inspect workbook|sheets|range|used-range|cell --json`, or use `xlflow inspect form <FormName> --session --json` for live UserForm state.
 10. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
@@ -183,7 +183,7 @@ When the user reports a runtime failure:
 - Use `xlflow test --module <ModuleName> --session --json` to run only the tests in one module.
 - Use `xlflow test --tag <tag> --session --json` to run only tests matching a tag.
 - Use `xlflow test --filter <Module.TestName> --session --json` for exact focused iteration; unqualified names only work when unique.
-- Read [references/testing.md](references/testing.md) for detailed guidance on `XlflowAssert`, lifecycle hooks, tag conventions, and failure diagnosis.
+- Read [references/testing.md](references/testing.md) for detailed guidance on `XlflowAssert`, `@ExpectedError`, lifecycle hooks, tag conventions, and failure diagnosis.
 - Use `xlflow macros --session --json` to discover runnable macro entrypoints before guessing a non-default `run` target.
 - Use `xlflow inspect workbook --json` to confirm saved workbook metadata after save, or `xlflow inspect workbook --session --json` to inspect the live workbook before saving.
 - Use `xlflow inspect sheets --json` to verify saved worksheet names, visibility, and lightweight used ranges, or `xlflow inspect sheets --session --json` for the live workbook.
@@ -226,6 +226,7 @@ When the user reports a runtime failure:
 - Restore `Application` state in cleanup paths.
 - Use `On Error GoTo ErrHandler`; avoid broad `On Error Resume Next`.
 - Do not pass object or array values to `AssertEquals`; compare scalar properties such as `Range.Value2`.
+- For error-path tests, prefer `@ExpectedError(number[, description[, source]])` metadata above the test procedure instead of writing repetitive `On Error GoTo ExpectedError` assertion scaffolding. Keep using normal assertions when the test needs to inspect state after recovering from an error.
 - Do not introduce raw `MsgBox` or `InputBox` outside `XlflowUI.bas` or a deliberate interactive-only adapter. Use `XlflowUI.MsgBox` / `XlflowUI.InputBox` with stable dialog ids, and load [references/xlflow-ui.md](references/xlflow-ui.md) when designing dialog flows.
 - Avoid other UI prompts such as `Application.GetOpenFilename`, `Application.GetSaveAsFilename`, `Application.FileDialog`, and `UserForm.Show` in macros that must run headlessly. Prefer `run --arg`, environment variables, configuration cells, deterministic paths, or an interactive-only adapter.
 - Structure GUI-dependent macros with a human-facing entrypoint and a headless core:
@@ -280,7 +281,7 @@ When workbook code launches an external PowerShell process, separate xlflow's br
 
 ## Failure Handling
 
-If `xlflow test` fails, read the failing test name, module, `error.code`, VBA error number, description, and line. Distinct `error.code` values include `test_failed`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`, and `test_inconclusive`. Hook failures (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`) indicate setup/cleanup problems rather than assertion failures in the test body. Load [references/testing.md](references/testing.md) for a full failure-code reference. Patch the smallest relevant area, rerun the focused test with `--filter` first, then run the full test suite.
+If `xlflow test` fails, read the failing test name, module, `error.code`, VBA error number, description, line, and any `expected_error` / `observed_error` fields. Distinct `error.code` values include `test_failed`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`, and `test_inconclusive`. Hook failures (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`) indicate setup/cleanup problems rather than assertion failures in the test body. `expected_error_mismatch` means the `@ExpectedError` contract was not met; compare the declared metadata against the observed VBA error before changing production code. Load [references/testing.md](references/testing.md) for a full failure-code reference. Patch the smallest relevant area, rerun the focused test with `--filter` first, then run the full test suite.
 
 If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls. Plain `run` already includes compile-first diagnostics by default; do not switch to `--gui-compile-errors` unless a human explicitly wants GUI dialogs.
 

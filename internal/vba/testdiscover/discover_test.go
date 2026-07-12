@@ -1,6 +1,7 @@
 package testdiscover
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ Option Explicit
 
 '@Tag("smoke")
 '' Plain documentation line
+'@ExpectedError(5, "Invalid ""値""", "InvoiceParser")
 '@Tag("fast")
 Public Sub Test足し算()
 End Sub
@@ -56,15 +58,27 @@ End Sub
 	if first.ID != "SmokeTests.Test足し算" || first.Module != "SmokeTests" || first.Name != "Test足し算" || first.QualifiedName != "SmokeTests.Test足し算" {
 		t.Fatalf("unexpected first test identity: %+v", first)
 	}
-	if first.SourcePath != "src/modules/SmokeTests.bas" || first.Line != 7 {
+	if first.SourcePath != "src/modules/SmokeTests.bas" || first.Line != 8 {
 		t.Fatalf("unexpected first test location: %+v", first)
 	}
 	if !reflect.DeepEqual(first.Tags, []string{"fast", "smoke"}) {
 		t.Fatalf("tags = %#v, want fast/smoke", first.Tags)
 	}
+	if first.ExpectedError == nil || first.ExpectedError.Number != 5 {
+		t.Fatalf("expected error missing: %+v", first.ExpectedError)
+	}
+	if first.ExpectedError.Description == nil || *first.ExpectedError.Description != `Invalid "値"` {
+		t.Fatalf("description = %+v", first.ExpectedError.Description)
+	}
+	if first.ExpectedError.Source == nil || *first.ExpectedError.Source != "InvoiceParser" {
+		t.Fatalf("source = %+v", first.ExpectedError.Source)
+	}
 	second := result.Items[1]
 	if second.Name != "EndsWith_Test" || len(second.Tags) != 0 {
 		t.Fatalf("unexpected second test: %+v", second)
+	}
+	if second.ExpectedError != nil {
+		t.Fatalf("unexpected expected error on second test: %+v", second.ExpectedError)
 	}
 }
 
@@ -129,6 +143,91 @@ func TestDiscoverEmptySourceReturnsEmptyItems(t *testing.T) {
 	}
 	if result.Summary.Files != 0 || result.Summary.Tests != 0 || len(result.Items) != 0 {
 		t.Fatalf("unexpected empty result: %+v", result)
+	}
+}
+
+func TestDiscoverExpectedErrorNumberOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, filepath.Join("src", "modules", "ParserTests.bas"), `Attribute VB_Name = "ParserTests"
+Option Explicit
+
+'@ExpectedError(5)
+Public Sub Test_InvalidArgument()
+End Sub
+`)
+
+	result, err := Discover(Options{RootDir: dir, Config: config.Default()})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ExpectedError == nil {
+		t.Fatalf("expected metadata: %+v", result.Items)
+	}
+	if got := result.Items[0].ExpectedError.Number; got != 5 {
+		t.Fatalf("number = %d, want 5", got)
+	}
+}
+
+func TestDiscoverRejectsInvalidExpectedErrorMetadata(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "duplicate",
+			body: `'@ExpectedError(5)
+'@ExpectedError(6)
+Public Sub Test_InvalidArgument()
+End Sub
+`,
+		},
+		{
+			name: "non_numeric",
+			body: `'@ExpectedError(foo)
+Public Sub Test_InvalidArgument()
+End Sub
+`,
+		},
+		{
+			name: "bad_arg_count",
+			body: `'@ExpectedError(5, "a", "b", "c")
+Public Sub Test_InvalidArgument()
+End Sub
+`,
+		},
+		{
+			name: "malformed_string",
+			body: `'@ExpectedError(5, "unterminated)
+Public Sub Test_InvalidArgument()
+End Sub
+`,
+		},
+		{
+			name: "non_test",
+			body: `'@ExpectedError(5)
+Public Sub Helper()
+End Sub
+`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeModule(t, dir, filepath.Join("src", "modules", "ParserTests.bas"), "Attribute VB_Name = \"ParserTests\"\nOption Explicit\n\n"+c.body)
+
+			_, err := Discover(Options{RootDir: dir, Config: config.Default()})
+			if err == nil {
+				t.Fatal("Discover() error = nil, want invalid metadata")
+			}
+			var metadataErr InvalidMetadataError
+			if !errors.As(err, &metadataErr) {
+				t.Fatalf("error = %T %v, want InvalidMetadataError", err, err)
+			}
+			if metadataErr.Path == "" || metadataErr.Line == 0 || metadataErr.Module != "ParserTests" {
+				t.Fatalf("metadata location missing: %+v", metadataErr)
+			}
+		})
 	}
 }
 

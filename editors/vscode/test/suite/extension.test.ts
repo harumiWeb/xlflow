@@ -17,6 +17,7 @@ import {
   parseProcedureDeclaration,
 } from "../../src/codeActions";
 import {
+  isAnnotationCommentPrefix,
   isDocCommentSnippetPrefix,
   isProgIdStringPrefix,
   isStatementPrefix,
@@ -239,6 +240,10 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(isDocCommentSnippetPrefix("'''"), true);
   assert.strictEqual(isDocCommentSnippetPrefix("    '''"), true);
   assert.strictEqual(isDocCommentSnippetPrefix("    ''' summary"), false);
+  assert.strictEqual(isAnnotationCommentPrefix("'@"), true);
+  assert.strictEqual(isAnnotationCommentPrefix("    ' @Ex"), true);
+  assert.strictEqual(isAnnotationCommentPrefix("'@ExpectedError(\"text@"), false);
+  assert.strictEqual(isAnnotationCommentPrefix('Debug.Print "@'), false);
   const parsedFunction = parseProcedureDeclaration(
     "Public Function FindCustomer(ByVal customerCode As String) As Customer",
   );

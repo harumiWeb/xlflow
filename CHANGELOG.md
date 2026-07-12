@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `@ExpectedError(number[, description[, source]])` metadata for VBA tests, including source/runtime discovery JSON, expected-error execution matching, `observed_error` JSON for expected-error results, and `invalid_test_metadata` diagnostics for malformed annotations.
 - Added `xlflow edit sheet add` for live-session worksheet creation, including idempotent `--if-missing` usage and positioned `--before` / `--after` insertion.
 - Added `xlflow edit formula` for live-session range formula edits, including R1C1 and A1 formula assignment, event control, optional target-range calculation, and structured edit summaries for AI-agent formula workflows.
 - Added VS Code editor support for xlflow VBA documentation comments, including Quick Fix snippet generation from `'''`, Rubberduck `@Description` annotation completions in comments, doc-comment continuation on Enter, and highlighting for `'''` comments and Rubberduck description annotations.

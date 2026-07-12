@@ -834,6 +834,12 @@ func commentStartIndex(prefix string) int {
 func rubberduckAnnotationCompletions(prefix string, replaceRange Range) []Completion {
 	specs := []syntaxCompletionSpec{
 		{
+			label:         "@ExpectedError",
+			detail:        "xlflow expected VBA error",
+			insertText:    `@ExpectedError(${1:5})`,
+			documentation: "Marks the following xlflow VBA test as passing only when the test body raises the expected VBA error number.",
+		},
+		{
 			label:         "@Description",
 			detail:        "Rubberduck procedure description",
 			insertText:    `@Description("${1:Description.}")`,

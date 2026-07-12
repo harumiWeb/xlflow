@@ -34,6 +34,8 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"xlflow pull --session --json",
 		"xlflow save --json",
 		"xlflow push --fast --session --no-save --json",
+		"@ExpectedError` metadata for expected VBA runtime errors",
+		"expected_error_mismatch",
 		"When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.",
 		"Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove`",
 		"Use `xlflow list forms --session --json` when you need workbook UserForm names",

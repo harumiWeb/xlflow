@@ -60,6 +60,30 @@ Public Sub Test_ImportLargeFile()
 
 Multiple tags are allowed. Tags are case-insensitive during filtering. There is no predefined tag list; use whatever names match your project conventions.
 
+## Expected VBA Errors
+
+Use `' @ExpectedError(...)` directly above a test when the test should pass only if the test body raises a specific VBA error:
+
+```vb
+'@ExpectedError(5)
+Public Sub Test_InvalidArgument()
+    ParseValue ""
+End Sub
+
+'@ExpectedError(5, "Invalid value", "ParserModule")
+Public Sub Test_InvalidArgument_Detail()
+    ParseValue ""
+End Sub
+```
+
+Supported forms are `@ExpectedError(number)`, `@ExpectedError(number, description)`, and `@ExpectedError(number, description, source)`. The error number matches exactly, description matches exactly and case-sensitively, and source matches exactly but case-insensitively.
+
+Only the test body can satisfy `@ExpectedError`. Hook failures (`BeforeAll`, `BeforeEach`, `AfterEach`, `AfterAll`) keep their hook-specific failure codes, and cleanup failures still fail the test. `AssertInconclusive` remains `inconclusive` even if its internal error number matches `@ExpectedError`.
+
+Prefer `@ExpectedError` for ordinary error-path tests because VBA has no ergonomic `AssertThrows` callback pattern. Use a manual `On Error GoTo` test only when the test must recover from the error and then assert additional workbook or object state.
+
+Malformed `@ExpectedError` metadata, multiple expected-error annotations on one procedure, non-numeric error numbers, unsupported argument counts, malformed string literals, or attaching the annotation to a non-test procedure fail discovery with `invalid_test_metadata`. Fix metadata before changing production VBA.
+
 ## Lifecycle Hooks
 
 Each standard module can optionally define up to four hook subs. They must take **no arguments** and match these exact names:
@@ -220,21 +244,31 @@ Each test entry includes:
 
 - `name`, `module`, `status` (`passed` | `failed` | `inconclusive`)
 - `duration_ms`
-- `error.code` (`test_failed`, `test_inconclusive`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)
+- `expected_error` when `@ExpectedError` is present
+- `observed_error` when an expected-error test body raised an error
+- `error.code` (`test_failed`, `test_inconclusive`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)
 - `error.message`, `error.source`, `error.number`
 
 When `status` is `failed`, inspect `error.code` and `error.message` first. The message comes from `XlflowAssert` helpers or the VBA runtime error description.
 
+For `expected_error_mismatch`, inspect `expected_error`, `observed_error`, and `error.message` together:
+
+- If `observed_error` is absent, the test body did not raise an error.
+- If `observed_error.number` differs, the wrong VBA error path ran.
+- If only description or source differs, decide whether the implementation should raise the documented detail or the test metadata is too strict.
+- If the failure code is a hook code, do not treat it as an expected-error mismatch; fix setup/cleanup first.
+
 ### Common failure codes
 
-| `error.code`         | Meaning                                        | Action                                                                       |
-| -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
-| `test_failed`        | Assertion failed or runtime error in test body | Read `error.message` and `error.source`; fix the test or the code under test |
-| `test_inconclusive`  | `AssertInconclusive` was called                | Expected if the test is intentionally incomplete                             |
-| `before_all_failed`  | `BeforeAll` raised an error                    | Fix the `BeforeAll` setup logic; no module test body ran                     |
-| `after_all_failed`   | `AfterAll` raised an error                     | Fix the `AfterAll` cleanup logic; the test body may have passed              |
-| `before_each_failed` | `BeforeEach` raised an error                   | Fix `BeforeEach`; the test body was skipped                                  |
-| `after_each_failed`  | `AfterEach` raised an error                    | Fix `AfterEach`; the test body may have passed                               |
+| `error.code`              | Meaning                                                  | Action                                                                       |
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `test_failed`             | Assertion failed or runtime error in test body           | Read `error.message` and `error.source`; fix the test or the code under test |
+| `test_inconclusive`       | `AssertInconclusive` was called                          | Expected if the test is intentionally incomplete                             |
+| `expected_error_mismatch` | `@ExpectedError` was missing, different, or too specific | Compare `expected_error`, `observed_error`, and `error.message`              |
+| `before_all_failed`       | `BeforeAll` raised an error                              | Fix the `BeforeAll` setup logic; no module test body ran                     |
+| `after_all_failed`        | `AfterAll` raised an error                               | Fix the `AfterAll` cleanup logic; the test body may have passed              |
+| `before_each_failed`      | `BeforeEach` raised an error                             | Fix `BeforeEach`; the test body was skipped                                  |
+| `after_each_failed`       | `AfterEach` raised an error                              | Fix `AfterEach`; the test body may have passed                               |
 
 ### Debugging failing tests
 
@@ -262,6 +296,7 @@ When `status` is `failed`, inspect `error.code` and `error.message` first. The m
 - **Do not use `Application` state assumptions in tests**. Avoid `ActiveSheet`, `Selection`, and `ActiveWorkbook`. Create explicit worksheet references.
 - **Tag slow or fragile tests** with `' @tag slow` or `' @tag flaky` so CI or quick-check runs can exclude them.
 - **Use `AssertInconclusive`** for tests that describe desired behavior not yet implemented, rather than commenting them out.
+- **Use `@ExpectedError` for error paths** instead of hand-written error handlers when the only assertion is that a specific VBA error should be raised.
 - **Remove E2E-only test modules** before committing. If you create intentional-failure modules to verify hook behavior, do not check them into version control.
 - **Use `xlflow generate test <ModuleName>`** to scaffold a new test module with hook stubs and a sample test sub. This is faster than writing the boilerplate by hand and keeps the module structure consistent.
 - **Run `xlflow lint --json` after editing test source**. xlflow lint validates both production and test VBA.
