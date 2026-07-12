@@ -41,7 +41,7 @@ By default, `xlflow test` runs against a temporary copy of the configured workbo
 
 ## Source Test Discovery
 
-`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
+`xlflow test list --json` lists source-defined VBA tests without opening Excel or executing workbook VBA. It scans standard `.bas` modules in the configured source tree, recognizes public parameterless `Sub` procedures named `Test*` or `*_Test`, and collects `@Tag("name")` and `@ExpectedError(...)` comment annotations directly above each test. Class modules, UserForms, functions, private procedures, and procedures with parameters are not listed.
 
 The JSON envelope uses `command: "test list"` and returns discovery data under `tests`:
 
@@ -63,7 +63,12 @@ The JSON envelope uses `command: "test list"` and returns discovery data under `
         "qualified_name": "SmokeTests.TestSmoke",
         "source_path": "src/modules/SmokeTests.bas",
         "line": 5,
-        "tags": ["smoke"]
+        "tags": ["smoke"],
+        "expected_error": {
+          "number": 5,
+          "description": "Invalid value",
+          "source": "ParserModule"
+        }
       }
     ]
   }
@@ -110,6 +115,28 @@ Public Sub Test_ImportLargeFile()
 ```
 
 Multiple tags are allowed. Tags are case-insensitive during filtering.
+
+## Expected VBA Errors
+
+Add `' @ExpectedError(...)` directly above a test when the test should pass only if the test body raises a specific VBA error:
+
+```vb
+'@ExpectedError(5)
+Public Sub Test_InvalidArgument()
+    ParseValue ""
+End Sub
+
+'@ExpectedError(5, "Invalid value", "ParserModule")
+Public Sub Test_InvalidArgument_Detail()
+    ParseValue ""
+End Sub
+```
+
+Supported forms are `@ExpectedError(number)`, `@ExpectedError(number, description)`, and `@ExpectedError(number, description, source)`. The error number must match exactly. Description matching is exact and case-sensitive. Source matching is exact and case-insensitive. Substring and regular-expression matching are not supported.
+
+Only errors raised by the test procedure body can satisfy `@ExpectedError`. `BeforeAll`, `BeforeEach`, `AfterEach`, and `AfterAll` failures remain hook failures, and `AfterEach` / `AfterAll` failures still fail the test even after the expected error was raised. `AssertInconclusive` remains `inconclusive` and never satisfies `@ExpectedError`.
+
+Malformed metadata, multiple `@ExpectedError` annotations on one test, unsupported argument counts, non-numeric error numbers, malformed string literals, and `@ExpectedError` on non-test procedures fail discovery with `invalid_test_metadata`.
 
 ## Lifecycle Hooks
 
@@ -217,6 +244,23 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
       "status": "passed",
       "duration_ms": 12,
       "tags": ["smoke"]
+    },
+    {
+      "id": "SmokeTests.TestInvalidArgument",
+      "qualified_name": "SmokeTests.TestInvalidArgument",
+      "name": "TestInvalidArgument",
+      "module": "SmokeTests",
+      "status": "passed",
+      "duration_ms": 7,
+      "tags": [],
+      "expected_error": {
+        "number": 5
+      },
+      "observed_error": {
+        "number": 5,
+        "source": "ParserModule",
+        "message": "Invalid value"
+      }
     },
     {
       "id": "SmokeTests.TestDraft",

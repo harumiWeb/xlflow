@@ -4368,6 +4368,11 @@ func TestTestListJSONEnvelope(t *testing.T) {
 				SourcePath    string   `json:"source_path"`
 				Line          int      `json:"line"`
 				Tags          []string `json:"tags"`
+				ExpectedError *struct {
+					Number      int    `json:"number"`
+					Description string `json:"description"`
+					Source      string `json:"source"`
+				} `json:"expected_error"`
 			} `json:"items"`
 		} `json:"tests"`
 	}
@@ -4389,6 +4394,9 @@ func TestTestListJSONEnvelope(t *testing.T) {
 	}
 	if strings.Join(first.Tags, ",") != "fast,smoke" {
 		t.Fatalf("unexpected tags: %+v", first.Tags)
+	}
+	if first.ExpectedError == nil || first.ExpectedError.Number != 5 || first.ExpectedError.Description != "Invalid value" || first.ExpectedError.Source != "ParserModule" {
+		t.Fatalf("unexpected expected error: %+v", first.ExpectedError)
 	}
 }
 
@@ -4431,6 +4439,50 @@ End Sub
 	}
 	if got.Status != output.StatusFailed || got.Error.Code != "duplicate_test_name" {
 		t.Fatalf("unexpected failure envelope: %+v", got)
+	}
+}
+
+func TestTestListJSONInvalidMetadataIsValidationFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeTestListFixture(t, dir)
+	body := `Attribute VB_Name = "SmokeTests"
+Option Explicit
+
+'@ExpectedError(foo)
+Public Sub TestAlpha()
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "SmokeTests.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "test", "list"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("test list json error = nil, want metadata validation error")
+	}
+	if got := output.ExitCode(err); got != output.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", got, output.ExitValidation)
+	}
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse test list failure output: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "invalid_test_metadata" {
+		t.Fatalf("unexpected failure envelope: %+v", got)
+	}
+	if !strings.Contains(got.Error.Message, "SmokeTests") || !strings.Contains(got.Error.Message, ":4") {
+		t.Fatalf("metadata error is not source-aware: %q", got.Error.Message)
 	}
 }
 
@@ -4602,6 +4654,7 @@ path = "build/Book.xlsm"
 Option Explicit
 
 '@Tag("smoke")
+'@ExpectedError(5, "Invalid value", "ParserModule")
 '@Tag("fast")
 Public Sub TestAlpha()
 End Sub

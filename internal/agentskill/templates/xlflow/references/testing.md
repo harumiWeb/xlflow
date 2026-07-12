@@ -60,6 +60,26 @@ Public Sub Test_ImportLargeFile()
 
 Multiple tags are allowed. Tags are case-insensitive during filtering. There is no predefined tag list; use whatever names match your project conventions.
 
+## Expected VBA Errors
+
+Use `' @ExpectedError(...)` directly above a test when the test should pass only if the test body raises a specific VBA error:
+
+```vb
+'@ExpectedError(5)
+Public Sub Test_InvalidArgument()
+    ParseValue ""
+End Sub
+
+'@ExpectedError(5, "Invalid value", "ParserModule")
+Public Sub Test_InvalidArgument_Detail()
+    ParseValue ""
+End Sub
+```
+
+Supported forms are `@ExpectedError(number)`, `@ExpectedError(number, description)`, and `@ExpectedError(number, description, source)`. The error number matches exactly, description matches exactly and case-sensitively, and source matches exactly but case-insensitively.
+
+Only the test body can satisfy `@ExpectedError`. Hook failures (`BeforeAll`, `BeforeEach`, `AfterEach`, `AfterAll`) keep their hook-specific failure codes, and cleanup failures still fail the test. `AssertInconclusive` remains `inconclusive` even if its internal error number matches `@ExpectedError`.
+
 ## Lifecycle Hooks
 
 Each standard module can optionally define up to four hook subs. They must take **no arguments** and match these exact names:
@@ -220,21 +240,24 @@ Each test entry includes:
 
 - `name`, `module`, `status` (`passed` | `failed` | `inconclusive`)
 - `duration_ms`
-- `error.code` (`test_failed`, `test_inconclusive`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)
+- `expected_error` when `@ExpectedError` is present
+- `observed_error` when an expected-error test body raised an error
+- `error.code` (`test_failed`, `test_inconclusive`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`)
 - `error.message`, `error.source`, `error.number`
 
 When `status` is `failed`, inspect `error.code` and `error.message` first. The message comes from `XlflowAssert` helpers or the VBA runtime error description.
 
 ### Common failure codes
 
-| `error.code`         | Meaning                                        | Action                                                                       |
-| -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
-| `test_failed`        | Assertion failed or runtime error in test body | Read `error.message` and `error.source`; fix the test or the code under test |
-| `test_inconclusive`  | `AssertInconclusive` was called                | Expected if the test is intentionally incomplete                             |
-| `before_all_failed`  | `BeforeAll` raised an error                    | Fix the `BeforeAll` setup logic; no module test body ran                     |
-| `after_all_failed`   | `AfterAll` raised an error                     | Fix the `AfterAll` cleanup logic; the test body may have passed              |
-| `before_each_failed` | `BeforeEach` raised an error                   | Fix `BeforeEach`; the test body was skipped                                  |
-| `after_each_failed`  | `AfterEach` raised an error                    | Fix `AfterEach`; the test body may have passed                               |
+| `error.code`              | Meaning                                                  | Action                                                                       |
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `test_failed`             | Assertion failed or runtime error in test body           | Read `error.message` and `error.source`; fix the test or the code under test |
+| `test_inconclusive`       | `AssertInconclusive` was called                          | Expected if the test is intentionally incomplete                             |
+| `expected_error_mismatch` | `@ExpectedError` was missing, different, or too specific | Compare `expected_error`, `observed_error`, and `error.message`              |
+| `before_all_failed`       | `BeforeAll` raised an error                              | Fix the `BeforeAll` setup logic; no module test body ran                     |
+| `after_all_failed`        | `AfterAll` raised an error                               | Fix the `AfterAll` cleanup logic; the test body may have passed              |
+| `before_each_failed`      | `BeforeEach` raised an error                             | Fix `BeforeEach`; the test body was skipped                                  |
+| `after_each_failed`       | `AfterEach` raised an error                              | Fix `AfterEach`; the test body may have passed                               |
 
 ### Debugging failing tests
 

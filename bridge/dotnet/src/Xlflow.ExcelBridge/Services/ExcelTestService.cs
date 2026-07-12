@@ -228,6 +228,11 @@ public sealed class ExcelTestService : ITestService
 
             return (selection.Tests, null);
         }
+        catch (InvalidTestMetadataException ex)
+        {
+            return ([], BuildErrorResponse(request, args, "invalid_test_metadata", ex.Message,
+                sessionAttached: false, sessionMode: "none", [], runtimeState: null, runtimeInjected: false, displayWorkbookPath: displayWorkbookPath));
+        }
         catch (Exception ex)
         {
             return ([], BridgeResponse.Failed(request, new BridgeError(
@@ -262,6 +267,7 @@ public sealed class ExcelTestService : ITestService
         var sessionAttached = false;
         var sessionMode = "none";
         var excelProcessId = 0;
+        var runtimeInjected = false;
 
         try
         {
@@ -286,7 +292,7 @@ public sealed class ExcelTestService : ITestService
                 args.UIStreamPipeName,
                 args.UIStreamRedactInput);
 
-            var runtimeInjected = runtimeState.Applied;
+            runtimeInjected = runtimeState.Applied;
 
             vbProject = ExcelBridgeSupport.RunPhase("get_vbproject", () => ExcelBridgeSupport.Get(workbook, "VBProject"))
                 ?? throw new InvalidOperationException("VBIDE access is not available.");
@@ -432,43 +438,16 @@ public sealed class ExcelTestService : ITestService
                             var statusHint = Convert.ToString(arr[4], CultureInfo.InvariantCulture) ?? "";
                             var phaseHint = Convert.ToString(arr[5], CultureInfo.InvariantCulture) ?? "";
 
-                            var status = "passed";
-                            var errorCode = "";
-                            var errorMessage = "";
-                            var errorSource = "";
-                            var errorNumber = 0;
+                            var classification = ClassifyTestOutcome(test, success, errNumber, errSource, errDescription, statusHint, phaseHint);
+                            results.Add(BuildTestResult(test, classification.Status, (int)sw.ElapsedMilliseconds,
+                                new { code = classification.ErrorCode, message = classification.ErrorMessage, source = classification.ErrorSource, number = classification.ErrorNumber },
+                                classification.ObservedError));
 
-                            if (!success)
-                            {
-                                status = "failed";
-                                errorCode = "test_failed";
-                                errorMessage = errDescription;
-                                errorSource = errSource;
-                                errorNumber = errNumber;
-                                if (statusHint == "inconclusive")
-                                {
-                                    status = "inconclusive";
-                                    errorCode = "test_inconclusive";
-                                }
-                                else
-                                {
-                                    errorCode = phaseHint switch
-                                    {
-                                        "before_each" => "before_each_failed",
-                                        "after_each" => "after_each_failed",
-                                        _ => errorCode,
-                                    };
-                                }
-                            }
-
-                            results.Add(BuildTestResult(test, status, (int)sw.ElapsedMilliseconds,
-                                new { code = errorCode, message = errorMessage, source = errorSource, number = errorNumber }));
-
-                            if (status == "passed")
+                            if (classification.Status == "passed")
                             {
                                 logs.Add($"PASS {test.QualifiedName}");
                             }
-                            else if (status == "inconclusive")
+                            else if (classification.Status == "inconclusive")
                             {
                                 inconclusiveCount++;
                                 logs.Add($"? {test.QualifiedName}: inconclusive");
@@ -476,7 +455,7 @@ public sealed class ExcelTestService : ITestService
                             else
                             {
                                 failed++;
-                                logs.Add($"FAIL {test.QualifiedName}: {errorMessage}");
+                                logs.Add($"FAIL {test.QualifiedName}: {classification.ErrorMessage}");
                             }
                         }
                         catch (Exception ex)
@@ -504,26 +483,18 @@ public sealed class ExcelTestService : ITestService
                             var moduleTestNames = moduleGroup.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                             for (var i = 0; i < results.Count; i++)
                             {
-                                // Reconstruct from anonymous type via reflection
                                 var resultObj = results[i];
-                                var resultName = (string)resultObj.GetType().GetProperty("name")!.GetValue(resultObj)!;
-                                var resultModule = (string)resultObj.GetType().GetProperty("module")!.GetValue(resultObj)!;
-                                var resultStatus = (string)resultObj.GetType().GetProperty("status")!.GetValue(resultObj)!;
+                                var resultName = ResultString(resultObj, "name");
+                                var resultModule = ResultString(resultObj, "module");
+                                var resultStatus = ResultString(resultObj, "status");
                                 if (resultModule == moduleName && moduleTestNames.Contains(resultName))
                                 {
                                     AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
-                                    var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
-                                    var resultQualifiedName = (string)resultObj.GetType().GetProperty("qualified_name")!.GetValue(resultObj)!;
-                                    results[i] = new
-                                    {
-                                        id = resultQualifiedName,
-                                        qualified_name = resultQualifiedName,
-                                        name = resultName,
-                                        module = resultModule,
-                                        status = "failed",
-                                        duration_ms = resultDuration,
-                                        error = new { code = "after_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) },
-                                    };
+                                    var resultDuration = ResultInt(resultObj, "duration_ms");
+                                    var resultQualifiedName = ResultString(resultObj, "qualified_name");
+                                    var test = selected.First(t => string.Equals(t.QualifiedName, resultQualifiedName, StringComparison.OrdinalIgnoreCase));
+                                    results[i] = BuildTestResult(test, "failed", resultDuration,
+                                        new { code = "after_all_failed", message, source = Convert.ToString(arr[2], CultureInfo.InvariantCulture) ?? "", number = Convert.ToInt32(arr[1], CultureInfo.InvariantCulture) });
                                     logs.Add($"FAIL {resultQualifiedName}: after_all_failed: {message}");
                                 }
                             }
@@ -536,24 +507,17 @@ public sealed class ExcelTestService : ITestService
                         for (var i = 0; i < results.Count; i++)
                         {
                             var resultObj = results[i];
-                            var resultName = (string)resultObj.GetType().GetProperty("name")!.GetValue(resultObj)!;
-                            var resultModule = (string)resultObj.GetType().GetProperty("module")!.GetValue(resultObj)!;
-                            var resultStatus = (string)resultObj.GetType().GetProperty("status")!.GetValue(resultObj)!;
+                            var resultName = ResultString(resultObj, "name");
+                            var resultModule = ResultString(resultObj, "module");
+                            var resultStatus = ResultString(resultObj, "status");
                             if (resultModule == moduleName && moduleTestNames.Contains(resultName))
                             {
                                 AdjustCountsForAfterAllFailure(resultStatus, ref failed, ref inconclusiveCount);
-                                var resultDuration = (int)resultObj.GetType().GetProperty("duration_ms")!.GetValue(resultObj)!;
-                                var resultQualifiedName = (string)resultObj.GetType().GetProperty("qualified_name")!.GetValue(resultObj)!;
-                                results[i] = new
-                                {
-                                    id = resultQualifiedName,
-                                    qualified_name = resultQualifiedName,
-                                    name = resultName,
-                                    module = resultModule,
-                                    status = "failed",
-                                    duration_ms = resultDuration,
-                                    error = new { code = "after_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult },
-                                };
+                                var resultDuration = ResultInt(resultObj, "duration_ms");
+                                var resultQualifiedName = ResultString(resultObj, "qualified_name");
+                                var test = selected.First(t => string.Equals(t.QualifiedName, resultQualifiedName, StringComparison.OrdinalIgnoreCase));
+                                results[i] = BuildTestResult(test, "failed", resultDuration,
+                                    new { code = "after_all_failed", message = ex.Message, source = ex.Source ?? "", number = ex.HResult });
                                 logs.Add($"FAIL {resultQualifiedName}: after_all_failed: {ex.Message}");
                             }
                         }
@@ -640,6 +604,11 @@ public sealed class ExcelTestService : ITestService
                 Logs = logs,
                 Extensions = extensions,
             };
+        }
+        catch (InvalidTestMetadataException ex)
+        {
+            return BuildErrorResponse(request, args, "invalid_test_metadata", ex.Message,
+                sessionAttached, sessionMode, [], runtimeState, runtimeInjected, displayWorkbookPath: displayWorkbookPath);
         }
         catch (Exception ex)
         {
@@ -815,41 +784,29 @@ public sealed class ExcelTestService : ITestService
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i].Trim();
-            var match = Regex.Match(line,
+            var procedureMatch = Regex.Match(line,
+                $@"^(?:(?:Public|Private)\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+({VbaIdentifierPattern.Identifier})\b",
+                RegexOptions.IgnoreCase);
+            if (!procedureMatch.Success)
+            {
+                continue;
+            }
+
+            var name = procedureMatch.Groups[1].Value;
+            var metadata = MetadataAbove(lines, i, moduleName);
+            var testMatch = Regex.Match(line,
                 $@"^(?:Public\s+)?Sub\s+({VbaIdentifierPattern.Identifier})\s*(?:\(\s*\))?\s*(?:'.*)?$",
                 RegexOptions.IgnoreCase);
-            if (!match.Success)
+            var isTest = testMatch.Success &&
+                (name.StartsWith("Test", StringComparison.OrdinalIgnoreCase) || name.EndsWith("_Test", StringComparison.OrdinalIgnoreCase));
+            if (!isTest)
             {
+                if (metadata.ExpectedError is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, i + 1, metadata.ExpectedErrorLine,
+                        "@ExpectedError annotation is only supported on test procedures");
+                }
                 continue;
-            }
-
-            var name = match.Groups[1].Value;
-            if (!name.StartsWith("Test", StringComparison.OrdinalIgnoreCase) && !name.EndsWith("_Test", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var tags = new List<string>();
-            for (var j = i - 1; j >= 0; j--)
-            {
-                var prev = lines[j].Trim();
-                if (string.IsNullOrWhiteSpace(prev))
-                {
-                    continue;
-                }
-
-                var tagMatch = Regex.Match(prev, @"^'\s*@Tag\s*\(""([^""]+)""\)", RegexOptions.IgnoreCase);
-                if (tagMatch.Success)
-                {
-                    tags.Add(tagMatch.Groups[1].Value);
-                    continue;
-                }
-                if (prev.StartsWith("''", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                break;
             }
 
             tests.Add(new TestCase
@@ -857,10 +814,143 @@ public sealed class ExcelTestService : ITestService
                 Name = name,
                 Module = moduleName,
                 Line = i + 1,
-                Tags = tags.ToArray(),
+                Tags = metadata.Tags.ToArray(),
+                ExpectedError = metadata.ExpectedError,
             });
         }
         return tests;
+    }
+
+    private static TestMetadata MetadataAbove(string[] lines, int procedureIndex, string moduleName)
+    {
+        var metadata = new TestMetadata();
+        for (var j = procedureIndex - 1; j >= 0; j--)
+        {
+            var prev = lines[j].Trim();
+            if (string.IsNullOrWhiteSpace(prev))
+            {
+                continue;
+            }
+
+            var tagMatch = Regex.Match(prev, @"^'\s*@Tag\s*\(""([^""]+)""\)", RegexOptions.IgnoreCase);
+            if (tagMatch.Success)
+            {
+                metadata.Tags.Add(tagMatch.Groups[1].Value);
+                continue;
+            }
+
+            if (Regex.IsMatch(prev, @"^'\s*@ExpectedError\b", RegexOptions.IgnoreCase))
+            {
+                if (metadata.ExpectedError is not null)
+                {
+                    throw new InvalidTestMetadataException(moduleName, procedureIndex + 1, j + 1,
+                        "multiple @ExpectedError annotations on one test procedure");
+                }
+                metadata.ExpectedError = ParseExpectedErrorAnnotation(prev, moduleName, j + 1);
+                metadata.ExpectedErrorLine = j + 1;
+                continue;
+            }
+
+            if (prev.StartsWith("''", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            break;
+        }
+        return metadata;
+    }
+
+    internal static ExpectedErrorMetadata ParseExpectedErrorAnnotation(string line, string moduleName = "", int lineNumber = 0)
+    {
+        var match = Regex.Match(line, @"^'\s*@ExpectedError\s*\((.*)\)\s*$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, "malformed @ExpectedError annotation");
+        }
+
+        var args = SplitExpectedErrorArgs(match.Groups[1].Value, moduleName, lineNumber);
+        if (args.Count is < 1 or > 3)
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, "@ExpectedError supports 1 to 3 arguments");
+        }
+        if (!int.TryParse(args[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, "@ExpectedError error number must be numeric");
+        }
+
+        return new ExpectedErrorMetadata
+        {
+            Number = number,
+            Description = args.Count >= 2 ? ParseExpectedErrorStringArg(args[1], moduleName, lineNumber, "description") : null,
+            Source = args.Count >= 3 ? ParseExpectedErrorStringArg(args[2], moduleName, lineNumber, "source") : null,
+        };
+    }
+
+    private static List<string> SplitExpectedErrorArgs(string input, string moduleName, int lineNumber)
+    {
+        var args = new List<string>();
+        var current = new StringBuilder();
+        var inString = false;
+        for (var i = 0; i < input.Length; i++)
+        {
+            var ch = input[i];
+            if (ch == '"')
+            {
+                current.Append(ch);
+                if (inString && i + 1 < input.Length && input[i + 1] == '"')
+                {
+                    i++;
+                    current.Append(input[i]);
+                    continue;
+                }
+                inString = !inString;
+                continue;
+            }
+            if (ch == ',' && !inString)
+            {
+                args.Add(current.ToString().Trim());
+                current.Clear();
+                continue;
+            }
+            current.Append(ch);
+        }
+        if (inString)
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, "malformed string literal");
+        }
+        args.Add(current.ToString().Trim());
+        if (args.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, "@ExpectedError arguments must not be empty");
+        }
+        return args;
+    }
+
+    private static string ParseExpectedErrorStringArg(string input, string moduleName, int lineNumber, string name)
+    {
+        input = input.Trim();
+        if (input.Length < 2 || input[0] != '"' || input[^1] != '"')
+        {
+            throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @ExpectedError {name}: expected a quoted string literal");
+        }
+        var body = input[1..^1];
+        var builder = new StringBuilder();
+        for (var i = 0; i < body.Length; i++)
+        {
+            if (body[i] == '"')
+            {
+                if (i + 1 < body.Length && body[i + 1] == '"')
+                {
+                    builder.Append('"');
+                    i++;
+                    continue;
+                }
+                throw new InvalidTestMetadataException(moduleName, lineNumber, lineNumber, $"malformed @ExpectedError {name}: unexpected quote");
+            }
+            builder.Append(body[i]);
+        }
+        return builder.ToString();
     }
 
     internal static ModuleHooks FindModuleHooks(string moduleName, string code)
@@ -1081,19 +1171,119 @@ public sealed class ExcelTestService : ITestService
         return builder.ToString();
     }
 
-    private static object BuildTestResult(TestCase test, string status, int durationMs, object error)
+    internal static TestClassification ClassifyTestOutcome(
+        TestCase test,
+        bool success,
+        int errNumber,
+        string errSource,
+        string errDescription,
+        string statusHint,
+        string phaseHint)
     {
-        return new
+        if (!success)
         {
-            id = test.QualifiedName,
-            qualified_name = test.QualifiedName,
-            name = test.Name,
-            module = test.Module,
-            status,
-            duration_ms = durationMs,
-            tags = test.Tags,
-            error,
+            if (statusHint == "inconclusive")
+            {
+                return new TestClassification("inconclusive", "test_inconclusive", errDescription, errSource, errNumber, null);
+            }
+
+            var hookCode = phaseHint switch
+            {
+                "before_each" => "before_each_failed",
+                "after_each" => "after_each_failed",
+                _ => "",
+            };
+            if (hookCode != "")
+            {
+                return new TestClassification("failed", hookCode, errDescription, errSource, errNumber, null);
+            }
+
+            if (phaseHint == "test" && test.ExpectedError is not null)
+            {
+                var mismatch = ExpectedErrorMismatch(test.ExpectedError, errNumber, errSource, errDescription);
+                if (mismatch == "")
+                {
+                    return new TestClassification("passed", "", "", "", 0,
+                        BuildObservedError(errNumber, errSource, errDescription));
+                }
+                return new TestClassification("failed", "expected_error_mismatch", mismatch, errSource, errNumber,
+                    BuildObservedError(errNumber, errSource, errDescription));
+            }
+
+            return new TestClassification("failed", "test_failed", errDescription, errSource, errNumber, null);
+        }
+
+        if (test.ExpectedError is not null)
+        {
+            return new TestClassification("failed", "expected_error_mismatch",
+                $"expected VBA error {test.ExpectedError.Number} but no error was raised", "", 0, null);
+        }
+
+        return new TestClassification("passed", "", "", "", 0, null);
+    }
+
+    private static string ExpectedErrorMismatch(ExpectedErrorMetadata expected, int errNumber, string errSource, string errDescription)
+    {
+        if (errNumber != expected.Number)
+        {
+            return $"expected VBA error {expected.Number} but got error {errNumber}: {errDescription}";
+        }
+        if (expected.Description is not null && errDescription != expected.Description)
+        {
+            return $"expected error description <{expected.Description}> but got <{errDescription}>";
+        }
+        if (expected.Source is not null && !string.Equals(errSource, expected.Source, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"expected error source <{expected.Source}> but got <{errSource}>";
+        }
+        return "";
+    }
+
+    private static Dictionary<string, object?> BuildTestResult(TestCase test, string status, int durationMs, object error, object? observedError = null)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["id"] = test.QualifiedName,
+            ["qualified_name"] = test.QualifiedName,
+            ["name"] = test.Name,
+            ["module"] = test.Module,
+            ["status"] = status,
+            ["duration_ms"] = durationMs,
+            ["tags"] = test.Tags,
+            ["error"] = error,
         };
+        if (test.ExpectedError is not null)
+        {
+            result["expected_error"] = BuildExpectedError(test.ExpectedError);
+        }
+        if (observedError is not null)
+        {
+            result["observed_error"] = observedError;
+        }
+        return result;
+    }
+
+    private static Dictionary<string, object?> BuildExpectedError(ExpectedErrorMetadata expected)
+    {
+        var payload = new Dictionary<string, object?> { ["number"] = expected.Number };
+        if (expected.Description is not null)
+        {
+            payload["description"] = expected.Description;
+        }
+        if (expected.Source is not null)
+        {
+            payload["source"] = expected.Source;
+        }
+        return payload;
+    }
+
+    private static object? BuildObservedError(int number, string source, string message)
+    {
+        if (number == 0 && source == "" && message == "")
+        {
+            return null;
+        }
+        return new { number, source, message };
     }
 
     internal static BridgeResponse BuildErrorResponse(
@@ -1126,7 +1316,7 @@ public sealed class ExcelTestService : ITestService
                 session_requested = args.UseSession,
                 auto_session = sessionAttached && !args.UseSession,
             },
-            ["tests"] = tests.Select(t => new { id = t.QualifiedName, qualified_name = t.QualifiedName, name = t.Name, module = t.Module, line = t.Line, tags = t.Tags }).ToArray(),
+            ["tests"] = tests.Select(BuildDiscoveredTestPayload).ToArray(),
         };
 
         return new BridgeResponse
@@ -1143,6 +1333,50 @@ public sealed class ExcelTestService : ITestService
             Logs = logs,
             Extensions = extensions,
         };
+    }
+
+    private static object BuildDiscoveredTestPayload(TestCase test)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["id"] = test.QualifiedName,
+            ["qualified_name"] = test.QualifiedName,
+            ["name"] = test.Name,
+            ["module"] = test.Module,
+            ["line"] = test.Line,
+            ["tags"] = test.Tags,
+        };
+        if (test.ExpectedError is not null)
+        {
+            payload["expected_error"] = BuildExpectedError(test.ExpectedError);
+        }
+        return payload;
+    }
+
+    private static string ResultString(object result, string key)
+    {
+        if (result is IReadOnlyDictionary<string, object?> readOnly && readOnly.TryGetValue(key, out var readOnlyValue))
+        {
+            return Convert.ToString(readOnlyValue, CultureInfo.InvariantCulture) ?? "";
+        }
+        if (result is IDictionary<string, object?> dictionary && dictionary.TryGetValue(key, out var value))
+        {
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+        }
+        return Convert.ToString(result.GetType().GetProperty(key)?.GetValue(result), CultureInfo.InvariantCulture) ?? "";
+    }
+
+    private static int ResultInt(object result, string key)
+    {
+        if (result is IReadOnlyDictionary<string, object?> readOnly && readOnly.TryGetValue(key, out var readOnlyValue))
+        {
+            return Convert.ToInt32(readOnlyValue, CultureInfo.InvariantCulture);
+        }
+        if (result is IDictionary<string, object?> dictionary && dictionary.TryGetValue(key, out var value))
+        {
+            return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+        return Convert.ToInt32(result.GetType().GetProperty(key)?.GetValue(result), CultureInfo.InvariantCulture);
     }
 
     private static string? GetSessionUsageLog(string sessionMode)
@@ -1368,7 +1602,59 @@ public sealed class ExcelTestService : ITestService
         public string Id => QualifiedName;
         public int Line { get; init; }
         public string[] Tags { get; init; } = [];
+        public ExpectedErrorMetadata? ExpectedError { get; init; }
         public int Index { get; set; }
+    }
+
+    internal sealed class ExpectedErrorMetadata
+    {
+        public int Number { get; init; }
+        public string? Description { get; init; }
+        public string? Source { get; init; }
+    }
+
+    internal sealed record TestClassification(
+        string Status,
+        string ErrorCode,
+        string ErrorMessage,
+        string ErrorSource,
+        int ErrorNumber,
+        object? ObservedError);
+
+    private sealed class TestMetadata
+    {
+        public List<string> Tags { get; } = [];
+        public ExpectedErrorMetadata? ExpectedError { get; set; }
+        public int ExpectedErrorLine { get; set; }
+    }
+
+    internal sealed class InvalidTestMetadataException : Exception
+    {
+        public InvalidTestMetadataException(string module, int procedureLine, int metadataLine, string message)
+            : base(BuildMessage(module, procedureLine, metadataLine, message))
+        {
+            Module = module;
+            ProcedureLine = procedureLine;
+            MetadataLine = metadataLine;
+        }
+
+        public string Module { get; }
+        public int ProcedureLine { get; }
+        public int MetadataLine { get; }
+
+        private static string BuildMessage(string module, int procedureLine, int metadataLine, string message)
+        {
+            var locationLine = metadataLine > 0 ? metadataLine : procedureLine;
+            if (!string.IsNullOrWhiteSpace(module) && locationLine > 0)
+            {
+                return $"module {module}:{locationLine}: {message}";
+            }
+            if (!string.IsNullOrWhiteSpace(module))
+            {
+                return $"module {module}: {message}";
+            }
+            return message;
+        }
     }
 
     internal sealed record TestSelection(List<TestCase> Tests, List<TestCase> Matches, bool Ambiguous);
