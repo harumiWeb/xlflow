@@ -3230,7 +3230,7 @@ func TestRunnerDotNetPushUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 				supports:  true,
 				callCount: &dotNetCalls,
 				requests:  &dotNetRequests,
-				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 4 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"backup":{"id":"push_20260101T120000","path":"C:\\temp\\.xlflow\\backups\\Book_20260101T120000.xlsm","reason":"before-push","mode":"never"},"source":{"changed_only":true,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+				response:  excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["imported 4 source file(s)"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":true,"save_required":true,"live_newer_than_disk":true,"mode":"explicit","source_of_truth":"live_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":true,"needs_save":true},"source":{"changed_only":true,"changed":true,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
 			}
 		default:
 			return trackingBridgeProvider{
@@ -3267,15 +3267,11 @@ func TestRunnerDotNetPushUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 	if got := dotNetRequests[0].Args["BackupMode"]; got != "never" {
 		t.Fatalf("BackupMode = %q, want never", got)
 	}
-	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Backup == nil || env.Source == nil {
+	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Source == nil {
 		t.Fatalf("expected push envelope fields to be populated: %+v", env)
 	}
-	backup, ok := env.Backup.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected backup payload map, got %#v", env.Backup)
-	}
-	if backup["mode"] != "never" {
-		t.Fatalf("backup.mode = %v, want never", backup["mode"])
+	if env.Backup != nil {
+		t.Fatalf("backup = %#v, want nil when backup mode is never", env.Backup)
 	}
 	source, ok := env.Source.(map[string]interface{})
 	if !ok {
@@ -3292,7 +3288,7 @@ func TestRunnerDotNetPushChangedOnlyNoOpKeepsWorkbookFileBacked(t *testing.T) {
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
 		return fakeBridgeProvider{
 			name:     string(excelbridge.ModeDotNet),
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["source state unchanged; skipped workbook import"],"target":{"kind":"file","path":"C:\\temp\\Book.xlsm"},"session":{"active":false,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"none","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false,"session_mode":"none","session_requested":false,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"backup":{"path":null,"mode":"never"},"source":{"changed_only":true,"changed":false,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"push","logs":["source state unchanged; skipped workbook import"],"target":{"kind":"file","path":"C:\\temp\\Book.xlsm"},"session":{"active":false,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"none","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":false,"session_mode":"none","session_requested":false,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"source":{"changed_only":true,"changed":false,"state":"C:\\temp\\.xlflow\\state\\push.json"}}`)},
 		}
 	}
 

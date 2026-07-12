@@ -516,13 +516,14 @@ func (a *app) backupListCommand() *cobra.Command {
 				return err
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
-			records, err := backup.List(a.cwd, workbookPath)
+			scan, err := backup.Scan(a.cwd, workbookPath)
 			if err != nil {
-				return a.writeFailure("backup list", output.ExitEnvironment, "backup_list_failed", err)
+				return a.writeFailure("backup list", output.ExitEnvironment, "backup_scan_failed", err)
 			}
 			env := output.New("backup list")
-			env.Backups = renderBackupRecords(a.cwd, records)
-			env.Logs = []string{fmt.Sprintf("found %d backup(s)", len(records))}
+			env.Backups = renderBackupRecords(a.cwd, scan.Records)
+			env.Warnings = renderInvalidBackupWarnings(a.cwd, scan.Invalid)
+			env.Logs = []string{fmt.Sprintf("found %d backup(s)", len(scan.Records))}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
@@ -2299,9 +2300,28 @@ func renderBackupRecords(rootDir string, records []backup.Record) []map[string]a
 			"reason":     record.Reason,
 			"workbook":   displayPath(rootDir, record.OriginalWorkbookPath),
 			"path":       displayPath(rootDir, record.BackupFileAbsPath),
+			"size_bytes": record.SizeBytes,
+			"status":     "valid",
 		})
 	}
 	return rendered
+}
+
+func renderInvalidBackupWarnings(rootDir string, entries []backup.InvalidEntry) []map[string]any {
+	if len(entries) == 0 {
+		return nil
+	}
+	warnings := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		warnings = append(warnings, map[string]any{
+			"code":    "invalid_backup_entry",
+			"message": "A backup entry could not be read.",
+			"path":    displayPath(rootDir, entry.Directory),
+			"reason":  entry.Code,
+			"detail":  entry.Message,
+		})
+	}
+	return warnings
 }
 
 func displayPath(rootDir, path string) string {
