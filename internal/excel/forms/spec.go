@@ -132,17 +132,6 @@ func (e *SpecError) Unwrap() error {
 	return e.Cause
 }
 
-var typeProgIDMap = map[string]string{
-	"label":         "Forms.Label.1",
-	"textbox":       "Forms.TextBox.1",
-	"combobox":      "Forms.ComboBox.1",
-	"listbox":       "Forms.ListBox.1",
-	"commandbutton": "Forms.CommandButton.1",
-	"checkbox":      "Forms.CheckBox.1",
-	"optionbutton":  "Forms.OptionButton.1",
-	"frame":         "Forms.Frame.1",
-}
-
 func ResolveSnapshotOutput(root, outPath string) (SnapshotOutput, error) {
 	trimmed := strings.TrimSpace(outPath)
 	if trimmed == "" {
@@ -286,6 +275,7 @@ func ValidateFormSpec(spec FormSpec) error {
 		return newSpecValidationError("spec_schema_invalid", "form.name is required", "form.name")
 	}
 	ids := make(map[string]struct{}, len(spec.Controls))
+	controlsByID := make(map[string]FormSpecControl, len(spec.Controls))
 	for i, control := range spec.Controls {
 		path := fmt.Sprintf("controls[%d]", i)
 		if err := ValidateFormSpecControl(control, path); err != nil {
@@ -295,14 +285,20 @@ func ValidateFormSpec(spec FormSpec) error {
 			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s.id %q is duplicated", path, control.ID), path+".id")
 		}
 		ids[control.ID] = struct{}{}
+		controlsByID[control.ID] = control
 	}
 	for i, control := range spec.Controls {
 		if strings.TrimSpace(control.ParentID) == "" {
 			continue
 		}
-		if _, ok := ids[control.ParentID]; !ok {
+		parent, ok := controlsByID[control.ParentID]
+		if !ok {
 			field := fmt.Sprintf("controls[%d].parentId", i)
 			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q was not found", field, control.ParentID), field)
+		}
+		if _, knownParentType := LookupControlContract(parent.Type); knownParentType && !ControlCanContainChildren(parent.Type) {
+			field := fmt.Sprintf("controls[%d].parentId", i)
+			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q references non-container control %q", field, control.ParentID, parent.Name), field)
 		}
 	}
 	return nil
@@ -328,7 +324,7 @@ func ControlProgID(control FormSpecControl) (string, error) {
 	if progID := strings.TrimSpace(control.ProgID); progID != "" {
 		return progID, nil
 	}
-	progID, ok := typeProgIDMap[strings.ToLower(strings.TrimSpace(control.Type))]
+	progID, ok := BuiltInControlProgID(control.Type)
 	if !ok {
 		return "", fmt.Errorf("unsupported control type %q", control.Type)
 	}
