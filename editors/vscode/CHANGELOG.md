@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.6.1
+
+- Fixed `xlflow module install --push` from the VS Code extension so helper source files appear in the sidebar even when push is blocked by preflight lint, and clarified the failure notification.
+
 ## v0.6.0
 
 - Added VBA annotation completion for xlflow `@ExpectedError(...)`, `@Skip(...)`, and `@Todo(...)` test metadata when typing `@` in apostrophe comments.

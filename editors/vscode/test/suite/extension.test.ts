@@ -10,6 +10,8 @@ import {
   formatBackupTimestamp,
   formatBytes,
   initWorkbookExtensions,
+  moduleInstallFailureMessage,
+  moduleInstallPreflightBlocked,
   newProjectWorkbookPlaceholder,
   pruneSummary,
   validateKeepLastInput,
@@ -214,6 +216,30 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(
     backupIDFromPushEnvelope({ status: "failed", backup: { id: "  " } }),
     undefined,
+  );
+  const moduleInstallPreflight = {
+    status: "failed",
+    error: {
+      code: "lint_failed",
+      message: "1 source issue(s) must be fixed before pushing to Excel",
+      phase: "preflight",
+    },
+  };
+  assert.strictEqual(moduleInstallPreflightBlocked(moduleInstallPreflight, true), true);
+  assert.strictEqual(moduleInstallPreflightBlocked(moduleInstallPreflight, false), false);
+  assert.ok(
+    moduleInstallFailureMessage(moduleInstallPreflight, "", 1, true).includes(
+      "Helper modules were installed to source",
+    ),
+  );
+  assert.strictEqual(
+    moduleInstallFailureMessage(
+      { status: "failed", error: { code: "module_install_failed", message: "already exists" } },
+      "",
+      1,
+      false,
+    ),
+    "already exists",
   );
   assert.deepStrictEqual(
     [
