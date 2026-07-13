@@ -429,6 +429,13 @@ controls:
     name: CustomParent
     type: VendorWidget
     progId: Vendor.Widget.1
+    caption: Details
+    text: Ready
+    value: 7
+    observed:
+      caption: Details
+      text: Ready
+      value: 7
     properties:
       customCaption: Details
   - id: label_child
@@ -453,6 +460,8 @@ warnings:
 		support SupportLevel
 	}{
 		{"UFV014", "controls[0].progId", SupportLevelCustomUnchecked},
+		{"UFV013", "controls[0].caption", SupportLevelCustomUnchecked},
+		{"UFV013", "controls[0].observed.text", SupportLevelCustomUnchecked},
 		{"UFV013", "form.width", SupportLevelBestEffort},
 		{"UFV013", "warnings", SupportLevelSnapshotOnly},
 	} {
@@ -500,6 +509,42 @@ warnings: []
 		!hasValidationIssue(specErr.Issues, "UFV007", "controls[1].id") ||
 		!hasValidationIssue(specErr.Issues, "UFV008", "controls[1].parentId") {
 		t.Fatalf("unexpected issues: %+v", specErr.Issues)
+	}
+}
+
+func TestLoadFormSpecSelectsDeterministicFirstValidationIssue(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "UserForm1.form.yaml")
+	body := `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+unknownRoot: true
+form:
+  name: UserForm1
+  zUnknown: true
+controls:
+  - id: label1
+    name: Label1
+    type: Label
+    list: [A]
+warnings: []
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input, err := ResolveSpecInput(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		_, err = LoadFormSpec(input)
+		var specErr *SpecError
+		if !errors.As(err, &specErr) {
+			t.Fatalf("expected SpecError, got %T", err)
+		}
+		if specErr.Field != "unknownRoot" {
+			t.Fatalf("iteration %d: field = %q, issues = %+v", i, specErr.Field, specErr.Issues)
+		}
 	}
 }
 

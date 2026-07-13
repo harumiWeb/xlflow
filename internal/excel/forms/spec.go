@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -538,6 +539,8 @@ func validateRawControlProperties(controlMap map[string]any, controlType, progID
 		for key, property := range builtInControl.Properties {
 			allowed[key] = property
 		}
+	} else if isCustomProgID(progID) {
+		addGenericCustomControlProperties(allowed, SupportLevelCustomUnchecked)
 	}
 	issues := validateObjectProperties(controlMap, allowed, path, nil)
 	if builtInType {
@@ -570,10 +573,8 @@ func validateRawObservedControlProperties(controlMap map[string]any, controlType
 		for key, property := range builtInControl.Properties {
 			allowed[key] = property
 		}
-	} else if strings.TrimSpace(progID) == "" {
-		allowed["caption"] = property(ValueTypeString, false, SupportLevelSupported, "Observed caption.", false)
-		allowed["text"] = property(ValueTypeString, false, SupportLevelSupported, "Observed text.", false)
-		allowed["value"] = property(ValueTypeAny, false, SupportLevelSupported, "Observed value.", false)
+	} else if isCustomProgID(progID) {
+		addGenericCustomControlProperties(allowed, SupportLevelCustomUnchecked)
 	}
 	issues := validateObjectProperties(controlMap, allowed, path, nil)
 	if _, ok := LookupControlContract(controlType); ok {
@@ -633,6 +634,21 @@ func rawControlCanContainChildren(control rawControlRef) (bool, bool) {
 	return false, false
 }
 
+func isCustomProgID(progID string) bool {
+	trimmed := strings.TrimSpace(progID)
+	if trimmed == "" {
+		return false
+	}
+	_, known := LookupControlContractByProgID(trimmed)
+	return !known
+}
+
+func addGenericCustomControlProperties(properties map[string]PropertyContract, support SupportLevel) {
+	properties["caption"] = property(ValueTypeString, false, support, "Generic custom control caption captured from Excel.", false)
+	properties["text"] = property(ValueTypeString, false, support, "Generic custom control text captured from Excel.", false)
+	properties["value"] = property(ValueTypeAny, false, support, "Generic custom control value captured from Excel.", false)
+}
+
 func markUnsupportedControlProperties(issues []ValidationIssue, controlType string) {
 	for i := range issues {
 		if issues[i].Code != "UFV001" {
@@ -674,7 +690,8 @@ func validationFieldName(field string) string {
 
 func validateObjectProperties(root map[string]any, properties map[string]PropertyContract, path string, allow map[string]bool) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
-	for key, value := range root {
+	for _, key := range sortedMapKeys(root) {
+		value := root[key]
 		field := joinFieldPath(path, key)
 		property, ok := lookupProperty(properties, key)
 		if !ok {
@@ -695,7 +712,8 @@ func validateObjectProperties(root map[string]any, properties map[string]Propert
 			issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s has %s support.", field, property.SupportLevel), field, supportSuggestion(property.SupportLevel), property.SupportLevel))
 		}
 	}
-	for key, property := range properties {
+	for _, key := range sortedPropertyKeys(properties) {
+		property := properties[key]
 		if !property.Required {
 			continue
 		}
@@ -727,7 +745,7 @@ func formObservedProperties() map[string]PropertyContract {
 func parentCycleIssues(parentByID map[string]string) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	reported := map[string]bool{}
-	for id := range parentByID {
+	for _, id := range sortedMapKeys(parentByID) {
 		seen := map[string]bool{}
 		for current := id; current != ""; current = parentByID[current] {
 			if seen[current] {
@@ -741,6 +759,19 @@ func parentCycleIssues(parentByID map[string]string) []ValidationIssue {
 		}
 	}
 	return issues
+}
+
+func sortedMapKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedPropertyKeys(values map[string]PropertyContract) []string {
+	return sortedMapKeys(values)
 }
 
 func valueMatchesType(value any, valueType ValueType) bool {
