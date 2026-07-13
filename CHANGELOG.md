@@ -4,8 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.23.0
+
 - Added `xlflow form migrate sidecar` for converting imported UserForms from `frm` code-source mode to sidecar code plus Designer specs, and added `xlflow init --userform-code-source sidecar` for opting imported workbooks into the modern UserForm layout.
 - Fixed non-executing UserForm Designer snapshots to capture top-level form width and height from VBComponent properties when available.
+- Fixed `.NET` UserForm Designer builds so top-level form width and height from sidecar specs are applied through VBComponent properties instead of staying at Excel's default size.
 
 ## v0.22.0
 
