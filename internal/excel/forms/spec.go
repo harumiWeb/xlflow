@@ -1,9 +1,12 @@
 package forms
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,13 +29,14 @@ type SpecInput struct {
 }
 
 type FormSpec struct {
-	SchemaVersion    int               `json:"schemaVersion" yaml:"schemaVersion"`
-	Kind             string            `json:"kind" yaml:"kind"`
-	Basis            string            `json:"basis" yaml:"basis"`
-	CoordinateSystem string            `json:"coordinateSystem,omitempty" yaml:"coordinateSystem,omitempty"`
-	Form             FormSpecForm      `json:"form" yaml:"form"`
-	Controls         []FormSpecControl `json:"controls" yaml:"controls"`
-	Warnings         []FormSpecWarning `json:"warnings" yaml:"warnings"`
+	SchemaVersion      int               `json:"schemaVersion" yaml:"schemaVersion"`
+	Kind               string            `json:"kind" yaml:"kind"`
+	Basis              string            `json:"basis" yaml:"basis"`
+	CoordinateSystem   string            `json:"coordinateSystem,omitempty" yaml:"coordinateSystem,omitempty"`
+	Form               FormSpecForm      `json:"form" yaml:"form"`
+	Controls           []FormSpecControl `json:"controls" yaml:"controls"`
+	Warnings           []FormSpecWarning `json:"warnings" yaml:"warnings"`
+	ValidationWarnings []ValidationIssue `json:"-" yaml:"-"`
 }
 
 type FormSpecForm struct {
@@ -115,6 +119,7 @@ type SpecError struct {
 	Column     int
 	Field      string
 	Suggestion string
+	Issues     []ValidationIssue
 	Cause      error
 }
 
@@ -130,6 +135,22 @@ func (e *SpecError) Unwrap() error {
 		return nil
 	}
 	return e.Cause
+}
+
+type Severity string
+
+const (
+	SeverityError   Severity = "error"
+	SeverityWarning Severity = "warning"
+)
+
+type ValidationIssue struct {
+	Code       string       `json:"code,omitempty"`
+	Severity   Severity     `json:"severity,omitempty"`
+	Message    string       `json:"message,omitempty"`
+	Field      string       `json:"field,omitempty"`
+	Suggestion string       `json:"suggestion,omitempty"`
+	Support    SupportLevel `json:"support,omitempty"`
 }
 
 func ResolveSnapshotOutput(root, outPath string) (SnapshotOutput, error) {
@@ -223,6 +244,13 @@ func LoadFormSpec(input SpecInput) (FormSpec, error) {
 	if err != nil {
 		return FormSpec{}, err
 	}
+	issues, err := ValidateFormSpecSource(input, body)
+	if err != nil {
+		return FormSpec{}, err
+	}
+	if hasValidationErrors(issues) {
+		return FormSpec{}, newSpecValidationIssuesError(input, issues)
+	}
 	var spec FormSpec
 	switch input.Format {
 	case "json":
@@ -236,7 +264,9 @@ func LoadFormSpec(input SpecInput) (FormSpec, error) {
 		return FormSpec{}, newSpecParseError(input, body, err)
 	}
 	spec = NormalizeFormSpec(spec)
-	if err := ValidateFormSpec(spec); err != nil {
+	structIssues := ValidateFormSpecStrict(spec)
+	if hasValidationErrors(structIssues) {
+		err := newSpecValidationIssuesError(input, structIssues)
 		var specErr *SpecError
 		if errors.As(err, &specErr) {
 			if specErr.Path == "" {
@@ -248,6 +278,7 @@ func LoadFormSpec(input SpecInput) (FormSpec, error) {
 		}
 		return FormSpec{}, err
 	}
+	spec.ValidationWarnings = validationWarnings(append(issues, structIssues...))
 	return spec, nil
 }
 
@@ -262,62 +293,106 @@ func NormalizeFormSpec(spec FormSpec) FormSpec {
 }
 
 func ValidateFormSpec(spec FormSpec) error {
+	issues := ValidateFormSpecStrict(spec)
+	if hasValidationErrors(issues) {
+		return newSpecValidationErrorFromIssue(firstValidationError(issues), issues)
+	}
+	return nil
+}
+
+func ValidateFormSpecSource(input SpecInput, body []byte) ([]ValidationIssue, error) {
+	value, err := decodeSpecSource(input, body)
+	if err != nil {
+		return nil, err
+	}
+	root, ok := asObjectMap(value)
+	if !ok {
+		return []ValidationIssue{validationIssue("UFV002", SeverityError, "UserForm spec root must be an object.", "", "", "")}, nil
+	}
+	return validateRawFormSpec(root), nil
+}
+
+func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
 	if spec.SchemaVersion != 1 {
-		return newSpecValidationError("spec_schema_invalid", "schemaVersion must be 1", "schemaVersion")
+		issues = append(issues, invalidFixedValueIssue("schemaVersion", "1"))
 	}
 	if spec.Kind != "xlflow.userform" {
-		return newSpecValidationError("spec_schema_invalid", `kind must be "xlflow.userform"`, "kind")
+		issues = append(issues, invalidFixedValueIssue("kind", `"xlflow.userform"`))
 	}
 	if strings.TrimSpace(spec.Basis) != "designer" {
-		return newSpecValidationError("spec_schema_invalid", `basis must be "designer"`, "basis")
+		issues = append(issues, invalidFixedValueIssue("basis", `"designer"`))
 	}
 	if strings.TrimSpace(spec.Form.Name) == "" {
-		return newSpecValidationError("spec_schema_invalid", "form.name is required", "form.name")
+		issues = append(issues, requiredFieldIssue("form.name"))
 	}
 	ids := make(map[string]struct{}, len(spec.Controls))
 	controlsByID := make(map[string]FormSpecControl, len(spec.Controls))
 	for i, control := range spec.Controls {
 		path := fmt.Sprintf("controls[%d]", i)
-		if err := ValidateFormSpecControl(control, path); err != nil {
-			return err
+		issues = append(issues, ValidateFormSpecControlIssues(control, path)...)
+		if strings.TrimSpace(control.ID) == "" {
+			continue
 		}
 		if _, exists := ids[control.ID]; exists {
-			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s.id %q is duplicated", path, control.ID), path+".id")
+			issues = append(issues, validationIssue("UFV007", SeverityError, fmt.Sprintf("%s.id %q is duplicated.", path, control.ID), path+".id", "Use a unique stable id for each control.", ""))
+			continue
 		}
 		ids[control.ID] = struct{}{}
 		controlsByID[control.ID] = control
 	}
+	parentByID := make(map[string]string, len(spec.Controls))
 	for i, control := range spec.Controls {
 		if strings.TrimSpace(control.ParentID) == "" {
 			continue
 		}
+		field := fmt.Sprintf("controls[%d].parentId", i)
+		if control.ParentID == control.ID {
+			issues = append(issues, validationIssue("UFV009", SeverityError, fmt.Sprintf("%s must not reference the same control.", field), field, "Remove parentId or point it at a container control.", ""))
+			continue
+		}
 		parent, ok := controlsByID[control.ParentID]
 		if !ok {
-			field := fmt.Sprintf("controls[%d].parentId", i)
-			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q was not found", field, control.ParentID), field)
+			issues = append(issues, validationIssue("UFV008", SeverityError, fmt.Sprintf("%s %q was not found.", field, control.ParentID), field, "Use the id of an existing container control.", ""))
+			continue
 		}
 		if canContainChildren, knownParentControl := FormSpecControlCanContainChildren(parent); knownParentControl && !canContainChildren {
-			field := fmt.Sprintf("controls[%d].parentId", i)
-			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q references non-container control %q", field, control.ParentID, parent.Name), field)
+			issues = append(issues, validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", field, control.ParentID, parent.Name), field, "Use a Frame or custom container control as the parent.", ""))
 		}
+		parentByID[control.ID] = control.ParentID
+	}
+	issues = append(issues, parentCycleIssues(parentByID)...)
+	return issues
+}
+
+func ValidateFormSpecControl(control FormSpecControl, path string) error {
+	issues := ValidateFormSpecControlIssues(control, path)
+	if hasValidationErrors(issues) {
+		return newSpecValidationErrorFromIssue(firstValidationError(issues), issues)
 	}
 	return nil
 }
 
-func ValidateFormSpecControl(control FormSpecControl, path string) error {
+func ValidateFormSpecControlIssues(control FormSpecControl, path string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
 	if strings.TrimSpace(control.ID) == "" {
-		return newSpecValidationError("spec_validation_failed", path+".id is required", path+".id")
+		issues = append(issues, requiredFieldIssue(path+".id"))
 	}
 	if strings.TrimSpace(control.Name) == "" {
-		return newSpecValidationError("spec_validation_failed", path+".name is required", path+".name")
+		issues = append(issues, requiredFieldIssue(path+".name"))
 	}
 	if strings.TrimSpace(control.Type) == "" {
-		return newSpecValidationError("spec_validation_failed", path+".type is required", path+".type")
+		issues = append(issues, requiredFieldIssue(path+".type"))
 	}
 	if _, err := ControlProgID(control); err != nil {
-		return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s: %v", path, err), path+".type")
+		issues = append(issues, validationIssue("UFV006", SeverityError, fmt.Sprintf("%s: %v.", path, err), path+".type", "Use a supported built-in type or provide a custom progId.", ""))
 	}
-	return nil
+	if strings.TrimSpace(control.Type) != "" && strings.TrimSpace(control.ProgID) != "" {
+		if progControl, ok := LookupControlContractByProgID(control.ProgID); ok && !strings.EqualFold(strings.TrimSpace(control.Type), progControl.Type) {
+			issues = append(issues, validationIssue("UFV012", SeverityError, fmt.Sprintf("%s.progId %q is for %s, not %s.", path, control.ProgID, progControl.Type, control.Type), path+".progId", "Use the ProgID that matches type or change type to match the ProgID.", ""))
+		}
+	}
+	return issues
 }
 
 func ControlProgID(control FormSpecControl) (string, error) {
@@ -329,6 +404,574 @@ func ControlProgID(control FormSpecControl) (string, error) {
 		return "", fmt.Errorf("unsupported control type %q", control.Type)
 	}
 	return progID, nil
+}
+
+func decodeSpecSource(input SpecInput, body []byte) (any, error) {
+	switch input.Format {
+	case "json":
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, newSpecParseError(input, body, err)
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			return nil, newSpecParseError(input, body, fmt.Errorf("invalid JSON document"))
+		}
+		return normalizeDecodedValue(value), nil
+	case "yaml":
+		var node yaml.Node
+		if err := yaml.Unmarshal(body, &node); err != nil {
+			return nil, newSpecParseError(input, body, err)
+		}
+		var value any
+		if err := node.Decode(&value); err != nil {
+			return nil, newSpecParseError(input, body, err)
+		}
+		return normalizeDecodedValue(value), nil
+	default:
+		return nil, fmt.Errorf("unsupported form spec format %q", input.Format)
+	}
+}
+
+func validateRawFormSpec(root map[string]any) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	contract := UserFormContract()
+	issues = append(issues, validateObjectProperties(root, contract.DocumentProperties, "", nil)...)
+	form, ok := root["form"]
+	if ok {
+		if formMap, formOK := asObjectMap(form); formOK {
+			issues = append(issues, validateObjectProperties(formMap, contract.FormProperties, "form", nil)...)
+			issues = append(issues, validateRawFormSubobject(formMap, "build", formBuildProperties(), "form.build")...)
+			issues = append(issues, validateRawFormSubobject(formMap, "observed", formObservedProperties(), "form.observed")...)
+		}
+	}
+	rawControls, controlsOK := root["controls"]
+	if controlsOK {
+		flatControls, controlIssues := validateRawControls(rawControls, "controls", "")
+		issues = append(issues, controlIssues...)
+		issues = append(issues, validateRawControlStructure(flatControls)...)
+	}
+	return issues
+}
+
+func validateRawFormSubobject(root map[string]any, key string, properties map[string]PropertyContract, path string) []ValidationIssue {
+	value, ok := root[key]
+	if !ok || value == nil {
+		return nil
+	}
+	object, ok := asObjectMap(value)
+	if !ok {
+		return nil
+	}
+	return validateObjectProperties(object, properties, path, nil)
+}
+
+type rawControlRef struct {
+	Path     string
+	ID       string
+	ParentID string
+	Name     string
+	Type     string
+	ProgID   string
+}
+
+func validateRawControls(value any, path, inheritedParentID string) ([]rawControlRef, []ValidationIssue) {
+	items, ok := asSlice(value)
+	if !ok {
+		return nil, nil
+	}
+	refs := make([]rawControlRef, 0, len(items))
+	issues := make([]ValidationIssue, 0)
+	for i, item := range items {
+		itemPath := fmt.Sprintf("%s[%d]", path, i)
+		controlMap, ok := asObjectMap(item)
+		if !ok {
+			issues = append(issues, validationIssue("UFV002", SeverityError, fmt.Sprintf("%s must be an object.", itemPath), itemPath, "", ""))
+			continue
+		}
+		refsForControl, issuesForControl := validateRawControl(controlMap, itemPath, inheritedParentID)
+		refs = append(refs, refsForControl...)
+		issues = append(issues, issuesForControl...)
+	}
+	return refs, issues
+}
+
+func validateRawControl(controlMap map[string]any, path, inheritedParentID string) ([]rawControlRef, []ValidationIssue) {
+	issues := make([]ValidationIssue, 0)
+	controlType, _ := stringField(controlMap, "type")
+	progID, _ := stringField(controlMap, "progId")
+	issues = append(issues, validateRawControlProperties(controlMap, controlType, progID, path)...)
+	id, _ := stringField(controlMap, "id")
+	name, _ := stringField(controlMap, "name")
+	parentID, _ := stringField(controlMap, "parentId")
+	if strings.TrimSpace(parentID) == "" {
+		parentID = inheritedParentID
+	}
+	ref := rawControlRef{
+		Path:     path,
+		ID:       strings.TrimSpace(id),
+		ParentID: strings.TrimSpace(parentID),
+		Name:     strings.TrimSpace(name),
+		Type:     strings.TrimSpace(controlType),
+		ProgID:   strings.TrimSpace(progID),
+	}
+	refs := []rawControlRef{ref}
+	if observed, ok := asObjectMap(controlMap["observed"]); ok {
+		issues = append(issues, validateRawObservedControlProperties(observed, ref.Type, ref.ProgID, path+".observed")...)
+	}
+	if children, ok := controlMap["controls"]; ok {
+		issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s.controls is a legacy nested control structure.", path), path+".controls", "Prefer the canonical flat controls array with parentId references.", SupportLevelSnapshotOnly))
+		childRefs, childIssues := validateRawControls(children, path+".controls", ref.ID)
+		refs = append(refs, childRefs...)
+		issues = append(issues, childIssues...)
+	}
+	return refs, issues
+}
+
+func validateRawControlProperties(controlMap map[string]any, controlType, progID, path string) []ValidationIssue {
+	contract := UserFormContract()
+	allowed := clonePropertyMap(contract.CommonControlProperties)
+	builtInControl, builtInType := LookupControlContract(controlType)
+	if builtInType {
+		for key, property := range builtInControl.Properties {
+			allowed[key] = property
+		}
+	}
+	issues := validateObjectProperties(controlMap, allowed, path, nil)
+	if builtInType {
+		markUnsupportedControlProperties(issues, controlType)
+	}
+	if strings.TrimSpace(controlType) != "" && strings.TrimSpace(progID) != "" {
+		if progControl, ok := LookupControlContractByProgID(progID); ok && !strings.EqualFold(strings.TrimSpace(controlType), progControl.Type) {
+			issues = append(issues, validationIssue("UFV012", SeverityError, fmt.Sprintf("%s.progId %q is for %s, not %s.", path, progID, progControl.Type, controlType), path+".progId", "Use the ProgID that matches type or change type to match the ProgID.", ""))
+		}
+	}
+	if strings.TrimSpace(controlType) != "" && !builtInType {
+		if strings.TrimSpace(progID) == "" {
+			issues = append(issues, validationIssue("UFV006", SeverityError, fmt.Sprintf("%s.type %q is not a supported built-in control type.", path, controlType), path+".type", "Use a supported built-in type or provide a custom progId.", ""))
+		} else if _, knownProgID := LookupControlContractByProgID(progID); !knownProgID {
+			issues = append(issues, validationIssue("UFV014", SeverityWarning, fmt.Sprintf("%s uses custom control type %q with unchecked ProgID %q.", path, controlType, progID), path+".progId", "Only common structural fields and the properties bag are validated for custom controls.", SupportLevelCustomUnchecked))
+		}
+	}
+	return issues
+}
+
+func validateRawObservedControlProperties(controlMap map[string]any, controlType, progID, path string) []ValidationIssue {
+	contract := UserFormContract()
+	allowed := map[string]PropertyContract{}
+	for _, key := range []string{"left", "top", "width", "height", "tabIndex", "enabled", "visible", "unsupported", "properties"} {
+		if property, ok := lookupProperty(contract.CommonControlProperties, key); ok {
+			allowed[key] = property
+		}
+	}
+	if builtInControl, ok := LookupControlContract(controlType); ok {
+		for key, property := range builtInControl.Properties {
+			allowed[key] = property
+		}
+	} else if strings.TrimSpace(progID) == "" {
+		allowed["caption"] = property(ValueTypeString, false, SupportLevelSupported, "Observed caption.", false)
+		allowed["text"] = property(ValueTypeString, false, SupportLevelSupported, "Observed text.", false)
+		allowed["value"] = property(ValueTypeAny, false, SupportLevelSupported, "Observed value.", false)
+	}
+	issues := validateObjectProperties(controlMap, allowed, path, nil)
+	if _, ok := LookupControlContract(controlType); ok {
+		markUnsupportedControlProperties(issues, controlType)
+	}
+	return issues
+}
+
+func validateRawControlStructure(controls []rawControlRef) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	ids := make(map[string]rawControlRef, len(controls))
+	parentByID := make(map[string]string, len(controls))
+	for _, control := range controls {
+		if control.ID == "" {
+			continue
+		}
+		if existing, exists := ids[control.ID]; exists {
+			issues = append(issues, validationIssue("UFV007", SeverityError, fmt.Sprintf("%s.id %q is duplicated; first seen at %s.id.", control.Path, control.ID, existing.Path), control.Path+".id", "Use a unique stable id for each control.", ""))
+			continue
+		}
+		ids[control.ID] = control
+	}
+	for _, control := range controls {
+		if control.ParentID == "" {
+			continue
+		}
+		field := control.Path + ".parentId"
+		if control.ID != "" && control.ParentID == control.ID {
+			issues = append(issues, validationIssue("UFV009", SeverityError, fmt.Sprintf("%s must not reference the same control.", field), field, "Remove parentId or point it at a container control.", ""))
+			continue
+		}
+		parent, ok := ids[control.ParentID]
+		if !ok {
+			issues = append(issues, validationIssue("UFV008", SeverityError, fmt.Sprintf("%s %q was not found.", field, control.ParentID), field, "Use the id of an existing container control.", ""))
+			continue
+		}
+		if canContainChildren, known := rawControlCanContainChildren(parent); known && !canContainChildren {
+			issues = append(issues, validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", field, control.ParentID, parent.Name), field, "Use a Frame or custom container control as the parent.", ""))
+		}
+		if control.ID != "" {
+			parentByID[control.ID] = control.ParentID
+		}
+	}
+	return append(issues, parentCycleIssues(parentByID)...)
+}
+
+func rawControlCanContainChildren(control rawControlRef) (bool, bool) {
+	if control.ProgID != "" {
+		if contract, ok := LookupControlContractByProgID(control.ProgID); ok {
+			return contract.CanContainChildren, true
+		}
+		return false, false
+	}
+	if contract, ok := LookupControlContract(control.Type); ok {
+		return contract.CanContainChildren, true
+	}
+	return false, false
+}
+
+func markUnsupportedControlProperties(issues []ValidationIssue, controlType string) {
+	for i := range issues {
+		if issues[i].Code != "UFV001" {
+			continue
+		}
+		propertyName := validationFieldName(issues[i].Field)
+		if !knownControlPropertyName(propertyName) {
+			continue
+		}
+		issues[i].Code = "UFV005"
+		issues[i].Message = fmt.Sprintf("%s is not valid for control type %s.", issues[i].Field, controlType)
+		issues[i].Suggestion = "Remove the property or use a control type that supports it."
+	}
+}
+
+func knownControlPropertyName(name string) bool {
+	contract := UserFormContract()
+	if _, ok := lookupProperty(contract.CommonControlProperties, name); ok {
+		return true
+	}
+	for _, control := range contract.Controls {
+		if _, ok := lookupProperty(control.Properties, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func validationFieldName(field string) string {
+	field = strings.TrimSpace(field)
+	if dot := strings.LastIndex(field, "."); dot >= 0 {
+		return field[dot+1:]
+	}
+	if bracket := strings.LastIndex(field, "]"); bracket >= 0 && bracket+1 < len(field) && field[bracket+1] == '.' {
+		return field[bracket+2:]
+	}
+	return field
+}
+
+func validateObjectProperties(root map[string]any, properties map[string]PropertyContract, path string, allow map[string]bool) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	for key, value := range root {
+		field := joinFieldPath(path, key)
+		property, ok := lookupProperty(properties, key)
+		if !ok {
+			if allow != nil && allow[key] {
+				continue
+			}
+			issues = append(issues, validationIssue("UFV001", SeverityError, fmt.Sprintf("%s is not defined by the UserForm spec contract.", field), field, "Remove the field or move custom data under properties.", ""))
+			continue
+		}
+		if !valueMatchesType(value, property.ValueType) {
+			issues = append(issues, validationIssue("UFV002", SeverityError, fmt.Sprintf("%s must be %s.", field, property.ValueType), field, "", ""))
+			continue
+		}
+		if len(property.AllowedValues) > 0 && !valueInAllowedValues(value, property.AllowedValues) {
+			issues = append(issues, validationIssue("UFV003", SeverityError, fmt.Sprintf("%s must be one of: %s.", field, strings.Join(property.AllowedValues, ", ")), field, "", ""))
+		}
+		if property.SupportLevel != "" && property.SupportLevel != SupportLevelSupported {
+			issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s has %s support.", field, property.SupportLevel), field, supportSuggestion(property.SupportLevel), property.SupportLevel))
+		}
+	}
+	for key, property := range properties {
+		if !property.Required {
+			continue
+		}
+		if _, ok := lookupRawField(root, key); !ok {
+			issues = append(issues, requiredFieldIssue(joinFieldPath(path, key)))
+		}
+	}
+	return issues
+}
+
+func formBuildProperties() map[string]PropertyContract {
+	return map[string]PropertyContract{
+		"caption": property(ValueTypeString, false, SupportLevelSupported, "Build caption.", false),
+		"width":   property(ValueTypeNumber, false, SupportLevelBestEffort, "Build width.", false),
+		"height":  property(ValueTypeNumber, false, SupportLevelBestEffort, "Build height.", false),
+	}
+}
+
+func formObservedProperties() map[string]PropertyContract {
+	return map[string]PropertyContract{
+		"caption":      property(ValueTypeString, false, SupportLevelSnapshotOnly, "Observed caption.", false),
+		"width":        property(ValueTypeNumber, false, SupportLevelSnapshotOnly, "Observed width.", false),
+		"height":       property(ValueTypeNumber, false, SupportLevelSnapshotOnly, "Observed height.", false),
+		"insideWidth":  property(ValueTypeNumber, false, SupportLevelSnapshotOnly, "Observed inside width.", false),
+		"insideHeight": property(ValueTypeNumber, false, SupportLevelSnapshotOnly, "Observed inside height.", false),
+	}
+}
+
+func parentCycleIssues(parentByID map[string]string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	reported := map[string]bool{}
+	for id := range parentByID {
+		seen := map[string]bool{}
+		for current := id; current != ""; current = parentByID[current] {
+			if seen[current] {
+				if !reported[id] {
+					issues = append(issues, validationIssue("UFV010", SeverityError, fmt.Sprintf("controls parentId chain for %q contains a cycle.", id), "controls", "Break the parentId cycle so controls form a tree.", ""))
+					reported[id] = true
+				}
+				break
+			}
+			seen[current] = true
+		}
+	}
+	return issues
+}
+
+func valueMatchesType(value any, valueType ValueType) bool {
+	if value == nil {
+		return true
+	}
+	switch valueType {
+	case ValueTypeAny:
+		return true
+	case ValueTypeString:
+		_, ok := value.(string)
+		return ok
+	case ValueTypeNumber:
+		return isNumber(value)
+	case ValueTypeInteger:
+		return isInteger(value)
+	case ValueTypeBoolean:
+		_, ok := value.(bool)
+		return ok
+	case ValueTypeStringArray:
+		items, ok := asSlice(value)
+		if !ok {
+			return false
+		}
+		for _, item := range items {
+			if _, ok := item.(string); !ok {
+				return false
+			}
+		}
+		return true
+	case ValueTypeObject:
+		_, ok := asObjectMap(value)
+		return ok
+	case ValueTypeObjectArray:
+		items, ok := asSlice(value)
+		if !ok {
+			return false
+		}
+		for _, item := range items {
+			if _, ok := asObjectMap(item); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func isNumber(value any) bool {
+	switch typed := value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	case json.Number:
+		_, err := typed.Float64()
+		return err == nil
+	default:
+		return false
+	}
+}
+
+func isInteger(value any) bool {
+	switch typed := value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case float32:
+		return math.Trunc(float64(typed)) == float64(typed)
+	case float64:
+		return math.Trunc(typed) == typed
+	case json.Number:
+		_, err := typed.Int64()
+		return err == nil
+	default:
+		return false
+	}
+}
+
+func valueInAllowedValues(value any, allowed []string) bool {
+	var text string
+	switch typed := value.(type) {
+	case string:
+		text = typed
+	case json.Number:
+		text = typed.String()
+	default:
+		text = fmt.Sprint(typed)
+	}
+	for _, item := range allowed {
+		if text == item {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupRawField(root map[string]any, key string) (any, bool) {
+	if value, ok := root[key]; ok {
+		return value, true
+	}
+	normalized := contractKey(key)
+	for rawKey, value := range root {
+		if contractKey(rawKey) == normalized {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func normalizeDecodedValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeDecodedValue(item)
+		}
+		return out
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[fmt.Sprint(key)] = normalizeDecodedValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, normalizeDecodedValue(item))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func validationIssue(code string, severity Severity, message, field, suggestion string, support SupportLevel) ValidationIssue {
+	return ValidationIssue{
+		Code:       code,
+		Severity:   severity,
+		Message:    message,
+		Field:      field,
+		Suggestion: suggestion,
+		Support:    support,
+	}
+}
+
+func invalidFixedValueIssue(field, want string) ValidationIssue {
+	return validationIssue("UFV003", SeverityError, fmt.Sprintf("%s must be %s.", field, want), field, "", "")
+}
+
+func requiredFieldIssue(field string) ValidationIssue {
+	return validationIssue("UFV004", SeverityError, fmt.Sprintf("%s is required.", field), field, "", "")
+}
+
+func supportSuggestion(level SupportLevel) string {
+	switch level {
+	case SupportLevelBestEffort:
+		return "Treat this field as best-effort and verify the rebuilt form in Excel."
+	case SupportLevelObservedOnly:
+		return "Treat this field as observed state; xlflow may apply it best-effort but does not guarantee round-trip fidelity."
+	case SupportLevelSnapshotOnly:
+		return "This field is snapshot-oriented and should not be treated as authoritative build intent."
+	case SupportLevelCustomUnchecked:
+		return "Custom controls are accepted, but xlflow cannot validate type-specific behavior."
+	default:
+		return ""
+	}
+}
+
+func joinFieldPath(base, key string) string {
+	if base == "" {
+		return key
+	}
+	return base + "." + key
+}
+
+func hasValidationErrors(issues []ValidationIssue) bool {
+	return firstValidationError(issues).Code != ""
+}
+
+func firstValidationError(issues []ValidationIssue) ValidationIssue {
+	for _, issue := range issues {
+		if issue.Severity == SeverityError {
+			return issue
+		}
+	}
+	return ValidationIssue{}
+}
+
+func validationWarnings(issues []ValidationIssue) []ValidationIssue {
+	warnings := make([]ValidationIssue, 0)
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		if issue.Severity != SeverityWarning {
+			continue
+		}
+		key := issue.Code + "\x00" + issue.Field + "\x00" + issue.Message
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		warnings = append(warnings, issue)
+	}
+	return warnings
+}
+
+func newSpecValidationIssuesError(input SpecInput, issues []ValidationIssue) error {
+	err := newSpecValidationErrorFromIssue(firstValidationError(issues), issues)
+	if err.Path == "" {
+		err.Path = input.DisplayPath
+	}
+	if err.Format == "" {
+		err.Format = input.Format
+	}
+	return err
+}
+
+func newSpecValidationErrorFromIssue(issue ValidationIssue, issues []ValidationIssue) *SpecError {
+	code := "spec_validation_failed"
+	if issue.Code == "UFV003" || (issue.Code == "UFV004" && (issue.Field == "schemaVersion" || issue.Field == "kind" || issue.Field == "basis" || issue.Field == "form" || issue.Field == "form.name")) {
+		code = "spec_schema_invalid"
+	}
+	message := issue.Message
+	if message == "" {
+		message = "UserForm spec validation failed"
+	}
+	return &SpecError{
+		Code:       code,
+		Message:    message,
+		Field:      issue.Field,
+		Suggestion: issue.Suggestion,
+		Issues:     append([]ValidationIssue(nil), issues...),
+	}
 }
 
 func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
@@ -900,14 +1543,6 @@ func relPath(base, path string) string {
 		return path
 	}
 	return rel
-}
-
-func newSpecValidationError(code, message, field string) error {
-	return &SpecError{
-		Code:    code,
-		Message: message,
-		Field:   field,
-	}
 }
 
 func newSpecParseError(input SpecInput, body []byte, err error) error {

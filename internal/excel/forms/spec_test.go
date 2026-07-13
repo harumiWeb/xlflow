@@ -232,7 +232,7 @@ func TestLoadFormSpecValidatesSchemaAndControls(t *testing.T) {
   "basis": "designer",
   "form": { "name": "UserForm1" },
   "controls": [
-    { "name": "txtCustomer", "type": "TextBox" }
+    { "id": "txt_customer", "name": "txtCustomer", "type": "TextBox" }
   ],
   "warnings": []
 }`
@@ -250,8 +250,8 @@ func TestLoadFormSpecValidatesSchemaAndControls(t *testing.T) {
 	if spec.Form.Name != "UserForm1" {
 		t.Fatalf("form name = %q", spec.Form.Name)
 	}
-	if len(spec.Controls) != 1 || spec.Controls[0].ID == "" {
-		t.Fatalf("expected normalized control ids, got %#v", spec.Controls)
+	if len(spec.Controls) != 1 || spec.Controls[0].ID != "txt_customer" {
+		t.Fatalf("expected control id, got %#v", spec.Controls)
 	}
 
 	if _, err := ResolveSpecInput(root, filepath.Join(root, "missing.form.json")); err == nil {
@@ -269,10 +269,12 @@ basis: designer
 form:
   name: UserForm1
 controls:
-  - name: Frame1
+  - id: frame_main
+    name: Frame1
     type: Frame
     controls:
-      - name: txtCustomer
+      - id: txt_customer
+        name: txtCustomer
         type: TextBox
 warnings: []
 `
@@ -326,6 +328,178 @@ func TestLoadFormSpecRejectsDuplicateExplicitControlIDs(t *testing.T) {
 	}
 	if specErr.Code != "spec_validation_failed" || specErr.Field != "controls[1].id" {
 		t.Fatalf("unexpected spec error: %+v", specErr)
+	}
+}
+
+func TestValidateFormSpecSourceReportsStrictStructuralIssues(t *testing.T) {
+	body := []byte(`schemaVersion: 2
+kind: xlflow.userform
+basis: designer
+extraRoot: true
+form:
+  name: UserForm1
+  build:
+    width: wide
+  observed:
+    insideWidth: 200
+    extraObserved: true
+controls:
+  - id: label_status
+    name: LabelStatus
+    type: Label
+    list:
+      - A
+      - B
+    observed:
+      missing: true
+  - id: button_ok
+    name: OKButton
+    type: CommandButton
+    selectedIndex: 1
+warnings: []
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		code  string
+		field string
+	}{
+		{"UFV003", "schemaVersion"},
+		{"UFV001", "extraRoot"},
+		{"UFV002", "form.build.width"},
+		{"UFV001", "form.observed.extraObserved"},
+		{"UFV005", "controls[0].list"},
+		{"UFV001", "controls[0].observed.missing"},
+		{"UFV005", "controls[1].selectedIndex"},
+	} {
+		if !hasValidationIssue(issues, want.code, want.field) {
+			t.Fatalf("missing validation issue %s at %s in %+v", want.code, want.field, issues)
+		}
+	}
+}
+
+func TestValidateFormSpecSourceReportsReferenceAndProgIDIssues(t *testing.T) {
+	body := []byte(`{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "form": { "name": "UserForm1" },
+  "controls": [
+    { "id": "frame_a", "name": "FrameA", "type": "Frame", "parentId": "frame_b" },
+    { "id": "frame_b", "name": "FrameB", "type": "Frame", "parentId": "frame_a" },
+    { "id": "txt_parent", "name": "TextBox1", "type": "TextBox" },
+    { "id": "lbl_child", "name": "Label1", "type": "Label", "parentId": "txt_parent" },
+    { "id": "self", "name": "SelfFrame", "type": "Frame", "parentId": "self" },
+    { "id": "missing", "name": "MissingParent", "type": "Label", "parentId": "nope" },
+    { "id": "bad_prog", "name": "BadProg", "type": "TextBox", "progId": "Forms.Label.1" }
+  ],
+  "warnings": []
+}`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "json", DisplayPath: "UserForm1.json"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		code  string
+		field string
+	}{
+		{"UFV010", "controls"},
+		{"UFV011", "controls[3].parentId"},
+		{"UFV009", "controls[4].parentId"},
+		{"UFV008", "controls[5].parentId"},
+		{"UFV012", "controls[6].progId"},
+	} {
+		if !hasValidationIssue(issues, want.code, want.field) {
+			t.Fatalf("missing validation issue %s at %s in %+v", want.code, want.field, issues)
+		}
+	}
+}
+
+func TestValidateFormSpecSourceAcceptsCustomProgIDWithWarnings(t *testing.T) {
+	body := []byte(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+  width: 240
+controls:
+  - id: custom_parent
+    name: CustomParent
+    type: VendorWidget
+    progId: Vendor.Widget.1
+    properties:
+      customCaption: Details
+  - id: label_child
+    parentId: custom_parent
+    name: Label1
+    type: Label
+    caption: Name
+warnings:
+  - code: captured
+    message: captured warning
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasValidationErrors(issues) {
+		t.Fatalf("custom ProgID should not produce errors: %+v", issues)
+	}
+	for _, want := range []struct {
+		code    string
+		field   string
+		support SupportLevel
+	}{
+		{"UFV014", "controls[0].progId", SupportLevelCustomUnchecked},
+		{"UFV013", "form.width", SupportLevelBestEffort},
+		{"UFV013", "warnings", SupportLevelSnapshotOnly},
+	} {
+		if !hasValidationIssueWithSupport(issues, want.code, want.field, want.support) {
+			t.Fatalf("missing warning %s at %s support %s in %+v", want.code, want.field, want.support, issues)
+		}
+	}
+}
+
+func TestLoadFormSpecReturnsMultipleValidationIssues(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "UserForm1.form.yaml")
+	body := `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+controls:
+  - id: shared
+    name: Label1
+    type: Label
+    list: [A]
+  - id: shared
+    name: TextBox1
+    type: TextBox
+    parentId: missing_parent
+warnings: []
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input, err := ResolveSpecInput(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadFormSpec(input)
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if len(specErr.Issues) < 3 {
+		t.Fatalf("expected multiple issues, got %+v", specErr.Issues)
+	}
+	if !hasValidationIssue(specErr.Issues, "UFV005", "controls[0].list") ||
+		!hasValidationIssue(specErr.Issues, "UFV007", "controls[1].id") ||
+		!hasValidationIssue(specErr.Issues, "UFV008", "controls[1].parentId") {
+		t.Fatalf("unexpected issues: %+v", specErr.Issues)
 	}
 }
 
@@ -394,4 +568,22 @@ func TestLoadFormSpecReturnsJSONSpecificParseSuggestion(t *testing.T) {
 
 func ptrFloat(value float64) *float64 {
 	return &value
+}
+
+func hasValidationIssue(issues []ValidationIssue, code, field string) bool {
+	for _, issue := range issues {
+		if issue.Code == code && issue.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+func hasValidationIssueWithSupport(issues []ValidationIssue, code, field string, support SupportLevel) bool {
+	for _, issue := range issues {
+		if issue.Code == code && issue.Field == field && issue.Support == support {
+			return true
+		}
+	}
+	return false
 }

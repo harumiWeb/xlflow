@@ -2786,7 +2786,7 @@ func TestBuildFormWriteOptionsValidatesAndNormalizes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols:\n  - name: txtCustomer\n    type: TextBox\nwarnings: []\n"
+	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols:\n  - id: txt_customer\n    name: txtCustomer\n    type: TextBox\nwarnings: []\n"
 	if err := os.WriteFile(specPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4440,6 +4440,74 @@ func TestFormBuildCommandReturnsSpecParseMetadata(t *testing.T) {
 	if suggestion, _ := got.Spec["suggestion"].(string); !strings.Contains(suggestion, `caption: ""`) {
 		t.Fatalf("unexpected suggestion: %+v", got.Spec)
 	}
+}
+
+func TestFormBuildReturnsStrictSpecValidationIssuesBeforeConfig(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols:\n  - id: label_status\n    name: LabelStatus\n    type: Label\n    list: [A, B]\n  - id: label_status\n    name: ButtonOK\n    type: CommandButton\n    selectedIndex: 0\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:    dir,
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "form", "build", specPath})
+
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Spec struct {
+			Field  string `json:"field"`
+			Issues []struct {
+				Code  string `json:"code"`
+				Field string `json:"field"`
+			} `json:"issues"`
+		} `json:"spec"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
+		t.Fatalf("failed to parse form build validation output: %v\n%s", unmarshalErr, stdout.String())
+	}
+	if got.Status != output.StatusFailed || got.Error.Code != "spec_validation_failed" {
+		t.Fatalf("unexpected form build validation payload: %+v", got)
+	}
+	if got.Spec.Field != "controls[0].list" {
+		t.Fatalf("first field = %q", got.Spec.Field)
+	}
+	if len(got.Spec.Issues) < 3 {
+		t.Fatalf("issues = %+v", got.Spec.Issues)
+	}
+	if !hasCLISpecIssue(got.Spec.Issues, "UFV005", "controls[0].list") ||
+		!hasCLISpecIssue(got.Spec.Issues, "UFV007", "controls[1].id") ||
+		!hasCLISpecIssue(got.Spec.Issues, "UFV005", "controls[1].selectedIndex") {
+		t.Fatalf("unexpected spec issues: %+v", got.Spec.Issues)
+	}
+}
+
+func hasCLISpecIssue(issues []struct {
+	Code  string `json:"code"`
+	Field string `json:"field"`
+}, code, field string) bool {
+	for _, issue := range issues {
+		if issue.Code == code && issue.Field == field {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFormBuildSidecarModeRunsSourcePreflightBeforeExcel(t *testing.T) {

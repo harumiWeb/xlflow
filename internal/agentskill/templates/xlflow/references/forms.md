@@ -74,11 +74,12 @@ controls:
 ## Canonical Structural Rules
 
 - `controls` is the canonical flat capture array.
-- Each control must have a stable `id`.
+- Each authored control must have a stable `id`.
 - `parentId` is optional and case-sensitive. When present, it must reference another control `id`.
 - For known first-class controls, `parentId` must reference a container-capable control. Currently `Frame` is container-capable; custom controls with explicit `progId` remain unchecked for compatibility.
 - `zIndex` is optional and is used to preserve sibling ordering when present.
 - Explicit duplicate `id` values are validation errors. xlflow does not auto-correct them.
+- Self-referencing `parentId` values and parent cycles are validation errors.
 - Legacy nested `controls` input may still be accepted and normalized into the flat array, but new specs should use the flat structure directly.
 
 ## Supported Build Semantics
@@ -92,16 +93,19 @@ Strongly supported:
 - supported control types and ProgID mapping
 - common geometry and visual properties such as `caption`, `text`, `value`, `visible`, and `enabled`
 
-xlflow core defines the canonical UserForm contract for document fields, form fields, built-in control types, property value types, support levels, ProgID mappings, and container capability. Current CLI validation uses it for structure, ProgID lookup, and known-container checks; strict type-specific property rejection is intentionally deferred.
+xlflow core defines the canonical UserForm contract for document fields, form fields, built-in control types, property value types, support levels, ProgID mappings, and container capability. `form build` validates raw YAML/JSON specs against that contract before Excel opens, including unknown fields, incorrect value types, fixed values, type-specific control properties, parent references, and known built-in `type` / `progId` consistency. Invalid specs fail with all detected issues in `spec.issues[]` so editors and agents can show multiple diagnostics from one pass.
+
+Custom controls with an explicit custom `progId` remain accepted with reduced validation. xlflow validates common structural fields and the `properties` bag, then returns a `custom/unchecked` warning because type-specific behavior cannot be verified from the built-in contract.
 
 Best-effort or observed-only:
 
 - form-level `width` / `height`: best-effort only
 - design-time `ComboBox` / `ListBox` `list` / `selectedIndex`: observed-only for round-trip expectations, even though xlflow still attempts to apply them
+- persisted `warnings`, `observed`, `unsupported`, and legacy nested `controls`: snapshot-only metadata
 
 Expect successful `form build` responses to return contract warnings when the spec depends on those weaker fields.
 
-When `form build` fails before Excel opens, expect structured `spec_parse_failed`, `spec_validation_failed`, or `spec_schema_invalid` errors plus top-level `spec` metadata such as `path`, `format`, optional `line` / `column`, optional `field`, and an optional remediation `suggestion`.
+When `form build` fails before Excel opens, expect structured `spec_parse_failed`, `spec_validation_failed`, or `spec_schema_invalid` errors plus top-level `spec` metadata such as `path`, `format`, optional `line` / `column`, optional first `field`, optional remediation `suggestion`, and `issues[]` containing all validation issues.
 
 ## Overwrite and Safety Rules
 
