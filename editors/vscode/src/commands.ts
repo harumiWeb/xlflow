@@ -50,6 +50,18 @@ interface XlflowStatusEnvelope {
   }>;
 }
 
+export interface XlflowModuleInstallEnvelope {
+  status?: string;
+  error?: {
+    code?: string;
+    message?: string;
+    phase?: string;
+  };
+  source?: {
+    created?: string[];
+  };
+}
+
 export interface XlflowBackupRecord {
   id?: string;
   created_at?: string;
@@ -261,7 +273,7 @@ export function registerCommands(
       await installAgentSkill(channels);
     }),
     vscode.commands.registerCommand("xlflow.moduleInstall", async () => {
-      await installHelperModules(channels);
+      await installHelperModules(channels, hooks);
     }),
     vscode.commands.registerCommand("xlflow.newModule", async () => {
       await newModule(channels, hooks);
@@ -1222,7 +1234,10 @@ async function installAgentSkill(channels: XlflowChannels): Promise<void> {
   });
 }
 
-async function installHelperModules(channels: XlflowChannels): Promise<void> {
+async function installHelperModules(
+  channels: XlflowChannels,
+  hooks: CommandRefreshHooks,
+): Promise<void> {
   const workspaceFolder = await resolveWorkspaceRoot({ prompt: true });
   if (workspaceFolder === undefined) {
     vscode.window.showWarningMessage(
@@ -1251,12 +1266,80 @@ async function installHelperModules(channels: XlflowChannels): Promise<void> {
   if (mode === undefined) {
     return;
   }
-  await runXlflowCommand(mode.args, `xlflow ${mode.args.join(" ")}`, channels.output, {
-    requireWorkspace: true,
-    uiLabel: mode.args.includes("--push")
-      ? vscode.l10n.t("xlflow module install --push")
-      : vscode.l10n.t("xlflow module install"),
+  const push = mode.args.includes("--push");
+  const uiLabel = push
+    ? vscode.l10n.t("xlflow module install --push")
+    : vscode.l10n.t("xlflow module install");
+  const result = await runJsonWithProgress<XlflowModuleInstallEnvelope>(
+    ["--json", ...mode.args],
+    `xlflow ${mode.args.join(" ")}`,
+    channels.output,
+    uiLabel,
     workspaceFolder,
+  );
+  if (result.exitCode !== -1) {
+    await refreshAfterModuleInstall(hooks, push);
+  }
+  if (result.exitCode === 0) {
+    vscode.window.showInformationMessage(vscode.l10n.t("{label} completed.", { label: uiLabel }));
+    return;
+  }
+  showModuleInstallFailure(result.json, result.stderr, result.exitCode, push, channels);
+}
+
+async function refreshAfterModuleInstall(hooks: CommandRefreshHooks, push: boolean): Promise<void> {
+  const refreshes: Array<Promise<void> | void> = [hooks.refreshModules(), hooks.refreshTests()];
+  if (push) {
+    refreshes.push(hooks.refreshProject());
+  }
+  await Promise.all(refreshes);
+}
+
+export function moduleInstallPreflightBlocked(
+  envelope: XlflowModuleInstallEnvelope | undefined,
+  push: boolean,
+): boolean {
+  return push && envelope?.error?.phase === "preflight";
+}
+
+export function moduleInstallFailureMessage(
+  envelope: XlflowModuleInstallEnvelope | undefined,
+  stderr: string,
+  exitCode: number,
+  push: boolean,
+): string {
+  if (moduleInstallPreflightBlocked(envelope, push)) {
+    const detail = readNonEmpty(envelope?.error?.message);
+    const prefix = vscode.l10n.t(
+      "Helper modules were installed to source, but push was blocked by preflight.",
+    );
+    const suffix = vscode.l10n.t("Fix the reported source issues and run xlflow push.");
+    return detail === undefined ? `${prefix} ${suffix}` : `${prefix} ${detail} ${suffix}`;
+  }
+  return (
+    readNonEmpty(envelope?.error?.message) ??
+    readNonEmpty(stderr) ??
+    vscode.l10n.t("xlflow module install failed with exit code {exitCode}.", { exitCode })
+  );
+}
+
+function showModuleInstallFailure(
+  envelope: XlflowModuleInstallEnvelope | undefined,
+  stderr: string,
+  exitCode: number,
+  push: boolean,
+  channels: XlflowChannels,
+): void {
+  const message = moduleInstallFailureMessage(envelope, stderr, exitCode, push);
+  if (!moduleInstallPreflightBlocked(envelope, push)) {
+    showStructuredCommandFailure(message, undefined, channels);
+    return;
+  }
+  const openOutput = vscode.l10n.t("Open xlflow Output");
+  void vscode.window.showWarningMessage(message, openOutput).then((action) => {
+    if (action === openOutput) {
+      channels.output.show(true);
+    }
   });
 }
 
