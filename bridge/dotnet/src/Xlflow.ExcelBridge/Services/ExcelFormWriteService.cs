@@ -651,7 +651,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 return false;
             }
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(properties, "Count"));
-            for (var index = 0; index < count; index++)
+            for (var index = 1; index <= count; index++)
             {
                 object? property = null;
                 try

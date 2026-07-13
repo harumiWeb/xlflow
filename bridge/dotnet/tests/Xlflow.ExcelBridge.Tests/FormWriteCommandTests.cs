@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -104,6 +105,19 @@ public sealed class FormWriteCommandTests
         Assert.Equal("form_build_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
+    [Fact]
+    public void SetVBComponentPropertyUsesOneBasedVBIDEPropertyIndexes()
+    {
+        var component = new FakeVBComponent();
+        var method = typeof(ExcelFormWriteService).GetMethod("SetVBComponentProperty", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+        var result = method.Invoke(null, [component, "Width", 333.0]);
+
+        Assert.Equal(true, result);
+        Assert.Equal(333.0, component.Properties.Width.Value);
+    }
+
     private sealed class FakeFormWriteService(Func<BridgeRequest, FormWriteCommandArguments, BridgeResponse> handler) : IFormWriteService
     {
         public BridgeResponse Execute(BridgeRequest request, FormWriteCommandArguments args, CancellationToken cancellationToken)
@@ -111,5 +125,33 @@ public sealed class FormWriteCommandTests
             cancellationToken.ThrowIfCancellationRequested();
             return handler(request, args);
         }
+    }
+
+    private sealed class FakeVBComponent
+    {
+        public FakeVBIDEProperties Properties { get; } = new();
+    }
+
+    private sealed class FakeVBIDEProperties
+    {
+        public FakeVBIDEProperty Width { get; } = new("Width", 240.0);
+
+        public FakeVBIDEProperty Height { get; } = new("Height", 180.0);
+
+        public int Count => 2;
+
+        public FakeVBIDEProperty Item(int index) => index switch
+        {
+            1 => Width,
+            2 => Height,
+            _ => throw new ArgumentOutOfRangeException(nameof(index), "VBIDE Properties is one-based."),
+        };
+    }
+
+    private sealed class FakeVBIDEProperty(string name, double value)
+    {
+        public string Name { get; } = name;
+
+        public double Value { get; set; } = value;
     }
 }
