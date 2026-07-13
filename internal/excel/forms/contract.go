@@ -87,9 +87,36 @@ func BuiltInControlProgID(typeName string) (string, bool) {
 	return control.ProgID, true
 }
 
+func LookupControlContractByProgID(progID string) (ControlContract, bool) {
+	normalized := strings.TrimSpace(progID)
+	if normalized == "" {
+		return ControlContract{}, false
+	}
+	for _, control := range userFormContract.Controls {
+		if strings.EqualFold(normalized, control.ProgID) {
+			return cloneControlContract(control), true
+		}
+	}
+	return ControlContract{}, false
+}
+
 func ControlCanContainChildren(typeName string) bool {
 	control, ok := userFormContract.Controls[contractKey(typeName)]
 	return ok && control.CanContainChildren
+}
+
+func FormSpecControlCanContainChildren(control FormSpecControl) (bool, bool) {
+	if progID := strings.TrimSpace(control.ProgID); progID != "" {
+		if contract, ok := LookupControlContractByProgID(progID); ok {
+			return contract.CanContainChildren, true
+		}
+		return false, false
+	}
+	contract, ok := LookupControlContract(control.Type)
+	if !ok {
+		return false, false
+	}
+	return contract.CanContainChildren, true
 }
 
 func ProgIDMatchesControlType(typeName, progID string) bool {

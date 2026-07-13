@@ -41,6 +41,10 @@ func TestUserFormContractBuiltInControlsAndProgIDs(t *testing.T) {
 			if !ok || progID != tc.progID {
 				t.Fatalf("BuiltInControlProgID(%q) = %q, %v; want %q, true", tc.typeName, progID, ok, tc.progID)
 			}
+			byProgID, ok := LookupControlContractByProgID(tc.progID)
+			if !ok || byProgID.Type != tc.typeName {
+				t.Fatalf("LookupControlContractByProgID(%q) = %#v, %v; want %q, true", tc.progID, byProgID, ok, tc.typeName)
+			}
 			if !ProgIDMatchesControlType(tc.typeName, tc.progID) {
 				t.Fatalf("ProgIDMatchesControlType(%q, %q) = false", tc.typeName, tc.progID)
 			}
@@ -266,6 +270,50 @@ func TestValidateFormSpecAllowsFrameAndCustomParent(t *testing.T) {
 	}
 	if err := ValidateFormSpec(customSpec); err != nil {
 		t.Fatalf("custom parent should remain unchecked for compatibility: %v", err)
+	}
+}
+
+func TestValidateFormSpecHonorsExplicitContainerProgIDOverride(t *testing.T) {
+	spec := FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form:          FormSpecForm{Name: "UserForm1"},
+		Controls: []FormSpecControl{
+			{ID: "frame", Name: "Frame1", Type: "TextBox", ProgID: "Forms.Frame.1"},
+			{ID: "lbl", ParentID: "frame", Name: "Label1", Type: "Label"},
+		},
+	}
+	if err := ValidateFormSpec(spec); err != nil {
+		t.Fatalf("explicit container progID should override non-container type for validation: %v", err)
+	}
+	canContainChildren, known := FormSpecControlCanContainChildren(spec.Controls[0])
+	if !known || !canContainChildren {
+		t.Fatalf("FormSpecControlCanContainChildren = %v, %v; want true, true", canContainChildren, known)
+	}
+}
+
+func TestValidateFormSpecRejectsExplicitKnownNonContainerProgIDOverride(t *testing.T) {
+	spec := FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form:          FormSpecForm{Name: "UserForm1"},
+		Controls: []FormSpecControl{
+			{ID: "parent", Name: "Parent1", Type: "Frame", ProgID: "Forms.TextBox.1"},
+			{ID: "lbl", ParentID: "parent", Name: "Label1", Type: "Label"},
+		},
+	}
+	err := ValidateFormSpec(spec)
+	if err == nil {
+		t.Fatal("expected explicit known non-container progID to be rejected")
+	}
+	specErr, ok := err.(*SpecError)
+	if !ok {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if specErr.Field != "controls[1].parentId" {
+		t.Fatalf("field = %q", specErr.Field)
 	}
 }
 

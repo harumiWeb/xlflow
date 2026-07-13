@@ -296,7 +296,7 @@ func ValidateFormSpec(spec FormSpec) error {
 			field := fmt.Sprintf("controls[%d].parentId", i)
 			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q was not found", field, control.ParentID), field)
 		}
-		if _, knownParentType := LookupControlContract(parent.Type); knownParentType && !ControlCanContainChildren(parent.Type) {
+		if canContainChildren, knownParentControl := FormSpecControlCanContainChildren(parent); knownParentControl && !canContainChildren {
 			field := fmt.Sprintf("controls[%d].parentId", i)
 			return newSpecValidationError("spec_validation_failed", fmt.Sprintf("%s %q references non-container control %q", field, control.ParentID, parent.Name), field)
 		}
