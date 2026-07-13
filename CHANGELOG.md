@@ -4,7 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added a canonical core UserForm spec contract covering built-in control metadata, property value types, support levels, type-to-ProgID mappings, and container capability for future validation, LSP, schema, and editor features.
+- Added strict reusable UserForm spec validation based on the canonical contract, including unknown-field, type, fixed-value, control-property, parent-reference, and type/ProgID mismatch diagnostics before `form build` opens Excel.
 
 ## v0.23.0
 

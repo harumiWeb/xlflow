@@ -1125,6 +1125,7 @@ func (a *app) formBuildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			appendFormSpecValidationWarnings(&env, opts.Spec.ValidationWarnings)
 			return a.write(env, code)
 		},
 	}
@@ -1176,6 +1177,7 @@ func (a *app) formApplyCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			appendFormSpecValidationWarnings(&env, opts.Spec.ValidationWarnings)
 			return a.write(env, code)
 		},
 	}
@@ -7805,6 +7807,9 @@ func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) err
 	if specErr.Suggestion != "" {
 		spec["suggestion"] = specErr.Suggestion
 	}
+	if len(specErr.Issues) > 0 {
+		spec["issues"] = formValidationIssuesPayload(specErr.Issues)
+	}
 	if len(spec) > 0 {
 		env.Spec = spec
 	}
@@ -7812,6 +7817,53 @@ func (a *app) writeFormSpecFailure(command string, specErr *forms.SpecError) err
 		return output.WithExitCode(output.ExitValidation, writeErr)
 	}
 	return output.WithExitCode(output.ExitValidation, specErr)
+}
+
+func appendFormSpecValidationWarnings(env *output.Envelope, issues []forms.ValidationIssue) {
+	if env == nil || len(issues) == 0 {
+		return
+	}
+	warnings := anySlice(env.Warnings)
+	for _, issue := range issues {
+		if issue.Severity != forms.SeverityWarning {
+			continue
+		}
+		warnings = append(warnings, formValidationIssuePayload(issue))
+	}
+	if len(warnings) > 0 {
+		env.Warnings = warnings
+	}
+}
+
+func formValidationIssuesPayload(issues []forms.ValidationIssue) []map[string]any {
+	out := make([]map[string]any, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, formValidationIssuePayload(issue))
+	}
+	return out
+}
+
+func formValidationIssuePayload(issue forms.ValidationIssue) map[string]any {
+	item := map[string]any{}
+	if issue.Code != "" {
+		item["code"] = issue.Code
+	}
+	if issue.Severity != "" {
+		item["severity"] = string(issue.Severity)
+	}
+	if issue.Message != "" {
+		item["message"] = issue.Message
+	}
+	if issue.Field != "" {
+		item["field"] = issue.Field
+	}
+	if issue.Suggestion != "" {
+		item["suggestion"] = issue.Suggestion
+	}
+	if issue.Support != "" {
+		item["support"] = string(issue.Support)
+	}
+	return item
 }
 
 func (a *app) write(env output.Envelope, code int) error {

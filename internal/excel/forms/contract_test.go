@@ -273,7 +273,7 @@ func TestValidateFormSpecAllowsFrameAndCustomParent(t *testing.T) {
 	}
 }
 
-func TestValidateFormSpecHonorsExplicitContainerProgIDOverride(t *testing.T) {
+func TestValidateFormSpecRejectsKnownProgIDMismatch(t *testing.T) {
 	spec := FormSpec{
 		SchemaVersion: 1,
 		Kind:          "xlflow.userform",
@@ -284,16 +284,20 @@ func TestValidateFormSpecHonorsExplicitContainerProgIDOverride(t *testing.T) {
 			{ID: "lbl", ParentID: "frame", Name: "Label1", Type: "Label"},
 		},
 	}
-	if err := ValidateFormSpec(spec); err != nil {
-		t.Fatalf("explicit container progID should override non-container type for validation: %v", err)
+	err := ValidateFormSpec(spec)
+	if err == nil {
+		t.Fatal("expected known type/progId mismatch to be rejected")
 	}
-	canContainChildren, known := FormSpecControlCanContainChildren(spec.Controls[0])
-	if !known || !canContainChildren {
-		t.Fatalf("FormSpecControlCanContainChildren = %v, %v; want true, true", canContainChildren, known)
+	specErr, ok := err.(*SpecError)
+	if !ok {
+		t.Fatalf("expected SpecError, got %T", err)
+	}
+	if specErr.Field != "controls[0].progId" {
+		t.Fatalf("field = %q", specErr.Field)
 	}
 }
 
-func TestValidateFormSpecRejectsExplicitKnownNonContainerProgIDOverride(t *testing.T) {
+func TestValidateFormSpecRejectsExplicitKnownNonContainerProgIDMismatch(t *testing.T) {
 	spec := FormSpec{
 		SchemaVersion: 1,
 		Kind:          "xlflow.userform",
@@ -312,7 +316,7 @@ func TestValidateFormSpecRejectsExplicitKnownNonContainerProgIDOverride(t *testi
 	if !ok {
 		t.Fatalf("expected SpecError, got %T", err)
 	}
-	if specErr.Field != "controls[1].parentId" {
+	if specErr.Field != "controls[0].progId" {
 		t.Fatalf("field = %q", specErr.Field)
 	}
 }
