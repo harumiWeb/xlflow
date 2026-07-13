@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a canonical core UserForm spec contract covering built-in control metadata, property value types, support levels, type-to-ProgID mappings, and container capability for future validation, LSP, schema, and editor features.
+
 ## v0.23.0
 
 - Added `xlflow form migrate sidecar` for converting imported UserForms from `frm` code-source mode to sidecar code plus Designer specs, and added `xlflow init --userform-code-source sidecar` for opting imported workbooks into the modern UserForm layout.

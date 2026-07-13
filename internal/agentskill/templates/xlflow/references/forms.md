@@ -76,6 +76,7 @@ controls:
 - `controls` is the canonical flat capture array.
 - Each control must have a stable `id`.
 - `parentId` is optional and case-sensitive. When present, it must reference another control `id`.
+- For known first-class controls, `parentId` must reference a container-capable control. Currently `Frame` is container-capable; custom controls with explicit `progId` remain unchecked for compatibility.
 - `zIndex` is optional and is used to preserve sibling ordering when present.
 - Explicit duplicate `id` values are validation errors. xlflow does not auto-correct them.
 - Legacy nested `controls` input may still be accepted and normalized into the flat array, but new specs should use the flat structure directly.
@@ -90,6 +91,8 @@ Strongly supported:
 - top-level vs nested control structure from `id` / `parentId`
 - supported control types and ProgID mapping
 - common geometry and visual properties such as `caption`, `text`, `value`, `visible`, and `enabled`
+
+xlflow core defines the canonical UserForm contract for document fields, form fields, built-in control types, property value types, support levels, ProgID mappings, and container capability. Current CLI validation uses it for structure, ProgID lookup, and known-container checks; strict type-specific property rejection is intentionally deferred.
 
 Best-effort or observed-only:
 
