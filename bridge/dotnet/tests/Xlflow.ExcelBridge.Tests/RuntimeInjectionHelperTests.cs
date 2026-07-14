@@ -205,9 +205,19 @@ public sealed class RuntimeInjectionHelperTests
     }
 
     [Fact]
-    public void WorkbookSaveDoesNotRequireVBProjectWhenNoTransientMarkersExist()
+    public void WorkbookSaveRequiresVBProjectInspectionWhenNoTransientMarkersExist()
     {
         var workbook = new FakeWorkbookWithoutVBProject();
+
+        Assert.ThrowsAny<Exception>(() => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+
+        Assert.Equal(0, workbook.SaveCalls);
+    }
+
+    [Fact]
+    public void MacroFreeWorkbookSaveDoesNotRequireVBProjectInspection()
+    {
+        var workbook = new FakeWorkbookWithoutVBProject { FullName = @"C:\work\Book.xlsx" };
 
         ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
 
@@ -215,9 +225,47 @@ public sealed class RuntimeInjectionHelperTests
     }
 
     [Fact]
-    public void WorkbookSaveRequiresVBProjectWhenTransientMarkersExist()
+    public void WorkbookSaveDoesNotRequireVBProjectForMarkerOnlyCleanup()
     {
-        var workbook = new FakeWorkbookWithoutVBProject(new FakeDefinedName("__XLFLOW_MODE__"));
+        var marker = new FakeDefinedName("__XLFLOW_MODE__");
+        var workbook = new FakeWorkbookWithoutVBProject(marker);
+
+        ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+
+        Assert.True(marker.Deleted);
+        Assert.Equal(1, workbook.SaveCalls);
+    }
+
+    [Theory]
+    [InlineData("SaveAs")]
+    [InlineData("SaveCopyAs")]
+    public void WorkbookSaveVariantsDoNotRequireVBProjectForMarkerOnlyCleanup(string method)
+    {
+        var marker = new FakeDefinedName("__XLFLOW_MODE__");
+        var workbook = new FakeWorkbookWithoutVBProject(marker);
+
+        ExcelBridgeSupport.InvokeViaDynamic(workbook, method, @"C:\work\Copy.xlsm");
+
+        Assert.True(marker.Deleted);
+        Assert.Equal(1, method == "SaveAs" ? workbook.SaveAsCalls : workbook.SaveCopyAsCalls);
+    }
+
+    [Fact]
+    public void WorkbookSaveRemovesUnmarkedLegacyHelperBeforeSaving()
+    {
+        var temporary = new FakeComponent("XlflowRun_legacy");
+        var workbook = new FakeWorkbook([], [temporary]);
+
+        ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+
+        Assert.True(temporary.Removed);
+        Assert.Equal(1, workbook.SaveCalls);
+    }
+
+    [Fact]
+    public void WorkbookSaveRequiresVBProjectWhenHelperMarkerExists()
+    {
+        var workbook = new FakeWorkbookWithoutVBProject(new FakeDefinedName("__XLFLOW_RUN_HELPER__"));
 
         Assert.ThrowsAny<Exception>(() => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
 
@@ -400,11 +448,24 @@ public sealed class RuntimeInjectionHelperTests
     public sealed class FakeWorkbookWithoutVBProject(params FakeDefinedName[] names)
     {
         public FakeNames Names { get; } = new(names);
+        public string? FullName { get; init; }
         public int SaveCalls { get; private set; }
+        public int SaveAsCalls { get; private set; }
+        public int SaveCopyAsCalls { get; private set; }
 
         public void Save()
         {
             SaveCalls++;
+        }
+
+        public void SaveAs(object path)
+        {
+            SaveAsCalls++;
+        }
+
+        public void SaveCopyAs(object path)
+        {
+            SaveCopyAsCalls++;
         }
     }
 }

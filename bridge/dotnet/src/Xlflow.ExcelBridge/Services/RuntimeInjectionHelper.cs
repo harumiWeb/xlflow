@@ -158,12 +158,7 @@ internal static class RuntimeInjectionHelper
 
     public static bool IsTransientRuntimeDefinedName(string name)
     {
-        var normalized = (name ?? "").Trim();
-        var separator = normalized.LastIndexOf('!');
-        if (separator >= 0 && separator + 1 < normalized.Length)
-        {
-            normalized = normalized[(separator + 1)..];
-        }
+        var normalized = NormalizeDefinedName(name);
 
         if (normalized.Equals("__XLFLOW_MODE__", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("__XLFLOW_RUNTIME_VERSION__", StringComparison.OrdinalIgnoreCase) ||
@@ -181,6 +176,13 @@ internal static class RuntimeInjectionHelper
              normalized.StartsWith("__XLFLOW_UI_FILEDIALOG_", StringComparison.OrdinalIgnoreCase));
     }
 
+    internal static bool IsTemporaryRuntimeComponentDefinedName(string name)
+    {
+        var normalized = NormalizeDefinedName(name);
+        return normalized.Equals("__XLFLOW_RUN_HELPER__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_UI_STREAM_HELPER__", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsTemporaryRuntimeComponentName(string name)
     {
         var normalized = (name ?? "").Trim();
@@ -190,16 +192,22 @@ internal static class RuntimeInjectionHelper
 
     public static int RemoveTransientRuntimeArtifacts(object workbook)
     {
-        var transientNamesPresent = ContainsTransientRuntimeDefinedNames(workbook);
-        var removedComponents = RemoveTemporaryRuntimeComponents(workbook, transientNamesPresent);
+        var transientNameState = GetTransientRuntimeDefinedNameState(workbook);
+        // Helper markers prove that VBIDE cleanup is required. With no markers, macro-capable
+        // workbooks are inspected strictly so legacy unmarked helpers cannot pass a save. Runtime
+        // mode/UI markers alone are safe to remove without VBIDE (notably for --direct runs).
+        var accessRequired = transientNameState.ComponentMarkerPresent ||
+            (!transientNameState.AnyPresent && WorkbookCanContainVba(workbook));
+        var removedComponents = RemoveTemporaryRuntimeComponents(workbook, accessRequired);
         var removedNames = RemoveTransientRuntimeDefinedNames(workbook);
         return removedComponents + removedNames;
     }
 
-    private static bool ContainsTransientRuntimeDefinedNames(object workbook)
+    private static TransientRuntimeDefinedNameState GetTransientRuntimeDefinedNameState(object workbook)
     {
         var names = ExcelBridgeSupport.Get(workbook, "Names")
             ?? throw new InvalidOperationException("Workbook names are unavailable.");
+        var transientNamesPresent = false;
         try
         {
             var count = Convert.ToInt32(ExcelBridgeSupport.Get(names, "Count"), CultureInfo.InvariantCulture);
@@ -217,7 +225,11 @@ internal static class RuntimeInjectionHelper
                         CultureInfo.InvariantCulture) ?? "";
                     if (IsTransientRuntimeDefinedName(definedNameText))
                     {
-                        return true;
+                        if (IsTemporaryRuntimeComponentDefinedName(definedNameText))
+                        {
+                            return new TransientRuntimeDefinedNameState(true, true);
+                        }
+                        transientNamesPresent = true;
                     }
                 }
                 finally
@@ -225,13 +237,49 @@ internal static class RuntimeInjectionHelper
                     ExcelBridgeSupport.ReleaseComObject(definedName);
                 }
             }
-            return false;
+            return new TransientRuntimeDefinedNameState(transientNamesPresent, false);
         }
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(names);
         }
     }
+
+    private static string NormalizeDefinedName(string name)
+    {
+        var normalized = (name ?? "").Trim();
+        var separator = normalized.LastIndexOf('!');
+        if (separator >= 0 && separator + 1 < normalized.Length)
+        {
+            normalized = normalized[(separator + 1)..];
+        }
+        return normalized;
+    }
+
+    private static bool WorkbookCanContainVba(object workbook)
+    {
+        try
+        {
+            var fullName = Convert.ToString(
+                ExcelBridgeSupport.Get(workbook, "FullName"),
+                CultureInfo.InvariantCulture) ?? "";
+            return Path.GetExtension(fullName).ToLowerInvariant() switch
+            {
+                ".xlsm" or ".xlsb" or ".xlam" or ".xltm" or
+                ".xls" or ".xla" or ".xlt" => true,
+                "" => true,
+                _ => false,
+            };
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private readonly record struct TransientRuntimeDefinedNameState(
+        bool AnyPresent,
+        bool ComponentMarkerPresent);
 
     private static int RemoveTemporaryRuntimeComponents(object workbook, bool accessRequired)
     {

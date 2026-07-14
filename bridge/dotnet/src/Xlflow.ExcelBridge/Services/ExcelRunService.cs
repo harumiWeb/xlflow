@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -30,6 +31,7 @@ public sealed class ExcelRunService : IRunService
         var sessionAttached = false;
         var sessionMode = "none";
         var skipComCleanup = false;
+        var runtimeCleanupSaved = false;
         var excelProcessId = 0;
         var ownedExcelProcess = OwnedExcelProcess.None;
 
@@ -111,6 +113,13 @@ public sealed class ExcelRunService : IRunService
 
             runtimeState = ApplyRuntimeMarkers(workbook, args);
             var runtimeInjected = runtimeState.Applied;
+            WorkbookFileFingerprint? workbookPersistenceBaseline = null;
+            if (runtimeState.RestoreRequired || !args.Direct)
+            {
+                workbookPersistenceBaseline = ExcelBridgeSupport.RunPhase(
+                    "capture_workbook_persistence",
+                    () => CaptureWorkbookFileFingerprint(args.WorkbookPath));
+            }
             ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(150));
 
             var macroReference = BuildWorkbookQualifiedMacroReference(workbook, macroName);
@@ -194,10 +203,21 @@ public sealed class ExcelRunService : IRunService
             }
 
             var runtimeStateWasPersistedByMacro = false;
-            if (!runTimedOut && runtimeState.RestoreRequired &&
-                ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var workbookDirtyAfterMacro))
+            if (!runTimedOut && runtimeState.RestoreRequired)
             {
-                runtimeStateWasPersistedByMacro = !workbookDirtyAfterMacro;
+                try
+                {
+                    runtimeStateWasPersistedByMacro = WorkbookFileChanged(
+                        args.WorkbookPath,
+                        workbookPersistenceBaseline ?? throw new InvalidOperationException(
+                            "Workbook persistence baseline is unavailable."));
+                }
+                catch
+                {
+                    // If the persisted workbook cannot be inspected after user VBA ran, save the
+                    // cleaned live state rather than risk leaving injected runtime artifacts on disk.
+                    runtimeStateWasPersistedByMacro = true;
+                }
             }
 
             if (!runTimedOut)
@@ -208,9 +228,8 @@ public sealed class ExcelRunService : IRunService
                 runtimeState = null;
                 if (runtimeStateWasPersistedByMacro)
                 {
-                    ExcelBridgeSupport.RunPhase(
-                        "save_runtime_cleanup",
-                        () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+                    SaveRuntimeCleanup(workbook);
+                    runtimeCleanupSaved = true;
                 }
             }
 
@@ -347,7 +366,7 @@ public sealed class ExcelRunService : IRunService
                 };
             }
 
-            var saved = false;
+            var saved = runtimeCleanupSaved;
             var saveAsCopy = false;
             if (!string.IsNullOrWhiteSpace(args.SaveAsPath))
             {
@@ -356,7 +375,7 @@ public sealed class ExcelRunService : IRunService
                 ExcelBridgeSupport.RunPhase("save_as", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", saveAsPath));
                 saveAsCopy = true;
             }
-            else if (args.SaveWorkbook)
+            else if (args.SaveWorkbook && !saved)
             {
                 ExcelBridgeSupport.RunPhase("save_workbook", () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
                 saved = true;
@@ -472,6 +491,14 @@ public sealed class ExcelRunService : IRunService
                     ["last_command"] = ex.Metadata.LastCommand,
                 }));
         }
+        catch (RuntimeCleanupSaveException ex)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "runtime_cleanup_failed",
+                Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
+                Phase: "save_result",
+                Source: "xlflow-excel-bridge"));
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
@@ -502,6 +529,36 @@ public sealed class ExcelRunService : IRunService
                     CloseWorkbook(workbook, excel, ownedExcelProcess);
                 }
             }
+        }
+    }
+
+    internal static WorkbookFileFingerprint CaptureWorkbookFileFingerprint(string workbookPath)
+    {
+        using var stream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var hash = Convert.ToHexString(SHA256.HashData(stream));
+        return new WorkbookFileFingerprint(stream.Length, hash);
+    }
+
+    internal static bool WorkbookFileChanged(
+        string workbookPath,
+        WorkbookFileFingerprint baseline)
+    {
+        return !baseline.Equals(CaptureWorkbookFileFingerprint(workbookPath));
+    }
+
+    private static void SaveRuntimeCleanup(object workbook)
+    {
+        try
+        {
+            ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+        }
+        catch (Exception ex)
+        {
+            throw new RuntimeCleanupSaveException(ex);
         }
     }
 
@@ -1094,3 +1151,10 @@ public sealed class ExcelRunService : IRunService
         ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, ownedProcess);
     }
 }
+
+internal sealed record WorkbookFileFingerprint(long Length, string Sha256);
+
+internal sealed class RuntimeCleanupSaveException(Exception innerException)
+    : Exception(
+        $"save_runtime_cleanup failed: {ExcelBridgeSupport.FormatExceptionDetail(innerException)}",
+        innerException);
