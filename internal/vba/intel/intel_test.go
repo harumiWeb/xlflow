@@ -757,6 +757,59 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsAcceptLineContinuedParenlessCalls(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub PopulateAttendanceMetricsForMainRows(ByVal mainSheet As Worksheet, ByVal startRow As Long, ByVal endRow As Long, ByVal jworkSheet As Worksheet, ByVal jworkLayout As Object, ByVal annualPlanSheet As Worksheet, ByVal annualPlanLayout As Object, ByVal annualActualSheet As Worksheet, ByVal annualActualLayout As Object)
+End Sub
+
+Public Sub Test()
+    PopulateAttendanceMetricsForMainRows _
+        mainSheet, _
+        12, _
+        11 + mainRowCount, _
+        jworkWorkbook.Worksheets(1), _
+        jworkLayout, _
+        annualPlanWorkbook.Worksheets(1), _
+        annualPlanLayout, _
+        annualActualWorkbook.Worksheets(1), _
+        annualActualLayout
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+		t.Fatalf("line-continued parenless call should not produce argument diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestArgumentDiagnosticsMapNestedContinuedCallToPhysicalLine(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub NeedsTwo(ByVal first As Variant, ByVal second As Variant)
+End Sub
+
+Public Sub Test()
+    Wrapper _
+        NeedsTwo(1), _
+        2
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "NeedsTwo expects at least 2 argument(s), got 1") {
+		t.Fatalf("nested continued call should report its argument mismatch: %+v", diagnostics)
+	}
+	if diagnostics[0].Range.Start.Line != 6 {
+		t.Fatalf("nested continued call diagnostic line = %d, want 6", diagnostics[0].Range.Start.Line)
+	}
+}
+
 func TestDiagnosticsIncludeUnknownMemberOnKnownConcreteType(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	if err := analyzer.DB.MergeJSON([]byte(`{

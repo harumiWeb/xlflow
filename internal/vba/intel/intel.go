@@ -1119,18 +1119,87 @@ func signatureFromSymbol(sym Symbol) Signature {
 
 func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 	var out []Diagnostic
-	lines := normalizedLines(doc.Source)
-	for lineNo, line := range lines {
-		code := stripLineComment(line)
-		for _, call := range callsOnLine(code) {
-			sig, ok, err := a.resolveCallSignature(doc, call.Target, Position{Line: lineNo, Character: utf16Len(line)}, []Document{doc})
+	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		for _, call := range callsOnLine(logicalLine.Text) {
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, ok, err := a.resolveCallSignature(doc, call.Target, callRange.Start, []Document{doc})
 			if err != nil || !ok || len(sig.Parameters) == 0 {
 				continue
 			}
-			out = append(out, diagnosticsForCallArguments(lineNo, call, sig)...)
+			out = append(out, diagnosticsForCallArguments(callRange.Start.Line, call, sig)...)
 		}
 	}
 	return out
+}
+
+type logicalCallAnalysisLine struct {
+	Text     string
+	Segments []logicalCallAnalysisSegment
+}
+
+type logicalCallAnalysisSegment struct {
+	LogicalStart int
+	Line         int
+	Text         string
+}
+
+func logicalLinesForCallAnalysis(source string) []logicalCallAnalysisLine {
+	lines := normalizedLines(source)
+	out := make([]logicalCallAnalysisLine, 0, len(lines))
+	for lineNo := 0; lineNo < len(lines); {
+		logicalLine := logicalCallAnalysisLine{}
+		var text strings.Builder
+		for {
+			code := stripLineComment(lines[lineNo])
+			continued := hasExplicitContinuation(code)
+			fragment := code
+			if continued {
+				fragment = strings.TrimRight(trimExplicitContinuation(code), " \t")
+			}
+			logicalLine.Segments = append(logicalLine.Segments, logicalCallAnalysisSegment{
+				LogicalStart: text.Len(),
+				Line:         lineNo,
+				Text:         fragment,
+			})
+			text.WriteString(fragment)
+			if continued {
+				text.WriteByte(' ')
+			}
+			lineNo++
+			if !continued || lineNo == len(lines) {
+				break
+			}
+		}
+		logicalLine.Text = text.String()
+		out = append(out, logicalLine)
+	}
+	return out
+}
+
+func (line logicalCallAnalysisLine) callRange(call parsedCall) Range {
+	startLine, startColumn := line.positionForOffset(call.Start)
+	endLine, endColumn := line.positionForOffset(call.End)
+	return Range{
+		Start: Position{Line: startLine, Character: startColumn},
+		End:   Position{Line: endLine, Character: endColumn},
+	}
+}
+
+func (line logicalCallAnalysisLine) positionForOffset(offset int) (int, int) {
+	if len(line.Segments) == 0 {
+		return 0, 0
+	}
+	offset = max(0, min(offset, len(line.Text)))
+	segment := line.Segments[len(line.Segments)-1]
+	for _, candidate := range line.Segments {
+		if offset <= candidate.LogicalStart+len(candidate.Text) {
+			segment = candidate
+			break
+		}
+	}
+	column := max(0, min(offset-segment.LogicalStart, len(segment.Text)))
+	return segment.Line, utf16Len(segment.Text[:column])
 }
 
 func (a Analyzer) documentationDiagnostics(doc Document) []Diagnostic {
@@ -1717,11 +1786,12 @@ func (a Analyzer) knownModuleOrNamespaceReceiver(doc Document, receiver string) 
 }
 
 type parsedCall struct {
-	Target    string
-	Arguments []argument
-	Line      string
-	Start     int
-	End       int
+	Target          string
+	Arguments       []argument
+	Line            string
+	Start           int
+	End             int
+	DiagnosticRange *Range
 }
 
 func callsOnLine(line string) []parsedCall {
@@ -2002,15 +2072,19 @@ func editDistance(a, b string) int {
 }
 
 func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
+	r := Range{
+		Start: Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.Start, len(call.Line)))])},
+		End:   Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.End, len(call.Line)))])},
+	}
+	if call.DiagnosticRange != nil {
+		r = *call.DiagnosticRange
+	}
 	return Diagnostic{
 		Code:     "VB030",
 		Severity: "warning",
 		Source:   "xlflow",
 		Message:  msg,
-		Range: Range{
-			Start: Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.Start, len(call.Line)))])},
-			End:   Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.End, len(call.Line)))])},
-		},
+		Range:    r,
 	}
 }
 
