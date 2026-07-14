@@ -173,7 +173,7 @@ Configurable lint rule IDs:
 | `VB026` | `detect_dangerous_resume`            |
 | `VB027` | `detect_nested_with_ambiguity`       |
 
-Safety diagnostics `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be disabled with `disabled_rules`.
+Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be disabled with `disabled_rules`.
 
 For local exceptions, keep the rule enabled and suppress a specific source line with an apostrophe comment:
 
@@ -183,7 +183,7 @@ Range("A1").Select
 Range("A2").Select ' xlflow:disable-line VB002
 ```
 
-Preflight-blocking lint diagnostics `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, and `VB032` cannot be suppressed inline.
+Preflight-blocking lint diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` cannot be suppressed inline.
 
 ### `[analyze]`
 

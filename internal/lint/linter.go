@@ -1,10 +1,13 @@
 package lint
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
@@ -63,7 +66,11 @@ var (
 	}
 )
 
-const vb007DisableHint = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
+const (
+	vb007DisableHint                   = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
+	maxVBAContinuationLines            = 24
+	lineContinuationOverflowSuggestion = "Reduce the number of continuations by making constituent lines longer or splitting the work into separate statements."
+)
 
 func (l Linter) Run() ([]Issue, error) {
 	result, err := l.RunResult()
@@ -291,6 +298,7 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 	inTypeBlock := false
 	var logicalLine strings.Builder
 	logicalStartLine := 0
+	continuationCount := 0
 	lines := strings.Split(strings.ReplaceAll(source, "\r\n", "\n"), "\n")
 	for i, line := range lines {
 		lineNo := i + 1
@@ -328,6 +336,7 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 			logicalStartLine = lineNo
 		}
 		if hasValidLineContinuation(detectionCode) {
+			continuationCount++
 			logicalLine.WriteString(strings.TrimRight(removeLineContinuationMarker(lineForProcedure), " \t"))
 			logicalLine.WriteByte(' ')
 			continue
@@ -336,13 +345,20 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 			logicalLine.WriteString(lineForProcedure)
 			lineForProcedure = logicalLine.String()
 		}
+		if continuationCount > maxVBAContinuationLines {
+			issues = append(issues, l.lineContinuationOverflowIssue(path, logicalStartLine, lineForProcedure, continuationCount))
+		}
 		for _, statement := range splitStatements(lineForProcedure) {
 			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
 		}
 		logicalLine.Reset()
 		logicalStartLine = 0
+		continuationCount = 0
 	}
 	if logicalLine.Len() > 0 {
+		if continuationCount > maxVBAContinuationLines {
+			issues = append(issues, l.lineContinuationOverflowIssue(path, logicalStartLine, logicalLine.String(), continuationCount))
+		}
 		for _, statement := range splitStatements(logicalLine.String()) {
 			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
 		}
@@ -353,6 +369,24 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 		issues = append(issues, issue)
 	}
 	return issues, nil
+}
+
+func (l Linter) lineContinuationOverflowIssue(path string, lineNo int, logicalLine string, continuationCount int) Issue {
+	issue := l.issue(path, lineNo, "VB015", "error", fmt.Sprintf("VBA logical line exceeds the line-continuation limit: uses %d continuation lines; VBA allows at most %d.", continuationCount, maxVBAContinuationLines))
+	issue.Kind = "logical_line"
+	issue.Suggestion = lineContinuationOverflowSuggestion
+	if procedure, ok := procedureStart(logicalLine, lineNo); ok {
+		issue.Kind = "procedure_declaration"
+		issue.Symbol = procedure.Name
+		issue.Message = fmt.Sprintf("Procedure declaration exceeds VBA's line-continuation limit: uses %d continuation lines; VBA allows at most %d.", continuationCount, maxVBAContinuationLines)
+		return issue
+	}
+	if target, ok := procedureCallTarget(logicalLine); ok {
+		issue.Kind = "procedure_call"
+		issue.Symbol = target
+		issue.Message = fmt.Sprintf("Procedure call exceeds VBA's line-continuation limit: uses %d continuation lines; VBA allows at most %d.", continuationCount, maxVBAContinuationLines)
+	}
+	return issue
 }
 
 type astLintContext struct {
@@ -1028,7 +1062,7 @@ func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" || issue.Code == "VB032" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB015" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" || issue.Code == "VB032" {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -1549,7 +1583,7 @@ func intString(value int) string {
 
 func hasSpecificSyntaxIssue(issues []Issue) bool {
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB032" {
+		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB015" || issue.Code == "VB032" {
 			return true
 		}
 	}
@@ -1816,7 +1850,7 @@ func isVBAIdentifierRune(r rune) bool {
 	case '_', '$', '%', '&', '!', '#', '@', '^':
 		return true
 	}
-	return r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func (l Linter) procedureBoundaryIssues(path string, lineNo int, line string, procedures *[]procedureFrame) []Issue {
@@ -1894,6 +1928,55 @@ afterModifiers:
 		}
 	default:
 		return procedureFrame{}, false
+	}
+}
+
+func procedureCallTarget(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) >= len("Call") && strings.EqualFold(trimmed[:len("Call")], "Call") &&
+		(len(trimmed) == len("Call") || trimmed[len("Call")] == ' ' || trimmed[len("Call")] == '\t') {
+		return vbaCallTarget(strings.TrimSpace(trimmed[len("Call"):]))
+	}
+	if strings.Contains(trimmed, "=") {
+		return "", false
+	}
+	target, rest, ok := splitVBACallTarget(trimmed)
+	if !ok || !strings.HasPrefix(rest, "(") || isVBAControlStatement(target) {
+		return "", false
+	}
+	return target, true
+}
+
+func vbaCallTarget(line string) (string, bool) {
+	target, _, ok := splitVBACallTarget(line)
+	return target, ok
+}
+
+func splitVBACallTarget(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", "", false
+	}
+	end := 0
+	for end < len(line) {
+		r, size := utf8.DecodeRuneInString(line[end:])
+		if !isVBAIdentifierRune(r) && r != '.' {
+			break
+		}
+		end += size
+	}
+	if end == 0 || line[end-1] == '.' {
+		return "", "", false
+	}
+	return line[:end], strings.TrimSpace(line[end:]), true
+}
+
+func isVBAControlStatement(target string) bool {
+	switch strings.ToLower(target) {
+	case "if", "elseif", "for", "for each", "while", "do", "loop", "select", "with", "end", "debug", "set", "let":
+		return true
+	default:
+		return false
 	}
 }
 

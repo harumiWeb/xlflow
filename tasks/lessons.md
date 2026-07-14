@@ -56,6 +56,7 @@
 - AST symbol ranges may describe declaration nodes rather than enclosing scopes. Lint rules that scan local references must derive the containing procedure bounds, and cleanup labels such as `Cleanup:` need explicit coverage because they can be normal fallthrough cleanup paths.
 - GitHub Actions workflows that use `msys2/setup-msys2` must not hardcode `C:\msys64`. Use the action's `msys2-location` output to derive UCRT64 tool paths because hosted runners can install MSYS2 under `$RUNNER_TEMP`.
 - Formatter casing passes must collect user-declared identifier collisions broadly before applying built-in casing. Include locals, parameters, procedure/property names, enum members, and parameterized declarations so formatter defaults never recase user-defined identifiers that happen to match curated built-ins.
+- When adding a non-suppressible diagnostic, update the backend suppression registry and every editor-side Quick Fix allowlist together, then test that the editor does not offer an inline-suppression action for the new code.
 
 # DialogWatcher
 

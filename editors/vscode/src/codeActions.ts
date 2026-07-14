@@ -8,6 +8,7 @@ const unsupportedInlineSuppressionRules = new Set([
   "VB012",
   "VB013",
   "VB014",
+  "VB015",
   "VB028",
   "VB029",
   "VB031",

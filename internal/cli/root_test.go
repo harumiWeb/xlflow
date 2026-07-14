@@ -28,6 +28,20 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
+func continuedCLILogicalLine(first, middle, last string, continuations int) string {
+	var b strings.Builder
+	for i := 0; i < continuations; i++ {
+		if i == 0 {
+			b.WriteString(first)
+		} else {
+			b.WriteString(middle)
+		}
+		b.WriteString(" _\n")
+	}
+	b.WriteString(last)
+	return b.String()
+}
+
 type stubReleaseChecker struct {
 	release latestRelease
 	err     error
@@ -6542,6 +6556,83 @@ func TestPushRejectsMissingLineContinuationWhitespaceBeforeExcel(t *testing.T) {
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {
 		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestLintAndPushRejectVBAContinuationOverflowBeforeExcel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB015\n" +
+		continuedCLILogicalLine("  Call TooMany(a0,", "      arg,", "      finalArg)\nEnd Sub\n", 25)
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var lintStdout bytes.Buffer
+	lintApp := &app{cwd: dir, stdout: &lintStdout, stderr: &bytes.Buffer{}}
+	lintRoot := lintApp.rootCommand()
+	lintRoot.SetArgs([]string{"--json", "lint"})
+	err := lintRoot.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected lint validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var lintResult struct {
+		Issues []struct {
+			Code       string `json:"code"`
+			File       string `json:"file"`
+			Line       int    `json:"line"`
+			Kind       string `json:"kind"`
+			Symbol     string `json:"symbol"`
+			Message    string `json:"message"`
+			Suggestion string `json:"suggestion"`
+		} `json:"issues"`
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal(lintStdout.Bytes(), &lintResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(lintResult.Issues) != 1 {
+		t.Fatalf("expected one lint issue, got %+v", lintResult)
+	}
+	issue := lintResult.Issues[0]
+	if issue.Code != "VB015" || issue.File != "src/modules/Main.bas" || issue.Line != 5 || issue.Kind != "procedure_call" || issue.Symbol != "TooMany" || !strings.Contains(issue.Message, "uses 25 continuation lines") || issue.Suggestion == "" {
+		t.Fatalf("unexpected VB015 lint issue: %+v", issue)
+	}
+	if !hasCLIWarning(lintResult.Warnings, "unsupported_inline_suppression_rule", "VB015") {
+		t.Fatalf("expected unsupported inline suppression warning, got %+v", lintResult.Warnings)
+	}
+
+	var pushStdout bytes.Buffer
+	pushApp := &app{cwd: dir, stdout: &pushStdout, stderr: &bytes.Buffer{}}
+	pushRoot := pushApp.rootCommand()
+	pushRoot.SetArgs([]string{"--json", "push"})
+	err = pushRoot.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected push validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var pushResult struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+		Issues []struct {
+			Code string `json:"code"`
+			Line int    `json:"line"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(pushStdout.Bytes(), &pushResult); err != nil {
+		t.Fatal(err)
+	}
+	if pushResult.Status != output.StatusFailed || pushResult.Error.Code != "lint_failed" || pushResult.Error.Phase != "preflight" || len(pushResult.Issues) != 1 || pushResult.Issues[0].Code != "VB015" || pushResult.Issues[0].Line != 5 {
+		t.Fatalf("unexpected push preflight result: %+v", pushResult)
 	}
 }
 

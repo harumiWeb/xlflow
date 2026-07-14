@@ -3,6 +3,7 @@ package lint
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -991,6 +992,94 @@ End Sub
 	}
 }
 
+func TestLinterFindsVBAContinuationLineOverflow(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		line          int
+		kind          string
+		symbol        string
+		continuations int
+	}{
+		{
+			name: "procedure declaration",
+			body: "Attribute VB_Name = \"Main\"\nOption Explicit\n" + continuedLogicalLine(
+				"Public Sub TooMany(ByVal a0 As Long,", "    ByVal arg As Long,", "    ByVal finalArg As Long)\nEnd Sub\n", 25),
+			line:          3,
+			kind:          "procedure_declaration",
+			symbol:        "TooMany",
+			continuations: 25,
+		},
+		{
+			name: "procedure call",
+			body: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" + continuedLogicalLine(
+				"    Call TooMany(a0,", "        arg,", "        finalArg)\nEnd Sub\n", 25),
+			line:          4,
+			kind:          "procedure_call",
+			symbol:        "TooMany",
+			continuations: 25,
+		},
+		{
+			name: "procedure call with Unicode name",
+			body: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" + continuedLogicalLine(
+				"    Call 実行(a0,", "        arg,", "        finalArg)\nEnd Sub\n", 25),
+			line:          4,
+			kind:          "procedure_call",
+			symbol:        "実行",
+			continuations: 25,
+		},
+		{
+			name: "generic logical line",
+			body: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" + continuedLogicalLine(
+				"    result = a0 +", "        arg +", "        finalArg\nEnd Sub\n", 27),
+			line:          4,
+			kind:          "logical_line",
+			continuations: 27,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeLintModule(t, dir, "Main.bas", tc.body)
+			issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			vb015 := issuesByCode(issues, "VB015")
+			if len(vb015) != 1 {
+				t.Fatalf("expected one VB015 issue, got %+v", vb015)
+			}
+			issue := vb015[0]
+			if issue.Line != tc.line || issue.Kind != tc.kind || issue.Symbol != tc.symbol {
+				t.Fatalf("unexpected VB015 metadata: %+v", issue)
+			}
+			if !strings.Contains(issue.Message, "uses "+strconv.Itoa(tc.continuations)+" continuation lines") || !strings.Contains(issue.Message, "at most 24") || issue.Suggestion == "" {
+				t.Fatalf("unexpected VB015 diagnostic: %+v", issue)
+			}
+			assertIssue(t, PushBlockingIssues(issues), "VB015", tc.line)
+		})
+	}
+}
+
+func TestLinterAllowsVBAContinuationLineLimitAndIgnoresStringsAndComments(t *testing.T) {
+	dir := t.TempDir()
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" +
+		continuedLogicalLine("    result = a0 +", "        arg +", "        finalArg\n", 24) +
+		continuedLogicalLine("    result = b0 +", "        arg +", "        finalArg\n", 24) +
+		strings.Repeat("    Debug.Print \"_\"\n", 30) +
+		strings.Repeat("    ' _\n", 30) +
+		"End Sub\n"
+	writeLintModule(t, dir, "Main.bas", body)
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB015"); len(got) != 0 {
+		t.Fatalf("valid continuation limits, strings, and comments should not trigger VB015: %+v", got)
+	}
+}
+
 func TestLinterFindsRepeatedQuestionShorthand(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -1621,4 +1710,18 @@ func writeLintModule(t *testing.T, dir, name, body string) {
 	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func continuedLogicalLine(first, middle, last string, continuations int) string {
+	var b strings.Builder
+	for i := 0; i < continuations; i++ {
+		if i == 0 {
+			b.WriteString(first)
+		} else {
+			b.WriteString(middle)
+		}
+		b.WriteString(" _\n")
+	}
+	b.WriteString(last)
+	return b.String()
 }
