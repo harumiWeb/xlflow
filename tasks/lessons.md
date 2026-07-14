@@ -57,6 +57,8 @@
 - GitHub Actions workflows that use `msys2/setup-msys2` must not hardcode `C:\msys64`. Use the action's `msys2-location` output to derive UCRT64 tool paths because hosted runners can install MSYS2 under `$RUNNER_TEMP`.
 - Formatter casing passes must collect user-declared identifier collisions broadly before applying built-in casing. Include locals, parameters, procedure/property names, enum members, and parameterized declarations so formatter defaults never recase user-defined identifiers that happen to match curated built-ins.
 - When adding a non-suppressible diagnostic, update the backend suppression registry and every editor-side Quick Fix allowlist together, then test that the editor does not offer an inline-suppression action for the new code.
+- Do not infer that user VBA saved injected runtime state from the final `Workbook.Saved`/dirty flag. A macro can save and then mutate again; compare the persisted workbook across the invocation boundary and sanitize any detected in-macro save.
+- Runtime cleanup must distinguish marker-only state from helper-bearing state, but an unmarked legacy helper cannot be ruled out when VBProject inspection is denied. Keep ordinary macro-workbook saves strict enough to inspect for orphan helpers, and make only explicit marker-only cleanup best-effort.
 
 # DialogWatcher
 

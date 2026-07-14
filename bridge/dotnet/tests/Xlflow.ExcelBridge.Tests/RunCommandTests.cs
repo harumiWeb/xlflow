@@ -313,6 +313,25 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void WorkbookFileChangedDetectsPersistenceEvenWhenLaterDirtyStateIsUnknown()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlflow-run-fingerprint-{Guid.NewGuid():N}.xlsm");
+        try
+        {
+            File.WriteAllText(path, "before");
+            var baseline = ExcelRunService.CaptureWorkbookFileFingerprint(path);
+
+            File.WriteAllText(path, "after");
+
+            Assert.True(ExcelRunService.WorkbookFileChanged(path, baseline));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void DefaultRuntimeSkipRequiresNoDebugOrUiInjection()
     {
         var args = RunArgs(@"C:\work\Book.xlsm", "Main.Run") with

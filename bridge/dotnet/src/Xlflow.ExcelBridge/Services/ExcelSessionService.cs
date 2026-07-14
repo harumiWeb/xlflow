@@ -40,18 +40,30 @@ public sealed class ExcelSessionService : ISessionService
             var direct = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, true, disableAutomationMacros: false);
             excel = direct.Excel;
             workbook = direct.Workbook;
+            var removedTransientArtifacts = RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
+            bool? dirty = null;
+            if (ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var workbookDirty))
+            {
+                dirty = workbookDirty;
+            }
             ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, "managed");
+
+            var logs = new List<string> { "started xlflow Excel session" };
+            if (removedTransientArtifacts > 0)
+            {
+                logs.Add($"removed {removedTransientArtifacts} stale xlflow runtime artifact(s); save the session to persist the cleanup");
+            }
 
             return new BridgeResponse
             {
                 RequestId = request.RequestId,
                 Command = request.Command,
-                Logs = ["started xlflow Excel session"],
+                Logs = logs,
                 Extensions = new Dictionary<string, object?>
                 {
                     ["target"] = ExcelBridgeSupport.BuildTargetPayload("live_session", workbookPath),
-                    ["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, "managed", false, false),
-                    ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, "managed", false, false, false, false),
+                    ["session"] = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, "managed", dirty, dirty != false),
+                    ["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(workbookPath, true, "managed", false, false, dirty, dirty != false),
                 },
             };
         }
@@ -110,6 +122,7 @@ public sealed class ExcelSessionService : ISessionService
             }
 
             CloseExistingSession(args.MetadataPath);
+            RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
             ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, "external");
 
             bool? dirty;
@@ -416,11 +429,7 @@ public sealed class ExcelSessionService : ISessionService
                 throw new InvalidOperationException("xlflow session is not running");
             }
 
-            if (string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase))
-            {
-                ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
-                return BuildStopResponse(request, workbookPath, false, false, detachedExternal: true);
-            }
+            var externalOwner = string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase);
 
             excel = ExcelBridgeSupport.GetSessionExcel(args.MetadataPath);
             if (excel is null)
@@ -442,8 +451,20 @@ public sealed class ExcelSessionService : ISessionService
                 return BuildStopResponse(request, workbookPath, false, removedStaleMetadata);
             }
 
+            RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
             var wasDirtyKnown = ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var wasDirtyValue);
             var wasDirty = wasDirtyKnown && wasDirtyValue;
+            if (externalOwner)
+            {
+                ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
+                return BuildStopResponse(
+                    request,
+                    workbookPath,
+                    false,
+                    false,
+                    detachedExternal: true,
+                    detachedDirty: wasDirtyKnown ? wasDirtyValue : null);
+            }
             if (wasDirty)
             {
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
@@ -470,12 +491,22 @@ public sealed class ExcelSessionService : ISessionService
         }
     }
 
-    private static BridgeResponse BuildStopResponse(BridgeRequest request, string workbookPath, bool autoSavedOnStop, bool removedStaleMetadata, bool detachedExternal = false)
+    private static BridgeResponse BuildStopResponse(
+        BridgeRequest request,
+        string workbookPath,
+        bool autoSavedOnStop,
+        bool removedStaleMetadata,
+        bool detachedExternal = false,
+        bool? detachedDirty = false)
     {
         var logs = new List<string>();
         if (detachedExternal)
         {
             logs.Add("detached external Excel session without closing workbook");
+            if (detachedDirty != false)
+            {
+                logs.Add("SAVE REQUIRED: detached workbook has unsaved changes in Excel");
+            }
         }
         if (autoSavedOnStop)
         {
@@ -497,22 +528,24 @@ public sealed class ExcelSessionService : ISessionService
                 ["path"] = workbookPath,
                 ["session"] = false,
                 ["session_mode"] = "none",
-                ["saved"] = true,
-                ["dirty"] = false,
-                ["needs_save"] = false,
-                ["dirty_before_stop"] = autoSavedOnStop,
+                ["saved"] = !detachedExternal || detachedDirty == false,
+                ["dirty"] = detachedExternal ? detachedDirty : false,
+                ["needs_save"] = detachedExternal && detachedDirty != false,
+                ["dirty_before_stop"] = detachedExternal ? detachedDirty : autoSavedOnStop,
                 ["auto_saved_on_stop"] = autoSavedOnStop,
                 ["detached_external"] = detachedExternal,
             },
         };
-        if (autoSavedOnStop)
+        if (autoSavedOnStop || (detachedExternal && detachedDirty != false))
         {
             extensions["warnings"] = new[]
             {
                 new Dictionary<string, object?>
                 {
                     ["code"] = "save_required",
-                    ["message"] = "The live session workbook had unsaved changes and was saved while stopping the session.",
+                    ["message"] = detachedExternal
+                        ? "The detached external workbook has unsaved changes. Save it in Excel to persist the cleanup."
+                        : "The live session workbook had unsaved changes and was saved while stopping the session.",
                 },
             };
         }

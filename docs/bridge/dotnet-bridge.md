@@ -223,7 +223,12 @@ the timeout boundary. Excel may continue executing user VBA after the child COM
 caller is terminated, so COM-based harness cleanup is not attempted
 synchronously while Excel is busy. Callers must treat timeout results as
 `vba_may_still_be_running` until the Excel session is reset or the workbook is
-reopened. When the .NET bridge cannot finish returning its own timeout payload
+reopened. Once Excel is responsive, every .NET bridge workbook persistence
+boundary removes transient xlflow runtime/UI/debug defined names and generated
+helper modules before saving;
+cleanup failure blocks the save. This prevents a later `save --session` or
+managed `session stop` from persisting the timeout's execution mode into manual
+workbook use. When the .NET bridge cannot finish returning its own timeout payload
 before the outer Go deadline, xlflow still returns a valid JSON timeout envelope
 from Go with the same limitation documented explicitly.
 

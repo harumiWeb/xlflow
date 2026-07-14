@@ -945,9 +945,9 @@ internal static class ExcelBridgeSupport
             "Buttons" => dyn.Buttons(),
             "CopyPicture" => InvokeCopyPicture(dyn, args),
             "Open" => dyn.Open(args[0]),
-            "Save" => dyn.Save(),
-            "SaveAs" => InvokeSaveAs(dyn, args),
-            "SaveCopyAs" => dyn.SaveCopyAs(args[0]),
+            "Save" => InvokeWorkbookSave(dyn, comObject),
+            "SaveAs" => InvokeWorkbookSaveAs(dyn, comObject, args),
+            "SaveCopyAs" => InvokeWorkbookSaveCopyAs(dyn, comObject, args),
             "Import" => dyn.Import(args[0]),
             "Export" => dyn.Export(args[0]),
             "Remove" => dyn.Remove(args[0]),
@@ -960,8 +960,16 @@ internal static class ExcelBridgeSupport
         };
     }
 
-    private static object? InvokeSaveAs(dynamic dyn, object?[] args)
+    private static object? InvokeWorkbookSave(dynamic dyn, object workbook)
     {
+        RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
+        dyn.Save();
+        return null;
+    }
+
+    private static object? InvokeWorkbookSaveAs(dynamic dyn, object workbook, object?[] args)
+    {
+        RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
         switch (args.Length)
         {
             case 1:
@@ -973,6 +981,17 @@ internal static class ExcelBridgeSupport
             default:
                 throw new InvalidOperationException("SaveAs currently supports 1 or 2 arguments.");
         }
+    }
+
+    private static object? InvokeWorkbookSaveCopyAs(dynamic dyn, object workbook, object?[] args)
+    {
+        if (args.Length != 1)
+        {
+            throw new InvalidOperationException("SaveCopyAs requires exactly 1 argument.");
+        }
+        RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
+        dyn.SaveCopyAs(args[0]);
+        return null;
     }
 
     private static object? InvokeCopyPicture(dynamic dyn, object?[] args)

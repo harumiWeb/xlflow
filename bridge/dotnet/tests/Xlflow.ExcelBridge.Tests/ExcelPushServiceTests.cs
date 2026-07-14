@@ -449,11 +449,29 @@ public sealed class ExcelPushServiceTests
 
     public sealed class FakeBackupWorkbook(Action<string> saveCopyAs)
     {
+        public EmptyNames Names { get; } = new();
+        public EmptyVBProject VBProject { get; } = new();
+
         public object? SaveCopyAs(object path)
         {
             saveCopyAs((string)path);
             return null;
         }
+    }
+
+    public sealed class EmptyNames
+    {
+        public int Count => 0;
+    }
+
+    public sealed class EmptyVBProject
+    {
+        public EmptyComponents VBComponents { get; } = new();
+    }
+
+    public sealed class EmptyComponents
+    {
+        public int Count => 0;
     }
 
     private static PushCommandArguments PushArgs(string backupMode)
