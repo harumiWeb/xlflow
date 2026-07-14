@@ -118,6 +118,31 @@ public sealed class FormWriteCommandTests
         Assert.Equal(333.0, component.Properties.Width.Value);
     }
 
+    [Fact]
+    public void SetRequiredVBComponentPropertyPersistsCaptionAndVerifiesReadback()
+    {
+        var component = new FakeVBComponent();
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredVBComponentProperty", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+        _ = method.Invoke(null, [component, "Caption", "労務管理 実行"]);
+
+        Assert.Equal("労務管理 実行", component.Properties.Caption.Value);
+    }
+
+    [Fact]
+    public void SetRequiredVBComponentPropertyFailsWhenCaptionReadbackDoesNotMatch()
+    {
+        var component = new FakeVBComponent(ignoreCaptionWrites: true);
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredVBComponentProperty", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+        var exception = Assert.Throws<TargetInvocationException>(() => method.Invoke(null, [component, "Caption", "労務管理 実行"]));
+
+        var inner = Assert.IsType<InvalidOperationException>(exception.InnerException);
+        Assert.Contains("Caption did not persist", inner.Message, StringComparison.Ordinal);
+    }
+
     private sealed class FakeFormWriteService(Func<BridgeRequest, FormWriteCommandArguments, BridgeResponse> handler) : IFormWriteService
     {
         public BridgeResponse Execute(BridgeRequest request, FormWriteCommandArguments args, CancellationToken cancellationToken)
@@ -129,29 +154,54 @@ public sealed class FormWriteCommandTests
 
     private sealed class FakeVBComponent
     {
-        public FakeVBIDEProperties Properties { get; } = new();
+        public FakeVBComponent(bool ignoreCaptionWrites = false)
+        {
+            Properties = new FakeVBIDEProperties(ignoreCaptionWrites);
+        }
+
+        public FakeVBIDEProperties Properties { get; }
     }
 
     private sealed class FakeVBIDEProperties
     {
+        public FakeVBIDEProperties(bool ignoreCaptionWrites)
+        {
+            Caption = new FakeVBIDEProperty("Caption", "UserForm1", ignoreCaptionWrites);
+        }
+
         public FakeVBIDEProperty Width { get; } = new("Width", 240.0);
 
         public FakeVBIDEProperty Height { get; } = new("Height", 180.0);
 
-        public int Count => 2;
+        public FakeVBIDEProperty Caption { get; }
+
+        public int Count => 3;
 
         public FakeVBIDEProperty Item(int index) => index switch
         {
             1 => Width,
             2 => Height,
+            3 => Caption,
             _ => throw new ArgumentOutOfRangeException(nameof(index), "VBIDE Properties is one-based."),
         };
     }
 
-    private sealed class FakeVBIDEProperty(string name, double value)
+    private sealed class FakeVBIDEProperty(string name, object value, bool ignoreWrites = false)
     {
+        private object _value = value;
+
         public string Name { get; } = name;
 
-        public double Value { get; set; } = value;
+        public object Value
+        {
+            get => _value;
+            set
+            {
+                if (!ignoreWrites)
+                {
+                    _value = value;
+                }
+            }
+        }
     }
 }

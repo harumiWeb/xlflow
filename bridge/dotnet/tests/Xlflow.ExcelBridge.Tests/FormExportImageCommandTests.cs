@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -81,6 +82,20 @@ public sealed class FormExportImageCommandTests
 
         Assert.Equal("failed", json.RootElement.GetProperty("status").GetString());
         Assert.Equal("form_export_image_args_invalid", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void CaptureHelperKeepsTheRuntimeCaptionInsteadOfMaskingItWithDesignerState()
+    {
+        var method = typeof(ExcelFormExportImageService).GetMethod("BuildHelperCode", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+        var helperCode = (string)method.Invoke(null, null)!;
+
+        Assert.Contains("caption = CStr(xlflowCapturedForm.Caption)", helperCode, StringComparison.Ordinal);
+        Assert.Contains("xlflowCapturedForm.Caption = caption & \" [xlflow-capture-\"", helperCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("xlflowExpectedCaption", helperCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("expectedCaption", helperCode, StringComparison.Ordinal);
     }
 
     private sealed class FakeFormExportImageService(Func<BridgeRequest, FormExportImageCommandArguments, BridgeResponse> handler) : IFormExportImageService

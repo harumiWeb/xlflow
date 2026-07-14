@@ -6,6 +6,7 @@ All notable changes to xlflow will be documented in this file.
 
 - Added non-configurable `VB015` lint/preflight validation for VBA logical lines with more than 24 line continuations, preventing opaque Excel import failures before `push` or `run` opens Excel.
 - Added strict reusable UserForm spec validation based on the canonical contract, including unknown-field, type, fixed-value, control-property, parent-reference, and type/ProgID mismatch diagnostics before `form build` opens Excel.
+- Fixed `form build` so a UserForm caption is persisted through the VBComponent property path and remains consistent with runtime forms; `form export-image` now captures the actual runtime caption instead of substituting the Designer value.
 
 ## v0.23.0
 

@@ -503,9 +503,10 @@ public sealed class ExcelFormWriteService : IFormWriteService
     private static void SetDesignerFormProperties(object designer, object component, FormWriteFormSpec form)
     {
         var caption = form.Build?.Caption ?? form.Caption ?? form.Observed?.Caption;
-        if (!string.IsNullOrWhiteSpace(caption))
+        if (caption is not null)
         {
-            TrySetProperty(designer, "Caption", caption);
+            SetRequiredVBComponentProperty(component, "Caption", caption);
+            SetRequiredProperty(designer, "Caption", caption);
         }
         var width = form.Build?.Width ?? form.Width ?? form.Observed?.Width;
         if (width is not null)
@@ -679,6 +680,81 @@ public sealed class ExcelFormWriteService : IFormWriteService
             ExcelBridgeSupport.ReleaseComObject(properties);
         }
         return false;
+    }
+
+    private static void SetRequiredVBComponentProperty(object component, string propertyName, string expectedValue)
+    {
+        object? properties = null;
+        try
+        {
+            properties = ExcelBridgeSupport.Get(component, "Properties");
+            if (properties is null)
+            {
+                throw new InvalidOperationException($"designer_write_failed: failed to access VBComponent.Properties for UserForm {propertyName}.");
+            }
+
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(properties, "Count"));
+            for (var index = 1; index <= count; index++)
+            {
+                object? property = null;
+                try
+                {
+                    property = ExcelBridgeSupport.Get(properties, "Item", index);
+                    var name = ExcelBridgeSupport.GetString(property!, "Name") ?? "";
+                    if (!string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    ExcelBridgeSupport.Set(property!, "Value", expectedValue);
+                    var actualValue = ExcelBridgeSupport.GetString(property!, "Value");
+                    if (!string.Equals(actualValue, expectedValue, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"designer_write_failed: UserForm {propertyName} did not persist through VBComponent.Properties.");
+                    }
+                    return;
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(property);
+                }
+            }
+
+            throw new InvalidOperationException($"designer_write_failed: VBComponent.Properties does not expose UserForm {propertyName}.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"designer_write_failed: failed to set UserForm {propertyName} through VBComponent.Properties. {ex.Message}", ex);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(properties);
+        }
+    }
+
+    private static void SetRequiredProperty(object target, string propertyName, string expectedValue)
+    {
+        try
+        {
+            ExcelBridgeSupport.Set(target, propertyName, expectedValue);
+            var actualValue = ExcelBridgeSupport.GetString(target, propertyName);
+            if (!string.Equals(actualValue, expectedValue, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"designer_write_failed: UserForm Designer {propertyName} did not persist.");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"designer_write_failed: failed to set UserForm Designer {propertyName}. {ex.Message}", ex);
+        }
     }
 
     private static object? GetComponentByName(object vbProject, string name)
