@@ -70,11 +70,10 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
             helperModuleName = ExcelBridgeSupport.GetString(helperComponent, "Name") ?? "";
 
             var processId = ExcelBridgeSupport.GetExcelProcessId(runtimeExcel);
-            var sourceCaption = GetDesignerCaption(workbook, args.FormName);
             var token = $"xlflow-capture-{Guid.NewGuid():N}";
 
             phase = "schedule_form_capture";
-            InvokePrepareCapture(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, token, args.Initializer, sourceCaption);
+            InvokePrepareCapture(runtimeExcel, runtimeWorkbook, helperModuleName, args.FormName, token, args.Initializer);
 
             phase = "find_form_window";
             var capture = WaitForCaptureWindow(runtimeExcel, runtimeWorkbook, helperModuleName, processId, token, cancellationToken);
@@ -322,29 +321,6 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         return (direct.Excel, direct.Workbook, tempPath);
     }
 
-    private static string GetDesignerCaption(object workbook, string formName)
-    {
-        object? component = null;
-        object? designer = null;
-        try
-        {
-            var vbProject = ExcelBridgeSupport.TryGetWorkbookVbProject(workbook);
-            var components = ExcelBridgeSupport.Get(vbProject!, "VBComponents");
-            component = ExcelBridgeSupport.Get(components!, "Item", formName);
-            designer = ExcelBridgeSupport.Get(component!, "Designer");
-            return ExcelBridgeSupport.GetString(designer!, "Caption") ?? "";
-        }
-        catch
-        {
-            return "";
-        }
-        finally
-        {
-            ExcelBridgeSupport.ReleaseComObject(designer);
-            ExcelBridgeSupport.ReleaseComObject(component);
-        }
-    }
-
     private static object InstallHelper(object runtimeVbProject)
     {
         object? components = null;
@@ -369,12 +345,12 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
         }
     }
 
-    private static void InvokePrepareCapture(object runtimeExcel, object runtimeWorkbook, string helperModuleName, string formName, string token, string initializer, string expectedCaption)
+    private static void InvokePrepareCapture(object runtimeExcel, object runtimeWorkbook, string helperModuleName, string formName, string token, string initializer)
     {
         var workbookName = (ExcelBridgeSupport.TryGetWorkbookName(runtimeWorkbook) ?? "").Replace("'", "''", StringComparison.Ordinal);
         var moduleName = string.IsNullOrWhiteSpace(helperModuleName) ? "XlflowCap" : helperModuleName;
         var macroName = $"'{workbookName}'!{moduleName}.XlflowPrepareFormImageCapture";
-        ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName, formName, token, initializer, expectedCaption);
+        ExcelBridgeSupport.RunExcelMacro(runtimeExcel, macroName, formName, token, initializer);
     }
 
     private static WindowInfo WaitForCaptureWindow(object runtimeExcel, object runtimeWorkbook, string helperModuleName, int processId, string token, CancellationToken cancellationToken)
@@ -638,7 +614,6 @@ Private xlflowLastErrorMessage As String
 Private xlflowCaptureReady As Boolean
 Private xlflowCaptureWindowCaption As String
 Private xlflowCaptureWindowHandle As String
-Private xlflowExpectedCaption As String
 
 Private Function XlflowFindFormWindowHandle(ByVal caption As String) As String
 #If VBA7 Then
@@ -654,11 +629,10 @@ Private Function XlflowFindFormWindowHandle(ByVal caption As String) As String
   XlflowFindFormWindowHandle = CStr(hwnd)
 End Function
 
-Public Sub XlflowPrepareFormImageCapture(ByVal formName As String, ByVal token As String, Optional ByVal initializer As String = "", Optional ByVal expectedCaption As String = "")
+Public Sub XlflowPrepareFormImageCapture(ByVal formName As String, ByVal token As String, Optional ByVal initializer As String = "")
   xlflowCaptureFormName = formName
   xlflowCaptureToken = token
   xlflowCaptureInitializer = Trim$(initializer)
-  xlflowExpectedCaption = Trim$(expectedCaption)
   xlflowLastErrorSource = ""
   xlflowLastErrorMessage = ""
   xlflowCaptureReady = False
@@ -686,17 +660,6 @@ Public Sub XlflowExecuteFormImageCapture()
   On Error Resume Next
   caption = CStr(xlflowCapturedForm.Caption)
   On Error GoTo ErrHandler
-  If Len(xlflowExpectedCaption) > 0 Then
-    If Len(caption) = 0 _
-      Or StrComp(caption, xlflowCaptureFormName, vbTextCompare) = 0 _
-      Or LCase$(Left$(caption, 8)) = "userform" Then
-      caption = xlflowExpectedCaption
-    End If
-  End If
-  If Len(caption) = 0 Then
-    caption = xlflowCaptureFormName
-  End If
-
   PrimeFocusableControl xlflowCapturedForm
   xlflowCapturedForm.Caption = caption & " [xlflow-capture-" & xlflowCaptureToken & "]"
   xlflowCapturedForm.Show vbModeless
@@ -812,7 +775,6 @@ Public Sub XlflowCleanupFormImageCapture()
   xlflowCaptureReady = False
   xlflowCaptureWindowCaption = ""
   xlflowCaptureWindowHandle = "0"
-  xlflowExpectedCaption = ""
   xlflowLastErrorSource = ""
   xlflowLastErrorMessage = ""
   On Error GoTo 0
