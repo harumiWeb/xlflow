@@ -333,6 +333,8 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   suppressibleDiagnostic.code = "VB029";
   assert.strictEqual(diagnosticRuleCode(suppressibleDiagnostic), undefined);
+  suppressibleDiagnostic.code = "VB015";
+  assert.strictEqual(diagnosticRuleCode(suppressibleDiagnostic), undefined);
   assert.deepStrictEqual(
     await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, undefined),
     ["lsp", "--stdio"],

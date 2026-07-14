@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
@@ -1848,7 +1850,7 @@ func isVBAIdentifierRune(r rune) bool {
 	case '_', '$', '%', '&', '!', '#', '@', '^':
 		return true
 	}
-	return r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func (l Linter) procedureBoundaryIssues(path string, lineNo int, line string, procedures *[]procedureFrame) []Issue {
@@ -1956,8 +1958,12 @@ func splitVBACallTarget(line string) (string, string, bool) {
 		return "", "", false
 	}
 	end := 0
-	for end < len(line) && (isVBAIdentifierRune(rune(line[end])) || line[end] == '.') {
-		end++
+	for end < len(line) {
+		r, size := utf8.DecodeRuneInString(line[end:])
+		if !isVBAIdentifierRune(r) && r != '.' {
+			break
+		}
+		end += size
 	}
 	if end == 0 || line[end-1] == '.' {
 		return "", "", false

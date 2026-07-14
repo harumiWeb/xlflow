@@ -1020,6 +1020,15 @@ func TestLinterFindsVBAContinuationLineOverflow(t *testing.T) {
 			continuations: 25,
 		},
 		{
+			name: "procedure call with Unicode name",
+			body: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" + continuedLogicalLine(
+				"    Call 実行(a0,", "        arg,", "        finalArg)\nEnd Sub\n", 25),
+			line:          4,
+			kind:          "procedure_call",
+			symbol:        "実行",
+			continuations: 25,
+		},
+		{
 			name: "generic logical line",
 			body: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" + continuedLogicalLine(
 				"    result = a0 +", "        arg +", "        finalArg\nEnd Sub\n", 27),
