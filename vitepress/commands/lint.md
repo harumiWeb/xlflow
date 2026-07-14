@@ -48,6 +48,7 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB012` | error    | Mismatched procedure end statement.                                                                                        |
 | `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                  |
 | `VB014` | error    | `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes.                                             |
+| `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                         |
 | `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                   |
 | `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                              |
 | `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                 |
@@ -83,7 +84,7 @@ Range("A2").Select ' xlflow:disable-line VB002
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match a lint diagnostic are reported as warnings.
 
-Safety diagnostics `VB008` through `VB014`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 Rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Disable `VB020` with `disabled_rules = ["VB020"]` when a project intentionally keeps scratch locals. Heavier project-wide rules such as `detect_unused_private_procedures = true` (`VB021`) stay conservative opt-ins; new `xlflow.toml` files include commented examples. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, `Range.Find` `Nothing` guards, and object `Nothing` guards combined with dereferences in non-short-circuit boolean expressions.
 

@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added non-configurable `VB015` lint/preflight validation for VBA logical lines with more than 24 line continuations, preventing opaque Excel import failures before `push` or `run` opens Excel.
 - Added strict reusable UserForm spec validation based on the canonical contract, including unknown-field, type, fixed-value, control-property, parent-reference, and type/ProgID mismatch diagnostics before `form build` opens Excel.
 
 ## v0.23.0
