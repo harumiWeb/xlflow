@@ -101,6 +101,129 @@ public sealed class RuntimeInjectionHelperTests
         Assert.Equal("=\"say \"\"hi\"\"\"", RuntimeInjectionHelper.BuildDefinedNameRefersTo("say \"hi\""));
     }
 
+    [Theory]
+    [InlineData("__XLFLOW_MODE__")]
+    [InlineData("Book.xlsm!__XLFLOW_MODE__")]
+    [InlineData("'Book.xlsm'!__XLFLOW_RUNTIME_VERSION__")]
+    [InlineData("__XLFLOW_DEBUG_PIPE__")]
+    [InlineData("__XLFLOW_RUN_HELPER__")]
+    [InlineData("__XLFLOW_UI_STREAM_HELPER__")]
+    [InlineData("__XLFLOW_UI_STREAM_REDACT_INPUT__")]
+    [InlineData("__XLFLOW_UI_MSGBOX_confirm_save__")]
+    [InlineData("__XLFLOW_UI_INPUT_customer_name__")]
+    [InlineData("__XLFLOW_UI_FILEDIALOG_GET_OPEN_source_files__")]
+    public void IsTransientRuntimeDefinedNameRecognizesXlflowOwnedMarkers(string name)
+    {
+        Assert.True(RuntimeInjectionHelper.IsTransientRuntimeDefinedName(name));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("CustomerName")]
+    [InlineData("XLFLOW_MODE")]
+    [InlineData("__XLFLOW_PROJECT_SETTING__")]
+    [InlineData("__XLFLOW_UI_CUSTOM__")]
+    public void IsTransientRuntimeDefinedNamePreservesUnownedNames(string name)
+    {
+        Assert.False(RuntimeInjectionHelper.IsTransientRuntimeDefinedName(name));
+    }
+
+    [Theory]
+    [InlineData("XlflowRun_1234abcd")]
+    [InlineData("xlflowuistream_deadbeef")]
+    public void IsTemporaryRuntimeComponentNameRecognizesGeneratedHelpers(string name)
+    {
+        Assert.True(RuntimeInjectionHelper.IsTemporaryRuntimeComponentName(name));
+    }
+
+    [Theory]
+    [InlineData("XlflowRunner")]
+    [InlineData("XlflowRuntime")]
+    [InlineData("CustomerModule")]
+    public void IsTemporaryRuntimeComponentNamePreservesPersistentModules(string name)
+    {
+        Assert.False(RuntimeInjectionHelper.IsTemporaryRuntimeComponentName(name));
+    }
+
+    [Fact]
+    public void RemoveTransientRuntimeDefinedNamesDeletesOnlyXlflowOwnedMarkers()
+    {
+        var mode = new FakeDefinedName("Book.xlsm!__XLFLOW_MODE__");
+        var response = new FakeDefinedName("__XLFLOW_UI_INPUT_customer_name__");
+        var customer = new FakeDefinedName("CustomerName");
+        var workbook = new FakeWorkbook(mode, response, customer);
+
+        var removed = RuntimeInjectionHelper.RemoveTransientRuntimeDefinedNames(workbook);
+
+        Assert.Equal(2, removed);
+        Assert.True(mode.Deleted);
+        Assert.True(response.Deleted);
+        Assert.False(customer.Deleted);
+    }
+
+    [Fact]
+    public void WorkbookSaveDoesNotRunWhenTransientMarkerCleanupFails()
+    {
+        var marker = new FakeDefinedName("__XLFLOW_MODE__") { DeleteFailure = new InvalidOperationException("delete failed") };
+        var workbook = new FakeWorkbook(marker);
+
+        var error = Assert.ThrowsAny<Exception>(() => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+
+        Assert.Contains("delete failed", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, workbook.SaveCalls);
+    }
+
+    [Fact]
+    public void WorkbookSaveRemovesTransientMarkersBeforeSaving()
+    {
+        var marker = new FakeDefinedName("__XLFLOW_MODE__");
+        var temporary = new FakeComponent("XlflowRun_1234abcd");
+        var persistent = new FakeComponent("XlflowRunner");
+        var workbook = new FakeWorkbook([marker], [temporary, persistent]);
+
+        ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+
+        Assert.True(marker.Deleted);
+        Assert.True(temporary.Removed);
+        Assert.False(persistent.Removed);
+        Assert.Equal(1, workbook.SaveCalls);
+    }
+
+    [Fact]
+    public void EnsureDefinedNameRestorationTracksHarnessMarkerWhenModeInjectionWasSkipped()
+    {
+        var workbook = new FakeWorkbook();
+        var state = new RuntimeInjectionHelper.RuntimeInjectionState();
+
+        RuntimeInjectionHelper.EnsureDefinedNameRestoration(workbook, state, "__XLFLOW_RUN_HELPER__");
+        RuntimeInjectionHelper.EnsureDefinedNameRestoration(workbook, state, "__XLFLOW_RUN_HELPER__");
+
+        Assert.True(state.RestoreRequired);
+        var snapshot = Assert.Single(state.NameSnapshots);
+        Assert.Equal("__XLFLOW_RUN_HELPER__", snapshot.Name);
+        Assert.False(snapshot.Existed);
+    }
+
+    [Fact]
+    public void WorkbookSaveDoesNotRequireVBProjectWhenNoTransientMarkersExist()
+    {
+        var workbook = new FakeWorkbookWithoutVBProject();
+
+        ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+
+        Assert.Equal(1, workbook.SaveCalls);
+    }
+
+    [Fact]
+    public void WorkbookSaveRequiresVBProjectWhenTransientMarkersExist()
+    {
+        var workbook = new FakeWorkbookWithoutVBProject(new FakeDefinedName("__XLFLOW_MODE__"));
+
+        Assert.ThrowsAny<Exception>(() => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+
+        Assert.Equal(0, workbook.SaveCalls);
+    }
+
     [Fact]
     public void DecodeUIResponsesJsonParsesBase64Json()
     {
@@ -203,5 +326,85 @@ public sealed class RuntimeInjectionHelperTests
     {
         var code = RuntimeInjectionHelper.BuildUIStreamModuleCode("test\"pipe");
         Assert.Contains("test\"\"pipe", code);
+    }
+
+    public sealed class FakeWorkbook
+    {
+        public FakeWorkbook(params FakeDefinedName[] names) : this(names, [])
+        {
+        }
+
+        public FakeWorkbook(FakeDefinedName[] names, FakeComponent[] components)
+        {
+            Names = new FakeNames(names);
+            VBProject = new FakeVBProject(components);
+        }
+
+        public FakeNames Names { get; }
+        public FakeVBProject VBProject { get; }
+        public int SaveCalls { get; private set; }
+
+        public void Save()
+        {
+            SaveCalls++;
+        }
+    }
+
+    public sealed class FakeNames(params FakeDefinedName[] names)
+    {
+        private readonly FakeDefinedName[] items = names;
+        public int Count => items.Length;
+        public FakeDefinedName Item(int index) => items[index - 1];
+    }
+
+    public sealed class FakeDefinedName(string name)
+    {
+        public string Name { get; } = name;
+        public bool Deleted { get; private set; }
+        public Exception? DeleteFailure { get; init; }
+
+        public void Delete()
+        {
+            if (DeleteFailure is not null)
+            {
+                throw DeleteFailure;
+            }
+            Deleted = true;
+        }
+    }
+
+    public sealed class FakeVBProject(FakeComponent[] components)
+    {
+        public FakeComponents VBComponents { get; } = new(components);
+    }
+
+    public sealed class FakeComponents(FakeComponent[] components)
+    {
+        private readonly FakeComponent[] items = components;
+        public int Count => items.Length;
+        public FakeComponent Item(int index) => items[index - 1];
+
+        public object? Remove(object component)
+        {
+            ((FakeComponent)component).Removed = true;
+            return null;
+        }
+    }
+
+    public sealed class FakeComponent(string name)
+    {
+        public string Name { get; } = name;
+        public bool Removed { get; set; }
+    }
+
+    public sealed class FakeWorkbookWithoutVBProject(params FakeDefinedName[] names)
+    {
+        public FakeNames Names { get; } = new(names);
+        public int SaveCalls { get; private set; }
+
+        public void Save()
+        {
+            SaveCalls++;
+        }
     }
 }

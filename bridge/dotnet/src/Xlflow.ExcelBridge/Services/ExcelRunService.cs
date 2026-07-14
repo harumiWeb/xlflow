@@ -125,6 +125,11 @@ public sealed class ExcelRunService : IRunService
                     ?? throw new InvalidOperationException("inject_harness failed: could not add a temporary module.");
                 var runnerName = "XlflowRun_" + Guid.NewGuid().ToString("N")[..8];
                 SetProperty(runnerComponent, "Name", runnerName);
+                RuntimeInjectionHelper.EnsureDefinedNameRestoration(
+                    workbook,
+                    runtimeState,
+                    "__XLFLOW_RUN_HELPER__");
+                RuntimeInjectionHelper.SetDefinedName(workbook, "__XLFLOW_RUN_HELPER__", runnerName);
                 runnerCodeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                     ?? throw new InvalidOperationException("inject_harness failed: CodeModule is unavailable.");
                 ExcelBridgeSupport.InvokeMethod(runnerCodeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs));
@@ -188,12 +193,25 @@ public sealed class ExcelRunService : IRunService
                 }
             }
 
+            var runtimeStateWasPersistedByMacro = false;
+            if (!runTimedOut && runtimeState.RestoreRequired &&
+                ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var workbookDirtyAfterMacro))
+            {
+                runtimeStateWasPersistedByMacro = !workbookDirtyAfterMacro;
+            }
+
             if (!runTimedOut)
             {
                 RemoveTemporaryComponent(vbProject, runnerComponent);
                 runnerComponent = null;
                 RestoreRuntimeMarkers(workbook, runtimeState);
                 runtimeState = null;
+                if (runtimeStateWasPersistedByMacro)
+                {
+                    ExcelBridgeSupport.RunPhase(
+                        "save_runtime_cleanup",
+                        () => ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save"));
+                }
             }
 
             var targetKind = sessionAttached ? "live_session" : "file";

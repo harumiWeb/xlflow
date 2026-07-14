@@ -156,6 +156,206 @@ internal static class RuntimeInjectionHelper
         return "=\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
+    public static bool IsTransientRuntimeDefinedName(string name)
+    {
+        var normalized = (name ?? "").Trim();
+        var separator = normalized.LastIndexOf('!');
+        if (separator >= 0 && separator + 1 < normalized.Length)
+        {
+            normalized = normalized[(separator + 1)..];
+        }
+
+        if (normalized.Equals("__XLFLOW_MODE__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_RUNTIME_VERSION__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_DEBUG_PIPE__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_RUN_HELPER__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_UI_STREAM_HELPER__", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("__XLFLOW_UI_STREAM_REDACT_INPUT__", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalized.EndsWith("__", StringComparison.Ordinal) &&
+            (normalized.StartsWith("__XLFLOW_UI_MSGBOX_", StringComparison.OrdinalIgnoreCase) ||
+             normalized.StartsWith("__XLFLOW_UI_INPUT_", StringComparison.OrdinalIgnoreCase) ||
+             normalized.StartsWith("__XLFLOW_UI_FILEDIALOG_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsTemporaryRuntimeComponentName(string name)
+    {
+        var normalized = (name ?? "").Trim();
+        return normalized.StartsWith("XlflowRun_", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("XlflowUIStream_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static int RemoveTransientRuntimeArtifacts(object workbook)
+    {
+        var transientNamesPresent = ContainsTransientRuntimeDefinedNames(workbook);
+        var removedComponents = RemoveTemporaryRuntimeComponents(workbook, transientNamesPresent);
+        var removedNames = RemoveTransientRuntimeDefinedNames(workbook);
+        return removedComponents + removedNames;
+    }
+
+    private static bool ContainsTransientRuntimeDefinedNames(object workbook)
+    {
+        var names = ExcelBridgeSupport.Get(workbook, "Names")
+            ?? throw new InvalidOperationException("Workbook names are unavailable.");
+        try
+        {
+            var count = Convert.ToInt32(ExcelBridgeSupport.Get(names, "Count"), CultureInfo.InvariantCulture);
+            for (var index = 1; index <= count; index++)
+            {
+                var definedName = ExcelBridgeSupport.Get(names, "Item", index);
+                if (definedName is null)
+                {
+                    continue;
+                }
+                try
+                {
+                    var definedNameText = Convert.ToString(
+                        ExcelBridgeSupport.Get(definedName, "Name"),
+                        CultureInfo.InvariantCulture) ?? "";
+                    if (IsTransientRuntimeDefinedName(definedNameText))
+                    {
+                        return true;
+                    }
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(definedName);
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(names);
+        }
+    }
+
+    private static int RemoveTemporaryRuntimeComponents(object workbook, bool accessRequired)
+    {
+        object? vbProject;
+        try
+        {
+            vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
+        }
+        catch when (!accessRequired)
+        {
+            return 0;
+        }
+        if (vbProject is null)
+        {
+            if (accessRequired)
+            {
+                throw new InvalidOperationException("VBProject is unavailable while cleaning transient xlflow runtime state.");
+            }
+            return 0;
+        }
+        object? components = null;
+        var temporaryComponents = new List<object>();
+        try
+        {
+            try
+            {
+                components = ExcelBridgeSupport.Get(vbProject, "VBComponents");
+            }
+            catch when (!accessRequired)
+            {
+                return 0;
+            }
+            if (components is null)
+            {
+                if (accessRequired)
+                {
+                    throw new InvalidOperationException("VBComponents are unavailable while cleaning transient xlflow runtime state.");
+                }
+                return 0;
+            }
+            var count = Convert.ToInt32(ExcelBridgeSupport.Get(components, "Count"), CultureInfo.InvariantCulture);
+            for (var index = 1; index <= count; index++)
+            {
+                var component = ExcelBridgeSupport.Get(components, "Item", index);
+                if (component is null)
+                {
+                    continue;
+                }
+                var componentName = Convert.ToString(
+                    ExcelBridgeSupport.Get(component, "Name"),
+                    CultureInfo.InvariantCulture) ?? "";
+                if (IsTemporaryRuntimeComponentName(componentName))
+                {
+                    temporaryComponents.Add(component);
+                }
+                else
+                {
+                    ExcelBridgeSupport.ReleaseComObject(component);
+                }
+            }
+
+            foreach (var component in temporaryComponents)
+            {
+                ExcelBridgeSupport.InvokeViaDynamic(components, "Remove", component);
+            }
+            return temporaryComponents.Count;
+        }
+        finally
+        {
+            foreach (var component in temporaryComponents)
+            {
+                ExcelBridgeSupport.ReleaseComObject(component);
+            }
+            ExcelBridgeSupport.ReleaseComObject(components);
+            ExcelBridgeSupport.ReleaseComObject(vbProject);
+        }
+    }
+
+    public static int RemoveTransientRuntimeDefinedNames(object workbook)
+    {
+        var names = ExcelBridgeSupport.Get(workbook, "Names")
+            ?? throw new InvalidOperationException("Workbook names are unavailable.");
+        var transientNames = new List<object>();
+        try
+        {
+            var count = Convert.ToInt32(ExcelBridgeSupport.Get(names, "Count"), CultureInfo.InvariantCulture);
+            for (var index = 1; index <= count; index++)
+            {
+                var definedName = ExcelBridgeSupport.Get(names, "Item", index);
+                if (definedName is null)
+                {
+                    continue;
+                }
+
+                var definedNameText = Convert.ToString(
+                    ExcelBridgeSupport.Get(definedName, "Name"),
+                    CultureInfo.InvariantCulture) ?? "";
+                if (IsTransientRuntimeDefinedName(definedNameText))
+                {
+                    transientNames.Add(definedName);
+                }
+                else
+                {
+                    ExcelBridgeSupport.ReleaseComObject(definedName);
+                }
+            }
+
+            foreach (var definedName in transientNames)
+            {
+                ExcelBridgeSupport.InvokeMethod(definedName, "Delete");
+            }
+
+            return transientNames.Count;
+        }
+        finally
+        {
+            foreach (var definedName in transientNames)
+            {
+                ExcelBridgeSupport.ReleaseComObject(definedName);
+            }
+            ExcelBridgeSupport.ReleaseComObject(names);
+        }
+    }
+
     public static void SetDefinedName(object workbook, string name, string value)
     {
         var names = ExcelBridgeSupport.Get(workbook, "Names")
@@ -208,6 +408,20 @@ internal static class RuntimeInjectionHelper
         {
             ExcelBridgeSupport.ReleaseComObject(names);
         }
+    }
+
+    public static void EnsureDefinedNameRestoration(
+        object workbook,
+        RuntimeInjectionState state,
+        string name)
+    {
+        if (state.NameSnapshots.Any(snapshot =>
+            snapshot.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+        state.NameSnapshots.Add(CaptureDefinedNameState(workbook, name));
+        state.RestoreRequired = true;
     }
 
     public static void RestoreDefinedName(object workbook, DefinedNameSnapshot snapshot)
@@ -391,6 +605,7 @@ internal static class RuntimeInjectionHelper
                 state.NameSnapshots.Add(CaptureDefinedNameState(workbook, name));
             }
             state.NameSnapshots.Add(CaptureDefinedNameState(workbook, "__XLFLOW_DEBUG_PIPE__"));
+            state.NameSnapshots.Add(CaptureDefinedNameState(workbook, "__XLFLOW_RUN_HELPER__"));
             state.NameSnapshots.Add(CaptureDefinedNameState(workbook, "__XLFLOW_UI_STREAM_HELPER__"));
             state.NameSnapshots.Add(CaptureDefinedNameState(workbook, "__XLFLOW_UI_STREAM_REDACT_INPUT__"));
 

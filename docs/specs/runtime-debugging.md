@@ -66,7 +66,10 @@ Timeout is intentionally weaker than runtime dialog suppression. xlflow returns
 does not attempt synchronous COM cleanup while Excel is still busy. Timeout
 diagnostics therefore imply `vba_may_still_be_running`: the workbook and any
 attached session should be treated as dirty until Excel is reset or the workbook
-is reopened.
+is reopened. If the timed-out macro later returns and the session is saved, the
+.NET bridge removes transient xlflow runtime/UI/debug defined names and helper modules before
+calling Excel's save API. Cleanup failure blocks the save so a non-interactive
+runtime mode cannot be silently persisted into later manual workbook use.
 
 ## Diagnostic Compile Mode
 
@@ -123,6 +126,8 @@ Findings explain that xlflow-oriented macros should prefer explicit `run --arg` 
 `xlflow inspect-gui` exposes the same boundary report without running Excel. `xlflow session attach` adopts the human-opened configured workbook as the live xlflow session before an interactive workflow continues. The legacy `xlflow attach --active` command is deprecated and only validates the active workbook.
 
 When `run` or `test` invokes user VBA, xlflow also injects a workbook-scoped runtime mode marker before execution and restores the reserved names afterward. New scaffolded projects expose that state through `XlflowRuntime.bas`, so VBA can branch with helpers such as `XlflowRuntime.ModeName()`, `XlflowRuntime.IsHeadless()`, `XlflowRuntime.IsAgent()`, and `XlflowRuntime.IsTest()`. The workbook-scoped marker is the primary contract; `Environ$("XLFLOW_MODE")` is only a secondary fallback for manual helper adoption in older projects or wrapper-driven runs.
+
+All defined names and generated helper modules used by the runtime injection layer are transient and reserved. The .NET bridge removes the known runtime/UI/debug markers and `XlflowRun_*` / `XlflowUIStream_*` components before workbook persistence, including session save/stop after a timed-out run. `session start` and `session attach` also remove stale artifacts from the live workbook so saving that session repairs workbooks affected by older versions.
 
 New scaffolded projects also include `XlflowDebug.bas`. `XlflowDebug.Log` is the explicit workbook-side logging surface for terminal-visible debug lines. During xlflow `run` and `test`, the runtime injection layer writes a temporary `__XLFLOW_DEBUG_PIPE__` workbook defined name before user VBA starts and restores the prior state afterward. `XlflowDebug.Log` always writes to the native VBA Immediate Window, and when that debug pipe marker is present it also emits newline-delimited JSON events to xlflow's debug stream so stderr and final JSON output can include the same log lines without corrupting stdout.
 
