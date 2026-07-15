@@ -26,6 +26,13 @@ Failures set `status` to `failed` and populate `error`:
 }
 ```
 
+When another xlflow process is using the same workbook, workbook-bound commands
+fail immediately with `error.code: "workbook_busy"`. `error.details` includes
+`workbook`, `operation`, `resource_scope`, and `retryable`. It may also include
+diagnostic `owner` metadata such as `pid`, stable command name, operation kind,
+and start time. Owner metadata can be missing after a crash or during cleanup;
+the error code, not the presence of `owner`, is the stable contention signal.
+
 Unknown commands are also structured when `--json` appears before the invalid command:
 
 ```json

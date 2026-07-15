@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/wsl"
 )
@@ -99,6 +100,13 @@ func shouldDelegateTopLevelCommand(name string) bool {
 }
 
 func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
+	if cmd != nil {
+		if descriptor, err := coordination.LookupCLI(cmd.CommandPath()); err == nil &&
+			descriptor.Policy.ResourceScope == coordination.ResourceWorkbook &&
+			!descriptor.Policy.ParallelSafe {
+			return true
+		}
+	}
 	if topLevel == "test" && cmd != nil && cmd.Name() == "list" {
 		return false
 	}

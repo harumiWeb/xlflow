@@ -347,6 +347,42 @@ All JSON output uses a stable top-level envelope.
 
 `status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure. Error objects contain `code`, `message`, `source`, `number`, `line`, `phase`, `h_result`, `details`, and `suggestions`. `h_result` is a hex string (e.g. `"0x80040154"`) populated for COM-origin failures. `details` is an object with additional context such as `source` and `stack_trace`. `suggestions` is an array of command names for CLI parse failures such as `unknown_command`. All error fields except `message` are optional and omitted when empty or zero.
 
+Workbook lock contention uses the stable error code `workbook_busy`. It fails
+immediately by default and uses the same envelope for every workbook-bound
+command, including compact `run --json` failures:
+
+```json
+{
+  "status": "failed",
+  "command": "push",
+  "error": {
+    "code": "workbook_busy",
+    "message": "Another xlflow operation is currently using this workbook.",
+    "details": {
+      "workbook": "C:\\projects\\sample\\sample.xlsm",
+      "operation": "push",
+      "resource_scope": "workbook",
+      "retryable": true,
+      "owner": {
+        "pid": 12345,
+        "command": "run",
+        "operation_kind": "execute",
+        "resource_scope": "workbook",
+        "started_at": "2026-07-15T09:30:00Z"
+      }
+    }
+  }
+}
+```
+
+`error.details.workbook` is the canonical diagnostic workbook path,
+`operation` identifies the attempted command, and `retryable` comes from its
+coordination policy. `owner` is included only when guarded metadata identifies
+the current lock holder; it may be omitted or null without changing the busy
+result. Owner metadata is diagnostic rather than authoritative, and clients must
+not infer that a workbook is free from missing owner details. Human output names
+the busy workbook and indicates whether retrying is appropriate.
+
 Command-specific fields are added at the top level:
 
 - `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread, plus `.NET` bridge `excel.systemprofile_desktop` readiness with per-path `status` values of `exists`, `missing`, `access_denied`, or `unknown`; `doctor --workbook` additionally opens the configured workbook and reports `workbook_openable`; WSL adds `host`, `windows`, and `path_translation`)
@@ -499,7 +535,7 @@ When no Excel processes are running, `process` is an empty array and the command
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
 - `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
-- `3`: environment failure, including Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
+- `3`: environment or operational failure, including workbook lock contention (`workbook_busy`), Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

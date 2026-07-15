@@ -4,6 +4,10 @@ Stable error codes appear in `error.code` and command-specific findings.
 
 Common examples:
 
+- `workbook_busy`: another xlflow process holds the target workbook's
+  coordination lock. The command fails immediately by default; JSON details
+  include the workbook, attempted operation, and whether retrying is supported.
+  Current owner metadata is included when available but is not authoritative.
 - `vbide_access_denied`
 - `macro_failed`
 - `macro_not_found`

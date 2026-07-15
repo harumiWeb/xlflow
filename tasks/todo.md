@@ -1,3 +1,19 @@
+# Issues #320, #321, #323: Workbook operation coordination
+
+## Implementation
+
+- [x] Add cross-process workbook lock and crash-safe lease lifecycle
+- [x] Integrate exclusive coordination across full workbook command lifetime
+- [x] Add structured `workbook_busy` diagnostics and stable exit behavior
+- [x] Add atomic owner metadata with stale-owner race protection
+- [x] Update ADR, specs, public docs, and changelog
+- [x] Add subprocess contention, crash, diagnostic, and metadata tests
+- [x] Run focused and full Go verification
+- [x] Run Windows + Excel COM E2E in `tmp_workspaces`
+- [x] Self-review the complete diff
+
+---
+
 # Issue #79 + Issue #78 follow-up
 
 ---

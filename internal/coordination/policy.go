@@ -1,5 +1,5 @@
-// Package coordination defines the authoritative coordination policy for
-// xlflow commands. It deliberately contains no locking implementation.
+// Package coordination defines command policy, canonical workbook identity,
+// and cross-process workbook operation locking for xlflow commands.
 package coordination
 
 import "fmt"
