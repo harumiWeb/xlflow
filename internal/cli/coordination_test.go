@@ -342,9 +342,9 @@ func TestWorkbookCoordinationTimeoutDoesNotCoverHandlerRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{cwd: rootDir, wait: true, waitTimeout: 20 * time.Millisecond, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, coordination: manager}
+	a := &app{cwd: rootDir, wait: true, waitTimeout: 500 * time.Millisecond, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, coordination: manager}
 	err = a.withWorkbookCoordination(context.Background(), "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error {
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
 		return nil
 	})
 	if err != nil {
