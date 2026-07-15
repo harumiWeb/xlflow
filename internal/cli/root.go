@@ -52,6 +52,8 @@ import (
 type app struct {
 	json           bool
 	bridge         string
+	wait           bool
+	waitTimeout    time.Duration
 	cwd            string
 	rawArgs        []string
 	stdout         io.Writer
@@ -181,11 +183,16 @@ func (a *app) rootCommand() *cobra.Command {
 			if err := a.requireCoordinationPolicy(cmd); err != nil {
 				return err
 			}
+			if err := a.validateCoordinationWaitOptions(cmd); err != nil {
+				return err
+			}
 			return a.delegateWSLCommand(cmd)
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "write machine-readable JSON output")
 	root.PersistentFlags().StringVar(&a.bridge, "bridge", "", "Excel bridge mode: auto, dotnet")
+	root.PersistentFlags().BoolVar(&a.wait, "wait", false, "wait for a busy workbook before starting the command")
+	root.PersistentFlags().DurationVar(&a.waitTimeout, "wait-timeout", 30*time.Second, "maximum time to wait for workbook coordination")
 	root.AddCommand(
 		a.newCommand(),
 		a.initCommand(),

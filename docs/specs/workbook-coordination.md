@@ -25,8 +25,8 @@ The policy vocabulary is:
 | `retryable_when_busy` | boolean                                 | Whether a future caller may opt into retrying after resource contention.       |
 | `default_wait_policy` | `fail`, `wait`                          | Whether acquisition should fail immediately or wait by default.                |
 
-All initial policies use `default_wait_policy: fail`. Waiting remains explicit in
-future work. A resource operation is retryable only when it is non-parallel-safe
+All policies use `default_wait_policy: fail`. Callers may opt into bounded
+waiting through the public CLI contract below. A resource operation is retryable only when it is non-parallel-safe
 and retrying after contention is meaningful. `parallel_safe: true` means that the
 operation does not need exclusive acquisition at its declared scope; it does not
 introduce a shared read-lock mode.
@@ -189,8 +189,8 @@ before acquisition.
 
 Immediate acquisition is the default. If the authoritative byte range is
 already locked, acquisition returns a typed busy result without entering the
-command body. The internal API may poll with a context for cancellation-aware
-blocking acquisition, but no public `--wait` or timeout flag is defined here.
+command body. The internal API also polls with a context for the explicit,
+cancellation-aware wait contract below.
 
 ### Windows Primitive and Storage
 
@@ -306,11 +306,33 @@ information never changes the `workbook_busy` result. Human output identifies
 the workbook and operation as busy and indicates whether retrying is appropriate.
 The CLI maps contention to environment/operational exit code `3`.
 
+## Opt-in Waiting Contract
+
+`--wait` opts a retryable, non-parallel-safe workbook command into lock waiting.
+`--wait-timeout <duration>` overrides the finite 30-second default and is valid
+only with `--wait`; zero and negative durations are invalid. Source-only,
+parallel-safe, `excel_instance`, and non-retryable commands reject waiting from
+their central policy before command execution.
+
+The CLI uses one timeout for the complete sorted multi-workbook acquisition.
+It releases partial acquisitions in reverse order on timeout, cancellation, or
+error. The timeout ends when every required lease is acquired and never applies
+to the command body. Acquisition first attempts the lock without waiting; only
+actual contention enters polling. Human output prints one waiting line, while
+JSON output remains a single envelope with no progress text.
+
+Timeout returns `workbook_busy_timeout`; Ctrl+C or parent-context cancellation
+returns `workbook_busy_cancelled`. Both use phase `coordination.acquire`, include
+the attempted workbook, operation, resource scope, retryability, and configured
+wait timeout, and map to operational exit code `3`. The underlying workbook
+operation is never retried. Polling is cancellation-aware but does not guarantee
+FIFO ordering.
+
 ## Out of Scope for This Version
 
 This contract does not add:
 
-- public `--wait`, timeout, cancellation, or FIFO queue behavior;
+- FIFO queue behavior;
 - coordination fields in `session status`;
 - an `excel_instance` lock primitive;
 - a public policy/capabilities endpoint or serialized bridge schema; or

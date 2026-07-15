@@ -207,6 +207,36 @@ func TestDelegateWSLCommandPreservesStreamsArgumentsAndExitCode(t *testing.T) {
 	}
 }
 
+func TestDelegateWSLCommandPreservesCoordinationWaitOptions(t *testing.T) {
+	for _, args := range [][]string{
+		{"--json", "--wait", "--wait-timeout", "45s", "push"},
+		{"--json", "--wait", "--wait-timeout=45s", "push"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			restore := stubWSLDelegationGlobals(t)
+			defer restore()
+			t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+			t.Setenv("WSL_HELPER_MODE", "echo")
+			isWSL = func() bool { return true }
+			translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project`, nil }
+			resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+			translateWSLArgs = func(_ context.Context, got []string) ([]string, error) { return append([]string{}, got...), nil }
+			newDelegatedCommand = delegatedHelperCommand
+			var stdout bytes.Buffer
+			a := &app{cwd: t.TempDir(), rawArgs: args, stdout: &stdout, stderr: &bytes.Buffer{}, buildInfo: BuildInfo{Version: "1.2.3"}}
+			root := a.rootCommand()
+			root.SetArgs(args)
+			err := root.Execute()
+			if !errors.Is(err, errWSLDelegated) || output.ExitCode(err) != output.ExitSuccess {
+				t.Fatalf("delegation error = %v, exit=%d", err, output.ExitCode(err))
+			}
+			if want := "ARGS=" + strings.Join(args, "|"); !strings.Contains(stdout.String(), want) {
+				t.Fatalf("wait args were not preserved, want %q:\n%s", want, stdout.String())
+			}
+		})
+	}
+}
+
 func TestDelegateWSLCommandStopsLocalRunEAfterSuccessfulDelegation(t *testing.T) {
 	restore := stubWSLDelegationGlobals(t)
 	defer restore()

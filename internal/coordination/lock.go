@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	WorkbookBusyCode = "workbook_busy"
-	ownerSchemaV1    = 1
-	operationByte    = int64(0)
-	publicationByte  = int64(1)
+	WorkbookBusyCode          = "workbook_busy"
+	WorkbookBusyTimeoutCode   = "workbook_busy_timeout"
+	WorkbookBusyCancelledCode = "workbook_busy_cancelled"
+	ownerSchemaV1             = 1
+	operationByte             = int64(0)
+	publicationByte           = int64(1)
 )
 
 var (

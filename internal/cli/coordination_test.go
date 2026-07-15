@@ -7,7 +7,9 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
@@ -76,6 +78,329 @@ func TestWorkbookContentionStopsCLILeafWithStructuredBusyFailure(t *testing.T) {
 	owner, ok := details["owner"].(map[string]any)
 	if !ok || owner["command"] != "run" {
 		t.Fatalf("owner details = %#v", details["owner"])
+	}
+}
+
+func TestCoordinationWaitOptionsValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantCode string
+	}{
+		{name: "timeout requires wait", args: []string{"--json", "--wait-timeout", "1s", "push"}, wantCode: coordinationWaitArgsInvalidCode},
+		{name: "timeout must be positive", args: []string{"--json", "--wait", "--wait-timeout", "0s", "push"}, wantCode: coordinationWaitArgsInvalidCode},
+		{name: "timeout cannot be negative", args: []string{"--json", "--wait", "--wait-timeout", "-1s", "push"}, wantCode: coordinationWaitArgsInvalidCode},
+		{name: "source command cannot wait", args: []string{"--json", "--wait", "lint"}, wantCode: coordinationWaitUnsupportedCode},
+		{name: "parallel observer cannot wait", args: []string{"--json", "--wait", "session", "status"}, wantCode: coordinationWaitUnsupportedCode},
+		{name: "excel instance command cannot wait", args: []string{"--json", "--wait", "doctor"}, wantCode: coordinationWaitUnsupportedCode},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			a := &app{cwd: t.TempDir(), rawArgs: tt.args, stdout: &stdout, stderr: &bytes.Buffer{}}
+			root := a.rootCommand()
+			root.SetArgs(tt.args)
+			err := root.Execute()
+			if output.ExitCode(err) != output.ExitConfig {
+				t.Fatalf("exit code = %d, want %d (err=%v)", output.ExitCode(err), output.ExitConfig, err)
+			}
+			var env output.Envelope
+			if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+				t.Fatalf("decode JSON: %v\n%s", decodeErr, stdout.String())
+			}
+			if env.Error == nil || env.Error.Code != tt.wantCode {
+				t.Fatalf("error = %#v, want %s", env.Error, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestCoordinationWaitDefaultIsThirtySeconds(t *testing.T) {
+	a := &app{}
+	root := a.rootCommand()
+	if a.waitTimeout != 30*time.Second {
+		t.Fatalf("wait timeout = %s, want 30s", a.waitTimeout)
+	}
+	if got := root.PersistentFlags().Lookup("wait-timeout").DefValue; got != "30s" {
+		t.Fatalf("wait-timeout default = %q, want 30s", got)
+	}
+}
+
+func TestCoordinationWaitOptionsAllowGeneratedCobraCommands(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--wait", "help"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetOut(&stdout)
+	root.SetArgs(a.rawArgs)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("generated help command rejected --wait: %v", err)
+	}
+}
+
+func TestWorkbookCoordinationWaitsThenRunsHandlerOnce(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
+	time.AfterFunc(75*time.Millisecond, func() { _ = owner.Release() })
+	runs := 0
+	err := a.withWorkbookCoordination(context.Background(), "push", []string{identity.CanonicalPath}, func() error {
+		runs++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waited command failed: %v", err)
+	}
+	if runs != 1 {
+		t.Fatalf("handler runs = %d, want 1", runs)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("JSON wait emitted progress: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestWorkbookCoordinationWaitTimeoutIsStructuredAndJSONPure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
+	defer func() { _ = owner.Release() }()
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: 75 * time.Millisecond, stdout: &stdout, stderr: &stderr, coordination: manager}
+	err := a.withWorkbookCoordination(context.Background(), "push", []string{identity.CanonicalPath}, func() error {
+		t.Fatal("handler must not run after timeout")
+		return nil
+	})
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, "75ms")
+	if stderr.Len() != 0 {
+		t.Fatalf("JSON wait emitted stderr progress: %q", stderr.String())
+	}
+}
+
+func TestWorkbookCoordinationWaitCancellationIsStructured(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
+	defer func() { _ = owner.Release() }()
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	err := a.withWorkbookCoordination(ctx, "push", []string{identity.CanonicalPath}, func() error {
+		t.Fatal("handler must not run after cancellation")
+		return nil
+	})
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyCancelledCode, "1s")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context cancellation", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("JSON cancellation emitted stderr progress: %q", stderr.String())
+	}
+}
+
+func TestWorkbookCoordinationHumanWaitMessageAppearsOnlyAfterContention(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
+	defer func() { _ = owner.Release() }()
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, wait: true, waitTimeout: 50 * time.Millisecond, stdout: &stdout, stderr: &stderr, coordination: manager}
+	_ = a.withWorkbookCoordination(context.Background(), "push", []string{identity.CanonicalPath}, func() error { return nil })
+	if !strings.Contains(stderr.String(), "Waiting up to 50ms") || !strings.Contains(stderr.String(), identity.CanonicalPath) {
+		t.Fatalf("wait message = %q", stderr.String())
+	}
+	if strings.Count(stderr.String(), "\n") != 1 {
+		t.Fatalf("wait message should be exactly one line: %q", stderr.String())
+	}
+}
+
+func TestWorkbookCoordinationWithoutContentionEmitsNoWaitMessage(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	a := &app{cwd: rootDir, wait: true, waitTimeout: time.Second, stdout: &bytes.Buffer{}, stderr: &stderr, coordination: manager}
+	if err := a.withWorkbookCoordination(context.Background(), "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("uncontended wait emitted progress: %q", stderr.String())
+	}
+}
+
+func TestWorkbookCoordinationNonWaitCancellationKeepsSetupFailureCode(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: rootDir, json: true, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	runErr := a.withWorkbookCoordination(ctx, "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error { return nil })
+	if output.ExitCode(runErr) != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d (err=%v)", output.ExitCode(runErr), output.ExitEnvironment, runErr)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("decode JSON: %v\n%s", decodeErr, stdout.String())
+	}
+	if env.Error == nil || env.Error.Code != "coordination_acquire_failed" {
+		t.Fatalf("non-wait cancellation error = %#v", env.Error)
+	}
+}
+
+func TestWorkbookCoordinationTimeoutReleasesEarlierMultiTargetLease(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(rootDir, "first.xlsm")
+	secondPath := filepath.Join(rootDir, "second.xlsm")
+	firstIdentity, _ := coordination.NewWorkbookIdentity(rootDir, firstPath)
+	secondIdentity, _ := coordination.NewWorkbookIdentity(rootDir, secondPath)
+	if firstIdentity.LockID > secondIdentity.LockID {
+		firstPath, secondPath = secondPath, firstPath
+		firstIdentity, secondIdentity = secondIdentity, firstIdentity
+	}
+	descriptor, _ := coordination.Lookup("diff")
+	owner, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: secondIdentity, Command: "run", OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Release() }()
+	var stdout bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: 75 * time.Millisecond, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+	err = a.withWorkbookCoordination(context.Background(), descriptor.ID, []string{firstPath, secondPath}, func() error { return nil })
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, "75ms")
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: firstIdentity, Command: descriptor.ID, OperationKind: descriptor.Policy.OperationKind, ResourceScope: descriptor.Policy.ResourceScope})
+	if err != nil {
+		t.Fatalf("earlier target remained locked: %v", err)
+	}
+	_ = lease.Release()
+}
+
+func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(rootDir, "first.xlsm")
+	secondPath := filepath.Join(rootDir, "second.xlsm")
+	firstIdentity, _ := coordination.NewWorkbookIdentity(rootDir, firstPath)
+	secondIdentity, _ := coordination.NewWorkbookIdentity(rootDir, secondPath)
+	if firstIdentity.LockID > secondIdentity.LockID {
+		firstPath, secondPath = secondPath, firstPath
+		firstIdentity, secondIdentity = secondIdentity, firstIdentity
+	}
+	request := func(identity coordination.WorkbookIdentity) coordination.AcquireRequest {
+		return coordination.AcquireRequest{Identity: identity, Command: "run", OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook}
+	}
+	firstOwner, err := manager.Acquire(context.Background(), request(firstIdentity))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondOwner, err := manager.Acquire(context.Background(), request(secondIdentity))
+	if err != nil {
+		_ = firstOwner.Release()
+		t.Fatal(err)
+	}
+	defer func() { _ = firstOwner.Release() }()
+	defer func() { _ = secondOwner.Release() }()
+
+	const waitBudget = 220 * time.Millisecond
+	time.AfterFunc(120*time.Millisecond, func() { _ = firstOwner.Release() })
+	var stdout bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: waitBudget, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+	started := time.Now()
+	err = a.withWorkbookCoordination(context.Background(), "diff", []string{firstPath, secondPath}, func() error {
+		t.Fatal("handler must not run after the shared timeout expires")
+		return nil
+	})
+	elapsed := time.Since(started)
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, waitBudget.String())
+	if elapsed < 180*time.Millisecond {
+		t.Fatalf("multi-target acquisition timed out too early after %s", elapsed)
+	}
+	if elapsed >= 300*time.Millisecond {
+		t.Fatalf("multi-target acquisition took %s; timeout budget appears to have restarted per target", elapsed)
+	}
+}
+
+func TestWorkbookCoordinationTimeoutDoesNotCoverHandlerRuntime(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: rootDir, wait: true, waitTimeout: 500 * time.Millisecond, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, coordination: manager}
+	err = a.withWorkbookCoordination(context.Background(), "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error {
+		time.Sleep(600 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handler runtime was covered by wait timeout: %v", err)
+	}
+}
+
+func setupHeldCoordinationLock(t *testing.T, command coordination.CommandID) (string, *coordination.Manager, coordination.WorkbookIdentity, *coordination.Lease) {
+	t.Helper()
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewWorkbookIdentity(rootDir, filepath.Join(rootDir, "book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identity, Command: command, OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rootDir, manager, identity, lease
+}
+
+func assertCoordinationWaitFailure(t *testing.T, err error, body []byte, code, timeout string) {
+	t.Helper()
+	if output.ExitCode(err) != output.ExitEnvironment {
+		t.Fatalf("exit code = %d, want %d (err=%v)", output.ExitCode(err), output.ExitEnvironment, err)
+	}
+	var env output.Envelope
+	if decodeErr := json.Unmarshal(body, &env); decodeErr != nil {
+		t.Fatalf("decode JSON: %v\n%s", decodeErr, body)
+	}
+	if env.Error == nil || env.Error.Code != code || env.Error.Phase != "coordination.acquire" {
+		t.Fatalf("error payload = %#v", env.Error)
+	}
+	details, ok := env.Error.Details.(map[string]any)
+	if !ok || details["wait_timeout"] != timeout || details["retryable"] != true {
+		t.Fatalf("wait details = %#v", env.Error.Details)
 	}
 }
 

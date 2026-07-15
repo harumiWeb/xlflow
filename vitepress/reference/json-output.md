@@ -33,6 +33,12 @@ diagnostic `owner` metadata such as `pid`, stable command name, operation kind,
 and start time. Owner metadata can be missing after a crash or during cleanup;
 the error code, not the presence of `owner`, is the stable contention signal.
 
+Retryable workbook commands may add global `--wait`. Waiting defaults to 30
+seconds and can be changed with `--wait-timeout`. Timeout and cancellation use
+`workbook_busy_timeout` and `workbook_busy_cancelled`; their details include
+`wait_timeout`. JSON mode never writes wait progress to stderr or mixes it into
+stdout, so the result remains one valid envelope.
+
 Unknown commands are also structured when `--json` appears before the invalid command:
 
 ```json

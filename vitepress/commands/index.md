@@ -1,9 +1,10 @@
 # Commands
 
-xlflow exposes a Cobra-based CLI. Every command accepts the global `--json` flag for machine-readable output.
+xlflow exposes a Cobra-based CLI. Every command accepts the global `--json` flag for machine-readable output. Retryable workbook commands also accept `--wait` and `--wait-timeout <duration>`; waiting is opt-in and defaults to a 30-second limit.
 
 ```bash
 xlflow [command] --json
+xlflow [command] --wait --wait-timeout 45s
 ```
 
 Use command pages for workflow guidance and the canonical CLI contract in [JSON Output](../reference/json-output).

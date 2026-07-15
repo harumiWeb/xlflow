@@ -8,6 +8,14 @@ Common examples:
   coordination lock. The command fails immediately by default; JSON details
   include the workbook, attempted operation, and whether retrying is supported.
   Current owner metadata is included when available but is not authoritative.
+- `workbook_busy_timeout`: an explicit `--wait` did not acquire every required
+  workbook lock within the 30-second default or supplied `--wait-timeout`.
+- `workbook_busy_cancelled`: Ctrl+C or caller cancellation stopped an explicit
+  workbook wait before the command body started.
+- `coordination_wait_args_invalid`: `--wait-timeout` was used without `--wait`,
+  or the timeout was not positive.
+- `coordination_wait_unsupported`: the selected command is not a retryable,
+  non-parallel-safe workbook operation.
 - `vbide_access_denied`
 - `macro_failed`
 - `macro_not_found`
