@@ -3,7 +3,7 @@
 This spec defines the command-policy, canonical workbook-identity,
 cross-process lock, and owner-metadata contracts used by workbook operation
 coordination. Public waiting options and coordination status output build on
-these contracts but remain outside the current implementation.
+these contracts.
 
 See ADR-0016 for the policy and identity rationale and ADR-0018 for the Windows
 lock and metadata decisions.
@@ -87,6 +87,29 @@ The registry classifies commands conservatively:
 - Environment checks, active-workbook attachment, and Excel process cleanup use
   `resource_scope: excel_instance` when they inspect or mutate state broader than
   one configured workbook.
+
+### UserForm and Designer Coverage
+
+The configured workbook lock is the only exclusion primitive for UserForm work;
+there is no separate Designer lock. The Designer-classified command IDs are
+`form.migrate.sidecar`, `form.snapshot`, `form.build`, `form.apply`,
+`form.export-image`, and `inspect.form`. `list.forms` and `pull` use workbook
+read policy, while `push` uses workbook mutate policy. All nine operations use
+the same canonical workbook identity and therefore conflict with Designer,
+execution, test, synchronization, and other workbook operations on that file.
+
+The CLI lease surrounds the complete leaf handler. For migration and snapshot
+this includes Designer inspection plus sidecar/spec writes; for build and push
+it includes VBIDE mutation, `.frm`/`.frx` synchronization, save/restore, and
+cleanup. Direct Runner calls for `form-write`, `inspect-form`,
+`form-export-image`, list/forms, pull, and push resolve the same central
+descriptors before starting a bridge provider. CLI-owned Runner calls skip the
+second acquisition only while the outer lease remains held.
+
+`form.new`, source rename, and source delete remain `resource_scope: none` and
+do not open or lock a workbook. Their later workbook application occurs through
+coordinated `push`. Under WSL the source-only steps remain local; workbook-backed
+UserForm commands are delegated and acquire the lock in the Windows CLI.
 
 ## Canonical Workbook Identity
 
