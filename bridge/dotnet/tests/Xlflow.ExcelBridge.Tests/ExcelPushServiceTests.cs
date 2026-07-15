@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Services;
@@ -153,6 +154,278 @@ public sealed class ExcelPushServiceTests
                 Directory.Delete(root, true);
             }
         }
+    }
+
+    [Fact]
+    public void ReplaceNonDocumentComponents_StopsBeforeImportWhenComponentRemovalFails()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(Path.Combine(modulesDir, "Main.bas"), "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n");
+
+            var workbook = new FakeWorkbook();
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent("Main", 1));
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent(
+                "LockedForm",
+                3,
+                new COMException("simulated UserForm remove failure", unchecked((int)0x800A03EC))));
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent("Tail", 2));
+
+            var args = PushArgsForRoot(root, modulesDir);
+            var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var tmpImportDir = Path.Combine(root, ".tmp-import");
+            var method = typeof(ExcelPushService).GetMethod(
+                "ReplaceNonDocumentComponents",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+            var invocation = Assert.Throws<TargetInvocationException>(() =>
+                method!.Invoke(null, [workbook, args, sourceFiles, tmpImportDir]));
+            var error = Assert.IsType<ExcelPushService.ComponentRemovalException>(invocation.InnerException);
+
+            Assert.Equal("LockedForm", error.ComponentName);
+            Assert.Equal(3, error.ComponentType);
+            Assert.Empty(workbook.VBProject.VBComponents.ImportedPaths);
+            Assert.Equal(
+                ["Main", "LockedForm"],
+                workbook.VBProject.VBComponents.Components.Select(component => component.Name));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void BuildComponentRemovalFailureResponseIncludesStructuredComponentDiagnostics()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-remove-failed",
+            Command = "push",
+        };
+        var response = ExcelPushService.BuildComponentRemovalFailureResponse(
+            request,
+            PushArgs(backupMode: "never"),
+            sessionAttached: true,
+            sessionMode: "explicit",
+            exception: new ExcelPushService.ComponentRemovalException(
+                "LockedForm",
+                3,
+                new COMException("simulated UserForm remove failure", unchecked((int)0x800A03EC))));
+
+        Assert.Equal("failed", response.Status);
+        Assert.NotNull(response.Error);
+        Assert.Equal("vba_component_remove_failed", response.Error.Code);
+        Assert.Equal("remove_non_document_components", response.Error.Phase);
+        Assert.Equal("0x800A03EC", response.Error.HResult);
+        var details = Assert.IsType<Dictionary<string, object?>>(response.Error.Details);
+        Assert.Equal("LockedForm", details["component_name"]);
+        Assert.Equal(3, details["component_type"]);
+        Assert.Equal("user_form", details["component_kind"]);
+        var session = Assert.IsType<Dictionary<string, object?>>(response.Extensions["session"]);
+        Assert.Equal(true, session["dirty"]);
+        Assert.Equal(false, session["save_required"]);
+        Assert.Equal(true, session["discard_required"]);
+        var workbook = Assert.IsType<Dictionary<string, object?>>(response.Extensions["workbook"]);
+        Assert.Equal(false, workbook["needs_save"]);
+        var warnings = Assert.IsType<List<Dictionary<string, string>>>(response.Extensions["warnings"]);
+        Assert.Contains(warnings, warning => warning["code"] == "vba_component_replacement_partial");
+    }
+
+    [Fact]
+    public void ReplaceNonDocumentComponents_StopsBeforeImportWhenRemoveLeavesComponentBehind()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(Path.Combine(modulesDir, "Main.bas"), "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n");
+
+            var workbook = new FakeWorkbook();
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent("Main", 1, removeIsNoOp: true));
+            var args = PushArgsForRoot(root, modulesDir);
+            var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var method = typeof(ExcelPushService).GetMethod(
+                "ReplaceNonDocumentComponents",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+            var invocation = Assert.Throws<TargetInvocationException>(() =>
+                method!.Invoke(null, [workbook, args, sourceFiles, Path.Combine(root, ".tmp-import")]));
+            var error = Assert.IsType<ExcelPushService.ComponentRemovalException>(invocation.InnerException);
+
+            Assert.Equal("Main", error.ComponentName);
+            Assert.Equal(1, error.ComponentType);
+            Assert.Empty(workbook.VBProject.VBComponents.ImportedPaths);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReplaceNonDocumentComponents_WrapsUnexpectedFailureAfterRemovalBegins()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(Path.Combine(modulesDir, "Main.bas"), "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n");
+
+            var workbook = new FakeWorkbook();
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent("Main", 1));
+            workbook.VBProject.VBComponents.Components.Add(new FakeVBComponent("Tail", 2));
+            workbook.VBProject.VBComponents.ItemExceptionIndex = 1;
+            var args = PushArgsForRoot(root, modulesDir);
+            var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var method = typeof(ExcelPushService).GetMethod(
+                "ReplaceNonDocumentComponents",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+            var invocation = Assert.Throws<TargetInvocationException>(() =>
+                method!.Invoke(null, [workbook, args, sourceFiles, Path.Combine(root, ".tmp-import")]));
+            var error = Assert.IsType<ExcelPushService.ComponentReplacementException>(invocation.InnerException);
+
+            Assert.Equal("remove_non_document_components", error.Phase);
+            Assert.Empty(workbook.VBProject.VBComponents.ImportedPaths);
+            Assert.Equal(["Main"], workbook.VBProject.VBComponents.Components.Select(component => component.Name));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReplaceNonDocumentComponents_PreservesImportNameMismatch()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(Path.Combine(modulesDir, "Main.bas"), "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n");
+
+            var workbook = new FakeWorkbook();
+            workbook.VBProject.VBComponents.ImportedNameOverride = "Main1";
+            var args = PushArgsForRoot(root, modulesDir);
+            var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var method = typeof(ExcelPushService).GetMethod(
+                "ReplaceNonDocumentComponents",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+            var invocation = Assert.Throws<TargetInvocationException>(() =>
+                method!.Invoke(null, [workbook, args, sourceFiles, Path.Combine(root, ".tmp-import")]));
+            var error = Assert.IsType<ExcelPushService.ComponentImportNameException>(invocation.InnerException);
+            Assert.Equal("Main", error.ExpectedName);
+            Assert.Equal("Main1", error.ActualName);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReplaceNonDocumentComponents_WrapsOrdinaryImportFailure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(Path.Combine(modulesDir, "Main.bas"), "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n");
+
+            var workbook = new FakeWorkbook();
+            workbook.VBProject.VBComponents.ImportException = new COMException(
+                "simulated import failure",
+                unchecked((int)0x800A03EC));
+            var args = PushArgsForRoot(root, modulesDir);
+            var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+            var method = typeof(ExcelPushService).GetMethod(
+                "ReplaceNonDocumentComponents",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+            var invocation = Assert.Throws<TargetInvocationException>(() =>
+                method!.Invoke(null, [workbook, args, sourceFiles, Path.Combine(root, ".tmp-import")]));
+            var error = Assert.IsType<ExcelPushService.ComponentReplacementException>(invocation.InnerException);
+
+            Assert.Equal("import_vba_components", error.Phase);
+            Assert.IsType<COMException>(error.InnerException);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReplacementFailureResponseUsesExternalDiscardInstructions()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-replacement-failed",
+            Command = "push",
+        };
+        var response = ExcelPushService.BuildComponentReplacementFailureResponse(
+            request,
+            PushArgs(backupMode: "never"),
+            sessionAttached: true,
+            sessionMode: "external",
+            exception: new ExcelPushService.ComponentReplacementException(
+                "import_vba_components",
+                new COMException("simulated import failure", unchecked((int)0x800A03EC))));
+
+        Assert.Equal("vba_component_replacement_failed", response.Error?.Code);
+        Assert.Equal("import_vba_components", response.Error?.Phase);
+        var session = Assert.IsType<Dictionary<string, object?>>(response.Extensions["session"]);
+        Assert.Equal(true, session["discard_required"]);
+        var warnings = Assert.IsType<List<Dictionary<string, string>>>(response.Extensions["warnings"]);
+        var warning = Assert.Single(warnings, item => item["code"] == "vba_component_replacement_partial");
+        Assert.Contains("Close it in Excel without saving", warning["message"], StringComparison.Ordinal);
+        Assert.DoesNotContain("session stop", warning["message"], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -440,11 +713,66 @@ public sealed class ExcelPushServiceTests
     {
         public List<string> ImportedPaths { get; } = [];
 
+        public List<FakeVBComponent> Components { get; } = [];
+
+        public string? ImportedNameOverride { get; set; }
+
+        public Exception? ImportException { get; set; }
+
+        public int? ItemExceptionIndex { get; set; }
+
+        public int Count => Components.Count;
+
+        public FakeVBComponent Item(int index)
+        {
+            if (ItemExceptionIndex == index)
+            {
+                throw new COMException("simulated VBComponents.Item failure", unchecked((int)0x800A03EC));
+            }
+            return Components[index - 1];
+        }
+
+        public object? Remove(object component)
+        {
+            var vbComponent = (FakeVBComponent)component;
+            if (vbComponent.RemoveException is not null)
+            {
+                throw vbComponent.RemoveException;
+            }
+            if (vbComponent.RemoveIsNoOp)
+            {
+                return null;
+            }
+            Components.Remove(vbComponent);
+            return null;
+        }
+
         public object Import(object path)
         {
             ImportedPaths.Add((string)path);
-            return new object();
+            if (ImportException is not null)
+            {
+                throw ImportException;
+            }
+            return new FakeVBComponent(
+                ImportedNameOverride ?? Path.GetFileNameWithoutExtension((string)path),
+                Path.GetExtension((string)path).Equals(".frm", StringComparison.OrdinalIgnoreCase) ? 3 : 1);
         }
+    }
+
+    public sealed class FakeVBComponent(
+        string name,
+        int type,
+        Exception? removeException = null,
+        bool removeIsNoOp = false)
+    {
+        public string Name { get; } = name;
+
+        public int Type { get; } = type;
+
+        public Exception? RemoveException { get; } = removeException;
+
+        public bool RemoveIsNoOp { get; } = removeIsNoOp;
     }
 
     public sealed class FakeBackupWorkbook(Action<string> saveCopyAs)
@@ -494,5 +822,27 @@ public sealed class ExcelPushServiceTests
             UseSession: false,
             NoSave: false,
             MetadataPath: @"C:\work\.xlflow\session.json");
+    }
+
+    private static PushCommandArguments PushArgsForRoot(string root, string modulesDir)
+    {
+        return new PushCommandArguments(
+            WorkbookPath: Path.Combine(root, "Book.xlsm"),
+            ModulesDir: modulesDir,
+            ClassesDir: Path.Combine(root, "src", "classes"),
+            FormsDir: Path.Combine(root, "src", "forms"),
+            WorkbookDir: Path.Combine(root, "src", "workbook"),
+            CodeSource: "",
+            BackupRoot: Path.Combine(root, ".xlflow", "backups"),
+            Folders: false,
+            FolderAnnotation: "ignore",
+            DefaultComponentFolders: false,
+            StatePath: Path.Combine(root, ".xlflow", "state", "push.json"),
+            Visible: false,
+            BackupMode: "never",
+            ChangedOnly: false,
+            UseSession: false,
+            NoSave: false,
+            MetadataPath: Path.Combine(root, ".xlflow", "session.json"));
     }
 }

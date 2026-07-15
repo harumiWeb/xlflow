@@ -156,6 +156,7 @@ public sealed class SessionCommandTests
             Assert.NotNull(metadata);
             Assert.True(metadata!.Poisoned);
             Assert.Equal("0x800706BE", metadata.HResult);
+            Assert.False(metadata.DiscardUnsavedChanges);
             var ex = Assert.Throws<SessionPoisonedException>(() =>
                 ExcelBridgeSupport.ThrowIfSessionPoisoned(path, workbook));
             Assert.Equal("run", ex.Metadata.LastCommand);
@@ -167,6 +168,77 @@ public sealed class SessionCommandTests
                 Directory.Delete(dir, true);
             }
         }
+    }
+
+    [Fact]
+    public void ReplacementPoisonRequestsDiscardOnStop()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            var workbook = Path.Combine(dir, "Book.xlsm");
+            File.WriteAllText(path, $$"""{"hwnd":123,"pid":456,"workbook_path":"{{workbook.Replace("\\", "\\\\", StringComparison.Ordinal)}}"}""");
+
+            ExcelBridgeSupport.MarkSessionPoisoned(
+                path,
+                workbook,
+                "partial VBA replacement",
+                "0x800A03EC",
+                "push",
+                discardUnsavedChanges: true);
+            var metadata = Assert.IsType<SessionMetadata>(ExcelBridgeSupport.ReadSessionMetadata(path));
+
+            Assert.True(metadata.Poisoned);
+            Assert.True(metadata.DiscardUnsavedChanges);
+            Assert.True(ExcelSessionService.ShouldDiscardUnsavedChanges(metadata));
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void StatusDoesNotRequestSaveForDiscardPoisonedSession()
+    {
+        var metadata = new SessionMetadata(
+            Hwnd: 123,
+            Pid: 456,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: "managed",
+            Poisoned: true,
+            DiscardUnsavedChanges: true);
+
+        Assert.False(ExcelSessionService.NeedsSaveForStatus(
+            running: true,
+            open: true,
+            dirty: true,
+            metadata));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StatusPreservesSaveRequiredForNonDiscardDirtySession(bool poisoned)
+    {
+        var metadata = new SessionMetadata(
+            Hwnd: 123,
+            Pid: 456,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: "managed",
+            Poisoned: poisoned,
+            DiscardUnsavedChanges: false);
+
+        Assert.True(ExcelSessionService.NeedsSaveForStatus(
+            running: true,
+            open: true,
+            dirty: true,
+            metadata));
     }
 
     [Fact]
