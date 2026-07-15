@@ -11,7 +11,23 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/harumiWeb/xlflow/internal/coordination"
 )
+
+func TestDotNetSupportedCommandsHaveCoordinationSelectors(t *testing.T) {
+	covered := make(map[string]bool, len(dotNetSupportedCommands))
+	for _, descriptor := range coordination.All() {
+		for _, selector := range descriptor.Bridge {
+			covered[strings.ToLower(selector.Command)] = true
+		}
+	}
+	for command := range dotNetSupportedCommands {
+		if !covered[command] {
+			t.Errorf(".NET bridge command %q has no coordination selector", command)
+		}
+	}
+}
 
 func TestDotNetBridgeCommandFallsBackToInstalledBridgeWhenSDKMissing(t *testing.T) {
 	originalLookPath := dotNetLookPath
