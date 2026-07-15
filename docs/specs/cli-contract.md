@@ -383,6 +383,21 @@ result. Owner metadata is diagnostic rather than authoritative, and clients must
 not infer that a workbook is free from missing owner details. Human output names
 the busy workbook and indicates whether retrying is appropriate.
 
+All commands accept global `--wait` and `--wait-timeout <duration>` options, but
+the options are valid only for non-parallel-safe workbook commands whose central
+policy is retryable. Immediate failure remains the default. `--wait` uses a
+30-second timeout unless a positive override is supplied. A changed
+`--wait-timeout` without `--wait` returns `coordination_wait_args_invalid`;
+unsupported commands return `coordination_wait_unsupported`, both with exit code
+2 before workbook or bridge work starts.
+
+Waiting covers only acquisition of all required workbook locks, not the command
+body. Timeout returns `workbook_busy_timeout`; Ctrl+C or context cancellation
+returns `workbook_busy_cancelled`. Both use phase `coordination.acquire`, include
+`wait_timeout` in error details, and return exit code 3. JSON output contains no
+wait progress text; human output prints one concise line after contention is
+actually observed.
+
 Command-specific fields are added at the top level:
 
 - `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread, plus `.NET` bridge `excel.systemprofile_desktop` readiness with per-path `status` values of `exists`, `missing`, `access_denied`, or `unknown`; `doctor --workbook` additionally opens the configured workbook and reports `workbook_openable`; WSL adds `host`, `windows`, and `path_translation`)
@@ -535,7 +550,7 @@ When no Excel processes are running, `process` is an empty array and the command
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
 - `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
-- `3`: environment or operational failure, including workbook lock contention (`workbook_busy`), Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
+- `3`: environment or operational failure, including workbook lock contention (`workbook_busy`, `workbook_busy_timeout`, `workbook_busy_cancelled`), Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -16,6 +18,46 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
+
+const (
+	coordinationWaitArgsInvalidCode = "coordination_wait_args_invalid"
+	coordinationWaitUnsupportedCode = "coordination_wait_unsupported"
+)
+
+func (a *app) validateCoordinationWaitOptions(cmd *cobra.Command) error {
+	timeoutChanged := false
+	if cmd != nil {
+		if flag := cmd.Flags().Lookup("wait-timeout"); flag != nil {
+			timeoutChanged = flag.Changed
+		}
+	}
+	commandName := coordinationCommandName(cmd)
+	if a.waitTimeout <= 0 {
+		return a.writeFailure(commandName, output.ExitConfig, coordinationWaitArgsInvalidCode, fmt.Errorf("--wait-timeout must be greater than zero"))
+	}
+	if timeoutChanged && !a.wait {
+		return a.writeFailure(commandName, output.ExitConfig, coordinationWaitArgsInvalidCode, fmt.Errorf("--wait-timeout requires --wait"))
+	}
+	if !a.wait {
+		return nil
+	}
+	descriptor, err := coordination.LookupCLI(cmd.CommandPath())
+	if err != nil {
+		return a.writeFailure(commandName, output.ExitEnvironment, coordination.MissingPolicyCode, err)
+	}
+	policy := descriptor.Policy
+	if policy.ResourceScope != coordination.ResourceWorkbook || policy.ParallelSafe || !policy.RetryableWhenBusy {
+		return a.writeFailure(commandName, output.ExitConfig, coordinationWaitUnsupportedCode, fmt.Errorf("--wait is not supported for %s", commandName))
+	}
+	return nil
+}
+
+func coordinationCommandName(cmd *cobra.Command) string {
+	if cmd == nil {
+		return "xlflow"
+	}
+	return strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), "xlflow"))
+}
 
 func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 	var walk func(*cobra.Command)
@@ -153,7 +195,6 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
 	identities := make(map[string]coordination.WorkbookIdentity, len(workbookPaths))
 	for _, workbookPath := range workbookPaths {
 		if strings.TrimSpace(workbookPath) == "" {
@@ -182,22 +223,53 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		}
 	}
 
+	acquireCtx := ctx
+	stopSignal := func() {}
+	cancelTimeout := func() {}
+	if a.wait {
+		acquireCtx, stopSignal = signal.NotifyContext(ctx, os.Interrupt)
+		acquireCtx, cancelTimeout = context.WithTimeout(acquireCtx, a.waitTimeout)
+	}
+	defer stopSignal()
+	defer cancelTimeout()
+
 	leases := make([]*coordination.Lease, 0, len(lockIDs))
+	waitingAnnounced := false
 	release := func() {
 		for i := len(leases) - 1; i >= 0; i-- {
 			_ = leases[i].Release()
 		}
 	}
 	for _, lockID := range lockIDs {
-		lease, acquireErr := manager.Acquire(ctx, coordination.AcquireRequest{
-			Identity:      identities[lockID],
+		identity := identities[lockID]
+		request := coordination.AcquireRequest{
+			Identity:      identity,
 			Command:       descriptor.ID,
 			OperationKind: policy.OperationKind,
 			ResourceScope: policy.ResourceScope,
-		})
+		}
+		lease, acquireErr := manager.Acquire(acquireCtx, request)
+		var busy *coordination.BusyError
+		if a.wait && errors.As(acquireErr, &busy) {
+			if !waitingAnnounced && !a.json {
+				_, _ = fmt.Fprintf(a.stderrWriter(), "Waiting up to %s for the workbook to become available: %s\n", a.waitTimeout, busy.Identity.CanonicalPath)
+				waitingAnnounced = true
+			}
+			request.Wait = true
+			lease, acquireErr = manager.Acquire(acquireCtx, request)
+		}
+		if acquireErr == nil && a.wait && acquireCtx.Err() != nil {
+			_ = lease.Release()
+			acquireErr = acquireCtx.Err()
+		}
 		if acquireErr != nil {
 			release()
-			var busy *coordination.BusyError
+			if a.wait && errors.Is(acquireErr, context.DeadlineExceeded) {
+				return nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyTimeoutCode, fmt.Sprintf("The workbook did not become available within %s.", a.waitTimeout), acquireErr)
+			}
+			if a.wait && errors.Is(acquireErr, context.Canceled) {
+				return nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyCancelledCode, "Waiting for the workbook was cancelled.", acquireErr)
+			}
 			if errors.As(acquireErr, &busy) {
 				return nil, a.writeWorkbookBusyFailure(descriptor, busy)
 			}
@@ -206,6 +278,32 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		leases = append(leases, lease)
 	}
 	return release, nil
+}
+
+func (a *app) writeWorkbookWaitFailure(descriptor coordination.Descriptor, identity coordination.WorkbookIdentity, code, message string, cause error) error {
+	details := map[string]any{
+		"workbook":       identity.CanonicalPath,
+		"operation":      descriptor.ID,
+		"resource_scope": descriptor.Policy.ResourceScope,
+		"retryable":      descriptor.Policy.RetryableWhenBusy,
+		"wait_timeout":   a.waitTimeout.String(),
+	}
+	commandName := string(descriptor.ID)
+	if len(descriptor.CLI) > 0 && strings.TrimSpace(descriptor.CLI[0].Path) != "" {
+		commandName = descriptor.CLI[0].Path
+	}
+	env := output.Failure(commandName, output.Error{
+		Code:    code,
+		Message: message,
+		Source:  "xlflow",
+		Phase:   "coordination.acquire",
+		Details: details,
+	})
+	a.addConfigWarnings(&env)
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
+		return output.WithExitCode(output.ExitEnvironment, err)
+	}
+	return output.WithExitCode(output.ExitEnvironment, cause)
 }
 
 func (a *app) writeWorkbookBusyFailure(descriptor coordination.Descriptor, busy *coordination.BusyError) error {

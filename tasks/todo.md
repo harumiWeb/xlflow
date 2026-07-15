@@ -1,3 +1,16 @@
+# Issue #322: Optional workbook wait and timeout
+
+- [x] Define the opt-in 30-second wait contract and ADR
+- [x] Add global wait options and policy-based validation
+- [x] Add total acquisition timeout, cancellation, and partial lease cleanup
+- [x] Keep JSON output progress-free and human wait output concise
+- [x] Add focused wait, timeout, cancellation, and multi-target tests
+- [x] Verify WSL argument forwarding
+- [x] Run full tests, lint, docs build, and self-review
+- [ ] Create, review, and merge PR #322
+
+---
+
 # Issues #320, #321, #323: Workbook operation coordination
 
 ## Implementation
