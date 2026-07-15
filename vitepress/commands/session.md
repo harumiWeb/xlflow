@@ -55,10 +55,25 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 ```json
 {
   "status": "ok",
-  "command": "session status",
-  "session": { "name": "default", "running": true, "dirty": false }
+  "command": "session",
+  "session": { "name": "default", "running": true, "dirty": false },
+  "coordination": {
+    "busy": true,
+    "resource_scope": "workbook",
+    "operation_kind": "execute",
+    "command": "run",
+    "pid": 12345,
+    "started_at": "2026-07-15T09:30:00Z"
+  }
 }
 ```
+
+`coordination` is a point-in-time observation taken when `session status`
+starts. Idle workbooks return `{ "busy": false }`; a busy workbook may omit
+owner fields when current metadata is unavailable. The value can change before
+the response is returned and does not replace the CLI lock check performed by
+later workbook commands. If the lock cannot be observed, status remains
+available and returns warning `coordination_status_unavailable` instead.
 
 ## Related
 

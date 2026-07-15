@@ -3666,7 +3666,16 @@ func (a *app) sessionCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				env, code, err := a.excelRunnerForConfig(cfg).Session(cfg, action)
+				run := func() (output.Envelope, int, error) {
+					return a.excelRunnerForConfig(cfg).Session(cfg, action)
+				}
+				var env output.Envelope
+				var code int
+				if action == "status" {
+					env, code, err = a.runSessionStatus(cmd.Context(), cfg, run)
+				} else {
+					env, code, err = run()
+				}
 				if err != nil {
 					return err
 				}

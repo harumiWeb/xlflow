@@ -1,3 +1,21 @@
+# Issue #324: Session status coordination
+
+- [x] Probe the canonical configured workbook lock before bridge status
+- [x] Add the additive top-level coordination payload and fallback warning
+- [x] Preserve existing success/failure session envelopes and warnings
+- [x] Render idle, busy, ownerless, and public owner details
+- [x] Add focused payload, ordering, warning, JSON, and human-output tests
+- [x] Run full tests, lint, docs build, and Windows Excel E2E
+  - Workspace: `C:\dev\go\xlflow\tmp_workspaces\issue-324-e2e`
+  - During `run Main.HoldCoordination --session`, status reported busy owner
+    `run` / `execute`; after completion it reported `busy:false`
+  - Repeated without `--session`; run reported `session.mode=auto`, status
+    reported the same busy owner, and returned to idle after completion
+  - Live `Sheet1!A1` observed `coordination-finished`; session saved and stopped
+- [ ] Create, review, and merge PR #324
+
+---
+
 # Issue #322: Optional workbook wait and timeout
 
 - [x] Define the opt-in 30-second wait contract and ADR
@@ -7,7 +25,7 @@
 - [x] Add focused wait, timeout, cancellation, and multi-target tests
 - [x] Verify WSL argument forwarding
 - [x] Run full tests, lint, docs build, and self-review
-- [ ] Create, review, and merge PR #322
+- [x] Create, review, and merge PR #322
 
 ---
 
