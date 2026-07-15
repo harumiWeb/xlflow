@@ -3,11 +3,14 @@
 package coordination
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestNewWorkbookIdentityEquivalentWindowsPaths(t *testing.T) {
@@ -39,6 +42,32 @@ func TestNewWorkbookIdentityEquivalentWindowsPaths(t *testing.T) {
 	}
 	if len(want.CanonicalPath) < 2 || want.CanonicalPath[1] != ':' || want.CanonicalPath[0] < 'A' || want.CanonicalPath[0] > 'Z' {
 		t.Fatalf("CanonicalPath drive is not normalized: %q", want.CanonicalPath)
+	}
+}
+
+func TestNewWorkbookIdentityEquivalentShortAndLongParentPaths(t *testing.T) {
+	longBase := strings.TrimSpace(os.Getenv("ProgramFiles"))
+	if longBase == "" {
+		longBase = t.TempDir()
+	}
+	shortBase, err := windowsShortPath(longBase)
+	if err != nil {
+		t.Skipf("Windows short path is unavailable: %v", err)
+	}
+	if strings.EqualFold(shortBase, longBase) {
+		t.Skip("Windows short names are disabled for the selected parent directory")
+	}
+
+	fromLong, err := NewWorkbookIdentity(longBase, filepath.Join("missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(long): %v", err)
+	}
+	fromShort, err := NewWorkbookIdentity(shortBase, filepath.Join("missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(short): %v", err)
+	}
+	if fromShort != fromLong {
+		t.Fatalf("short parent identity = %#v, want long parent identity %#v", fromShort, fromLong)
 	}
 }
 
@@ -106,8 +135,15 @@ func TestNewWorkbookIdentityFallsBackForBrokenWindowsSymlink(t *testing.T) {
 	if first != second {
 		t.Fatalf("broken symlink fallback is not deterministic: %#v != %#v", first, second)
 	}
-	if first.CanonicalPath != filepath.Clean(link) {
-		t.Fatalf("CanonicalPath = %q, want lexical fallback %q", first.CanonicalPath, filepath.Clean(link))
+	if filepath.Base(first.CanonicalPath) != filepath.Base(link) {
+		t.Fatalf("CanonicalPath = %q, want broken link basename %q preserved", first.CanonicalPath, filepath.Base(link))
+	}
+	targetIdentity, err := NewWorkbookIdentity(baseDir, target)
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(target): %v", err)
+	}
+	if first.LockID == targetIdentity.LockID {
+		t.Fatalf("broken link identity %q unexpectedly matched missing target identity", first.LockID)
 	}
 }
 
@@ -172,5 +208,26 @@ func TestNewWorkbookIdentityResolvesWindowsJunctionParentForMissingWorkbook(t *t
 	}
 	if junctionIdentity != directIdentity {
 		t.Fatalf("missing workbook junction identity = %#v, want %#v", junctionIdentity, directIdentity)
+	}
+}
+
+func windowsShortPath(path string) (string, error) {
+	input, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, 512)
+	for {
+		length, err := windows.GetShortPathName(input, &buffer[0], uint32(len(buffer)))
+		if err != nil {
+			return "", err
+		}
+		if length == 0 {
+			return "", fmt.Errorf("GetShortPathName returned an empty path")
+		}
+		if length < uint32(len(buffer)) {
+			return windows.UTF16ToString(buffer[:length]), nil
+		}
+		buffer = make([]uint16, length+1)
 	}
 }

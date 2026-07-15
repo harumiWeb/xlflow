@@ -62,14 +62,16 @@ func TestNewWorkbookIdentityDifferentPaths(t *testing.T) {
 
 func TestNewWorkbookIdentityDoesNotRequireWorkbook(t *testing.T) {
 	baseDir := t.TempDir()
-	wantPath := filepath.Join(baseDir, "missing", "book.xlsm")
 
 	identity, err := NewWorkbookIdentity(baseDir, filepath.Join("missing", "book.xlsm"))
 	if err != nil {
 		t.Fatalf("NewWorkbookIdentity: %v", err)
 	}
-	if identity.CanonicalPath != filepath.Clean(wantPath) {
-		t.Fatalf("CanonicalPath = %q, want %q", identity.CanonicalPath, filepath.Clean(wantPath))
+	if !filepath.IsAbs(identity.CanonicalPath) || !strings.HasSuffix(identity.CanonicalPath, filepath.Join("missing", "book.xlsm")) {
+		t.Fatalf("CanonicalPath = %q, want absolute path preserving missing workbook tail", identity.CanonicalPath)
+	}
+	if _, err := os.Stat(identity.CanonicalPath); !os.IsNotExist(err) {
+		t.Fatalf("os.Stat(CanonicalPath) error = %v, want not exist", err)
 	}
 }
 
@@ -105,9 +107,8 @@ func TestNewWorkbookIdentityPreservesUnicodeAndSpacesForDiagnostics(t *testing.T
 	if err != nil {
 		t.Fatalf("NewWorkbookIdentity: %v", err)
 	}
-	wantPath := filepath.Join(baseDir, workbookPath)
-	if identity.CanonicalPath != wantPath {
-		t.Fatalf("CanonicalPath = %q, want %q", identity.CanonicalPath, wantPath)
+	if !strings.HasSuffix(identity.CanonicalPath, workbookPath) {
+		t.Fatalf("CanonicalPath = %q, want Unicode and space tail %q preserved", identity.CanonicalPath, workbookPath)
 	}
 }
 
