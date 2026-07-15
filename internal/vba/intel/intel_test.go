@@ -3396,6 +3396,7 @@ End Sub
 Public Sub Other()
     Dim customer As String
     Dim LogCustomer As String
+    Dim service As New CustomerService
     Debug.Print customer
     LogCustomer = "local"
 End Sub
@@ -3412,7 +3413,12 @@ End Function
 		ModuleKind: "standard",
 		Source:     source,
 	}
-	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	classDoc := Document{
+		Path:       filepath.Join(filepath.Dir(doc.Path), "CustomerService.cls"),
+		ModuleKind: "class",
+		Source:     "VERSION 1.0 CLASS\nAttribute VB_Name = \"CustomerService\"\n",
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc, classDoc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3421,6 +3427,9 @@ End Function
 	}
 	if !hasSemanticTokenAt(tokens, SemanticTokenType, "Customer", source, lineIndex(source, "PrintCustomer(ByVal")) {
 		t.Fatalf("project type reference should receive a type token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenClass, "CustomerService", source, lineIndex(source, "Dim service As New CustomerService")) {
+		t.Fatalf("As New class reference should receive a class token: %+v", tokens)
 	}
 	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Call Format(customer:=record)")) {
 		t.Fatalf("named argument must not receive a parameter token: %+v", tokens)
@@ -3436,6 +3445,9 @@ End Function
 	}
 	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "LogCustomer", source, lineIndex(source, "    LogCustomer = \"local\"")) {
 		t.Fatalf("local variable must not receive a function token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "CalculateScore", source, lineIndex(source, "CalculateScore = Len(record.Name)")) {
+		t.Fatalf("Function result assignment must not receive a function token: %+v", tokens)
 	}
 }
 

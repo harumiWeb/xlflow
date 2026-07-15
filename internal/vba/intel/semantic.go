@@ -105,7 +105,7 @@ var operatorRunes = map[rune]bool{
 var memberExprRe = regexp.MustCompile(`(?i)([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?)*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)`)
 var procedureDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)`)
 var propertyDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Property)\s+(?:Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)`)
-var projectTypeReferenceRe = regexp.MustCompile(`(?i)\b(?:As|New|Implements)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*([A-Za-z_][A-Za-z0-9_]*)`)
+var projectTypeReferenceRe = regexp.MustCompile(`(?i)\b(?:As\s+(?:New\s+)?|New\s+|Implements\s+)(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*([A-Za-z_][A-Za-z0-9_]*)`)
 
 func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken, error) {
 	builder := semanticBuilder{analyzer: a, doc: doc}
@@ -194,9 +194,12 @@ func semanticTypeForProjectTypeSymbol(sym Symbol) string {
 		return SemanticTokenEnum
 	case "class":
 		return SemanticTokenClass
-	default:
-		return ""
+	case "module":
+		if strings.EqualFold(sym.ModuleKind, "class") {
+			return SemanticTokenClass
+		}
 	}
+	return ""
 }
 
 // addProjectProcedureReferenceTokens classifies calls to workspace Sub and
@@ -225,9 +228,13 @@ func (b *semanticBuilder) addProjectProcedureReferenceTokens(open []Document) {
 	}
 	declarations := make(map[string]bool)
 	locals := make(map[string]bool)
+	functions := make(map[string]bool)
 	for _, sym := range docSyms {
 		if isProjectProcedureSymbol(sym) {
 			declarations[semanticRangeKey(b.symbolNameRange(sym))] = true
+		}
+		if strings.EqualFold(sym.Kind, "function") {
+			functions[strings.ToLower(sym.Name)] = true
 		}
 		if isLocalSymbol(sym) {
 			locals[procedureLocalKey(sym.Parent, sym.Name)] = true
@@ -244,6 +251,9 @@ func (b *semanticBuilder) addProjectProcedureReferenceTokens(open []Document) {
 				continue
 			}
 			procedure := currentProcedureNameForDocument(b.doc, rng.Start)
+			if strings.EqualFold(procedure, name) && functions[strings.ToLower(procedure)] && b.isAssignment(rng) {
+				continue
+			}
 			if locals[procedureLocalKey(procedure, name)] {
 				continue
 			}
@@ -274,6 +284,12 @@ func (b *semanticBuilder) isProjectProcedureReference(rng Range) bool {
 		return false
 	}
 	return !strings.HasPrefix(strings.TrimSpace(line[end:]), ":=")
+}
+
+func (b *semanticBuilder) isAssignment(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	return strings.HasPrefix(strings.TrimSpace(line[end:]), "=")
 }
 
 func (b *semanticBuilder) addLexicalTokens() {
