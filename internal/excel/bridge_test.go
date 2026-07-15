@@ -2164,6 +2164,20 @@ func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
 	}
 }
 
+func TestVbaComponentReplacementFailuresAreEnvironmentFailures(t *testing.T) {
+	for _, code := range []string{"vba_component_remove_failed", "vba_component_import_name_mismatch"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitEnvironment {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitEnvironment)
+			}
+		})
+	}
+}
+
 func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
