@@ -28,6 +28,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/backup"
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
@@ -176,6 +177,9 @@ func (a *app) rootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.requireCoordinationPolicy(cmd); err != nil {
+				return err
+			}
 			return a.delegateWSLCommand(cmd)
 		},
 	}
@@ -221,6 +225,32 @@ func (a *app) rootCommand() *cobra.Command {
 		a.processCommand(),
 	)
 	return root
+}
+
+func (a *app) requireCoordinationPolicy(cmd *cobra.Command) error {
+	if isGeneratedCobraCommand(cmd) {
+		return nil
+	}
+	if _, err := coordination.LookupCLI(cmd.CommandPath()); err != nil {
+		command := strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), "xlflow"))
+		return a.writeFailure(command, output.ExitEnvironment, coordination.MissingPolicyCode, err)
+	}
+	return nil
+}
+
+func isGeneratedCobraCommand(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	current := cmd
+	for current != nil {
+		switch current.Name() {
+		case "completion", "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			return true
+		}
+		current = current.Parent()
+	}
+	return false
 }
 
 func (a *app) executeRoot(root *cobra.Command) error {
@@ -2925,35 +2955,7 @@ func looksLikeWorkbookInUse(err error) bool {
 }
 
 func samePath(a, b string) bool {
-	left, leftErr := canonicalPath(a)
-	right, rightErr := canonicalPath(b)
-	if leftErr == nil && rightErr == nil {
-		return strings.EqualFold(left, right)
-	}
-	if leftInfo, err := os.Stat(a); err == nil {
-		if rightInfo, err := os.Stat(b); err == nil {
-			return os.SameFile(leftInfo, rightInfo)
-		}
-	}
-	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
-}
-
-func canonicalPath(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	resolvedPath, err := filepath.EvalSymlinks(absPath)
-	if err == nil {
-		return filepath.Clean(resolvedPath), nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return filepath.Clean(absPath), nil
-	}
-	return "", err
+	return coordination.SamePath(a, b)
 }
 
 func buildExportImageOptions(workbook, sheet, cellRange, outPath, outputDir, name, format string, overwrite bool, session bool, keepalive excel.CommandOptions) (excel.ExportImageOptions, error) {

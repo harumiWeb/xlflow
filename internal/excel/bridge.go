@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -1535,6 +1536,15 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
+	if _, err := coordination.LookupBridge(commandName, args); err != nil {
+		env = output.Failure(commandName, output.Error{
+			Code:    coordination.MissingPolicyCode,
+			Message: err.Error(),
+			Source:  "xlflow",
+			Phase:   "coordination.policy",
+		})
+		return env, output.ExitEnvironment, nil
+	}
 
 	var uiSession *uiStreamSession
 	var debugSession *debugStreamSession
