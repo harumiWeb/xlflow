@@ -250,7 +250,7 @@ func TestDesignerCoordinationWaitsThenPublishesDesignerOwner(t *testing.T) {
 	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "form.build")
 	var stdout, stderr bytes.Buffer
 	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
-	time.AfterFunc(75*time.Millisecond, func() { _ = owner.Release() })
+	time.AfterFunc(150*time.Millisecond, func() { _ = owner.Release() })
 	runs := 0
 	err := a.withWorkbookCoordination(context.Background(), "form.snapshot", []string{identity.CanonicalPath}, func() error {
 		runs++
