@@ -111,9 +111,9 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	sheet1Path := filepath.Join(cwd, "src", "workbook", "Sheet1.bas")
 	sampleTestPath := filepath.Join(cwd, "src", "modules", "Tests", "SampleTests.bas")
 	protectedPaths := []string{destPath, configPath}
-	protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldBaseModuleTemplates())...)
+	protectedPaths = append(protectedPaths, bundledModuleConflictPaths(moduleDir, scaffoldBaseModuleTemplates())...)
 	if scaffoldRuntimeHelper {
-		protectedPaths = append(protectedPaths, bundledModulePaths(moduleDir, scaffoldRuntimeHelperModuleTemplates())...)
+		protectedPaths = append(protectedPaths, bundledModuleConflictPaths(moduleDir, scaffoldRuntimeHelperModuleTemplates())...)
 	}
 	if scaffoldWorkbookModules {
 		protectedPaths = append(protectedPaths, thisWorkbookPath, sheet1Path)
@@ -464,18 +464,18 @@ warnings: []
 func installBundledModules(cwd, moduleDir string, templates []bundledModuleTemplate) (InstallModulesResult, error) {
 	var result InstallModulesResult
 	paths := bundledModulePaths(moduleDir, templates)
-	for _, path := range paths {
+	for _, path := range bundledModuleConflictPaths(moduleDir, templates) {
 		if _, err := os.Stat(path); err == nil {
 			return result, fmt.Errorf("refusing to overwrite existing file: %s", path)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return result, err
 		}
 	}
-	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
-		return result, err
-	}
 	for index, template := range templates {
 		path := paths[index]
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return result, err
+		}
 		if err := writeExclusive(path, template.body); err != nil {
 			return result, err
 		}
@@ -492,26 +492,39 @@ func bundledModulePaths(moduleDir string, templates []bundledModuleTemplate) []s
 	return paths
 }
 
+// bundledModuleConflictPaths includes the legacy root location for bundled
+// helpers. This prevents new scaffolds and module install from creating two
+// source files for the same VBA component in existing projects.
+func bundledModuleConflictPaths(moduleDir string, templates []bundledModuleTemplate) []string {
+	paths := bundledModulePaths(moduleDir, templates)
+	for _, template := range templates {
+		if filepath.Dir(template.fileName) == "Xlflow" {
+			paths = append(paths, filepath.Join(moduleDir, filepath.Base(template.fileName)))
+		}
+	}
+	return paths
+}
+
 func installHelperModuleTemplates() []bundledModuleTemplate {
 	return []bundledModuleTemplate{
-		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
-		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
-		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
-		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowAssert.bas"), body: defaultAssertModule},
+		{fileName: filepath.Join("Xlflow", "XlflowRuntime.bas"), body: defaultRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowUI.bas"), body: defaultUIRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowDebug.bas"), body: defaultDebugRuntimeModule},
 	}
 }
 
 func scaffoldRuntimeHelperModuleTemplates() []bundledModuleTemplate {
 	return []bundledModuleTemplate{
-		{fileName: "XlflowRuntime.bas", body: defaultRuntimeModule},
-		{fileName: "XlflowUI.bas", body: defaultUIRuntimeModule},
-		{fileName: "XlflowDebug.bas", body: defaultDebugRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowRuntime.bas"), body: defaultRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowUI.bas"), body: defaultUIRuntimeModule},
+		{fileName: filepath.Join("Xlflow", "XlflowDebug.bas"), body: defaultDebugRuntimeModule},
 	}
 }
 
 func scaffoldBaseModuleTemplates() []bundledModuleTemplate {
 	return []bundledModuleTemplate{
-		{fileName: "XlflowAssert.bas", body: defaultAssertModule},
+		{fileName: filepath.Join("Xlflow", "XlflowAssert.bas"), body: defaultAssertModule},
 		{fileName: "Main.bas", body: defaultMainModule},
 		{fileName: "App.bas", body: defaultAppModule},
 		{fileName: "Ui.bas", body: defaultUiModule},

@@ -493,7 +493,7 @@ xlflow inspect-gui --json
 
 ### Runtime-aware VBA branches
 
-New `xlflow new` projects include `src/modules/XlflowRuntime.bas`. During `xlflow run` and `xlflow test`, xlflow injects a workbook-scoped execution mode marker before user VBA starts, so code can branch without process inspection hacks.
+New `xlflow new` projects include `src/modules/Xlflow/XlflowRuntime.bas`. During `xlflow run` and `xlflow test`, xlflow injects a workbook-scoped execution mode marker before user VBA starts, so code can branch without process inspection hacks.
 
 ```vb
 If XlflowRuntime.IsHeadless() Then
@@ -669,10 +669,10 @@ Use `[analyze].disabled_rules = ["VBA205"]` to disable configurable analyzer rul
 
 In new projects, the following helper modules are scaffolded on the workbook side:
 
-- `src/modules/XlflowRuntime.bas`
-- `src/modules/XlflowUI.bas`
-- `src/modules/XlflowDebug.bas`
-- `src/modules/XlflowAssert.bas`
+- `src/modules/Xlflow/XlflowRuntime.bas`
+- `src/modules/Xlflow/XlflowUI.bas`
+- `src/modules/Xlflow/XlflowDebug.bas`
+- `src/modules/Xlflow/XlflowAssert.bas`
 
 The purpose of each module is as follows:
 
