@@ -105,15 +105,97 @@ var operatorRunes = map[rune]bool{
 var memberExprRe = regexp.MustCompile(`(?i)([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?)*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)`)
 var procedureDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)`)
 var propertyDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Property)\s+(?:Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+var projectTypeReferenceRe = regexp.MustCompile(`(?i)\b(?:As|New|Implements)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*([A-Za-z_][A-Za-z0-9_]*)`)
 
 func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken, error) {
 	builder := semanticBuilder{analyzer: a, doc: doc}
 	builder.addLexicalTokens()
 	builder.addSymbolTokens(open)
+	builder.addParameterReferenceTokens()
+	builder.addProjectTypeReferenceTokens(open)
 	builder.addKnownIdentifierTokens(open)
 	builder.addMemberTokens()
 	builder.addUserFormControlTokens()
 	return normalizeSemanticTokens(builder.tokens), nil
+}
+
+// addParameterReferenceTokens applies the parameter classification to uses in
+// the declaring procedure as well as to the declaration itself. TextMate can
+// recognize only the declaration; these tokens keep the two appearances
+// visually consistent without confusing members or named arguments.
+func (b *semanticBuilder) addParameterReferenceTokens() {
+	syms, err := b.analyzer.DocumentSymbols(b.doc)
+	if err != nil {
+		return
+	}
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Kind, "parameter") || sym.Name == "" {
+			continue
+		}
+		scope, ok := currentProcedureRangeForDocument(b.doc, sym.Selection.Start)
+		if !ok {
+			continue
+		}
+		for _, rng := range codeIdentifierRanges(b.doc.Source, sym.Name) {
+			if rangeContains(scope, rng) && b.isParameterReference(rng) {
+				b.add(rng, SemanticTokenParameter)
+			}
+		}
+	}
+}
+
+func (b *semanticBuilder) isParameterReference(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	start := byteIndexForUTF16(line, rng.Start.Character)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	if start > 0 && line[start-1] == '.' {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(line[end:]), ":=")
+}
+
+// addProjectTypeReferenceTokens highlights type positions such as "As Customer"
+// and "New Invoice" for types declared in the current workspace. Restricting
+// this to explicit type contexts avoids mistaking an ordinary variable that
+// happens to share a name with a type for a type reference.
+func (b *semanticBuilder) addProjectTypeReferenceTokens(open []Document) {
+	syms, err := b.analyzer.WorkspaceSymbols(open, "")
+	if err != nil {
+		return
+	}
+	types := make(map[string]string)
+	for _, sym := range syms {
+		tokenType := semanticTypeForProjectTypeSymbol(sym)
+		if tokenType == "" || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
+			continue
+		}
+		types[strings.ToLower(sym.Name)] = tokenType
+	}
+	for lineNo, line := range normalizedLines(b.doc.Source) {
+		limit := codeLimit(line)
+		for _, match := range projectTypeReferenceRe.FindAllStringSubmatchIndex(line[:limit], -1) {
+			if len(match) < 4 || match[2] < 0 || match[3] < 0 {
+				continue
+			}
+			name := strings.ToLower(line[match[2]:match[3]])
+			if tokenType, ok := types[name]; ok {
+				b.add(byteRange(lineNo, line, match[2], match[3]), tokenType)
+			}
+		}
+	}
+}
+
+func semanticTypeForProjectTypeSymbol(sym Symbol) string {
+	switch strings.ToLower(sym.Kind) {
+	case "type":
+		return SemanticTokenType
+	case "enum":
+		return SemanticTokenEnum
+	case "class":
+		return SemanticTokenClass
+	default:
+		return ""
+	}
 }
 
 func (b *semanticBuilder) addLexicalTokens() {

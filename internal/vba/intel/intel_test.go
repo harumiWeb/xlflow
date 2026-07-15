@@ -3379,6 +3379,46 @@ End Sub
 	}
 }
 
+func TestSemanticTokensCoverParameterUsesAndProjectTypeReferences(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Type Customer
+    Name As String
+End Type
+
+Public Sub PrintCustomer(ByVal record As Customer)
+    Debug.Print record.Name
+    Call Format(customer:=record)
+End Sub
+
+Public Sub Other()
+    Dim customer As String
+    Debug.Print customer
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenParameter, "record", source, lineIndex(source, "Debug.Print record.Name")) {
+		t.Fatalf("parameter use should receive a parameter token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenType, "Customer", source, lineIndex(source, "PrintCustomer(ByVal")) {
+		t.Fatalf("project type reference should receive a type token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Call Format(customer:=record)")) {
+		t.Fatalf("named argument must not receive a parameter token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Public Sub Other()")+2) {
+		t.Fatalf("local variable in another procedure must not receive a parameter token: %+v", tokens)
+	}
+}
+
 func TestSemanticTokensCoverUserFormControlsAndMalformedSource(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `VERSION 5.00
@@ -3514,6 +3554,15 @@ func hasSemanticToken(tokens []SemanticToken, tokenType, text, source string) bo
 func hasSemanticTokenAtLine(tokens []SemanticToken, tokenType string, line int) bool {
 	for _, token := range tokens {
 		if token.Type == tokenType && token.Range.Start.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSemanticTokenAt(tokens []SemanticToken, tokenType, text, source string, line int) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && token.Range.Start.Line == line && rangeText(source, token.Range) == text {
 			return true
 		}
 	}
