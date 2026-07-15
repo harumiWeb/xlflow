@@ -110,19 +110,31 @@ func TestShouldNotDelegateBackupSubcommands(t *testing.T) {
 	}
 }
 
-func TestShouldDelegateFormNewCommand(t *testing.T) {
-	root := &cobra.Command{Use: "xlflow"}
-	formCmd := &cobra.Command{Use: "form"}
-	newCmd := &cobra.Command{Use: "new"}
-	buildCmd := &cobra.Command{Use: "build"}
-	root.AddCommand(formCmd)
-	formCmd.AddCommand(newCmd, buildCmd)
-
-	if shouldDelegateCommand(newCmd, topLevelCommandName(newCmd)) {
-		t.Fatal("form new should remain local because it only creates source files")
+func TestShouldDelegateWorkbookBackedUserFormCommandsOnly(t *testing.T) {
+	root := (&app{}).rootCommand()
+	tests := []struct {
+		path     []string
+		delegate bool
+	}{
+		{path: []string{"form", "migrate", "sidecar"}, delegate: true},
+		{path: []string{"form", "snapshot"}, delegate: true},
+		{path: []string{"form", "build"}, delegate: true},
+		{path: []string{"form", "apply"}, delegate: true},
+		{path: []string{"form", "export-image"}, delegate: true},
+		{path: []string{"inspect", "form"}, delegate: true},
+		{path: []string{"list", "forms"}, delegate: true},
+		{path: []string{"form", "new"}, delegate: false},
+		{path: []string{"module", "rename"}, delegate: false},
+		{path: []string{"module", "remove"}, delegate: false},
 	}
-	if !shouldDelegateCommand(buildCmd, topLevelCommandName(buildCmd)) {
-		t.Fatal("form build should remain delegated because it writes workbook UserForms")
+	for _, tt := range tests {
+		cmd, _, err := root.Find(tt.path)
+		if err != nil {
+			t.Fatalf("find %v: %v", tt.path, err)
+		}
+		if got := shouldDelegateCommand(cmd, topLevelCommandName(cmd)); got != tt.delegate {
+			t.Errorf("%s delegation = %t, want %t", cmd.CommandPath(), got, tt.delegate)
+		}
 	}
 }
 

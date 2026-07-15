@@ -1,3 +1,47 @@
+# Issue #325: UserForm/Designer coordination coverage
+
+- [x] Confirm all workbook-backed UserForm leaves use the shared workbook lock
+- [x] Add exhaustive central policy and bridge-selector coverage
+- [x] Add held-lock CLI and direct Runner tests that stop before handlers/bridge
+- [x] Cover Designer owner metadata, bounded wait, cancellation, and timeout
+- [x] Cover different-workbook independence and WSL delegation classification
+- [x] Update coordination specs, user docs, agent guidance, and changelog
+- [x] Run Windows Excel UserForm/Designer E2E
+  - Primary workspace: `C:\dev\go\xlflow\tmp_workspaces\issue-325-e2e`
+  - Independent workbook: `C:\dev\go\xlflow\tmp_workspaces\issue-325-e2e-other`
+  - Installed the paired Go CLI and .NET bridge with `task install`
+  - Exercised JSON commands `new`, `form new`, `session start`, `form build`,
+    `push --fast --session --no-save`, `save --session`, `form snapshot`,
+    `inspect form --designer`, `form build --overwrite`, `form export-image`,
+    `run`, `pull`, `lint`, and `session stop`
+  - Initial push before the first build correctly failed preflight because the
+    new spec had no generated `.frm`; build created the artifacts and the
+    subsequent push succeeded
+  - Build/snapshot/inspect observed caption `Coordination Form`, two controls,
+    width 240, and height 150; overwrite succeeded and PNG export produced a
+    382x241 image
+  - `.frm` / `.frx` survived save/stop/pull at 603 / 2584 bytes, and pull
+    exported one sidecar code-behind file; lint reported no issues
+  - During `run Main.HoldWorkbook --session`, status reported busy owner
+    `run` / `execute`; immediate `form snapshot` returned exit 3
+    `workbook_busy`, operation `form.snapshot`, and created no output file
+  - `--wait --wait-timeout 15s form snapshot` succeeded after release and
+    created `artifacts/waited.yaml`; the macro wrote and live Excel inspection
+    observed `Sheet1!A1 = coordination-finished`
+  - While the primary workbook was busy, snapshotting `OtherForm` in the
+    independent workbook succeeded and created `artifacts/other.yaml`
+  - Not repeated on a physical WSL host; WSL source/workbook delegation is
+    covered by the expanded command table. Actual simultaneous Designer COM
+    calls were replaced with deterministic held-lease Designer-owner tests.
+- [x] Run full tests, lint, docs build, and diff check
+  - `task test`, `task lint`, `pnpm docs:build`, and `git diff --check` passed
+- [x] Complete final staff-level diff review
+  - No High/Medium findings; restored explicit run/test policy assertions and
+    widened new wait-test timing margins from the two Low findings
+- [ ] Create, review, and merge PR #325
+
+---
+
 # Issue #324: Session status coordination
 
 - [x] Probe the canonical configured workbook lock before bridge status
@@ -12,7 +56,7 @@
   - Repeated without `--session`; run reported `session.mode=auto`, status
     reported the same busy owner, and returned to idle after completion
   - Live `Sheet1!A1` observed `coordination-finished`; session saved and stopped
-- [ ] Create, review, and merge PR #324
+- [x] Create, review, and merge PR #324
 
 ---
 

@@ -13,6 +13,9 @@ All notable changes to xlflow will be documented in this file.
 - Added an observational top-level `coordination` section to `session status`,
   including current workbook busy state and guarded public owner metadata when
   available without changing existing session fields or failure behavior.
+- Documented and exhaustively tested UserForm/Designer coordination so migration,
+  snapshot, build/apply, image export, form inspection/listing, pull, and push all
+  converge on the same canonical workbook lock before Excel or VBIDE starts.
 - Changed new-project scaffolds and `module install` to place bundled `Xlflow*.bas` helpers under `src/modules/Xlflow/`; existing root-level helper files are not moved, and `module install` now refuses those legacy collisions rather than creating duplicate VBA components.
 - Fixed .NET `push` to stop before importing when Excel cannot remove an existing VBA component and to reject Excel-renamed imports, preventing duplicate modules with a `1` suffix; every removal/import failure poisons a partial session replacement, managed sessions discard the unsafe unsaved state on stop, and external sessions receive owner-correct recovery guidance.
 - Fixed .NET bridge workbook persistence so transient `__XLFLOW_MODE__`, related runtime/UI/debug defined names, and generated helper modules are removed before save, including after a timed-out session run or a macro that saves and then edits again, preventing manually opened workbooks from remaining in headless mode or retaining temporary harness code.

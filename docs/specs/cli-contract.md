@@ -398,6 +398,13 @@ returns `workbook_busy_cancelled`. Both use phase `coordination.acquire`, includ
 wait progress text; human output prints one concise line after contention is
 actually observed.
 
+For UserForms, `form migrate sidecar`, `form snapshot`, `form build`, hidden
+`form apply`, `form export-image`, `inspect form`, `list forms`, `pull`, and
+`push` all use this standard workbook coordination contract and may opt into
+bounded waiting. A busy result is returned before the leaf handler or Excel
+bridge starts. `form new` and source-only rename/delete are intentionally not
+wait-capable; the later `push` is the coordinated workbook boundary.
+
 Command-specific fields are added at the top level:
 
 - `diagnostics` for `doctor` (includes `excel.com_activation` which indicates successful `Excel.Application` creation on the STA thread, plus `.NET` bridge `excel.systemprofile_desktop` readiness with per-path `status` values of `exists`, `missing`, `access_denied`, or `unknown`; `doctor --workbook` additionally opens the configured workbook and reports `workbook_openable`; WSL adds `host`, `windows`, and `path_translation`)

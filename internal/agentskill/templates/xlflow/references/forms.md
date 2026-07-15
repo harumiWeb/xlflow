@@ -21,6 +21,18 @@ Load this reference when the task depends on `xlflow list forms`, `xlflow inspec
 - In `sidecar` mode, run `pull` before reviewing or editing `src/forms/code/<FormName>.bas`; `form snapshot` does not emit code-behind.
 - `form apply` is hidden and should not be used for sidecar-aware UserForm workflows; prefer `form build --overwrite`.
 
+## Workbook Coordination
+
+Workbook-backed form, inspect, list, pull, and push commands share one canonical
+workbook lock with run and test. Do not launch them concurrently for the same
+workbook. Treat `workbook_busy` as a retryable operational result: retry after
+the owner completes, or explicitly add global `--wait --wait-timeout <duration>`
+for a bounded acquisition wait. Waiting does not retry the command body.
+
+`form new` and source-only UserForm rename/delete steps do not lock Excel. Their
+workbook boundary is the later coordinated `push`. A prior idle `session status`
+is advisory only; the command's own lock acquisition remains authoritative.
+
 ## Persisted Spec Contract
 
 `form snapshot` persists an `xlflow.userform` spec. `form build` consumes the same contract.

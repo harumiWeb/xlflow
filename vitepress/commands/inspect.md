@@ -48,6 +48,7 @@ xlflow inspect workbook --json
 xlflow inspect range --sheet Result --address A1:F20 --json
 xlflow inspect range --sheet Result --address A1:F20 --session --include-style --json
 xlflow inspect form CalendarForm --both --json
+xlflow --wait --wait-timeout 15s inspect form CalendarForm --designer --json
 xlflow inspect calls --json
 xlflow inspect calls --from Main.Run --to BuildReport
 xlflow inspect symbols --json
@@ -61,6 +62,12 @@ Most `inspect` commands read the saved workbook by default. Add `--session` when
 :::
 
 `inspect calls` and `inspect symbols` are source-only. They parse exported `.bas`, `.cls`, and `.frm` files with tree-sitter-vba and do not open Excel.
+
+`inspect form` is a conservative Designer operation and shares the configured
+workbook lock with execution, synchronization, and other UserForm commands. It
+returns `workbook_busy` before Excel/VBIDE starts, or accepts global `--wait` for
+a bounded acquisition wait. The lock remains the final authority even if a
+preceding `session status` observation appeared idle.
 
 `inspect calls` reports syntax-level call sites with caller module/procedure context, callee text, argument count, named arguments, source range, parse recovery state, and conservative resolution status. It does not perform full VBA name binding, COM type-library resolution, host object model inference, overload resolution, or dynamic dispatch resolution.
 

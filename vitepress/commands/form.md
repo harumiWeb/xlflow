@@ -6,10 +6,10 @@ Manage UserForms through sidecar scaffolds, Designer snapshots, rebuilds, and im
 
 ```bash
 xlflow form new <name>
-xlflow form migrate sidecar [FormName] [--overwrite]
-xlflow form snapshot <name> --out <path>
-xlflow form build <spec> [--overwrite]
-xlflow form export-image <name> --out <png>
+xlflow [--wait] form migrate sidecar [FormName] [--overwrite]
+xlflow [--wait] form snapshot <name> --out <path>
+xlflow [--wait] form build <spec> [--overwrite]
+xlflow [--wait] form export-image <name> --out <png>
 ```
 
 ## Options and Arguments
@@ -26,10 +26,17 @@ xlflow form export-image <name> --out <png>
 | `--session`            | Operate against the managed live session workbook.              | false   |
 | `--no-save`            | Leave session-backed build changes unsaved until `xlflow save`. | false   |
 | `--initializer <mode>` | Control initializer execution for image export.                 | default |
+| `--wait`               | Wait up to 30 seconds for the configured workbook lock.         | false   |
+| `--wait-timeout <d>`   | Override the positive bounded wait duration; requires `--wait`. | 30s     |
 
 `form snapshot` reads the design-time Designer state without loading the form at runtime or running workbook VBA. Controls created only by runtime code are visible through runtime inspection or image export, not through snapshot.
 
 `form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); it does not create `.frm` or `.frx` artifacts.
+
+All other workbook-backed form commands share the configured workbook lock with
+`run`, `test`, `push`, `pull`, and Designer inspection. Contention returns
+`workbook_busy` before Excel or VBIDE starts. Use global `--wait` for an explicit
+bounded retry; `form new` rejects waiting because it changes source files only.
 
 `form migrate sidecar` converts existing tracked `src/forms/*.frm` UserForms to the sidecar layout. It extracts code-behind to `src/forms/code/<Name>.bas`, writes a non-executing Designer spec to `src/forms/specs/<Name>.yaml`, and switches `[userform].code_source` to `"sidecar"` after all selected forms succeed. Pass a form name to migrate one form. Existing Designer spec files always require `--overwrite`; existing sidecar code can be skipped only when it already matches the extracted `.frm` code.
 
@@ -44,6 +51,7 @@ xlflow form migrate sidecar CalendarForm --overwrite --json
 xlflow form snapshot CalendarForm --out src/forms/specs/CalendarForm.yaml --json
 xlflow form build src/forms/specs/CalendarForm.yaml --overwrite --json
 xlflow form export-image CalendarForm --out artifacts/CalendarForm.png --json
+xlflow --wait --wait-timeout 15s form snapshot CalendarForm --out artifacts/CalendarForm.yaml --json
 ```
 
 ## Notes

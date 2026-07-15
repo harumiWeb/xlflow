@@ -72,6 +72,10 @@ func TestLookupBridgeUsesPayloadSelectors(t *testing.T) {
 	}{
 		{"run", nil, "run"},
 		{"FORM-WRITE", map[string]string{"action": "BUILD", "SpecPath": "form.yaml"}, "form.build"},
+		{"form-write", map[string]string{"Action": "apply", "SpecPath": "form.yaml"}, "form.apply"},
+		{"inspect-form", map[string]string{"Name": "UserForm1"}, "inspect.form"},
+		{"form-export-image", map[string]string{"Name": "UserForm1"}, "form.export-image"},
+		{"list", map[string]string{"Action": "forms"}, "list.forms"},
 		{"edit", map[string]string{"Action": "formula"}, "edit.formula"},
 		{"inspect", map[string]string{"Target": "used-range"}, "inspect.used-range"},
 		{"session", map[string]string{"Action": "status"}, "session.status"},
@@ -93,6 +97,7 @@ func TestUnknownSelectorsFailClosed(t *testing.T) {
 		func() error { _, err := Lookup("future.command"); return err },
 		func() error { _, err := LookupCLI("future command"); return err },
 		func() error { _, err := LookupBridge("edit", map[string]string{"Action": "future"}); return err },
+		func() error { _, err := LookupBridge("form-write", map[string]string{"Action": "future"}); return err },
 		func() error { _, err := LookupBridge("session", nil); return err },
 	}
 	for _, lookup := range tests {
@@ -146,26 +151,43 @@ func TestAllIsStableAndDefensive(t *testing.T) {
 	}
 }
 
-func TestImportantCommandsHaveConservativePolicies(t *testing.T) {
+func TestUserFormCommandsHaveExplicitCoordinationPolicies(t *testing.T) {
 	tests := []struct {
-		path string
-		kind OperationKind
+		id        CommandID
+		path      string
+		scope     ResourceScope
+		kind      OperationKind
+		parallel  bool
+		retryable bool
 	}{
-		{"push", OperationMutate},
-		{"run", OperationExecute},
-		{"test", OperationExecute},
-		{"form build", OperationDesigner},
-		{"form apply", OperationDesigner},
-		{"form snapshot", OperationDesigner},
-		{"inspect form", OperationDesigner},
+		{"form.migrate.sidecar", "form migrate sidecar", ResourceWorkbook, OperationDesigner, false, true},
+		{"form.snapshot", "form snapshot", ResourceWorkbook, OperationDesigner, false, true},
+		{"form.build", "form build", ResourceWorkbook, OperationDesigner, false, true},
+		{"form.apply", "form apply", ResourceWorkbook, OperationDesigner, false, true},
+		{"form.export-image", "form export-image", ResourceWorkbook, OperationDesigner, false, true},
+		{"inspect.form", "inspect form", ResourceWorkbook, OperationDesigner, false, true},
+		{"list.forms", "list forms", ResourceWorkbook, OperationRead, false, true},
+		{"pull", "pull", ResourceWorkbook, OperationRead, false, true},
+		{"push", "push", ResourceWorkbook, OperationMutate, false, true},
+		{"run", "run", ResourceWorkbook, OperationExecute, false, true},
+		{"test", "test", ResourceWorkbook, OperationExecute, false, true},
+		{"form.new", "form new", ResourceNone, OperationMutate, true, false},
+		{"module.rename", "module rename", ResourceNone, OperationMutate, true, false},
+		{"module.remove", "module remove", ResourceNone, OperationMutate, true, false},
 	}
 	for _, test := range tests {
-		descriptor, err := LookupCLI(test.path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if descriptor.Policy.ResourceScope != ResourceWorkbook || descriptor.Policy.OperationKind != test.kind || descriptor.Policy.ParallelSafe {
-			t.Errorf("%s policy = %+v", test.path, descriptor.Policy)
-		}
+		t.Run(string(test.id), func(t *testing.T) {
+			descriptor, err := LookupCLI(test.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if descriptor.ID != test.id {
+				t.Fatalf("%s ID = %q, want %q", test.path, descriptor.ID, test.id)
+			}
+			policy := descriptor.Policy
+			if policy.ResourceScope != test.scope || policy.OperationKind != test.kind || policy.ParallelSafe != test.parallel || policy.RetryableWhenBusy != test.retryable || policy.DefaultWaitPolicy != WaitFail {
+				t.Errorf("%s policy = %+v", test.path, policy)
+			}
+		})
 	}
 }

@@ -9,29 +9,101 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
+	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
-func TestRunnerWorkbookBusyStopsBeforeBridgeExecution(t *testing.T) {
+func TestRunnerWorkbookBusyStopsUserFormCommandsBeforeBridgeExecution(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows LockFileEx coordination")
 	}
-	root := t.TempDir()
+	spec := forms.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: forms.FormSpecForm{Name: "UserForm1"}}
+	tests := []struct {
+		name      string
+		operation coordination.CommandID
+		invoke    func(Runner, config.Config, string) (output.Envelope, int, error)
+	}{
+		{name: "list forms", operation: "list.forms", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.ListForms(cfg, SessionCommandOptions{})
+		}},
+		{name: "inspect form", operation: "inspect.form", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.InspectForm(cfg, InspectFormOptions{Name: "UserForm1", Basis: "designer"})
+		}},
+		{name: "form build", operation: "form.build", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.FormWrite(cfg, FormWriteOptions{Action: "build", SpecPath: "UserForm1.yaml", Spec: spec})
+		}},
+		{name: "form apply", operation: "form.apply", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.FormWrite(cfg, FormWriteOptions{Action: "apply", SpecPath: "UserForm1.yaml", Spec: spec})
+		}},
+		{name: "form export image", operation: "form.export-image", invoke: func(r Runner, cfg config.Config, root string) (output.Envelope, int, error) {
+			return r.FormExportImage(cfg, FormExportImageOptions{Name: "UserForm1", OutPath: filepath.Join(root, "UserForm1.png")})
+		}},
+		{name: "pull", operation: "pull", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.PullWithOptions(cfg, SessionCommandOptions{})
+		}},
+		{name: "push", operation: "push", invoke: func(r Runner, cfg config.Config, _ string) (output.Envelope, int, error) {
+			return r.PushWithOptions(cfg, PushOptions{})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Default()
+			identity, err := coordination.NewWorkbookIdentity(root, cfg.Excel.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identity, Command: "run", OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = lease.Release() }()
+
+			original := bridgeProviderForMode
+			t.Cleanup(func() { bridgeProviderForMode = original })
+			callCount := 0
+			bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+				return trackingBridgeProvider{name: "dotnet", supports: true, callCount: &callCount}
+			}
+
+			env, code, err := tt.invoke(Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}, cfg, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != output.ExitEnvironment || env.Error == nil || env.Error.Code != coordination.WorkbookBusyCode {
+				t.Fatalf("result = code %d, error %#v", code, env.Error)
+			}
+			if callCount != 0 {
+				t.Fatalf("bridge calls = %d, want 0", callCount)
+			}
+			details, ok := env.Error.Details.(map[string]any)
+			if !ok || details["operation"] != tt.operation || details["retryable"] != true {
+				t.Fatalf("details = %#v", env.Error.Details)
+			}
+		})
+	}
+}
+
+func TestRunnerUserFormCoordinationDoesNotConflictAcrossWorkbooks(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
 	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
-	identity, err := coordination.NewWorkbookIdentity(root, cfg.Excel.Path)
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	identityA, err := coordination.NewWorkbookIdentity(rootA, cfg.Excel.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
-		Identity:      identity,
-		Command:       "run",
-		OperationKind: coordination.OperationExecute,
-		ResourceScope: coordination.ResourceWorkbook,
-	})
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identityA, Command: "form.build", OperationKind: coordination.OperationDesigner, ResourceScope: coordination.ResourceWorkbook})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,21 +113,13 @@ func TestRunnerWorkbookBusyStopsBeforeBridgeExecution(t *testing.T) {
 	t.Cleanup(func() { bridgeProviderForMode = original })
 	callCount := 0
 	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
-		return trackingBridgeProvider{name: "dotnet", supports: true, callCount: &callCount}
+		return trackingBridgeProvider{name: "dotnet", supports: true, callCount: &callCount, response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect-form","logs":[]}`)}}
 	}
-
-	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).PushWithOptions(cfg, PushOptions{})
+	env, code, err := (Runner{RootDir: rootB, BridgeMode: "dotnet", Coordination: manager}).InspectForm(cfg, InspectFormOptions{Name: "UserForm1", Basis: "designer"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != output.ExitEnvironment || env.Error == nil || env.Error.Code != coordination.WorkbookBusyCode {
-		t.Fatalf("result = code %d, error %#v", code, env.Error)
-	}
-	if callCount != 0 {
-		t.Fatalf("bridge calls = %d, want 0", callCount)
-	}
-	details, ok := env.Error.Details.(map[string]any)
-	if !ok || details["operation"] != coordination.CommandID("push") || details["retryable"] != true {
-		t.Fatalf("details = %#v", env.Error.Details)
+	if code != output.ExitSuccess || env.Error != nil || callCount != 1 {
+		t.Fatalf("different workbook result = code %d, error %#v, bridge calls %d", code, env.Error, callCount)
 	}
 }

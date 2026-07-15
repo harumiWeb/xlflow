@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -81,6 +82,86 @@ func TestWorkbookContentionStopsCLILeafWithStructuredBusyFailure(t *testing.T) {
 	}
 }
 
+func TestWorkbookContentionStopsEveryUserFormLeafBeforeHandler(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	tests := []struct {
+		name      string
+		operation coordination.CommandID
+		args      func(string) []string
+		output    func(string) string
+	}{
+		{name: "migrate sidecar", operation: "form.migrate.sidecar", args: func(string) []string { return []string{"--json", "form", "migrate", "sidecar"} }},
+		{name: "snapshot", operation: "form.snapshot", args: func(root string) []string {
+			return []string{"--json", "form", "snapshot", "UserForm1", "--out", filepath.Join(root, "snapshot.yaml")}
+		}, output: func(root string) string { return filepath.Join(root, "snapshot.yaml") }},
+		{name: "build", operation: "form.build", args: func(root string) []string {
+			return []string{"--json", "form", "build", filepath.Join(root, "missing.yaml")}
+		}},
+		{name: "hidden apply", operation: "form.apply", args: func(root string) []string {
+			return []string{"--json", "form", "apply", filepath.Join(root, "missing.yaml")}
+		}},
+		{name: "export image", operation: "form.export-image", args: func(root string) []string {
+			return []string{"--json", "form", "export-image", "UserForm1", "--out", filepath.Join(root, "form.png")}
+		}, output: func(root string) string { return filepath.Join(root, "form.png") }},
+		{name: "inspect form", operation: "inspect.form", args: func(string) []string { return []string{"--json", "inspect", "form", "UserForm1", "--designer"} }},
+		{name: "list forms", operation: "list.forms", args: func(string) []string { return []string{"--json", "list", "forms"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			cfg := config.Default()
+			if err := config.Write(filepath.Join(rootDir, config.FileName), cfg); err != nil {
+				t.Fatal(err)
+			}
+			manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := coordination.NewWorkbookIdentity(rootDir, cfg.Excel.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identity, Command: "run", OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = owner.Release() }()
+
+			args := tt.args(rootDir)
+			var stdout bytes.Buffer
+			a := &app{cwd: rootDir, rawArgs: args, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+			root := a.rootCommand()
+			root.SetArgs(args)
+			runErr := root.Execute()
+			if output.ExitCode(runErr) != output.ExitEnvironment || !errors.Is(runErr, coordination.ErrWorkbookBusy) {
+				t.Fatalf("result = exit %d, err %v; want workbook_busy exit 3", output.ExitCode(runErr), runErr)
+			}
+			var env output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+				t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
+			}
+			if env.Error == nil || env.Error.Code != coordination.WorkbookBusyCode {
+				t.Fatalf("error payload = %#v", env.Error)
+			}
+			details, ok := env.Error.Details.(map[string]any)
+			if !ok || details["operation"] != string(tt.operation) {
+				t.Fatalf("busy details = %#v", env.Error.Details)
+			}
+			ownerDetails, ok := details["owner"].(map[string]any)
+			if !ok || ownerDetails["command"] != "run" || ownerDetails["operation_kind"] != string(coordination.OperationExecute) {
+				t.Fatalf("owner details = %#v", details["owner"])
+			}
+			if tt.output != nil {
+				if _, statErr := os.Stat(tt.output(rootDir)); !os.IsNotExist(statErr) {
+					t.Fatalf("handler side effect exists after contention: %v", statErr)
+				}
+			}
+		})
+	}
+}
+
 func TestCoordinationWaitOptionsValidation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -91,6 +172,7 @@ func TestCoordinationWaitOptionsValidation(t *testing.T) {
 		{name: "timeout must be positive", args: []string{"--json", "--wait", "--wait-timeout", "0s", "push"}, wantCode: coordinationWaitArgsInvalidCode},
 		{name: "timeout cannot be negative", args: []string{"--json", "--wait", "--wait-timeout", "-1s", "push"}, wantCode: coordinationWaitArgsInvalidCode},
 		{name: "source command cannot wait", args: []string{"--json", "--wait", "lint"}, wantCode: coordinationWaitUnsupportedCode},
+		{name: "source-only form new cannot wait", args: []string{"--json", "--wait", "form", "new", "UserForm1"}, wantCode: coordinationWaitUnsupportedCode},
 		{name: "parallel observer cannot wait", args: []string{"--json", "--wait", "session", "status"}, wantCode: coordinationWaitUnsupportedCode},
 		{name: "excel instance command cannot wait", args: []string{"--json", "--wait", "doctor"}, wantCode: coordinationWaitUnsupportedCode},
 	}
@@ -144,7 +226,7 @@ func TestWorkbookCoordinationWaitsThenRunsHandlerOnce(t *testing.T) {
 	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
 	var stdout, stderr bytes.Buffer
 	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
-	time.AfterFunc(75*time.Millisecond, func() { _ = owner.Release() })
+	time.AfterFunc(150*time.Millisecond, func() { _ = owner.Release() })
 	runs := 0
 	err := a.withWorkbookCoordination(context.Background(), "push", []string{identity.CanonicalPath}, func() error {
 		runs++
@@ -158,6 +240,101 @@ func TestWorkbookCoordinationWaitsThenRunsHandlerOnce(t *testing.T) {
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("JSON wait emitted progress: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestDesignerCoordinationWaitsThenPublishesDesignerOwner(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "form.build")
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
+	time.AfterFunc(150*time.Millisecond, func() { _ = owner.Release() })
+	runs := 0
+	err := a.withWorkbookCoordination(context.Background(), "form.snapshot", []string{identity.CanonicalPath}, func() error {
+		runs++
+		probe, probeErr := manager.Probe(context.Background(), identity)
+		if probeErr != nil {
+			return probeErr
+		}
+		if !probe.Busy || probe.Owner == nil || probe.Owner.Command != "form.snapshot" || probe.Owner.OperationKind != coordination.OperationDesigner {
+			t.Fatalf("designer owner = %#v", probe.Owner)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waited Designer command failed: %v", err)
+	}
+	if runs != 1 || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("runs=%d stdout=%q stderr=%q", runs, stdout.String(), stderr.String())
+	}
+}
+
+func TestDesignerCoordinationConflictsWithDesignerExecutionAndSourceUpdates(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	for _, ownerCommand := range []coordination.CommandID{"form.build", "run", "test", "push"} {
+		t.Run(string(ownerCommand), func(t *testing.T) {
+			rootDir, manager, identity, owner := setupHeldCoordinationLock(t, ownerCommand)
+			defer func() { _ = owner.Release() }()
+			var stdout bytes.Buffer
+			a := &app{cwd: rootDir, json: true, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+			runs := 0
+			err := a.withWorkbookCoordination(context.Background(), "form.snapshot", []string{identity.CanonicalPath}, func() error { runs++; return nil })
+			if output.ExitCode(err) != output.ExitEnvironment || !errors.Is(err, coordination.ErrWorkbookBusy) {
+				t.Fatalf("result = exit %d, err %v; want workbook_busy exit 3", output.ExitCode(err), err)
+			}
+			if runs != 0 {
+				t.Fatalf("handler runs = %d, want 0", runs)
+			}
+			var env output.Envelope
+			if decodeErr := json.Unmarshal(stdout.Bytes(), &env); decodeErr != nil {
+				t.Fatalf("decode JSON: %v\n%s", decodeErr, stdout.String())
+			}
+			if env.Error == nil || env.Error.Code != coordination.WorkbookBusyCode {
+				t.Fatalf("error payload = %#v", env.Error)
+			}
+			details, ok := env.Error.Details.(map[string]any)
+			ownerDetails, ownerOK := details["owner"].(map[string]any)
+			if !ok || !ownerOK || details["operation"] != "form.snapshot" || ownerDetails["command"] != string(ownerCommand) {
+				t.Fatalf("busy details = %#v", env.Error.Details)
+			}
+		})
+	}
+}
+
+func TestDesignerCoordinationTimeoutAndCancellationNeverRunHandler(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	tests := []struct {
+		name    string
+		code    string
+		context func() context.Context
+		timeout time.Duration
+	}{
+		{name: "timeout", code: coordination.WorkbookBusyTimeoutCode, context: func() context.Context { return context.Background() }, timeout: 250 * time.Millisecond},
+		{name: "cancel", code: coordination.WorkbookBusyCancelledCode, context: func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			time.AfterFunc(150*time.Millisecond, cancel)
+			return ctx
+		}, timeout: time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
+			defer func() { _ = owner.Release() }()
+			var stdout, stderr bytes.Buffer
+			a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: tt.timeout, stdout: &stdout, stderr: &stderr, coordination: manager}
+			runs := 0
+			err := a.withWorkbookCoordination(tt.context(), "form.snapshot", []string{identity.CanonicalPath}, func() error { runs++; return nil })
+			assertCoordinationWaitFailure(t, err, stdout.Bytes(), tt.code, tt.timeout.String())
+			if runs != 0 || stderr.Len() != 0 {
+				t.Fatalf("handler runs=%d stderr=%q", runs, stderr.String())
+			}
+		})
 	}
 }
 
@@ -379,7 +556,11 @@ func setupHeldCoordinationLock(t *testing.T, command coordination.CommandID) (st
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identity, Command: command, OperationKind: coordination.OperationExecute, ResourceScope: coordination.ResourceWorkbook})
+	descriptor, err := coordination.Lookup(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: identity, Command: command, OperationKind: descriptor.Policy.OperationKind, ResourceScope: descriptor.Policy.ResourceScope})
 	if err != nil {
 		t.Fatal(err)
 	}
