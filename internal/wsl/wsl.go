@@ -260,7 +260,7 @@ func splitLongFlag(arg string) (string, string, bool) {
 
 func isPathFlag(name string) bool {
 	switch name {
-	case "--input", "--out", "--output-dir", "--path", "--save-as":
+	case "--input", "--out", "--output-dir", "--path", "--save-as", "--src", "--template", "--vba-before", "--vba-after":
 		return true
 	default:
 		return false
@@ -273,7 +273,7 @@ func flagTakesValue(name string) bool {
 		"--columns", "--events", "--filedialog", "--fill", "--filter", "--format", "--from",
 		"--formula", "--id", "--initializer", "--input", "--inputbox", "--line-numbers", "--macro",
 		"--module", "--msgbox", "--name", "--out", "--output-dir", "--range", "--rows",
-		"--path", "--save-as", "--sheet", "--tag", "--target", "--text", "--timeout", "--to", "--value",
+		"--path", "--save-as", "--sheet", "--src", "--tag", "--target", "--template", "--text", "--timeout", "--to", "--value",
 		"--vba-after", "--vba-before":
 		return true
 	default:

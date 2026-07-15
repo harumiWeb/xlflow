@@ -26,6 +26,8 @@ type Runner struct {
 	RootDir          string
 	BridgeMode       string
 	ConfigBridgeMode string
+	Coordination     *coordination.Manager
+	SkipCoordination bool
 }
 
 var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
@@ -1536,7 +1538,8 @@ type commandRunOptions struct {
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
 	env := output.New(commandName)
 	var err error
-	if _, err := coordination.LookupBridge(commandName, args); err != nil {
+	descriptor, err := coordination.LookupBridge(commandName, args)
+	if err != nil {
 		env = output.Failure(commandName, output.Error{
 			Code:    coordination.MissingPolicyCode,
 			Message: err.Error(),
@@ -1544,6 +1547,13 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			Phase:   "coordination.policy",
 		})
 		return env, output.ExitEnvironment, nil
+	}
+	lease, coordinationFailure := r.acquireBridgeCoordination(commandName, args, descriptor)
+	if coordinationFailure != nil {
+		return coordinationFailure.env, coordinationFailure.exitCode, nil
+	}
+	if lease != nil {
+		defer func() { _ = lease.Release() }()
 	}
 
 	var uiSession *uiStreamSession

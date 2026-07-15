@@ -126,6 +126,19 @@ func TestShouldDelegateFormNewCommand(t *testing.T) {
 	}
 }
 
+func TestUnsafeWorkbookPoliciesDelegateEvenWhenTopLevelWasHistoricallyLocal(t *testing.T) {
+	root := (&app{}).rootCommand()
+	for _, path := range [][]string{{"pack"}, {"diff"}, {"formulas", "pull"}, {"inspect", "workbook"}} {
+		cmd, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if !shouldDelegateCommand(cmd, topLevelCommandName(cmd)) {
+			t.Errorf("%s should delegate so the Windows process owns coordination", cmd.CommandPath())
+		}
+	}
+}
+
 func TestTopLevelCommandName(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	form := &cobra.Command{Use: "form"}

@@ -61,6 +61,7 @@ type app struct {
 	configWarnings []map[string]any
 	buildInfo      BuildInfo
 	updateChecker  releaseChecker
+	coordination   *coordination.Manager
 }
 
 var automaticBackupPrune = backup.Prune
@@ -224,6 +225,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.updateCommand(),
 		a.processCommand(),
 	)
+	a.wrapCoordinatedLeaves(root)
 	return root
 }
 
@@ -7735,11 +7737,11 @@ func (a *app) hasValidBridgeOverride() bool {
 }
 
 func (a *app) excelRunner() excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, Coordination: a.coordination, SkipCoordination: true}
 }
 
 func (a *app) excelRunnerForConfig(cfg config.Config) excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge, Coordination: a.coordination, SkipCoordination: true}
 }
 
 func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
