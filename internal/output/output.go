@@ -59,6 +59,7 @@ type Envelope struct {
 	Debug          any `json:"debug,omitempty"`
 	UI             any `json:"ui,omitempty"`
 	Session        any `json:"session,omitempty"`
+	Coordination   any `json:"coordination,omitempty"`
 	Runner         any `json:"runner,omitempty"`
 	Analysis       any `json:"analysis,omitempty"`
 	Check          any `json:"check,omitempty"`
@@ -3330,7 +3331,8 @@ func (r renderer) renderCreated(env Envelope) string {
 func (r renderer) renderSession(env Envelope) string {
 	session := objectMap(env.Session)
 	workbook := objectMap(env.Workbook)
-	if len(session) == 0 && len(workbook) == 0 {
+	coordination := objectMap(env.Coordination)
+	if len(session) == 0 && len(workbook) == 0 && len(coordination) == 0 {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -3343,6 +3345,31 @@ func (r renderer) renderSession(env Envelope) string {
 	}
 	if open, ok := boolValueOK(session, "workbook_open"); ok {
 		b.WriteString(kv("Workbook open", fmt.Sprintf("%t", open)))
+	}
+	if busy, ok := boolValueOK(coordination, "busy"); ok {
+		value := "idle"
+		if busy {
+			value = "busy"
+		}
+		b.WriteString(kv("Coordination", value))
+		if busy {
+			owner := make([]string, 0, 4)
+			if command := stringValue(coordination, "command"); command != "" {
+				owner = append(owner, command)
+			}
+			if kind := stringValue(coordination, "operation_kind"); kind != "" {
+				owner = append(owner, "kind "+kind)
+			}
+			if pid, ok := numberValue(coordination, "pid"); ok {
+				owner = append(owner, fmt.Sprintf("PID %d", int(pid)))
+			}
+			if started := stringValue(coordination, "started_at"); started != "" {
+				owner = append(owner, "since "+started)
+			}
+			if len(owner) > 0 {
+				b.WriteString(kv("Coordination owner", strings.Join(owner, ", ")))
+			}
+		}
 	}
 	if source := stringValue(session, "source_of_truth"); source != "" {
 		b.WriteString(kv("Source of truth", source))

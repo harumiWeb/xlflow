@@ -70,6 +70,32 @@ details omitted when no trustworthy current record is available.
 The detailed acquisition, metadata, and diagnostic contracts live in
 `docs/specs/workbook-coordination.md` and `docs/specs/cli-contract.md`.
 
+## Implementation Follow-up: Session Status Coordination (#324)
+
+`xlflow session status` now samples the authoritative workbook lock through
+`Manager.Probe` before it invokes the Excel bridge. This ordering preserves the
+command-start observation when a long-running session macro delays the COM
+status call until after the workbook owner has released its lease.
+
+The result is exposed as an additive top-level `coordination` object. It always
+contains `busy` when observation succeeds and flattens only the public owner
+fields `resource_scope`, `operation_kind`, `command`, `pid`, and `started_at`
+when guarded current metadata is available. Generation tokens, metadata schema
+fields, canonical workbook paths, and raw arguments remain internal. Missing or
+malformed owner metadata still reports `busy: true` from the OS lock alone.
+
+This status is observational rather than an authorization check and may change
+immediately after sampling. A probe failure does not fail session status or
+replace bridge warnings; xlflow omits `coordination` and adds the
+`coordination_status_unavailable` warning. The CLI lock remains the final
+authority for every workbook operation.
+
+The Deferred consequence below records the state when this ADR was originally
+accepted. ADR-0019 and issue #322 subsequently implemented public bounded wait
+flags, while this follow-up and issue #324 implement the `session status`
+coordination fields. FIFO fairness and `excel_instance` coordination remain
+deferred.
+
 ## Consequences
 
 - Positive: independent Windows and WSL-delegated processes cannot overlap
@@ -116,4 +142,4 @@ The detailed acquisition, metadata, and diagnostic contracts live in
 - `docs/specs/workbook-coordination.md`
 - `docs/specs/cli-contract.md`
 - `internal/coordination`
-- xlflow issues #311, #320, #321, and #323
+- xlflow issues #311, #320, #321, #323, and #324

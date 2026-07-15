@@ -328,12 +328,29 @@ wait timeout, and map to operational exit code `3`. The underlying workbook
 operation is never retried. Polling is cancellation-aware but does not guarantee
 FIFO ordering.
 
+## Session Status Observation
+
+`session status` observes the configured workbook identity through
+`Manager.Probe` before calling the Excel bridge. It never infers ownership from
+session metadata or the owner metadata file alone. The top-level result is
+`coordination: {"busy": false}` when the OS lock is free and
+`coordination: {"busy": true}` when it is held but guarded owner metadata is
+unavailable. When current owner metadata is available, the object additionally
+contains `resource_scope`, `operation_kind`, `command`, `pid`, and an RFC 3339
+UTC `started_at`. Internal generation, schema, workbook-path, and argv fields
+are not exposed.
+
+The observation represents command-start state and may change before the
+status response is returned. It is advisory and does not reserve the workbook;
+later commands must still rely on normal CLI lock acquisition. If identity,
+manager, or lock probing fails, session status preserves its bridge result,
+omits `coordination`, and adds warning `coordination_status_unavailable`.
+
 ## Out of Scope for This Version
 
 This contract does not add:
 
 - FIFO queue behavior;
-- coordination fields in `session status`;
 - an `excel_instance` lock primitive;
 - a public policy/capabilities endpoint or serialized bridge schema; or
 - a separate UserForm Designer lock outside workbook coordination.

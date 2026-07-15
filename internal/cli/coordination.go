@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -20,9 +21,19 @@ import (
 )
 
 const (
-	coordinationWaitArgsInvalidCode = "coordination_wait_args_invalid"
-	coordinationWaitUnsupportedCode = "coordination_wait_unsupported"
+	coordinationWaitArgsInvalidCode   = "coordination_wait_args_invalid"
+	coordinationWaitUnsupportedCode   = "coordination_wait_unsupported"
+	coordinationStatusUnavailableCode = "coordination_status_unavailable"
 )
+
+type sessionCoordinationStatus struct {
+	Busy          bool   `json:"busy"`
+	ResourceScope string `json:"resource_scope,omitempty"`
+	OperationKind string `json:"operation_kind,omitempty"`
+	Command       string `json:"command,omitempty"`
+	PID           int    `json:"pid,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
+}
 
 func (a *app) validateCoordinationWaitOptions(cmd *cobra.Command) error {
 	timeoutChanged := false
@@ -215,12 +226,9 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		lockIDs = append(lockIDs, lockID)
 	}
 	sort.Strings(lockIDs)
-	manager := a.coordination
-	if manager == nil {
-		manager, err = coordination.NewDefaultManager()
-		if err != nil {
-			return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_init_failed", err)
-		}
+	manager, err := a.coordinationManager()
+	if err != nil {
+		return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_init_failed", err)
 	}
 
 	acquireCtx := ctx
@@ -278,6 +286,57 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		leases = append(leases, lease)
 	}
 	return release, nil
+}
+
+func (a *app) coordinationManager() (*coordination.Manager, error) {
+	if a.coordination != nil {
+		return a.coordination, nil
+	}
+	return coordination.NewDefaultManager()
+}
+
+func (a *app) runSessionStatus(ctx context.Context, cfg config.Config, run func() (output.Envelope, int, error)) (output.Envelope, int, error) {
+	status, unavailable := a.observeSessionCoordination(ctx, cfg)
+	env, code, err := run()
+	if status != nil {
+		env.Coordination = status
+	}
+	if unavailable {
+		appendUniqueMessage(&env.Warnings, coordinationStatusUnavailableCode, "Workbook coordination status could not be observed; session status is still available.")
+	}
+	return env, code, err
+}
+
+func (a *app) observeSessionCoordination(ctx context.Context, cfg config.Config) (*sessionCoordinationStatus, bool) {
+	if runtime.GOOS != "windows" {
+		return nil, false
+	}
+	identity, err := coordination.NewWorkbookIdentity(a.cwd, cfg.Excel.Path)
+	if err != nil {
+		return nil, true
+	}
+	manager, err := a.coordinationManager()
+	if err != nil {
+		return nil, true
+	}
+	result, err := manager.Probe(ctx, identity)
+	if err != nil {
+		return nil, true
+	}
+	return sessionCoordinationStatusFromProbe(result), false
+}
+
+func sessionCoordinationStatusFromProbe(result coordination.ProbeResult) *sessionCoordinationStatus {
+	status := &sessionCoordinationStatus{Busy: result.Busy}
+	if !result.Busy || result.Owner == nil {
+		return status
+	}
+	status.ResourceScope = string(result.Owner.ResourceScope)
+	status.OperationKind = string(result.Owner.OperationKind)
+	status.Command = string(result.Owner.Command)
+	status.PID = result.Owner.PID
+	status.StartedAt = result.Owner.StartedAt.UTC().Format(time.RFC3339Nano)
+	return status
 }
 
 func (a *app) writeWorkbookWaitFailure(descriptor coordination.Descriptor, identity coordination.WorkbookIdentity, code, message string, cause error) error {

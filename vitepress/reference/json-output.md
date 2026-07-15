@@ -54,7 +54,13 @@ Unknown commands are also structured when `--json` appears before the invalid co
 }
 ```
 
-Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `backup_prune`, `rollback`, `target`, `session`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
+Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `backup_prune`, `rollback`, `target`, `session`, `coordination`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
+
+`session status` adds top-level `coordination` without changing `session`.
+Successful observation returns `{"busy":false}`, `{"busy":true}`, or a busy
+object with `resource_scope`, `operation_kind`, `command`, `pid`, and
+`started_at`. The value is observational command-start state. Probe failure
+omits the field and adds warning `coordination_status_unavailable`.
 
 `backup_prune` is returned by `xlflow backup prune` and may also appear on successful `push` or `rollback` when automatic retention deleted entries, skipped invalid or legacy entries, or encountered a pruning failure. Automatic results include `"automatic": true`; pruning failures are warnings and do not change the successful workbook operation status.
 

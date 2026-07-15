@@ -16,6 +16,9 @@ Common examples:
   or the timeout was not positive.
 - `coordination_wait_unsupported`: the selected command is not a retryable,
   non-parallel-safe workbook operation.
+- `coordination_status_unavailable` (warning): `session status` could not probe
+  the workbook OS lock. Existing session status fields and exit behavior remain
+  available, while the top-level `coordination` field is omitted.
 - `vbide_access_denied`
 - `macro_failed`
 - `macro_not_found`

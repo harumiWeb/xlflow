@@ -1290,15 +1290,66 @@ func TestWriteWithOptionsRendersSessionStatusSaveRequirement(t *testing.T) {
 	env := New("session")
 	env.Session = map[string]any{"running": true, "workbook_open": true, "needs_save": true, "live_newer_than_disk": true, "source_of_truth": "live_workbook", "userforms_present": true, "userform_count": 2}
 	env.Workbook = map[string]any{"path": "build/Book.xlsm", "needs_save": true}
+	env.Coordination = map[string]any{"busy": true, "resource_scope": "workbook", "operation_kind": "execute", "command": "run", "pid": 12345, "started_at": "2026-07-15T09:30:00Z"}
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Running:", "Workbook open:", "SAVE REQUIRED", "live workbook is newer than disk", "Source of truth:", "live_workbook", "UserForms:", "true (2)", "xlflow save before session stop"} {
+	for _, want := range []string{"Running:", "Workbook open:", "Coordination:", "busy", "Coordination owner:", "run, kind execute, PID 12345, since 2026-07-15T09:30:00Z", "SAVE REQUIRED", "live workbook is newer than disk", "Source of truth:", "live_workbook", "UserForms:", "true (2)", "xlflow save before session stop"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("session status output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestWriteWithOptionsRendersIdleAndOwnerlessSessionCoordination(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		coordination map[string]any
+		want         string
+	}{
+		{name: "idle", coordination: map[string]any{"busy": false}, want: "idle"},
+		{name: "ownerless busy", coordination: map[string]any{"busy": true}, want: "busy"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := New("session")
+			env.Session = map[string]any{"running": true, "workbook_open": true}
+			env.Coordination = tt.coordination
+			var buf bytes.Buffer
+			if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+				t.Fatal(err)
+			}
+			got := buf.String()
+			if !strings.Contains(got, "Coordination:") || !strings.Contains(got, tt.want) {
+				t.Fatalf("coordination output missing %q:\n%s", tt.want, got)
+			}
+			if strings.Contains(got, "Coordination owner:") {
+				t.Fatalf("ownerless coordination rendered owner details:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestWriteWithOptionsSerializesTopLevelSessionCoordination(t *testing.T) {
+	env := New("session")
+	env.Session = map[string]any{"active": true, "running": true}
+	env.Coordination = map[string]any{"busy": false}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	coordination := objectMap(got["coordination"])
+	if coordination["busy"] != false {
+		t.Fatalf("coordination = %#v", coordination)
+	}
+	session := objectMap(got["session"])
+	if session["active"] != true || session["running"] != true {
+		t.Fatalf("session payload changed: %#v", session)
 	}
 }
 
