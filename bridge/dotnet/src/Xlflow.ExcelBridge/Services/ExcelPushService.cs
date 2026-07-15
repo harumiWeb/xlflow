@@ -21,6 +21,40 @@ public sealed class ExcelPushService : IPushService
 
     internal sealed record BackupRef(string Id, string Path, string Reason, string Mode);
 
+    internal sealed class ComponentRemovalException : Exception
+    {
+        public ComponentRemovalException(string componentName, int componentType, Exception innerException)
+            : base($"failed to remove VBA component '{componentName}'", innerException)
+        {
+            ComponentName = componentName;
+            ComponentType = componentType;
+        }
+
+        public string ComponentName { get; }
+
+        public int ComponentType { get; }
+    }
+
+    internal sealed class ComponentImportNameException : Exception
+    {
+        public ComponentImportNameException(string expectedName, string actualName)
+            : base($"imported VBA component name '{actualName}' did not match expected name '{expectedName}'")
+        {
+            ExpectedName = expectedName;
+            ActualName = actualName;
+        }
+
+        public string ExpectedName { get; }
+
+        public string ActualName { get; }
+    }
+
+    internal sealed class ComponentReplacementException(string phase, Exception innerException)
+        : Exception($"VBA component replacement failed during {phase}", innerException)
+    {
+        public string Phase { get; } = phase;
+    }
+
     public BridgeResponse Execute(BridgeRequest request, PushCommandArguments args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -29,6 +63,7 @@ public sealed class ExcelPushService : IPushService
         object? workbook = null;
         BackupRef? backupRef = null;
         var sessionAttached = false;
+        var sessionMode = "none";
         var tmpImportDir = Path.Combine(Path.GetTempPath(), "xlflow-push-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
 
         try
@@ -122,7 +157,7 @@ public sealed class ExcelPushService : IPushService
             workbook = attachment.Workbook;
             sessionAttached = attached;
 
-            var sessionMode = ResolveSessionMode(attached, args.UseSession);
+            sessionMode = attachment.SessionMode;
 
             const string backupReason = "before-push";
 
@@ -136,13 +171,7 @@ public sealed class ExcelPushService : IPushService
 
             Directory.CreateDirectory(tmpImportDir);
 
-            ExcelBridgeSupport.RunPhase(
-                "remove_non_document_components",
-                () => RemoveNonDocumentComponents(workbook));
-
-            var importResult = ExcelBridgeSupport.RunPhase(
-                "import_vba_components",
-                () => ImportVbaComponents(workbook, args, sourceFiles, tmpImportDir));
+            var importResult = ReplaceNonDocumentComponents(workbook, args, sourceFiles, tmpImportDir);
             var documentModulesUpdated = ExcelBridgeSupport.RunPhase(
                 "update_document_modules",
                 () => UpdateDocumentModules(workbook, args));
@@ -296,6 +325,18 @@ public sealed class ExcelPushService : IPushService
                 Phase: "push",
                 Source: "xlflow-excel-bridge")), backupRef);
         }
+        catch (ComponentRemovalException ex)
+        {
+            return WithBackup(BuildComponentRemovalFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+        }
+        catch (ComponentImportNameException ex)
+        {
+            return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+        }
+        catch (ComponentReplacementException ex)
+        {
+            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
@@ -352,7 +393,40 @@ public sealed class ExcelPushService : IPushService
         }
     }
 
-    private static void RemoveNonDocumentComponents(object workbook)
+    private static int ReplaceNonDocumentComponents(
+        object workbook,
+        PushCommandArguments args,
+        List<DiscoveredSourceFile> sourceFiles,
+        string tmpImportDir)
+    {
+        try
+        {
+            RemoveNonDocumentComponents(workbook);
+        }
+        catch (ComponentRemovalException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ComponentReplacementException("remove_non_document_components", ex);
+        }
+
+        try
+        {
+            return ImportVbaComponents(workbook, args, sourceFiles, tmpImportDir);
+        }
+        catch (ComponentImportNameException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ComponentReplacementException("import_vba_components", ex);
+        }
+    }
+
+    internal static void RemoveNonDocumentComponents(object workbook)
     {
         object? vbProject = null;
         object? vbComponents = null;
@@ -361,13 +435,13 @@ public sealed class ExcelPushService : IPushService
             vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
             if (vbProject is null)
             {
-                return;
+                throw new InvalidOperationException("VBProject is unavailable while removing existing VBA components.");
             }
 
             vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
             if (vbComponents is null)
             {
-                return;
+                throw new InvalidOperationException("VBComponents are unavailable while removing existing VBA components.");
             }
 
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
@@ -380,13 +454,21 @@ public sealed class ExcelPushService : IPushService
                     component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
                     if (component is null)
                     {
-                        continue;
+                        throw new InvalidOperationException($"VBComponents.Item({index}) returned no component while removing existing VBA components.");
                     }
 
                     var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
                     if (type != ComponentTypeDocument)
                     {
-                        ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Remove", component);
+                        var name = ExcelBridgeSupport.GetString(component, "Name") ?? $"index {index}";
+                        try
+                        {
+                            ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Remove", component);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ComponentRemovalException(name, type, ex);
+                        }
                     }
                 }
                 finally
@@ -394,15 +476,164 @@ public sealed class ExcelPushService : IPushService
                     ExcelBridgeSupport.ReleaseComObject(component);
                 }
             }
-        }
-        catch
-        {
-            // best-effort removal; import will replace anyway
+
+            EnsureNonDocumentComponentsRemoved(vbComponents);
         }
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(vbComponents);
             ExcelBridgeSupport.ReleaseComObject(vbProject);
+        }
+    }
+
+    private static void EnsureNonDocumentComponentsRemoved(object vbComponents)
+    {
+        var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
+        for (var index = 1; index <= count; index++)
+        {
+            object? component = null;
+            try
+            {
+                component = ExcelBridgeSupport.Get(vbComponents, "Item", index);
+                if (component is null)
+                {
+                    throw new InvalidOperationException($"VBComponents.Item({index}) returned no component while verifying VBA component removal.");
+                }
+
+                var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
+                if (type == ComponentTypeDocument)
+                {
+                    continue;
+                }
+
+                var name = ExcelBridgeSupport.GetString(component, "Name") ?? $"index {index}";
+                throw new ComponentRemovalException(
+                    name,
+                    type,
+                    new InvalidOperationException("VBComponents.Remove returned without error, but the component remained in the project."));
+            }
+            finally
+            {
+                ExcelBridgeSupport.ReleaseComObject(component);
+            }
+        }
+    }
+
+    internal static BridgeResponse BuildComponentRemovalFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        bool sessionAttached,
+        string sessionMode,
+        ComponentRemovalException exception)
+    {
+        var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
+        var componentKind = exception.ComponentType switch
+        {
+            ComponentTypeModule => "standard_module",
+            ComponentTypeClass => "class_module",
+            ComponentTypeForm => "user_form",
+            _ => "unknown",
+        };
+
+        var response = BridgeResponse.Failed(request, new BridgeError(
+            Code: "vba_component_remove_failed",
+            Message: $"Could not remove existing VBA {componentKind} '{exception.ComponentName}' before importing source: {failure.Message}",
+            Phase: "remove_non_document_components",
+            Source: "xlflow-excel-bridge",
+            Number: failure.Number,
+            HResult: failure.HResult,
+            Details: new Dictionary<string, object?>
+            {
+                ["component_name"] = exception.ComponentName,
+                ["component_type"] = exception.ComponentType,
+                ["component_kind"] = componentKind,
+            }));
+        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return response;
+    }
+
+    internal static BridgeResponse BuildComponentImportNameFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        bool sessionAttached,
+        string sessionMode,
+        ComponentImportNameException exception)
+    {
+        var response = BridgeResponse.Failed(request, new BridgeError(
+            Code: "vba_component_import_name_mismatch",
+            Message: $"Excel imported VBA component '{exception.ExpectedName}' as '{exception.ActualName}'. The workbook was not saved.",
+            Phase: "import_vba_components",
+            Source: "xlflow-excel-bridge",
+            Details: new Dictionary<string, object?>
+            {
+                ["expected_name"] = exception.ExpectedName,
+                ["actual_name"] = exception.ActualName,
+            }));
+        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return response;
+    }
+
+    internal static BridgeResponse BuildComponentReplacementFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        bool sessionAttached,
+        string sessionMode,
+        ComponentReplacementException exception)
+    {
+        var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
+        var response = BridgeResponse.Failed(request, new BridgeError(
+            Code: "vba_component_replacement_failed",
+            Message: $"VBA component replacement failed during {exception.Phase}: {failure.Message}",
+            Phase: exception.Phase,
+            Source: "xlflow-excel-bridge",
+            Number: failure.Number,
+            HResult: failure.HResult));
+        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return response;
+    }
+
+    private static void AddPartialReplacementPayload(
+        BridgeResponse response,
+        PushCommandArguments args,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
+        response.Extensions["target"] = ExcelBridgeSupport.BuildTargetPayload(sessionAttached ? "live_session" : "file", workbookPath);
+        var session = ExcelBridgeSupport.BuildSessionPayload(workbookPath, sessionAttached, sessionMode, sessionAttached, saveRequired: false);
+        session["poisoned"] = sessionAttached;
+        session["discard_required"] = sessionAttached;
+        response.Extensions["session"] = session;
+        response.Extensions["workbook"] = ExcelBridgeSupport.BuildWorkbookPayload(
+            workbookPath,
+            sessionAttached,
+            sessionMode,
+            args.UseSession,
+            saved: false,
+            dirty: sessionAttached,
+            needsSave: false);
+
+        if (sessionAttached)
+        {
+            ExcelBridgeSupport.MarkSessionPoisoned(
+                args.MetadataPath,
+                workbookPath,
+                "VBA component replacement failed after the live workbook may have been partially modified.",
+                response.Error?.HResult ?? "",
+                "push",
+                discardUnsavedChanges: true);
+
+            var externalSession = string.Equals(sessionMode, "external", StringComparison.OrdinalIgnoreCase);
+            response.Extensions["warnings"] = new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    ["code"] = "vba_component_replacement_partial",
+                    ["message"] = externalSession
+                        ? "The external workbook may contain a partial VBA component replacement. Close it in Excel without saving, then start a fresh xlflow session before retrying push."
+                        : "The live workbook may contain a partial VBA component replacement. Run `xlflow session stop --json` to discard the unsafe changes, then start a fresh session before retrying push.",
+                },
+            };
         }
     }
 
@@ -465,8 +696,22 @@ public sealed class ExcelPushService : IPushService
                     }
                 }
 
-                ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Import", importPath);
-                imported++;
+                object? importedComponent = null;
+                try
+                {
+                    importedComponent = ExcelBridgeSupport.InvokeViaDynamic(vbComponents, "Import", importPath)
+                        ?? throw new ComponentImportNameException(file.ModuleName, "");
+                    var importedName = ExcelBridgeSupport.GetString(importedComponent, "Name") ?? "";
+                    if (!string.Equals(importedName, file.ModuleName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new ComponentImportNameException(file.ModuleName, importedName);
+                    }
+                    imported++;
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(importedComponent);
+                }
 
                 if (VbaSourceHelper.IsSidecarMode(args.CodeSource) && file.Kind == "form" && file.Extension == ".frm")
                 {
@@ -969,15 +1214,6 @@ public sealed class ExcelPushService : IPushService
     {
         var lines = dialog.Text.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
         return lines.Length > 0 ? string.Join(Environment.NewLine, lines) : dialog.Title;
-    }
-
-    private static string ResolveSessionMode(bool sessionAttached, bool useSession)
-    {
-        if (!sessionAttached)
-        {
-            return "none";
-        }
-        return useSession ? "explicit" : "auto";
     }
 
     private static Dictionary<string, object?> BuildBackupPayload(BackupRef backup)

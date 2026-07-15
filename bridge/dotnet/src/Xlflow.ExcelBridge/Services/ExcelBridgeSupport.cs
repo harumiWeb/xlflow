@@ -79,7 +79,8 @@ internal sealed record SessionMetadata(
     string PoisonedAt = "",
     string PoisonReason = "",
     string HResult = "",
-    string LastCommand = "");
+    string LastCommand = "",
+    bool DiscardUnsavedChanges = false);
 
 internal sealed record ExcelSessionAttachment(object Excel, object Workbook, string SessionMode);
 
@@ -91,7 +92,7 @@ internal sealed record OwnedExcelProcess(int ProcessId, DateTime? StartTime = nu
 }
 
 internal sealed class SessionPoisonedException(SessionMetadata metadata)
-    : InvalidOperationException("xlflow session is poisoned after a fatal Excel COM/RPC failure")
+    : InvalidOperationException("xlflow session is poisoned after an unsafe workbook or Excel COM failure")
 {
     public SessionMetadata Metadata { get; } = metadata;
 }
@@ -139,7 +140,8 @@ internal static class ExcelBridgeSupport
         var poisonReason = BridgePayload.GetString(root, "poison_reason") ?? "";
         var hResult = BridgePayload.GetString(root, "h_result") ?? "";
         var lastCommand = BridgePayload.GetString(root, "last_command") ?? "";
-        return new SessionMetadata(hwnd, pid, workbookPath, owner, poisoned, poisonedAt, poisonReason, hResult, lastCommand);
+        var discardUnsavedChanges = TryGetBool(root, "discard_unsaved_changes");
+        return new SessionMetadata(hwnd, pid, workbookPath, owner, poisoned, poisonedAt, poisonReason, hResult, lastCommand, discardUnsavedChanges);
     }
 
     public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath, string owner = "managed")
@@ -166,7 +168,13 @@ internal static class ExcelBridgeSupport
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
     }
 
-    public static void MarkSessionPoisoned(string metadataPath, string workbookPath, string reason, string hResult, string lastCommand)
+    public static void MarkSessionPoisoned(
+        string metadataPath,
+        string workbookPath,
+        string reason,
+        string hResult,
+        string lastCommand,
+        bool discardUnsavedChanges = false)
     {
         if (string.IsNullOrWhiteSpace(metadataPath))
         {
@@ -202,6 +210,7 @@ internal static class ExcelBridgeSupport
             ["poison_reason"] = reason,
             ["h_result"] = hResult,
             ["last_command"] = lastCommand,
+            ["discard_unsaved_changes"] = discardUnsavedChanges,
         };
 
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));

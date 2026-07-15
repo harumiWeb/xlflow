@@ -1952,7 +1952,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitValidation
 	case "process_args_invalid", "process_not_found":
 		return output.ExitConfig
-	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed":
+	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed", "vba_component_remove_failed", "vba_component_import_name_mismatch", "vba_component_replacement_failed":
 		return output.ExitEnvironment
 	case "pull_args_invalid", "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid", "test_args_invalid":
 		return output.ExitConfig

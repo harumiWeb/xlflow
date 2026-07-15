@@ -73,7 +73,7 @@ public sealed class ExcelSessionService : ISessionService
             {
                 return BridgeResponse.Failed(request, new BridgeError(
                     Code: "session_poisoned",
-                    Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --json` and start a fresh session.",
                     Phase: "session",
                     Source: "xlflow-excel-bridge",
                     HResult: poisoned.Metadata.HResult,
@@ -255,10 +255,14 @@ public sealed class ExcelSessionService : ISessionService
                 }
             }
 
-            var needsSave = running && open && (dirty is null || dirty == true);
+            var discardRequired = metadata is not null && ShouldDiscardUnsavedChanges(metadata);
+            var externalDiscard = discardRequired
+                && string.Equals(metadata?.Owner, "external", StringComparison.OrdinalIgnoreCase);
+            var needsSave = NeedsSaveForStatus(running, open, dirty, metadata);
             var logs = new[] { running && open ? "xlflow session is running" : "xlflow session is not running" };
             var sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, running && open, mode, dirty, needsSave);
             sessionPayload["owner"] = metadata?.Owner ?? "managed";
+            sessionPayload["discard_required"] = discardRequired;
             if (metadata is not null)
             {
                 sessionPayload["metadata"] = new Dictionary<string, object?>
@@ -272,6 +276,7 @@ public sealed class ExcelSessionService : ISessionService
                     ["poison_reason"] = metadata.PoisonReason,
                     ["h_result"] = metadata.HResult,
                     ["last_command"] = metadata.LastCommand,
+                    ["discard_unsaved_changes"] = metadata.DiscardUnsavedChanges,
                 };
             }
             if (poisoned && metadata is not null)
@@ -305,12 +310,16 @@ public sealed class ExcelSessionService : ISessionService
                     warnings.Add(new Dictionary<string, object?>
                     {
                         ["code"] = "session_poisoned",
-                        ["message"] = "The live Excel session was marked poisoned after a fatal COM/RPC failure.",
+                        ["message"] = "The live Excel session was marked poisoned after an unsafe workbook or Excel COM failure.",
                     });
                     hints.Add(new Dictionary<string, object?>
                     {
-                        ["code"] = "restart_session",
-                        ["message"] = "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
+                        ["code"] = externalDiscard
+                            ? "discard_external_workbook"
+                            : "restart_session",
+                        ["message"] = externalDiscard
+                            ? "Close the workbook in Excel without saving, then start or attach a fresh xlflow session."
+                            : "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
                     });
                 }
                 extensions["warnings"] = warnings;
@@ -334,7 +343,7 @@ public sealed class ExcelSessionService : ISessionService
             {
                 return BridgeResponse.Failed(request, new BridgeError(
                     Code: "session_poisoned",
-                    Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --json` and start a fresh session.",
                     Phase: "session",
                     Source: "xlflow-excel-bridge",
                     HResult: poisoned.Metadata.HResult,
@@ -430,6 +439,7 @@ public sealed class ExcelSessionService : ISessionService
             }
 
             var externalOwner = string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase);
+            var discardUnsavedChanges = ShouldDiscardUnsavedChanges(metadata);
 
             excel = ExcelBridgeSupport.GetSessionExcel(args.MetadataPath);
             if (excel is null)
@@ -451,7 +461,10 @@ public sealed class ExcelSessionService : ISessionService
                 return BuildStopResponse(request, workbookPath, false, removedStaleMetadata);
             }
 
-            RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
+            if (!discardUnsavedChanges)
+            {
+                RuntimeInjectionHelper.RemoveTransientRuntimeArtifacts(workbook);
+            }
             var wasDirtyKnown = ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var wasDirtyValue);
             var wasDirty = wasDirtyKnown && wasDirtyValue;
             if (externalOwner)
@@ -463,9 +476,10 @@ public sealed class ExcelSessionService : ISessionService
                     false,
                     false,
                     detachedExternal: true,
-                    detachedDirty: wasDirtyKnown ? wasDirtyValue : null);
+                    detachedDirty: wasDirtyKnown ? wasDirtyValue : null,
+                    unsafeChangesNotDiscarded: discardUnsavedChanges);
             }
-            if (wasDirty)
+            if (wasDirty && !discardUnsavedChanges)
             {
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             }
@@ -474,7 +488,12 @@ public sealed class ExcelSessionService : ISessionService
             workbook = null;
             excel = null;
             ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
-            return BuildStopResponse(request, workbookPath, wasDirty, false);
+            return BuildStopResponse(
+                request,
+                workbookPath,
+                wasDirty && !discardUnsavedChanges,
+                false,
+                discardedUnsavedChanges: discardUnsavedChanges);
         }
         catch (Exception ex)
         {
@@ -497,7 +516,9 @@ public sealed class ExcelSessionService : ISessionService
         bool autoSavedOnStop,
         bool removedStaleMetadata,
         bool detachedExternal = false,
-        bool? detachedDirty = false)
+        bool? detachedDirty = false,
+        bool discardedUnsavedChanges = false,
+        bool unsafeChangesNotDiscarded = false)
     {
         var logs = new List<string>();
         if (detachedExternal)
@@ -512,6 +533,14 @@ public sealed class ExcelSessionService : ISessionService
         {
             logs.Add("warning: session workbook had unsaved changes before stop");
             logs.Add("auto-saved workbook while stopping xlflow session; prefer xlflow save before stop");
+        }
+        if (discardedUnsavedChanges)
+        {
+            logs.Add("discarded unsafe unsaved workbook changes while stopping poisoned xlflow session");
+        }
+        if (unsafeChangesNotDiscarded)
+        {
+            logs.Add("UNSAFE CHANGES: close the external workbook in Excel without saving");
         }
         if (removedStaleMetadata)
         {
@@ -534,18 +563,28 @@ public sealed class ExcelSessionService : ISessionService
                 ["dirty_before_stop"] = detachedExternal ? detachedDirty : autoSavedOnStop,
                 ["auto_saved_on_stop"] = autoSavedOnStop,
                 ["detached_external"] = detachedExternal,
+                ["discarded_unsaved_changes"] = discardedUnsavedChanges,
+                ["unsafe_changes_not_discarded"] = unsafeChangesNotDiscarded,
             },
         };
-        if (autoSavedOnStop || (detachedExternal && detachedDirty != false))
+        if (autoSavedOnStop || (detachedExternal && detachedDirty != false) || discardedUnsavedChanges || unsafeChangesNotDiscarded)
         {
             extensions["warnings"] = new[]
             {
                 new Dictionary<string, object?>
                 {
-                    ["code"] = "save_required",
-                    ["message"] = detachedExternal
-                        ? "The detached external workbook has unsaved changes. Save it in Excel to persist the cleanup."
-                        : "The live session workbook had unsaved changes and was saved while stopping the session.",
+                    ["code"] = discardedUnsavedChanges
+                        ? "unsafe_changes_discarded"
+                        : unsafeChangesNotDiscarded
+                            ? "unsafe_changes_not_discarded"
+                            : "save_required",
+                    ["message"] = discardedUnsavedChanges
+                        ? "The poisoned session was closed without saving, so the unsafe VBA replacement was not persisted."
+                        : unsafeChangesNotDiscarded
+                            ? "The external workbook may contain a partial VBA replacement. Close it in Excel without saving."
+                            : detachedExternal
+                                ? "The detached external workbook has unsaved changes. Save it in Excel to persist the cleanup."
+                                : "The live session workbook had unsaved changes and was saved while stopping the session.",
                 },
             };
         }
@@ -557,6 +596,23 @@ public sealed class ExcelSessionService : ISessionService
             Logs = logs,
             Extensions = extensions,
         };
+    }
+
+    internal static bool ShouldDiscardUnsavedChanges(SessionMetadata metadata)
+    {
+        return metadata.Poisoned && metadata.DiscardUnsavedChanges;
+    }
+
+    internal static bool NeedsSaveForStatus(
+        bool running,
+        bool open,
+        bool? dirty,
+        SessionMetadata? metadata)
+    {
+        return running
+            && open
+            && (dirty is null || dirty == true)
+            && (metadata is null || !ShouldDiscardUnsavedChanges(metadata));
     }
 
     private static void CloseExistingSession(string metadataPath)
@@ -595,7 +651,9 @@ public sealed class ExcelSessionService : ISessionService
                 return;
             }
 
-            if (ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var wasDirty) && wasDirty)
+            if (!ShouldDiscardUnsavedChanges(metadata)
+                && ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var wasDirty)
+                && wasDirty)
             {
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             }

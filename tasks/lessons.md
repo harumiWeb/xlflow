@@ -59,6 +59,8 @@
 - When adding a non-suppressible diagnostic, update the backend suppression registry and every editor-side Quick Fix allowlist together, then test that the editor does not offer an inline-suppression action for the new code.
 - Do not infer that user VBA saved injected runtime state from the final `Workbook.Saved`/dirty flag. A macro can save and then mutate again; compare the persisted workbook across the invocation boundary and sanitize any detected in-macro save.
 - Runtime cleanup must distinguish marker-only state from helper-bearing state, but an unmarked legacy helper cannot be ruled out when VBProject inspection is denied. Keep ordinary macro-workbook saves strict enough to inspect for orphan helpers, and make only explicit marker-only cleanup best-effort.
+- Destructive VBIDE replacement must fail before import when any existing component cannot be removed or remains after `VBComponents.Remove`; partial best-effort deletion lets Excel silently auto-suffix colliding module names.
+- Once destructive VBIDE replacement begins, route every removal/import exception through the discard-poison path, preserve the attachment owner (`external` versus managed), and never emit `save_required` for state explicitly marked for discard.
 
 # DialogWatcher
 
