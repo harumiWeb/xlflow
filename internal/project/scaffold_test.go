@@ -28,7 +28,7 @@ func TestInitScaffold(t *testing.T) {
 	}
 	for _, path := range []string{
 		config.FileName,
-		"src/modules/XlflowAssert.bas",
+		"src/modules/Xlflow/XlflowAssert.bas",
 		"src/modules/Tests/SampleTests.bas",
 		"src/modules",
 		"src/classes",
@@ -278,10 +278,10 @@ func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
-		"custom/modules/XlflowAssert.bas",
-		"custom/modules/XlflowRuntime.bas",
-		"custom/modules/XlflowUI.bas",
-		"custom/modules/XlflowDebug.bas",
+		"custom/modules/Xlflow/XlflowAssert.bas",
+		"custom/modules/Xlflow/XlflowRuntime.bas",
+		"custom/modules/Xlflow/XlflowUI.bas",
+		"custom/modules/Xlflow/XlflowDebug.bas",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
@@ -293,7 +293,7 @@ func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "custom", "modules", "Main.bas")); !os.IsNotExist(err) {
 		t.Fatalf("expected Main.bas not to be installed for helper bundle, got %v", err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "custom", "modules", "XlflowAssert.bas"))
+	body, err := os.ReadFile(filepath.Join(dir, "custom", "modules", "Xlflow", "XlflowAssert.bas"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 
 func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "src", "modules")
+	moduleDir := filepath.Join(dir, "src", "modules", "Xlflow")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -318,6 +318,22 @@ func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
 		t.Fatal("expected overwrite refusal")
 	} else if !strings.Contains(err.Error(), "refusing to overwrite existing file") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInstallHelperModulesRefusesLegacyRootHelper(t *testing.T) {
+	dir := t.TempDir()
+	legacyPath := filepath.Join(dir, "src", "modules", "XlflowUI.bas")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallHelperModules(dir, config.SourceConfig{}); err == nil {
+		t.Fatal("expected legacy helper collision refusal")
+	} else if !strings.Contains(err.Error(), legacyPath) {
+		t.Fatalf("expected legacy helper path in error, got %v", err)
 	}
 }
 
@@ -547,7 +563,7 @@ func TestScaffoldCreatesAssertHelper(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowAssert.bas"))
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Xlflow", "XlflowAssert.bas"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +642,7 @@ func TestNewScaffoldCreatesRuntimeHelper(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowRuntime.bas"))
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Xlflow", "XlflowRuntime.bas"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +671,7 @@ func TestNewScaffoldCreatesUIHelper(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowUI.bas"))
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Xlflow", "XlflowUI.bas"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +742,7 @@ func TestNewScaffoldCreatesDebugHelper(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "XlflowDebug.bas"))
+	body, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Xlflow", "XlflowDebug.bas"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,7 +783,7 @@ func TestNewScaffoldRuntimeHelperLintsCleanly(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	runtimePath := filepath.Join(dir, "src", "modules", "XlflowRuntime.bas")
+	runtimePath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowRuntime.bas")
 	issues, err := lint.Linter{
 		RootDir: dir,
 		Config:  config.Default(),
@@ -788,7 +804,7 @@ func TestNewScaffoldUIHelperLintsCleanly(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	uiPath := filepath.Join(dir, "src", "modules", "XlflowUI.bas")
+	uiPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowUI.bas")
 	issues, err := lint.Linter{
 		RootDir: dir,
 		Config:  config.Default(),
@@ -809,7 +825,7 @@ func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	debugPath := filepath.Join(dir, "src", "modules", "XlflowDebug.bas")
+	debugPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowDebug.bas")
 	issues, err := lint.Linter{
 		RootDir: dir,
 		Config:  config.Default(),
@@ -905,7 +921,7 @@ func TestInitScaffoldDoesNotCreatePlaceholderWorkbookModules(t *testing.T) {
 			t.Fatalf("expected %s not to be scaffolded for init, got %v", path, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "src", "modules", "XlflowRuntime.bas")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "src", "modules", "Xlflow", "XlflowRuntime.bas")); !os.IsNotExist(err) {
 		t.Fatalf("expected runtime helper not to be scaffolded for init, got %v", err)
 	}
 }
@@ -1038,6 +1054,22 @@ func TestNewRefusesOverwrite(t *testing.T) {
 	}
 	if _, err := New(dir, "Sales", fakeWorkbookCreator); err == nil {
 		t.Fatal("expected overwrite refusal")
+	}
+}
+
+func TestNewRefusesLegacyRootHelper(t *testing.T) {
+	dir := t.TempDir()
+	legacyPath := filepath.Join(dir, "src", "modules", "XlflowAssert.bas")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, "Sales", fakeWorkbookCreator); err == nil {
+		t.Fatal("expected legacy helper collision refusal")
+	} else if !strings.Contains(err.Error(), legacyPath) {
+		t.Fatalf("expected legacy helper path in error, got %v", err)
 	}
 }
 

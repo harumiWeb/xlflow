@@ -19,7 +19,7 @@ The runtime contract needs to be explicit, deterministic, and available to ordin
 
 ## Decision
 
-xlflow injects workbook-scoped reserved names before `run` and `test` invoke user VBA, restores those names afterward, and scaffolds a standard module `XlflowRuntime.bas` in new projects so VBA can query the resolved execution mode.
+xlflow injects workbook-scoped reserved names before `run` and `test` invoke user VBA, restores those names afterward, and scaffolds the standard module `src/modules/Xlflow/XlflowRuntime.bas` in new projects so VBA can query the resolved execution mode.
 
 The primary signal is workbook-scoped state, currently including `__XLFLOW_MODE__` and a compatibility version marker. `XlflowRuntime.bas` reads that workbook-scoped state first and uses `Environ$("XLFLOW_MODE")` only as a secondary fallback for older projects or wrapper-driven runs that adopt the helper manually.
 
@@ -49,7 +49,7 @@ The public VBA helper surface is module-qualified rather than pseudo-namespaced:
 - `XlflowRuntime.IsAgent()`
 - `XlflowRuntime.IsTest()`
 
-Existing projects are not auto-migrated in Phase 1. `xlflow new` scaffolds `XlflowRuntime.bas`; imported projects can add it manually when they opt into runtime-aware branching.
+Existing projects are not auto-migrated in Phase 1. `xlflow new` scaffolds `XlflowRuntime.bas` under `src/modules/Xlflow/`; imported projects can add it manually when they opt into runtime-aware branching.
 
 ## Consequences
 

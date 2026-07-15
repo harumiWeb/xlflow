@@ -46,7 +46,7 @@ Use `--with-module` when the imported workbook should immediately gain `XlflowAs
 :::
 
 ::: warning
-`--with-module` refuses to overwrite existing helper source files. Resolve any `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, or `XlflowDebug.bas` collisions before retrying.
+`--with-module` writes helpers under `src/modules/Xlflow/` and refuses to overwrite either those target files or legacy root-level helper files. Resolve any `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, or `XlflowDebug.bas` collision before retrying.
 :::
 
 ## JSON Output Example

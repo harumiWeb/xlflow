@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Changed new-project scaffolds and `module install` to place bundled `Xlflow*.bas` helpers under `src/modules/Xlflow/`; existing root-level helper files are not moved, and `module install` now refuses those legacy collisions rather than creating duplicate VBA components.
 - Fixed .NET `push` to stop before importing when Excel cannot remove an existing VBA component and to reject Excel-renamed imports, preventing duplicate modules with a `1` suffix; every removal/import failure poisons a partial session replacement, managed sessions discard the unsafe unsaved state on stop, and external sessions receive owner-correct recovery guidance.
 - Fixed .NET bridge workbook persistence so transient `__XLFLOW_MODE__`, related runtime/UI/debug defined names, and generated helper modules are removed before save, including after a timed-out session run or a macro that saves and then edits again, preventing manually opened workbooks from remaining in headless mode or retaining temporary harness code.
 - Added non-configurable `VB015` lint/preflight validation for VBA logical lines with more than 24 line continuations, preventing opaque Excel import failures before `push` or `run` opens Excel.

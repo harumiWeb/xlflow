@@ -4,7 +4,7 @@ An xlflow project is a normal source tree wrapped around a configured Excel work
 
 ```text
 xlflow.toml
-src/modules/*.bas
+src/modules/**/*.bas
 src/classes/*.cls
 src/forms/*.frm
 src/forms/*.frx
