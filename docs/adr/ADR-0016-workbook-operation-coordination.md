@@ -54,10 +54,11 @@ identity contains:
 
 Identity construction takes both the base directory and workbook path explicitly
 so it does not depend on the process working directory. It normalizes the path
-lexically, attempts to resolve existing symbolic-link or junction aliases, and
-uses Windows case-insensitive comparison semantics while preserving UNC path
-semantics. Failure to resolve a link does not require the workbook to exist and
-falls back to the normalized lexical path.
+lexically, resolves the nearest existing ancestor to account for symbolic-link
+or junction aliases before reattaching any not-yet-created path tail, and uses
+Windows case-insensitive comparison semantics while preserving UNC path
+semantics. Failure to resolve an ancestor does not require the workbook to exist
+and falls back to the normalized lexical path.
 
 ADR-0011 remains the WSL boundary. WSL translates supported `/mnt/<drive>/...`
 paths with `wslpath -w` and delegates the complete command to Windows

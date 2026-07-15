@@ -44,9 +44,11 @@ func NewWorkbookIdentity(baseDir, workbookPath string) (WorkbookIdentity, error)
 	canonicalPath := normalizePlatformPath(filepath.Clean(workbookPath))
 
 	// A real operating-system lock, rather than path metadata, is the eventual
-	// source of truth. Symlink resolution is therefore best effort: a missing or
-	// inaccessible workbook still receives a deterministic lexical identity.
-	if resolved, err := resolvePlatformPath(canonicalPath); err == nil {
+	// source of truth. Resolve the nearest existing ancestor so a workbook that
+	// has not been created yet still shares an identity across symlinked or
+	// junctioned project paths. If no ancestor can be resolved, retain the
+	// deterministic lexical identity.
+	if resolved, err := resolveNearestExistingAncestor(canonicalPath); err == nil {
 		canonicalPath = normalizePlatformPath(filepath.Clean(resolved))
 	}
 
@@ -57,4 +59,27 @@ func NewWorkbookIdentity(baseDir, workbookPath string) (WorkbookIdentity, error)
 		CanonicalPath: canonicalPath,
 		LockID:        workbookLockIDPrefix + hex.EncodeToString(sum[:]),
 	}, nil
+}
+
+func resolveNearestExistingAncestor(path string) (string, error) {
+	candidate := path
+	missingTail := make([]string, 0, 4)
+	var lastErr error
+	for {
+		resolved, err := resolvePlatformPath(candidate)
+		if err == nil {
+			for i := len(missingTail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missingTail[i])
+			}
+			return resolved, nil
+		}
+		lastErr = err
+
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return "", lastErr
+		}
+		missingTail = append(missingTail, filepath.Base(candidate))
+		candidate = parent
+	}
 }

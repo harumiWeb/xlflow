@@ -144,3 +144,33 @@ func TestNewWorkbookIdentityResolvesWindowsJunction(t *testing.T) {
 		t.Fatalf("junction identity = %#v, want %#v", junctionIdentity, directIdentity)
 	}
 }
+
+func TestNewWorkbookIdentityResolvesWindowsJunctionParentForMissingWorkbook(t *testing.T) {
+	baseDir := t.TempDir()
+	targetDir := filepath.Join(baseDir, "target-missing")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	junction := filepath.Join(baseDir, "junction-missing")
+	if output, err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", junction, targetDir).CombinedOutput(); err != nil {
+		t.Skipf("creating a Windows junction is unavailable: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+	defer func() {
+		if err := os.Remove(junction); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove junction: %v", err)
+		}
+	}()
+
+	directIdentity, err := NewWorkbookIdentity(baseDir, filepath.Join(targetDir, "missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(target): %v", err)
+	}
+	junctionIdentity, err := NewWorkbookIdentity(baseDir, filepath.Join(junction, "missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(junction): %v", err)
+	}
+	if junctionIdentity != directIdentity {
+		t.Fatalf("missing workbook junction identity = %#v, want %#v", junctionIdentity, directIdentity)
+	}
+}

@@ -1,6 +1,7 @@
 package coordination
 
 import (
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -69,6 +70,30 @@ func TestNewWorkbookIdentityDoesNotRequireWorkbook(t *testing.T) {
 	}
 	if identity.CanonicalPath != filepath.Clean(wantPath) {
 		t.Fatalf("CanonicalPath = %q, want %q", identity.CanonicalPath, filepath.Clean(wantPath))
+	}
+}
+
+func TestNewWorkbookIdentityResolvesExistingParentAliasForMissingWorkbook(t *testing.T) {
+	baseDir := t.TempDir()
+	realParent := filepath.Join(baseDir, "real-project")
+	if err := os.Mkdir(realParent, 0o700); err != nil {
+		t.Fatalf("mkdir real parent: %v", err)
+	}
+	aliasParent := filepath.Join(baseDir, "alias-project")
+	if err := os.Symlink(realParent, aliasParent); err != nil {
+		t.Skipf("creating a directory symlink is unavailable: %v", err)
+	}
+
+	realIdentity, err := NewWorkbookIdentity(baseDir, filepath.Join(realParent, "missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(real): %v", err)
+	}
+	aliasIdentity, err := NewWorkbookIdentity(baseDir, filepath.Join(aliasParent, "missing", "book.xlsm"))
+	if err != nil {
+		t.Fatalf("NewWorkbookIdentity(alias): %v", err)
+	}
+	if aliasIdentity != realIdentity {
+		t.Fatalf("missing workbook under parent alias = %#v, want %#v", aliasIdentity, realIdentity)
 	}
 }
 

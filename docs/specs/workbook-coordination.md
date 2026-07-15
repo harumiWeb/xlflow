@@ -107,8 +107,10 @@ Identity generation applies these steps in order:
 1. Resolve a relative workbook path against the explicit base directory and make
    the result absolute.
 2. Clean redundant separators and `.` or `..` path segments.
-3. For an existing path, resolve symbolic links and junctions on a best-effort
-   basis. If resolution fails, retain the lexical absolute path.
+3. Starting with the full path, walk toward the root until the nearest existing
+   ancestor can be resolved. Resolve symbolic links and junctions in that
+   ancestor, then append the not-yet-created tail in its original order. If no
+   ancestor can be resolved, retain the lexical absolute path.
 4. Convert Windows extended path prefixes to their normal drive or UNC form while
    preserving UNC semantics.
 5. Normalize separators to the canonical Windows form.
@@ -162,9 +164,11 @@ same file:
 - paths that differ only by Unicode normalization; and
 - paths in directories explicitly configured for case-sensitive lookup.
 
-Broken, inaccessible, or not-yet-created symlink and junction paths use their
-lexically normalized absolute form. Diagnostic output may expose the canonical
-workbook path, but synchronization primitive names must expose only `LockID`.
+An existing symlink or junction parent is resolved even when the workbook or
+intermediate children beneath it do not exist yet. A broken, inaccessible, or
+not-yet-created alias itself uses its lexically normalized absolute form.
+Diagnostic output may expose the canonical workbook path, but synchronization
+primitive names must expose only `LockID`.
 
 ## Out of Scope for This Version
 
