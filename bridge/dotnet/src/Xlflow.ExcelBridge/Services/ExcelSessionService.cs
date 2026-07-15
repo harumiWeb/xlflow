@@ -255,10 +255,14 @@ public sealed class ExcelSessionService : ISessionService
                 }
             }
 
-            var needsSave = running && open && (dirty is null || dirty == true);
+            var discardRequired = metadata is not null && ShouldDiscardUnsavedChanges(metadata);
+            var externalDiscard = discardRequired
+                && string.Equals(metadata?.Owner, "external", StringComparison.OrdinalIgnoreCase);
+            var needsSave = NeedsSaveForStatus(running, open, dirty, metadata);
             var logs = new[] { running && open ? "xlflow session is running" : "xlflow session is not running" };
             var sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, running && open, mode, dirty, needsSave);
             sessionPayload["owner"] = metadata?.Owner ?? "managed";
+            sessionPayload["discard_required"] = discardRequired;
             if (metadata is not null)
             {
                 sessionPayload["metadata"] = new Dictionary<string, object?>
@@ -310,8 +314,12 @@ public sealed class ExcelSessionService : ISessionService
                     });
                     hints.Add(new Dictionary<string, object?>
                     {
-                        ["code"] = "restart_session",
-                        ["message"] = "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
+                        ["code"] = externalDiscard
+                            ? "discard_external_workbook"
+                            : "restart_session",
+                        ["message"] = externalDiscard
+                            ? "Close the workbook in Excel without saving, then start or attach a fresh xlflow session."
+                            : "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
                     });
                 }
                 extensions["warnings"] = warnings;
@@ -593,6 +601,18 @@ public sealed class ExcelSessionService : ISessionService
     internal static bool ShouldDiscardUnsavedChanges(SessionMetadata metadata)
     {
         return metadata.Poisoned && metadata.DiscardUnsavedChanges;
+    }
+
+    internal static bool NeedsSaveForStatus(
+        bool running,
+        bool open,
+        bool? dirty,
+        SessionMetadata? metadata)
+    {
+        return running
+            && open
+            && (dirty is null || dirty == true)
+            && (metadata is null || !ShouldDiscardUnsavedChanges(metadata));
     }
 
     private static void CloseExistingSession(string metadataPath)

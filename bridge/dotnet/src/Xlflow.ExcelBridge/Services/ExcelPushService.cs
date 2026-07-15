@@ -49,6 +49,12 @@ public sealed class ExcelPushService : IPushService
         public string ActualName { get; }
     }
 
+    internal sealed class ComponentReplacementException(string phase, Exception innerException)
+        : Exception($"VBA component replacement failed during {phase}", innerException)
+    {
+        public string Phase { get; } = phase;
+    }
+
     public BridgeResponse Execute(BridgeRequest request, PushCommandArguments args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -151,7 +157,7 @@ public sealed class ExcelPushService : IPushService
             workbook = attachment.Workbook;
             sessionAttached = attached;
 
-            sessionMode = ResolveSessionMode(attached, args.UseSession);
+            sessionMode = attachment.SessionMode;
 
             const string backupReason = "before-push";
 
@@ -327,6 +333,10 @@ public sealed class ExcelPushService : IPushService
         {
             return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
         }
+        catch (ComponentReplacementException ex)
+        {
+            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
@@ -389,10 +399,31 @@ public sealed class ExcelPushService : IPushService
         List<DiscoveredSourceFile> sourceFiles,
         string tmpImportDir)
     {
-        RemoveNonDocumentComponents(workbook);
-        return ExcelBridgeSupport.RunPhase(
-            "import_vba_components",
-            () => ImportVbaComponents(workbook, args, sourceFiles, tmpImportDir));
+        try
+        {
+            RemoveNonDocumentComponents(workbook);
+        }
+        catch (ComponentRemovalException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ComponentReplacementException("remove_non_document_components", ex);
+        }
+
+        try
+        {
+            return ImportVbaComponents(workbook, args, sourceFiles, tmpImportDir);
+        }
+        catch (ComponentImportNameException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ComponentReplacementException("import_vba_components", ex);
+        }
     }
 
     internal static void RemoveNonDocumentComponents(object workbook)
@@ -538,6 +569,25 @@ public sealed class ExcelPushService : IPushService
                 ["expected_name"] = exception.ExpectedName,
                 ["actual_name"] = exception.ActualName,
             }));
+        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return response;
+    }
+
+    internal static BridgeResponse BuildComponentReplacementFailureResponse(
+        BridgeRequest request,
+        PushCommandArguments args,
+        bool sessionAttached,
+        string sessionMode,
+        ComponentReplacementException exception)
+    {
+        var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
+        var response = BridgeResponse.Failed(request, new BridgeError(
+            Code: "vba_component_replacement_failed",
+            Message: $"VBA component replacement failed during {exception.Phase}: {failure.Message}",
+            Phase: exception.Phase,
+            Source: "xlflow-excel-bridge",
+            Number: failure.Number,
+            HResult: failure.HResult));
         AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
         return response;
     }
@@ -1164,15 +1214,6 @@ public sealed class ExcelPushService : IPushService
     {
         var lines = dialog.Text.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
         return lines.Length > 0 ? string.Join(Environment.NewLine, lines) : dialog.Title;
-    }
-
-    private static string ResolveSessionMode(bool sessionAttached, bool useSession)
-    {
-        if (!sessionAttached)
-        {
-            return "none";
-        }
-        return useSession ? "explicit" : "auto";
     }
 
     private static Dictionary<string, object?> BuildBackupPayload(BackupRef backup)

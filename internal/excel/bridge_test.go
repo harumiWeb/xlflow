@@ -2165,7 +2165,7 @@ func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
 }
 
 func TestVbaComponentReplacementFailuresAreEnvironmentFailures(t *testing.T) {
-	for _, code := range []string{"vba_component_remove_failed", "vba_component_import_name_mismatch"} {
+	for _, code := range []string{"vba_component_remove_failed", "vba_component_import_name_mismatch", "vba_component_replacement_failed"} {
 		t.Run(code, func(t *testing.T) {
 			result := ScriptResult{
 				Status: output.StatusFailed,

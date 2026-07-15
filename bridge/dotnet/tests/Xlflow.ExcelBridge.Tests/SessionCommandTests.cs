@@ -204,6 +204,44 @@ public sealed class SessionCommandTests
     }
 
     [Fact]
+    public void StatusDoesNotRequestSaveForDiscardPoisonedSession()
+    {
+        var metadata = new SessionMetadata(
+            Hwnd: 123,
+            Pid: 456,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: "managed",
+            Poisoned: true,
+            DiscardUnsavedChanges: true);
+
+        Assert.False(ExcelSessionService.NeedsSaveForStatus(
+            running: true,
+            open: true,
+            dirty: true,
+            metadata));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StatusPreservesSaveRequiredForNonDiscardDirtySession(bool poisoned)
+    {
+        var metadata = new SessionMetadata(
+            Hwnd: 123,
+            Pid: 456,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: "managed",
+            Poisoned: poisoned,
+            DiscardUnsavedChanges: false);
+
+        Assert.True(ExcelSessionService.NeedsSaveForStatus(
+            running: true,
+            open: true,
+            dirty: true,
+            metadata));
+    }
+
+    [Fact]
     public void RunPhaseDoesNotWrapSessionPoisonedException()
     {
         var metadata = new SessionMetadata(
