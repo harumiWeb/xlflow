@@ -3550,10 +3550,10 @@ func TestModuleInstallCommandInstallsHelperModules(t *testing.T) {
 		t.Fatalf("module install command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	for _, path := range []string{
-		filepath.Join(dir, "src", "modules", "XlflowAssert.bas"),
-		filepath.Join(dir, "src", "modules", "XlflowRuntime.bas"),
-		filepath.Join(dir, "src", "modules", "XlflowUI.bas"),
-		filepath.Join(dir, "src", "modules", "XlflowDebug.bas"),
+		filepath.Join(dir, "src", "modules", "Xlflow", "XlflowAssert.bas"),
+		filepath.Join(dir, "src", "modules", "Xlflow", "XlflowRuntime.bas"),
+		filepath.Join(dir, "src", "modules", "Xlflow", "XlflowUI.bas"),
+		filepath.Join(dir, "src", "modules", "Xlflow", "XlflowDebug.bas"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected installed helper module at %s: %v", path, err)

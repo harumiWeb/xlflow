@@ -473,7 +473,7 @@ xlflow inspect-gui --json
 
 ### 実行モードを VBA から参照する
 
-新しく `xlflow new` で作るプロジェクトには `src/modules/XlflowRuntime.bas` が含まれます。`xlflow run` や `xlflow test` の実行前に、xlflow は workbook-scoped の実行モード marker を一時注入するため、VBA 側は process inspection に頼らずに分岐できます。
+新しく `xlflow new` で作るプロジェクトには `src/modules/Xlflow/XlflowRuntime.bas` が含まれます。`xlflow run` や `xlflow test` の実行前に、xlflow は workbook-scoped の実行モード marker を一時注入するため、VBA 側は process inspection に頼らずに分岐できます。
 
 ```vb
 If XlflowRuntime.IsHeadless() Then
@@ -634,10 +634,10 @@ analyzer ルールは `[analyze].disabled_rules = ["VBA205"]` のように無効
 
 新しい project では、workbook 側 helper module として
 
-- `src/modules/XlflowRuntime.bas`
-- `src/modules/XlflowUI.bas`
-- `src/modules/XlflowDebug.bas`
-- `src/modules/XlflowAssert.bas` が scaffold されます。
+- `src/modules/Xlflow/XlflowRuntime.bas`
+- `src/modules/Xlflow/XlflowUI.bas`
+- `src/modules/Xlflow/XlflowDebug.bas`
+- `src/modules/Xlflow/XlflowAssert.bas` が scaffold されます。
 
 各モジュールの目的は次の通りです。
 

@@ -41,7 +41,7 @@ xlflow module install --push --json
 :::
 
 ::: tip
-`module install` writes `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules` root.
+`module install` writes `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules/Xlflow/` directory. It refuses both target collisions and legacy root-level helper collisions.
 :::
 
 ::: warning
@@ -117,10 +117,10 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
   "command": "module install",
   "source": {
     "created": [
-      "src/modules/XlflowAssert.bas",
-      "src/modules/XlflowRuntime.bas",
-      "src/modules/XlflowUI.bas",
-      "src/modules/XlflowDebug.bas"
+      "src/modules/Xlflow/XlflowAssert.bas",
+      "src/modules/Xlflow/XlflowRuntime.bas",
+      "src/modules/Xlflow/XlflowUI.bas",
+      "src/modules/Xlflow/XlflowDebug.bas"
     ]
   }
 }

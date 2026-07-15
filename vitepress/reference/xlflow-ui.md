@@ -24,7 +24,7 @@ This lets one workbook support both autonomous agent workflows and normal Excel 
 
 ## VBA Contract
 
-Recent `xlflow new` scaffolds include `src/modules/XlflowUI.bas` with these wrappers:
+Recent `xlflow new` scaffolds include `src/modules/Xlflow/XlflowUI.bas` with these wrappers:
 
 ```vb
 Public Function MsgBox(ByVal Id As String, ByVal Prompt As String, Optional ByVal Buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal Title As String = "", Optional ByVal DefaultResponse As String = "") As VbMsgBoxResult
