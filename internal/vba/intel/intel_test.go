@@ -3379,6 +3379,78 @@ End Sub
 	}
 }
 
+func TestSemanticTokensCoverParameterUsesAndProjectTypeReferences(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Type Customer
+    Name As String
+End Type
+
+Public Sub PrintCustomer(ByVal record As Customer)
+    Debug.Print record.Name
+    Call Format(customer:=record)
+    LogCustomer record
+    Debug.Print CalculateScore(record)
+End Sub
+
+Public Sub Other()
+    Dim customer As String
+    Dim LogCustomer As String
+    Dim service As New CustomerService
+    Debug.Print customer
+    LogCustomer = "local"
+End Sub
+
+Public Sub LogCustomer(ByVal record As Customer)
+End Sub
+
+Private Function CalculateScore(ByVal record As Customer) As Long
+    CalculateScore = Len(record.Name)
+End Function
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	classDoc := Document{
+		Path:       filepath.Join(filepath.Dir(doc.Path), "CustomerService.cls"),
+		ModuleKind: "class",
+		Source:     "VERSION 1.0 CLASS\nAttribute VB_Name = \"CustomerService\"\n",
+	}
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc, classDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenParameter, "record", source, lineIndex(source, "Debug.Print record.Name")) {
+		t.Fatalf("parameter use should receive a parameter token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenType, "Customer", source, lineIndex(source, "PrintCustomer(ByVal")) {
+		t.Fatalf("project type reference should receive a type token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenClass, "CustomerService", source, lineIndex(source, "Dim service As New CustomerService")) {
+		t.Fatalf("As New class reference should receive a class token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Call Format(customer:=record)")) {
+		t.Fatalf("named argument must not receive a parameter token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Public Sub Other()")+2) {
+		t.Fatalf("local variable in another procedure must not receive a parameter token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenFunction, "LogCustomer", source, lineIndex(source, "    LogCustomer record")) {
+		t.Fatalf("bare Sub call should receive a function token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenFunction, "CalculateScore", source, lineIndex(source, "Debug.Print CalculateScore")) {
+		t.Fatalf("Function call in an expression should receive a function token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "LogCustomer", source, lineIndex(source, "    LogCustomer = \"local\"")) {
+		t.Fatalf("local variable must not receive a function token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "CalculateScore", source, lineIndex(source, "CalculateScore = Len(record.Name)")) {
+		t.Fatalf("Function result assignment must not receive a function token: %+v", tokens)
+	}
+}
+
 func TestSemanticTokensCoverUserFormControlsAndMalformedSource(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `VERSION 5.00
@@ -3514,6 +3586,15 @@ func hasSemanticToken(tokens []SemanticToken, tokenType, text, source string) bo
 func hasSemanticTokenAtLine(tokens []SemanticToken, tokenType string, line int) bool {
 	for _, token := range tokens {
 		if token.Type == tokenType && token.Range.Start.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSemanticTokenAt(tokens []SemanticToken, tokenType, text, source string, line int) bool {
+	for _, token := range tokens {
+		if token.Type == tokenType && token.Range.Start.Line == line && rangeText(source, token.Range) == text {
 			return true
 		}
 	}

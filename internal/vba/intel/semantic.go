@@ -105,15 +105,191 @@ var operatorRunes = map[rune]bool{
 var memberExprRe = regexp.MustCompile(`(?i)([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^()\r\n]*\))?)*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)`)
 var procedureDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Sub|Function)\s+([A-Za-z_][A-Za-z0-9_]*)`)
 var propertyDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?\s*(Property)\s+(?:Get|Let|Set)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+var projectTypeReferenceRe = regexp.MustCompile(`(?i)\b(?:As\s+(?:New\s+)?|New\s+|Implements\s+)(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*([A-Za-z_][A-Za-z0-9_]*)`)
 
 func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken, error) {
 	builder := semanticBuilder{analyzer: a, doc: doc}
 	builder.addLexicalTokens()
 	builder.addSymbolTokens(open)
+	builder.addParameterReferenceTokens()
+	builder.addProjectTypeReferenceTokens(open)
+	builder.addProjectProcedureReferenceTokens(open)
 	builder.addKnownIdentifierTokens(open)
 	builder.addMemberTokens()
 	builder.addUserFormControlTokens()
 	return normalizeSemanticTokens(builder.tokens), nil
+}
+
+// addParameterReferenceTokens applies the parameter classification to uses in
+// the declaring procedure as well as to the declaration itself. TextMate can
+// recognize only the declaration; these tokens keep the two appearances
+// visually consistent without confusing members or named arguments.
+func (b *semanticBuilder) addParameterReferenceTokens() {
+	syms, err := b.analyzer.DocumentSymbols(b.doc)
+	if err != nil {
+		return
+	}
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Kind, "parameter") || sym.Name == "" {
+			continue
+		}
+		scope, ok := currentProcedureRangeForDocument(b.doc, sym.Selection.Start)
+		if !ok {
+			continue
+		}
+		for _, rng := range codeIdentifierRanges(b.doc.Source, sym.Name) {
+			if rangeContains(scope, rng) && b.isParameterReference(rng) {
+				b.add(rng, SemanticTokenParameter)
+			}
+		}
+	}
+}
+
+func (b *semanticBuilder) isParameterReference(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	start := byteIndexForUTF16(line, rng.Start.Character)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	if start > 0 && line[start-1] == '.' {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(line[end:]), ":=")
+}
+
+// addProjectTypeReferenceTokens highlights type positions such as "As Customer"
+// and "New Invoice" for types declared in the current workspace. Restricting
+// this to explicit type contexts avoids mistaking an ordinary variable that
+// happens to share a name with a type for a type reference.
+func (b *semanticBuilder) addProjectTypeReferenceTokens(open []Document) {
+	syms, err := b.analyzer.WorkspaceSymbols(open, "")
+	if err != nil {
+		return
+	}
+	types := make(map[string]string)
+	for _, sym := range syms {
+		tokenType := semanticTypeForProjectTypeSymbol(sym)
+		if tokenType == "" || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
+			continue
+		}
+		types[strings.ToLower(sym.Name)] = tokenType
+	}
+	for lineNo, line := range normalizedLines(b.doc.Source) {
+		limit := codeLimit(line)
+		for _, match := range projectTypeReferenceRe.FindAllStringSubmatchIndex(line[:limit], -1) {
+			if len(match) < 4 || match[2] < 0 || match[3] < 0 {
+				continue
+			}
+			name := strings.ToLower(line[match[2]:match[3]])
+			if tokenType, ok := types[name]; ok {
+				b.add(byteRange(lineNo, line, match[2], match[3]), tokenType)
+			}
+		}
+	}
+}
+
+func semanticTypeForProjectTypeSymbol(sym Symbol) string {
+	switch strings.ToLower(sym.Kind) {
+	case "type":
+		return SemanticTokenType
+	case "enum":
+		return SemanticTokenEnum
+	case "class":
+		return SemanticTokenClass
+	case "module":
+		if strings.EqualFold(sym.ModuleKind, "class") {
+			return SemanticTokenClass
+		}
+	}
+	return ""
+}
+
+// addProjectProcedureReferenceTokens classifies calls to workspace Sub and
+// Function declarations. Declarations are already covered by addSymbolTokens;
+// this supplies the same function color for bare Sub calls and Functions used
+// in expressions.
+func (b *semanticBuilder) addProjectProcedureReferenceTokens(open []Document) {
+	syms, err := b.analyzer.WorkspaceSymbols(open, "")
+	if err != nil {
+		return
+	}
+	procedures := make(map[string]bool)
+	for _, sym := range syms {
+		if !isProjectProcedureSymbol(sym) || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
+			continue
+		}
+		procedures[strings.ToLower(sym.Name)] = true
+	}
+	if len(procedures) == 0 {
+		return
+	}
+
+	docSyms, err := b.analyzer.DocumentSymbols(b.doc)
+	if err != nil {
+		return
+	}
+	declarations := make(map[string]bool)
+	locals := make(map[string]bool)
+	functions := make(map[string]bool)
+	for _, sym := range docSyms {
+		if isProjectProcedureSymbol(sym) {
+			declarations[semanticRangeKey(b.symbolNameRange(sym))] = true
+		}
+		if strings.EqualFold(sym.Kind, "function") {
+			functions[strings.ToLower(sym.Name)] = true
+		}
+		if isLocalSymbol(sym) {
+			locals[procedureLocalKey(sym.Parent, sym.Name)] = true
+		}
+	}
+	for lineNo, line := range normalizedLines(b.doc.Source) {
+		for _, span := range codeIdentifierSpans(line) {
+			name := line[span.start:span.end]
+			if !procedures[strings.ToLower(name)] {
+				continue
+			}
+			rng := byteRange(lineNo, line, span.start, span.end)
+			if declarations[semanticRangeKey(rng)] || !b.isProjectProcedureReference(rng) {
+				continue
+			}
+			procedure := currentProcedureNameForDocument(b.doc, rng.Start)
+			if strings.EqualFold(procedure, name) && functions[strings.ToLower(procedure)] && b.isAssignment(rng) {
+				continue
+			}
+			if locals[procedureLocalKey(procedure, name)] {
+				continue
+			}
+			b.add(rng, SemanticTokenFunction)
+		}
+	}
+}
+
+func isProjectProcedureSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func procedureLocalKey(procedure, name string) string {
+	return strings.ToLower(procedure) + "\x00" + strings.ToLower(name)
+}
+
+func (b *semanticBuilder) isProjectProcedureReference(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	start := byteIndexForUTF16(line, rng.Start.Character)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	before := strings.TrimSpace(line[:start])
+	if strings.HasSuffix(before, ".") {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(line[end:]), ":=")
+}
+
+func (b *semanticBuilder) isAssignment(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	return strings.HasPrefix(strings.TrimSpace(line[end:]), "=")
 }
 
 func (b *semanticBuilder) addLexicalTokens() {
