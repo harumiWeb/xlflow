@@ -3389,12 +3389,23 @@ End Type
 Public Sub PrintCustomer(ByVal record As Customer)
     Debug.Print record.Name
     Call Format(customer:=record)
+    LogCustomer record
+    Debug.Print CalculateScore(record)
 End Sub
 
 Public Sub Other()
     Dim customer As String
+    Dim LogCustomer As String
     Debug.Print customer
+    LogCustomer = "local"
 End Sub
+
+Public Sub LogCustomer(ByVal record As Customer)
+End Sub
+
+Private Function CalculateScore(ByVal record As Customer) As Long
+    CalculateScore = Len(record.Name)
+End Function
 `
 	doc := Document{
 		Path:       filepath.Join(t.TempDir(), "Main.bas"),
@@ -3416,6 +3427,15 @@ End Sub
 	}
 	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "customer", source, lineIndex(source, "Public Sub Other()")+2) {
 		t.Fatalf("local variable in another procedure must not receive a parameter token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenFunction, "LogCustomer", source, lineIndex(source, "    LogCustomer record")) {
+		t.Fatalf("bare Sub call should receive a function token: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenFunction, "CalculateScore", source, lineIndex(source, "Debug.Print CalculateScore")) {
+		t.Fatalf("Function call in an expression should receive a function token: %+v", tokens)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "LogCustomer", source, lineIndex(source, "    LogCustomer = \"local\"")) {
+		t.Fatalf("local variable must not receive a function token: %+v", tokens)
 	}
 }
 

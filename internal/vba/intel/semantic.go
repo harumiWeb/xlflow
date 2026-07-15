@@ -113,6 +113,7 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 	builder.addSymbolTokens(open)
 	builder.addParameterReferenceTokens()
 	builder.addProjectTypeReferenceTokens(open)
+	builder.addProjectProcedureReferenceTokens(open)
 	builder.addKnownIdentifierTokens(open)
 	builder.addMemberTokens()
 	builder.addUserFormControlTokens()
@@ -196,6 +197,83 @@ func semanticTypeForProjectTypeSymbol(sym Symbol) string {
 	default:
 		return ""
 	}
+}
+
+// addProjectProcedureReferenceTokens classifies calls to workspace Sub and
+// Function declarations. Declarations are already covered by addSymbolTokens;
+// this supplies the same function color for bare Sub calls and Functions used
+// in expressions.
+func (b *semanticBuilder) addProjectProcedureReferenceTokens(open []Document) {
+	syms, err := b.analyzer.WorkspaceSymbols(open, "")
+	if err != nil {
+		return
+	}
+	procedures := make(map[string]bool)
+	for _, sym := range syms {
+		if !isProjectProcedureSymbol(sym) || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
+			continue
+		}
+		procedures[strings.ToLower(sym.Name)] = true
+	}
+	if len(procedures) == 0 {
+		return
+	}
+
+	docSyms, err := b.analyzer.DocumentSymbols(b.doc)
+	if err != nil {
+		return
+	}
+	declarations := make(map[string]bool)
+	locals := make(map[string]bool)
+	for _, sym := range docSyms {
+		if isProjectProcedureSymbol(sym) {
+			declarations[semanticRangeKey(b.symbolNameRange(sym))] = true
+		}
+		if isLocalSymbol(sym) {
+			locals[procedureLocalKey(sym.Parent, sym.Name)] = true
+		}
+	}
+	for lineNo, line := range normalizedLines(b.doc.Source) {
+		for _, span := range codeIdentifierSpans(line) {
+			name := line[span.start:span.end]
+			if !procedures[strings.ToLower(name)] {
+				continue
+			}
+			rng := byteRange(lineNo, line, span.start, span.end)
+			if declarations[semanticRangeKey(rng)] || !b.isProjectProcedureReference(rng) {
+				continue
+			}
+			procedure := currentProcedureNameForDocument(b.doc, rng.Start)
+			if locals[procedureLocalKey(procedure, name)] {
+				continue
+			}
+			b.add(rng, SemanticTokenFunction)
+		}
+	}
+}
+
+func isProjectProcedureSymbol(sym Symbol) bool {
+	switch strings.ToLower(sym.Kind) {
+	case "sub", "function", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func procedureLocalKey(procedure, name string) string {
+	return strings.ToLower(procedure) + "\x00" + strings.ToLower(name)
+}
+
+func (b *semanticBuilder) isProjectProcedureReference(rng Range) bool {
+	line := lineAt(b.doc.Source, rng.Start.Line)
+	start := byteIndexForUTF16(line, rng.Start.Character)
+	end := byteIndexForUTF16(line, rng.End.Character)
+	before := strings.TrimSpace(line[:start])
+	if strings.HasSuffix(before, ".") {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(line[end:]), ":=")
 }
 
 func (b *semanticBuilder) addLexicalTokens() {
