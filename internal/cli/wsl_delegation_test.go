@@ -224,10 +224,9 @@ func TestDelegateWSLCommandPreservesCoordinationWaitOptions(t *testing.T) {
 			newDelegatedCommand = delegatedHelperCommand
 			var stdout bytes.Buffer
 			a := &app{cwd: t.TempDir(), rawArgs: args, stdout: &stdout, stderr: &bytes.Buffer{}, buildInfo: BuildInfo{Version: "1.2.3"}}
-			root := &cobra.Command{Use: "xlflow"}
-			push := &cobra.Command{Use: "push"}
-			root.AddCommand(push)
-			err := a.delegateWSLCommand(push)
+			root := a.rootCommand()
+			root.SetArgs(args)
+			err := root.Execute()
 			if !errors.Is(err, errWSLDelegated) || output.ExitCode(err) != output.ExitSuccess {
 				t.Fatalf("delegation error = %v, exit=%d", err, output.ExitCode(err))
 			}

@@ -126,6 +126,17 @@ func TestCoordinationWaitDefaultIsThirtySeconds(t *testing.T) {
 	}
 }
 
+func TestCoordinationWaitOptionsAllowGeneratedCobraCommands(t *testing.T) {
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--wait", "help"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetOut(&stdout)
+	root.SetArgs(a.rawArgs)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("generated help command rejected --wait: %v", err)
+	}
+}
+
 func TestWorkbookCoordinationWaitsThenRunsHandlerOnce(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows LockFileEx coordination")
@@ -174,8 +185,8 @@ func TestWorkbookCoordinationWaitCancellationIsStructured(t *testing.T) {
 	}
 	rootDir, manager, identity, owner := setupHeldCoordinationLock(t, "run")
 	defer func() { _ = owner.Release() }()
-	var stdout bytes.Buffer
-	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+	var stdout, stderr bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: time.Second, stdout: &stdout, stderr: &stderr, coordination: manager}
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
 	err := a.withWorkbookCoordination(ctx, "push", []string{identity.CanonicalPath}, func() error {
@@ -185,6 +196,9 @@ func TestWorkbookCoordinationWaitCancellationIsStructured(t *testing.T) {
 	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyCancelledCode, "1s")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context cancellation", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("JSON cancellation emitted stderr progress: %q", stderr.String())
 	}
 }
 
@@ -273,10 +287,10 @@ func TestWorkbookCoordinationTimeoutReleasesEarlierMultiTargetLease(t *testing.T
 		t.Fatal(err)
 	}
 	defer func() { _ = owner.Release() }()
-	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: 75 * time.Millisecond, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, coordination: manager}
-	if err := a.withWorkbookCoordination(context.Background(), descriptor.ID, []string{firstPath, secondPath}, func() error { return nil }); output.ExitCode(err) != output.ExitEnvironment {
-		t.Fatalf("timeout error = %v", err)
-	}
+	var stdout bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: 75 * time.Millisecond, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
+	err = a.withWorkbookCoordination(context.Background(), descriptor.ID, []string{firstPath, secondPath}, func() error { return nil })
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, "75ms")
 	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{Identity: firstIdentity, Command: descriptor.ID, OperationKind: descriptor.Policy.OperationKind, ResourceScope: descriptor.Policy.ResourceScope})
 	if err != nil {
 		t.Fatalf("earlier target remained locked: %v", err)
@@ -318,15 +332,17 @@ func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testin
 
 	const waitBudget = 220 * time.Millisecond
 	time.AfterFunc(120*time.Millisecond, func() { _ = firstOwner.Release() })
-	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: waitBudget, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, coordination: manager}
+	var stdout bytes.Buffer
+	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: waitBudget, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
 	started := time.Now()
 	err = a.withWorkbookCoordination(context.Background(), "diff", []string{firstPath, secondPath}, func() error {
 		t.Fatal("handler must not run after the shared timeout expires")
 		return nil
 	})
 	elapsed := time.Since(started)
-	if output.ExitCode(err) != output.ExitEnvironment {
-		t.Fatalf("timeout error = %v", err)
+	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, waitBudget.String())
+	if elapsed < 180*time.Millisecond {
+		t.Fatalf("multi-target acquisition timed out too early after %s", elapsed)
 	}
 	if elapsed >= 300*time.Millisecond {
 		t.Fatalf("multi-target acquisition took %s; timeout budget appears to have restarted per target", elapsed)

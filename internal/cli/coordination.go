@@ -38,7 +38,7 @@ func (a *app) validateCoordinationWaitOptions(cmd *cobra.Command) error {
 	if timeoutChanged && !a.wait {
 		return a.writeFailure(commandName, output.ExitConfig, coordinationWaitArgsInvalidCode, fmt.Errorf("--wait-timeout requires --wait"))
 	}
-	if !a.wait {
+	if !a.wait || isGeneratedCobraCommand(cmd) {
 		return nil
 	}
 	descriptor, err := coordination.LookupCLI(cmd.CommandPath())
