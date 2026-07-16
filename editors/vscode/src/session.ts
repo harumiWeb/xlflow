@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import { XlflowChannels } from "./logging";
+import type { XlflowCapabilityOperation, XlflowBusyOperation } from "./capabilities";
 import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./xlflow";
 
 export type SessionState =
@@ -26,6 +27,18 @@ export interface XlflowCoordinationPayload {
   busy?: boolean;
   recovery_required?: boolean;
   recovery?: XlflowRecoveryPayload;
+  resource_scope?: string;
+  operation_kind?: string;
+  command?: string;
+  pid?: number;
+  started_at?: string;
+  owner?: {
+    resource_scope?: string;
+    operation_kind?: string;
+    command?: string;
+    pid?: number;
+    started_at?: string;
+  };
 }
 
 export interface XlflowRecoveryPayload {
@@ -57,6 +70,7 @@ export interface XlflowSessionPayload {
 export interface SessionSnapshot {
   state: SessionState;
   coordination?: XlflowCoordinationPayload;
+  managedOperation?: XlflowCapabilityOperation;
   session?: XlflowSessionPayload;
   workspaceFolder?: vscode.WorkspaceFolder;
   lastCheckedAt?: Date;
@@ -79,6 +93,7 @@ export class SessionManager implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<SessionSnapshot>();
   private snapshot: SessionSnapshot = { state: "unknown" };
   private projectKind: "noWorkspace" | "notInitialized" | "ready" | "invalid" = "noWorkspace";
+  private managedOperation: XlflowCapabilityOperation | undefined;
 
   readonly onDidChangeSnapshot = this.emitter.event;
 
@@ -98,6 +113,37 @@ export class SessionManager implements vscode.Disposable {
     return this.snapshot;
   }
 
+  currentBusyOperation(): XlflowBusyOperation | undefined {
+    if (this.managedOperation !== undefined) {
+      return {
+        busy: true,
+        command: this.managedOperation.commandID,
+        operationKind: this.managedOperation.capability.operation_kind,
+        resourceScope: this.managedOperation.capability.resource_scope,
+      };
+    }
+    const coordination = this.snapshot.coordination;
+    if (coordination?.busy !== true) {
+      return undefined;
+    }
+    const owner = coordination.owner;
+    return {
+      busy: true,
+      command: stringValue(coordination.command ?? owner?.command),
+      operationKind: stringValue(coordination.operation_kind ?? owner?.operation_kind),
+      resourceScope: stringValue(coordination.resource_scope ?? owner?.resource_scope),
+      pid: numberValue(coordination.pid ?? owner?.pid),
+      startedAt: stringValue(coordination.started_at ?? owner?.started_at),
+    };
+  }
+
+  setManagedOperation(operation: XlflowCapabilityOperation | undefined): void {
+    this.managedOperation = operation;
+    this.snapshot = { ...this.snapshot, managedOperation: operation };
+    this.updateStatusBar();
+    this.emitter.fire(this.snapshot);
+  }
+
   setProjectKind(kind: "noWorkspace" | "notInitialized" | "ready" | "invalid"): void {
     this.projectKind = kind;
     this.updateStatusBar();
@@ -109,10 +155,10 @@ export class SessionManager implements vscode.Disposable {
       fallbackToFirst: true,
     });
     if (folder === undefined) {
-      this.snapshot = {
+      this.snapshot = this.withManagedOperation({
         state: "unknown",
         lastError: vscode.l10n.t("No workspace folder is open."),
-      };
+      });
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
       return;
@@ -137,24 +183,24 @@ export class SessionManager implements vscode.Disposable {
       result.json === undefined ||
       (state !== "recovery" && (result.exitCode !== 0 || result.json.session === undefined))
     ) {
-      this.snapshot = {
+      this.snapshot = this.withManagedOperation({
         state: "error",
         workspaceFolder: folder,
         lastCheckedAt,
         lastError: statusErrorMessage(result.json, result.stderr),
-      };
+      });
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
       return;
     }
 
-    this.snapshot = {
+    this.snapshot = this.withManagedOperation({
       state,
       coordination: result.json.coordination,
       session: result.json.session,
       workspaceFolder: folder,
       lastCheckedAt,
-    };
+    });
     this.updateStatusBar();
     this.emitter.fire(this.snapshot);
   }
@@ -409,6 +455,10 @@ export class SessionManager implements vscode.Disposable {
     this.emitter.fire(this.snapshot);
   }
 
+  private withManagedOperation(snapshot: SessionSnapshot): SessionSnapshot {
+    return { ...snapshot, managedOperation: this.managedOperation };
+  }
+
   private updateStatusBar(): void {
     this.statusBarItem.text = sessionStatusText(this.snapshot.state, this.projectKind);
     this.statusBarItem.tooltip = sessionStatusTooltip(this.snapshot);
@@ -456,6 +506,11 @@ export class SessionManager implements vscode.Disposable {
       "setContext",
       "xlflow.recoveryRequired",
       projectReady && this.snapshot.state === "recovery",
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.workbookBusy",
+      projectReady && this.currentBusyOperation()?.busy === true,
     );
   }
 }
@@ -554,6 +609,26 @@ function sessionStatusTooltip(snapshot: SessionSnapshot): string {
     lines.push(vscode.l10n.t("Started: {startedAt}", { startedAt }));
   }
   const recovery = snapshot.coordination?.recovery;
+  const busy = busyOperationFromSnapshot(snapshot);
+  if (busy !== undefined) {
+    lines.push(
+      vscode.l10n.t("Workbook operation in progress: {command}", {
+        command: busy.command ?? vscode.l10n.t("xlflow operation"),
+      }),
+    );
+    if (busy.operationKind !== undefined) {
+      lines.push(vscode.l10n.t("Operation kind: {kind}", { kind: busy.operationKind }));
+    }
+    if (busy.resourceScope !== undefined) {
+      lines.push(vscode.l10n.t("Resource scope: {scope}", { scope: busy.resourceScope }));
+    }
+    if (busy.pid !== undefined) {
+      lines.push(vscode.l10n.t("Operation process: {pid}", { pid: busy.pid }));
+    }
+    if (busy.startedAt !== undefined) {
+      lines.push(vscode.l10n.t("Operation started: {startedAt}", { startedAt: busy.startedAt }));
+    }
+  }
   const recoveryReason = readNonEmpty(recovery?.reason);
   if (recoveryReason !== undefined) {
     lines.push(vscode.l10n.t("Recovery reason: {reason}", { reason: recoveryReason }));
@@ -662,4 +737,36 @@ function readNonEmpty(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return readNonEmpty(value);
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function busyOperationFromSnapshot(snapshot: SessionSnapshot): XlflowBusyOperation | undefined {
+  if (snapshot.managedOperation !== undefined) {
+    return {
+      busy: true,
+      command: snapshot.managedOperation.commandID,
+      operationKind: snapshot.managedOperation.capability.operation_kind,
+      resourceScope: snapshot.managedOperation.capability.resource_scope,
+    };
+  }
+  const coordination = snapshot.coordination;
+  if (coordination?.busy !== true) {
+    return undefined;
+  }
+  const owner = coordination.owner;
+  return {
+    busy: true,
+    command: stringValue(coordination.command ?? owner?.command),
+    operationKind: stringValue(coordination.operation_kind ?? owner?.operation_kind),
+    resourceScope: stringValue(coordination.resource_scope ?? owner?.resource_scope),
+    pid: numberValue(coordination.pid ?? owner?.pid),
+    startedAt: stringValue(coordination.started_at ?? owner?.started_at),
+  };
 }

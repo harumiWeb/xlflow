@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.7.0
+
+- Added discovery of `xlflow capabilities --json` so the extension can use the
+  CLI's central command-safety metadata instead of maintaining a local policy
+  table. Workbook-busy operations now show their active command details and
+  offer Retry or a 30-second Wait action when the CLI reports it is retryable.
+
 ## v0.6.1
 
 - Fixed `xlflow module install --push` from the VS Code extension so helper source files appear in the sidebar even when push is blocked by preflight lint, and clarified the failure notification.

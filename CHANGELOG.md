@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.24.0
+
+- Added `xlflow capabilities --json`, a versioned, machine-readable projection
+  of the central command-coordination registry for VS Code and external
+  integrations. The v1 contract publishes stable command IDs, CLI paths, and
+  safety/wait/recovery policy metadata without exposing bridge selectors; it is
+  advisory and the CLI lock remains authoritative.
 - Added Windows cross-process workbook coordination with crash-released
   `LockFileEx` ownership, immediate structured `workbook_busy` diagnostics, and
   guarded atomic owner metadata for conflicting CLI processes and

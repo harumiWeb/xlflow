@@ -17,6 +17,7 @@ import {
   runXlflowCommand,
   runXlflowJsonCommand,
   runXlflowTerminalCommand,
+  workbookBusyRetryArgs,
 } from "./xlflow";
 
 type RunProcedureArgs = {
@@ -995,7 +996,7 @@ async function runJsonWithProgress<T>(
   uiLabel: string,
   workspaceFolder: vscode.WorkspaceFolder | undefined,
 ) {
-  return vscode.window.withProgress(
+  const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
       title: uiLabel,
@@ -1007,6 +1008,11 @@ async function runJsonWithProgress<T>(
         workspaceFolder,
       }),
   );
+  const retryArgs = await workbookBusyRetryArgs(args, result);
+  if (retryArgs === undefined) {
+    return result;
+  }
+  return runJsonWithProgress<T>(retryArgs, label, outputChannel, uiLabel, workspaceFolder);
 }
 
 export interface BackupQuickPickItem extends vscode.QuickPickItem {

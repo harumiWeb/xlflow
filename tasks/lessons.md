@@ -70,3 +70,4 @@
 - Clicking `Debug` on a runtime error dialog can leave VBE in break mode and make later COM attachment fail. Until selection capture and reset are proven reliable, prefer `End` for unattended suppression.
 - When rewriting test results from `inconclusive` to `failed`, update both counters. Per-item status and top-level command status must not diverge after lifecycle hook failures.
 - Semantic highlighting for VBA must model language-specific implicit identifiers and extractor shapes: a Function name on an assignment is its return variable, `As New` must color the type rather than `New`, and class modules may be represented as `module` symbols with `ModuleKind == "class"`.
+- VS Code capability discovery must invalidate failed or path-bound caches, classify only the parsed CLI command path rather than arbitrary argv values, revalidate observed busy state before advisory blocking, and clear managed-operation UI state in `finally`.

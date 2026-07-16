@@ -11,6 +11,7 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 ```text
 xlflow [--json] [--bridge <auto|dotnet>] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] [--bridge <auto|dotnet>] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
+xlflow [--json] capabilities
 xlflow [--json] [--bridge <auto|dotnet>] doctor [--workbook]
 xlflow [--json] [--bridge <auto|dotnet>] attach --active
 xlflow [--json] backup list
@@ -357,6 +358,18 @@ All JSON output uses a stable top-level envelope.
 
 `status` is either `ok` or `failed`. `error` is `null` on success and a structured object on failure. Error objects contain `code`, `message`, `source`, `number`, `line`, `phase`, `h_result`, `details`, and `suggestions`. `h_result` is a hex string (e.g. `"0x80040154"`) populated for COM-origin failures. `details` is an object with additional context such as `source` and `stack_trace`. `suggestions` is an array of command names for CLI parse failures such as `unknown_command`. All error fields except `message` are optional and omitted when empty or zero.
 
+`capabilities --json` returns top-level `capabilities` with
+`capability_version: 1` and a command-ID map generated from the authoritative
+coordination registry. Every command entry contains `cli_paths`,
+`resource_scope`, `operation_kind`, `parallel_safe`, `retryable_when_busy`,
+`default_wait_policy`, and `recovery_behavior`. Command IDs, paths, and the
+meaning of those fields are stable for version 1. New commands and fields may be
+added; clients must ignore unknown entries and fields. The endpoint is
+project-independent and source-only. Older CLI versions may not provide it, so
+integrations must treat an unavailable, invalid, failed, or unsupported-version
+response as unavailable advisory metadata, not infer safety from command names.
+See `docs/specs/workbook-coordination.md` for the complete capability contract.
+
 Workbook lock contention uses the stable error code `workbook_busy`. It fails
 immediately by default and uses the same envelope for every workbook-bound
 command, including compact `run --json` failures:
@@ -475,6 +488,7 @@ Command-specific fields are added at the top level:
 - `issues` for `lint`
 - `analysis` for `analyze` and `check`
 - `check` for `check`
+- `capabilities` for command coordination and safety metadata
 - `run_diagnostic` for enriched `run` failures
 - `push_diagnostic` for enriched `push` compile failures
 - `debug` for `run` and `test` debug-log events emitted by `XlflowDebug.Log`

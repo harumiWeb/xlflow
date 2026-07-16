@@ -85,6 +85,7 @@ type Envelope struct {
 	Suggestions    any `json:"suggestions,omitempty"`
 	Process        any `json:"process,omitempty"`
 	Recovery       any `json:"recovery,omitempty"`
+	Capabilities   any `json:"capabilities,omitempty"`
 }
 
 type Options struct {

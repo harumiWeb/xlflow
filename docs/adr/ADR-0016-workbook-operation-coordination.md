@@ -42,8 +42,13 @@ including action fields needed to distinguish multiplexed bridge requests.
 An executable command without an explicit policy fails closed with a typed
 `coordination_policy_missing` error. It does not inherit a permissive default.
 Policy consumers use the Go registry; the .NET bridge does not maintain a second
-command list. Future external discovery may serialize this registry, but this
-decision does not add or change a public CLI, bridge, or capabilities schema.
+command list. `xlflow capabilities --json` publishes a versioned, additive
+projection of that same registry for editor and agent integrations. The v1
+projection exports stable command IDs, CLI leaf paths, and coordination-policy
+fields only; it never exposes bridge selectors or other implementation metadata.
+Client-side uses of this metadata are advisory. The CLI lock remains the sole
+authority for acquisition, contention, waiting, and exclusion because another
+process may start a conflicting operation at any time.
 
 Coordination is keyed by canonical workbook identity rather than session ID. An
 identity contains:
@@ -85,6 +90,8 @@ The detailed policy and identity contracts live in
   workbook paths in synchronization primitive names.
 - Positive: identity generation does not require Excel, an open workbook, or an
   existing workbook file.
+- Positive: editors and external integrations can discover stable command
+  safety metadata without maintaining a duplicate classification table.
 - Negative: every executable command and multiplexed bridge action must be kept
   registered as the command surface evolves.
 - Negative: conservative policies can serialize operations that might eventually
@@ -93,8 +100,8 @@ The detailed policy and identity contracts live in
   paths, DFS or DNS aliases, hard links, 8.3 names, or every network alias.
 - Negative: the initial case-insensitive identity contract does not distinguish
   Windows directories explicitly configured for case-sensitive lookup.
-- Deferred: cross-process acquisition, crash recovery, busy/timeout diagnostics,
-  opt-in waiting, and session status integration require subsequent work.
+- Deferred: FIFO fairness and an `excel_instance` coordination primitive require
+  subsequent work.
 
 ## Alternatives Considered
 
