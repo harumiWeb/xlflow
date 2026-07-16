@@ -13,7 +13,8 @@ import { SessionManager } from "./session";
 import { XlflowSidebar } from "./sidebar";
 import { XlflowUpdateService } from "./updateCheck";
 import { XlflowTestController } from "./testing";
-import { setXlflowCliAvailabilityService } from "./xlflow";
+import { XlflowCapabilitiesService } from "./capabilities";
+import { setXlflowCapabilitiesService, setXlflowCliAvailabilityService } from "./xlflow";
 
 let clientManager: XlflowLanguageClientManager | undefined;
 let testController: XlflowTestController | undefined;
@@ -22,6 +23,7 @@ let projectState: XlflowProjectStateService | undefined;
 let sidebar: XlflowSidebar | undefined;
 let cliAvailability: XlflowCliAvailabilityService | undefined;
 let updateService: XlflowUpdateService | undefined;
+let capabilitiesService: XlflowCapabilitiesService | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const channels = createChannels();
@@ -30,6 +32,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   clientManager = new XlflowLanguageClientManager(channels, cliAvailability);
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);
+  capabilitiesService = new XlflowCapabilitiesService(channels, {
+    currentBusyOperation: () => sessionManager?.currentBusyOperation(),
+    operationStarted: (operation) => sessionManager?.setManagedOperation(operation),
+    operationFinished: () => sessionManager?.setManagedOperation(undefined),
+    refreshStatus: async () => {
+      await sessionManager?.refreshStatus();
+    },
+  });
+  setXlflowCapabilitiesService(capabilitiesService);
   projectState = new XlflowProjectStateService();
   updateService = new XlflowUpdateService(context);
   sidebar = new XlflowSidebar(
@@ -188,6 +199,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
   await cliAvailability.refresh();
+  void capabilitiesService.load();
   await updateService.checkAutomatic(cliAvailability.current());
   await refreshSelectedProject({ restartLsp: false });
   await checkVbaLanguageAssociation(context);
@@ -208,7 +220,9 @@ export async function deactivate(): Promise<void> {
   sidebar = undefined;
   cliAvailability = undefined;
   updateService = undefined;
+  capabilitiesService = undefined;
   setXlflowCliAvailabilityService(undefined);
+  setXlflowCapabilitiesService(undefined);
   bars?.dispose();
   states?.dispose();
   tests?.dispose();

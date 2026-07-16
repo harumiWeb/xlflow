@@ -3,7 +3,7 @@
 This spec defines the command-policy, canonical workbook-identity,
 cross-process lock, owner-metadata, and recovery-quarantine contracts used by
 workbook operation coordination. Public waiting options and coordination status
-output build on these contracts.
+and capability output build on these contracts.
 
 See ADR-0016 for the policy and identity rationale and ADR-0018 for the Windows
 lock and metadata decisions. ADR-0020 defines recovery quarantine after
@@ -55,12 +55,52 @@ are not executable policy entries.
 Bridge-backed commands resolve through the same registry before invocation. A
 selector contains the bridge command and, for multiplexed bridge endpoints, the
 request field such as `Action` that identifies the actual operation. The .NET
-bridge must not duplicate the registry. Stable command IDs are internal identifiers
-in this version; they are suitable for future serialization but are not yet a
-public capabilities schema.
+bridge must not duplicate the registry.
 
 Registry enumeration is deterministic and returns defensive copies so callers
 cannot mutate the authoritative definitions.
+
+### Public Capability Contract
+
+`xlflow capabilities --json` is a source-only, parallel-safe command that
+returns a v1, machine-readable projection of every registry descriptor in the
+normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
+
+```json
+{
+  "status": "ok",
+  "command": "capabilities",
+  "capabilities": {
+    "capability_version": 1,
+    "commands": {
+      "push": {
+        "cli_paths": ["push"],
+        "resource_scope": "workbook",
+        "operation_kind": "mutate",
+        "parallel_safe": false,
+        "retryable_when_busy": true,
+        "default_wait_policy": "fail",
+        "recovery_behavior": "block"
+      }
+    }
+  }
+}
+```
+
+`capability_version` is an integer schema version. Version 1 stabilizes the
+command-map keys (command IDs), each command's `cli_paths`, and the meanings and
+vocabularies of `resource_scope`, `operation_kind`, `parallel_safe`,
+`retryable_when_busy`, `default_wait_policy`, and `recovery_behavior`. The
+`capabilities` command itself is included with ID and path `capabilities`.
+
+This endpoint exposes only the public projection above. It does not expose
+bridge command/action selectors, lock IDs, workbook paths, or other internal
+descriptor data. A future version may add command entries or fields without
+breaking version 1 consumers. Consumers must ignore unknown commands and fields,
+and treat a missing endpoint, invalid JSON, non-success result, or unsupported
+`capability_version` as unavailable metadata rather than inferring policies from
+command names. Metadata is advisory only: the CLI's central policy and lock
+remain authoritative for all coordination decisions.
 
 ### Fail-Closed Behavior
 
@@ -613,7 +653,7 @@ This contract does not add:
 
 - FIFO queue behavior;
 - an `excel_instance` lock primitive;
-- a public policy/capabilities endpoint or serialized bridge schema; or
+- a serialized bridge policy schema; or
 - a separate UserForm Designer lock outside workbook coordination.
 
 Those features must consume this registry, identity, and lock contract rather

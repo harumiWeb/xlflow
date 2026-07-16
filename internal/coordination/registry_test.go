@@ -1,6 +1,7 @@
 package coordination
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sort"
@@ -163,6 +164,82 @@ func TestAllIsStableAndDefensive(t *testing.T) {
 		if value == "changed" {
 			t.Fatal("bridge selector mutation escaped defensive copy")
 		}
+	}
+}
+
+func TestPublicCapabilitiesProjectEveryDescriptorWithoutBridgeMetadata(t *testing.T) {
+	capabilities := PublicCapabilities()
+	if capabilities.CapabilityVersion != CapabilityVersion {
+		t.Fatalf("capability version = %d, want %d", capabilities.CapabilityVersion, CapabilityVersion)
+	}
+
+	descriptors := All()
+	if len(capabilities.Commands) != len(descriptors) {
+		t.Fatalf("capabilities contain %d commands, want %d", len(capabilities.Commands), len(descriptors))
+	}
+	for _, descriptor := range descriptors {
+		capability, ok := capabilities.Commands[descriptor.ID]
+		if !ok {
+			t.Errorf("missing public capability for %q", descriptor.ID)
+			continue
+		}
+		if capability.ResourceScope != descriptor.Policy.ResourceScope ||
+			capability.OperationKind != descriptor.Policy.OperationKind ||
+			capability.ParallelSafe != descriptor.Policy.ParallelSafe ||
+			capability.RetryableWhenBusy != descriptor.Policy.RetryableWhenBusy ||
+			capability.DefaultWaitPolicy != descriptor.Policy.DefaultWaitPolicy ||
+			capability.RecoveryBehavior != descriptor.Policy.RecoveryBehavior {
+			t.Errorf("capability %q does not match descriptor policy: %#v vs %#v", descriptor.ID, capability, descriptor.Policy)
+		}
+		wantPaths := make([]string, 0, len(descriptor.CLI))
+		for _, selector := range descriptor.CLI {
+			wantPaths = append(wantPaths, normalizeCLIPath(selector.Path))
+		}
+		sort.Strings(wantPaths)
+		if !reflect.DeepEqual(capability.CLIPaths, wantPaths) {
+			t.Errorf("capability %q cli_paths = %#v, want %#v", descriptor.ID, capability.CLIPaths, wantPaths)
+		}
+	}
+	encoded, err := json.Marshal(capabilities)
+	if err != nil {
+		t.Fatalf("marshal public capabilities: %v", err)
+	}
+	if strings.Contains(string(encoded), `"bridge"`) {
+		t.Fatalf("public capabilities leaked bridge metadata: %s", encoded)
+	}
+}
+
+func TestPublicCapabilitiesV1StableFields(t *testing.T) {
+	capabilities := PublicCapabilities()
+	if _, ok := capabilities.Commands["capabilities"]; !ok {
+		t.Fatal("capabilities command must publish its own coordination policy")
+	}
+	push, ok := capabilities.Commands["push"]
+	if !ok {
+		t.Fatal("push capability missing")
+	}
+	want := CommandCapability{
+		CLIPaths:          []string{"push"},
+		ResourceScope:     ResourceWorkbook,
+		OperationKind:     OperationMutate,
+		ParallelSafe:      false,
+		RetryableWhenBusy: true,
+		DefaultWaitPolicy: WaitFail,
+		RecoveryBehavior:  RecoveryBlock,
+	}
+	if !reflect.DeepEqual(push, want) {
+		t.Fatalf("push capability = %#v, want %#v", push, want)
+	}
+}
+
+func TestPublicCapabilitiesReturnsFreshValues(t *testing.T) {
+	first := PublicCapabilities()
+	first.Commands["push"] = CommandCapability{CLIPaths: []string{"changed"}}
+
+	second := PublicCapabilities()
+	push := second.Commands["push"]
+	if len(push.CLIPaths) != 1 || push.CLIPaths[0] != "push" {
+		t.Fatalf("capability mutation escaped defensive copy: %#v", push)
 	}
 }
 

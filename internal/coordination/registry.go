@@ -24,6 +24,31 @@ type Descriptor struct {
 	Bridge []BridgeSelector `json:"bridge,omitempty"`
 }
 
+// CapabilityVersion is the current version of the public command capability
+// contract. Consumers must ignore fields and commands they do not recognize.
+const CapabilityVersion = 1
+
+// Capabilities is the machine-readable, integration-safe view of the command
+// coordination registry. It deliberately excludes bridge selectors and any
+// other implementation detail that is not part of the public CLI contract.
+type Capabilities struct {
+	CapabilityVersion int                             `json:"capability_version"`
+	Commands          map[CommandID]CommandCapability `json:"commands"`
+}
+
+// CommandCapability contains the stable public coordination metadata for a
+// command. CLIPaths are command argv selectors without the root "xlflow"
+// token, so integrations do not need to infer them from command IDs.
+type CommandCapability struct {
+	CLIPaths          []string         `json:"cli_paths"`
+	ResourceScope     ResourceScope    `json:"resource_scope"`
+	OperationKind     OperationKind    `json:"operation_kind"`
+	ParallelSafe      bool             `json:"parallel_safe"`
+	RetryableWhenBusy bool             `json:"retryable_when_busy"`
+	DefaultWaitPolicy WaitPolicy       `json:"default_wait_policy"`
+	RecoveryBehavior  RecoveryBehavior `json:"recovery_behavior"`
+}
+
 var descriptors = buildDescriptors()
 
 // Lookup returns a defensive copy of the descriptor with id.
@@ -83,6 +108,33 @@ func All() []Descriptor {
 		result[i] = cloneDescriptor(descriptor)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+// PublicCapabilities projects the authoritative registry into the stable
+// external capability schema. The result is generated from All rather than a
+// duplicated command classification table.
+func PublicCapabilities() Capabilities {
+	result := Capabilities{
+		CapabilityVersion: CapabilityVersion,
+		Commands:          make(map[CommandID]CommandCapability, len(descriptors)),
+	}
+	for _, descriptor := range All() {
+		paths := make([]string, 0, len(descriptor.CLI))
+		for _, selector := range descriptor.CLI {
+			paths = append(paths, normalizeCLIPath(selector.Path))
+		}
+		sort.Strings(paths)
+		result.Commands[descriptor.ID] = CommandCapability{
+			CLIPaths:          paths,
+			ResourceScope:     descriptor.Policy.ResourceScope,
+			OperationKind:     descriptor.Policy.OperationKind,
+			ParallelSafe:      descriptor.Policy.ParallelSafe,
+			RetryableWhenBusy: descriptor.Policy.RetryableWhenBusy,
+			DefaultWaitPolicy: descriptor.Policy.DefaultWaitPolicy,
+			RecoveryBehavior:  descriptor.Policy.RecoveryBehavior,
+		}
+	}
 	return result
 }
 

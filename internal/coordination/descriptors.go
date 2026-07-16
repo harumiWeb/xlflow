@@ -13,6 +13,7 @@ func buildDescriptors() []Descriptor {
 	recoveryAction := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryRecover}
 
 	return []Descriptor{
+		cli("capabilities", "capabilities", sourceRead),
 		cli("version", "version", sourceRead),
 		cli("update", "update", sourceMutate),
 		cli("update.check", "update check", sourceRead),

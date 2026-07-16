@@ -61,7 +61,16 @@ import {
 } from "../../src/sidebar";
 import { sourceUri } from "../../src/testDiscovery";
 import { discoveredTestDescription } from "../../src/testing";
-import { buildTerminalCommandLine, containsVBAObjectModelAccessIssue } from "../../src/xlflow";
+import {
+  buildTerminalCommandLine,
+  containsVBAObjectModelAccessIssue,
+  withBusyWaitArgs,
+} from "../../src/xlflow";
+import {
+  capabilityOperationForArgs,
+  parseCapabilitiesEnvelope,
+  supportedCapabilityVersion,
+} from "../../src/capabilities";
 import {
   cliVersionSummary,
   lastCheckedKey,
@@ -92,6 +101,65 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));
+  const capabilities = parseCapabilitiesEnvelope({
+    status: "ok",
+    capabilities: {
+      capability_version: supportedCapabilityVersion,
+      commands: {
+        push: {
+          cli_paths: ["push"],
+          resource_scope: "workbook",
+          operation_kind: "mutate",
+          parallel_safe: false,
+          retryable_when_busy: true,
+          default_wait_policy: "fail",
+          recovery_behavior: "block",
+          future_field: "ignored",
+        },
+        formBuild: {
+          cli_paths: ["form build"],
+          resource_scope: "workbook",
+          operation_kind: "mutate",
+          parallel_safe: false,
+          retryable_when_busy: true,
+          default_wait_policy: "fail",
+          recovery_behavior: "block",
+        },
+      },
+      future_envelope_field: true,
+    },
+  });
+  assert.ok(capabilities, "v1 capability output should parse while ignoring unknown fields");
+  assert.strictEqual(
+    capabilityOperationForArgs(capabilities!, ["--json", "push"])?.commandID,
+    "push",
+  );
+  assert.strictEqual(
+    capabilityOperationForArgs(capabilities!, ["--json", "form", "build"])?.commandID,
+    "formBuild",
+  );
+  assert.strictEqual(
+    parseCapabilitiesEnvelope({
+      status: "ok",
+      capabilities: { capability_version: supportedCapabilityVersion + 1, commands: {} },
+    }),
+    undefined,
+    "unknown capability versions should silently fall back",
+  );
+  assert.deepStrictEqual(withBusyWaitArgs(["--json", "push"]), [
+    "--json",
+    "push",
+    "--wait",
+    "--wait-timeout",
+    "30s",
+  ]);
+  assert.deepStrictEqual(withBusyWaitArgs(["--json", "push", "--wait", "--wait-timeout", "5s"]), [
+    "--json",
+    "push",
+    "--wait",
+    "--wait-timeout",
+    "30s",
+  ]);
 
   const languages = await vscode.languages.getLanguages();
   assert.ok(languages.includes("vba"), "vba language should be registered");

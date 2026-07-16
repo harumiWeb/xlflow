@@ -1,15 +1,25 @@
 import * as childProcess from "child_process";
 import * as vscode from "vscode";
+import type { XlflowCapabilitiesService, XlflowCapabilityOperation } from "./capabilities";
 import { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig } from "./config";
 import { appendProcessOutput } from "./logging";
 
 let cliAvailabilityService: XlflowCliAvailabilityService | undefined;
+let capabilitiesService: XlflowCapabilitiesService | undefined;
 
 export function setXlflowCliAvailabilityService(
   service: XlflowCliAvailabilityService | undefined,
 ): void {
   cliAvailabilityService = service;
+}
+
+export function setXlflowCapabilitiesService(service: XlflowCapabilitiesService | undefined): void {
+  capabilitiesService = service;
+}
+
+export function xlflowCapabilities(): XlflowCapabilitiesService | undefined {
+  return capabilitiesService;
 }
 
 export interface WorkspaceRootOptions {
@@ -56,6 +66,7 @@ export async function runXlflowCommand(
     showCliUnavailable?: boolean;
     uiLabel?: string;
     workspaceFolder?: vscode.WorkspaceFolder;
+    skipCoordination?: boolean;
   },
 ): Promise<number> {
   const uiLabel = options.uiLabel ?? label;
@@ -78,15 +89,23 @@ export async function runXlflowCommand(
     return -1;
   }
 
+  const commandArgs = ensureJsonArgs(args);
+  const operation =
+    options.skipCoordination === true ? undefined : await beginManagedCommand(commandArgs);
+  if (operation === "blocked") {
+    return -1;
+  }
+
   const config = readConfig();
   const cwd = folder?.uri.fsPath;
   if (options.showOutput === true) {
     outputChannel.show(true);
   }
   outputChannel.appendLine(
-    `> ${config.path} ${args.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
+    `> ${config.path} ${commandArgs.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
   );
   const notify = options.notify !== false;
+  let jsonResult: XlflowJsonCommandResult<unknown> | undefined;
 
   const run = new Promise<number>((resolve) => {
     let settled = false;
@@ -97,7 +116,7 @@ export async function runXlflowCommand(
       settled = true;
       resolve(exitCode);
     };
-    const child = childProcess.spawn(config.path, args, {
+    const child = childProcess.spawn(config.path, commandArgs, {
       cwd,
       windowsHide: true,
     });
@@ -128,7 +147,18 @@ export async function runXlflowCommand(
         return;
       }
       const exitCode = code ?? -1;
-      const combinedOutput = Buffer.concat([...stdoutChunks, ...stderrChunks]).toString("utf8");
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+      const combinedOutput = `${stdout}\n${stderr}`;
+      let json: unknown;
+      if (stdout.trim() !== "") {
+        try {
+          json = JSON.parse(stdout) as unknown;
+        } catch {
+          // Older or non-conforming CLIs retain the existing text-only fallback.
+        }
+      }
+      jsonResult = { exitCode, stdout, stderr, json };
       outputChannel.appendLine(`${label} exited with code ${exitCode}`);
       showVBAObjectModelAccessNotice(combinedOutput);
       if (!notify) {
@@ -139,7 +169,7 @@ export async function runXlflowCommand(
         vscode.window.showInformationMessage(
           vscode.l10n.t("{label} completed.", { label: uiLabel }),
         );
-      } else {
+      } else if (!isWorkbookBusyEnvelope(json)) {
         showCommandFailure(
           vscode.l10n.t("{label} failed with exit code {exitCode}.", {
             label: uiLabel,
@@ -150,17 +180,24 @@ export async function runXlflowCommand(
       settle(exitCode);
     });
   });
-  if (!notify) {
-    return run;
+  const completed = !notify
+    ? await run
+    : await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: uiLabel,
+          cancellable: false,
+        },
+        () => run,
+      );
+  await finishManagedCommand(operation);
+  if (completed !== 0 && jsonResult !== undefined) {
+    const retryArgs = await workbookBusyRetryArgs(commandArgs, jsonResult);
+    if (retryArgs !== undefined) {
+      return runXlflowCommand(retryArgs, label, outputChannel, options);
+    }
   }
-  return vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: uiLabel,
-      cancellable: false,
-    },
-    () => run,
-  );
+  return completed;
 }
 
 export async function runXlflowTerminalCommand(
@@ -194,6 +231,10 @@ export async function runXlflowTerminalCommand(
     return false;
   }
 
+  if (!((await capabilitiesService?.beforeTerminalCommand(args)) ?? true)) {
+    return false;
+  }
+
   const config = readConfig();
   const terminal = vscode.window.createTerminal({
     name: options.terminalName ?? "xlflow",
@@ -222,6 +263,102 @@ export interface XlflowJsonCommandResult<T> {
   json?: T;
 }
 
+interface XlflowFailureEnvelope {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+  };
+}
+
+export async function workbookBusyRetryArgs(
+  args: string[],
+  result: XlflowJsonCommandResult<unknown>,
+): Promise<string[] | undefined> {
+  const failure = result.json as XlflowFailureEnvelope | undefined;
+  const code = failure?.error?.code;
+  if (typeof code !== "string" || !code.startsWith("workbook_busy")) {
+    return undefined;
+  }
+  const details = recordValue(failure?.error?.details);
+  const owner = recordValue(details?.owner);
+  const ownerCommand = stringValue(owner?.command) ?? stringValue(details?.command);
+  const operation = stringValue(owner?.operation_kind) ?? stringValue(details?.operation_kind);
+  const scope = stringValue(owner?.resource_scope) ?? stringValue(details?.resource_scope);
+  const retryableFromError = details?.retryable;
+  const capability = await capabilitiesService?.capabilityForArgs(args);
+  const retryable =
+    typeof retryableFromError === "boolean"
+      ? retryableFromError
+      : capability?.retryable_when_busy === true;
+  const retry = vscode.l10n.t("Retry");
+  const wait = vscode.l10n.t("Wait up to 30 seconds");
+  const message = workbookBusyMessage(ownerCommand, operation, scope, failure?.error?.message);
+  const action = await vscode.window.showErrorMessage(
+    message,
+    ...(retryable ? [retry, wait] : [retry]),
+  );
+  if (action === retry) {
+    return [...args];
+  }
+  if (action === wait) {
+    return withBusyWaitArgs(args);
+  }
+  return undefined;
+}
+
+function workbookBusyMessage(
+  command: string | undefined,
+  operation: string | undefined,
+  scope: string | undefined,
+  fallback: unknown,
+): string {
+  const parts = [
+    command === undefined ? undefined : vscode.l10n.t("Command: {command}", { command }),
+    operation === undefined ? undefined : vscode.l10n.t("Operation: {operation}", { operation }),
+    scope === undefined ? undefined : vscode.l10n.t("Scope: {scope}", { scope }),
+  ].filter((part): part is string => part !== undefined);
+  const prefix = vscode.l10n.t("Workbook is busy.");
+  const detail = parts.length === 0 ? "" : ` ${parts.join("; ")}`;
+  const message = stringValue(fallback);
+  return message === undefined ? `${prefix}${detail}` : `${prefix}${detail} ${message}`;
+}
+
+export function withBusyWaitArgs(args: string[]): string[] {
+  const withoutWait: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--wait") {
+      continue;
+    }
+    if (args[index] === "--wait-timeout") {
+      index += 1;
+      continue;
+    }
+    withoutWait.push(args[index]);
+  }
+  return [...withoutWait, "--wait", "--wait-timeout", "30s"];
+}
+
+function ensureJsonArgs(args: string[]): string[] {
+  return args.includes("--json") ? args : ["--json", ...args];
+}
+
+function isWorkbookBusyEnvelope(value: unknown): boolean {
+  const error = recordValue(value)?.error;
+  const code = recordValue(error)?.code;
+  return typeof code === "string" && code.startsWith("workbook_busy");
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
 export async function runXlflowJsonCommand<T>(
   args: string[],
   label: string,
@@ -231,6 +368,7 @@ export async function runXlflowJsonCommand<T>(
     showCliUnavailable?: boolean;
     uiLabel?: string;
     workspaceFolder?: vscode.WorkspaceFolder;
+    skipCoordination?: boolean;
   },
 ): Promise<XlflowJsonCommandResult<T>> {
   const uiLabel = options.uiLabel ?? label;
@@ -253,13 +391,18 @@ export async function runXlflowJsonCommand<T>(
     return { exitCode: -1, stdout: "", stderr: vscode.l10n.t("xlflow CLI is unavailable.") };
   }
 
+  const operation = options.skipCoordination === true ? undefined : await beginManagedCommand(args);
+  if (operation === "blocked") {
+    return { exitCode: -1, stdout: "", stderr: "" };
+  }
+
   const config = readConfig();
   const cwd = folder?.uri.fsPath;
   outputChannel.appendLine(
     `> ${config.path} ${args.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
   );
 
-  return new Promise((resolve) => {
+  const result = await new Promise<XlflowJsonCommandResult<T>>((resolve) => {
     let settled = false;
     const settle = (result: XlflowJsonCommandResult<T>): void => {
       if (settled) {
@@ -309,6 +452,23 @@ export async function runXlflowJsonCommand<T>(
       settle({ exitCode, stdout, stderr, json });
     });
   });
+  await finishManagedCommand(operation);
+  return result;
+}
+
+async function beginManagedCommand(
+  args: string[],
+): Promise<XlflowCapabilityOperation | undefined | "blocked"> {
+  return capabilitiesService?.beforeManagedCommand(args);
+}
+
+async function finishManagedCommand(
+  operation: XlflowCapabilityOperation | undefined | "blocked",
+): Promise<void> {
+  if (operation === "blocked") {
+    return;
+  }
+  await capabilitiesService?.afterManagedCommand(operation);
 }
 
 async function ensureCliAvailable(showActions: boolean): Promise<boolean> {

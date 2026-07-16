@@ -196,6 +196,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().BoolVar(&a.wait, "wait", false, "wait for a busy workbook before starting the command")
 	root.PersistentFlags().DurationVar(&a.waitTimeout, "wait-timeout", 30*time.Second, "maximum time to wait for workbook coordination")
 	root.AddCommand(
+		a.capabilitiesCommand(),
 		a.newCommand(),
 		a.initCommand(),
 		a.doctorCommand(),
@@ -237,6 +238,21 @@ func (a *app) rootCommand() *cobra.Command {
 	)
 	a.wrapCoordinatedLeaves(root)
 	return root
+}
+
+func (a *app) capabilitiesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "capabilities",
+		Short: "Show machine-readable command coordination capabilities",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			capabilities := coordination.PublicCapabilities()
+			env := output.New("capabilities")
+			env.Capabilities = capabilities
+			env.Logs = []string{fmt.Sprintf("capability version: %d", capabilities.CapabilityVersion), fmt.Sprintf("commands: %d", len(capabilities.Commands))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 }
 
 func (a *app) requireCoordinationPolicy(cmd *cobra.Command) error {
