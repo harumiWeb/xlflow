@@ -173,7 +173,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const pathChanged = event.affectsConfiguration("xlflow.path");
       const lspChanged = event.affectsConfiguration("xlflow.lsp");
       if (pathChanged) {
+        capabilitiesService?.invalidate();
         await cliAvailability?.refresh();
+        void capabilitiesService?.load();
         await updateService?.checkAutomatic(cliAvailability?.current());
       }
       if (pathChanged || lspChanged) {

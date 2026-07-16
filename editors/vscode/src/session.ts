@@ -155,10 +155,10 @@ export class SessionManager implements vscode.Disposable {
       fallbackToFirst: true,
     });
     if (folder === undefined) {
-      this.snapshot = {
+      this.snapshot = this.withManagedOperation({
         state: "unknown",
         lastError: vscode.l10n.t("No workspace folder is open."),
-      };
+      });
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
       return;
@@ -183,24 +183,24 @@ export class SessionManager implements vscode.Disposable {
       result.json === undefined ||
       (state !== "recovery" && (result.exitCode !== 0 || result.json.session === undefined))
     ) {
-      this.snapshot = {
+      this.snapshot = this.withManagedOperation({
         state: "error",
         workspaceFolder: folder,
         lastCheckedAt,
         lastError: statusErrorMessage(result.json, result.stderr),
-      };
+      });
       this.updateStatusBar();
       this.emitter.fire(this.snapshot);
       return;
     }
 
-    this.snapshot = {
+    this.snapshot = this.withManagedOperation({
       state,
       coordination: result.json.coordination,
       session: result.json.session,
       workspaceFolder: folder,
       lastCheckedAt,
-    };
+    });
     this.updateStatusBar();
     this.emitter.fire(this.snapshot);
   }
@@ -453,6 +453,10 @@ export class SessionManager implements vscode.Disposable {
     this.snapshot = { ...this.snapshot, state };
     this.updateStatusBar();
     this.emitter.fire(this.snapshot);
+  }
+
+  private withManagedOperation(snapshot: SessionSnapshot): SessionSnapshot {
+    return { ...snapshot, managedOperation: this.managedOperation };
   }
 
   private updateStatusBar(): void {

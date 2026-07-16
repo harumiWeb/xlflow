@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.24.0
+
 - Added `xlflow capabilities --json`, a versioned, machine-readable projection
   of the central command-coordination registry for VS Code and external
   integrations. The v1 contract publishes stable command IDs, CLI paths, and

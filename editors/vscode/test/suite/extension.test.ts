@@ -125,6 +125,24 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
           default_wait_policy: "fail",
           recovery_behavior: "block",
         },
+        test: {
+          cli_paths: ["test"],
+          resource_scope: "workbook",
+          operation_kind: "execute",
+          parallel_safe: false,
+          retryable_when_busy: true,
+          default_wait_policy: "fail",
+          recovery_behavior: "block",
+        },
+        lint: {
+          cli_paths: ["lint"],
+          resource_scope: "none",
+          operation_kind: "inspect",
+          parallel_safe: true,
+          retryable_when_busy: false,
+          default_wait_policy: "fail",
+          recovery_behavior: "allow",
+        },
       },
       future_envelope_field: true,
     },
@@ -137,6 +155,17 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(
     capabilityOperationForArgs(capabilities!, ["--json", "form", "build"])?.commandID,
     "formBuild",
+  );
+  assert.strictEqual(
+    capabilityOperationForArgs(capabilities!, ["--json", "test", "--filter", "lint"])?.commandID,
+    "test",
+    "command matching must ignore option values",
+  );
+  assert.strictEqual(
+    capabilityOperationForArgs(capabilities!, ["--bridge", "dotnet", "--wait-timeout=5s", "push"])
+      ?.commandID,
+    "push",
+    "command matching must skip root options before the command selector",
   );
   assert.strictEqual(
     parseCapabilitiesEnvelope({

@@ -180,17 +180,21 @@ export async function runXlflowCommand(
       settle(exitCode);
     });
   });
-  const completed = !notify
-    ? await run
-    : await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: uiLabel,
-          cancellable: false,
-        },
-        () => run,
-      );
-  await finishManagedCommand(operation);
+  let completed: number;
+  try {
+    completed = !notify
+      ? await run
+      : await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: uiLabel,
+            cancellable: false,
+          },
+          () => run,
+        );
+  } finally {
+    await finishManagedCommand(operation);
+  }
   if (completed !== 0 && jsonResult !== undefined) {
     const retryArgs = await workbookBusyRetryArgs(commandArgs, jsonResult);
     if (retryArgs !== undefined) {
@@ -402,58 +406,60 @@ export async function runXlflowJsonCommand<T>(
     `> ${config.path} ${args.join(" ")}${cwd === undefined ? "" : ` (cwd: ${cwd})`}`,
   );
 
-  const result = await new Promise<XlflowJsonCommandResult<T>>((resolve) => {
-    let settled = false;
-    const settle = (result: XlflowJsonCommandResult<T>): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      resolve(result);
-    };
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    const child = childProcess.spawn(config.path, args, {
-      cwd,
-      windowsHide: true,
-    });
-
-    child.stdout.on("data", (data: Buffer) => {
-      stdoutChunks.push(data);
-      appendProcessOutput(outputChannel, "stdout", data);
-    });
-    child.stderr.on("data", (data: Buffer) => {
-      stderrChunks.push(data);
-      appendProcessOutput(outputChannel, "stderr", data);
-    });
-    child.on("error", (error) => {
-      outputChannel.appendLine(`[error] ${error.message}`);
-      showVBAObjectModelAccessNotice(error.message);
-      settle({ exitCode: -1, stdout: "", stderr: error.message });
-    });
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-      const exitCode = code ?? -1;
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
-      const stderr = Buffer.concat(stderrChunks).toString("utf8");
-      let json: T | undefined;
-      if (stdout.trim() !== "") {
-        try {
-          json = JSON.parse(stdout) as T;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          outputChannel.appendLine(`[error] Failed to parse ${label} JSON: ${message}`);
+  try {
+    return await new Promise<XlflowJsonCommandResult<T>>((resolve) => {
+      let settled = false;
+      const settle = (result: XlflowJsonCommandResult<T>): void => {
+        if (settled) {
+          return;
         }
-      }
-      outputChannel.appendLine(`${label} exited with code ${exitCode}`);
-      showVBAObjectModelAccessNotice(`${stdout}\n${stderr}`);
-      settle({ exitCode, stdout, stderr, json });
+        settled = true;
+        resolve(result);
+      };
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      const child = childProcess.spawn(config.path, args, {
+        cwd,
+        windowsHide: true,
+      });
+
+      child.stdout.on("data", (data: Buffer) => {
+        stdoutChunks.push(data);
+        appendProcessOutput(outputChannel, "stdout", data);
+      });
+      child.stderr.on("data", (data: Buffer) => {
+        stderrChunks.push(data);
+        appendProcessOutput(outputChannel, "stderr", data);
+      });
+      child.on("error", (error) => {
+        outputChannel.appendLine(`[error] ${error.message}`);
+        showVBAObjectModelAccessNotice(error.message);
+        settle({ exitCode: -1, stdout: "", stderr: error.message });
+      });
+      child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+        const exitCode = code ?? -1;
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+        let json: T | undefined;
+        if (stdout.trim() !== "") {
+          try {
+            json = JSON.parse(stdout) as T;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            outputChannel.appendLine(`[error] Failed to parse ${label} JSON: ${message}`);
+          }
+        }
+        outputChannel.appendLine(`${label} exited with code ${exitCode}`);
+        showVBAObjectModelAccessNotice(`${stdout}\n${stderr}`);
+        settle({ exitCode, stdout, stderr, json });
+      });
     });
-  });
-  await finishManagedCommand(operation);
-  return result;
+  } finally {
+    await finishManagedCommand(operation);
+  }
 }
 
 async function beginManagedCommand(

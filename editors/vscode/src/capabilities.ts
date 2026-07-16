@@ -55,9 +55,28 @@ export class XlflowCapabilitiesService {
 
   async load(): Promise<XlflowCapabilities | undefined> {
     if (this.loadPromise === undefined) {
-      this.loadPromise = this.loadOnce();
+      const pending = this.loadOnce();
+      this.loadPromise = pending;
+      try {
+        const capabilities = await pending;
+        // A missing/older CLI must not disable coordination for the rest of this
+        // extension session: a later availability or path change may make it usable.
+        if (capabilities === undefined && this.loadPromise === pending) {
+          this.loadPromise = undefined;
+        }
+        return capabilities;
+      } catch (error) {
+        if (this.loadPromise === pending) {
+          this.loadPromise = undefined;
+        }
+        throw error;
+      }
     }
     return this.loadPromise;
+  }
+
+  invalidate(): void {
+    this.loadPromise = undefined;
   }
 
   async beforeManagedCommand(
@@ -68,7 +87,7 @@ export class XlflowCapabilitiesService {
       return operation;
     }
     if (!args.includes("--wait")) {
-      const busy = this.hooks.currentBusyOperation();
+      const busy = await this.refreshBusyOperation();
       if (busy?.busy === true) {
         showBusyAdvisory(operation, busy);
         return "blocked";
@@ -95,7 +114,7 @@ export class XlflowCapabilitiesService {
     ) {
       return true;
     }
-    const busy = this.hooks.currentBusyOperation();
+    const busy = await this.refreshBusyOperation();
     if (busy?.busy !== true) {
       return true;
     }
@@ -124,6 +143,21 @@ export class XlflowCapabilitiesService {
     }
     return capabilityOperationForArgs(capabilities, args);
   }
+
+  private async refreshBusyOperation(): Promise<XlflowBusyOperation | undefined> {
+    const busy = this.hooks.currentBusyOperation();
+    if (busy?.busy !== true) {
+      return undefined;
+    }
+    try {
+      await this.hooks.refreshStatus();
+    } catch {
+      // Retain the existing advisory guard if a status refresh itself fails.
+      return busy;
+    }
+    const refreshed = this.hooks.currentBusyOperation();
+    return refreshed?.busy === true ? refreshed : undefined;
+  }
 }
 
 export function parseCapabilitiesEnvelope(value: unknown): XlflowCapabilities | undefined {
@@ -149,15 +183,15 @@ export function capabilityOperationForArgs(
   args: string[],
 ): XlflowCapabilityOperation | undefined {
   let best: XlflowCapabilityOperation | undefined;
+  let bestMatchLength = 0;
   for (const [commandID, capability] of Object.entries(capabilities.commands)) {
-    if (!containsCliPath(args, capability.cli_paths)) {
+    const matchLength = matchedCliPathLength(args, capability.cli_paths);
+    if (matchLength === undefined) {
       continue;
     }
-    if (
-      best === undefined ||
-      longestCliPathLength(capability.cli_paths) > longestCliPathLength(best.capability.cli_paths)
-    ) {
+    if (best === undefined || matchLength > bestMatchLength) {
       best = { commandID, capability };
+      bestMatchLength = matchLength;
     }
   }
   return best;
@@ -201,25 +235,63 @@ function parseCommandCapability(value: unknown): XlflowCommandCapability | undef
   };
 }
 
-function containsCliPath(args: string[], cliPaths: string[]): boolean {
+function matchedCliPathLength(args: string[], cliPaths: string[]): number | undefined {
+  const selectorOffset = commandSelectorOffset(args);
+  if (selectorOffset === undefined) {
+    return undefined;
+  }
+  let bestLength: number | undefined;
   for (const path of cliPaths) {
     const cliPath = cliPathParts(path);
-    for (let offset = 0; offset <= args.length - cliPath.length; offset += 1) {
-      if (cliPath.every((part, index) => args[offset + index] === part)) {
-        return true;
-      }
+    if (cliPath.every((part, index) => args[selectorOffset + index] === part)) {
+      bestLength = Math.max(bestLength ?? 0, cliPath.length);
     }
   }
-  return false;
+  return bestLength;
+}
+
+function commandSelectorOffset(args: string[]): number | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      return undefined;
+    }
+    if (!arg.startsWith("-")) {
+      return index;
+    }
+    if (isGlobalBooleanFlag(arg)) {
+      continue;
+    }
+    if (isGlobalValueFlag(arg)) {
+      if (!arg.includes("=")) {
+        index += 1;
+      }
+      continue;
+    }
+    // The selector cannot be identified safely when an unknown option precedes it.
+    return undefined;
+  }
+  return undefined;
+}
+
+function isGlobalBooleanFlag(arg: string): boolean {
+  return (
+    arg === "--json" || arg.startsWith("--json=") || arg === "--wait" || arg.startsWith("--wait=")
+  );
+}
+
+function isGlobalValueFlag(arg: string): boolean {
+  return (
+    arg === "--bridge" ||
+    arg.startsWith("--bridge=") ||
+    arg === "--wait-timeout" ||
+    arg.startsWith("--wait-timeout=")
+  );
 }
 
 function cliPathParts(path: string): string[] {
   // The public contract keeps selectors as complete CLI-path strings, e.g. "form build".
   return path.trim().split(/\s+/).filter(Boolean);
-}
-
-function longestCliPathLength(paths: string[]): number {
-  return Math.max(0, ...paths.map((path) => cliPathParts(path).length));
 }
 
 function showBusyAdvisory(operation: XlflowCapabilityOperation, busy: XlflowBusyOperation): void {

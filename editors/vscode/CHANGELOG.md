@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.7.0
+
 - Added discovery of `xlflow capabilities --json` so the extension can use the
   CLI's central command-safety metadata instead of maintaining a local policy
   table. Workbook-busy operations now show their active command details and
