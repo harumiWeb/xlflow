@@ -309,6 +309,12 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
+If `run`, `test`, or bridge cleanup returns while Excel/VBA may still be active,
+xlflow quarantines the workbook. Follow-up workbook commands return
+`workbook_recovery_required`; `--wait` does not bypass it. Use
+`xlflow status --json`, then recover with `session stop --discard`, matching
+`process cleanup`, or `xlflow recovery clear`.
+
 Source-only commands such as `lint`, `fmt`, `analyze`, and `diff` can run locally in WSL. Excel-backed commands such as `new`, `init`, `pull`, `push`, `run`, `test`, `inspect`, `save`, and `doctor` delegate to Windows automatically.
 
 ---
@@ -544,6 +550,7 @@ You can install it from the [Visual Studio Marketplace](https://marketplace.visu
 | `session`           | Keep the configured workbook open for fast loops                        | `xlflow session start`                                                       |
 | `status`            | Show project, source, workbook, and session state                       | `xlflow status --json`                                                       |
 | `save`              | Save the workbook held by a session                                     | `xlflow save --session --json`                                               |
+| `recovery`          | Verify and clear workbook recovery-required state                       | `xlflow recovery clear --json`                                               |
 | `runner`            | Manage the persistent xlflow runner marker module                       | `xlflow runner install --json`                                               |
 | `process`           | Manage local Excel processes (list, cleanup)                            | `xlflow process list --json`                                                 |
 | `macros`            | Discover runnable macro entrypoints                                     | `xlflow macros --json`                                                       |
@@ -748,16 +755,21 @@ On failure, `status` is `failed`, and `error.code` and `error.message` are retur
 > [!TIP]
 > AI agents and automation scripts should treat `status`, `command`, `error.code`, and command-specific top-level fields as the primary contract.
 
+`workbook_recovery_required` is an operational safety failure, not normal lock
+contention. Inspect `coordination.recovery` with `xlflow status --json` and
+follow the returned recovery actions. Force clearing removes only xlflow's
+marker; it does not stop VBA or repair Excel state.
+
 ---
 
 ## Exit codes
 
-| Code | Meaning                                                         |
-| ---: | --------------------------------------------------------------- |
-|  `0` | Success                                                         |
-|  `1` | Validation failure, such as lint, macro, or test failure        |
-|  `2` | CLI argument or configuration error                             |
-|  `3` | Environment error, such as Excel, COM, VBIDE, or bridge failure |
+| Code | Meaning                                                           |
+| ---: | ----------------------------------------------------------------- |
+|  `0` | Success                                                           |
+|  `1` | Validation failure, such as lint, macro, or test failure          |
+|  `2` | CLI argument or configuration error                               |
+|  `3` | Operational/environment failure, including busy or recovery state |
 
 > [!NOTE]
 > `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.

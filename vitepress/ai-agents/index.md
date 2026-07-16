@@ -51,6 +51,26 @@ xlflow pull --session --json
 
 Use `run --diagnostic` when you need structured compile or runtime failure details instead of a blind Excel/VBE dialog. Re-run `pull` after workbook-side investigation when you need the latest saved workbook state back in source.
 
+## Recovery-required workflow
+
+If a result contains `error.code: "workbook_recovery_required"` or top-level
+`recovery.required: true`, stop the normal loop. Do not retry with `--wait` and
+do not save the quarantined session.
+
+```bash
+xlflow status --json
+xlflow session stop --discard --json
+# or, when an affected PID is reported:
+xlflow process cleanup <pid> --json
+xlflow recovery clear --json
+xlflow status --json
+```
+
+For external user-owned Excel sessions, do not close or discard the workbook
+automatically. Ask the user to close it without saving, then run verified
+`recovery clear`. Use `recovery clear --force` only with explicit acceptance
+that it clears the marker without stopping VBA or proving workbook safety.
+
 Install the bundled skill when supported by your agent:
 
 ```bash

@@ -26,12 +26,12 @@ func TestSessionCoordinationStatusPayload(t *testing.T) {
 		{
 			name:   "idle ignores owner",
 			probe:  coordination.ProbeResult{Owner: &coordination.OwnerMetadata{Command: "run"}},
-			fields: map[string]any{"busy": false},
+			fields: map[string]any{"busy": false, "recovery_required": false},
 		},
 		{
 			name:   "busy without owner",
 			probe:  coordination.ProbeResult{Busy: true},
-			fields: map[string]any{"busy": true},
+			fields: map[string]any{"busy": true, "recovery_required": false},
 		},
 		{
 			name: "busy with public owner fields",
@@ -46,12 +46,13 @@ func TestSessionCoordinationStatusPayload(t *testing.T) {
 				StartedAt:     startedAt,
 			}},
 			fields: map[string]any{
-				"busy":           true,
-				"resource_scope": "workbook",
-				"operation_kind": "execute",
-				"command":        "run",
-				"pid":            float64(12345),
-				"started_at":     "2026-07-15T00:30:00.123456789Z",
+				"busy":              true,
+				"recovery_required": false,
+				"resource_scope":    "workbook",
+				"operation_kind":    "execute",
+				"command":           "run",
+				"pid":               float64(12345),
+				"started_at":        "2026-07-15T00:30:00.123456789Z",
 			},
 		},
 	}

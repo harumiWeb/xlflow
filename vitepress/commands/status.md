@@ -35,6 +35,11 @@ AI agents should prefer `xlflow status --json` before pushing or running to avoi
 `src_newer_than_workbook` is a heuristic based on file modification times. Clock skew or manual copies can cause false results.
 :::
 
+`status` also distinguishes current lock ownership from recovery quarantine.
+`busy: true` means another xlflow operation owns the operating-system workbook
+lock. `recovery_required: true` means Excel-side completion is uncertain and
+unsafe workbook commands remain blocked even when `busy` is false.
+
 ## JSON Output Example
 
 ```json
@@ -59,6 +64,10 @@ AI agents should prefer `xlflow status --json` before pushing or running to avoi
     "live_newer_than_disk": false,
     "source_of_truth": "saved_workbook"
   },
+  "coordination": {
+    "busy": false,
+    "recovery_required": false
+  },
   "state": {
     "src_newer_than_workbook": false,
     "live_session_newer_than_disk": false,
@@ -74,9 +83,16 @@ AI agents should prefer `xlflow status --json` before pushing or running to avoi
 }
 ```
 
+While recovery is required, `status` does not call unsafe workbook COM APIs. It
+reports `session.dirty: null`, `session.source_of_truth: "uncertain"`,
+`session.discard_required: true`, and nested recovery details under
+`coordination.recovery`. Use [recovery](./recovery) to choose a safe clearing
+path.
+
 ## Related
 
 - [session](./session)
 - [inspect](./inspect)
 - [push](./push)
 - [save](./save)
+- [recovery](./recovery)

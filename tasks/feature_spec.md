@@ -1,3 +1,47 @@
+# Issue #335: Workbook Recovery Quarantine
+
+## Safety contract
+
+- The Windows workbook operation lock remains the sole authority for active
+  ownership.
+- A versioned `<LockID>.recovery.json` marker is a separate persisted
+  authorization-deny state. It blocks unsafe workbook operations after xlflow
+  can no longer prove that Excel/VBA/COM cleanup completed.
+- Recovery publication and clearing happen while the normal workbook lease is
+  held and are serialized by the coordination publication guard.
+- Invalid or unsupported recovery metadata fails closed.
+- `--wait` waits only for active lock ownership and never waits on recovery.
+
+## Policy and diagnostics
+
+- Every command policy declares `recovery_behavior` as `not_applicable`,
+  `block`, `observe`, or `recover`.
+- Blocked operations return `workbook_recovery_required`, phase
+  `coordination.recovery`, exit code 3, and `retryable=false`.
+- Status keeps `busy` and `recovery_required` separate.
+- Uncertain command results expose top-level recovery publication metadata.
+
+## Recovery actions
+
+- `recovery clear` verifies that a recorded Excel PID no longer exists.
+- `recovery clear --force` removes the marker without proving Excel/VBA safety
+  and emits a mandatory warning.
+- `session stop --discard` may clear a managed-session marker only after
+  unsaved state is discarded and the Excel process is confirmed stopped.
+- External session detach never clears recovery.
+- Process cleanup clears only markers whose affected Excel termination is
+  confirmed; `--all` may clear unknown-PID markers only after confirming that no
+  Excel processes remain.
+
+## Known limitations
+
+- A crash before recovery publication remains undetectable.
+- Older xlflow binaries do not enforce recovery markers.
+- Recovery state is per Windows user and is not distributed across users or
+  machines.
+
+---
+
 # Issue #79 + Issue #78 Follow-up: .NET DialogWatcher and run parity
 
 ---

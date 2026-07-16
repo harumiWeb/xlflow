@@ -64,6 +64,7 @@ type app struct {
 	buildInfo      BuildInfo
 	updateChecker  releaseChecker
 	coordination   *coordination.Manager
+	activeLeases   *coordination.LeaseSet
 }
 
 var automaticBackupPrune = backup.Prune
@@ -231,6 +232,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.versionCommand(),
 		a.updateCommand(),
 		a.processCommand(),
+		a.recoveryCommand(),
 	)
 	a.wrapCoordinatedLeaves(root)
 	return root
@@ -3657,6 +3659,7 @@ func (a *app) sessionCommand() *cobra.Command {
 	}
 	for _, action := range []string{"start", "status", "stop"} {
 		action := action
+		var discard bool
 		cmd := &cobra.Command{
 			Use:   action,
 			Short: action + " the xlflow Excel session",
@@ -3667,7 +3670,7 @@ func (a *app) sessionCommand() *cobra.Command {
 					return err
 				}
 				run := func() (output.Envelope, int, error) {
-					return a.excelRunnerForConfig(cfg).Session(cfg, action)
+					return a.excelRunnerForConfig(cfg).Session(cfg, action, excel.SessionCommandOptions{Discard: discard})
 				}
 				var env output.Envelope
 				var code int
@@ -3681,6 +3684,9 @@ func (a *app) sessionCommand() *cobra.Command {
 				}
 				return a.write(env, code)
 			},
+		}
+		if action == "stop" {
+			cmd.Flags().BoolVar(&discard, "discard", false, "close a managed session without saving unsaved workbook changes")
 		}
 		session.AddCommand(cmd)
 	}
@@ -3760,8 +3766,13 @@ func (a *app) statusCommand() *cobra.Command {
 			env.Project = projectPayload
 			env.Session = sessionState
 			env.State = statePayload
+			if coordinationStatus, unavailable := a.observeSessionCoordination(cmd.Context(), cfg); coordinationStatus != nil {
+				env.Coordination = coordinationStatus
+			} else if unavailable {
+				appendUniqueMessage(&env.Warnings, coordinationStatusUnavailableCode, "Workbook coordination and recovery status could not be observed.")
+			}
 			warnings, hints := buildStatusWarningsAndHints(sessionState, statePayload)
-			env.Warnings = warnings
+			env.Warnings = appendObjectMessages(env.Warnings, warnings)
 			env.Hints = hints
 			env.Logs = []string{"status reported"}
 			return a.write(env, output.ExitSuccess)
@@ -7753,11 +7764,11 @@ func (a *app) hasValidBridgeOverride() bool {
 }
 
 func (a *app) excelRunner() excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, Coordination: a.coordination, SkipCoordination: true}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, Coordination: a.coordination, BorrowedLeases: a.activeLeases}
 }
 
 func (a *app) excelRunnerForConfig(cfg config.Config) excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge, Coordination: a.coordination, SkipCoordination: true}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge, Coordination: a.coordination, BorrowedLeases: a.activeLeases}
 }
 
 func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {

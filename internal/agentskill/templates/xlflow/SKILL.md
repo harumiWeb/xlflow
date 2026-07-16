@@ -36,6 +36,10 @@ Default safety rules for AI-agent work:
 - Use `xlflow edit --session` for temporary workbook-state setup, event triggering, and visual tuning when the change does not belong in production VBA yet.
 - `xlflow run` returns structured compile diagnostics by default. Use `--gui-compile-errors` only when a human explicitly wants raw Excel/VBE compile dialogs.
 - When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.
+- If any command returns `workbook_recovery_required` or top-level
+  `recovery.required=true`, stop all normal workbook work. Do not retry with
+  `--wait`, do not save the quarantined session, and follow the recovery actions
+  before `push`, `pull`, `run`, `test`, inspect, edit, Designer, or save work.
 
 ## Session Lifecycle
 
@@ -45,7 +49,9 @@ For normal AI-agent development tasks, use an explicit xlflow session from task 
 2. Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove` when the configured workbook path matches `.xlflow/session.json`; add `--session` when you want that reuse to be explicit.
 3. Prefer `xlflow push --fast --session --no-save --json` while iterating, and use `xlflow run --session --json` or `xlflow run --headless --session --json` when `project.entry` is the intended entrypoint because structured compile diagnostics are on by default.
 4. Save with `xlflow save --json` before any disk-based verification step such as `xlflow inspect ...` when the live session workbook may be newer than disk.
-5. End with `xlflow save --json` when workbook changes must persist, then always run `xlflow session stop`.
+5. End with `xlflow save --json` when workbook changes must persist, then always
+   run `xlflow session stop`. If recovery is required, do not save; use managed
+   `xlflow session stop --discard --json` instead.
 
 Use isolated non-session commands only for one-shot CI-style verification, release checks, suspicious session state, or when the user explicitly asks not to keep Excel open.
 
@@ -114,7 +120,10 @@ If `xlflow push --session --no-save` succeeds, or `xlflow run --session` complet
    - Add `--vba-before <dir> --vba-after <dir>` when exported source changes also need review.
 
 7. Repeat until the command results prove the task.
-   - Finish every normal AI-agent development task with `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
+   - Finish every normal AI-agent development task with `xlflow save --json`
+     when workbook changes must persist, then `xlflow session stop`.
+   - If the workbook is quarantined, suspend this workflow and complete the
+     recovery workflow below before continuing.
 
 ## Project Orientation
 
@@ -157,7 +166,9 @@ When the user asks to create or change VBA behavior:
    - Load [references/testing.md](references/testing.md) when writing new tests, adding hooks, using `@ExpectedError`, or debugging test failures.
 8. If tests do not cover the behavior, run `xlflow macros --session --json`, then `xlflow run --headless --session --json` when `project.entry` is correct, or `xlflow run <qualified_name> --headless --session --json` for non-default entrypoints. Add `XlflowDebug.Log` before rerunning if internal runtime state is still unclear.
 9. When workbook output matters, run `xlflow save --json` if needed, then inspect the result with `xlflow inspect workbook|sheets|range|used-range|cell --json`, or use `xlflow inspect form <FormName> --session --json` for live UserForm state.
-10. Run `xlflow save --json` when workbook changes must persist, then `xlflow session stop`.
+10. Run `xlflow save --json` when workbook changes must persist, then
+    `xlflow session stop`. If any result reports recovery required, skip save and
+    use the recovery workflow before continuing.
 11. Use `xlflow diff <before> <after> --json` when workbook state changes must be reviewed.
 
 When the user reports a runtime failure:
@@ -212,6 +223,15 @@ When the user reports a runtime failure:
 - Use `xlflow run --gui-compile-errors --interactive --json` only when a human explicitly wants raw compile dialogs instead of structured diagnostics.
 - Matching workbook sessions auto-reuse on `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove`; use explicit `--session` when you want that reuse to be deliberate and visible in the command line.
 - Use `xlflow session attach --json` before human-assisted sessions to adopt the open Excel workbook that matches `xlflow.toml`.
+- Use `xlflow status --json` to distinguish `coordination.busy` from
+  `coordination.recovery_required`. Busy can be retried or waited on according
+  to policy; recovery requires an explicit safety action.
+- Use `xlflow recovery clear --json` only after the recorded Excel PID has
+  stopped. A missing marker is idempotent success. If verification fails, leave
+  the marker intact and recover Excel first.
+- Use `xlflow recovery clear --force --json` only after explicit manual recovery
+  when the user accepts that clearing the marker does not terminate VBA, close
+  Excel, discard changes, or repair the workbook.
 - `xlflow attach --active --json` is deprecated and only validates the active workbook; do not use it when later `push`, `pull`, `run`, or `inspect` commands should target the already-open workbook.
 - Use `xlflow run --session --json` when tests are absent or the macro mutates workbook state. If more internal state is needed, add `XlflowDebug.Log` and rerun.
 - Use `xlflow diff` to summarize workbook and optional exported VBA differences.
@@ -276,18 +296,54 @@ When workbook code launches an external PowerShell process, separate xlflow's br
 
 ## Excel Process Management
 
-- Use `xlflow process list` to list all local Excel processes. The output includes PID and whether each process has open workbooks.
-- Use `xlflow process cleanup <pid>` to terminate a single Excel process by PID. The command tries graceful shutdown first and falls back to force-stop only if the process persists.
+- Use `xlflow process list` to list all local Excel processes. The output
+  includes PID, whether each process has open workbooks, and whether recovery
+  metadata identifies the PID. xlflow avoids workbook COM probing for affected
+  recovery PIDs.
+- Use `xlflow process cleanup <pid>` to terminate a single Excel process by PID.
+  The command tries graceful shutdown first and falls back to force-stop only if
+  the process persists. A matching recovery marker clears only when
+  `terminated=true`.
 - Use `xlflow process cleanup --auto` to terminate only Excel processes that have no open workbooks. This is safe for cleaning up zombie Excel instances.
 - Use `xlflow process cleanup --all` to force-terminate ALL Excel processes. **WARNING: `cleanup --all` is a destructive operation that WILL terminate every Excel process on the local machine, including any with unsaved workbooks.** This command always prompts for confirmation unless `--yes` is passed.
 
 ## Failure Handling
 
+If `workbook_recovery_required` is returned, or a failed `run` / `test` includes
+top-level `recovery.required=true`, do not run another workbook-bound command and
+do not add `--wait`. Read `reason`, prior `operation`, `recorded_at`, optional
+`excel_pid`, and `recovery_actions`.
+
+Recovery workflow:
+
+1. Run `xlflow status --json`. Treat `busy` and `recovery_required` as separate
+   states; a free OS lock does not authorize workbook work while recovery is
+   required.
+2. For an xlflow-owned managed session, run
+   `xlflow session stop --discard --json`. Never save uncertain unsaved state.
+3. If a known affected Excel PID remains, run
+   `xlflow process cleanup <pid> --json` and confirm `terminated=true`.
+4. For an external user-owned session, do not close or discard it
+   automatically. Ask the user to close the workbook in Excel without saving,
+   then run `xlflow recovery clear --json`.
+5. Use `xlflow recovery clear --force --json` only with explicit acceptance of
+   its warning. It removes xlflow's marker only and does not prove that Excel or
+   VBA stopped.
+6. Run `xlflow status --json` again and resume workbook work only after
+   `coordination.recovery_required=false`.
+
+If recovery publication itself fails with
+`workbook_recovery_publication_failed`, assume the workbook is unsafe even
+though the marker could not be written. Stop or close Excel manually before any
+more workbook work. If recovery checking fails with
+`coordination_recovery_check_failed`, treat it as fail-closed rather than
+working around the check.
+
 If `xlflow test` fails, read the failing test name, module, `error.code`, VBA error number, description, line, and any `expected_error` / `observed_error` fields. Distinct `error.code` values include `test_failed`, `expected_error_mismatch`, `before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`, and `test_inconclusive`. Hook failures (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`) indicate setup/cleanup problems rather than assertion failures in the test body. `expected_error_mismatch` means the `@ExpectedError` contract was not met; compare the declared metadata against the observed VBA error before changing production code. Load [references/testing.md](references/testing.md) for a full failure-code reference. Patch the smallest relevant area, rerun the focused test with `--filter` first, then run the full test suite.
 
 If `xlflow run` fails, inspect `error.code`, `error.phase`, and any top-level `run_diagnostic`. `macro_not_found` means the entrypoint is missing or invalid; run `xlflow macros --session --json` and correct the target before changing user code. Setup phases such as `open_workbook`, `prepare_vbide`, and `inject_harness` usually indicate environment, configuration, or VBIDE access problems. `invoke_macro` points at the target macro or code it calls. Plain `run` already includes compile-first diagnostics by default; do not switch to `--gui-compile-errors` unless a human explicitly wants GUI dialogs.
 
-If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. If the boundary is raw `MsgBox` or `InputBox`, replace it with `XlflowUI` and rerun with `--msgbox` / `--inputbox`. Otherwise refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop.
+If `xlflow run --headless --session --json` fails with `gui_boundary_detected`, read `gui_boundaries` and do not retry the same command blindly. If the boundary is raw `MsgBox` or `InputBox`, replace it with `XlflowUI` and rerun with `--msgbox` / `--inputbox`. Otherwise refactor the GUI boundary behind a parameterized core procedure, or switch to `xlflow run --interactive --json` only when a human is ready to operate Excel. If `macro_timeout` is returned, suspect an unresolved dialog, file picker, UserForm, or long-running loop and follow the recovery workflow; VBA may still be active after the command returns.
 
 If `xlflow run --diagnostic --session --json` fails with `vba_compile_failed`, inspect `run_diagnostic.kind`, `run_diagnostic.message`, `run_diagnostic.location`, and `run_diagnostic.nearby_code` before changing source. Treat dialog text as localized opaque text and fix the selected source location when available.
 

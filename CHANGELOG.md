@@ -13,6 +13,12 @@ All notable changes to xlflow will be documented in this file.
 - Added an observational top-level `coordination` section to `session status`,
   including current workbook busy state and guarded public owner metadata when
   available without changing existing session fields or failure behavior.
+- Added persistent workbook recovery quarantine for uncertain Excel/VBA
+  termination, including atomic per-workbook markers, fail-closed
+  `workbook_recovery_required` diagnostics, recovery-aware status/session/process
+  output, managed `session stop --discard`, and verified or force
+  `recovery clear` workflows that remain distinct from the operating-system
+  workbook lock.
 - Documented and exhaustively tested UserForm/Designer coordination so migration,
   snapshot, build/apply, image export, form inspection/listing, pull, and push all
   converge on the same canonical workbook lock before Excel or VBIDE starts.

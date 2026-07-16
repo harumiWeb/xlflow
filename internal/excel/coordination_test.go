@@ -123,3 +123,55 @@ func TestRunnerUserFormCoordinationDoesNotConflictAcrossWorkbooks(t *testing.T) 
 		t.Fatalf("different workbook result = code %d, error %#v, bridge calls %d", code, env.Error, callCount)
 	}
 }
+
+func TestRunnerWorkbookRecoveryStopsBeforeBridgeExecution(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	root := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	identity, err := coordination.NewWorkbookIdentity(root, cfg.Excel.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
+		Identity:      identity,
+		Command:       "run",
+		OperationKind: coordination.OperationExecute,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.PublishRecovery(coordination.RecoveryPublication{
+		Reason:    "vba_may_still_be_running",
+		Operation: "run",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	callCount := 0
+	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{name: "dotnet", supports: true, callCount: &callCount}
+	}
+
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).PushWithOptions(cfg, PushOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment || env.Error == nil || env.Error.Code != coordination.WorkbookRecoveryRequiredCode {
+		t.Fatalf("result = code %d, error %#v", code, env.Error)
+	}
+	if callCount != 0 {
+		t.Fatalf("bridge calls = %d, want 0", callCount)
+	}
+}

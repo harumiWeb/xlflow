@@ -1,6 +1,10 @@
 # Commands
 
-xlflow exposes a Cobra-based CLI. Every command accepts the global `--json` flag for machine-readable output. Retryable workbook commands also accept `--wait` and `--wait-timeout <duration>`; waiting is opt-in and defaults to a 30-second limit.
+xlflow exposes a Cobra-based CLI. Every command accepts the global `--json` flag
+for machine-readable output. Retryable workbook commands also accept `--wait`
+and `--wait-timeout <duration>`; waiting is opt-in and defaults to a 30-second
+limit. A workbook recovery quarantine is different from lock contention:
+`--wait` does not bypass it, and an explicit recovery command is required.
 
 ```bash
 xlflow [command] --json
@@ -25,6 +29,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [status](./status)             | Show project, source, workbook, and session state in one read-only command.      |
 | [session](./session)           | Keep Excel and the configured workbook open across repeated commands.            |
 | [save](./save)                 | Save the workbook held by the managed xlflow session.                            |
+| [recovery](./recovery)         | Verify and clear workbook recovery-required state.                               |
 | [runner](./runner)             | Manage the persistent xlflow runner marker module.                               |
 | [run](./run)                   | Run a workbook macro from the CLI.                                               |
 | [export-image](./export-image) | Export a worksheet range as a PNG image through Excel COM.                       |

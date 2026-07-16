@@ -107,7 +107,8 @@ public sealed class ExcelRunService : IRunService
                         dirty,
                         needsSave,
                         logs,
-                        compileInvocation);
+                        compileInvocation,
+                        excelProcessId);
                 }
             }
 
@@ -253,14 +254,15 @@ public sealed class ExcelRunService : IRunService
                 var errorCode = fatalComFailure ? "excel_com_rpc_failure" : runTimedOut ? "macro_timeout" : compileFailure ? "vba_compile_failed" : ClassifyRunError(runError, runErrorNumber);
                 var errorPhase = fatalComFailure ? fatalStage : compileFailure ? "compile_vba" : "invoke_macro";
                 logs.Add(compileFailure ? $"VBA compile failed: {runError}" : $"macro execution failed: {runError}");
-                if (fatalComFailure && sessionAttached)
+                if ((fatalComFailure || runTimedOut) && sessionAttached)
                 {
                     ExcelBridgeSupport.MarkSessionPoisoned(
                         args.MetadataPath,
                         args.WorkbookPath,
                         runError,
                         fatalHResult ?? "",
-                        "run");
+                        "run",
+                        discardUnsavedChanges: true);
                 }
                 if (sessionAttached)
                 {
@@ -363,6 +365,15 @@ public sealed class ExcelRunService : IRunService
                             : null),
                     Logs = logs,
                     Extensions = extensions,
+                    Recovery = runTimedOut || fatalComFailure
+                        ? BuildRecoveryOutcome(
+                            reason: runTimedOut ? "vba_may_still_be_running" : "excel_com_state_uncertain",
+                            operation: "run",
+                            excelProcessId,
+                            invocation.WorkerProcessId,
+                            sessionAttached,
+                            sessionMode)
+                        : null,
                 };
             }
 
@@ -477,7 +488,7 @@ public sealed class ExcelRunService : IRunService
         {
             return BridgeResponse.Failed(request, new BridgeError(
                 Code: "session_poisoned",
-                Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --json` and start a fresh session.",
+                Message: "The xlflow session was marked poisoned after a fatal Excel COM/RPC failure. Run `xlflow session stop --discard --json` and start a fresh session.",
                 Phase: "run",
                 Source: "xlflow-excel-bridge",
                 HResult: ex.Metadata.HResult,
@@ -677,7 +688,8 @@ public sealed class ExcelRunService : IRunService
         bool dirty,
         bool needsSave,
         List<string> logs,
-        WorkerInvocationResult invocation)
+        WorkerInvocationResult invocation,
+        int excelProcessId)
     {
         var message = invocation.Dialog is not null
             ? DialogMessage(invocation.Dialog)
@@ -690,14 +702,15 @@ public sealed class ExcelRunService : IRunService
             ? ExcelBridgeSupport.FormatHResult(invocation.Result!.Error!.Number)
             : null;
         var fatalStage = invocation.Result?.Error?.Stage ?? "compile_vba";
-        if (fatalComFailure && sessionAttached)
+        if ((fatalComFailure || invocation.TimedOut) && sessionAttached)
         {
             ExcelBridgeSupport.MarkSessionPoisoned(
                 args.MetadataPath,
                 args.WorkbookPath,
                 message,
                 fatalHResult ?? "",
-                "run");
+                "run",
+                discardUnsavedChanges: true);
         }
         logs.Add($"VBE Compile failed: {message}");
         var extensions = new Dictionary<string, object?>
@@ -753,6 +766,43 @@ public sealed class ExcelRunService : IRunService
                     : null),
             Logs = logs,
             Extensions = extensions,
+            Recovery = invocation.TimedOut || fatalComFailure
+                ? BuildRecoveryOutcome(
+                    reason: invocation.TimedOut ? "excel_cleanup_unconfirmed" : "excel_com_state_uncertain",
+                    operation: "run",
+                    excelProcessId,
+                    invocation.WorkerProcessId,
+                    sessionAttached,
+                    sessionMode)
+                : null,
+        };
+    }
+
+    internal static BridgeRecovery BuildRecoveryOutcome(
+        string reason,
+        string operation,
+        int excelProcessId,
+        int workerProcessId,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        return new BridgeRecovery
+        {
+            Required = true,
+            Reason = reason,
+            Operation = operation,
+            ExcelProcessId = excelProcessId > 0 ? excelProcessId : null,
+            WorkerProcessId = workerProcessId > 0 ? workerProcessId : null,
+            CleanupConfirmed = false,
+            Session = new BridgeRecoverySession
+            {
+                Active = sessionAttached,
+                Owner = sessionAttached
+                    ? string.Equals(sessionMode, "external", StringComparison.OrdinalIgnoreCase)
+                        ? "external"
+                        : "managed"
+                    : "none",
+            },
         };
     }
 

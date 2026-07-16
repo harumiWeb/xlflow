@@ -25,7 +25,13 @@ xlflow process cleanup --all [--yes]
 xlflow process list --json
 ```
 
-Enumerates all local `EXCEL.EXE` processes. Returns each process's PID and whether it has open workbooks (`true` = has workbook, `false` = no workbook, `null` = unknown).
+Enumerates all local `EXCEL.EXE` processes. Returns each process's PID, whether
+it has open workbooks (`true` = has workbook, `false` = no workbook, `null` =
+unknown), and whether a recovery marker identifies that process.
+
+For an affected recovery PID, xlflow does not probe workbook state through COM;
+`has_workbook` is `null`, `recovery_required` is `true`, and
+`workbook_probe_skipped` is `true`.
 
 `cleanup --auto` only targets processes with `has_workbook: false` (confirmed no workbook). Processes with `has_workbook: null` are never targeted by `--auto`.
 
@@ -41,6 +47,30 @@ Terminates Excel processes in one of three modes:
 - `<pid>`: Graceful shutdown of the specified process. Falls back to force-stop if the process persists after a 3-second grace window.
 - `--auto`: Graceful shutdown of only those Excel processes that have **no open workbooks**. Workbook-bearing Excel instances are left alone. This is the safe route for cleaning up zombie Excel instances left behind by crashes or failed COM cleanup.
 - `--all`: Force-terminates **every** local Excel process, including processes with unsaved workbooks. **Use with extreme caution.**
+
+Successful cleanup also clears matching workbook recovery state:
+
+- `<pid>` clears only markers for that PID when `terminated: true`.
+- `--auto` clears only known PIDs that it actually terminates.
+- `--all` can clear a marker without a recorded PID only after a follow-up
+  enumeration confirms no Excel process remains.
+
+Partial cleanup leaves recovery markers for processes that were not terminated.
+When markers are cleared, JSON adds:
+
+```json
+{
+  "recovery": {
+    "cleared": [
+      {
+        "workbook": "C:\\projects\\sample\\sample.xlsm",
+        "excel_pid": 5678
+      }
+    ],
+    "count": 1
+  }
+}
+```
 
 `cleanup --all` always prompts for interactive confirmation:
 
@@ -64,9 +94,24 @@ xlflow process list --json
   "command": "process list",
   "error": null,
   "process": [
-    { "pid": 1234, "has_workbook": true },
-    { "pid": 5678, "has_workbook": false },
-    { "pid": 9012, "has_workbook": null }
+    {
+      "pid": 1234,
+      "has_workbook": true,
+      "workbook_probe_skipped": false,
+      "recovery_required": false
+    },
+    {
+      "pid": 5678,
+      "has_workbook": false,
+      "workbook_probe_skipped": false,
+      "recovery_required": false
+    },
+    {
+      "pid": 9012,
+      "has_workbook": null,
+      "workbook_probe_skipped": true,
+      "recovery_required": true
+    }
   ],
   "logs": ["found 3 Excel process(es)"]
 }
@@ -167,3 +212,9 @@ When force-stop fails for an individual process, `method` is `"none"` and the co
 `cleanup --all` is a **destructive operation**. It forcibly terminates every Excel process on the machine regardless of whether unsaved workbooks are open. Any workbook changes not yet saved to disk will be lost.
 
 Use `--auto` when you only want to clean up orphaned Excel processes with no open workbooks. Reserve `--all` for situations where you need a complete Excel restart and understand the data-loss implications.
+
+## Related
+
+- [recovery](./recovery)
+- [session](./session)
+- [status](./status)

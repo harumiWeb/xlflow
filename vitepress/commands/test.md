@@ -312,6 +312,13 @@ FAIL SmokeTests.TestBad: expected <110> but got <100>
 > `test` executes VBA. Use a controlled workbook state before running tests that mutate sheets or files.
 > `test` reports progress on stderr. Interactive terminals show a spinner, while non-interactive or `--json` runs emit a single progress line so stdout stays parseable.
 
+> [!WARNING]
+> If workbook-backed test execution times out after Excel work begins, xlflow
+> quarantines the target workbook. Subsequent workbook commands return
+> `workbook_recovery_required`; `--wait` is not recovery. Inspect top-level
+> `recovery` and use the suggested discard, process cleanup, or recovery clear
+> action.
+
 ::: tip
 Use `XlflowAssert` helpers for workbook-side tests so failures keep stable error numbers, sources, and parseable formatted values.
 :::
@@ -495,3 +502,4 @@ When `--ui-stream` is enabled, xlflow also writes realtime stderr lines such as 
 
 - [run](./run)
 - [check](./check)
+- [recovery](./recovery)

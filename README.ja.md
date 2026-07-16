@@ -298,6 +298,8 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
+`run`、`test`、bridge cleanup が Excel/VBA の停止を保証できない状態で戻った場合、xlflow は workbook を quarantine します。以後の workbook command は `workbook_recovery_required` を返し、`--wait` では回避できません。`xlflow status --json` を確認し、`session stop --discard`、対応する `process cleanup`、または `xlflow recovery clear` で復旧してください。
+
 `lint`、`fmt`、`analyze`、`diff` などの source-only command は WSL 内で実行できます。`new`、`init`、`pull`、`push`、`run`、`test`、`inspect`、`save`、`doctor` などの Excel-backed command は Windows へ自動委譲されます。
 
 ---
@@ -519,6 +521,7 @@ xlflowは人間にとっても最も優れたExcelVBAマクロ開発ツールを
 | `session`           | 高速ループ用に workbook を開いたままにする                           | `xlflow session start`                                                       |
 | `status`            | プロジェクト、source、workbook、session の状態を表示                 | `xlflow status --json`                                                       |
 | `save`              | session 中の workbook を保存                                         | `xlflow save --session --json`                                               |
+| `recovery`          | workbook の recovery-required state を検証して解除                   | `xlflow recovery clear --json`                                               |
 | `runner`            | 永続 xlflow runner marker module を管理                              | `xlflow runner install --json`                                               |
 | `process`           | ローカル Excel プロセスの管理 (一覧表示、終了)                       | `xlflow process list --json`                                                 |
 | `macros`            | 実行可能な macro entrypoint を検出                                   | `xlflow macros --json`                                                       |
@@ -713,16 +716,18 @@ xlflow module install --push
 > [!TIP]
 > AIエージェントや自動化スクリプトでは、`status`、`command`、`error.code`、各コマンド固有の top-level field を主な contract として扱うことを推奨します。
 
+`workbook_recovery_required` は通常の lock contention ではなく、操作上の安全性エラーです。`xlflow status --json` の `coordination.recovery` と recovery action を確認してください。force clear は xlflow の marker だけを削除し、VBA の停止や Excel state の修復は行いません。
+
 ---
 
 ## Exit code
 
-| Code | 意味                                       |
-| ---: | ------------------------------------------ |
-|  `0` | 成功                                       |
-|  `1` | lint、macro、test などの検証失敗           |
-|  `2` | CLI 引数または設定エラー                   |
-|  `3` | Excel、COM、VBIDE、bridge などの環境エラー |
+| Code | 意味                                                           |
+| ---: | -------------------------------------------------------------- |
+|  `0` | 成功                                                           |
+|  `1` | lint、macro、test などの検証失敗                               |
+|  `2` | CLI 引数または設定エラー                                       |
+|  `3` | busy/recovery state、Excel、COM、bridge などの操作・環境エラー |
 
 > [!NOTE]
 > `diff` は差分が見つかった場合でも exit code `0` を返します。差分の有無は `diff.summary.total_diffs` を確認してください。

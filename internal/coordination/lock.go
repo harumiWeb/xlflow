@@ -255,6 +255,35 @@ type Lease struct {
 
 func (l *Lease) Identity() WorkbookIdentity { return l.identity }
 
+type LeaseSet struct {
+	leases map[string]*Lease
+}
+
+func NewLeaseSet(leases ...*Lease) *LeaseSet {
+	set := &LeaseSet{leases: make(map[string]*Lease, len(leases))}
+	for _, lease := range leases {
+		set.Add(lease)
+	}
+	return set
+}
+
+func (s *LeaseSet) Add(lease *Lease) {
+	if s == nil || lease == nil {
+		return
+	}
+	if s.leases == nil {
+		s.leases = map[string]*Lease{}
+	}
+	s.leases[lease.identity.LockID] = lease
+}
+
+func (s *LeaseSet) Lease(identity WorkbookIdentity) *Lease {
+	if s == nil {
+		return nil
+	}
+	return s.leases[identity.LockID]
+}
+
 func (l *Lease) Release() error {
 	if l == nil {
 		return nil
@@ -347,13 +376,13 @@ func waitContext(ctx context.Context, delay time.Duration) error {
 }
 
 func newOwnerMetadata(req AcquireRequest) (*OwnerMetadata, error) {
-	var token [16]byte
-	if _, err := io.ReadFull(rand.Reader, token[:]); err != nil {
-		return nil, fmt.Errorf("generate ownership token: %w", err)
+	generation, err := newGeneration()
+	if err != nil {
+		return nil, err
 	}
 	return &OwnerMetadata{
 		SchemaVersion: ownerSchemaV1,
-		Generation:    hex.EncodeToString(token[:]),
+		Generation:    generation,
 		Workbook:      req.Identity.CanonicalPath,
 		PID:           os.Getpid(),
 		Command:       req.Command,
@@ -368,33 +397,15 @@ func (m *Manager) ownerPath(identity WorkbookIdentity) string {
 }
 
 func (m *Manager) writeOwner(identity WorkbookIdentity, owner *OwnerMetadata) error {
-	tmp, err := os.CreateTemp(m.dir, identity.LockID+".owner-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create owner metadata: %w", err)
+	return writeJSONAtomic(m.dir, m.ownerPath(identity), identity.LockID+".owner-", owner)
+}
+
+func newGeneration() (string, error) {
+	var token [16]byte
+	if _, err := io.ReadFull(rand.Reader, token[:]); err != nil {
+		return "", fmt.Errorf("generate metadata token: %w", err)
 	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("secure owner metadata: %w", err)
-	}
-	encoder := json.NewEncoder(tmp)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(owner); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("encode owner metadata: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("flush owner metadata: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close owner metadata: %w", err)
-	}
-	if err := platformAtomicReplace(tmpName, m.ownerPath(identity)); err != nil {
-		return fmt.Errorf("publish owner metadata: %w", err)
-	}
-	return nil
+	return hex.EncodeToString(token[:]), nil
 }
 
 func (m *Manager) readOwnerBestEffort(identity WorkbookIdentity) *OwnerMetadata {

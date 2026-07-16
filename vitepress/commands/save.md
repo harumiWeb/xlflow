@@ -27,6 +27,11 @@ xlflow save --session --json
 > [!IMPORTANT]
 > Use this after `push --session --no-save` or `edit --session` when the live workbook should become the persisted workbook.
 
+> [!WARNING]
+> When workbook recovery is required, `save` is blocked with
+> `workbook_recovery_required`. Do not persist uncertain state. Use managed
+> `session stop --discard`, process cleanup, or verified recovery clear.
+
 ## JSON Output Example
 
 Successful `--json` output uses the xlflow envelope plus command-specific fields.
@@ -43,3 +48,4 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 
 - [session](./session)
 - [push](./push)
+- [recovery](./recovery)

@@ -18,7 +18,36 @@ The .NET bridge owns Windows automation concerns that are difficult to keep reli
 - Process/window ownership checks.
 - Clipboard and image export fallback behavior.
 
-The Go CLI remains responsible for command parsing, config loading, source-tree decisions, static checks, public envelope mapping, and provider selection.
+The Go CLI remains responsible for command parsing, config loading, source-tree
+decisions, static checks, public envelope mapping, provider selection, workbook
+coordination, and persistent recovery-marker storage.
+
+## Recovery Outcome Contract
+
+The bridge reports uncertain Excel termination through a typed recovery outcome;
+the Go layer does not infer quarantine by parsing logs or localized error
+messages. The outcome records:
+
+- whether recovery is required;
+- a stable reason such as `vba_may_still_be_running`;
+- whether Excel-side cleanup was confirmed;
+- the Excel PID and worker PID when known; and
+- session attachment/ownership information when relevant.
+
+Typed recovery outcomes are emitted only after Excel-side work may have begun
+and completion cannot be guaranteed. Covered cases include run/test child-worker
+timeout, VBE compile-worker timeout during push, fatal COM/RPC disconnect,
+deliberately skipped cleanup because Excel is still busy, and unsafe session
+poison/discard results. Validation, source preflight, lock contention,
+cancellation before Excel starts, and ordinary known failures do not request
+recovery.
+
+The bridge does not write or clear recovery marker files. The Go coordination
+layer holds the normal workbook lease, interprets the typed outcome, publishes
+the marker before releasing the lease, and maps public diagnostics. If the outer
+Go provider deadline expires, the process terminates abnormally, or bridge JSON
+cannot be decoded after workbook work began, Go publishes an equivalent
+recovery-required outcome even when no Excel PID was returned.
 
 ## Implemented Commands
 
@@ -186,7 +215,10 @@ If a fatal COM/RPC failure occurs while using a live session, the bridge marks
 `.xlflow/session.json` as poisoned instead of killing Excel. Subsequent auto or
 explicit session reuse fails with `session_poisoned`; `xlflow session status`
 surfaces the poisoned metadata and `xlflow session stop` remains available to
-clear the session before starting a fresh one.
+discard the session before starting a fresh one. The response also carries a
+typed recovery outcome so Go publishes workbook quarantine. Session save and
+plain stop are blocked until managed `session stop --discard` or another
+recovery action confirms the unsafe Excel state ended.
 
 ### `test`
 
@@ -222,15 +254,13 @@ includes actionable suggestions plus the dialog and worker state available at
 the timeout boundary. Excel may continue executing user VBA after the child COM
 caller is terminated, so COM-based harness cleanup is not attempted
 synchronously while Excel is busy. Callers must treat timeout results as
-`vba_may_still_be_running` until the Excel session is reset or the workbook is
-reopened. Once Excel is responsive, every .NET bridge workbook persistence
-boundary removes transient xlflow runtime/UI/debug defined names and generated
-helper modules before saving;
-cleanup failure blocks the save. This prevents a later `save --session` or
-managed `session stop` from persisting the timeout's execution mode into manual
-workbook use. When the .NET bridge cannot finish returning its own timeout payload
-before the outer Go deadline, xlflow still returns a valid JSON timeout envelope
-from Go with the same limitation documented explicitly.
+`vba_may_still_be_running` until explicit recovery. The typed response includes
+the affected Excel/worker PID when available and requests recovery publication.
+Session save and plain managed stop are prohibited; managed
+`session stop --discard` closes without saving. When the .NET bridge cannot
+finish returning its own timeout payload before the outer Go deadline, xlflow
+still returns a valid JSON timeout envelope from Go and publishes a marker whose
+Excel PID may be unknown.
 
 ### `process`
 
@@ -241,10 +271,17 @@ The .NET bridge now supports:
 
 Behavior matches the PowerShell contract:
 
-- `process list` returns `process: [{ pid, has_workbook }]`
+- `process list` returns
+  `process: [{ pid, has_workbook, workbook_probe_skipped, recovery_required }]`
 - `process cleanup --auto` targets only workbook-free Excel processes
 - `process cleanup --all` force-stops the selected Excel processes
 - partial cleanup failures return structured `process_termination_failed` errors while preserving the `process` result payload
+
+For a PID referenced by recovery metadata, Go instructs process observation not
+to perform a workbook COM probe; `has_workbook` remains null. After the bridge
+returns termination results, Go clears only matching recovery generations for
+processes with `terminated=true`. `cleanup --all` can clear PID-unknown markers
+only after a follow-up enumeration confirms that no Excel process remains.
 
 ### `pull`
 
@@ -286,6 +323,12 @@ The command:
 8. Returns `target`, `session`, `workbook`, `backup`, and `source` envelope fields
 
 If VBE Compile fails, the command returns `vba_compile_failed` with `error.phase = "compile_vba"` and `push_diagnostic.kind = "compile"` or `"timeout"`. The workbook is not saved and source fingerprints are not updated. Session-backed pushes report the live workbook as dirty because source was already imported before the compile failure.
+
+A normal compile failure with confirmed cleanup does not quarantine the
+workbook. A compile worker timeout, fatal COM disconnect, or destructive
+replacement failure whose cleanup cannot be confirmed returns a typed recovery
+outcome. Go then publishes the recovery marker before releasing the workbook
+lease.
 
 ## Process Model
 

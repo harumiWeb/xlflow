@@ -1,3 +1,20 @@
+# Issue #335: Workbook recovery quarantine
+
+- [ ] Add ADR-0020 and permanent recovery-state specifications
+- [ ] Add versioned atomic per-workbook recovery metadata
+- [ ] Extend central coordination policy with recovery behavior
+- [ ] Enforce recovery after lease acquisition in CLI and direct Runner paths
+- [ ] Publish recovery before lease release for uncertain bridge outcomes
+- [ ] Add `recovery clear [--force]` and `session stop --discard`
+- [ ] Clear recovery through confirmed session discard and process cleanup
+- [ ] Make status/session status/process list recovery-aware without unsafe COM probes
+- [ ] Add VS Code Recovery Required state and safe recovery actions
+- [ ] Run focused and full Go, .NET, VS Code, lint, docs, and diff verification
+- [ ] Run Windows Excel release-gate and recovery E2E under `tmp_workspaces`
+- [ ] Complete staff-level self-review
+
+---
+
 # Issue #325: UserForm/Designer coordination coverage
 
 - [x] Confirm all workbook-backed UserForm leaves use the shared workbook lock

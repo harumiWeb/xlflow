@@ -28,8 +28,9 @@ xlflow [--json] rollback (--latest | --backup <backup-id>)
 xlflow [--json] session start
 xlflow [--json] session attach
 xlflow [--json] session status
-xlflow [--json] session stop
+xlflow [--json] session stop [--discard]
 xlflow [--json] save [--session]
+xlflow [--json] recovery clear [--force]
 xlflow [--json] runner install
 xlflow [--json] runner remove
 xlflow [--json] runner status
@@ -80,7 +81,7 @@ Unknown top-level commands fail loudly before any workbook or project configurat
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge. Explicit `--bridge dotnet` is strict. The removed value `powershell` is rejected with a bridge-mode/configuration error.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -194,7 +195,7 @@ Backup deletion uses only directories discovered by the managed scanner. It reso
 
 `rollback --latest` restores the newest backup for the configured workbook. `rollback --backup <backup-id>` restores a specific backup. Before replacing the workbook file, xlflow creates a safety workbook backup with reason `pre-rollback`. Rollback restores only the workbook file and never rewrites `src/` automatically. If an xlflow session for the same workbook is active, rollback fails with `workbook_in_use`. Successful results warn that source files may now be out of sync and hint to run `inspect` and `pull`. When `[backup.retention].enabled=true`, automatic pruning runs only after the safety backup is created and the selected backup is restored successfully; pruning failure is reported as a warning and does not fail the successful rollback.
 
-`session start` opens the configured workbook in Excel and writes `.xlflow/session.json` with process metadata and `owner="managed"`. Session Excel is kept visible even when `excel.visible=false`, because later CLI invocations must reattach to that specific Excel instance through its window handle. xlflow disables events while opening the workbook, but it must keep workbook macros executable afterward so `run --session` and `test --session` can invoke user VBA against the same open workbook. Commands that only inspect or rewrite workbook structure without running user VBA force-disable automation macros before opening. `session attach` searches already-open local Excel workbooks for the configured workbook path and writes `.xlflow/session.json` with `owner="external"` without opening a new Excel process. This is the supported human-centered workflow when a user has already opened the workbook and wants xlflow commands to operate on that live workbook. `session status` reports whether the recorded process is running, whether the configured workbook is open, whether the session owner is `managed` or `external`, and whether the live workbook is dirty and needs `xlflow save`. `session status --json` must always include a top-level `session` object; when no matching session is active it succeeds with `session.active=false`. The `.NET` bridge resolves session workbooks by normalized full path; for add-in workbooks such as `.xlam` that Excel does not include in normal `Workbooks` enumeration, it may additionally query `Workbooks.Item(<file name>)`, but it must still reject the result unless `FullName` matches the configured path. `session stop` saves and closes the workbook, quits Excel, and removes the metadata for managed sessions. For external sessions, `session stop` only removes the session metadata and does not close the workbook or quit Excel; users must run `save --session` explicitly when they want workbook changes persisted. `save` saves the matching live session workbook when `.xlflow/session.json` points at the configured workbook; `save --session` forces that same path and fails if no matching session workbook is running. Phase 1 UserForm detection for `session` / `save` is best-effort: detected forms add warnings/hints, but failure to inspect UserForms does not fail the session command. Like `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `macros`, `export-image`, and `test`, matching recorded session workbooks may be auto-reused when `--session` is omitted.
+`session start` opens the configured workbook in Excel and writes `.xlflow/session.json` with process metadata and `owner="managed"`. Session Excel is kept visible even when `excel.visible=false`, because later CLI invocations must reattach to that specific Excel instance through its window handle. xlflow disables events while opening the workbook, but it must keep workbook macros executable afterward so `run --session` and `test --session` can invoke user VBA against the same open workbook. Commands that only inspect or rewrite workbook structure without running user VBA force-disable automation macros before opening. `session attach` searches already-open local Excel workbooks for the configured workbook path and writes `.xlflow/session.json` with `owner="external"` without opening a new Excel process. This is the supported human-centered workflow when a user has already opened the workbook and wants xlflow commands to operate on that live workbook. `session status` reports whether the recorded process is running, whether the configured workbook is open, whether the session owner is `managed` or `external`, whether the live workbook is dirty and needs `xlflow save`, and additive workbook coordination/recovery state. `session status --json` must always include a top-level `session` object; when no matching session is active it succeeds with `session.active=false`. While workbook recovery is required, it does not call unsafe workbook COM APIs: `dirty` is null/unknown, `source_of_truth="uncertain"`, and `discard_required=true`. The `.NET` bridge resolves session workbooks by normalized full path; for add-in workbooks such as `.xlam` that Excel does not include in normal `Workbooks` enumeration, it may additionally query `Workbooks.Item(<file name>)`, but it must still reject the result unless `FullName` matches the configured path. `session stop` normally saves and closes the workbook, quits Excel, and removes the metadata for managed sessions. While recovery is required, plain `session stop` and `save` are blocked. A managed `session stop --discard` closes without saving and clears recovery only after xlflow confirms the owned Excel process ended. For external sessions, `session stop` or `session stop --discard` only removes the session metadata and does not close the workbook, quit Excel, or clear recovery; the result instructs the user to close the workbook in Excel without saving before verified recovery clear. `save` saves the matching live session workbook when `.xlflow/session.json` points at the configured workbook; `save --session` forces that same path and fails if no matching session workbook is running. Phase 1 UserForm detection for `session` / `save` is best-effort: detected forms add warnings/hints, but failure to inspect UserForms does not fail the session command. Like `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `macros`, `export-image`, and `test`, matching recorded session workbooks may be auto-reused when `--session` is omitted.
 
 Before any .NET bridge workbook save, save-as, or save-copy boundary, xlflow removes its transient runtime artifacts: execution mode, runtime version, debug/UI stream, scripted UI response defined names, and generated `XlflowRun_*` / `XlflowUIStream_*` helper modules. These names and components are reserved xlflow state and are never part of the persisted workbook contract. Marker-only cleanup does not require VBProject inspection, but a helper marker or a macro workbook with no runtime marker requires inspection so unmarked helpers left by older xlflow versions cannot pass a save unchecked. If required inspection or cleanup fails, the save fails instead of persisting a possibly headless workbook or temporary harness. `session start` and `session attach` also remove stale transient artifacts from the live workbook and report the resulting dirty/save-required state so a previously affected workbook can be repaired by the next session save. Stopping an external session performs the same live cleanup without saving or closing the user-owned workbook; when cleanup leaves it dirty, the stop result reports `save_required` and the user must save it in Excel.
 
@@ -212,13 +213,13 @@ The legacy debugging command surface is removed. Workbook-side runtime debugging
 
 `run --direct` executes an argument-free macro through `Excel.Run($MacroName)` without injecting the temporary harness module. It cannot be combined with `--arg`, `--ui-stream`, or `--diagnostic`; those combinations fail before Excel starts. Direct runs return weaker VBA diagnostics than the harness path, but default `run` still suppresses Excel-owned VBA runtime error dialogs and routes them back to structured CLI output unless `--gui-compile-errors` is set. `run --fast` uses direct execution when the macro has no CLI arguments and diagnostic mode is not requested; otherwise it falls back to the normal harness. `run --session` forces attachment to the workbook opened by `session start` or adopted by `session attach`. When `--session` is omitted and `.xlflow/session.json` points at the configured workbook, xlflow auto-reuses that matching live session workbook rather than an arbitrary active Excel instance.
 
-`run` performs the same fatal source preflight checks as `push` before Excel starts whenever it targets the configured project workbook, including `--session` runs. If that preflight finds known VBE-dialog-causing source problems, the run fails with validation exit code `1` and top-level `issues` and/or `analysis` instead of launching Excel. `run --push` first imports the configured source tree into the configured workbook through the normal `push` path, then runs the macro only if that push succeeds. Without `--session`, this pre-run push uses the same save-by-default semantics as `xlflow push`; with `--session`, it pushes into the live session workbook with `--no-save` semantics and then runs against that same session. `run --push` cannot be combined with `--input` because the push target is the configured project workbook. `run --headless` is for AI agents, tests, and CI. Before Excel starts, xlflow also scans the configured VBA source tree for GUI boundaries. If any boundary is found, the run fails with `gui_boundary_detected`, exit code `1`, and top-level `gui_boundaries` containing the detected file, line, kind, symbol, severity, message, and suggestion. `run --interactive` is for human-assisted Excel workflows. It runs with Excel visible and alerts enabled so a person can complete dialogs, message boxes, or forms. `--headless` and `--interactive` cannot be combined. `--timeout` defaults to `5m`; if a run exceeds the timeout, xlflow returns `macro_timeout` with exit code `1` and guidance that a dialog, form, file picker, or loop may still be waiting. Running without either mode keeps the legacy behavior except for the timeout.
+`run` performs the same fatal source preflight checks as `push` before Excel starts whenever it targets the configured project workbook, including `--session` runs. If that preflight finds known VBE-dialog-causing source problems, the run fails with validation exit code `1` and top-level `issues` and/or `analysis` instead of launching Excel. `run --push` first imports the configured source tree into the configured workbook through the normal `push` path, then runs the macro only if that push succeeds. Without `--session`, this pre-run push uses the same save-by-default semantics as `xlflow push`; with `--session`, it pushes into the live session workbook with `--no-save` semantics and then runs against that same session. `run --push` cannot be combined with `--input` because the push target is the configured project workbook. `run --headless` is for AI agents, tests, and CI. Before Excel starts, xlflow also scans the configured VBA source tree for GUI boundaries. If any boundary is found, the run fails with `gui_boundary_detected`, exit code `1`, and top-level `gui_boundaries` containing the detected file, line, kind, symbol, severity, message, and suggestion. `run --interactive` is for human-assisted Excel workflows. It runs with Excel visible and alerts enabled so a person can complete dialogs, message boxes, or forms. `--headless` and `--interactive` cannot be combined. `--timeout` defaults to `5m`; if a run exceeds the timeout, xlflow returns `macro_timeout` with exit code `1`, publishes recovery-required state, and warns that a dialog, form, file picker, loop, or VBA mutation may still be active. Running without either mode keeps the legacy behavior except for the timeout.
 
 `run --diagnostic` is an opt-in compile-first mode for agent debugging. It runs the same preflight checks as normal `run`, then uses the temporary harness path even when `--fast` is set. Before verifying and invoking the macro, xlflow executes VBE Compile for the workbook VBA project. If VBE shows a modal compile dialog, xlflow reads the dialog text as localized opaque text, closes the dialog, reads `ActiveCodePane.GetSelection` when available, and returns `vba_compile_failed` with validation exit code `1`. `--diagnostic` controls this compile/runtime diagnostic behavior; it does not control how much of the collected data is emitted in JSON. In the `.NET` bridge, VBE selection locations use snake_case fields such as `source_path`, `end_line`, and `end_column`, and failed best-effort capture attempts are reported under `run_diagnostic.location_capture` when verbose output is requested. Verified `line` and `end_line` values are source-file line numbers, adjusted for exported metadata lines that VBE hides; column fields are omitted when VBE only reports a whole-line selection. During normal macro invocation, xlflow also suppresses Excel-owned VBA runtime error dialogs by default and returns `run_diagnostic.kind = "runtime"` with the same best-effort location shape when available. `--gui-compile-errors` is the explicit opt-out for both compile and runtime dialog suppression. Diagnostic mode does not automate arbitrary user `MsgBox`, file picker, or UserForm UI; those remain governed by `--headless` and `--interactive`.
 
 Before user VBA starts, `run` injects workbook-scoped reserved names that describe the resolved xlflow execution mode, currently including `__XLFLOW_MODE__` and a runtime helper version marker. New `xlflow new` projects also scaffold `src/modules/Xlflow/XlflowRuntime.bas`, which reads workbook-scoped mode first and falls back to `Environ$("XLFLOW_MODE")` only as a secondary override. Stable helper calls are module-qualified VBA functions such as `XlflowRuntime.ModeName()`, `XlflowRuntime.IsHeadless()`, `XlflowRuntime.IsAgent()`, and `XlflowRuntime.IsTest()`. `run --headless` resolves to `headless`; `run --interactive` resolves to `interactive`; plain `run` defaults to `interactive` unless the xlflow process environment sets `XLFLOW_MODE=interactive|headless|ci|agent|test`. During `run` and `test`, xlflow may also inject additional reserved names for helper modules, including `__XLFLOW_DEBUG_PIPE__` for `XlflowDebug.Log` transport and the existing `XlflowUI` runtime stream markers.
 
-Runtime defined names and generated helper modules exist only inside a live xlflow execution boundary. They must not remain in a workbook saved for later manual use. xlflow compares the persisted workbook before and after macro invocation, so a macro that explicitly saves `ThisWorkbook` while runtime injection is active is followed by a cleaned save after the macro returns even if the macro makes another edit after saving. A failed cleaned save returns `runtime_cleanup_failed` with `error.phase = "save_result"`; it is not reported as a macro-body failure and is not downgraded to a successful run while stale state may remain on disk. A timed-out macro may still be running, so xlflow defers that cleanup; the next xlflow persistence boundary removes the reserved artifacts before saving.
+Runtime defined names and generated helper modules exist only inside a live xlflow execution boundary. They must not remain in a workbook saved for later manual use. xlflow compares the persisted workbook before and after macro invocation, so a macro that explicitly saves `ThisWorkbook` while runtime injection is active is followed by a cleaned save after the macro returns even if the macro makes another edit after saving. A failed cleaned save returns `runtime_cleanup_failed` with `error.phase = "save_result"`; it is not reported as a macro-body failure and is not downgraded to a successful run while stale state may remain on disk. A timed-out macro may still be running, so xlflow quarantines the workbook and prohibits persistence until explicit recovery discards or terminates the uncertain Excel state.
 
 New scaffolded projects add `src/modules/Xlflow/XlflowUI.bas` and `src/modules/Xlflow/XlflowDebug.bas`. Existing projects can add the same bundled helper modules later with `init --with-module` during bootstrap or `module install` after bootstrap. `XlflowUI.MsgBox`, `XlflowUI.InputBox`, `XlflowUI.GetOpenFilename`, `XlflowUI.FileDialogOpen`, `XlflowUI.GetSaveAsFilename`, and `XlflowUI.FolderPicker` require a stable dialog id that contains at least one ASCII letter or digit. In interactive mode they delegate to the native VBA or Excel dialog APIs. In headless-like modes (`headless`, `ci`, `agent`, `test`) they resolve scripted responses from xlflow-injected workbook markers keyed by the normalized dialog id. `GetOpenFilename` and `FileDialogOpen` return a Variant string array when `MultiSelect=True`, a single string when exactly one value is resolved, and `False` on cancel. `GetSaveAsFilename` and `FolderPicker` return a single string or `False` on cancel. Missing or invalid scripted responses are deterministic VBA errors owned by `XlflowUI` rather than interactive fallback. `XlflowDebug.Log` is an explicit workbook-side debug wrapper for terminal-visible logging. It always writes to the VBA Immediate Window and, during xlflow `run` or `test`, also mirrors the rendered message to xlflow's stderr/debug envelope.
 
@@ -233,9 +234,12 @@ bridges generate equivalent VBA numeric literals for `double` arguments.
 behavior and cannot be combined with `--save` or `--save-as`. On timeout,
 xlflow still returns a valid JSON envelope and exit code `1`, but the result
 must be treated as `vba_may_still_be_running`; xlflow does not perform
-synchronous COM cleanup on that path. After the macro stops, a subsequent
-`save --session`, managed `session stop`, or another .NET bridge save boundary
-must remove transient xlflow runtime markers before persisting the workbook.
+synchronous COM cleanup on that path. xlflow publishes workbook recovery state
+before releasing the operation lock and returns top-level
+`recovery.required=true` / `recovery.published=true`. Follow-up workbook
+commands are blocked with `workbook_recovery_required`; `--wait` does not bypass
+that state. A managed session must use `session stop --discard`, process cleanup,
+or another explicit recovery path rather than saving the uncertain workbook.
 
 `run` no longer provides a separate helper-based debugging path. Runtime debug detail comes from `XlflowDebug.Log`, which writes Immediate Window output and, during xlflow execution, also emits structured `debug.events` in the final JSON envelope plus realtime stderr debug lines. If a failed run has insufficient context, callers should add `XlflowDebug.Log` near procedure entry, important branches, external file access, destructive operations, and error handlers, then rerun with `xlflow run --json`.
 
@@ -276,6 +280,12 @@ must remove transient xlflow runtime markers before persisting the workbook.
 `attach --active` is deprecated. It inspects the current active Excel workbook and verifies that the active workbook path matches configured `excel.path`, but it does not change the connection target for `pull`, `push`, or `run`. It returns an `attach_active_deprecated` warning. Use `session attach` when xlflow should operate on an already-open workbook.
 
 `test` discovers public `Sub` procedures from the workbook VBIDE state whose names start with `Test` or end with `_Test`. By default, non-session execution copies the configured workbook to `.xlflow/test-runs/<run-id>/`, executes against that temporary copy, closes without explicitly saving, and removes the temporary directory after success or failure. Parameterless tests keep stable identifiers in `<Module>.<Procedure>` form, exposed as both `id` and `qualified_name`. Parameterized procedures use `@TestCase(...)` and execute one independent case per annotation with identifiers in `<Module>.<Procedure>[<case>]` form. The runtime discovery and source discovery support the same literal categories, scalar parameter types, named-case syntax, case metadata fields, and `invalid_test_case` validation failures. `--filter` accepts exact case identifiers such as `InvoiceTests.Test_Add[1,2,3]`; filtering by the qualified procedure name such as `InvoiceTests.Test_Add` selects all cases for that procedure. Shells that treat brackets specially require quoting the exact case filter, for example `xlflow test --filter "InvoiceTests.Test_Add[1,2,3]"`. An unqualified procedure name remains accepted only when it resolves to exactly one discovered test item after applying `--module` and `--tag`. Ambiguous unqualified filters fail with `error.code = "ambiguous_test_name"` and `error.details.matches` listing matching qualified names. `--module` filters by exact module name. `--tag` filters by tag attached via `' @Tag("name")` comment lines directly above the test sub. `@Skip` / `@Skip("reason")` marks a discovered test as `skipped`, and `@Todo` / `@Todo("reason")` marks it as `todo`; these tests remain selectable by qualified name, module, and tag, appear in execution results, do not invoke the test body, do not invoke `BeforeEach` / `AfterEach`, and do not fail the command by default. Module-level `BeforeAll` / `AfterAll` hooks run only for modules with at least one selected executable test. A module containing only skipped/todo selected tests produces skipped/todo results without module hook execution. Duplicate `@Skip`, duplicate `@Todo`, or combining `@Skip` and `@Todo` fails with `invalid_test_metadata`. `@ExpectedError(number[, description[, source]])` attached directly above a test requires the test body to raise that VBA error. Error number matching is exact, description matching is exact and case-sensitive, and source matching is exact and case-insensitive. A matching expected-error test passes and includes `expected_error` plus `observed_error` in JSON. Missing or mismatched expected errors fail with `error.code = "expected_error_mismatch"`. Hook failures cannot satisfy `@ExpectedError`; `BeforeAll`, `BeforeEach`, `AfterEach`, and `AfterAll` keep their hook-specific failure codes, and cleanup failures still fail the executable test. `AssertInconclusive` remains `test_inconclusive` before expected-error matching. `--isolation none` uses one temporary workbook for the run, `--isolation module` uses one fresh copy per selected module, and `--isolation test` uses one fresh copy per selected test case. In `test` isolation, `BeforeAll` and `AfterAll` run once per isolated executable test because each executable test receives a complete independent workbook environment; skipped/todo tests still do not execute hooks. `--fail-fast` stops scheduling new tests after the first final failure and is equivalent to `--max-failures 1`; it cannot be combined with `--max-failures`. `--max-failures N` requires `N > 0` and stops scheduling after `N` final failed outcomes. Tests selected but not executed because the limit was reached are emitted with `status = "not_run"` and `reason = "maximum failure count reached"`. `--rerun-failed N` requires `N >= 0` and reruns eligible failed tests up to `N` additional attempts. Correct expected-error passes, skipped, todo, inconclusive, not-run, discovery failures, `BeforeAll` failures, and `AfterAll` failures are not retried. Failed attempts that later pass are final `passed` results with `flaky = true`; `passed` counts include flaky passes and `flaky` is a subset count. Retries are supported only for non-session temporary workbook runs; `--session --rerun-failed N` with `N > 0` fails because live session state cannot guarantee a clean retry baseline. `--no-save` prevents xlflow from explicitly saving the test workbook. Because `test` executes user VBA, xlflow must keep workbook macros executable for both temporary opens and `test --session`. `test --session` runs against the workbook opened by `session start` via the recorded session metadata, supports only `--isolation none`, and `--session --isolation module|test` fails with `unsupported_test_isolation`. `test --session --no-save` suppresses xlflow's final explicit save, but it cannot hide or undo mutations already made to the live workbook. Duplicate discovered test procedures within the same module, duplicate generated case IDs, no discovered tests, missing filter targets, ambiguous filter targets, invalid test metadata, invalid test cases, and VBA test failures are validation failures. The same procedure name may appear in different modules. Excel, COM, VBIDE, PowerShell, and script failures are environment failures. JSON output includes top-level `test_run` metadata with `isolation`, `session`, `temporary_workbook`, `source_workbook`, `workbook_saved`, `cleanup.status`, and `execution`; cleanup failures report `cleanup.path` and `cleanup.message` without hiding test results. `test_run.execution` includes `fail_fast`, optional `max_failures`, `rerun_failed`, `stopped_early`, and optional `stop_reason`.
+
+If test execution or its bridge worker times out after Excel work begins, the
+result is classified as uncertain in the same way as `run`: xlflow publishes
+recovery-required state before releasing the workbook lease, includes top-level
+`recovery`, and blocks subsequent workbook commands until explicit recovery.
+Source-only `test list` cannot publish or be blocked by workbook recovery.
 
 For session-aware workbooks, `test --session` is the preferred validation path whenever the workbook is already open or when it will be followed by additional workbook-backed commands. Avoid reopening the workbook between `run`, `test`, `save`, and inspect commands unless the specific behavior under test is the reopen boundary itself.
 
@@ -398,6 +408,52 @@ returns `workbook_busy_cancelled`. Both use phase `coordination.acquire`, includ
 wait progress text; human output prints one concise line after contention is
 actually observed.
 
+After acquiring the normal lock, workbook commands check the independent
+recovery marker. A current marker returns
+`error.code="workbook_recovery_required"`,
+`error.phase="coordination.recovery"`, and exit code 3 before the command body
+or bridge starts. `error.details` contains the canonical workbook, previous
+operation, reason, recorded time, `retryable=false`,
+`wait_will_resolve=false`, and context-appropriate `recovery_actions`.
+`--wait` never polls, bypasses, or clears recovery state.
+
+```json
+{
+  "status": "failed",
+  "command": "push",
+  "error": {
+    "code": "workbook_recovery_required",
+    "message": "The workbook is in an uncertain Excel state after a previous operation. Explicit recovery is required before this command can run; --wait will not resolve it.",
+    "source": "xlflow",
+    "phase": "coordination.recovery",
+    "details": {
+      "workbook": "C:\\projects\\sample\\sample.xlsm",
+      "operation": "run",
+      "reason": "vba_may_still_be_running",
+      "recorded_at": "2026-07-16T09:30:00Z",
+      "retryable": false,
+      "wait_will_resolve": false,
+      "recovery_actions": [
+        "xlflow session stop --discard",
+        "xlflow process cleanup 23456",
+        "xlflow recovery clear",
+        "xlflow recovery clear --force"
+      ]
+    }
+  },
+  "logs": []
+}
+```
+
+An operation that detects its own uncertain termination keeps the original
+operation failure and adds top-level `recovery` with `required=true`,
+`published=true`, `reason`, `operation`, `recorded_at`, and optional
+`excel_pid`, `worker_pid`, and session ownership. If the marker cannot be published,
+`workbook_recovery_publication_failed` becomes the primary operational error
+and preserves the original failure in details. Recovery storage/read failures
+return `coordination_recovery_check_failed` and fail closed. An unverifiable
+normal clear returns `workbook_recovery_verification_failed`.
+
 For UserForms, `form migrate sidecar`, `form snapshot`, `form build`, hidden
 `form apply`, `form export-image`, `inspect form`, `list forms`, `pull`, and
 `push` all use this standard workbook coordination contract and may opt into
@@ -428,9 +484,10 @@ Command-specific fields are added at the top level:
 - `forms` for `form build`
 - `edit` for `edit`
 - `process` for `process list` (array of process objects) and `process cleanup` (cleanup result object)
-- `project`, `session`, `state`, `warnings`, and `hints` for `status`
+- `recovery` for uncertain operation publication and `recovery clear`
+- `project`, `session`, `state`, `coordination`, `warnings`, and `hints` for `status`
 - `session` and additive `coordination` for session status metadata and the
-  command-start workbook lock observation
+  command-start workbook lock/recovery observation
 - `runner` for persistent runner module status
 - `version` for `version`
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
@@ -477,13 +534,72 @@ Command-specific fields are added at the top level:
 
 `rollback` success results add top-level `rollback`, plus the normal `target`, `warnings`, and `hints`. `rollback.restored_from` contains `id`, `path`, `reason`, and `created_at` for the restored backup. `rollback.safety_backup` contains `id` and `path` for the safety backup created before restore. `rollback.target.path` identifies the restored workbook path.
 
-Workbook-state-aware commands may return top-level `target`, `session`, `warnings`, and `hints`. `target.kind` uses the fixed vocabulary `source`, `file`, or `live_session`. `target` may also include `path`, `description`, `note`, and command-specific fields such as `sheet`, `range`, `form`, and `capture_state`. `session` may include `active`, `workbook_path`, `workbook_name`, `dirty`, `save_required`, `live_newer_than_disk`, `source_of_truth`, `userforms_present`, `userform_count`, and `mode`; `session status` also keeps `running`, `workbook_open`, and `metadata` unchanged and adds top-level `coordination`. A successful observation is `{busy:false}`, `{busy:true}`, or `{busy:true,resource_scope,operation_kind,command,pid,started_at}` when current owner metadata is available. It is sampled before the bridge call, may change immediately, and never authorizes a later operation. Probe failure omits the field and adds `coordination_status_unavailable` without changing the session status exit code. Warning and hint objects contain `code` and `message`. `push`, `pull`, `run`, `save`, `session`, `macros`, `inspect`, `export-image`, `form build`, `form export-image`, and `edit` should use these fields to make workbook state explicit without removing the existing compatibility fields under `workbook`.
+Workbook-state-aware commands may return top-level `target`, `session`,
+`coordination`, `recovery`, `warnings`, and `hints`. `target.kind` uses the fixed
+vocabulary `source`, `file`, or `live_session`. `target` may also include `path`,
+`description`, `note`, and command-specific fields such as `sheet`, `range`,
+`form`, and `capture_state`. `session` may include `active`, `workbook_path`,
+`workbook_name`, `dirty`, `save_required`, `live_newer_than_disk`,
+`source_of_truth`, `discard_required`, `userforms_present`, `userform_count`,
+and `mode`; `session status` also keeps `running`, `workbook_open`, and
+`metadata` unchanged.
+
+Top-level `status` and `session status` add `coordination`. A successful
+observation always contains `busy` and `recovery_required`. Current owner fields
+`resource_scope`, `operation_kind`, `command`, `pid`, and `started_at` appear
+only when guarded OS-lock owner metadata is available. When
+`recovery_required=true`, nested `recovery` includes public `reason`,
+`operation`, `recorded_at`, optional `excel_pid`, and optional session ownership.
+Busy and recovery state are independent and may both be true briefly. The
+observation may change immediately and never authorizes a later operation.
+Probe failure omits the field and adds `coordination_status_unavailable` without
+changing status exit behavior. Recovery metadata failures are not reported as
+idle. Warning and hint objects contain `code` and `message`. `push`, `pull`,
+`run`, `save`, `session`, `macros`, `inspect`, `export-image`, `form build`,
+`form export-image`, and `edit` should use these fields to make workbook state
+explicit without removing the existing compatibility fields under `workbook`.
+
+### `recovery clear`
+
+`xlflow recovery clear` is the configured workbook's explicit marker-clear
+command. It acquires the normal workbook lease and performs a generation-checked
+clear. When no marker exists, it succeeds idempotently with
+`recovery.cleared=false`.
+
+With a marker, normal clear succeeds only when `excel_pid` was recorded and the
+operating system confirms that PID no longer exists. A live process, unknown
+PID, unavailable process check, or malformed marker returns
+`workbook_recovery_verification_failed` and preserves the marker.
+
+`recovery clear --force` removes the current marker without process
+verification. Human and JSON output must include a safety warning that the
+command does not terminate VBA, close Excel, repair the workbook, or prove that
+Excel-side mutation stopped. Success JSON adds:
+
+```json
+{
+  "recovery": {
+    "required": false,
+    "cleared": true,
+    "forced": true,
+    "workbook": "C:\\projects\\sample\\sample.xlsm"
+  },
+  "warnings": [
+    {
+      "code": "recovery_force_cleared",
+      "message": "The recovery marker was force-cleared. This did not terminate Excel or VBA and did not repair or verify workbook state."
+    }
+  ]
+}
+```
 
 ### `status`
 
 `xlflow status` is a read-only project-level command that aggregates project, source, workbook, and session state. It does not modify workbook files, source files, or `.xlflow/state`.
 
-`status` success results add top-level `project`, `session`, `state`, `warnings`, and `hints`. The `command` envelope field is `"status"`.
+`status` success results add top-level `project`, `session`, `state`,
+`coordination`, `warnings`, and `hints`. The `command` envelope field is
+`"status"`.
 
 `project` contains:
 
@@ -492,14 +608,22 @@ Workbook-state-aware commands may return top-level `target`, `session`, `warning
 - `src_paths` — array of resolved source directory paths (modules, classes, forms, workbook).
 - `project_name` — configured project name from `xlflow.toml`.
 
-`session` reuses the `session status` payload. When no session is active, `session` contains `active: false` and the command still succeeds. When a live session matches the configured workbook but the workbook dirty state cannot be inspected, `session.dirty` may be `null` rather than `false`; `session.save_required` remains the authoritative signal for unsaved changes.
+`session` reuses the `session status` payload. When no session is active,
+`session` contains `active: false` and the command still succeeds. When a live
+session matches the configured workbook but the workbook dirty state cannot be
+inspected, `session.dirty` may be `null` rather than `false`; outside recovery,
+`session.save_required` remains the authoritative signal for unsaved changes.
+During recovery, status does not access the uncertain workbook through COM and
+reports `session.dirty=null`, `session.source_of_truth="uncertain"`, and
+`session.discard_required=true`.
 
 `state` contains:
 
 - `src_newer_than_workbook` — true when any workbook-affecting source file (`.bas`, `.cls`, `.frm`, `.frx`, plus sidecar code) has an mtime newer than the saved workbook mtime.
 - `live_session_newer_than_disk` — reported by the session probe when a live session workbook differs from the saved file on disk.
 - `workbook_saved` — true when no live session workbook is open with unsaved changes.
-- `source_of_truth` — `"saved_workbook"`, `"live_workbook"`, or `"unknown"`.
+- `source_of_truth` — `"saved_workbook"`, `"live_workbook"`, `"unknown"`, or
+  `"uncertain"` while recovery is required.
 - `workbook_last_modified_at` — ISO 8601 mtime of the saved workbook file (omitted when the file is missing).
 - `latest_source_modified_at` — ISO 8601 mtime of the most recent workbook-affecting source file (omitted when no source files exist).
 - `push_state_last_modified_at` — ISO 8601 mtime of `.xlflow/state/push.json` (omitted when the file does not exist).
@@ -520,8 +644,15 @@ Success results add top-level `process` as an array of process objects. Each obj
 
 - `pid` — integer process ID.
 - `has_workbook` — boolean (`true` when at least one open workbook is confirmed, `false` when no workbook is confirmed, `null` when workbook state could not be determined).
+- `recovery_required` — true when a recovery marker identifies this PID as an
+  affected Excel process.
+- `workbook_probe_skipped` — true when xlflow deliberately avoided the COM
+  workbook probe because recovery is required.
 
 When no Excel processes are running, `process` is an empty array and the command still succeeds.
+For a PID referenced by recovery metadata, process list does not use COM to
+probe its workbooks; `has_workbook` is null so observation cannot re-enter the
+uncertain Excel instance.
 
 ### `process cleanup`
 
@@ -539,6 +670,19 @@ When no Excel processes are running, `process` is an empty array and the command
 - `mode` — `"pid"`, `"auto"`, or `"all"`.
 - `total` — number of targeted processes.
 - `results` — array of per-process objects, each containing `pid`, `terminated` (boolean), and `method` (`"graceful"`, `"force"`, `"none"`, or `"unknown"` when the process exited but the shutdown method could not be determined).
+
+Cleanup also evaluates recovery markers:
+
+- `<pid>` clears only markers whose `excel_pid` matches a result with
+  `terminated=true`.
+- `--auto` clears only known matching PIDs that it actually terminated.
+- `--all` may clear markers with no recorded PID only after cleanup succeeds and
+  a new enumeration confirms that no Excel process remains.
+
+Candidate workbook leases are acquired in stable identity order before cleanup,
+and each clear rechecks marker generation. Partial termination failures preserve
+the corresponding marker. Cleanup results add `recovery.cleared[]` and
+`recovery.count` when one or more markers were removed.
 
 `process cleanup` may return these error codes:
 
@@ -558,7 +702,15 @@ When no Excel processes are running, `process` is an empty array and the command
 - `0`: success
 - `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
 - `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
-- `3`: environment or operational failure, including workbook lock contention (`workbook_busy`, `workbook_busy_timeout`, `workbook_busy_cancelled`), Excel, COM, VBIDE, PowerShell, script execution failures, WSL delegation failures, and process enumeration/termination errors (`process_enumeration_failed`, `process_termination_failed`, `process_cleanup_failed`)
+- `3`: environment or operational failure, including workbook lock contention
+  (`workbook_busy`, `workbook_busy_timeout`, `workbook_busy_cancelled`),
+  workbook recovery (`workbook_recovery_required`,
+  `workbook_recovery_verification_failed`,
+  `workbook_recovery_publication_failed`,
+  `coordination_recovery_check_failed`), Excel, COM, VBIDE, PowerShell, script
+  execution failures, WSL delegation failures, and process
+  enumeration/termination errors (`process_enumeration_failed`,
+  `process_termination_failed`, `process_cleanup_failed`)
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

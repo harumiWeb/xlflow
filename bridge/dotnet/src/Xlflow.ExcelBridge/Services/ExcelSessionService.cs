@@ -73,7 +73,7 @@ public sealed class ExcelSessionService : ISessionService
             {
                 return BridgeResponse.Failed(request, new BridgeError(
                     Code: "session_poisoned",
-                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --discard --json` and start a fresh session.",
                     Phase: "session",
                     Source: "xlflow-excel-bridge",
                     HResult: poisoned.Metadata.HResult,
@@ -319,7 +319,7 @@ public sealed class ExcelSessionService : ISessionService
                             : "restart_session",
                         ["message"] = externalDiscard
                             ? "Close the workbook in Excel without saving, then start or attach a fresh xlflow session."
-                            : "Run `xlflow session stop --json`, then `xlflow session start --json` before reusing this workbook.",
+                            : "Run `xlflow session stop --discard --json`, then `xlflow session start --json` before reusing this workbook.",
                     });
                 }
                 extensions["warnings"] = warnings;
@@ -343,7 +343,7 @@ public sealed class ExcelSessionService : ISessionService
             {
                 return BridgeResponse.Failed(request, new BridgeError(
                     Code: "session_poisoned",
-                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --json` and start a fresh session.",
+                    Message: "The xlflow session was marked poisoned after an unsafe workbook or Excel COM failure. Run `xlflow session stop --discard --json` and start a fresh session.",
                     Phase: "session",
                     Source: "xlflow-excel-bridge",
                     HResult: poisoned.Metadata.HResult,
@@ -439,14 +439,64 @@ public sealed class ExcelSessionService : ISessionService
             }
 
             var externalOwner = string.Equals(metadata.Owner, "external", StringComparison.OrdinalIgnoreCase);
-            var discardUnsavedChanges = ShouldDiscardUnsavedChanges(metadata);
+            var discardRequired = ShouldDiscardUnsavedChanges(metadata);
+            if (RequiresExplicitDiscard(metadata, args.Discard))
+            {
+                return new BridgeResponse
+                {
+                    RequestId = request.RequestId,
+                    Command = request.Command,
+                    Status = BridgeStatus.Failed,
+                    Error = new BridgeError(
+                        Code: "session_discard_required",
+                        Message: "The poisoned session may contain unsafe unsaved workbook state. Retry session stop with Discard=true.",
+                        Phase: "session.stop",
+                        Source: "xlflow-excel-bridge",
+                        Details: new Dictionary<string, object?>
+                        {
+                            ["workbook_path"] = workbookPath,
+                            ["excel_pid"] = metadata.Pid,
+                            ["owner"] = metadata.Owner,
+                            ["poison_reason"] = metadata.PoisonReason,
+                        }),
+                    Recovery = BuildRecovery(
+                        required: true,
+                        reason: "session_discard_required",
+                        operation: "session stop",
+                        excelProcessId: metadata.Pid,
+                        cleanupConfirmed: false,
+                        sessionActive: true,
+                        sessionOwner: metadata.Owner),
+                };
+            }
+            var discardUnsavedChanges = args.Discard;
 
             excel = ExcelBridgeSupport.GetSessionExcel(args.MetadataPath);
             if (excel is null)
             {
-                ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
-                removedStaleMetadata = true;
-                return BuildStopResponse(request, workbookPath, false, removedStaleMetadata);
+                var cleanupConfirmed = !ExcelBridgeSupport.IsExcelProcessRunning(metadata.Pid);
+                if (!args.Discard || cleanupConfirmed)
+                {
+                    ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
+                    removedStaleMetadata = true;
+                }
+                return BuildStopResponse(
+                    request,
+                    workbookPath,
+                    false,
+                    removedStaleMetadata,
+                    excelProcessId: metadata.Pid,
+                    excelProcessExited: cleanupConfirmed,
+                    recovery: args.Discard
+                        ? BuildRecovery(
+                            required: !cleanupConfirmed,
+                            reason: cleanupConfirmed ? "managed_session_discarded" : "excel_cleanup_unconfirmed",
+                            operation: "session stop",
+                            excelProcessId: metadata.Pid,
+                            cleanupConfirmed,
+                            sessionActive: !cleanupConfirmed,
+                            sessionOwner: metadata.Owner)
+                        : null);
             }
             excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
 
@@ -456,9 +506,29 @@ public sealed class ExcelSessionService : ISessionService
             }
             catch (InvalidOperationException)
             {
-                ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
-                removedStaleMetadata = true;
-                return BuildStopResponse(request, workbookPath, false, removedStaleMetadata);
+                var cleanupConfirmed = !ExcelBridgeSupport.IsExcelProcessRunning(metadata.Pid);
+                if (!args.Discard || cleanupConfirmed)
+                {
+                    ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
+                    removedStaleMetadata = true;
+                }
+                return BuildStopResponse(
+                    request,
+                    workbookPath,
+                    false,
+                    removedStaleMetadata,
+                    excelProcessId: metadata.Pid,
+                    excelProcessExited: cleanupConfirmed,
+                    recovery: args.Discard
+                        ? BuildRecovery(
+                            required: !cleanupConfirmed,
+                            reason: cleanupConfirmed ? "managed_session_discarded" : "excel_cleanup_unconfirmed",
+                            operation: "session stop",
+                            excelProcessId: metadata.Pid,
+                            cleanupConfirmed,
+                            sessionActive: !cleanupConfirmed,
+                            sessionOwner: metadata.Owner)
+                        : null);
             }
 
             if (!discardUnsavedChanges)
@@ -477,23 +547,73 @@ public sealed class ExcelSessionService : ISessionService
                     false,
                     detachedExternal: true,
                     detachedDirty: wasDirtyKnown ? wasDirtyValue : null,
-                    unsafeChangesNotDiscarded: discardUnsavedChanges);
+                    unsafeChangesNotDiscarded: discardUnsavedChanges,
+                    recovery: discardUnsavedChanges
+                        ? BuildRecovery(
+                            required: true,
+                            reason: "external_session_detached",
+                            operation: "session stop",
+                            excelProcessId: excelProcessId,
+                            cleanupConfirmed: false,
+                            sessionActive: false,
+                            sessionOwner: "external")
+                        : null);
             }
             if (wasDirty && !discardUnsavedChanges)
             {
                 ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             }
 
-            ExcelBridgeSupport.CloseWorkbookAndQuitApplication(workbook, excel, excelProcessId);
+            var excelProcessExited = ExcelBridgeSupport.CloseWorkbookAndQuitApplicationAndConfirmExit(workbook, excel, excelProcessId);
             workbook = null;
             excel = null;
+            if (!excelProcessExited)
+            {
+                return new BridgeResponse
+                {
+                    RequestId = request.RequestId,
+                    Command = request.Command,
+                    Status = BridgeStatus.Failed,
+                    Error = new BridgeError(
+                        Code: "session_stop_cleanup_unconfirmed",
+                        Message: "The managed Excel session could not be confirmed stopped. Recovery remains required.",
+                        Phase: "session.stop",
+                        Source: "xlflow-excel-bridge",
+                        Details: new Dictionary<string, object?>
+                        {
+                            ["workbook_path"] = workbookPath,
+                            ["excel_pid"] = excelProcessId,
+                            ["discarded_unsaved_changes"] = discardUnsavedChanges,
+                        }),
+                    Recovery = BuildRecovery(
+                        required: true,
+                        reason: "excel_cleanup_unconfirmed",
+                        operation: "session stop",
+                        excelProcessId: excelProcessId,
+                        cleanupConfirmed: false,
+                        sessionActive: true,
+                        sessionOwner: "managed"),
+                };
+            }
             ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
             return BuildStopResponse(
                 request,
                 workbookPath,
                 wasDirty && !discardUnsavedChanges,
                 false,
-                discardedUnsavedChanges: discardUnsavedChanges);
+                discardedUnsavedChanges: discardUnsavedChanges,
+                excelProcessId: excelProcessId,
+                excelProcessExited: true,
+                recovery: discardUnsavedChanges
+                    ? BuildRecovery(
+                        required: false,
+                        reason: "managed_session_discarded",
+                        operation: "session stop",
+                        excelProcessId: excelProcessId,
+                        cleanupConfirmed: true,
+                        sessionActive: false,
+                        sessionOwner: "managed")
+                    : null);
         }
         catch (Exception ex)
         {
@@ -510,7 +630,7 @@ public sealed class ExcelSessionService : ISessionService
         }
     }
 
-    private static BridgeResponse BuildStopResponse(
+    internal static BridgeResponse BuildStopResponse(
         BridgeRequest request,
         string workbookPath,
         bool autoSavedOnStop,
@@ -518,7 +638,10 @@ public sealed class ExcelSessionService : ISessionService
         bool detachedExternal = false,
         bool? detachedDirty = false,
         bool discardedUnsavedChanges = false,
-        bool unsafeChangesNotDiscarded = false)
+        bool unsafeChangesNotDiscarded = false,
+        int excelProcessId = 0,
+        bool? excelProcessExited = null,
+        BridgeRecovery? recovery = null)
     {
         var logs = new List<string>();
         if (detachedExternal)
@@ -567,6 +690,14 @@ public sealed class ExcelSessionService : ISessionService
                 ["unsafe_changes_not_discarded"] = unsafeChangesNotDiscarded,
             },
         };
+        if (excelProcessId > 0 || excelProcessExited is not null)
+        {
+            extensions["excel_process"] = new Dictionary<string, object?>
+            {
+                ["pid"] = excelProcessId > 0 ? excelProcessId : null,
+                ["exited"] = excelProcessExited,
+            };
+        }
         if (autoSavedOnStop || (detachedExternal && detachedDirty != false) || discardedUnsavedChanges || unsafeChangesNotDiscarded)
         {
             extensions["warnings"] = new[]
@@ -595,12 +726,42 @@ public sealed class ExcelSessionService : ISessionService
             Command = request.Command,
             Logs = logs,
             Extensions = extensions,
+            Recovery = recovery,
+        };
+    }
+
+    internal static BridgeRecovery BuildRecovery(
+        bool required,
+        string reason,
+        string operation,
+        int excelProcessId,
+        bool cleanupConfirmed,
+        bool sessionActive,
+        string sessionOwner)
+    {
+        return new BridgeRecovery
+        {
+            Required = required,
+            Reason = reason,
+            Operation = operation,
+            ExcelProcessId = excelProcessId > 0 ? excelProcessId : null,
+            CleanupConfirmed = cleanupConfirmed,
+            Session = new BridgeRecoverySession
+            {
+                Active = sessionActive,
+                Owner = string.IsNullOrWhiteSpace(sessionOwner) ? "managed" : sessionOwner,
+            },
         };
     }
 
     internal static bool ShouldDiscardUnsavedChanges(SessionMetadata metadata)
     {
         return metadata.Poisoned && metadata.DiscardUnsavedChanges;
+    }
+
+    internal static bool RequiresExplicitDiscard(SessionMetadata metadata, bool discardRequested)
+    {
+        return ShouldDiscardUnsavedChanges(metadata) && !discardRequested;
     }
 
     internal static bool NeedsSaveForStatus(

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Services;
 using Xlflow.ExcelBridge.Windows;
+using Xlflow.ExcelBridge.Workers;
 
 namespace Xlflow.ExcelBridge.Tests;
 
@@ -552,6 +553,74 @@ public sealed class ExcelPushServiceTests
         Assert.Equal(backup.Path, payload["path"]);
         Assert.Equal("before-push", payload["reason"]);
         Assert.Equal("always", payload["mode"]);
+        Assert.NotNull(response.Recovery);
+        Assert.True(response.Recovery.Required);
+        Assert.Equal("excel_cleanup_unconfirmed", response.Recovery.Reason);
+        Assert.Equal("push", response.Recovery.Operation);
+        Assert.Equal(1234, response.Recovery.WorkerProcessId);
+        Assert.False(response.Recovery.CleanupConfirmed);
+        Assert.Equal("none", response.Recovery.Session.Owner);
+    }
+
+    [Fact]
+    public void BuildPushRecoveryPreservesExternalSessionOwnership()
+    {
+        var recovery = ExcelPushService.BuildPushRecovery(
+            "excel_com_state_uncertain",
+            excelProcessId: 1234,
+            workerProcessId: 5678,
+            sessionAttached: true,
+            sessionMode: "external");
+
+        Assert.True(recovery.Required);
+        Assert.Equal("excel_com_state_uncertain", recovery.Reason);
+        Assert.Equal(1234, recovery.ExcelProcessId);
+        Assert.Equal(5678, recovery.WorkerProcessId);
+        Assert.True(recovery.Session.Active);
+        Assert.Equal("external", recovery.Session.Owner);
+    }
+
+    [Fact]
+    public void BuildCompileFailureResponseClassifiesFatalComAsRecoveryRequired()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-compile-rpc",
+            Command = "push",
+        };
+        var invocation = new WorkerInvocationResult(
+            Result: new MacroRunWorkerResult(
+                Completed: true,
+                Ok: false,
+                Value: null,
+                Error: new MacroRunWorkerError(
+                    "The remote procedure call failed.",
+                    "Microsoft Excel",
+                    unchecked((int)0x800706BE),
+                    "compile_vba")),
+            Dialog: null,
+            Dialogs: [],
+            LocationCapture: new VbeSelectionCapture(null, []),
+            TimedOut: false,
+            WorkerProcessId: 5678);
+
+        var response = ExcelPushService.BuildCompileFailureResponse(
+            request,
+            PushArgs(backupMode: "never"),
+            @"C:\work\Book.xlsm",
+            sessionAttached: false,
+            sessionMode: "none",
+            backup: null,
+            invocation,
+            excelProcessId: 1234);
+
+        Assert.Equal("excel_com_rpc_failure", response.Error?.Code);
+        Assert.Equal("0x800706BE", response.Error?.HResult);
+        Assert.NotNull(response.Recovery);
+        Assert.Equal("excel_com_state_uncertain", response.Recovery.Reason);
+        Assert.Equal(1234, response.Recovery.ExcelProcessId);
+        Assert.Equal(5678, response.Recovery.WorkerProcessId);
     }
 
     [Fact]

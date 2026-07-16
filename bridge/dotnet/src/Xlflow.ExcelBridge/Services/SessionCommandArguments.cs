@@ -5,4 +5,5 @@ public sealed record SessionCommandArguments(
     string WorkbookPath,
     string MetadataPath,
     bool Visible,
-    bool UseSession);
+    bool UseSession,
+    bool Discard);

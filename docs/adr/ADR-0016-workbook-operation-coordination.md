@@ -125,4 +125,5 @@ The detailed policy and identity contracts live in
 - `docs/adr/ADR-0008-dotnet-excel-bridge.md`
 - `docs/adr/ADR-0009-bridge-provider-contract.md`
 - `docs/adr/ADR-0011-wsl-windows-cli-delegation.md`
+- `docs/adr/ADR-0020-workbook-recovery-quarantine.md`
 - xlflow issues #311, #318, and #319

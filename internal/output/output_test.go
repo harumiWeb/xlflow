@@ -1353,6 +1353,46 @@ func TestWriteWithOptionsSerializesTopLevelSessionCoordination(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersWorkbookRecoveryState(t *testing.T) {
+	env := New("session")
+	env.Session = map[string]any{"running": false, "source_of_truth": "uncertain"}
+	env.Coordination = map[string]any{
+		"busy":              false,
+		"recovery_required": true,
+		"recovery": map[string]any{
+			"reason":    "vba_may_still_be_running",
+			"operation": "run",
+			"excel_pid": 24680,
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Recovery:", "REQUIRED", "Recovery reason:", "vba_may_still_be_running", "Previous operation:", "run", "Affected Excel PID:", "24680"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("recovery output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersRecoveryClearWarning(t *testing.T) {
+	env := New("recovery clear")
+	env.Recovery = map[string]any{"required": false, "cleared": true, "forced": true, "workbook": `C:\project\Book.xlsm`}
+	env.Warnings = []map[string]any{{"code": "recovery_force_cleared", "message": "Excel and VBA were not stopped."}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Marker cleared:", "true", "Force cleared:", `C:\project\Book.xlsm`, "Excel and VBA were not stopped."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("recovery clear output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsRendersUnknownUserFormsState(t *testing.T) {
 	env := New("session")
 	env.Session = map[string]any{"running": true, "workbook_open": true, "userforms_known": false}

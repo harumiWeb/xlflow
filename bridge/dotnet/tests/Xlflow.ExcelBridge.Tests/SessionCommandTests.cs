@@ -18,6 +18,7 @@ public sealed class SessionCommandTests
             Assert.Equal(@"C:\work\.xlflow\session.json", args.MetadataPath);
             Assert.True(args.Visible);
             Assert.False(args.UseSession);
+            Assert.True(args.Discard);
             return BridgeResponse.Ok(request);
         });
 
@@ -27,7 +28,7 @@ public sealed class SessionCommandTests
             ProtocolVersion = ProtocolVersion.Current,
             RequestId = "req-session",
             Command = "session",
-            Payload = JsonDocument.Parse("""{"Action":"start","WorkbookPath":"C:\\work\\Book.xlsm","MetadataPath":"C:\\work\\.xlflow\\session.json","Visible":"true","UseSession":"false"}""").RootElement.Clone(),
+            Payload = JsonDocument.Parse("""{"Action":"start","WorkbookPath":"C:\\work\\Book.xlsm","MetadataPath":"C:\\work\\.xlflow\\session.json","Visible":"true","UseSession":"false","Discard":"true"}""").RootElement.Clone(),
         };
 
         var response = command.Handle(request, CancellationToken.None);
@@ -193,6 +194,8 @@ public sealed class SessionCommandTests
             Assert.True(metadata.Poisoned);
             Assert.True(metadata.DiscardUnsavedChanges);
             Assert.True(ExcelSessionService.ShouldDiscardUnsavedChanges(metadata));
+            Assert.True(ExcelSessionService.RequiresExplicitDiscard(metadata, discardRequested: false));
+            Assert.False(ExcelSessionService.RequiresExplicitDiscard(metadata, discardRequested: true));
         }
         finally
         {
@@ -259,6 +262,77 @@ public sealed class SessionCommandTests
             ExcelBridgeSupport.RunPhase("open_workbook", () => throw new SessionPoisonedException(metadata)));
 
         Assert.Equal("0x800706BE", ex.Metadata.HResult);
+    }
+
+    [Fact]
+    public void ManagedDiscardStopReportsConfirmedRecoveryAndExcelExit()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-session-stop-discard",
+            Command = "session",
+        };
+        var recovery = ExcelSessionService.BuildRecovery(
+            required: false,
+            reason: "managed_session_discarded",
+            operation: "session stop",
+            excelProcessId: 4321,
+            cleanupConfirmed: true,
+            sessionActive: false,
+            sessionOwner: "managed");
+
+        var response = ExcelSessionService.BuildStopResponse(
+            request,
+            @"C:\work\Book.xlsm",
+            autoSavedOnStop: false,
+            removedStaleMetadata: false,
+            discardedUnsavedChanges: true,
+            excelProcessId: 4321,
+            excelProcessExited: true,
+            recovery: recovery);
+        using var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.False(json.RootElement.GetProperty("recovery").GetProperty("required").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("recovery").GetProperty("cleanup_confirmed").GetBoolean());
+        Assert.Equal(4321, json.RootElement.GetProperty("excel_process").GetProperty("pid").GetInt32());
+        Assert.True(json.RootElement.GetProperty("excel_process").GetProperty("exited").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("workbook").GetProperty("discarded_unsaved_changes").GetBoolean());
+    }
+
+    [Fact]
+    public void ExternalDiscardDetachKeepsRecoveryRequired()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-session-stop-external",
+            Command = "session",
+        };
+        var recovery = ExcelSessionService.BuildRecovery(
+            required: true,
+            reason: "external_session_detached",
+            operation: "session stop",
+            excelProcessId: 4321,
+            cleanupConfirmed: false,
+            sessionActive: false,
+            sessionOwner: "external");
+
+        var response = ExcelSessionService.BuildStopResponse(
+            request,
+            @"C:\work\Book.xlsm",
+            autoSavedOnStop: false,
+            removedStaleMetadata: false,
+            detachedExternal: true,
+            detachedDirty: true,
+            unsafeChangesNotDiscarded: true,
+            recovery: recovery);
+        using var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.True(json.RootElement.GetProperty("recovery").GetProperty("required").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("recovery").GetProperty("cleanup_confirmed").GetBoolean());
+        Assert.Equal("external", json.RootElement.GetProperty("recovery").GetProperty("session").GetProperty("owner").GetString());
+        Assert.True(json.RootElement.GetProperty("workbook").GetProperty("unsafe_changes_not_discarded").GetBoolean());
     }
 
     private sealed class FakeSessionService(Func<BridgeRequest, SessionCommandArguments, BridgeResponse> handler) : ISessionService

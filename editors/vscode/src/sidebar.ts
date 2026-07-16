@@ -366,7 +366,7 @@ class ProjectTreeProvider implements vscode.TreeDataProvider<ProjectNode> {
     const configuredWorkbookPath = await configuredWorkbook(state);
     const workbookPath = workbookPathFromSession(snapshot.session) ?? configuredWorkbookPath;
     const workbookLabel = workbookDisplayName(snapshot.session) ?? configuredWorkbookPath;
-    const saveRequired = snapshot.session?.save_required === true;
+    const saveRequired = snapshot.state !== "recovery" && snapshot.session?.save_required === true;
     const nodes: ProjectNode[] = [
       {
         kind: "project",
@@ -1221,6 +1221,8 @@ function sessionDescription(state: SessionState): string {
       return vscode.l10n.t("Starting");
     case "stopping":
       return vscode.l10n.t("Stopping");
+    case "recovery":
+      return vscode.l10n.t("Recovery required");
     case "unknown":
       return vscode.l10n.t("Unknown");
   }
@@ -1231,6 +1233,7 @@ function sessionIcon(state: SessionState): vscode.ThemeIcon {
     case "active":
       return new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor("testing.iconPassed"));
     case "error":
+    case "recovery":
       return new vscode.ThemeIcon("warning");
     default:
       return new vscode.ThemeIcon("circle-outline");

@@ -68,6 +68,57 @@ internal static class BridgePayload
         var value = GetString(payload, name);
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
     }
+
+    public static IReadOnlySet<int> GetIntSet(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return new HashSet<int>();
+        }
+
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.Array)
+            {
+                return ParseIntSet(property.Value);
+            }
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                try
+                {
+                    using var json = JsonDocument.Parse(property.Value.GetString() ?? "");
+                    return json.RootElement.ValueKind == JsonValueKind.Array
+                        ? ParseIntSet(json.RootElement)
+                        : new HashSet<int>();
+                }
+                catch (JsonException)
+                {
+                    return new HashSet<int>();
+                }
+            }
+
+            return new HashSet<int>();
+        }
+
+        return new HashSet<int>();
+    }
+
+    private static HashSet<int> ParseIntSet(JsonElement array)
+    {
+        return array.EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var number)
+                ? number
+                : int.TryParse(item.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number)
+                    ? number
+                    : 0)
+            .Where(number => number > 0)
+            .ToHashSet();
+    }
 }
 
 internal sealed record SessionMetadata(
@@ -635,14 +686,18 @@ internal static class ExcelBridgeSupport
         return sawWorkbookFreeState ? false : null;
     }
 
-    public static List<ExcelProcessInfo> GetExcelProcesses()
+    public static List<ExcelProcessInfo> GetExcelProcesses(IReadOnlySet<int>? skipWorkbookProbePids = null)
     {
         return Process.GetProcessesByName("EXCEL")
             .Select(process =>
             {
                 try
                 {
-                    return new ExcelProcessInfo(process.Id, GetWorkbookStateByProcessId(process.Id));
+                    return new ExcelProcessInfo(
+                        process.Id,
+                        ShouldProbeWorkbook(process.Id, skipWorkbookProbePids)
+                            ? GetWorkbookStateByProcessId(process.Id)
+                            : null);
                 }
                 finally
                 {
@@ -651,6 +706,11 @@ internal static class ExcelBridgeSupport
             })
             .OrderBy(process => process.ProcessId)
             .ToList();
+    }
+
+    internal static bool ShouldProbeWorkbook(int processId, IReadOnlySet<int>? skipWorkbookProbePids)
+    {
+        return skipWorkbookProbePids is null || !skipWorkbookProbePids.Contains(processId);
     }
 
     public static object? TryGetExcelByProcessId(int processId)
@@ -1478,6 +1538,16 @@ internal static class ExcelBridgeSupport
 
     public static void CloseWorkbookAndQuitApplication(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
     {
+        _ = CloseWorkbookAndQuitApplicationCore(workbook, excel, ownedProcess);
+    }
+
+    public static bool CloseWorkbookAndQuitApplicationAndConfirmExit(object? workbook, object? excel, int ownedProcessId)
+    {
+        return CloseWorkbookAndQuitApplicationCore(workbook, excel, CaptureOwnedExcelProcess(ownedProcessId));
+    }
+
+    private static bool CloseWorkbookAndQuitApplicationCore(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
+    {
         if (workbook is not null)
         {
             try
@@ -1508,7 +1578,7 @@ internal static class ExcelBridgeSupport
         }
 
         CollectComGarbage();
-        EnsureOwnedExcelProcessExited(ownedProcess);
+        return EnsureOwnedExcelProcessExited(ownedProcess);
     }
 
     public static void CollectComGarbage()
@@ -1551,11 +1621,11 @@ internal static class ExcelBridgeSupport
         }
     }
 
-    private static void EnsureOwnedExcelProcessExited(OwnedExcelProcess ownedProcess)
+    private static bool EnsureOwnedExcelProcessExited(OwnedExcelProcess ownedProcess)
     {
         if (ownedProcess.ProcessId <= 0)
         {
-            return;
+            return false;
         }
 
         try
@@ -1563,20 +1633,67 @@ internal static class ExcelBridgeSupport
             using var process = Process.GetProcessById(ownedProcess.ProcessId);
             if (process.WaitForExit(1500))
             {
-                return;
+                return true;
             }
 
             if (!IsSameOwnedExcelProcess(process, ownedProcess))
             {
-                return;
+                return true;
             }
 
             process.Kill(entireProcessTree: true);
-            _ = process.WaitForExit(3000);
+            return process.WaitForExit(3000);
+        }
+        catch (ArgumentException)
+        {
+            return true;
         }
         catch
         {
             // The process may already have exited, or Windows may refuse termination.
+            return !IsExcelProcessRunning(ownedProcess.ProcessId);
+        }
+    }
+
+    public static bool IsExcelProcessRunning(int processId)
+    {
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            string processName;
+            try
+            {
+                processName = process.ProcessName;
+            }
+            catch
+            {
+                return true;
+            }
+            if (!string.Equals(processName, "EXCEL", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            try
+            {
+                return !process.HasExited;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch
+        {
+            return true;
         }
     }
 

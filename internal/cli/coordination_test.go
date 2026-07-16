@@ -545,6 +545,74 @@ func TestWorkbookCoordinationTimeoutDoesNotCoverHandlerRuntime(t *testing.T) {
 	}
 }
 
+func TestWorkbookRecoveryBlocksWithoutWaitingAndDoesNotRunHandler(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows LockFileEx coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewWorkbookIdentity(rootDir, filepath.Join(rootDir, "book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
+		Identity:      identity,
+		Command:       "run",
+		OperationKind: coordination.OperationExecute,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.PublishRecovery(coordination.RecoveryPublication{
+		Reason:    "vba_may_still_be_running",
+		Operation: "run",
+		ExcelPID:  12345,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	a := &app{
+		cwd:          rootDir,
+		json:         true,
+		wait:         true,
+		waitTimeout:  5 * time.Second,
+		stdout:       &stdout,
+		stderr:       &stderr,
+		coordination: manager,
+	}
+	runs := 0
+	err = a.withWorkbookCoordination(context.Background(), "push", []string{identity.CanonicalPath}, func() error {
+		runs++
+		return nil
+	})
+	if output.ExitCode(err) != output.ExitEnvironment || runs != 0 {
+		t.Fatalf("err=%v exit=%d runs=%d", err, output.ExitCode(err), runs)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error == nil || env.Error.Code != coordination.WorkbookRecoveryRequiredCode || env.Error.Phase != "coordination.recovery" {
+		t.Fatalf("error = %#v", env.Error)
+	}
+	details, ok := env.Error.Details.(map[string]any)
+	if !ok || details["reason"] != "vba_may_still_be_running" || details["retryable"] != false || details["wait_will_resolve"] != false {
+		t.Fatalf("details = %#v", env.Error.Details)
+	}
+	if strings.Contains(stderr.String(), "Waiting up to") {
+		t.Fatalf("recovery unexpectedly entered wait path: %s", stderr.String())
+	}
+}
+
 func setupHeldCoordinationLock(t *testing.T, command coordination.CommandID) (string, *coordination.Manager, coordination.WorkbookIdentity, *coordination.Lease) {
 	t.Helper()
 	rootDir := t.TempDir()

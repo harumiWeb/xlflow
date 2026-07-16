@@ -1,12 +1,13 @@
 # Workbook Operation Coordination
 
 This spec defines the command-policy, canonical workbook-identity,
-cross-process lock, and owner-metadata contracts used by workbook operation
-coordination. Public waiting options and coordination status output build on
-these contracts.
+cross-process lock, owner-metadata, and recovery-quarantine contracts used by
+workbook operation coordination. Public waiting options and coordination status
+output build on these contracts.
 
 See ADR-0016 for the policy and identity rationale and ADR-0018 for the Windows
-lock and metadata decisions.
+lock and metadata decisions. ADR-0020 defines recovery quarantine after
+indeterminate Excel termination.
 
 ## Command Policy Contract
 
@@ -17,19 +18,27 @@ hardcoded workbook-command lists.
 
 The policy vocabulary is:
 
-| Field                 | Values                                  | Meaning                                                                        |
-| --------------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| `resource_scope`      | `none`, `workbook`, `excel_instance`    | Smallest resource boundary required by the operation.                          |
-| `operation_kind`      | `read`, `mutate`, `execute`, `designer` | The operation's highest-risk behavior.                                         |
-| `parallel_safe`       | boolean                                 | Whether the operation may proceed without exclusive coordination at its scope. |
-| `retryable_when_busy` | boolean                                 | Whether a future caller may opt into retrying after resource contention.       |
-| `default_wait_policy` | `fail`, `wait`                          | Whether acquisition should fail immediately or wait by default.                |
+| Field                 | Values                                          | Meaning                                                                        |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| `resource_scope`      | `none`, `workbook`, `excel_instance`            | Smallest resource boundary required by the operation.                          |
+| `operation_kind`      | `read`, `mutate`, `execute`, `designer`         | The operation's highest-risk behavior.                                         |
+| `parallel_safe`       | boolean                                         | Whether the operation may proceed without exclusive coordination at its scope. |
+| `retryable_when_busy` | boolean                                         | Whether a future caller may opt into retrying after resource contention.       |
+| `default_wait_policy` | `fail`, `wait`                                  | Whether acquisition should fail immediately or wait by default.                |
+| `recovery_behavior`   | `not_applicable`, `block`, `observe`, `recover` | How the command behaves when workbook recovery is required.                    |
 
 All policies use `default_wait_policy: fail`. Callers may opt into bounded
 waiting through the public CLI contract below. A resource operation is retryable only when it is non-parallel-safe
 and retrying after contention is meaningful. `parallel_safe: true` means that the
 operation does not need exclusive acquisition at its declared scope; it does not
 introduce a shared read-lock mode.
+
+Every descriptor must also declare `recovery_behavior`; there is no permissive
+zero value. `not_applicable` is limited to operations that do not address unsafe
+workbook or Excel state. `block` requires a lease-scoped marker check before the
+command body starts. `observe` permits metadata-only status or process
+observation. `recover` permits an explicit recovery operation while preserving
+normal lock serialization.
 
 When flags can change a command's risk, the descriptor uses the most restrictive
 behavior supported by that executable command unless the registry has an explicit
@@ -57,8 +66,8 @@ cannot mutate the authoritative definitions.
 
 An executable CLI command or bridge invocation without an explicit matching
 descriptor returns a typed policy lookup failure. The CLI error code is
-`coordination_policy_missing`. There is no implicit `resource_scope: none` or
-other permissive fallback.
+`coordination_policy_missing`. There is no implicit `resource_scope: none`,
+`recovery_behavior: not_applicable`, or other permissive fallback.
 
 Coverage tests enumerate executable Cobra leaves and used bridge command/action
 selectors. Adding a command without adding its policy must fail those tests.
@@ -68,25 +77,34 @@ selectors. Adding a command without adding its policy must fail those tests.
 The registry classifies commands conservatively:
 
 - Source-only operations such as lint, format, analyze, LSP, source inspection,
-  `test list`, and `form new` use `resource_scope: none`.
+  `test list`, and `form new` use `resource_scope: none` and
+  `recovery_behavior: not_applicable`.
 - Workbook inspection and synchronization reads, including pull, init, macro and
   form listing, formula pull, workbook diff, and workbook/sheet/range inspection, use
-  `resource_scope: workbook`, `operation_kind: read`, and are not parallel-safe.
+  `resource_scope: workbook`, `operation_kind: read`, are not parallel-safe, and
+  use `recovery_behavior: block`.
 - Workbook creation and mutation, including new, push, rollback, save, session
   start/stop, runner changes, pack artifact generation, and worksheet/cell/UI edits, use
   `resource_scope: workbook`, `operation_kind: mutate`, and are not parallel-safe.
+  Normal mutation commands use `recovery_behavior: block`; `session stop` is
+  recovery-capable so it can discard an unsafe managed session.
 - VBA run and test use `resource_scope: workbook`, `operation_kind: execute`, and
-  are not parallel-safe.
+  are not parallel-safe. Executing variants use `recovery_behavior: block`;
+  source-only `test list` remains not applicable.
 - UserForm migration, snapshot, build, specification application, image export,
   and Designer inspection use `resource_scope: workbook`,
-  `operation_kind: designer`, and are not parallel-safe.
+  `operation_kind: designer`, are not parallel-safe, and use
+  `recovery_behavior: block`.
 - Top-level status and session status are read-only observers. They use
   `resource_scope: workbook`, `operation_kind: read`, and `parallel_safe: true`
-  so they can report a future busy state without first waiting for that state to
-  clear.
+  with `recovery_behavior: observe` so they can report busy and recovery state
+  without first waiting for either state to clear.
 - Environment checks, active-workbook attachment, and Excel process cleanup use
   `resource_scope: excel_instance` when they inspect or mutate state broader than
-  one configured workbook.
+  one configured workbook. Process list observes recovery metadata, while
+  process cleanup is recovery-capable. Attachment remains blocked when it would
+  access a quarantined workbook.
+- `recovery clear` uses workbook scope and `recovery_behavior: recover`.
 
 ### UserForm and Designer Coverage
 
@@ -103,8 +121,10 @@ this includes Designer inspection plus sidecar/spec writes; for build and push
 it includes VBIDE mutation, `.frm`/`.frx` synchronization, save/restore, and
 cleanup. Direct Runner calls for `form-write`, `inspect-form`,
 `form-export-image`, list/forms, pull, and push resolve the same central
-descriptors before starting a bridge provider. CLI-owned Runner calls skip the
-second acquisition only while the outer lease remains held.
+descriptors before starting a bridge provider. CLI-owned Runner calls receive a
+borrowed `LeaseSet` from the outer command rather than bypassing coordination.
+Direct Runner calls acquire their own leases. Both paths use the same
+lease-scoped recovery check and publication API.
 
 `form.new`, source rename, and source delete remain `resource_scope: none` and
 do not open or lock a workbook. Their later workbook application occurs through
@@ -299,6 +319,184 @@ Metadata may remain after a crash, but the operating-system lock does not. A new
 owner can therefore acquire immediately and supersede stale data. Readers never
 report stale data as current solely because the metadata file exists.
 
+## Workbook Recovery Metadata
+
+Recovery metadata represents an unresolved safety condition after xlflow can no
+longer prove that Excel, VBA, COM automation, or bridge-side cleanup finished.
+It is stored beside the lock and owner metadata as
+`<LockID>.recovery.json`:
+
+```json
+{
+  "schema_version": 1,
+  "generation": "recovery-specific-random-token",
+  "workbook": "C:\\projects\\sample\\sample.xlsm",
+  "reason": "vba_may_still_be_running",
+  "operation": "run",
+  "xlflow_pid": 12345,
+  "recorded_at": "2026-07-16T09:30:00Z",
+  "session": {
+    "active": true,
+    "owner": "managed"
+  },
+  "excel_pid": 23456,
+  "worker_pid": 34567
+}
+```
+
+`generation` is created for each publication and is used for
+compare-and-delete clearing. `workbook` must match the canonical identity
+associated with the filename. `recorded_at` is UTC. `excel_pid`, `worker_pid`,
+and session data are optional when the uncertain boundary could not observe
+them. Suggested actions are derived at response time and are not persisted.
+
+The file is diagnostic state and never an ownership lock. Its existence does
+not make `busy` true, affect owner metadata, or prevent a process from acquiring
+the normal operation byte range.
+
+### Publication and Read Contract
+
+Recovery publication occurs only for explicitly classified indeterminate
+outcomes after Excel-side work may have begun. Examples include:
+
+- `vba_may_still_be_running`;
+- bridge or child-worker timeout during Excel/VBA execution or VBE compile;
+- fatal COM/RPC failure after Excel activity began;
+- failed or deliberately skipped cleanup that cannot prove Excel is idle;
+- a poisoned session whose unsaved state requires discard; and
+- outer provider timeout, abnormal termination, or invalid bridge response after
+  the provider began workbook work.
+
+Argument validation, source preflight, lock contention, ordinary cancellation
+before Excel starts, and other failures known to occur before workbook work do
+not publish recovery state.
+
+The uncertain operation holds the normal workbook lease while atomically
+replacing the recovery file. Publication happens before owner cleanup and lease
+release. If publication fails, xlflow returns
+`workbook_recovery_publication_failed`, retains the original uncertain error in
+details, and gives emergency guidance to stop Excel manually.
+
+Recovery reads and writes use the metadata publication guard. A command with
+`recovery_behavior: block` acquires its normal lease, reads the marker, and
+enters the command body only when no marker exists. A storage or read failure
+returns `coordination_recovery_check_failed` and fails closed.
+
+Malformed JSON, unsupported schema, filename/identity mismatch, or otherwise
+untrustworthy metadata is represented as
+`reason: "recovery_metadata_invalid"` and blocks unsafe operations. Invalid
+metadata is not silently deleted.
+
+### Recovery Diagnostic Contract
+
+Blocked commands return operational exit code `3` with phase
+`coordination.recovery`:
+
+```json
+{
+  "status": "failed",
+  "command": "push",
+  "error": {
+    "code": "workbook_recovery_required",
+    "message": "The workbook is in an uncertain Excel state after a previous operation. Explicit recovery is required before this command can run; --wait will not resolve it.",
+    "source": "xlflow",
+    "phase": "coordination.recovery",
+    "details": {
+      "workbook": "C:\\projects\\sample\\sample.xlsm",
+      "operation": "run",
+      "reason": "vba_may_still_be_running",
+      "recorded_at": "2026-07-16T09:30:00Z",
+      "retryable": false,
+      "wait_will_resolve": false,
+      "recovery_actions": [
+        "xlflow session stop --discard",
+        "xlflow process cleanup 23456",
+        "xlflow recovery clear",
+        "xlflow recovery clear --force"
+      ]
+    }
+  },
+  "logs": []
+}
+```
+
+The current command's operation is not substituted for the previous
+`operation` that caused quarantine. Human output identifies the prior operation
+when known, states that `--wait` does not resolve the condition, and recommends
+only actions appropriate for the recorded session owner and process data.
+
+An uncertain operation that successfully publishes its marker retains its
+primary operation failure and adds top-level recovery data:
+
+```json
+{
+  "recovery": {
+    "required": true,
+    "published": true,
+    "reason": "vba_may_still_be_running",
+    "operation": "run",
+    "recorded_at": "2026-07-16T09:30:00Z",
+    "excel_pid": 23456,
+    "worker_pid": 34567,
+    "session": {
+      "active": true,
+      "owner": "managed"
+    }
+  }
+}
+```
+
+`excel_pid`, `worker_pid`, and `session` are omitted when unknown or inactive.
+
+### Clearing Contract
+
+Recovery state is cleared only while holding the normal workbook lease and only
+when the generation still matches the marker that the recovery operation
+examined.
+
+- `recovery clear` is idempotent when no marker exists. With a marker, it clears
+  only when `excel_pid` was recorded and the operating system confirms that PID
+  no longer exists. A live, unknown, or unverifiable PID returns
+  `workbook_recovery_verification_failed`.
+- `recovery clear --force` removes the current generation without process
+  verification and emits a mandatory safety warning. It does not stop Excel or
+  VBA and does not repair or validate workbook contents.
+- A managed `session stop --discard` clears the marker only after closing
+  without saving and confirming the owned Excel process ended. Plain
+  `session stop` and session save remain blocked during recovery.
+- An external session stop detaches xlflow metadata but does not close the
+  user's workbook or clear recovery state.
+- `process cleanup <pid>` clears only matching markers for results with
+  `terminated: true`.
+- `process cleanup --auto` clears only markers for known PIDs that it actually
+  terminated.
+- `process cleanup --all` may also clear markers without an Excel PID only when
+  cleanup completes and a new enumeration proves that no Excel processes remain.
+
+Process cleanup enumerates candidate markers, acquires their workbook leases in
+stable LockID order, performs cleanup, then generation-checks each clear. Partial
+process failures leave the corresponding marker intact. Successful cleanup for
+one workbook does not clear another marker merely because both were observed in
+the same command.
+
+## Recovery-Aware Command Start
+
+A non-parallel-safe workbook operation follows this serialized sequence:
+
+1. Resolve canonical workbook identities.
+2. Acquire every required operation lease in stable LockID order.
+3. Check recovery state for every target under the held leases.
+4. If any target is blocked or unreadable, release all acquired leases in
+   reverse order without entering the command body.
+5. Run the command.
+6. If the outcome is explicitly uncertain, publish recovery state before
+   releasing the lease.
+7. Clear matching owner metadata and release leases normally.
+
+Different workbook identities remain independent. Direct Runner and CLI
+invocations both follow this sequence. WSL delegates the full invocation and
+uses the Windows-side state directory; it does not create a Linux marker.
+
 ## Busy Diagnostic Contract
 
 Immediate contention returns `workbook_busy`. JSON output uses the standard CLI
@@ -351,23 +549,55 @@ wait timeout, and map to operational exit code `3`. The underlying workbook
 operation is never retried. Polling is cancellation-aware but does not guarantee
 FIFO ordering.
 
-## Session Status Observation
+Waiting ends when the operating-system lease is acquired. The command then
+performs its recovery check once and returns `workbook_recovery_required`
+immediately if quarantine is present. Recovery state is not contention, is not
+retryable, and does not consume or extend the wait timeout.
 
-`session status` observes the configured workbook identity through
-`Manager.Probe` before calling the Excel bridge. It never infers ownership from
-session metadata or the owner metadata file alone. The top-level result is
-`coordination: {"busy": false}` when the OS lock is free and
-`coordination: {"busy": true}` when it is held but guarded owner metadata is
-unavailable. When current owner metadata is available, the object additionally
-contains `resource_scope`, `operation_kind`, `command`, `pid`, and an RFC 3339
-UTC `started_at`. Internal generation, schema, workbook-path, and argv fields
-are not exposed.
+## Status Observation
+
+Top-level `status` and `session status` observe the configured workbook identity
+through a combined coordination observation. They never infer ownership from
+session metadata, owner metadata, or recovery metadata alone. The top-level
+result always distinguishes active ownership from quarantine:
+
+```json
+{
+  "coordination": {
+    "busy": false,
+    "recovery_required": true,
+    "recovery": {
+      "reason": "vba_may_still_be_running",
+      "operation": "run",
+      "recorded_at": "2026-07-16T09:30:00Z",
+      "excel_pid": 23456
+    }
+  }
+}
+```
+
+`busy` reflects only the OS operation lock. When current owner metadata is
+available, the object also contains `resource_scope`, `operation_kind`,
+`command`, `pid`, and RFC 3339 UTC `started_at`. `recovery_required` reflects
+the marker independently; both fields can briefly be true while a failing
+operation publishes quarantine or a recovery operation is running. Public
+status omits marker generation, schema, internal filenames, worker PID, and
+canonical-path storage details. It may include the recorded session owner when
+the uncertain operation used a session.
 
 The observation represents command-start state and may change before the
 status response is returned. It is advisory and does not reserve the workbook;
 later commands must still rely on normal CLI lock acquisition. If identity,
 manager, or lock probing fails, session status preserves its bridge result,
 omits `coordination`, and adds warning `coordination_status_unavailable`.
+Recovery metadata failures are not reported as idle.
+
+While recovery is required, status must not call unsafe workbook COM APIs. It
+combines recovery metadata, project-local session metadata, and process liveness.
+Unknown live fields remain unknown: session dirty state is null/unknown,
+`source_of_truth` is `uncertain`, and `discard_required` is true. `process list`
+similarly avoids workbook COM probes for recorded affected PIDs and returns
+`has_workbook: null` plus `recovery_required: true`.
 
 ## Out of Scope for This Version
 

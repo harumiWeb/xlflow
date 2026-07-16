@@ -17,7 +17,7 @@ public sealed class ExcelProcessService : IProcessService
         {
             return args.Action switch
             {
-                "list" => List(request),
+                "list" => List(request, args),
                 "cleanup" => Cleanup(request, args),
                 _ => BridgeResponse.Failed(request, new BridgeError("process_args_invalid", "Action must be list or cleanup", "process", "xlflow")),
             };
@@ -32,15 +32,11 @@ public sealed class ExcelProcessService : IProcessService
         }
     }
 
-    private static BridgeResponse List(BridgeRequest request)
+    private static BridgeResponse List(BridgeRequest request, ProcessCommandArguments args)
     {
-        var processes = ExcelBridgeSupport.GetExcelProcesses()
+        var processes = ExcelBridgeSupport.GetExcelProcesses(args.SkipWorkbookProbePids)
             .OrderBy(item => item.ProcessId)
-            .Select(item => new Dictionary<string, object?>
-            {
-                ["pid"] = item.ProcessId,
-                ["has_workbook"] = item.HasWorkbook,
-            })
+            .Select(item => BuildProcessListItem(item, args.SkipWorkbookProbePids))
             .ToArray();
 
         var logs = processes.Length == 0
@@ -56,6 +52,20 @@ public sealed class ExcelProcessService : IProcessService
             {
                 ["process"] = processes,
             },
+        };
+    }
+
+    internal static Dictionary<string, object?> BuildProcessListItem(
+        ExcelProcessInfo process,
+        IReadOnlySet<int> skipWorkbookProbePids)
+    {
+        var recoveryRequired = skipWorkbookProbePids.Contains(process.ProcessId);
+        return new Dictionary<string, object?>
+        {
+            ["pid"] = process.ProcessId,
+            ["has_workbook"] = process.HasWorkbook,
+            ["workbook_probe_skipped"] = recoveryRequired,
+            ["recovery_required"] = recoveryRequired,
         };
     }
 

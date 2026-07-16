@@ -438,6 +438,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   }
   assert.strictEqual(sessionStatusText("inactive"), "$(circle-slash) xlflow: No Session");
   assert.strictEqual(sessionStatusText("active"), "$(check) xlflow: Session Active");
+  assert.strictEqual(sessionStatusText("recovery"), "$(warning) xlflow: Recovery Required");
   assert.ok(
     sessionQuickPickItems("inactive").some((item) => item.action === "attach"),
     "inactive session QuickPick should offer attach",
@@ -445,6 +446,25 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.ok(
     sessionQuickPickItems("active").some((item) => item.action === "attach"),
     "active session QuickPick should offer attach",
+  );
+  const managedRecoveryItems = sessionQuickPickItems("recovery", "managed");
+  assert.ok(
+    managedRecoveryItems.some((item) => item.action === "stopDiscard"),
+    "managed recovery QuickPick should offer session discard",
+  );
+  assert.ok(
+    managedRecoveryItems.some((item) => item.action === "clearRecovery"),
+    "recovery QuickPick should offer verified clear",
+  );
+  assert.ok(
+    !managedRecoveryItems.some(
+      (item) => item.action === "clearRecovery" && item.description?.includes("--force"),
+    ),
+    "recovery QuickPick must not offer force clear",
+  );
+  assert.ok(
+    !sessionQuickPickItems("recovery", "external").some((item) => item.action === "stopDiscard"),
+    "external recovery QuickPick should not offer session discard",
   );
   assert.strictEqual(
     sessionStatusText("inactive", "notInitialized"),
@@ -548,6 +568,24 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(
     sessionStateFromEnvelope({ status: "ok", session: { active: false } }),
     "inactive",
+  );
+  assert.strictEqual(
+    sessionStateFromEnvelope({
+      status: "ok",
+      coordination: {
+        recovery_required: true,
+        recovery: { reason: "vba_may_still_be_running", operation: "run" },
+      },
+    }),
+    "recovery",
+  );
+  assert.strictEqual(
+    sessionStateFromEnvelope({
+      status: "failed",
+      coordination: { recovery_required: true },
+      session: { active: true },
+    }),
+    "recovery",
   );
   assert.strictEqual(sessionStateFromEnvelope({ status: "failed" }), "error");
   assert.strictEqual(saveRequiredProjectNode(true).command?.command, "xlflow.saveWorkbook");

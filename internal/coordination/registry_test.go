@@ -9,17 +9,18 @@ import (
 )
 
 func TestPolicyValidation(t *testing.T) {
-	valid := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationExecute, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
+	valid := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationExecute, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid policy: %v", err)
 	}
 
 	tests := []Policy{
-		{ResourceScope: "invalid", OperationKind: OperationRead, DefaultWaitPolicy: WaitFail},
-		{ResourceScope: ResourceNone, OperationKind: "invalid", DefaultWaitPolicy: WaitFail},
-		{ResourceScope: ResourceNone, OperationKind: OperationRead, DefaultWaitPolicy: "invalid"},
-		{ResourceScope: ResourceNone, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail},
-		{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, ParallelSafe: true, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail},
+		{ResourceScope: "invalid", OperationKind: OperationRead, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock},
+		{ResourceScope: ResourceNone, OperationKind: "invalid", DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable},
+		{ResourceScope: ResourceNone, OperationKind: OperationRead, DefaultWaitPolicy: "invalid", RecoveryBehavior: RecoveryNotApplicable},
+		{ResourceScope: ResourceNone, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable},
+		{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, ParallelSafe: true, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryObserve},
+		{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, DefaultWaitPolicy: WaitFail},
 	}
 	for _, policy := range tests {
 		if err := policy.Validate(); err == nil {
@@ -54,6 +55,9 @@ func TestLookupByIDAndCLI(t *testing.T) {
 	if !status.Policy.ParallelSafe || status.Policy.ResourceScope != ResourceWorkbook {
 		t.Fatalf("status should be a workbook observer: %+v", status.Policy)
 	}
+	if status.Policy.RecoveryBehavior != RecoveryObserve {
+		t.Fatalf("status recovery behavior = %q", status.Policy.RecoveryBehavior)
+	}
 
 	lint, err := LookupCLI("lint")
 	if err != nil {
@@ -61,6 +65,17 @@ func TestLookupByIDAndCLI(t *testing.T) {
 	}
 	if lint.Policy.ResourceScope != ResourceNone {
 		t.Fatalf("lint should be source-only: %+v", lint.Policy)
+	}
+	if lint.Policy.RecoveryBehavior != RecoveryNotApplicable {
+		t.Fatalf("lint recovery behavior = %q", lint.Policy.RecoveryBehavior)
+	}
+
+	clear, err := LookupCLI("recovery clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clear.Policy.RecoveryBehavior != RecoveryRecover {
+		t.Fatalf("recovery clear policy = %+v", clear.Policy)
 	}
 }
 

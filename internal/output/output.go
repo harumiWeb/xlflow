@@ -84,6 +84,7 @@ type Envelope struct {
 	DefaultEntry   any `json:"default_entry,omitempty"`
 	Suggestions    any `json:"suggestions,omitempty"`
 	Process        any `json:"process,omitempty"`
+	Recovery       any `json:"recovery,omitempty"`
 }
 
 type Options struct {
@@ -432,6 +433,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderSession(env))
 	case "status":
 		b.WriteString(r.renderStatus(env))
+	case "recovery clear":
+		b.WriteString(r.renderRecovery(env))
 	case "type db status", "type db init", "type db refresh", "type db clean":
 		b.WriteString(r.renderTypeDB(env))
 	case "save":
@@ -3371,6 +3374,20 @@ func (r renderer) renderSession(env Envelope) string {
 			}
 		}
 	}
+	if required, ok := boolValueOK(coordination, "recovery_required"); ok && required {
+		b.WriteString(kv("Recovery", r.style("REQUIRED", "196", true)))
+		if recovery := objectMap(coordination["recovery"]); len(recovery) > 0 {
+			if reason := stringValue(recovery, "reason"); reason != "" {
+				b.WriteString(kv("Recovery reason", reason))
+			}
+			if operation := stringValue(recovery, "operation"); operation != "" {
+				b.WriteString(kv("Previous operation", operation))
+			}
+			if pid, ok := numberValue(recovery, "excel_pid"); ok {
+				b.WriteString(kv("Affected Excel PID", fmt.Sprintf("%d", int(pid))))
+			}
+		}
+	}
 	if source := stringValue(session, "source_of_truth"); source != "" {
 		b.WriteString(kv("Source of truth", source))
 	}
@@ -3422,7 +3439,8 @@ func (r renderer) renderStatus(env Envelope) string {
 	project := objectMap(env.Project)
 	session := objectMap(env.Session)
 	state := objectMap(env.State)
-	if len(project) == 0 && len(session) == 0 && len(state) == 0 {
+	coordination := objectMap(env.Coordination)
+	if len(project) == 0 && len(session) == 0 && len(state) == 0 && len(coordination) == 0 {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -3474,6 +3492,51 @@ func (r renderer) renderStatus(env Envelope) string {
 		if mtime := stringValue(state, "push_state_last_modified_at"); mtime != "" {
 			b.WriteString(r.kvRows(kvRow{"Push state mtime", mtime}))
 		}
+	}
+	if len(coordination) > 0 {
+		b.WriteString(r.section("Coordination"))
+		if busy, ok := boolValueOK(coordination, "busy"); ok {
+			b.WriteString(r.kvRows(kvRow{"Busy", fmt.Sprintf("%t", busy)}))
+		}
+		if required, ok := boolValueOK(coordination, "recovery_required"); ok {
+			value := fmt.Sprintf("%t", required)
+			if required {
+				value = r.style("REQUIRED", "196", true)
+			}
+			b.WriteString(r.kvRows(kvRow{"Recovery", value}))
+		}
+		if recovery := objectMap(coordination["recovery"]); len(recovery) > 0 {
+			if reason := stringValue(recovery, "reason"); reason != "" {
+				b.WriteString(r.kvRows(kvRow{"Reason", reason}))
+			}
+			if operation := stringValue(recovery, "operation"); operation != "" {
+				b.WriteString(r.kvRows(kvRow{"Previous operation", operation}))
+			}
+		}
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func (r renderer) renderRecovery(env Envelope) string {
+	recovery := objectMap(env.Recovery)
+	if len(recovery) == 0 {
+		return r.renderLogs(env) + r.renderWarningsAndHints(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	if required, ok := boolValueOK(recovery, "required"); ok {
+		b.WriteString(kv("Recovery required", fmt.Sprintf("%t", required)))
+	}
+	if cleared, ok := boolValueOK(recovery, "cleared"); ok {
+		b.WriteString(kv("Marker cleared", fmt.Sprintf("%t", cleared)))
+	}
+	if forced, ok := boolValueOK(recovery, "forced"); ok {
+		b.WriteString(kv("Force cleared", fmt.Sprintf("%t", forced)))
+	}
+	if workbook := stringValue(recovery, "workbook"); workbook != "" {
+		b.WriteString(kv("Workbook", workbook))
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
