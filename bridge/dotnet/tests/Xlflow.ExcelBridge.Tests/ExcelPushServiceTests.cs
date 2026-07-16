@@ -430,6 +430,58 @@ public sealed class ExcelPushServiceTests
     }
 
     [Fact]
+    public void NonSessionFatalReplacementFailurePublishesRecovery()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-replacement-fatal",
+            Command = "push",
+        };
+        var response = ExcelPushService.BuildComponentReplacementFailureResponse(
+            request,
+            PushArgs(backupMode: "never"),
+            sessionAttached: false,
+            sessionMode: "none",
+            exception: new ExcelPushService.ComponentReplacementException(
+                "import_vba_components",
+                new COMException("RPC disconnected", unchecked((int)0x80010108))),
+            excelProcessId: 24680);
+
+        Assert.Equal("vba_component_replacement_failed", response.Error?.Code);
+        Assert.NotNull(response.Recovery);
+        Assert.True(response.Recovery!.Required);
+        Assert.Equal("excel_com_state_uncertain", response.Recovery.Reason);
+        Assert.Equal("push", response.Recovery.Operation);
+        Assert.Equal(24680, response.Recovery.ExcelProcessId);
+        Assert.False(response.Recovery.Session.Active);
+        Assert.Equal("none", response.Recovery.Session.Owner);
+    }
+
+    [Fact]
+    public void NonSessionOrdinaryReplacementFailureDoesNotPublishRecovery()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-push-replacement-ordinary",
+            Command = "push",
+        };
+        var response = ExcelPushService.BuildComponentReplacementFailureResponse(
+            request,
+            PushArgs(backupMode: "never"),
+            sessionAttached: false,
+            sessionMode: "none",
+            exception: new ExcelPushService.ComponentReplacementException(
+                "import_vba_components",
+                new COMException("ordinary Excel failure", unchecked((int)0x800A03EC))),
+            excelProcessId: 24680);
+
+        Assert.Equal("vba_component_replacement_failed", response.Error?.Code);
+        Assert.Null(response.Recovery);
+    }
+
+    [Fact]
     public void BuildCompileFailureResponseMarksPushCompileFailureBeforeSave()
     {
         var request = new BridgeRequest

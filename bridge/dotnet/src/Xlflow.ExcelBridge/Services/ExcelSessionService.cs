@@ -475,6 +475,14 @@ public sealed class ExcelSessionService : ISessionService
             if (excel is null)
             {
                 var cleanupConfirmed = !ExcelBridgeSupport.IsExcelProcessRunning(metadata.Pid);
+                if (args.Discard && !cleanupConfirmed && !externalOwner)
+                {
+                    return BuildCleanupUnconfirmedResponse(
+                        request,
+                        workbookPath,
+                        metadata.Pid,
+                        discardedUnsavedChanges: false);
+                }
                 if (!args.Discard || cleanupConfirmed)
                 {
                     ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
@@ -507,6 +515,14 @@ public sealed class ExcelSessionService : ISessionService
             catch (InvalidOperationException)
             {
                 var cleanupConfirmed = !ExcelBridgeSupport.IsExcelProcessRunning(metadata.Pid);
+                if (args.Discard && !cleanupConfirmed && !externalOwner)
+                {
+                    return BuildCleanupUnconfirmedResponse(
+                        request,
+                        workbookPath,
+                        metadata.Pid,
+                        discardedUnsavedChanges: false);
+                }
                 if (!args.Discard || cleanupConfirmed)
                 {
                     ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
@@ -569,31 +585,11 @@ public sealed class ExcelSessionService : ISessionService
             excel = null;
             if (!excelProcessExited)
             {
-                return new BridgeResponse
-                {
-                    RequestId = request.RequestId,
-                    Command = request.Command,
-                    Status = BridgeStatus.Failed,
-                    Error = new BridgeError(
-                        Code: "session_stop_cleanup_unconfirmed",
-                        Message: "The managed Excel session could not be confirmed stopped. Recovery remains required.",
-                        Phase: "session.stop",
-                        Source: "xlflow-excel-bridge",
-                        Details: new Dictionary<string, object?>
-                        {
-                            ["workbook_path"] = workbookPath,
-                            ["excel_pid"] = excelProcessId,
-                            ["discarded_unsaved_changes"] = discardUnsavedChanges,
-                        }),
-                    Recovery = BuildRecovery(
-                        required: true,
-                        reason: "excel_cleanup_unconfirmed",
-                        operation: "session stop",
-                        excelProcessId: excelProcessId,
-                        cleanupConfirmed: false,
-                        sessionActive: true,
-                        sessionOwner: "managed"),
-                };
+                return BuildCleanupUnconfirmedResponse(
+                    request,
+                    workbookPath,
+                    excelProcessId,
+                    discardedUnsavedChanges: discardUnsavedChanges);
             }
             ExcelBridgeSupport.DeleteSessionMetadata(args.MetadataPath);
             return BuildStopResponse(
@@ -628,6 +624,39 @@ public sealed class ExcelSessionService : ISessionService
             ExcelBridgeSupport.ReleaseComObject(workbook);
             ExcelBridgeSupport.ReleaseComObject(excel);
         }
+    }
+
+    internal static BridgeResponse BuildCleanupUnconfirmedResponse(
+        BridgeRequest request,
+        string workbookPath,
+        int excelProcessId,
+        bool discardedUnsavedChanges)
+    {
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError(
+                Code: "session_stop_cleanup_unconfirmed",
+                Message: "The managed Excel session could not be confirmed stopped. Recovery remains required.",
+                Phase: "session.stop",
+                Source: "xlflow-excel-bridge",
+                Details: new Dictionary<string, object?>
+                {
+                    ["workbook_path"] = workbookPath,
+                    ["excel_pid"] = excelProcessId,
+                    ["discarded_unsaved_changes"] = discardedUnsavedChanges,
+                }),
+            Recovery = BuildRecovery(
+                required: true,
+                reason: "excel_cleanup_unconfirmed",
+                operation: "session stop",
+                excelProcessId: excelProcessId,
+                cleanupConfirmed: false,
+                sessionActive: true,
+                sessionOwner: "managed"),
+        };
     }
 
     internal static BridgeResponse BuildStopResponse(

@@ -301,6 +301,30 @@ public sealed class SessionCommandTests
     }
 
     [Fact]
+    public void ManagedDiscardWithLiveUnreachableProcessFailsAndKeepsRecovery()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-session-stop-unconfirmed",
+            Command = "session",
+        };
+        var response = ExcelSessionService.BuildCleanupUnconfirmedResponse(
+            request,
+            @"C:\work\Book.xlsm",
+            excelProcessId: 4321,
+            discardedUnsavedChanges: false);
+        using var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        Assert.Equal(BridgeStatus.Failed, response.Status);
+        Assert.Equal("session_stop_cleanup_unconfirmed", response.Error?.Code);
+        Assert.True(json.RootElement.GetProperty("recovery").GetProperty("required").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("recovery").GetProperty("cleanup_confirmed").GetBoolean());
+        Assert.Equal(4321, json.RootElement.GetProperty("recovery").GetProperty("excel_pid").GetInt32());
+        Assert.False(json.RootElement.GetProperty("error").GetProperty("details").GetProperty("discarded_unsaved_changes").GetBoolean());
+    }
+
+    [Fact]
     public void ExternalDiscardDetachKeepsRecoveryRequired()
     {
         var request = new BridgeRequest

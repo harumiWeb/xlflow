@@ -331,15 +331,15 @@ public sealed class ExcelPushService : IPushService
         }
         catch (ComponentRemovalException ex)
         {
-            return WithBackup(BuildComponentRemovalFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentRemovalFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (ComponentImportNameException ex)
         {
-            return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (ComponentReplacementException ex)
         {
-            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (Exception ex)
         {
@@ -561,7 +561,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentRemovalException exception)
+        ComponentRemovalException exception,
+        int excelProcessId = 0)
     {
         var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
         var componentKind = exception.ComponentType switch
@@ -585,7 +586,7 @@ public sealed class ExcelPushService : IPushService
                 ["component_type"] = exception.ComponentType,
                 ["component_kind"] = componentKind,
             }));
-        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
     internal static BridgeResponse BuildComponentImportNameFailureResponse(
@@ -593,7 +594,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentImportNameException exception)
+        ComponentImportNameException exception,
+        int excelProcessId = 0)
     {
         var response = BridgeResponse.Failed(request, new BridgeError(
             Code: "vba_component_import_name_mismatch",
@@ -605,7 +607,7 @@ public sealed class ExcelPushService : IPushService
                 ["expected_name"] = exception.ExpectedName,
                 ["actual_name"] = exception.ActualName,
             }));
-        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
     internal static BridgeResponse BuildComponentReplacementFailureResponse(
@@ -613,7 +615,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentReplacementException exception)
+        ComponentReplacementException exception,
+        int excelProcessId = 0)
     {
         var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
         var response = BridgeResponse.Failed(request, new BridgeError(
@@ -623,14 +626,15 @@ public sealed class ExcelPushService : IPushService
             Source: "xlflow-excel-bridge",
             Number: failure.Number,
             HResult: failure.HResult));
-        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
     private static BridgeResponse AddPartialReplacementPayload(
         BridgeResponse response,
         PushCommandArguments args,
         bool sessionAttached,
-        string sessionMode)
+        string sessionMode,
+        int excelProcessId)
     {
         var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
         response.Extensions["target"] = ExcelBridgeSupport.BuildTargetPayload(sessionAttached ? "live_session" : "file", workbookPath);
@@ -676,6 +680,19 @@ public sealed class ExcelPushService : IPushService
                 },
             };
             return response with { Recovery = recovery };
+        }
+
+        if (response.Error?.Number is int errorNumber && ExcelBridgeSupport.IsFatalComFailure(errorNumber))
+        {
+            return response with
+            {
+                Recovery = BuildPushRecovery(
+                    "excel_com_state_uncertain",
+                    excelProcessId,
+                    workerProcessId: 0,
+                    sessionAttached: false,
+                    sessionMode: "none"),
+            };
         }
 
         return response;

@@ -19,6 +19,10 @@ All notable changes to xlflow will be documented in this file.
   output, managed `session stop --discard`, and verified or force
   `recovery clear` workflows that remain distinct from the operating-system
   workbook lock.
+- Fixed recovery quarantine edge cases so fatal non-session VBA component
+  replacement failures publish recovery metadata, and managed
+  `session stop --discard` fails with `session_stop_cleanup_unconfirmed` when
+  the recorded Excel process is still running but cannot be reacquired.
 - Documented and exhaustively tested UserForm/Designer coordination so migration,
   snapshot, build/apply, image export, form inspection/listing, pull, and push all
   converge on the same canonical workbook lock before Excel or VBIDE starts.
