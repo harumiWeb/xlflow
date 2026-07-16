@@ -20,6 +20,8 @@ type recoveryLease struct {
 	metadata coordination.RecoveryMetadata
 }
 
+var anyExcelProcessRunningFunc = anyExcelProcessRunning
+
 func (r Runner) recoveryManager() (*coordination.Manager, error) {
 	if r.Coordination != nil {
 		return r.Coordination, nil
@@ -27,20 +29,23 @@ func (r Runner) recoveryManager() (*coordination.Manager, error) {
 	return coordination.NewDefaultManager()
 }
 
-func (r Runner) recoveryProbePIDs() []int {
+func (r Runner) recoveryProbePIDs() ([]int, error) {
 	if runtime.GOOS != "windows" {
-		return nil
+		return nil, nil
 	}
 	manager, err := r.recoveryManager()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	entries, err := manager.ListRecoveries()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	seen := map[int]struct{}{}
 	for _, entry := range entries {
+		if entry.State.Invalid || entry.State.Metadata == nil {
+			return nil, fmt.Errorf("recovery metadata %s is invalid", entry.LockID)
+		}
 		if entry.State.Metadata != nil && entry.State.Metadata.ExcelPID > 0 {
 			seen[entry.State.Metadata.ExcelPID] = struct{}{}
 		}
@@ -49,7 +54,7 @@ func (r Runner) recoveryProbePIDs() []int {
 	for pid := range seen {
 		result = append(result, pid)
 	}
-	return result
+	return result, nil
 }
 
 func (r Runner) acquireProcessRecoveryLeases(opts ProcessCleanupOptions) ([]recoveryLease, *coordinationFailure) {
@@ -126,11 +131,12 @@ func clearRecoveredProcessMarkers(env *output.Envelope, opts ProcessCleanupOptio
 	terminated := terminatedProcessIDs(env.Process)
 	clearUnknown := false
 	if opts.All {
-		if any, err := anyExcelProcessRunning(); err == nil {
+		if any, err := anyExcelProcessRunningFunc(); err == nil {
 			clearUnknown = !any
 		}
 	}
 	cleared := make([]map[string]any, 0)
+	clearFailures := make([]map[string]any, 0)
 	for _, held := range leases {
 		pid := held.metadata.ExcelPID
 		_, pidTerminated := terminated[pid]
@@ -143,7 +149,21 @@ func clearRecoveredProcessMarkers(env *output.Envelope, opts ProcessCleanupOptio
 			continue
 		}
 		ok, err := held.lease.ClearRecovery(held.metadata.Generation)
-		if err != nil || !ok {
+		if err != nil {
+			clearFailures = append(clearFailures, map[string]any{
+				"code":     "workbook_recovery_clear_failed",
+				"message":  fmt.Sprintf("Excel process cleanup succeeded, but recovery quarantine could not be cleared for %s.", held.metadata.Workbook),
+				"workbook": held.metadata.Workbook,
+				"cause":    err.Error(),
+			})
+			continue
+		}
+		if !ok {
+			clearFailures = append(clearFailures, map[string]any{
+				"code":     "workbook_recovery_generation_changed",
+				"message":  fmt.Sprintf("Recovery quarantine changed while process cleanup was running and was not cleared for %s.", held.metadata.Workbook),
+				"workbook": held.metadata.Workbook,
+			})
 			continue
 		}
 		cleared = append(cleared, map[string]any{
@@ -162,6 +182,29 @@ func clearRecoveredProcessMarkers(env *output.Envelope, opts ProcessCleanupOptio
 			"count":   len(cleared),
 		}
 		env.Logs = append(env.Logs, fmt.Sprintf("cleared recovery quarantine for %d workbook(s)", len(cleared)))
+	}
+	if len(clearFailures) > 0 {
+		env.Warnings = appendEnvelopeObjects(env.Warnings, clearFailures)
+	}
+}
+
+func appendEnvelopeObjects(existing any, additions []map[string]any) any {
+	switch values := existing.(type) {
+	case nil:
+		return additions
+	case []map[string]any:
+		return append(values, additions...)
+	case []any:
+		for _, addition := range additions {
+			values = append(values, addition)
+		}
+		return values
+	default:
+		result := []any{existing}
+		for _, addition := range additions {
+			result = append(result, addition)
+		}
+		return result
 	}
 }
 
@@ -211,6 +254,17 @@ func anyExcelProcessRunning() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	text := strings.TrimSpace(string(out))
-	return text != "" && !strings.Contains(strings.ToLower(text), "no tasks are running"), nil
+	rows, err := tasklistRows(out)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if len(row) < 2 || !strings.EqualFold(strings.TrimSpace(row[0]), "EXCEL.EXE") {
+			continue
+		}
+		if pid, parseErr := strconv.Atoi(strings.TrimSpace(row[1])); parseErr == nil && pid > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

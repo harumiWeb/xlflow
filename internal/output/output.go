@@ -253,6 +253,7 @@ func runJSONPayload(env Envelope, verbose bool) map[string]any {
 	if session := runSessionPayload(env.Session, verbose); session != nil {
 		payload["session"] = session
 	}
+	addPayloadField(payload, "recovery", env.Recovery)
 	addPayloadField(payload, "target", env.Target)
 	addPayloadField(payload, "warnings", env.Warnings)
 	if suggestion := runSuggestion(env); suggestion != "" {

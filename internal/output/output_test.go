@@ -1393,6 +1393,27 @@ func TestWriteWithOptionsRendersRecoveryClearWarning(t *testing.T) {
 	}
 }
 
+func TestRunJSONIncludesRecoveryPublicationInCompactMode(t *testing.T) {
+	env := Failure("run", Error{Code: "macro_timeout", Message: "timed out"})
+	env.Recovery = map[string]any{
+		"required":  true,
+		"published": true,
+		"reason":    "vba_may_still_be_running",
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	recovery := objectMap(payload["recovery"])
+	if recovery["required"] != true || recovery["published"] != true || recovery["reason"] != "vba_may_still_be_running" {
+		t.Fatalf("recovery = %#v", payload["recovery"])
+	}
+}
+
 func TestWriteWithOptionsRendersUnknownUserFormsState(t *testing.T) {
 	env := New("session")
 	env.Session = map[string]any{"running": true, "workbook_open": true, "userforms_known": false}

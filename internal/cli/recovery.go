@@ -41,7 +41,8 @@ func (a *app) recoveryClearCommand() *cobra.Command {
 			}
 			state, err := lease.RecoveryState()
 			if err != nil {
-				return a.writeFailure("recovery clear", output.ExitEnvironment, coordination.RecoveryCheckFailedCode, err)
+				descriptor, _ := coordination.Lookup("recovery.clear")
+				return a.writeRecoveryCheckFailure(descriptor, identity, err)
 			}
 			if !state.Required {
 				env := output.New("recovery clear")

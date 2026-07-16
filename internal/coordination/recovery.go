@@ -77,9 +77,9 @@ func RecoveryDetails(identity WorkbookIdentity, state RecoveryState) map[string]
 		if metadata.ExcelPID > 0 {
 			details["excel_pid"] = metadata.ExcelPID
 		}
-		if metadata.Session.Active {
+		if metadata.Session.Active || meaningfulRecoveryOwner(metadata.Session.Owner) {
 			details["session"] = map[string]any{
-				"active": true,
+				"active": metadata.Session.Active,
 				"owner":  metadata.Session.Owner,
 			}
 		}
@@ -89,10 +89,10 @@ func RecoveryDetails(identity WorkbookIdentity, state RecoveryState) map[string]
 
 func RecoveryActions(state RecoveryState) []string {
 	actions := make([]string, 0, 3)
-	if metadata := state.Metadata; metadata != nil && metadata.Session.Active {
+	if metadata := state.Metadata; metadata != nil {
 		if strings.EqualFold(metadata.Session.Owner, "external") {
 			actions = append(actions, "close the workbook in Excel without saving")
-		} else {
+		} else if metadata.Session.Active {
 			actions = append(actions, "xlflow session stop --discard")
 		}
 	}
@@ -150,7 +150,10 @@ func (m *Manager) ListRecoveries() ([]RecoveryEntry, error) {
 		}
 		var metadata RecoveryMetadata
 		if json.Unmarshal(data, &metadata) == nil && validRecoveryMetadata(lockID, metadata) {
-			state = RecoveryState{Required: true, Metadata: &metadata}
+			identity, identityErr := NewWorkbookIdentity(filepath.Dir(metadata.Workbook), metadata.Workbook)
+			if identityErr == nil && identity.LockID == lockID {
+				state = RecoveryState{Required: true, Metadata: &metadata}
+			}
 		}
 		result = append(result, RecoveryEntry{LockID: lockID, State: state})
 	}
@@ -321,6 +324,15 @@ func (m *Manager) readRecovery(identity WorkbookIdentity) (RecoveryState, error)
 }
 
 func validRecoveryMetadata(lockID string, metadata RecoveryMetadata) bool {
+	validOwner := metadata.Session.Owner == "" ||
+		strings.EqualFold(metadata.Session.Owner, "none") ||
+		strings.EqualFold(metadata.Session.Owner, "managed") ||
+		strings.EqualFold(metadata.Session.Owner, "external")
+	validSession := validOwner
+	if metadata.Session.Active {
+		validSession = strings.EqualFold(metadata.Session.Owner, "managed") ||
+			strings.EqualFold(metadata.Session.Owner, "external")
+	}
 	return validLockID.MatchString(lockID) &&
 		metadata.SchemaVersion == recoverySchemaV1 &&
 		validGeneration.MatchString(metadata.Generation) &&
@@ -329,6 +341,11 @@ func validRecoveryMetadata(lockID string, metadata RecoveryMetadata) bool {
 		metadata.Operation != "" &&
 		metadata.XlflowPID > 0 &&
 		!metadata.RecordedAt.IsZero() &&
+		validSession &&
 		metadata.ExcelPID >= 0 &&
 		metadata.WorkerPID >= 0
+}
+
+func meaningfulRecoveryOwner(owner string) bool {
+	return strings.TrimSpace(owner) != "" && !strings.EqualFold(owner, "none")
 }

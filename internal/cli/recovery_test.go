@@ -127,6 +127,23 @@ func TestRecoveryClearRequiresForceWhenExcelPIDIsUnknown(t *testing.T) {
 	}
 }
 
+func TestTasklistPIDRunningIgnoresLocalizedNoMatchMessage(t *testing.T) {
+	running, err := tasklistPIDRunning([]byte("情報: 指定された条件に一致するタスクは実行されていません。\r\n"), 24680)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running {
+		t.Fatal("localized tasklist no-match message was treated as a running process")
+	}
+	running, err = tasklistPIDRunning([]byte("\"EXCEL.EXE\",\"24680\",\"Console\",\"1\",\"10,000 K\"\r\n"), 24680)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !running {
+		t.Fatal("tasklist CSV row was not recognized")
+	}
+}
+
 func publishRecoveryForTest(t *testing.T, manager *coordination.Manager, identity coordination.WorkbookIdentity, excelPID int) {
 	t.Helper()
 	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{

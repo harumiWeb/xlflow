@@ -33,6 +33,10 @@ For an affected recovery PID, xlflow does not probe workbook state through COM;
 `has_workbook` is `null`, `recovery_required` is `true`, and
 `workbook_probe_skipped` is `true`.
 
+If the shared recovery store cannot be enumerated safely or contains malformed
+metadata whose affected PID cannot be trusted, `process list` returns
+`coordination_recovery_check_failed` before invoking Excel COM.
+
 `cleanup --auto` only targets processes with `has_workbook: false` (confirmed no workbook). Processes with `has_workbook: null` are never targeted by `--auto`.
 
 ## cleanup

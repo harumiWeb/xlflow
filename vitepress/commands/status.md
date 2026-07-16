@@ -89,6 +89,11 @@ reports `session.dirty: null`, `session.source_of_truth: "uncertain"`,
 `coordination.recovery`. Use [recovery](./recovery) to choose a safe clearing
 path.
 
+If recovery metadata cannot be read safely, `status` still does not report a
+clean workbook. It sets `coordination.recovery_check_failed: true`, keeps
+`busy` / `recovery_required` unknown (`null`), and reports the session/source of
+truth as uncertain.
+
 ## Related
 
 - [session](./session)

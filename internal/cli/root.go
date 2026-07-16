@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2944,14 +2945,28 @@ func processRunning(pid int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	text := strings.TrimSpace(string(out))
-	if text == "" {
-		return false, nil
+	return tasklistPIDRunning(out, pid)
+}
+
+func tasklistPIDRunning(out []byte, pid int) (bool, error) {
+	reader := csv.NewReader(bytes.NewReader(out))
+	reader.FieldsPerRecord = -1
+	for {
+		record, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
+			return false, nil
+		}
+		if readErr != nil {
+			return false, fmt.Errorf("parse tasklist output: %w", readErr)
+		}
+		if len(record) < 2 {
+			continue
+		}
+		recordedPID, parseErr := strconv.Atoi(strings.TrimSpace(record[1]))
+		if parseErr == nil && recordedPID == pid {
+			return true, nil
+		}
 	}
-	if strings.Contains(strings.ToLower(text), "no tasks are running") {
-		return false, nil
-	}
-	return true, nil
 }
 
 func looksLikeWorkbookInUse(err error) bool {
@@ -3769,6 +3784,7 @@ func (a *app) statusCommand() *cobra.Command {
 			if coordinationStatus, unavailable := a.observeSessionCoordination(cmd.Context(), cfg); coordinationStatus != nil {
 				env.Coordination = coordinationStatus
 			} else if unavailable {
+				markStatusRecoveryCheckFailed(sessionState, statePayload, &env)
 				appendUniqueMessage(&env.Warnings, coordinationStatusUnavailableCode, "Workbook coordination and recovery status could not be observed.")
 			}
 			warnings, hints := buildStatusWarningsAndHints(sessionState, statePayload)
@@ -3777,6 +3793,24 @@ func (a *app) statusCommand() *cobra.Command {
 			env.Logs = []string{"status reported"}
 			return a.write(env, output.ExitSuccess)
 		},
+	}
+}
+
+func markStatusRecoveryCheckFailed(session, state map[string]any, env *output.Envelope) {
+	session["dirty"] = nil
+	session["workbook_open"] = nil
+	session["source_of_truth"] = "uncertain"
+	session["discard_required"] = true
+	session["recovery_required"] = nil
+	session["recovery_check_failed"] = true
+	state["source_of_truth"] = "uncertain"
+	state["workbook_saved"] = nil
+	if env != nil {
+		env.Coordination = map[string]any{
+			"busy":                  nil,
+			"recovery_required":     nil,
+			"recovery_check_failed": true,
+		}
 	}
 }
 
@@ -3919,9 +3953,12 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 	if rawDirty, exists := status["dirty"]; exists {
 		session["dirty"] = rawDirty
 	}
+	if sourceOfTruth := stringValueForCLI(status, "source_of_truth"); sourceOfTruth != "" {
+		session["source_of_truth"] = sourceOfTruth
+	}
 	session["save_required"] = saveRequired
 	session["live_newer_than_disk"] = saveRequired
-	if saveRequired {
+	if saveRequired && stringValueForCLI(status, "source_of_truth") == "" {
 		session["source_of_truth"] = "live_workbook"
 	}
 	if running, ok := status["running"]; ok {
@@ -3947,6 +3984,12 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 	}
 	if known, ok := status["userforms_known"]; ok {
 		session["userforms_known"] = known
+	}
+	if discardRequired, ok := status["discard_required"]; ok {
+		session["discard_required"] = discardRequired
+	}
+	if recoveryRequired, ok := status["recovery_required"]; ok {
+		session["recovery_required"] = recoveryRequired
 	}
 	return session
 }

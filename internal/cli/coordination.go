@@ -319,7 +319,7 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 			if errors.As(recoveryErr, &required) {
 				return nil, nil, a.writeWorkbookRecoveryFailure(descriptor, required)
 			}
-			return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, coordination.RecoveryCheckFailedCode, recoveryErr)
+			return nil, nil, a.writeRecoveryCheckFailure(descriptor, identity, recoveryErr)
 		}
 	}
 	return coordination.NewLeaseSet(leases...), release, nil
@@ -468,6 +468,30 @@ func (a *app) writeWorkbookRecoveryFailure(descriptor coordination.Descriptor, r
 		return output.WithExitCode(output.ExitEnvironment, err)
 	}
 	return output.WithExitCode(output.ExitEnvironment, required)
+}
+
+func (a *app) writeRecoveryCheckFailure(descriptor coordination.Descriptor, identity coordination.WorkbookIdentity, cause error) error {
+	commandName := string(descriptor.ID)
+	if len(descriptor.CLI) > 0 && strings.TrimSpace(descriptor.CLI[0].Path) != "" {
+		commandName = descriptor.CLI[0].Path
+	}
+	env := output.Failure(commandName, output.Error{
+		Code:    coordination.RecoveryCheckFailedCode,
+		Message: "Workbook recovery state could not be read safely. The command was blocked to avoid operating on an uncertain Excel workbook.",
+		Source:  "xlflow",
+		Phase:   "coordination.recovery",
+		Details: map[string]any{
+			"workbook":            identity.CanonicalPath,
+			"attempted_operation": descriptor.ID,
+			"retryable":           false,
+			"cause":               cause.Error(),
+		},
+	})
+	a.addConfigWarnings(&env)
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
+		return output.WithExitCode(output.ExitEnvironment, err)
+	}
+	return output.WithExitCode(output.ExitEnvironment, cause)
 }
 
 func appendObjectMessages(existing any, additions []map[string]any) any {

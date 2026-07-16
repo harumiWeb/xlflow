@@ -590,14 +590,22 @@ status response is returned. It is advisory and does not reserve the workbook;
 later commands must still rely on normal CLI lock acquisition. If identity,
 manager, or lock probing fails, session status preserves its bridge result,
 omits `coordination`, and adds warning `coordination_status_unavailable`.
-Recovery metadata failures are not reported as idle.
+Top-level status keeps the successful observational envelope but reports
+`coordination.busy=null`, `coordination.recovery_required=null`,
+`coordination.recovery_check_failed=true`, `session.dirty=null`,
+`session.source_of_truth="uncertain"`, and `session.discard_required=true`.
+Recovery metadata failures are never reported as idle or as a confirmed saved
+workbook state.
 
 While recovery is required, status must not call unsafe workbook COM APIs. It
 combines recovery metadata, project-local session metadata, and process liveness.
 Unknown live fields remain unknown: session dirty state is null/unknown,
 `source_of_truth` is `uncertain`, and `discard_required` is true. `process list`
 similarly avoids workbook COM probes for recorded affected PIDs and returns
-`has_workbook: null` plus `recovery_required: true`.
+`has_workbook: null` plus `recovery_required: true`. If recovery metadata cannot
+be enumerated or contains an invalid marker whose affected PID cannot be trusted,
+`process list` fails with `coordination_recovery_check_failed` before invoking
+the bridge rather than probing Excel through COM.
 
 ## Out of Scope for This Version
 

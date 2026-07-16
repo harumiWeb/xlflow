@@ -219,3 +219,78 @@ func TestRunSessionStatusReturnsBridgeExecutionErrorAfterObservation(t *testing.
 		t.Fatalf("pre-bridge observation was not retained: %#v", env.Coordination)
 	}
 }
+
+func TestBuildStatusSessionPreservesRecoveryUncertainty(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows recovery coordination")
+	}
+	rootDir := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Excel.Path = filepath.Join("build", "Book.xlsm")
+	identity, err := coordination.NewWorkbookIdentity(rootDir, cfg.Excel.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+		Identity:      identity,
+		Command:       "run",
+		OperationKind: coordination.OperationExecute,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.PublishRecovery(coordination.RecoveryPublication{
+		Reason:    "vba_may_still_be_running",
+		Operation: "run",
+		Session:   coordination.RecoverySession{Active: true, Owner: "managed"},
+		ExcelPID:  2147483000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: rootDir, coordination: manager}
+	session := a.buildStatusSession(cfg, identity.CanonicalPath)
+	if session["dirty"] != nil ||
+		session["source_of_truth"] != "uncertain" ||
+		session["discard_required"] != true ||
+		session["recovery_required"] != true {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
+func TestMarkStatusRecoveryCheckFailedDoesNotReportSavedState(t *testing.T) {
+	session := map[string]any{
+		"dirty":           false,
+		"workbook_open":   false,
+		"source_of_truth": "saved_workbook",
+	}
+	state := map[string]any{
+		"source_of_truth": "saved_workbook",
+		"workbook_saved":  true,
+	}
+	env := output.New("status")
+	markStatusRecoveryCheckFailed(session, state, &env)
+	if session["dirty"] != nil ||
+		session["workbook_open"] != nil ||
+		session["source_of_truth"] != "uncertain" ||
+		session["discard_required"] != true ||
+		session["recovery_check_failed"] != true {
+		t.Fatalf("session = %#v", session)
+	}
+	if state["source_of_truth"] != "uncertain" || state["workbook_saved"] != nil {
+		t.Fatalf("state = %#v", state)
+	}
+	coordination := cliObjectMap(env.Coordination)
+	if coordination["busy"] != nil ||
+		coordination["recovery_required"] != nil ||
+		coordination["recovery_check_failed"] != true {
+		t.Fatalf("coordination = %#v", env.Coordination)
+	}
+}

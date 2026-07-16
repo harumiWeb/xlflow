@@ -24,7 +24,7 @@ func TestDelegatedTopLevelCommands(t *testing.T) {
 	delegated := []string{
 		"attach", "check", "doctor", "edit", "export-image", "form", "init",
 		"list", "macros", "new", "process", "pull", "push", "rollback",
-		"run", "runner", "save", "session", "status", "test", "type", "ui",
+		"recovery", "run", "runner", "save", "session", "status", "test", "type", "ui",
 	}
 	local := []string{
 		"backup", "completion", "diff", "fmt", "generate", "inspect-gui", "lint",
@@ -140,7 +140,7 @@ func TestShouldDelegateWorkbookBackedUserFormCommandsOnly(t *testing.T) {
 
 func TestUnsafeWorkbookPoliciesDelegateEvenWhenTopLevelWasHistoricallyLocal(t *testing.T) {
 	root := (&app{}).rootCommand()
-	for _, path := range [][]string{{"pack"}, {"diff"}, {"formulas", "pull"}, {"inspect", "workbook"}} {
+	for _, path := range [][]string{{"pack"}, {"diff"}, {"formulas", "pull"}, {"inspect", "workbook"}, {"recovery", "clear"}} {
 		cmd, _, err := root.Find(path)
 		if err != nil {
 			t.Fatalf("find %v: %v", path, err)

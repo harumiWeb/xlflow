@@ -1,10 +1,13 @@
 package excel
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,16 +87,26 @@ func recoverySessionStatusEnvelope(commandName string, args map[string]string, i
 		_ = json.Unmarshal(body, &metadata)
 	}
 	matches := metadata.WorkbookPath != "" && coordination.SamePath(metadata.WorkbookPath, identity.CanonicalPath)
+	recoveryMetadata := observation.Recovery.Metadata
 	running := false
 	if matches && metadata.PID > 0 {
 		running, _ = processExistsByPID(metadata.PID)
+	} else if recoveryMetadata != nil && recoveryMetadata.ExcelPID > 0 {
+		running, _ = processExistsByPID(recoveryMetadata.ExcelPID)
 	}
 	owner := strings.TrimSpace(metadata.Owner)
-	if owner == "" {
-		owner = "managed"
+	if owner == "" && recoveryMetadata != nil &&
+		strings.TrimSpace(recoveryMetadata.Session.Owner) != "" &&
+		!strings.EqualFold(recoveryMetadata.Session.Owner, "none") {
+		owner = strings.TrimSpace(recoveryMetadata.Session.Owner)
 	}
+	if owner == "" {
+		owner = "none"
+	}
+	discardRequired := true
+	sessionActive := (matches || (recoveryMetadata != nil && recoveryMetadata.Session.Active)) && running
 	session := map[string]any{
-		"active":               matches && running,
+		"active":               sessionActive,
 		"running":              running,
 		"workbook_open":        nil,
 		"workbook_path":        identity.CanonicalPath,
@@ -102,7 +115,7 @@ func recoverySessionStatusEnvelope(commandName string, args map[string]string, i
 		"save_required":        false,
 		"live_newer_than_disk": false,
 		"source_of_truth":      "uncertain",
-		"discard_required":     matches,
+		"discard_required":     discardRequired,
 		"recovery_required":    true,
 	}
 	if matches {
@@ -116,10 +129,10 @@ func recoverySessionStatusEnvelope(commandName string, args map[string]string, i
 	}
 	env := output.New(commandName)
 	env.Session = session
-	env.Target = map[string]any{"kind": map[bool]string{true: "live_session", false: "file"}[matches && running], "path": identity.CanonicalPath}
+	env.Target = map[string]any{"kind": map[bool]string{true: "live_session", false: "file"}[sessionActive], "path": identity.CanonicalPath}
 	env.Workbook = map[string]any{
 		"path":       identity.CanonicalPath,
-		"session":    matches && running,
+		"session":    sessionActive,
 		"saved":      false,
 		"dirty":      nil,
 		"needs_save": false,
@@ -168,8 +181,36 @@ func processExistsByPID(pid int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	text := strings.TrimSpace(string(out))
-	return text != "" && !strings.Contains(strings.ToLower(text), "no tasks are running"), nil
+	rows, err := tasklistRows(out)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		recordedPID, parseErr := strconv.Atoi(strings.TrimSpace(row[1]))
+		if parseErr == nil && recordedPID == pid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func tasklistRows(out []byte) ([][]string, error) {
+	reader := csv.NewReader(bytes.NewReader(out))
+	reader.FieldsPerRecord = -1
+	rows := make([][]string, 0)
+	for {
+		row, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			return rows, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse tasklist output: %w", err)
+		}
+		rows = append(rows, row)
+	}
 }
 
 func (r Runner) acquireBridgeCoordination(commandName string, args map[string]string, descriptor coordination.Descriptor) (*coordination.Lease, bool, *coordinationFailure) {
@@ -258,16 +299,38 @@ func requireBridgeRecoveryAllowed(commandName string, descriptor coordination.De
 	if errors.As(err, &required) {
 		return newWorkbookRecoveryFailure(commandName, descriptor, required)
 	}
-	return newCoordinationSetupFailure(commandName, coordination.RecoveryCheckFailedCode, err)
+	return newRecoveryCheckFailure(commandName, descriptor, lease.Identity(), err)
+}
+
+func newRecoveryCheckFailure(commandName string, descriptor coordination.Descriptor, identity coordination.WorkbookIdentity, cause error) *coordinationFailure {
+	return &coordinationFailure{
+		env: output.Failure(commandName, output.Error{
+			Code:    coordination.RecoveryCheckFailedCode,
+			Message: "Workbook recovery state could not be read safely. The command was blocked to avoid operating on an uncertain Excel workbook.",
+			Source:  "xlflow",
+			Phase:   "coordination.recovery",
+			Details: map[string]any{
+				"workbook":            identity.CanonicalPath,
+				"attempted_operation": descriptor.ID,
+				"retryable":           false,
+				"cause":               cause.Error(),
+			},
+		}),
+		exitCode: output.ExitEnvironment,
+	}
 }
 
 func newCoordinationSetupFailure(commandName, code string, err error) *coordinationFailure {
+	phase := "coordination.acquire"
+	if code == coordination.RecoveryCheckFailedCode {
+		phase = "coordination.recovery"
+	}
 	return &coordinationFailure{
 		env: output.Failure(commandName, output.Error{
 			Code:    code,
 			Message: err.Error(),
 			Source:  "xlflow",
-			Phase:   "coordination.acquire",
+			Phase:   phase,
 		}),
 		exitCode: output.ExitEnvironment,
 	}

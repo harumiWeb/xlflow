@@ -81,7 +81,7 @@ Unknown top-level commands fail loudly before any workbook or project configurat
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge. Explicit `--bridge dotnet` is strict. The removed value `powershell` is rejected with a bridge-mode/configuration error.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `diff`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `diff`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -553,8 +553,12 @@ only when guarded OS-lock owner metadata is available. When
 Busy and recovery state are independent and may both be true briefly. The
 observation may change immediately and never authorizes a later operation.
 Probe failure omits the field and adds `coordination_status_unavailable` without
-changing status exit behavior. Recovery metadata failures are not reported as
-idle. Warning and hint objects contain `code` and `message`. `push`, `pull`,
+changing session-status exit behavior. Top-level status represents a failed
+recovery check with null `busy` / `recovery_required`,
+`recovery_check_failed=true`, `session.dirty=null`,
+`session.source_of_truth="uncertain"`, and `session.discard_required=true`.
+Recovery metadata failures are not reported as idle. Warning and hint objects
+contain `code` and `message`. `push`, `pull`,
 `run`, `save`, `session`, `macros`, `inspect`, `export-image`, `form build`,
 `form export-image`, and `edit` should use these fields to make workbook state
 explicit without removing the existing compatibility fields under `workbook`.
@@ -615,7 +619,9 @@ inspected, `session.dirty` may be `null` rather than `false`; outside recovery,
 `session.save_required` remains the authoritative signal for unsaved changes.
 During recovery, status does not access the uncertain workbook through COM and
 reports `session.dirty=null`, `session.source_of_truth="uncertain"`, and
-`session.discard_required=true`.
+`session.discard_required=true`. The same uncertain session/state representation
+is used when recovery storage cannot be read safely; status does not fall back
+to `dirty=false` or `source_of_truth="saved_workbook"`.
 
 `state` contains:
 

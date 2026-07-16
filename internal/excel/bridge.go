@@ -1147,7 +1147,12 @@ func (r Runner) ProcessList(opts ProcessListOptions) (output.Envelope, int, erro
 		action = "list"
 	}
 	args := map[string]string{"Action": action}
-	if pids := r.recoveryProbePIDs(); len(pids) > 0 {
+	pids, recoveryErr := r.recoveryProbePIDs()
+	if recoveryErr != nil {
+		failure := newCoordinationSetupFailure("process list", coordination.RecoveryCheckFailedCode, recoveryErr)
+		return failure.env, failure.exitCode, nil
+	}
+	if len(pids) > 0 {
 		if body, marshalErr := json.Marshal(pids); marshalErr == nil {
 			args["SkipWorkbookProbePids"] = string(body)
 		}
@@ -2032,8 +2037,8 @@ func publishWorkbookRecovery(env output.Envelope, exitCode int, lease *coordinat
 	if metadata.WorkerPID > 0 {
 		public["worker_pid"] = metadata.WorkerPID
 	}
-	if metadata.Session.Active {
-		public["session"] = map[string]any{"active": true, "owner": metadata.Session.Owner}
+	if metadata.Session.Active || (strings.TrimSpace(metadata.Session.Owner) != "" && !strings.EqualFold(metadata.Session.Owner, "none")) {
+		public["session"] = map[string]any{"active": metadata.Session.Active, "owner": metadata.Session.Owner}
 	}
 	env.Recovery = public
 	env.Warnings = appendEnvelopeObject(env.Warnings, map[string]any{
@@ -2199,6 +2204,9 @@ func closeDebugStreamSession(session *debugStreamSession) (any, error) {
 
 func exitCodeForScriptResult(result ScriptResult) int {
 	if result.Error == nil {
+		if result.Status != output.StatusFailed {
+			return output.ExitSuccess
+		}
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
