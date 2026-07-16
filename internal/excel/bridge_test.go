@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -51,6 +53,27 @@ type trackingBridgeProvider struct {
 	requests     *[]excelbridge.Request
 }
 
+type callbackBridgeProvider struct {
+	name     string
+	response excelbridge.Response
+	err      error
+	execute  func(excelbridge.Request)
+}
+
+func (p callbackBridgeProvider) Name() string { return p.name }
+func (p callbackBridgeProvider) Supports(string) bool {
+	return true
+}
+func (p callbackBridgeProvider) Info(context.Context) (excelbridge.Info, error) {
+	return excelbridge.Info{Name: p.name, Version: "test"}, nil
+}
+func (p callbackBridgeProvider) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {
+	if p.execute != nil {
+		p.execute(req)
+	}
+	return p.response, p.err
+}
+
 func (p trackingBridgeProvider) Name() string {
 	return p.name
 }
@@ -84,6 +107,170 @@ func TestScriptResultAcceptsScalarLogString(t *testing.T) {
 	}
 	if len(result.Logs) != 1 || result.Logs[0] != "stopped xlflow Excel session" {
 		t.Fatalf("unexpected logs: %+v", result.Logs)
+	}
+}
+
+func TestRunnerPublishesStructuredRecoveryOutcomeBeforeReturning(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows recovery coordination")
+	}
+	root := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook := filepath.Join(root, "Book.xlsm")
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     "dotnet",
+			supports: true,
+			response: excelbridge.Response{Stdout: []byte(`{
+				"protocol_version":1,
+				"status":"failed",
+				"command":"run",
+				"error":{"code":"macro_timeout","message":"timed out","phase":"invoke_macro"},
+				"logs":[],
+				"recovery":{
+					"required":true,
+					"reason":"vba_may_still_be_running",
+					"operation":"run",
+					"excel_pid":24680,
+					"worker_pid":13579,
+					"cleanup_confirmed":false,
+					"session":{"active":true,"owner":"managed"}
+				}
+			}`)},
+		}
+	}
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).run("run", map[string]string{
+		"WorkbookPath": workbook,
+		"MacroName":    "Main.Run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation || env.Error == nil || env.Error.Code != "macro_timeout" {
+		t.Fatalf("result code=%d error=%#v", code, env.Error)
+	}
+	recovery, ok := env.Recovery.(map[string]any)
+	if !ok || recovery["published"] != true || recovery["reason"] != "vba_may_still_be_running" {
+		t.Fatalf("recovery = %#v", env.Recovery)
+	}
+	identity, err := coordination.NewWorkbookIdentity(root, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := manager.RecoveryState(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Required || state.Metadata == nil || state.Metadata.ExcelPID != 24680 || state.Metadata.WorkerPID != 13579 {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestRunnerPublishesRecoveryForOuterRunTimeout(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows recovery coordination")
+	}
+	root := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook := filepath.Join(root, "Book.xlsm")
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     "dotnet",
+			supports: true,
+			response: excelbridge.Response{TimedOut: true},
+			err:      errors.New("bridge worker terminated by timeout"),
+		}
+	}
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).run("run", map[string]string{
+		"WorkbookPath": workbook,
+		"MacroName":    "Main.Run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitValidation || env.Error == nil || env.Error.Code != "macro_timeout" {
+		t.Fatalf("result code=%d error=%#v", code, env.Error)
+	}
+	recovery, ok := env.Recovery.(map[string]any)
+	if !ok || recovery["published"] != true || recovery["reason"] != "vba_may_still_be_running" {
+		t.Fatalf("recovery = %#v", env.Recovery)
+	}
+	identity, err := coordination.NewWorkbookIdentity(root, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := manager.RecoveryState(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Required || state.Metadata == nil || state.Metadata.Reason != "vba_may_still_be_running" {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestRunnerRecoveryPublicationFailureOverridesOriginalError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows recovery coordination")
+	}
+	root := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook := filepath.Join(root, "Book.xlsm")
+	identity, err := coordination.NewWorkbookIdentity(root, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+		return callbackBridgeProvider{
+			name: "dotnet",
+			execute: func(excelbridge.Request) {
+				if err := os.Mkdir(filepath.Join(manager.StateDir(), identity.LockID+".recovery.json"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			response: excelbridge.Response{Stdout: []byte(`{
+				"protocol_version":1,
+				"status":"failed",
+				"command":"run",
+				"error":{"code":"macro_timeout","message":"timed out","phase":"invoke_macro"},
+				"logs":[],
+				"recovery":{"required":true,"reason":"vba_may_still_be_running","operation":"run","cleanup_confirmed":false}
+			}`)},
+		}
+	}
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).run("run", map[string]string{
+		"WorkbookPath": workbook,
+		"MacroName":    "Main.Run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitEnvironment || env.Error == nil ||
+		env.Error.Code != coordination.WorkbookRecoveryPublicationFailedCode ||
+		env.Error.Phase != "coordination.recovery" {
+		t.Fatalf("result code=%d error=%#v", code, env.Error)
+	}
+	details, ok := env.Error.Details.(map[string]any)
+	if !ok || details["original_error"] == nil || details["cause"] == nil {
+		t.Fatalf("details = %#v", env.Error.Details)
+	}
+	recovery, ok := env.Recovery.(map[string]any)
+	if !ok || recovery["required"] != true || recovery["published"] != false {
+		t.Fatalf("recovery = %#v", env.Recovery)
 	}
 }
 
@@ -1190,6 +1377,11 @@ func TestRunnerDotNetExplicitModeDoesNotFallBackOnDecodeError(t *testing.T) {
 func TestRunnerAutoModeAttemptsDotNetForUnsupportedCommand(t *testing.T) {
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
 
 	var dotNetCalls, powerShellCalls int
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
@@ -1211,7 +1403,7 @@ func TestRunnerAutoModeAttemptsDotNetForUnsupportedCommand(t *testing.T) {
 		}
 	}
 
-	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.Run(config.Default(), RunOptions{
+	env, code, err := Runner{RootDir: root, BridgeMode: "auto", Coordination: manager}.Run(config.Default(), RunOptions{
 		Macro: "Module1.Main",
 	})
 	if err != nil {

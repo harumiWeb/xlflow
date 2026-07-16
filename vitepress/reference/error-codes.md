@@ -12,13 +12,25 @@ Common examples:
   workbook lock within the 30-second default or supplied `--wait-timeout`.
 - `workbook_busy_cancelled`: Ctrl+C or caller cancellation stopped an explicit
   workbook wait before the command body started.
+- `workbook_recovery_required`: the normal OS lock was acquired, but a previous
+  operation left the workbook in an uncertain Excel/VBA state. The command body
+  does not start, the failure is not retryable, and `--wait` will not recover
+  it. Follow `error.details.recovery_actions`.
+- `workbook_recovery_verification_failed`: normal `recovery clear` could not
+  prove that the recorded Excel PID no longer exists, or the marker did not
+  contain verifiable process information. The marker remains.
+- `workbook_recovery_publication_failed`: xlflow detected an uncertain
+  termination but could not atomically publish its recovery marker. Stop or
+  close Excel manually before attempting more workbook work.
+- `coordination_recovery_check_failed`: xlflow could not safely read recovery
+  state after acquiring the workbook lock. Unsafe operations fail closed.
 - `coordination_wait_args_invalid`: `--wait-timeout` was used without `--wait`,
   or the timeout was not positive.
 - `coordination_wait_unsupported`: the selected command is not a retryable,
   non-parallel-safe workbook operation.
 - `coordination_status_unavailable` (warning): `session status` could not probe
-  the workbook OS lock. Existing session status fields and exit behavior remain
-  available, while the top-level `coordination` field is omitted.
+  workbook coordination state. Existing session status fields and exit behavior
+  remain available, while the top-level `coordination` field is omitted.
 - `vbide_access_denied`
 - `macro_failed`
 - `macro_not_found`

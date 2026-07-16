@@ -3,7 +3,14 @@ import * as vscode from "vscode";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot, runXlflowCommand, runXlflowJsonCommand } from "./xlflow";
 
-export type SessionState = "unknown" | "inactive" | "starting" | "active" | "stopping" | "error";
+export type SessionState =
+  | "unknown"
+  | "inactive"
+  | "starting"
+  | "active"
+  | "stopping"
+  | "recovery"
+  | "error";
 
 export interface XlflowStatusEnvelope {
   status?: string;
@@ -11,7 +18,21 @@ export interface XlflowStatusEnvelope {
     code?: string;
     message?: string;
   };
+  coordination?: XlflowCoordinationPayload;
   session?: XlflowSessionPayload;
+}
+
+export interface XlflowCoordinationPayload {
+  busy?: boolean;
+  recovery_required?: boolean;
+  recovery?: XlflowRecoveryPayload;
+}
+
+export interface XlflowRecoveryPayload {
+  reason?: string;
+  operation?: string;
+  recorded_at?: string;
+  excel_pid?: number;
 }
 
 export interface XlflowSessionPayload {
@@ -35,13 +56,23 @@ export interface XlflowSessionPayload {
 
 export interface SessionSnapshot {
   state: SessionState;
+  coordination?: XlflowCoordinationPayload;
   session?: XlflowSessionPayload;
   workspaceFolder?: vscode.WorkspaceFolder;
   lastCheckedAt?: Date;
   lastError?: string;
 }
 
-type SessionAction = "start" | "attach" | "stop" | "restart" | "status" | "output" | "doctor";
+type SessionAction =
+  | "start"
+  | "attach"
+  | "stop"
+  | "stopDiscard"
+  | "clearRecovery"
+  | "restart"
+  | "status"
+  | "output"
+  | "doctor";
 
 export class SessionManager implements vscode.Disposable {
   private readonly statusBarItem: vscode.StatusBarItem;
@@ -101,7 +132,11 @@ export class SessionManager implements vscode.Disposable {
       this.channels.output.show(true);
     }
     const lastCheckedAt = new Date();
-    if (result.exitCode !== 0 || result.json === undefined || result.json.session === undefined) {
+    const state = result.json === undefined ? "error" : sessionStateFromEnvelope(result.json);
+    if (
+      result.json === undefined ||
+      (state !== "recovery" && (result.exitCode !== 0 || result.json.session === undefined))
+    ) {
       this.snapshot = {
         state: "error",
         workspaceFolder: folder,
@@ -113,9 +148,9 @@ export class SessionManager implements vscode.Disposable {
       return;
     }
 
-    const state = sessionStateFromEnvelope(result.json);
     this.snapshot = {
       state,
+      coordination: result.json.coordination,
       session: result.json.session,
       workspaceFolder: folder,
       lastCheckedAt,
@@ -168,6 +203,50 @@ export class SessionManager implements vscode.Disposable {
       "stopped",
       vscode.l10n.t("stopped"),
     );
+  }
+
+  async stopDiscard(): Promise<void> {
+    const discardLabel = vscode.l10n.t("Stop Session and Discard");
+    const confirmed = await vscode.window.showWarningMessage(
+      vscode.l10n.t(
+        "Stop the managed xlflow session and discard its unsafe unsaved workbook state?",
+      ),
+      { modal: true },
+      discardLabel,
+    );
+    if (confirmed !== discardLabel) {
+      return;
+    }
+    await this.runSessionCommand(
+      "stopping",
+      ["session", "stop", "--discard"],
+      "xlflow session stop --discard",
+      vscode.l10n.t("xlflow session stop --discard"),
+      "stopped and discarded",
+      vscode.l10n.t("stopped and discarded"),
+    );
+  }
+
+  async clearRecovery(): Promise<void> {
+    const code = await runXlflowCommand(
+      ["recovery", "clear"],
+      "xlflow recovery clear",
+      this.channels.output,
+      {
+        requireWorkspace: true,
+        notify: false,
+        uiLabel: vscode.l10n.t("xlflow recovery clear"),
+      },
+    );
+    if (code !== 0) {
+      this.showOutputError(
+        vscode.l10n.t("Workbook recovery verification failed. See xlflow output."),
+      );
+      await this.refreshStatus();
+      return;
+    }
+    vscode.window.showInformationMessage(vscode.l10n.t("Workbook recovery state cleared."));
+    await this.refreshStatus();
   }
 
   async restart(): Promise<void> {
@@ -250,6 +329,12 @@ export class SessionManager implements vscode.Disposable {
       case "stop":
         await this.stop();
         return;
+      case "stopDiscard":
+        await this.stopDiscard();
+        return;
+      case "clearRecovery":
+        await this.clearRecovery();
+        return;
       case "restart":
         await this.restart();
         return;
@@ -266,7 +351,7 @@ export class SessionManager implements vscode.Disposable {
   }
 
   private quickPickItems(): Array<vscode.QuickPickItem & { action: SessionAction }> {
-    return sessionQuickPickItems(this.snapshot.state);
+    return sessionQuickPickItems(this.snapshot.state, sessionOwner(this.snapshot.session));
   }
 
   private async runSessionCommand(
@@ -334,7 +419,7 @@ export class SessionManager implements vscode.Disposable {
     this.statusBarItem.color =
       this.snapshot.state === "active" ? new vscode.ThemeColor("testing.iconPassed") : undefined;
     this.statusBarItem.backgroundColor =
-      this.snapshot.state === "error"
+      this.snapshot.state === "error" || this.snapshot.state === "recovery"
         ? new vscode.ThemeColor("statusBarItem.warningBackground")
         : undefined;
     this.updateSessionContext();
@@ -363,7 +448,14 @@ export class SessionManager implements vscode.Disposable {
     void vscode.commands.executeCommand(
       "setContext",
       "xlflow.saveRequired",
-      projectReady && this.snapshot.session?.save_required === true,
+      projectReady &&
+        this.snapshot.state !== "recovery" &&
+        this.snapshot.session?.save_required === true,
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "xlflow.recoveryRequired",
+      projectReady && this.snapshot.state === "recovery",
     );
   }
 }
@@ -392,12 +484,17 @@ export function sessionStatusText(
       return vscode.l10n.t("$(check) xlflow: Session Active");
     case "stopping":
       return vscode.l10n.t("$(sync~spin) xlflow: Stopping");
+    case "recovery":
+      return vscode.l10n.t("$(warning) xlflow: Recovery Required");
     case "error":
       return vscode.l10n.t("$(warning) xlflow: Session Error");
   }
 }
 
 export function sessionStateFromEnvelope(env: XlflowStatusEnvelope): SessionState {
+  if (env.coordination?.recovery_required === true) {
+    return "recovery";
+  }
   if (env.status === "failed" || env.session === undefined) {
     return "error";
   }
@@ -418,6 +515,14 @@ function sessionStatusTooltip(snapshot: SessionSnapshot): string {
       break;
     case "stopping":
       lines.push(vscode.l10n.t("xlflow session stopping..."));
+      break;
+    case "recovery":
+      lines.push(vscode.l10n.t("Workbook recovery is required."));
+      lines.push(
+        vscode.l10n.t(
+          "Workbook operations are blocked until recovery is verified or the managed session is discarded.",
+        ),
+      );
       break;
     case "error":
       lines.push(vscode.l10n.t("xlflow session error"));
@@ -448,6 +553,19 @@ function sessionStatusTooltip(snapshot: SessionSnapshot): string {
   if (startedAt !== undefined) {
     lines.push(vscode.l10n.t("Started: {startedAt}", { startedAt }));
   }
+  const recovery = snapshot.coordination?.recovery;
+  const recoveryReason = readNonEmpty(recovery?.reason);
+  if (recoveryReason !== undefined) {
+    lines.push(vscode.l10n.t("Recovery reason: {reason}", { reason: recoveryReason }));
+  }
+  const recoveryOperation = readNonEmpty(recovery?.operation);
+  if (recoveryOperation !== undefined) {
+    lines.push(vscode.l10n.t("Previous operation: {operation}", { operation: recoveryOperation }));
+  }
+  const recordedAt = readNonEmpty(recovery?.recorded_at);
+  if (recordedAt !== undefined) {
+    lines.push(vscode.l10n.t("Recovery recorded: {recordedAt}", { recordedAt }));
+  }
   if (snapshot.lastCheckedAt !== undefined) {
     lines.push(
       vscode.l10n.t("Last check: {lastCheck}", {
@@ -473,6 +591,7 @@ function workbookDisplayName(session: XlflowSessionPayload | undefined): string 
 
 export function sessionQuickPickItems(
   state: SessionState,
+  owner?: string,
 ): Array<vscode.QuickPickItem & { action: SessionAction }> {
   const attach = {
     label: vscode.l10n.t("Connect Open Workbook"),
@@ -484,6 +603,22 @@ export function sessionQuickPickItems(
     { label: vscode.l10n.t("Open xlflow Output"), action: "output" },
   ];
   switch (state) {
+    case "recovery": {
+      const recoveryItems: Array<vscode.QuickPickItem & { action: SessionAction }> = [];
+      if (owner?.trim().toLowerCase() === "managed") {
+        recoveryItems.push({
+          label: vscode.l10n.t("Stop Session and Discard"),
+          description: vscode.l10n.t("Run xlflow session stop --discard"),
+          action: "stopDiscard",
+        });
+      }
+      recoveryItems.push({
+        label: vscode.l10n.t("Verify and Clear Recovery State"),
+        description: vscode.l10n.t("Run xlflow recovery clear"),
+        action: "clearRecovery",
+      });
+      return [...recoveryItems, ...common];
+    }
     case "active":
       return [
         { label: vscode.l10n.t("Stop Session"), action: "stop" },
@@ -507,6 +642,10 @@ export function sessionQuickPickItems(
         { label: vscode.l10n.t("Run Doctor"), action: "doctor" },
       ];
   }
+}
+
+function sessionOwner(session: XlflowSessionPayload | undefined): string | undefined {
+  return readNonEmpty(session?.owner ?? session?.metadata?.owner);
 }
 
 function statusErrorMessage(env: XlflowStatusEnvelope | undefined, stderr: string): string {

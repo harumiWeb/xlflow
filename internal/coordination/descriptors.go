@@ -1,15 +1,16 @@
 package coordination
 
 func buildDescriptors() []Descriptor {
-	sourceRead := Policy{ResourceScope: ResourceNone, OperationKind: OperationRead, ParallelSafe: true, DefaultWaitPolicy: WaitFail}
-	sourceMutate := Policy{ResourceScope: ResourceNone, OperationKind: OperationMutate, ParallelSafe: true, DefaultWaitPolicy: WaitFail}
-	workbookRead := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
-	workbookMutate := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
-	workbookExecute := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationExecute, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
-	workbookDesigner := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationDesigner, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
-	workbookObserver := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, ParallelSafe: true, DefaultWaitPolicy: WaitFail}
-	excelRead := Policy{ResourceScope: ResourceExcelInstance, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
-	excelMutate := Policy{ResourceScope: ResourceExcelInstance, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail}
+	sourceRead := Policy{ResourceScope: ResourceNone, OperationKind: OperationRead, ParallelSafe: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}
+	sourceMutate := Policy{ResourceScope: ResourceNone, OperationKind: OperationMutate, ParallelSafe: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}
+	workbookRead := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
+	workbookMutate := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
+	workbookExecute := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationExecute, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
+	workbookDesigner := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationDesigner, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
+	workbookObserver := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, ParallelSafe: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryObserve}
+	excelRead := Policy{ResourceScope: ResourceExcelInstance, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}
+	excelMutate := Policy{ResourceScope: ResourceExcelInstance, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}
+	recoveryAction := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryRecover}
 
 	return []Descriptor{
 		cli("version", "version", sourceRead),
@@ -35,7 +36,7 @@ func buildDescriptors() []Descriptor {
 		both("new", "new", workbookMutate, bridge("new")),
 		cli("init", "init", workbookRead),
 		both("doctor", "doctor", excelRead, bridge("doctor")),
-		both("attach", "attach", excelMutate, bridge("attach")),
+		both("attach", "attach", withRecovery(excelMutate, RecoveryBlock), bridge("attach")),
 		both("pull", "pull", workbookRead, bridge("pull")),
 		cli("pack", "pack", workbookMutate),
 		both("push", "push", workbookMutate, bridge("push")),
@@ -46,8 +47,8 @@ func buildDescriptors() []Descriptor {
 		cli("module.install", "module install", workbookMutate),
 		both("session.start", "session start", workbookMutate, bridgeArgs("session", "Action", "start")),
 		both("session.status", "session status", workbookObserver, bridgeArgs("session", "Action", "status")),
-		both("session.stop", "session stop", workbookMutate, bridgeArgs("session", "Action", "stop")),
-		both("session.attach", "session attach", excelMutate, bridgeArgs("session", "Action", "attach")),
+		both("session.stop", "session stop", recoveryAction, bridgeArgs("session", "Action", "stop")),
+		both("session.attach", "session attach", withRecovery(excelMutate, RecoveryBlock), bridgeArgs("session", "Action", "attach")),
 		both("save", "save", workbookMutate, bridgeArgs("session", "Action", "save")),
 		cli("status", "status", workbookObserver),
 		both("runner.install", "runner install", workbookMutate, bridgeArgs("runner", "Action", "install")),
@@ -67,8 +68,9 @@ func buildDescriptors() []Descriptor {
 		both("type.db.init", "type db init", excelRead, bridge("type-db-import")),
 		cli("type.db.refresh", "type db refresh", excelRead),
 		cli("type.db.clean", "type db clean", sourceMutate),
-		both("process.list", "process list", excelRead, bridgeArgs("process", "Action", "list")),
-		both("process.cleanup", "process cleanup", excelMutate, bridgeArgs("process", "Action", "cleanup")),
+		both("process.list", "process list", withRecovery(excelRead, RecoveryObserve), bridgeArgs("process", "Action", "list")),
+		both("process.cleanup", "process cleanup", withRecovery(excelMutate, RecoveryRecover), bridgeArgs("process", "Action", "cleanup")),
+		cli("recovery.clear", "recovery clear", recoveryAction),
 		cli("diff", "diff", workbookRead),
 		cli("inspect.calls", "inspect calls", sourceRead),
 		cli("inspect.symbols", "inspect symbols", sourceRead),
@@ -86,6 +88,11 @@ func buildDescriptors() []Descriptor {
 		cli("inspect-gui", "inspect-gui", sourceRead),
 		cli("skill.install", "skill install", sourceMutate),
 	}
+}
+
+func withRecovery(policy Policy, behavior RecoveryBehavior) Policy {
+	policy.RecoveryBehavior = behavior
+	return policy
 }
 
 func cli(id CommandID, path string, policy Policy) Descriptor {

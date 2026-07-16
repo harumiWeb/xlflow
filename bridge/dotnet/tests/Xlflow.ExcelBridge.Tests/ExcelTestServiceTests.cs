@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Serialization;
@@ -870,5 +871,61 @@ public sealed class ExcelTestServiceTests
                 Directory.Delete(dir, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    public void FatalComFailureProducesTypedRecoveryOutcome()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-test-fatal-com",
+            Command = "test",
+        };
+        var exception = new COMException("RPC disconnected", unchecked((int)0x80010108));
+
+        Assert.True(ExcelTestService.IsFatalTestComFailure(exception));
+
+        var response = ExcelTestService.BuildUnhandledTestFailureResponse(
+            request,
+            exception,
+            excelProcessId: 24680,
+            sessionAttached: true,
+            sessionMode: "managed");
+
+        Assert.Equal(BridgeStatus.Failed, response.Status);
+        Assert.Equal("excel_com_rpc_failure", response.Error?.Code);
+        Assert.Equal("0x80010108", response.Error?.HResult);
+        Assert.NotNull(response.Recovery);
+        Assert.True(response.Recovery!.Required);
+        Assert.Equal("excel_com_state_uncertain", response.Recovery.Reason);
+        Assert.Equal("test", response.Recovery.Operation);
+        Assert.Equal(24680, response.Recovery.ExcelProcessId);
+        Assert.True(response.Recovery.Session.Active);
+        Assert.Equal("managed", response.Recovery.Session.Owner);
+    }
+
+    [Fact]
+    public void OrdinaryTestEnvironmentFailureDoesNotProduceRecovery()
+    {
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-test-ordinary-failure",
+            Command = "test",
+        };
+        var exception = new InvalidOperationException("ordinary test error");
+
+        Assert.False(ExcelTestService.IsFatalTestComFailure(exception));
+
+        var response = ExcelTestService.BuildUnhandledTestFailureResponse(
+            request,
+            exception,
+            excelProcessId: 0,
+            sessionAttached: false,
+            sessionMode: "none");
+
+        Assert.Equal("test_environment_failed", response.Error?.Code);
+        Assert.Null(response.Recovery);
     }
 }

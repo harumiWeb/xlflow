@@ -694,7 +694,7 @@ public sealed class ExcelTestService : ITestService
                             }
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (!IsFatalTestComFailure(ex))
                     {
                         sw.Stop();
                         beforeAllFailed = true;
@@ -758,7 +758,7 @@ public sealed class ExcelTestService : ITestService
                                 logs.Add($"FAIL {test.QualifiedName}: {classification.ErrorMessage}");
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (!IsFatalTestComFailure(ex))
                         {
                             sw.Stop();
                             failed++;
@@ -800,7 +800,7 @@ public sealed class ExcelTestService : ITestService
                             }
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (!IsFatalTestComFailure(ex))
                     {
                         sw.Stop();
                         var moduleTestNames = executableModuleGroup.Where(t => scheduledExecutable.Contains(t.QualifiedName)).Select(t => t.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -837,7 +837,7 @@ public sealed class ExcelTestService : ITestService
                         ExcelBridgeSupport.ReleaseComObject(vbComponents);
                     }
                 }
-                catch
+                catch (Exception ex) when (!IsFatalTestComFailure(ex))
                 {
                     // best-effort
                 }
@@ -919,11 +919,23 @@ public sealed class ExcelTestService : ITestService
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
-            return BridgeResponse.Failed(request, new BridgeError(
-                Code: "test_environment_failed",
-                Message: detail,
-                Phase: "test",
-                Source: "xlflow-excel-bridge"));
+            var comFailure = ExcelBridgeSupport.ClassifyComFailure(ex);
+            if (comFailure.Fatal && sessionAttached)
+            {
+                ExcelBridgeSupport.MarkSessionPoisoned(
+                    args.MetadataPath,
+                    args.WorkbookPath,
+                    detail,
+                    comFailure.HResult,
+                    "test",
+                    discardUnsavedChanges: true);
+            }
+            return BuildUnhandledTestFailureResponse(
+                request,
+                ex,
+                excelProcessId,
+                sessionAttached,
+                sessionMode);
         }
         finally
         {
@@ -971,6 +983,52 @@ public sealed class ExcelTestService : ITestService
                 CloseWorkbook(workbook, excel, excelProcessId);
             }
         }
+    }
+
+    internal static bool IsFatalTestComFailure(Exception ex)
+    {
+        return ExcelBridgeSupport.ClassifyComFailure(ex).Fatal;
+    }
+
+    internal static BridgeResponse BuildUnhandledTestFailureResponse(
+        BridgeRequest request,
+        Exception ex,
+        int excelProcessId,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
+        var comFailure = ExcelBridgeSupport.ClassifyComFailure(ex);
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError(
+                Code: comFailure.Fatal ? "excel_com_rpc_failure" : "test_environment_failed",
+                Message: detail,
+                Phase: "test",
+                Source: "xlflow-excel-bridge",
+                Number: comFailure.Fatal ? comFailure.Number : null,
+                HResult: comFailure.Fatal ? comFailure.HResult : null,
+                Details: comFailure.Fatal
+                    ? new Dictionary<string, object?>
+                    {
+                        ["excel_pid"] = excelProcessId > 0 ? excelProcessId : null,
+                        ["session"] = sessionAttached,
+                        ["session_mode"] = sessionMode,
+                    }
+                    : null),
+            Recovery = comFailure.Fatal
+                ? ExcelRunService.BuildRecoveryOutcome(
+                    reason: "excel_com_state_uncertain",
+                    operation: "test",
+                    excelProcessId,
+                    workerProcessId: 0,
+                    sessionAttached,
+                    sessionMode)
+                : null,
+        };
     }
 
     private static List<TestCase> DiscoverTests(object vbProject, CancellationToken cancellationToken)

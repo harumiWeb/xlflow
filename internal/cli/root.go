@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +65,7 @@ type app struct {
 	buildInfo      BuildInfo
 	updateChecker  releaseChecker
 	coordination   *coordination.Manager
+	activeLeases   *coordination.LeaseSet
 }
 
 var automaticBackupPrune = backup.Prune
@@ -231,6 +233,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.versionCommand(),
 		a.updateCommand(),
 		a.processCommand(),
+		a.recoveryCommand(),
 	)
 	a.wrapCoordinatedLeaves(root)
 	return root
@@ -2942,14 +2945,28 @@ func processRunning(pid int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	text := strings.TrimSpace(string(out))
-	if text == "" {
-		return false, nil
+	return tasklistPIDRunning(out, pid)
+}
+
+func tasklistPIDRunning(out []byte, pid int) (bool, error) {
+	reader := csv.NewReader(bytes.NewReader(out))
+	reader.FieldsPerRecord = -1
+	for {
+		record, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
+			return false, nil
+		}
+		if readErr != nil {
+			return false, fmt.Errorf("parse tasklist output: %w", readErr)
+		}
+		if len(record) < 2 {
+			continue
+		}
+		recordedPID, parseErr := strconv.Atoi(strings.TrimSpace(record[1]))
+		if parseErr == nil && recordedPID == pid {
+			return true, nil
+		}
 	}
-	if strings.Contains(strings.ToLower(text), "no tasks are running") {
-		return false, nil
-	}
-	return true, nil
 }
 
 func looksLikeWorkbookInUse(err error) bool {
@@ -3657,6 +3674,7 @@ func (a *app) sessionCommand() *cobra.Command {
 	}
 	for _, action := range []string{"start", "status", "stop"} {
 		action := action
+		var discard bool
 		cmd := &cobra.Command{
 			Use:   action,
 			Short: action + " the xlflow Excel session",
@@ -3667,7 +3685,7 @@ func (a *app) sessionCommand() *cobra.Command {
 					return err
 				}
 				run := func() (output.Envelope, int, error) {
-					return a.excelRunnerForConfig(cfg).Session(cfg, action)
+					return a.excelRunnerForConfig(cfg).Session(cfg, action, excel.SessionCommandOptions{Discard: discard})
 				}
 				var env output.Envelope
 				var code int
@@ -3681,6 +3699,9 @@ func (a *app) sessionCommand() *cobra.Command {
 				}
 				return a.write(env, code)
 			},
+		}
+		if action == "stop" {
+			cmd.Flags().BoolVar(&discard, "discard", false, "close a managed session without saving unsaved workbook changes")
 		}
 		session.AddCommand(cmd)
 	}
@@ -3760,12 +3781,36 @@ func (a *app) statusCommand() *cobra.Command {
 			env.Project = projectPayload
 			env.Session = sessionState
 			env.State = statePayload
+			if coordinationStatus, unavailable := a.observeSessionCoordination(cmd.Context(), cfg); coordinationStatus != nil {
+				env.Coordination = coordinationStatus
+			} else if unavailable {
+				markStatusRecoveryCheckFailed(sessionState, statePayload, &env)
+				appendUniqueMessage(&env.Warnings, coordinationStatusUnavailableCode, "Workbook coordination and recovery status could not be observed.")
+			}
 			warnings, hints := buildStatusWarningsAndHints(sessionState, statePayload)
-			env.Warnings = warnings
+			env.Warnings = appendObjectMessages(env.Warnings, warnings)
 			env.Hints = hints
 			env.Logs = []string{"status reported"}
 			return a.write(env, output.ExitSuccess)
 		},
+	}
+}
+
+func markStatusRecoveryCheckFailed(session, state map[string]any, env *output.Envelope) {
+	session["dirty"] = nil
+	session["workbook_open"] = nil
+	session["source_of_truth"] = "uncertain"
+	session["discard_required"] = true
+	session["recovery_required"] = nil
+	session["recovery_check_failed"] = true
+	state["source_of_truth"] = "uncertain"
+	state["workbook_saved"] = nil
+	if env != nil {
+		env.Coordination = map[string]any{
+			"busy":                  nil,
+			"recovery_required":     nil,
+			"recovery_check_failed": true,
+		}
 	}
 }
 
@@ -3908,9 +3953,12 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 	if rawDirty, exists := status["dirty"]; exists {
 		session["dirty"] = rawDirty
 	}
+	if sourceOfTruth := stringValueForCLI(status, "source_of_truth"); sourceOfTruth != "" {
+		session["source_of_truth"] = sourceOfTruth
+	}
 	session["save_required"] = saveRequired
 	session["live_newer_than_disk"] = saveRequired
-	if saveRequired {
+	if saveRequired && stringValueForCLI(status, "source_of_truth") == "" {
 		session["source_of_truth"] = "live_workbook"
 	}
 	if running, ok := status["running"]; ok {
@@ -3936,6 +3984,12 @@ func (a *app) buildStatusSession(cfg config.Config, workbookPath string) map[str
 	}
 	if known, ok := status["userforms_known"]; ok {
 		session["userforms_known"] = known
+	}
+	if discardRequired, ok := status["discard_required"]; ok {
+		session["discard_required"] = discardRequired
+	}
+	if recoveryRequired, ok := status["recovery_required"]; ok {
+		session["recovery_required"] = recoveryRequired
 	}
 	return session
 }
@@ -7753,11 +7807,11 @@ func (a *app) hasValidBridgeOverride() bool {
 }
 
 func (a *app) excelRunner() excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, Coordination: a.coordination, SkipCoordination: true}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, Coordination: a.coordination, BorrowedLeases: a.activeLeases}
 }
 
 func (a *app) excelRunnerForConfig(cfg config.Config) excel.Runner {
-	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge, Coordination: a.coordination, SkipCoordination: true}
+	return excel.Runner{RootDir: a.cwd, BridgeMode: a.bridge, ConfigBridgeMode: cfg.Excel.Bridge, Coordination: a.coordination, BorrowedLeases: a.activeLeases}
 }
 
 func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {

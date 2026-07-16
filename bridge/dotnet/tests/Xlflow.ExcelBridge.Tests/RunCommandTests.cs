@@ -266,6 +266,35 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void RunTimeoutRecoveryOutcomeIsTypedAndMachineReadable()
+    {
+        var recovery = ExcelRunService.BuildRecoveryOutcome(
+            reason: "vba_may_still_be_running",
+            operation: "run",
+            excelProcessId: 1234,
+            workerProcessId: 5678,
+            sessionAttached: true,
+            sessionMode: "explicit");
+        var response = new BridgeResponse
+        {
+            RequestId = "req-run-recovery",
+            Command = "run",
+            Status = BridgeStatus.Failed,
+            Recovery = recovery,
+        };
+        using var json = JsonSerializer.SerializeToDocument(response, JsonOptions.Default);
+
+        var payload = json.RootElement.GetProperty("recovery");
+        Assert.True(payload.GetProperty("required").GetBoolean());
+        Assert.Equal("vba_may_still_be_running", payload.GetProperty("reason").GetString());
+        Assert.Equal("run", payload.GetProperty("operation").GetString());
+        Assert.Equal(1234, payload.GetProperty("excel_pid").GetInt32());
+        Assert.Equal(5678, payload.GetProperty("worker_pid").GetInt32());
+        Assert.False(payload.GetProperty("cleanup_confirmed").GetBoolean());
+        Assert.Equal("managed", payload.GetProperty("session").GetProperty("owner").GetString());
+    }
+
+    [Fact]
     public void BuildRunHarnessCodePumpsDoEventsAroundMacroInvocation()
     {
         var code = ExcelRunService.BuildRunHarnessCode("Main.ReproFormatOps", []);

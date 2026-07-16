@@ -64,6 +64,8 @@ public sealed class ExcelPushService : IPushService
         BackupRef? backupRef = null;
         var sessionAttached = false;
         var sessionMode = "none";
+        var excelProcessId = 0;
+        var excelMutationBegan = false;
         var tmpImportDir = Path.Combine(Path.GetTempPath(), "xlflow-push-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
 
         try
@@ -171,12 +173,13 @@ public sealed class ExcelPushService : IPushService
 
             Directory.CreateDirectory(tmpImportDir);
 
+            excelMutationBegan = true;
             var importResult = ReplaceNonDocumentComponents(workbook, args, sourceFiles, tmpImportDir);
             var documentModulesUpdated = ExcelBridgeSupport.RunPhase(
                 "update_document_modules",
                 () => UpdateDocumentModules(workbook, args));
 
-            var excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
             var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
             if (excelProcessId <= 0)
             {
@@ -208,7 +211,8 @@ public sealed class ExcelPushService : IPushService
                     sessionAttached,
                     sessionMode,
                     backupRef,
-                    compileInvocation);
+                    compileInvocation,
+                    excelProcessId);
             }
 
             var saved = false;
@@ -327,19 +331,52 @@ public sealed class ExcelPushService : IPushService
         }
         catch (ComponentRemovalException ex)
         {
-            return WithBackup(BuildComponentRemovalFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentRemovalFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (ComponentImportNameException ex)
         {
-            return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentImportNameFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (ComponentReplacementException ex)
         {
-            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex), backupRef);
+            return WithBackup(BuildComponentReplacementFailureResponse(request, args, sessionAttached, sessionMode, ex, excelProcessId), backupRef);
         }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
+            var fatalComFailure = ExcelBridgeSupport.IsFatalComFailure(ex.HResult);
+            if (fatalComFailure && excelMutationBegan)
+            {
+                if (sessionAttached)
+                {
+                    ExcelBridgeSupport.MarkSessionPoisoned(
+                        args.MetadataPath,
+                        args.WorkbookPath,
+                        detail,
+                        ExcelBridgeSupport.FormatHResult(ex.HResult),
+                        "push",
+                        discardUnsavedChanges: true);
+                }
+                return WithBackup(new BridgeResponse
+                {
+                    RequestId = request.RequestId,
+                    Command = request.Command,
+                    Status = BridgeStatus.Failed,
+                    Error = new BridgeError(
+                        Code: "excel_com_rpc_failure",
+                        Message: detail,
+                        Phase: "push",
+                        Source: "xlflow-excel-bridge",
+                        Number: ex.HResult,
+                        HResult: ExcelBridgeSupport.FormatHResult(ex.HResult)),
+                    Recovery = BuildPushRecovery(
+                        "excel_com_state_uncertain",
+                        excelProcessId,
+                        workerProcessId: 0,
+                        sessionAttached,
+                        sessionMode),
+                }, backupRef);
+            }
             return WithBackup(BridgeResponse.Failed(request, new BridgeError(
                 Code: "push_failed",
                 Message: detail,
@@ -524,7 +561,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentRemovalException exception)
+        ComponentRemovalException exception,
+        int excelProcessId = 0)
     {
         var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
         var componentKind = exception.ComponentType switch
@@ -548,8 +586,7 @@ public sealed class ExcelPushService : IPushService
                 ["component_type"] = exception.ComponentType,
                 ["component_kind"] = componentKind,
             }));
-        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
-        return response;
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
     internal static BridgeResponse BuildComponentImportNameFailureResponse(
@@ -557,7 +594,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentImportNameException exception)
+        ComponentImportNameException exception,
+        int excelProcessId = 0)
     {
         var response = BridgeResponse.Failed(request, new BridgeError(
             Code: "vba_component_import_name_mismatch",
@@ -569,8 +607,7 @@ public sealed class ExcelPushService : IPushService
                 ["expected_name"] = exception.ExpectedName,
                 ["actual_name"] = exception.ActualName,
             }));
-        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
-        return response;
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
     internal static BridgeResponse BuildComponentReplacementFailureResponse(
@@ -578,7 +615,8 @@ public sealed class ExcelPushService : IPushService
         PushCommandArguments args,
         bool sessionAttached,
         string sessionMode,
-        ComponentReplacementException exception)
+        ComponentReplacementException exception,
+        int excelProcessId = 0)
     {
         var failure = ExcelBridgeSupport.ClassifyComFailure(exception.InnerException ?? exception);
         var response = BridgeResponse.Failed(request, new BridgeError(
@@ -588,15 +626,15 @@ public sealed class ExcelPushService : IPushService
             Source: "xlflow-excel-bridge",
             Number: failure.Number,
             HResult: failure.HResult));
-        AddPartialReplacementPayload(response, args, sessionAttached, sessionMode);
-        return response;
+        return AddPartialReplacementPayload(response, args, sessionAttached, sessionMode, excelProcessId);
     }
 
-    private static void AddPartialReplacementPayload(
+    private static BridgeResponse AddPartialReplacementPayload(
         BridgeResponse response,
         PushCommandArguments args,
         bool sessionAttached,
-        string sessionMode)
+        string sessionMode,
+        int excelProcessId)
     {
         var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
         response.Extensions["target"] = ExcelBridgeSupport.BuildTargetPayload(sessionAttached ? "live_session" : "file", workbookPath);
@@ -622,6 +660,13 @@ public sealed class ExcelPushService : IPushService
                 response.Error?.HResult ?? "",
                 "push",
                 discardUnsavedChanges: true);
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(args.MetadataPath);
+            var recovery = BuildPushRecovery(
+                "session_discard_required",
+                metadata?.Pid ?? 0,
+                workerProcessId: 0,
+                sessionAttached,
+                sessionMode);
 
             var externalSession = string.Equals(sessionMode, "external", StringComparison.OrdinalIgnoreCase);
             response.Extensions["warnings"] = new List<Dictionary<string, string>>
@@ -631,10 +676,26 @@ public sealed class ExcelPushService : IPushService
                     ["code"] = "vba_component_replacement_partial",
                     ["message"] = externalSession
                         ? "The external workbook may contain a partial VBA component replacement. Close it in Excel without saving, then start a fresh xlflow session before retrying push."
-                        : "The live workbook may contain a partial VBA component replacement. Run `xlflow session stop --json` to discard the unsafe changes, then start a fresh session before retrying push.",
+                        : "The live workbook may contain a partial VBA component replacement. Run `xlflow session stop --discard --json` to discard the unsafe changes, then start a fresh session before retrying push.",
                 },
             };
+            return response with { Recovery = recovery };
         }
+
+        if (response.Error?.Number is int errorNumber && ExcelBridgeSupport.IsFatalComFailure(errorNumber))
+        {
+            return response with
+            {
+                Recovery = BuildPushRecovery(
+                    "excel_com_state_uncertain",
+                    excelProcessId,
+                    workerProcessId: 0,
+                    sessionAttached: false,
+                    sessionMode: "none"),
+            };
+        }
+
+        return response;
     }
 
     private static int ImportVbaComponents(object workbook, PushCommandArguments args, List<DiscoveredSourceFile> sourceFiles, string tmpImportDir)
@@ -1092,7 +1153,8 @@ public sealed class ExcelPushService : IPushService
         bool sessionAttached,
         string sessionMode,
         BackupRef? backup,
-        WorkerInvocationResult invocation)
+        WorkerInvocationResult invocation,
+        int excelProcessId = 0)
     {
         var message = invocation.Dialog is not null
             ? DialogMessage(invocation.Dialog)
@@ -1131,6 +1193,21 @@ public sealed class ExcelPushService : IPushService
             ["push_diagnostic"] = BuildPushDiagnostic(invocation),
         };
         AddBackupPayload(extensions, backup);
+        var fatalComFailure = invocation.Result?.Error is not null &&
+            ExcelBridgeSupport.IsFatalComFailure(invocation.Result.Error.Number);
+        var recoveryRequired = invocation.TimedOut || fatalComFailure;
+        if (recoveryRequired && sessionAttached)
+        {
+            ExcelBridgeSupport.MarkSessionPoisoned(
+                args.MetadataPath,
+                args.WorkbookPath,
+                message,
+                fatalComFailure
+                    ? ExcelBridgeSupport.FormatHResult(invocation.Result!.Error!.Number)
+                    : "",
+                "push",
+                discardUnsavedChanges: true);
+        }
 
         if (dirty)
         {
@@ -1150,13 +1227,51 @@ public sealed class ExcelPushService : IPushService
             Command = request.Command,
             Status = BridgeStatus.Failed,
             Error = new BridgeError(
-                Code: "vba_compile_failed",
+                Code: fatalComFailure ? "excel_com_rpc_failure" : "vba_compile_failed",
                 Message: message,
-                Phase: "compile_vba",
+                Phase: fatalComFailure ? invocation.Result?.Error?.Stage ?? "compile_vba" : "compile_vba",
                 Source: "xlflow-excel-bridge",
-                Number: invocation.Result?.Error?.Number),
+                Number: invocation.Result?.Error?.Number,
+                HResult: fatalComFailure
+                    ? ExcelBridgeSupport.FormatHResult(invocation.Result!.Error!.Number)
+                    : null),
             Logs = ["VBE Compile failed: " + message],
             Extensions = extensions,
+            Recovery = recoveryRequired
+                ? BuildPushRecovery(
+                    invocation.TimedOut ? "excel_cleanup_unconfirmed" : "excel_com_state_uncertain",
+                    excelProcessId,
+                    invocation.WorkerProcessId,
+                    sessionAttached,
+                    sessionMode)
+                : null,
+        };
+    }
+
+    internal static BridgeRecovery BuildPushRecovery(
+        string reason,
+        int excelProcessId,
+        int workerProcessId,
+        bool sessionAttached,
+        string sessionMode)
+    {
+        return new BridgeRecovery
+        {
+            Required = true,
+            Reason = reason,
+            Operation = "push",
+            ExcelProcessId = excelProcessId > 0 ? excelProcessId : null,
+            WorkerProcessId = workerProcessId > 0 ? workerProcessId : null,
+            CleanupConfirmed = false,
+            Session = new BridgeRecoverySession
+            {
+                Active = sessionAttached,
+                Owner = sessionAttached
+                    ? string.Equals(sessionMode, "external", StringComparison.OrdinalIgnoreCase)
+                        ? "external"
+                        : "managed"
+                    : "none",
+            },
         };
     }
 

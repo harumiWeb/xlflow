@@ -25,6 +25,10 @@ public sealed record BridgeResponse
     [JsonPropertyName("bridge")]
     public BridgeInfo Bridge { get; init; } = BridgeInfo.Current();
 
+    [JsonPropertyName("recovery")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BridgeRecovery? Recovery { get; init; }
+
     [JsonExtensionData]
     public IDictionary<string, object?> Extensions { get; init; } = new Dictionary<string, object?>();
 

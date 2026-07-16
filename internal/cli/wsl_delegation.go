@@ -40,6 +40,7 @@ var delegatedTopLevelCommands = map[string]struct{}{
 	"process":      {},
 	"pull":         {},
 	"push":         {},
+	"recovery":     {},
 	"rollback":     {},
 	"run":          {},
 	"runner":       {},

@@ -4,4 +4,5 @@ public sealed record ProcessCommandArguments(
     string Action,
     int? TargetPid,
     bool Auto,
-    bool All);
+    bool All,
+    IReadOnlySet<int> SkipWorkbookProbePids);

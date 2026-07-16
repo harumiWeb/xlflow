@@ -39,6 +39,60 @@ seconds and can be changed with `--wait-timeout`. Timeout and cancellation use
 `wait_timeout`. JSON mode never writes wait progress to stderr or mixes it into
 stdout, so the result remains one valid envelope.
 
+Workbook recovery quarantine is separate from lock contention. After acquiring
+the normal lock, an unsafe workbook command returns immediately with
+`workbook_recovery_required` when a recovery marker exists:
+
+```json
+{
+  "status": "failed",
+  "command": "push",
+  "error": {
+    "code": "workbook_recovery_required",
+    "message": "The workbook is in an uncertain Excel state after a previous operation. Explicit recovery is required before this command can run; --wait will not resolve it.",
+    "phase": "coordination.recovery",
+    "details": {
+      "workbook": "C:\\projects\\sample\\sample.xlsm",
+      "operation": "run",
+      "reason": "vba_may_still_be_running",
+      "recorded_at": "2026-07-16T09:30:00Z",
+      "retryable": false,
+      "wait_will_resolve": false,
+      "recovery_actions": [
+        "xlflow session stop --discard",
+        "xlflow process cleanup 23456",
+        "xlflow recovery clear",
+        "xlflow recovery clear --force"
+      ]
+    }
+  },
+  "logs": []
+}
+```
+
+`--wait` does not poll or bypass this state. A command whose own termination is
+uncertain keeps its primary failure and adds top-level `recovery`:
+
+```json
+{
+  "recovery": {
+    "required": true,
+    "published": true,
+    "reason": "vba_may_still_be_running",
+    "operation": "run",
+    "recorded_at": "2026-07-16T09:30:00Z",
+    "excel_pid": 23456,
+    "worker_pid": 34567,
+    "session": {
+      "active": true,
+      "owner": "managed"
+    }
+  }
+}
+```
+
+PID and session fields are omitted when xlflow could not observe them.
+
 Unknown commands are also structured when `--json` appears before the invalid command:
 
 ```json
@@ -54,13 +108,25 @@ Unknown commands are also structured when `--json` appears before the invalid co
 }
 ```
 
-Command-specific fields are top-level fields such as `issues`, `analysis`, `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`, `backup_prune`, `rollback`, `target`, `session`, `coordination`, `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`. `output` carries `fmt` result summaries, `export-image` output paths, and `form` command artifacts.
+Command-specific fields are top-level fields such as `issues`, `analysis`,
+`macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`,
+`backup_prune`, `rollback`, `target`, `session`, `coordination`, `recovery`,
+`warnings`, `hints`, `output`, `forms`, `edit`, `runner`, and `version`.
+`output` carries `fmt` result summaries, `export-image` output paths, and `form`
+command artifacts.
 
-`session status` adds top-level `coordination` without changing `session`.
-Successful observation returns `{"busy":false}`, `{"busy":true}`, or a busy
-object with `resource_scope`, `operation_kind`, `command`, `pid`, and
-`started_at`. The value is observational command-start state. Probe failure
-omits the field and adds warning `coordination_status_unavailable`.
+Top-level `status` and `session status` add `coordination` without removing
+existing fields. Successful observation always distinguishes OS lock ownership
+from quarantine with `busy` and `recovery_required`. A busy object may add
+`resource_scope`, `operation_kind`, `command`, `pid`, and `started_at`. A
+recovery object adds `reason`, previous `operation`, `recorded_at`, and optional
+`excel_pid` / session ownership. Both states may briefly be true. The value is observational
+command-start state. Probe failure omits the field and adds warning
+`coordination_status_unavailable`.
+
+While recovery is required, status avoids unsafe workbook COM access. Session
+fields may include `dirty: null`, `source_of_truth: "uncertain"`, and
+`discard_required: true`.
 
 `backup_prune` is returned by `xlflow backup prune` and may also appear on successful `push` or `rollback` when automatic retention deleted entries, skipped invalid or legacy entries, or encountered a pruning failure. Automatic results include `"automatic": true`; pruning failures are warnings and do not change the successful workbook operation status.
 

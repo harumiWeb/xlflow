@@ -60,6 +60,7 @@ function commandSidebar() {
         { text: "rollback", link: "/commands/rollback" },
         { text: "session", link: "/commands/session" },
         { text: "save", link: "/commands/save" },
+        { text: "recovery", link: "/commands/recovery" },
         { text: "runner", link: "/commands/runner" },
         { text: "run", link: "/commands/run" },
         { text: "export-image", link: "/commands/export-image" },

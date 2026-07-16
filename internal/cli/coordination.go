@@ -27,12 +27,14 @@ const (
 )
 
 type sessionCoordinationStatus struct {
-	Busy          bool   `json:"busy"`
-	ResourceScope string `json:"resource_scope,omitempty"`
-	OperationKind string `json:"operation_kind,omitempty"`
-	Command       string `json:"command,omitempty"`
-	PID           int    `json:"pid,omitempty"`
-	StartedAt     string `json:"started_at,omitempty"`
+	Busy             bool           `json:"busy"`
+	RecoveryRequired bool           `json:"recovery_required"`
+	Recovery         map[string]any `json:"recovery,omitempty"`
+	ResourceScope    string         `json:"resource_scope,omitempty"`
+	OperationKind    string         `json:"operation_kind,omitempty"`
+	Command          string         `json:"command,omitempty"`
+	PID              int            `json:"pid,omitempty"`
+	StartedAt        string         `json:"started_at,omitempty"`
 }
 
 func (a *app) validateCoordinationWaitOptions(cmd *cobra.Command) error {
@@ -80,7 +82,7 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 			return
 		}
 		descriptor, err := coordination.LookupCLI(command.CommandPath())
-		if err != nil || descriptor.Policy.ResourceScope != coordination.ResourceWorkbook || descriptor.Policy.ParallelSafe {
+		if err != nil || !requiresWorkbookLease(descriptor.Policy) {
 			return
 		}
 		original := command.RunE
@@ -89,12 +91,32 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 			if !resolved {
 				return original(cmd, args)
 			}
-			return a.withWorkbookCoordination(cmd.Context(), descriptor.ID, targets, func() error {
+			return a.withWorkbookCoordinationIntent(cmd.Context(), descriptor.ID, targets, commandRecoveryIntent(cmd, descriptor.ID), func() error {
 				return original(cmd, args)
 			})
 		}
 	}
 	walk(root)
+}
+
+func requiresWorkbookLease(policy coordination.Policy) bool {
+	if policy.ResourceScope == coordination.ResourceWorkbook && !policy.ParallelSafe {
+		return true
+	}
+	return policy.RecoveryBehavior == coordination.RecoveryBlock
+}
+
+func commandRecoveryIntent(cmd *cobra.Command, commandID coordination.CommandID) bool {
+	switch commandID {
+	case "recovery.clear":
+		return true
+	case "session.stop":
+		if cmd != nil && cmd.Flags().Lookup("discard") != nil {
+			discard, err := cmd.Flags().GetBool("discard")
+			return err == nil && discard
+		}
+	}
+	return false
 }
 
 func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID coordination.CommandID) ([]string, bool) {
@@ -186,22 +208,29 @@ func commandFlagString(cmd *cobra.Command, name string) (string, bool) {
 }
 
 func (a *app) withWorkbookCoordination(ctx context.Context, commandID coordination.CommandID, workbookPaths []string, run func() error) error {
-	release, err := a.acquireWorkbookCoordination(ctx, commandID, workbookPaths)
+	return a.withWorkbookCoordinationIntent(ctx, commandID, workbookPaths, false, run)
+}
+
+func (a *app) withWorkbookCoordinationIntent(ctx context.Context, commandID coordination.CommandID, workbookPaths []string, recoveryIntent bool, run func() error) error {
+	leases, release, err := a.acquireWorkbookCoordination(ctx, commandID, workbookPaths, recoveryIntent)
 	if err != nil {
 		return err
 	}
 	defer release()
+	previous := a.activeLeases
+	a.activeLeases = leases
+	defer func() { a.activeLeases = previous }()
 	return run()
 }
 
-func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordination.CommandID, workbookPaths []string) (func(), error) {
+func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordination.CommandID, workbookPaths []string, recoveryIntent bool) (*coordination.LeaseSet, func(), error) {
 	descriptor, err := coordination.Lookup(commandID)
 	if err != nil {
-		return nil, a.writeFailure(string(commandID), output.ExitEnvironment, coordination.MissingPolicyCode, err)
+		return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, coordination.MissingPolicyCode, err)
 	}
 	policy := descriptor.Policy
-	if runtime.GOOS != "windows" || policy.ResourceScope != coordination.ResourceWorkbook || policy.ParallelSafe {
-		return func() {}, nil
+	if runtime.GOOS != "windows" || !requiresWorkbookLease(policy) {
+		return coordination.NewLeaseSet(), func() {}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -213,12 +242,12 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		}
 		identity, identityErr := coordination.NewWorkbookIdentity(a.cwd, workbookPath)
 		if identityErr != nil {
-			return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_identity_failed", identityErr)
+			return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_identity_failed", identityErr)
 		}
 		identities[identity.LockID] = identity
 	}
 	if len(identities) == 0 {
-		return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_identity_failed", errors.New("workbook path is required for coordination"))
+		return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_identity_failed", errors.New("workbook path is required for coordination"))
 	}
 
 	lockIDs := make([]string, 0, len(identities))
@@ -228,7 +257,7 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 	sort.Strings(lockIDs)
 	manager, err := a.coordinationManager()
 	if err != nil {
-		return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_init_failed", err)
+		return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_init_failed", err)
 	}
 
 	acquireCtx := ctx
@@ -254,7 +283,7 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 			Identity:      identity,
 			Command:       descriptor.ID,
 			OperationKind: policy.OperationKind,
-			ResourceScope: policy.ResourceScope,
+			ResourceScope: coordination.ResourceWorkbook,
 		}
 		lease, acquireErr := manager.Acquire(acquireCtx, request)
 		var busy *coordination.BusyError
@@ -273,26 +302,39 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 		if acquireErr != nil {
 			release()
 			if a.wait && errors.Is(acquireErr, context.DeadlineExceeded) {
-				return nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyTimeoutCode, fmt.Sprintf("The workbook did not become available within %s.", a.waitTimeout), acquireErr)
+				return nil, nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyTimeoutCode, fmt.Sprintf("The workbook did not become available within %s.", a.waitTimeout), acquireErr)
 			}
 			if a.wait && errors.Is(acquireErr, context.Canceled) {
-				return nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyCancelledCode, "Waiting for the workbook was cancelled.", acquireErr)
+				return nil, nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyCancelledCode, "Waiting for the workbook was cancelled.", acquireErr)
 			}
 			if errors.As(acquireErr, &busy) {
-				return nil, a.writeWorkbookBusyFailure(descriptor, busy)
+				return nil, nil, a.writeWorkbookBusyFailure(descriptor, busy)
 			}
-			return nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_acquire_failed", acquireErr)
+			return nil, nil, a.writeFailure(string(commandID), output.ExitEnvironment, "coordination_acquire_failed", acquireErr)
 		}
 		leases = append(leases, lease)
+		if recoveryErr := lease.RequireRecoveryAllowed(policy.RecoveryBehavior, recoveryIntent); recoveryErr != nil {
+			release()
+			var required *coordination.RecoveryRequiredError
+			if errors.As(recoveryErr, &required) {
+				return nil, nil, a.writeWorkbookRecoveryFailure(descriptor, required)
+			}
+			return nil, nil, a.writeRecoveryCheckFailure(descriptor, identity, recoveryErr)
+		}
 	}
-	return release, nil
+	return coordination.NewLeaseSet(leases...), release, nil
 }
 
 func (a *app) coordinationManager() (*coordination.Manager, error) {
 	if a.coordination != nil {
 		return a.coordination, nil
 	}
-	return coordination.NewDefaultManager()
+	manager, err := coordination.NewDefaultManager()
+	if err != nil {
+		return nil, err
+	}
+	a.coordination = manager
+	return manager, nil
 }
 
 func (a *app) runSessionStatus(ctx context.Context, cfg config.Config, run func() (output.Envelope, int, error)) (output.Envelope, int, error) {
@@ -319,15 +361,29 @@ func (a *app) observeSessionCoordination(ctx context.Context, cfg config.Config)
 	if err != nil {
 		return nil, true
 	}
-	result, err := manager.Probe(ctx, identity)
+	result, err := manager.Observe(ctx, identity)
 	if err != nil {
 		return nil, true
 	}
-	return sessionCoordinationStatusFromProbe(result), false
+	return sessionCoordinationStatusFromObservation(result), false
 }
 
 func sessionCoordinationStatusFromProbe(result coordination.ProbeResult) *sessionCoordinationStatus {
-	status := &sessionCoordinationStatus{Busy: result.Busy}
+	return sessionCoordinationStatusFromObservation(coordination.Observation{Busy: result.Busy, Owner: result.Owner})
+}
+
+func sessionCoordinationStatusFromObservation(result coordination.Observation) *sessionCoordinationStatus {
+	status := &sessionCoordinationStatus{
+		Busy:             result.Busy,
+		RecoveryRequired: result.Recovery.Required,
+	}
+	if result.Recovery.Required {
+		status.Recovery = coordination.RecoveryDetails(coordination.WorkbookIdentity{}, result.Recovery)
+		delete(status.Recovery, "workbook")
+		delete(status.Recovery, "retryable")
+		delete(status.Recovery, "wait_will_resolve")
+		delete(status.Recovery, "recovery_actions")
+	}
 	if !result.Busy || result.Owner == nil {
 		return status
 	}
@@ -391,4 +447,72 @@ func (a *app) writeWorkbookBusyFailure(descriptor coordination.Descriptor, busy 
 		return output.WithExitCode(output.ExitEnvironment, err)
 	}
 	return output.WithExitCode(output.ExitEnvironment, busy)
+}
+
+func (a *app) writeWorkbookRecoveryFailure(descriptor coordination.Descriptor, required *coordination.RecoveryRequiredError) error {
+	commandName := string(descriptor.ID)
+	if len(descriptor.CLI) > 0 && strings.TrimSpace(descriptor.CLI[0].Path) != "" {
+		commandName = descriptor.CLI[0].Path
+	}
+	details := coordination.RecoveryDetails(required.Identity, required.State)
+	details["attempted_operation"] = descriptor.ID
+	env := output.Failure(commandName, output.Error{
+		Code:    coordination.WorkbookRecoveryRequiredCode,
+		Message: "The workbook is in an uncertain Excel state after a previous operation. Explicit recovery is required before this command can run; --wait will not resolve it.",
+		Source:  "xlflow",
+		Phase:   "coordination.recovery",
+		Details: details,
+	})
+	a.addConfigWarnings(&env)
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
+		return output.WithExitCode(output.ExitEnvironment, err)
+	}
+	return output.WithExitCode(output.ExitEnvironment, required)
+}
+
+func (a *app) writeRecoveryCheckFailure(descriptor coordination.Descriptor, identity coordination.WorkbookIdentity, cause error) error {
+	commandName := string(descriptor.ID)
+	if len(descriptor.CLI) > 0 && strings.TrimSpace(descriptor.CLI[0].Path) != "" {
+		commandName = descriptor.CLI[0].Path
+	}
+	env := output.Failure(commandName, output.Error{
+		Code:    coordination.RecoveryCheckFailedCode,
+		Message: "Workbook recovery state could not be read safely. The command was blocked to avoid operating on an uncertain Excel workbook.",
+		Source:  "xlflow",
+		Phase:   "coordination.recovery",
+		Details: map[string]any{
+			"workbook":            identity.CanonicalPath,
+			"attempted_operation": descriptor.ID,
+			"retryable":           false,
+			"cause":               cause.Error(),
+		},
+	})
+	a.addConfigWarnings(&env)
+	if err := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); err != nil {
+		return output.WithExitCode(output.ExitEnvironment, err)
+	}
+	return output.WithExitCode(output.ExitEnvironment, cause)
+}
+
+func appendObjectMessages(existing any, additions []map[string]any) any {
+	if len(additions) == 0 {
+		return existing
+	}
+	switch values := existing.(type) {
+	case nil:
+		return additions
+	case []map[string]any:
+		return append(values, additions...)
+	case []any:
+		for _, addition := range additions {
+			values = append(values, addition)
+		}
+		return values
+	default:
+		result := []any{existing}
+		for _, addition := range additions {
+			result = append(result, addition)
+		}
+		return result
+	}
 }

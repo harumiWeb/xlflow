@@ -37,7 +37,8 @@ public sealed class ProcessCommand : ICommandHandler
             Action: action,
             TargetPid: BridgePayload.GetNullableInt(request.Payload, "TargetPid"),
             Auto: BridgePayload.GetBool(request.Payload, "Auto"),
-            All: BridgePayload.GetBool(request.Payload, "All"));
+            All: BridgePayload.GetBool(request.Payload, "All"),
+            SkipWorkbookProbePids: BridgePayload.GetIntSet(request.Payload, "SkipWorkbookProbePids"));
 
         return _service.Execute(request, args, cancellationToken);
     }

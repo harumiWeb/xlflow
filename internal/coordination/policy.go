@@ -54,13 +54,32 @@ func (v WaitPolicy) Valid() bool {
 	return v == WaitFail || v == WaitWait
 }
 
+type RecoveryBehavior string
+
+const (
+	RecoveryNotApplicable RecoveryBehavior = "not_applicable"
+	RecoveryBlock         RecoveryBehavior = "block"
+	RecoveryObserve       RecoveryBehavior = "observe"
+	RecoveryRecover       RecoveryBehavior = "recover"
+)
+
+func (v RecoveryBehavior) Valid() bool {
+	switch v {
+	case RecoveryNotApplicable, RecoveryBlock, RecoveryObserve, RecoveryRecover:
+		return true
+	default:
+		return false
+	}
+}
+
 // Policy describes the concurrency characteristics of one command.
 type Policy struct {
-	ResourceScope     ResourceScope `json:"resource_scope"`
-	OperationKind     OperationKind `json:"operation_kind"`
-	ParallelSafe      bool          `json:"parallel_safe"`
-	RetryableWhenBusy bool          `json:"retryable_when_busy"`
-	DefaultWaitPolicy WaitPolicy    `json:"default_wait_policy"`
+	ResourceScope     ResourceScope    `json:"resource_scope"`
+	OperationKind     OperationKind    `json:"operation_kind"`
+	ParallelSafe      bool             `json:"parallel_safe"`
+	RetryableWhenBusy bool             `json:"retryable_when_busy"`
+	DefaultWaitPolicy WaitPolicy       `json:"default_wait_policy"`
+	RecoveryBehavior  RecoveryBehavior `json:"recovery_behavior"`
 }
 
 func (p Policy) Validate() error {
@@ -72,6 +91,9 @@ func (p Policy) Validate() error {
 	}
 	if !p.DefaultWaitPolicy.Valid() {
 		return fmt.Errorf("invalid default wait policy %q", p.DefaultWaitPolicy)
+	}
+	if !p.RecoveryBehavior.Valid() {
+		return fmt.Errorf("invalid recovery behavior %q", p.RecoveryBehavior)
 	}
 	if p.ResourceScope == ResourceNone && p.RetryableWhenBusy {
 		return fmt.Errorf("resource_scope none cannot be retryable when busy")

@@ -65,6 +65,14 @@ When a macro fails and your source files are newer than the workbook, `run` repo
 Use `--interactive` only when the macro intentionally shows dialogs or UserForms. Headless automation should avoid GUI prompts.
 :::
 
+::: warning
+If `run` times out after Excel work begins, VBA may still be running. xlflow
+publishes workbook recovery state before releasing the normal lock. Follow-up
+workbook commands fail with `workbook_recovery_required`; `--wait` does not
+resolve it. Inspect `recovery` in JSON and use `session stop --discard`,
+`process cleanup`, or `recovery clear` as directed.
+:::
+
 ::: tip
 For VBA-internal debugging, add `XlflowDebug.Log` in workbook code and inspect `debug.events` in `xlflow run --json`.
 :::
@@ -115,3 +123,4 @@ When `--ui-stream` is enabled, xlflow also writes realtime stderr lines such as 
 
 - [macros](./macros)
 - [test](./test)
+- [recovery](./recovery)

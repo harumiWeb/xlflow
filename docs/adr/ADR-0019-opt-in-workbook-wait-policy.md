@@ -72,6 +72,7 @@ lock lifecycle.
 
 - `docs/adr/ADR-0016-workbook-operation-coordination.md`
 - `docs/adr/ADR-0018-windows-workbook-lock-and-owner-metadata.md`
+- `docs/adr/ADR-0020-workbook-recovery-quarantine.md`
 - `docs/specs/workbook-coordination.md`
 - `docs/specs/cli-contract.md`
 - xlflow issues #311 and #322

@@ -1,3 +1,34 @@
+# Issue #335: Workbook recovery quarantine
+
+- [x] Add ADR-0020 and permanent recovery-state specifications
+- [x] Add versioned atomic per-workbook recovery metadata
+- [x] Extend central coordination policy with recovery behavior
+- [x] Enforce recovery after lease acquisition in CLI and direct Runner paths
+- [x] Publish recovery before lease release for uncertain bridge outcomes
+- [x] Add `recovery clear [--force]` and `session stop --discard`
+- [x] Clear recovery through confirmed session discard and process cleanup
+- [x] Make status/session status/process list recovery-aware without unsafe COM probes
+- [x] Add VS Code Recovery Required state and safe recovery actions
+- [x] Run focused and full Go, .NET, VS Code, lint, docs, and diff verification
+  - `task test`, `task lint`, `pnpm docs:build`, .NET 371 tests, VS Code
+    extension tests, .NET format verification, and `git diff --check` passed
+  - Full tests leave 0 per-user recovery marker files
+- [x] Run Windows Excel release-gate and recovery E2E under `tmp_workspaces`
+  - Primary: `C:\dev\go\xlflow\tmp_workspaces\recovery-quarantine-e2e`
+  - Init: `C:\dev\go\xlflow\tmp_workspaces\recovery-quarantine-init`
+  - Blank scaffold, doctor, pull/lint, standard/class/UserForm + `.frx`,
+    session-first run/test/save, Designer snapshot, COM sentinel, and init passed
+  - Timeout published `required=true`, `published=true`, and the affected Excel
+    PID before follow-up commands could enter
+  - `--wait` failed immediately with `workbook_recovery_required`
+  - Recovery status used metadata only; process list skipped the workbook probe
+  - Managed discard, PID cleanup, verified clear, and force clear all exercised
+  - Excel PIDs observed: 26836, 62108, 60560, 51048, and 49040
+  - Final state: 0 Excel processes and 0 recovery markers
+- [x] Complete staff-level self-review
+
+---
+
 # Issue #325: UserForm/Designer coordination coverage
 
 - [x] Confirm all workbook-backed UserForm leaves use the shared workbook lock

@@ -28,6 +28,22 @@ Run with structured debug output:
 xlflow run Main.Run --json
 ```
 
+## Workbook reports recovery required
+
+`workbook_recovery_required` means a previous Excel/VBA operation returned
+without proving that execution and cleanup finished. Do not retry with `--wait`;
+the marker is not lock contention.
+
+1. Run `xlflow status --json` and inspect `coordination.recovery`.
+2. For a managed session, use `xlflow session stop --discard --json`.
+3. If an affected PID is shown, use `xlflow process cleanup <pid> --json`.
+4. After manually closing Excel without saving, use
+   `xlflow recovery clear --json`.
+5. Use `recovery clear --force` only when you accept that it clears the marker
+   without stopping VBA or proving workbook safety.
+
+See [recovery](../commands/recovery).
+
 ## Workbook output depends on formatting
 
 Use:

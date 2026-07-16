@@ -27,7 +27,7 @@ type Runner struct {
 	BridgeMode       string
 	ConfigBridgeMode string
 	Coordination     *coordination.Manager
-	SkipCoordination bool
+	BorrowedLeases   *coordination.LeaseSet
 }
 
 var bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
@@ -271,6 +271,7 @@ type EditSheetAddOptions struct {
 
 type SessionCommandOptions struct {
 	Session   bool
+	Discard   bool
 	Keepalive CommandOptions
 }
 
@@ -396,42 +397,58 @@ func (l *ScriptLogs) UnmarshalJSON(data []byte) error {
 }
 
 type ScriptResult struct {
-	ProtocolVersion int           `json:"protocol_version,omitempty"`
-	Status          string        `json:"status"`
-	Command         string        `json:"command"`
-	Error           *output.Error `json:"error"`
-	Logs            ScriptLogs    `json:"logs"`
-	Diagnostics     any           `json:"diagnostics,omitempty"`
-	Workbook        any           `json:"workbook,omitempty"`
-	Backup          any           `json:"backup,omitempty"`
-	Source          any           `json:"source,omitempty"`
-	Bridge          any           `json:"bridge,omitempty"`
-	Macro           any           `json:"macro,omitempty"`
-	Macros          any           `json:"macros,omitempty"`
-	Forms           any           `json:"forms,omitempty"`
-	Tests           any           `json:"tests,omitempty"`
-	TestRun         any           `json:"test_run,omitempty"`
-	Runtime         any           `json:"runtime,omitempty"`
-	GUIBoundaries   any           `json:"gui_boundaries,omitempty"`
-	UI              any           `json:"ui,omitempty"`
-	Session         any           `json:"session,omitempty"`
-	Runner          any           `json:"runner,omitempty"`
-	Analysis        any           `json:"analysis,omitempty"`
-	Check           any           `json:"check,omitempty"`
-	RunDiagnostic   any           `json:"run_diagnostic,omitempty"`
-	PushDiagnostic  any           `json:"push_diagnostic,omitempty"`
-	Target          any           `json:"target,omitempty"`
-	Output          any           `json:"output,omitempty"`
-	Debug           any           `json:"debug,omitempty"`
-	Spec            any           `json:"spec,omitempty"`
-	Edit            any           `json:"edit,omitempty"`
-	Warnings        any           `json:"warnings,omitempty"`
-	Hints           any           `json:"hints,omitempty"`
-	Inspect         any           `json:"inspect,omitempty"`
-	DefaultEntry    string        `json:"default_entry,omitempty"`
-	Suggestions     any           `json:"suggestions,omitempty"`
-	Process         any           `json:"process,omitempty"`
-	TypeDB          any           `json:"type_db,omitempty"`
+	ProtocolVersion int             `json:"protocol_version,omitempty"`
+	Status          string          `json:"status"`
+	Command         string          `json:"command"`
+	Error           *output.Error   `json:"error"`
+	Logs            ScriptLogs      `json:"logs"`
+	Diagnostics     any             `json:"diagnostics,omitempty"`
+	Workbook        any             `json:"workbook,omitempty"`
+	Backup          any             `json:"backup,omitempty"`
+	Source          any             `json:"source,omitempty"`
+	Bridge          any             `json:"bridge,omitempty"`
+	Macro           any             `json:"macro,omitempty"`
+	Macros          any             `json:"macros,omitempty"`
+	Forms           any             `json:"forms,omitempty"`
+	Tests           any             `json:"tests,omitempty"`
+	TestRun         any             `json:"test_run,omitempty"`
+	Runtime         any             `json:"runtime,omitempty"`
+	GUIBoundaries   any             `json:"gui_boundaries,omitempty"`
+	UI              any             `json:"ui,omitempty"`
+	Session         any             `json:"session,omitempty"`
+	Runner          any             `json:"runner,omitempty"`
+	Analysis        any             `json:"analysis,omitempty"`
+	Check           any             `json:"check,omitempty"`
+	RunDiagnostic   any             `json:"run_diagnostic,omitempty"`
+	PushDiagnostic  any             `json:"push_diagnostic,omitempty"`
+	Target          any             `json:"target,omitempty"`
+	Output          any             `json:"output,omitempty"`
+	Debug           any             `json:"debug,omitempty"`
+	Spec            any             `json:"spec,omitempty"`
+	Edit            any             `json:"edit,omitempty"`
+	Warnings        any             `json:"warnings,omitempty"`
+	Hints           any             `json:"hints,omitempty"`
+	Inspect         any             `json:"inspect,omitempty"`
+	DefaultEntry    string          `json:"default_entry,omitempty"`
+	Suggestions     any             `json:"suggestions,omitempty"`
+	Process         any             `json:"process,omitempty"`
+	TypeDB          any             `json:"type_db,omitempty"`
+	Recovery        *ScriptRecovery `json:"recovery,omitempty"`
+}
+
+type ScriptRecovery struct {
+	Required         bool                  `json:"required"`
+	Reason           string                `json:"reason,omitempty"`
+	Operation        string                `json:"operation,omitempty"`
+	ExcelPID         int                   `json:"excel_pid,omitempty"`
+	WorkerPID        int                   `json:"worker_pid,omitempty"`
+	CleanupConfirmed bool                  `json:"cleanup_confirmed"`
+	Session          RecoverySessionResult `json:"session,omitempty"`
+}
+
+type RecoverySessionResult struct {
+	Active bool   `json:"active"`
+	Owner  string `json:"owner,omitempty"`
 }
 
 type ProcessListOptions struct {
@@ -682,8 +699,8 @@ func buildRunScriptArgs(root string, cfg config.Config, opts RunOptions) (map[st
 	return scriptArgs, nil
 }
 
-func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions) (output.Envelope, int, error) {
-	cmdOpts := CommandOptions{}
+func (r Runner) Session(cfg config.Config, action string, opts ...SessionCommandOptions) (output.Envelope, int, error) {
+	cmdOpts := SessionCommandOptions{}
 	if len(opts) > 0 {
 		cmdOpts = opts[0]
 	}
@@ -692,7 +709,8 @@ func (r Runner) Session(cfg config.Config, action string, opts ...CommandOptions
 		"WorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
 		"MetadataPath": filepath.Join(r.RootDir, ".xlflow", "session.json"),
 		"Visible":      strconv.FormatBool(cfg.Excel.Visible),
-	}, cmdOpts)
+		"Discard":      strconv.FormatBool(cmdOpts.Discard),
+	}, cmdOpts.Keepalive)
 }
 
 func (r Runner) SessionAttach(cfg config.Config, opts ...CommandOptions) (output.Envelope, int, error) {
@@ -1128,9 +1146,18 @@ func (r Runner) ProcessList(opts ProcessListOptions) (output.Envelope, int, erro
 	if action == "" {
 		action = "list"
 	}
-	env, code, err := r.run("process", map[string]string{
-		"Action": action,
-	})
+	args := map[string]string{"Action": action}
+	pids, recoveryErr := r.recoveryProbePIDs()
+	if recoveryErr != nil {
+		failure := newCoordinationSetupFailure("process list", coordination.RecoveryCheckFailedCode, recoveryErr)
+		return failure.env, failure.exitCode, nil
+	}
+	if len(pids) > 0 {
+		if body, marshalErr := json.Marshal(pids); marshalErr == nil {
+			args["SkipWorkbookProbePids"] = string(body)
+		}
+	}
+	env, code, err := r.run("process", args)
 	env.Command = "process list"
 	return env, code, err
 }
@@ -1148,8 +1175,15 @@ func (r Runner) ProcessCleanup(opts ProcessCleanupOptions) (output.Envelope, int
 	if opts.PID > 0 {
 		args["TargetPid"] = strconv.Itoa(opts.PID)
 	}
+	leases, failure := r.acquireProcessRecoveryLeases(opts)
+	if failure != nil {
+		failure.env.Command = "process cleanup"
+		return failure.env, failure.exitCode, nil
+	}
+	defer releaseRecoveryLeases(leases)
 	env, code, err := r.run("process", args)
 	env.Command = "process cleanup"
+	clearRecoveredProcessMarkers(&env, opts, leases)
 	return env, code, err
 }
 
@@ -1548,11 +1582,14 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		})
 		return env, output.ExitEnvironment, nil
 	}
-	lease, coordinationFailure := r.acquireBridgeCoordination(commandName, args, descriptor)
+	if observed, ok := r.observeRecoveryBeforeBridge(commandName, args, descriptor); ok {
+		return observed.env, observed.exitCode, nil
+	}
+	lease, ownsLease, coordinationFailure := r.acquireBridgeCoordination(commandName, args, descriptor)
 	if coordinationFailure != nil {
 		return coordinationFailure.env, coordinationFailure.exitCode, nil
 	}
-	if lease != nil {
+	if lease != nil && ownsLease {
 		defer func() { _ = lease.Release() }()
 	}
 
@@ -1689,7 +1726,8 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 				env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 			}
 			env.UI = mergeUIResult(nil, uiEvents)
-			return env, output.ExitValidation, nil
+			recovery := recoveryFromArgs(args, "vba_may_still_be_running", string(descriptor.ID))
+			return publishWorkbookRecovery(env, output.ExitValidation, lease, recovery)
 		}
 		code := "script_failed"
 		source := provider.Name()
@@ -1722,6 +1760,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
+		if lease != nil && !isBridgeSetupError(err) {
+			recovery := recoveryFromArgs(args, "bridge_terminated_during_excel_operation", string(descriptor.ID))
+			return publishWorkbookRecovery(env, output.ExitEnvironment, lease, recovery)
+		}
 		return env, output.ExitEnvironment, nil
 	}
 
@@ -1732,6 +1774,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
+		if lease != nil {
+			recovery := recoveryFromArgs(args, "bridge_response_indeterminate", string(descriptor.ID))
+			return publishWorkbookRecovery(env, output.ExitEnvironment, lease, recovery)
+		}
 		return env, output.ExitEnvironment, nil
 	}
 	result := *execution.result
@@ -1750,6 +1796,10 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 			env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
 		}
 		env.UI = mergeUIResult(nil, uiEvents)
+		if lease != nil {
+			recovery := recoveryFromArgs(args, "bridge_response_indeterminate", string(descriptor.ID))
+			return publishWorkbookRecovery(env, output.ExitEnvironment, lease, recovery)
+		}
 		return env, output.ExitEnvironment, nil
 	}
 	if result.Status == "" {
@@ -1800,13 +1850,65 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	}
 	env.Process = result.Process
 	env.TypeDB = result.TypeDB
+	if result.Recovery != nil {
+		env.Recovery = result.Recovery
+	}
 	if uiStreamErr != nil {
 		env.Logs = append(env.Logs, "UI stream closed with an error: "+uiStreamErr.Error())
+	}
+	if result.Recovery != nil && !result.Recovery.Required && result.Recovery.CleanupConfirmed && lease != nil {
+		if clearErr := clearConfirmedWorkbookRecovery(&env, lease, *result.Recovery); clearErr != nil {
+			return output.Failure(commandName, output.Error{
+				Code:    "workbook_recovery_clear_failed",
+				Message: "Excel cleanup was confirmed, but the workbook recovery marker could not be cleared.",
+				Source:  "xlflow",
+				Phase:   "coordination.recovery",
+				Details: map[string]any{"cause": clearErr.Error()},
+			}), output.ExitEnvironment, nil
+		}
+	}
+	if result.Recovery != nil && result.Recovery.Required {
+		return publishWorkbookRecovery(env, exitCodeForScriptResult(result), lease, *result.Recovery)
 	}
 	if result.Status == output.StatusFailed {
 		return env, exitCodeForScriptResult(result), nil
 	}
 	return env, output.ExitSuccess, nil
+}
+
+func clearConfirmedWorkbookRecovery(env *output.Envelope, lease *coordination.Lease, recovery ScriptRecovery) error {
+	state, err := lease.RecoveryState()
+	if err != nil {
+		return err
+	}
+	if !state.Required {
+		if env != nil {
+			env.Recovery = map[string]any{
+				"required":          false,
+				"cleared":           false,
+				"cleanup_confirmed": true,
+				"reason":            recovery.Reason,
+			}
+		}
+		return nil
+	}
+	expected := ""
+	if state.Metadata != nil {
+		expected = state.Metadata.Generation
+	}
+	cleared, err := lease.ClearRecovery(expected)
+	if err != nil {
+		return err
+	}
+	if env != nil {
+		env.Recovery = map[string]any{
+			"required":          false,
+			"cleared":           cleared,
+			"cleanup_confirmed": true,
+			"reason":            recovery.Reason,
+		}
+	}
+	return nil
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -1818,6 +1920,145 @@ func cloneStringMap(values map[string]string) map[string]string {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func isBridgeSetupError(err error) bool {
+	var bridgeErr *excelbridge.Error
+	if !errors.As(err, &bridgeErr) {
+		return false
+	}
+	switch bridgeErr.Kind {
+	case excelbridge.ErrorUnsupportedHost, excelbridge.ErrorScriptNotFound, excelbridge.ErrorDotNetMissing, excelbridge.ErrorDotNetRuntime:
+		return true
+	default:
+		return false
+	}
+}
+
+func recoveryFromArgs(args map[string]string, reason, operation string) ScriptRecovery {
+	recovery := ScriptRecovery{
+		Required:  true,
+		Reason:    reason,
+		Operation: operation,
+	}
+	requested, _ := strconv.ParseBool(strings.TrimSpace(args["UseSession"]))
+	recovery.Session.Active = requested
+	if requested {
+		recovery.Session.Owner = "managed"
+	}
+	metadataPath := strings.TrimSpace(args["MetadataPath"])
+	workbookPath := strings.TrimSpace(args["WorkbookPath"])
+	if metadataPath == "" || workbookPath == "" {
+		return recovery
+	}
+	body, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return recovery
+	}
+	var metadata struct {
+		PID          int    `json:"pid"`
+		WorkbookPath string `json:"workbook_path"`
+		Owner        string `json:"owner"`
+	}
+	if json.Unmarshal(body, &metadata) != nil || !coordination.SamePath(metadata.WorkbookPath, workbookPath) {
+		return recovery
+	}
+	recovery.Session.Active = true
+	recovery.Session.Owner = strings.TrimSpace(metadata.Owner)
+	if recovery.Session.Owner == "" {
+		recovery.Session.Owner = "managed"
+	}
+	recovery.ExcelPID = metadata.PID
+	return recovery
+}
+
+func publishWorkbookRecovery(env output.Envelope, exitCode int, lease *coordination.Lease, recovery ScriptRecovery) (output.Envelope, int, error) {
+	if !recovery.Required {
+		return env, exitCode, nil
+	}
+	if strings.TrimSpace(recovery.Reason) == "" {
+		recovery.Reason = "excel_state_uncertain"
+	}
+	if strings.TrimSpace(recovery.Operation) == "" {
+		recovery.Operation = env.Command
+	}
+	if lease == nil {
+		env.Recovery = map[string]any{
+			"required":  true,
+			"published": false,
+			"reason":    recovery.Reason,
+			"operation": recovery.Operation,
+		}
+		return env, exitCode, nil
+	}
+	metadata, err := lease.PublishRecovery(coordination.RecoveryPublication{
+		Reason:    recovery.Reason,
+		Operation: coordination.CommandID(recovery.Operation),
+		Session: coordination.RecoverySession{
+			Active: recovery.Session.Active,
+			Owner:  recovery.Session.Owner,
+		},
+		ExcelPID:  recovery.ExcelPID,
+		WorkerPID: recovery.WorkerPID,
+	})
+	if err != nil {
+		originalError := env.Error
+		env = output.Failure(env.Command, output.Error{
+			Code:    coordination.WorkbookRecoveryPublicationFailedCode,
+			Message: "Excel state became uncertain, but xlflow could not publish the workbook recovery marker. Stop or close the affected Excel instance before doing any further workbook work.",
+			Source:  "xlflow",
+			Phase:   "coordination.recovery",
+			Details: map[string]any{
+				"workbook":       lease.Identity().CanonicalPath,
+				"reason":         recovery.Reason,
+				"operation":      recovery.Operation,
+				"original_error": originalError,
+				"cause":          err.Error(),
+			},
+		})
+		env.Recovery = map[string]any{
+			"required":  true,
+			"published": false,
+			"reason":    recovery.Reason,
+			"operation": recovery.Operation,
+		}
+		return env, output.ExitEnvironment, nil
+	}
+	public := map[string]any{
+		"required":    true,
+		"published":   true,
+		"reason":      metadata.Reason,
+		"operation":   metadata.Operation,
+		"recorded_at": metadata.RecordedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if metadata.ExcelPID > 0 {
+		public["excel_pid"] = metadata.ExcelPID
+	}
+	if metadata.WorkerPID > 0 {
+		public["worker_pid"] = metadata.WorkerPID
+	}
+	if metadata.Session.Active || (strings.TrimSpace(metadata.Session.Owner) != "" && !strings.EqualFold(metadata.Session.Owner, "none")) {
+		public["session"] = map[string]any{"active": metadata.Session.Active, "owner": metadata.Session.Owner}
+	}
+	env.Recovery = public
+	env.Warnings = appendEnvelopeObject(env.Warnings, map[string]any{
+		"code":    coordination.WorkbookRecoveryRequiredCode,
+		"message": "The workbook was quarantined because Excel/VBA cleanup could not be confirmed. Use an explicit recovery action before retrying workbook commands.",
+	})
+	return env, exitCode, nil
+}
+
+func appendEnvelopeObject(existing any, value map[string]any) any {
+	switch items := existing.(type) {
+	case nil:
+		return []map[string]any{value}
+	case []map[string]any:
+		return append(items, value)
+	case []any:
+		return append(items, value)
+	default:
+		return []any{items, value}
+	}
 }
 
 func mergeUIResult(existing any, streamed []map[string]any) any {
@@ -1963,6 +2204,9 @@ func closeDebugStreamSession(session *debugStreamSession) (any, error) {
 
 func exitCodeForScriptResult(result ScriptResult) int {
 	if result.Error == nil {
+		if result.Status != output.StatusFailed {
+			return output.ExitSuccess
+		}
 		return output.ExitEnvironment
 	}
 	switch result.Error.Code {
