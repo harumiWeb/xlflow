@@ -265,6 +265,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   }
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
+  assert.strictEqual(config.get<boolean>("lsp.performanceLogging"), false);
   assert.strictEqual(
     buildTerminalCommandLine("xlflow", ["run", "--interactive", "Sheet1.Sample"]),
     "xlflow run --interactive Sheet1.Sample",
@@ -433,7 +434,14 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   suppressibleDiagnostic.code = "VB015";
   assert.strictEqual(diagnosticRuleCode(suppressibleDiagnostic), undefined);
   assert.deepStrictEqual(
-    await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, undefined),
+    await lspServerArgs(
+      {
+        lspLogFile: ".xlflow/lsp.log",
+        lspLogFileConfigured: false,
+        lspPerformanceLogging: false,
+      },
+      undefined,
+    ),
     ["lsp", "--stdio"],
   );
   const codeLensConfig = {
@@ -455,8 +463,26 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     userFormEvents: false,
   });
   assert.deepStrictEqual(
-    await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: true }, undefined),
+    await lspServerArgs(
+      {
+        lspLogFile: ".xlflow/lsp.log",
+        lspLogFileConfigured: true,
+        lspPerformanceLogging: false,
+      },
+      undefined,
+    ),
     ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
+  );
+  assert.deepStrictEqual(
+    await lspServerArgs(
+      {
+        lspLogFile: ".xlflow/lsp.log",
+        lspLogFileConfigured: false,
+        lspPerformanceLogging: true,
+      },
+      undefined,
+    ),
+    ["lsp", "--stdio", "--performance-log"],
   );
   assert.strictEqual(isStatementPrefix("Public Fu"), true);
   assert.strictEqual(isStatementPrefix("    Dim "), true);
@@ -527,8 +553,15 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
       index: 0,
     };
     assert.deepStrictEqual(
-      await lspServerArgs({ lspLogFile: ".xlflow/lsp.log", lspLogFileConfigured: false }, folder),
-      ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log"],
+      await lspServerArgs(
+        {
+          lspLogFile: ".xlflow/lsp.log",
+          lspLogFileConfigured: false,
+          lspPerformanceLogging: true,
+        },
+        folder,
+      ),
+      ["lsp", "--stdio", "--log-file", ".xlflow/lsp.log", "--performance-log"],
     );
   } finally {
     fs.rmSync(lspProjectDir, { recursive: true, force: true });

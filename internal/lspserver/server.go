@@ -37,23 +37,26 @@ type BuildInfo struct {
 }
 
 type Options struct {
-	RootDir   string
-	Config    config.Config
-	Build     BuildInfo
-	LogFile   string
-	Stderr    io.Writer
-	TypeDBDir string
+	RootDir        string
+	Config         config.Config
+	Build          BuildInfo
+	LogFile        string
+	Stderr         io.Writer
+	TypeDBDir      string
+	PerformanceLog bool
 }
 
 type Server struct {
-	opts           Options
-	db             *vbadb.DB
-	analyzer       intel.Analyzer
-	handler        protocol.Handler
-	docs           *documents
-	logger         *log.Logger
-	symbols        *workspaceSymbolCache
-	codeLensConfig intel.CodeLensConfig
+	opts                Options
+	db                  *vbadb.DB
+	analyzer            intel.Analyzer
+	handler             protocol.Handler
+	docs                *documents
+	logger              *log.Logger
+	symbols             *workspaceSymbolCache
+	codeLensConfig      intel.CodeLensConfig
+	diagnostics         func(intel.Document) []intel.Diagnostic
+	diagnosticsDebounce time.Duration
 
 	diagMu     sync.Mutex
 	diagTimers map[string]*time.Timer
@@ -115,6 +118,8 @@ func New(opts Options) (*Server, func(), error) {
 		diagGen:        make(map[string]uint64),
 	}
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
+	s.diagnostics = s.analyzer.Diagnostics
+	s.diagnosticsDebounce = diagnosticsDebounce
 	s.handler = protocol.Handler{
 		Initialize:                     s.initialize,
 		Initialized:                    s.initialized,
@@ -252,7 +257,7 @@ func (s *Server) exit(_ *glsp.Context) error {
 }
 
 func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
-	doc, err := s.docs.open(string(params.TextDocument.URI), params.TextDocument.Text)
+	doc, err := s.docs.open(string(params.TextDocument.URI), params.TextDocument.Text, int32(params.TextDocument.Version))
 	if err != nil {
 		return err
 	}
@@ -269,7 +274,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if !ok {
 		return fmt.Errorf("textDocument/didChange expected full document synchronization")
 	}
-	doc, err := s.docs.change(string(params.TextDocument.URI), text)
+	doc, err := s.docs.change(string(params.TextDocument.URI), text, int32(params.TextDocument.Version))
 	if err != nil {
 		return err
 	}
@@ -308,12 +313,16 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 }
 
 func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+	measurement := s.startPerformanceURI("textDocument/documentSymbol", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	syms, err := s.analyzer.DocumentSymbols(doc)
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	out := make([]protocol.DocumentSymbol, 0, len(syms))
@@ -327,12 +336,15 @@ func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 			SelectionRange: toProtocolRange(sym.Selection),
 		})
 	}
+	measurement.finish(len(out), nil)
 	return out, nil
 }
 
 func (s *Server) workspaceSymbol(_ *glsp.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
+	measurement := s.startPerformance("workspace/symbol", intel.Document{})
 	syms, err := s.analyzer.WorkspaceSymbols(s.docs.openDocuments(), params.Query)
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	out := make([]protocol.SymbolInformation, 0, len(syms))
@@ -351,16 +363,21 @@ func (s *Server) workspaceSymbol(_ *glsp.Context, params *protocol.WorkspaceSymb
 			ContainerName: &sym.Module,
 		})
 	}
+	measurement.finish(len(out), nil)
 	return out, nil
 }
 
 func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	measurement := s.startPerformanceURI("textDocument/definition", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	locs, err := s.analyzer.Definition(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), s.docs.uriForDisplayPath)
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	out := make([]protocol.Location, 0, len(locs))
@@ -371,16 +388,21 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		}
 		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
 	}
+	measurement.finish(len(out), nil)
 	return out, nil
 }
 
 func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	measurement := s.startPerformanceURI("textDocument/references", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	locs, err := s.analyzer.References(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), params.Context.IncludeDeclaration, s.docs.uriForDisplayPath)
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	out := make([]protocol.Location, 0, len(locs))
@@ -391,6 +413,7 @@ func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) (
 		}
 		out = append(out, protocol.Location{URI: protocol.DocumentUri(uri), Range: toProtocolRange(loc.Range)})
 	}
+	measurement.finish(len(out), nil)
 	return out, nil
 }
 
@@ -434,14 +457,19 @@ func (s *Server) rename(_ *glsp.Context, params *protocol.RenameParams) (*protoc
 }
 
 func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	measurement := s.startPerformanceURI("textDocument/hover", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	hover, err := s.analyzer.Hover(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || hover == nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.finish(1, nil)
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{
 			Kind:  protocol.MarkupKindMarkdown,
@@ -452,12 +480,16 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 }
 
 func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	measurement := s.startPerformanceURI("textDocument/completion", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	completions, err := s.analyzer.Completions(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	items := make([]protocol.CompletionItem, 0, len(completions))
@@ -494,6 +526,7 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		}
 		items = append(items, item)
 	}
+	measurement.finish(len(items), nil)
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
 }
 
@@ -525,12 +558,16 @@ func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 }
 
 func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	measurement := s.startPerformanceURI("textDocument/signatureHelp", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	help, err := s.analyzer.SignatureHelp(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || help == nil || len(help.Signatures) == 0 {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	activeSignature := protocol.UInteger(max(0, help.ActiveSignature))
@@ -550,6 +587,7 @@ func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpPa
 		}
 		signatures = append(signatures, info)
 	}
+	measurement.finish(len(signatures), nil)
 	return &protocol.SignatureHelp{
 		Signatures:      signatures,
 		ActiveSignature: &activeSignature,
@@ -592,24 +630,34 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 }
 
 func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
+	measurement := s.startPerformanceURI("textDocument/semanticTokens/full", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	tokens, err := s.analyzer.SemanticTokens(doc, s.docs.openDocuments())
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
-	return &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}, nil
+	result := &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}
+	measurement.finish(len(tokens), nil)
+	return result, nil
 }
 
 func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
+	measurement := s.startPerformanceURI("textDocument/codeLens", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
+	measurement.setDocument(doc)
 	procedures, err := s.analyzer.RunnableProcedures(doc, s.codeLensConfig)
 	if err != nil {
+		measurement.finish(0, err)
 		return nil, err
 	}
 	out := make([]protocol.CodeLens, 0, len(procedures))
@@ -639,6 +687,7 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 			},
 		})
 	}
+	measurement.finish(len(out), nil)
 	return out, nil
 }
 
@@ -653,7 +702,7 @@ func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
 	if timer := s.diagTimers[doc.URI]; timer != nil {
 		timer.Stop()
 	}
-	s.diagTimers[doc.URI] = time.AfterFunc(diagnosticsDebounce, func() {
+	s.diagTimers[doc.URI] = time.AfterFunc(s.diagnosticsDebounce, func() {
 		s.diagMu.Lock()
 		if s.diagGen[doc.URI] != gen {
 			s.diagMu.Unlock()
@@ -687,7 +736,8 @@ func (s *Server) stopDiagnosticTimers() {
 }
 
 func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
-	diagnostics := s.analyzer.Diagnostics(doc)
+	measurement := s.startPerformance("diagnostics", doc)
+	diagnostics := s.diagnostics(doc)
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, diag := range diagnostics {
 		severity := diagnosticSeverity(diag.Severity)
@@ -705,6 +755,7 @@ func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
 		URI:         protocol.DocumentUri(doc.URI),
 		Diagnostics: out,
 	})
+	measurement.finish(len(out), nil)
 }
 
 func (s *Server) baseAnalyzer() intel.Analyzer {
@@ -713,7 +764,9 @@ func (s *Server) baseAnalyzer() intel.Analyzer {
 
 func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]intel.Symbol, error) {
 	analyzer := s.baseAnalyzer()
-	base, err := s.symbols.base(analyzer)
+	started := time.Now()
+	base, hit, err := s.symbols.base(analyzer)
+	s.logCachePerformance("workspaceSymbols/cache/base", cacheStatus(hit), len(base), started, err)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +784,9 @@ func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]
 		out = append(out, sym)
 	}
 	for _, doc := range open {
-		syms, err := s.symbols.open(analyzer, doc)
+		started = time.Now()
+		syms, hit, err := s.symbols.open(analyzer, doc)
+		s.logCachePerformance("workspaceSymbols/cache/open", cacheStatus(hit), len(syms), started, err)
 		if err != nil {
 			continue
 		}
@@ -756,47 +811,48 @@ func newWorkspaceSymbolCache() *workspaceSymbolCache {
 	return &workspaceSymbolCache{openSymbols: map[string]cachedOpenSymbols{}}
 }
 
-func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, error) {
+func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, bool, error) {
 	c.mu.RLock()
 	if c.baseOK {
 		out := cloneSymbols(c.baseSymbols)
 		c.mu.RUnlock()
-		return out, nil
+		return out, true, nil
 	}
 	c.mu.RUnlock()
 
 	syms, err := analyzer.WorkspaceSymbols(nil, "")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	c.mu.Lock()
 	c.baseSymbols = cloneSymbols(syms)
 	c.baseOK = true
 	c.mu.Unlock()
-	return cloneSymbols(syms), nil
+	return cloneSymbols(syms), false, nil
 }
 
-func (c *workspaceSymbolCache) open(analyzer intel.Analyzer, doc intel.Document) ([]intel.Symbol, error) {
+func (c *workspaceSymbolCache) open(analyzer intel.Analyzer, doc intel.Document) ([]intel.Symbol, bool, error) {
 	key := documentSymbolKey(doc)
 	if key == "" {
-		return analyzer.DocumentSymbols(doc)
+		syms, err := analyzer.DocumentSymbols(doc)
+		return syms, false, err
 	}
 	c.mu.RLock()
 	if cached, ok := c.openSymbols[key]; ok && cached.source == doc.Source {
 		out := cloneSymbols(cached.symbols)
 		c.mu.RUnlock()
-		return out, nil
+		return out, true, nil
 	}
 	c.mu.RUnlock()
 
 	syms, err := analyzer.DocumentSymbols(doc)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	c.mu.Lock()
 	c.openSymbols[key] = cachedOpenSymbols{source: doc.Source, symbols: cloneSymbols(syms)}
 	c.mu.Unlock()
-	return cloneSymbols(syms), nil
+	return cloneSymbols(syms), false, nil
 }
 
 func (c *workspaceSymbolCache) invalidateOpen(doc intel.Document) {
@@ -913,10 +969,13 @@ func newDocuments(root string) *documents {
 	return &documents{root: root, docs: map[string]intel.Document{}, keys: map[string]string{}}
 }
 
-func (d *documents) open(uri, text string) (intel.Document, error) {
+func (d *documents) open(uri, text string, versions ...int32) (intel.Document, error) {
 	doc, err := d.docFromURI(uri, text)
 	if err != nil {
 		return intel.Document{}, err
+	}
+	if len(versions) > 0 {
+		doc.Version = versions[0]
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -926,15 +985,18 @@ func (d *documents) open(uri, text string) (intel.Document, error) {
 	return doc, nil
 }
 
-func (d *documents) change(uri, text string) (intel.Document, error) {
+func (d *documents) change(uri, text string, versions ...int32) (intel.Document, error) {
 	d.mu.RLock()
 	key := d.keys[uri]
 	current, ok := d.docs[key]
 	d.mu.RUnlock()
 	if !ok {
-		return d.open(uri, text)
+		return d.open(uri, text, versions...)
 	}
 	current.Source = text
+	if len(versions) > 0 {
+		current.Version = versions[0]
+	}
 	d.mu.Lock()
 	d.docs[key] = current
 	d.mu.Unlock()

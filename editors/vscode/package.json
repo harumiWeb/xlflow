@@ -73,6 +73,11 @@
           "default": ".xlflow/lsp.log",
           "description": "%configuration.xlflow.lsp.logFile.description%"
         },
+        "xlflow.lsp.performanceLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.xlflow.lsp.performanceLogging.description%"
+        },
         "xlflow.lsp.trace.server": {
           "type": "string",
           "enum": [

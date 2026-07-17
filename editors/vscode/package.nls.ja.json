@@ -5,6 +5,7 @@
   "configuration.xlflow.path.description": "xlflow実行ファイルのパスです。",
   "configuration.xlflow.lsp.enabled.description": "VBAファイルで xlflow lsp --stdio を開始します。",
   "configuration.xlflow.lsp.logFile.description": "xlflowプロジェクトで xlflow lsp --stdio に渡すログファイルです。xlflow以外のワークスペースでは、この設定が明示されていない限り出力チャンネルを使います。",
+  "configuration.xlflow.lsp.performanceLogging.description": "Language Server操作の構造化された性能計測ログを出力します。既定では無効です。",
   "configuration.xlflow.lsp.trace.server.description": "xlflow language server出力チャンネルのトレース詳細度です。",
   "configuration.xlflow.codeLens.enabled.description": "xlflowプロジェクトで実行可能なVBAプロシージャの上にxlflow CodeLensアクションを表示します。",
   "configuration.xlflow.codeLens.runProcedure.description": "実行可能なVBAプロシージャの上にRunアクションを表示します。",

@@ -33,6 +33,7 @@ type Document struct {
 	Path       string
 	Source     string
 	ModuleKind string
+	Version    int32
 }
 
 type Position struct {

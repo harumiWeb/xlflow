@@ -676,6 +676,21 @@ func TestLSPCheckUsesDefaultConfigWhenProjectConfigIsMissing(t *testing.T) {
 	}
 }
 
+func TestLSPPerformanceLogFlagIsOptIn(t *testing.T) {
+	a := &app{}
+	cmd, _, err := a.rootCommand().Find([]string{"lsp"})
+	if err != nil {
+		t.Fatalf("find lsp command: %v", err)
+	}
+	flag := cmd.Flags().Lookup("performance-log")
+	if flag == nil {
+		t.Fatal("lsp --performance-log flag is not registered")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("performance-log default = %q, want false", flag.DefValue)
+	}
+}
+
 func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
 	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
 	var stdout bytes.Buffer

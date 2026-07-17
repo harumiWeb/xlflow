@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the `xlflow.lsp.performanceLogging` setting to opt into structured language server performance measurements.
+
 ## v0.7.0
 
 - Added discovery of `xlflow capabilities --json` so the extension can use the

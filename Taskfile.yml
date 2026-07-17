@@ -102,6 +102,14 @@ tasks:
       - cmd: go test ./...
         platforms: [linux, darwin]
 
+  bench:lsp:
+    desc: Run deterministic LSP performance benchmarks
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5
+        platforms: [windows]
+      - cmd: go test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5
+        platforms: [linux, darwin]
+
   verify:security:
     desc: Run vulnerability and third-party licence inventory checks
     cmds:

@@ -7070,6 +7070,7 @@ func (a *app) lspCommand() *cobra.Command {
 	var check bool
 	var showVersion bool
 	var logFile string
+	var performanceLog bool
 	cmd := &cobra.Command{
 		Use:   "lsp",
 		Short: "Run the VBA language server",
@@ -7107,8 +7108,9 @@ func (a *app) lspCommand() *cobra.Command {
 					Commit:  a.buildInfo.withDefaults().Commit,
 					Date:    a.buildInfo.withDefaults().Date,
 				},
-				LogFile: logFile,
-				Stderr:  a.stderrWriter(),
+				LogFile:        logFile,
+				PerformanceLog: performanceLog,
+				Stderr:         a.stderrWriter(),
 			}
 			if check {
 				a.ensureLSPTypeDBGenerated()
@@ -7141,6 +7143,7 @@ func (a *app) lspCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&check, "check", false, "validate LSP prerequisites and exit")
 	cmd.Flags().BoolVar(&showVersion, "version", false, "show LSP server version and exit")
 	cmd.Flags().StringVar(&logFile, "log-file", "", "write LSP logs to this file instead of stderr")
+	cmd.Flags().BoolVar(&performanceLog, "performance-log", false, "log LSP operation performance metrics")
 	return cmd
 }
 
