@@ -428,13 +428,46 @@ func BenchmarkLSPSemanticTokens(b *testing.B) {
 	fixture := makeLSPBenchmarkFixture(b)
 	s := newLSPBenchmarkServer(b, fixture)
 	params := &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)}}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	b.Run("Cold", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			s.symbols = newWorkspaceSymbolCache()
+			s.documentSymbols = newDocumentSymbolCache()
+			s.semanticTokens = newSemanticTokenCache()
+			if _, err := s.semanticTokensFull(nil, params); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("Warm", func(b *testing.B) {
 		if _, err := s.semanticTokensFull(nil, params); err != nil {
 			b.Fatal(err)
 		}
-	}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := s.semanticTokensFull(nil, params); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("AfterEdit", func(b *testing.B) {
+		changed := strings.Replace(fixture.largeSource, "    localSheet.Ra\n", "    localSheet.Ran\n", 1)
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			source := fixture.largeSource
+			if i%2 == 0 {
+				source = changed
+			}
+			if _, err := s.docs.change(fixture.largeURI, source, int32(i+1)); err != nil {
+				b.Fatal(err)
+			}
+			s.semanticTokens.invalidateAll()
+			if _, err := s.semanticTokensFull(nil, params); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func BenchmarkLSPDocumentSymbols(b *testing.B) {

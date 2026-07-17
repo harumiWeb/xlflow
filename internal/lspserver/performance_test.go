@@ -3,6 +3,7 @@ package lspserver
 import (
 	"bytes"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -185,6 +186,52 @@ func TestDocumentSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
 	} {
 		if !strings.Contains(logOutput, expected) {
 			t.Fatalf("document symbol cache log missing %q:\n%s", expected, logOutput)
+		}
+	}
+}
+
+func TestSemanticTokenCachePerformanceReportsMissHitAndGenerationTime(t *testing.T) {
+	var output bytes.Buffer
+	s, cleanup, err := New(Options{
+		RootDir:        t.TempDir(),
+		Config:         config.Default(),
+		Stderr:         &output,
+		PerformanceLog: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(t.TempDir(), "Main.bas")
+	uri := pathToFileURI(path)
+	if _, err := s.docs.open(uri, "Option Explicit\n", 3); err != nil {
+		t.Fatal(err)
+	}
+	s.semanticTokenGenerator = func(intel.Document, []intel.Document) ([]intel.SemanticToken, error) {
+		return []intel.SemanticToken{{
+			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: 6}},
+			Type:  intel.SemanticTokenKeyword,
+		}}, nil
+	}
+	params := &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}}
+	if _, err := s.semanticTokensFull(nil, params); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.semanticTokensFull(nil, params); err != nil {
+		t.Fatal(err)
+	}
+
+	logOutput := output.String()
+	for _, expected := range []string{
+		`operation="semanticTokens/cache"`,
+		`cache="miss"`,
+		`cache="hit"`,
+		`operation="textDocument/semanticTokens/full"`,
+		`elapsed_ms=`,
+		`version=3`,
+	} {
+		if !strings.Contains(logOutput, expected) {
+			t.Fatalf("semantic token performance log missing %q:\n%s", expected, logOutput)
 		}
 	}
 }

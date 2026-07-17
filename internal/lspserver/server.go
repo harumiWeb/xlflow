@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -55,6 +56,8 @@ type Server struct {
 	logger                   *log.Logger
 	symbols                  *workspaceSymbolCache
 	documentSymbols          *documentSymbolCache
+	semanticTokens           *semanticTokenCache
+	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig           intel.CodeLensConfig
 	diagnostics              func(context.Context, intel.Document) []intel.Diagnostic
 	diagnosticsDebounce      time.Duration
@@ -137,12 +140,14 @@ func New(opts Options) (*Server, func(), error) {
 		logger:          logger,
 		symbols:         newWorkspaceSymbolCache(),
 		documentSymbols: newDocumentSymbolCache(),
+		semanticTokens:  newSemanticTokenCache(),
 		codeLensConfig:  intel.DefaultCodeLensConfig(),
 		diagStates:      make(map[string]*diagnosticState),
 		docLifecycles:   make(map[string]*sync.Mutex),
 	}
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
+	s.semanticTokenGenerator = s.analyzer.SemanticTokens
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsDebounce = diagnosticsDebounce
 	s.diagnosticsAfterFunc = func(delay time.Duration, callback func()) diagnosticTimer {
@@ -294,6 +299,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		return err
 	}
 	s.documentSymbols.invalidate(doc)
+	s.semanticTokens.invalidateAll()
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
 	if done != nil {
@@ -318,6 +324,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		return err
 	}
 	s.documentSymbols.invalidate(doc)
+	s.semanticTokens.invalidateAll()
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
 }
@@ -342,6 +349,7 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
 	s.docs.close(uri)
+	s.semanticTokens.invalidateAll()
 	if path, err := fileURIToPath(uri); err == nil {
 		s.documentSymbols.invalidate(intel.Document{URI: uri, Path: path})
 	}
@@ -668,20 +676,34 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 
 func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	measurement := s.startPerformanceURI("textDocument/semanticTokens/full", string(params.TextDocument.URI))
-	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
-	if err != nil {
-		measurement.finish(0, err)
-		return nil, err
+	for {
+		generation := s.semanticTokens.begin()
+		doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+		if err != nil {
+			measurement.finish(0, err)
+			return nil, err
+		}
+		measurement.setDocument(doc)
+		cacheStarted := time.Now()
+		data, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
+			tokens, err := s.semanticTokenGenerator(doc, s.docs.openDocuments())
+			if err != nil {
+				return nil, err
+			}
+			return encodeSemanticTokens(tokens), nil
+		})
+		if errors.Is(err, errSemanticTokensSuperseded) {
+			continue
+		}
+		s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(data)/5, cacheStarted, err)
+		if err != nil {
+			measurement.finish(0, err)
+			return nil, err
+		}
+		result := &protocol.SemanticTokens{Data: data}
+		measurement.finish(len(data)/5, nil)
+		return result, nil
 	}
-	measurement.setDocument(doc)
-	tokens, err := s.analyzer.SemanticTokens(doc, s.docs.openDocuments())
-	if err != nil {
-		measurement.finish(0, err)
-		return nil, err
-	}
-	result := &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}
-	measurement.finish(len(tokens), nil)
-	return result, nil
 }
 
 func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
