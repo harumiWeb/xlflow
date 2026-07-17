@@ -3533,6 +3533,113 @@ End Sub
 	}
 }
 
+func TestSemanticTokensRetrieveSymbolsOncePerRequest(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub Run(ByVal value As String)
+    Dim ws As Worksheet
+    Set ws = Worksheets("Input")
+    Debug.Print value
+    ws.Range("A1").Value = 1
+End Sub
+`
+	doc := Document{
+		URI:        "file:///project/Main.bas",
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+		Version:    1,
+	}
+	var documentCalls, workspaceCalls int
+	analyzer.DocumentSymbolsFunc = func(_ Document, load DocumentSymbolLoader) ([]Symbol, error) {
+		documentCalls++
+		return load()
+	}
+	analyzer.WorkspaceSymbolsFunc = func(_ []Document, _ string) ([]Symbol, error) {
+		workspaceCalls++
+		return nil, nil
+	}
+
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if documentCalls != 1 || workspaceCalls != 1 {
+		t.Fatalf("symbol retrievals = document:%d workspace:%d, want 1 each", documentCalls, workspaceCalls)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenParameter, "value", source, lineIndex(source, "Debug.Print value")) {
+		t.Fatalf("parameter token missing after symbol reuse: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenProperty, "Value", source, lineIndex(source, "ws.Range")) {
+		t.Fatalf("member token missing after symbol reuse: %+v", tokens)
+	}
+}
+
+func TestSemanticTokensPreferUnsavedDocumentOverRelativeWorkspaceSymbol(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Main.bas")
+	saved := `Option Explicit
+Public Sub OldCall()
+End Sub
+
+Public Sub Run()
+    OldCall
+End Sub
+`
+	if err := os.WriteFile(path, []byte(saved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	live := `Option Explicit
+Public Sub Run()
+    OldCall
+End Sub
+`
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		URI:        "file:///live/Main.bas",
+		Path:       path,
+		ModuleKind: "standard",
+		Source:     live,
+		Version:    2,
+	}
+
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSemanticTokenAt(tokens, SemanticTokenFunction, "OldCall", live, lineIndex(live, "    OldCall")) {
+		t.Fatalf("stale saved procedure colored an unresolved live-buffer call: %+v", tokens)
+	}
+}
+
+func TestNormalizeSemanticTokensPreservesPriorityAndRemovesOverlap(t *testing.T) {
+	rangeAt := func(start, end int) Range {
+		return Range{Start: Position{Line: 1, Character: start}, End: Position{Line: 1, Character: end}}
+	}
+	tokens := []SemanticToken{
+		{Range: rangeAt(0, 3), Type: SemanticTokenKeyword},
+		{Range: rangeAt(0, 3), Type: SemanticTokenFunction},
+		{Range: rangeAt(2, 5), Type: SemanticTokenVariable},
+		{Range: rangeAt(6, 8), Type: SemanticTokenNumber},
+	}
+
+	got := normalizeSemanticTokens(tokens)
+	if len(got) != 2 {
+		t.Fatalf("normalized tokens = %+v, want 2 non-overlapping tokens", got)
+	}
+	if got[0].Type != SemanticTokenFunction || got[0].Range != rangeAt(0, 3) {
+		t.Fatalf("first normalized token = %+v, want symbol priority winner", got[0])
+	}
+	if got[1].Type != SemanticTokenNumber || got[1].Range != rangeAt(6, 8) {
+		t.Fatalf("second normalized token = %+v, want trailing token", got[1])
+	}
+}
+
 func newTestAnalyzer(t *testing.T) Analyzer {
 	t.Helper()
 	db, err := vbadb.LoadBuiltin()

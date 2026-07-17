@@ -2874,7 +2874,10 @@ func currentProcedureRangeForDocument(doc Document, pos Position) (Range, bool) 
 }
 
 func currentProcedureForDocument(doc Document, pos Position) (string, *Range) {
-	lines := normalizedLines(doc.Source)
+	return currentProcedureForLines(normalizedLines(doc.Source), pos)
+}
+
+func currentProcedureForLines(lines []string, pos Position) (string, *Range) {
 	depth := 0
 	current := ""
 	var scope *Range
@@ -2916,6 +2919,85 @@ func currentProcedureForDocument(doc Document, pos Position) (string, *Range) {
 		}
 	}
 	return current, scope
+}
+
+type procedureScope struct {
+	name   string
+	range_ Range
+}
+
+type documentTypeContext struct {
+	lines           []string
+	symbols         []Symbol
+	procedures      []procedureScope
+	procedureByLine []int
+}
+
+func newDocumentTypeContext(lines []string, symbols []Symbol) *documentTypeContext {
+	ctx := &documentTypeContext{
+		lines:           lines,
+		symbols:         symbols,
+		procedureByLine: make([]int, len(lines)),
+	}
+	for i := range ctx.procedureByLine {
+		ctx.procedureByLine[i] = -1
+	}
+	depth := 0
+	active := -1
+	for lineNo, line := range lines {
+		text := strings.TrimSpace(line[:codeLimit(line)])
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		switch {
+		case strings.HasPrefix(lower, "end sub") || strings.HasPrefix(lower, "end function") || strings.HasPrefix(lower, "end property"):
+			if depth > 0 {
+				depth--
+			}
+			if depth == 0 && active >= 0 {
+				ctx.procedures[active].range_.End = Position{Line: lineNo, Character: utf16Len(line)}
+				active = -1
+			}
+		case procedureStartLine(lower):
+			depth++
+			if depth == 1 {
+				name := procedureNameFromLine(text)
+				if name != "" {
+					ctx.procedures = append(ctx.procedures, procedureScope{
+						name:   name,
+						range_: Range{Start: Position{Line: lineNo}, End: Position{Line: len(lines)}},
+					})
+					active = len(ctx.procedures) - 1
+				}
+			}
+		}
+	}
+	for index, procedure := range ctx.procedures {
+		lastLine := min(procedure.range_.End.Line, len(ctx.procedureByLine)-1)
+		for lineNo := procedure.range_.Start.Line; lineNo <= lastLine; lineNo++ {
+			ctx.procedureByLine[lineNo] = index
+		}
+	}
+	return ctx
+}
+
+func (c *documentTypeContext) procedureAt(pos Position) (string, *Range) {
+	if c == nil {
+		return "", nil
+	}
+	if pos.Line < 0 || pos.Line >= len(c.procedureByLine) {
+		return "", nil
+	}
+	index := c.procedureByLine[pos.Line]
+	if index < 0 || index >= len(c.procedures) {
+		return "", nil
+	}
+	scope := &c.procedures[index]
+	if comparePosition(scope.range_.Start, pos) <= 0 && comparePosition(pos, scope.range_.End) <= 0 {
+		return scope.name, &scope.range_
+	}
+	return "", nil
 }
 
 func procedureNameFromLine(text string) string {
@@ -2981,11 +3063,15 @@ type inferredType struct {
 }
 
 func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string, bool) {
-	inferred, ok := a.inferWordTypeInfoAt(doc, word, offset)
+	inferred, ok := a.inferWordTypeInfoAtContext(doc, word, offset, nil)
 	return inferred.Type, ok
 }
 
 func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (inferredType, bool) {
+	return a.inferWordTypeInfoAtContext(doc, word, offset, nil)
+}
+
+func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
 	if strings.EqualFold(word, "Me") {
 		if instance, ok := a.currentInstanceType(doc); ok {
 			return inferredType{Type: instance.Type, Source: instance.Source}, true
@@ -2999,12 +3085,12 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 	}
 	var declared string
 	if offset >= 0 {
-		if inferred, ok := a.visibleSymbolTypeInfoAt(doc, word, offset); ok {
+		if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
 			declared = inferred.Type
 			if !isObjectFallbackType(inferred.Type) {
 				return inferred, true
 			}
-		} else if currentProcedureNameForDocument(doc, positionForByteOffset(doc.Source, offset)) != "" {
+		} else if currentProcedureNameAt(doc, positionForByteOffset(doc.Source, offset), ctx) != "" {
 			return inferredType{}, false
 		}
 	}
@@ -3031,7 +3117,7 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 		}
 	}
 	if expr, exprOffset, ok := bestSetAssignmentExpression(doc.Source, word, offset); ok {
-		if typ, ok := a.resolveDocumentExpressionTypeAt(doc, expr, exprOffset); ok {
+		if typ, ok := a.resolveDocumentExpressionTypeAtContext(doc, expr, exprOffset, ctx); ok {
 			return inferredType{Type: typ, Source: "inferred from Set assignment"}, true
 		}
 	}
@@ -3041,12 +3127,18 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 	return inferredType{}, false
 }
 
-func (a Analyzer) visibleSymbolTypeInfoAt(doc Document, word string, offset int) (inferredType, bool) {
+func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
 	pos := positionForByteOffset(doc.Source, offset)
-	currentProcedure := currentProcedureNameForDocument(doc, pos)
-	syms, err := a.DocumentSymbols(doc)
-	if err != nil {
-		return inferredType{}, false
+	currentProcedure := currentProcedureNameAt(doc, pos, ctx)
+	var syms []Symbol
+	if ctx != nil {
+		syms = ctx.symbols
+	} else {
+		var err error
+		syms, err = a.DocumentSymbols(doc)
+		if err != nil {
+			return inferredType{}, false
+		}
 	}
 	var fallback inferredType
 	for _, sym := range syms {
@@ -3065,6 +3157,14 @@ func (a Analyzer) visibleSymbolTypeInfoAt(doc Document, word string, offset int)
 		return fallback, true
 	}
 	return inferredType{}, false
+}
+
+func currentProcedureNameAt(doc Document, pos Position, ctx *documentTypeContext) string {
+	if ctx != nil {
+		name, _ := ctx.procedureAt(pos)
+		return name
+	}
+	return currentProcedureNameForDocument(doc, pos)
 }
 
 func isObjectFallbackType(name string) bool {
@@ -3171,14 +3271,18 @@ func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
 }
 
 func (a Analyzer) resolveDocumentExpressionTypeAt(doc Document, expr string, offset int) (string, bool) {
-	return a.resolveExpressionTypeAt(doc, expr, true, offset)
+	return a.resolveDocumentExpressionTypeAtContext(doc, expr, offset, nil)
+}
+
+func (a Analyzer) resolveDocumentExpressionTypeAtContext(doc Document, expr string, offset int, ctx *documentTypeContext) (string, bool) {
+	return a.resolveExpressionTypeAtContext(doc, expr, true, offset, ctx)
 }
 
 func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument bool) (string, bool) {
-	return a.resolveExpressionTypeAt(doc, expr, useDocument, -1)
+	return a.resolveExpressionTypeAtContext(doc, expr, useDocument, -1, nil)
 }
 
-func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument bool, offset int) (string, bool) {
+func (a Analyzer) resolveExpressionTypeAtContext(doc Document, expr string, useDocument bool, offset int, ctx *documentTypeContext) (string, bool) {
 	parts := splitMemberExpression(expr)
 	if len(parts) == 0 {
 		return "", false
@@ -3201,8 +3305,8 @@ func (a Analyzer) resolveExpressionTypeAt(doc Document, expr string, useDocument
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
 	} else if useDocument {
-		if typ, ok := a.inferWordTypeAt(doc, base, offset); ok {
-			current = typ
+		if inferred, ok := a.inferWordTypeInfoAtContext(doc, base, offset, ctx); ok {
+			current = inferred.Type
 		} else {
 			return "", false
 		}
@@ -3284,7 +3388,14 @@ func sheetsDefaultExpression(expr string) bool {
 }
 
 func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (string, bool) {
+	return a.withBlockTypeAtContext(doc, pos, offset, nil)
+}
+
+func (a Analyzer) withBlockTypeAtContext(doc Document, pos Position, offset int, ctx *documentTypeContext) (string, bool) {
 	lines := normalizedLines(doc.Source)
+	if ctx != nil {
+		lines = ctx.lines
+	}
 	if pos.Line <= 0 || pos.Line > len(lines) {
 		return "", false
 	}
@@ -3304,7 +3415,7 @@ func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (strin
 		if len(m) == 0 {
 			continue
 		}
-		if typ, ok := a.resolveWithExpressionTypeAt(doc, strings.TrimSpace(m[1]), stack, offset); ok {
+		if typ, ok := a.resolveWithExpressionTypeAtContext(doc, strings.TrimSpace(m[1]), stack, offset, ctx); ok {
 			stack = append(stack, typ)
 		} else {
 			stack = append(stack, "")
@@ -3318,7 +3429,7 @@ func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (strin
 	return "", false
 }
 
-func (a Analyzer) resolveWithExpressionTypeAt(doc Document, expr string, stack []string, offset int) (string, bool) {
+func (a Analyzer) resolveWithExpressionTypeAtContext(doc Document, expr string, stack []string, offset int, ctx *documentTypeContext) (string, bool) {
 	expr = strings.TrimSpace(expr)
 	if strings.HasPrefix(expr, ".") {
 		if len(stack) == 0 || stack[len(stack)-1] == "" {
@@ -3326,7 +3437,7 @@ func (a Analyzer) resolveWithExpressionTypeAt(doc Document, expr string, stack [
 		}
 		return a.resolveMemberChainFromType(stack[len(stack)-1], expr)
 	}
-	return a.resolveDocumentExpressionTypeAt(doc, expr, offset)
+	return a.resolveDocumentExpressionTypeAtContext(doc, expr, offset, ctx)
 }
 
 func (a Analyzer) resolveMemberChainFromType(baseType, expr string) (string, bool) {
