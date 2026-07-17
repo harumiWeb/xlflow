@@ -169,6 +169,7 @@ func TestDocumentSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
 		ModuleKind: "standard",
 		Version:    42,
 	}
+	doc = intel.NewAnalysisSnapshot(doc).Document()
 	if _, err := s.analyzer.DocumentSymbols(doc); err != nil {
 		t.Fatal(err)
 	}

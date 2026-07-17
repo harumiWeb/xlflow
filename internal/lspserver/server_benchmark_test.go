@@ -432,8 +432,10 @@ func BenchmarkLSPSemanticTokens(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			s.symbols = newWorkspaceSymbolCache()
-			s.documentSymbols = newDocumentSymbolCache()
 			s.semanticTokens = newSemanticTokenCache()
+			if _, err := s.docs.change(fixture.largeURI, fixture.largeSource, int32(i+1)); err != nil {
+				b.Fatal(err)
+			}
 			if _, err := s.semanticTokensFull(nil, params); err != nil {
 				b.Fatal(err)
 			}
@@ -477,7 +479,9 @@ func BenchmarkLSPDocumentSymbols(b *testing.B) {
 	b.Run("Cold", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			s.documentSymbols = newDocumentSymbolCache()
+			if _, err := s.docs.change(fixture.largeURI, fixture.largeSource, int32(i+1)); err != nil {
+				b.Fatal(err)
+			}
 			if _, err := s.documentSymbol(nil, params); err != nil {
 				b.Fatal(err)
 			}
@@ -503,11 +507,9 @@ func BenchmarkLSPDocumentSymbols(b *testing.B) {
 			if i%2 == 0 {
 				source = changed
 			}
-			doc, err := s.docs.change(fixture.largeURI, source, int32(i+1))
-			if err != nil {
+			if _, err := s.docs.change(fixture.largeURI, source, int32(i+1)); err != nil {
 				b.Fatal(err)
 			}
-			s.documentSymbols.invalidate(doc)
 			if _, err := s.documentSymbol(nil, params); err != nil {
 				b.Fatal(err)
 			}

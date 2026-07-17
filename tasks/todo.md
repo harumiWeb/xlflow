@@ -1,3 +1,17 @@
+# Issue #344: Document-version-scoped LSP analysis snapshots
+
+- [x] Add immutable protocol-neutral analysis snapshots with source identity, normalized lines, procedure ranges, lazy source symbols, and semantic metadata
+- [x] Replace the LSP open-document map with snapshot publication, replacement, disk-backed reuse, close, and shutdown lifecycle ownership
+- [x] Layer semantic-token caching over snapshot documents while preserving workspace-generation invalidation
+- [x] Preserve UserForm control freshness and document-symbol performance logging
+- [x] Add snapshot concurrency, replacement, disk/open race, close, reopen, and shutdown regression tests
+- [x] Run full tests, lint, deterministic LSP benchmarks, race tests, diff checks, and final review
+  - `task test`, `task lint`, `task bench:lsp`, and `git diff --check` passed
+  - `go test -race ./internal/vba/intel ./internal/lspserver` passed through the Windows wrapper
+  - Excel COM E2E was not required because the change is confined to the pure-Go LSP path
+
+---
+
 # Issues #340 and #341: LSP performance phase 1
 
 - [x] Finish #340 opt-in performance instrumentation and document-version metadata
