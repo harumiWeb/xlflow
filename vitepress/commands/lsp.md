@@ -7,6 +7,7 @@ Start the reusable VBA language server for editor integrations.
 ```bash
 xlflow lsp --stdio
 xlflow lsp --stdio --log-file .xlflow/lsp.log
+xlflow lsp --stdio --performance-log
 xlflow lsp --check
 xlflow lsp --version
 ```
@@ -19,12 +20,15 @@ xlflow lsp --version
 | `--check`         | Validate server dependencies without starting JSON-RPC.   | false   |
 | `--version`       | Print LSP server build metadata.                          | false   |
 | `--log-file`      | Write server logs to this file instead of standard error. | stderr  |
+| `--performance-log` | Log structured performance measurements for LSP operations. | false |
 
 Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 ## Notes
 
 `xlflow lsp --stdio` reserves stdout exclusively for LSP messages. Normal logs go to stderr unless `--log-file` is provided.
+
+Performance logging is opt-in. With `--performance-log`, each measured operation writes one structured log line to stderr or the configured `--log-file`. Records include the operation, document URI or path where applicable, version or generation, input bytes and lines, elapsed time, result count, and outcome. Cache-aware operations may also report a cache hit or miss.
 
 `xlflow lsp --check` works even before a project has an `xlflow.toml`; it validates the parser and built-in type database using default configuration.
 
@@ -58,6 +62,8 @@ serverOptions = {
 ```
 
 For the MVP, xlflow is resolved from `PATH`.
+
+Set `xlflow.lsp.performanceLogging` to `true` to have the VS Code extension pass `--performance-log`. The setting defaults to `false`.
 
 ## Related
 

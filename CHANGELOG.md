@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in structured LSP performance logging through `xlflow lsp --performance-log`, including operation timing and result metadata for diagnostics and language features.
+
 ## v0.24.0
 
 - Added `xlflow capabilities --json`, a versioned, machine-readable projection

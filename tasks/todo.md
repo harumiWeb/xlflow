@@ -1,3 +1,13 @@
+# Issues #340 and #341: LSP performance phase 1
+
+- [x] Finish #340 opt-in performance instrumentation and document-version metadata
+- [x] Finish deterministic large-project/large-module benchmark fixtures
+- [x] Verify #340 with Go, VS Code, lint, docs, and benchmark runs
+- [ ] Record #340 baseline on GitHub and publish its draft PR
+- [ ] After #340 lands on main, implement #341 diagnostics coalescing on a separate branch
+
+---
+
 # Issue #335: Workbook recovery quarantine
 
 - [x] Add ADR-0020 and permanent recovery-state specifications

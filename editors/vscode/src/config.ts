@@ -7,6 +7,7 @@ export interface XlflowConfig {
   lspEnabled: boolean;
   lspLogFile: string;
   lspLogFileConfigured: boolean;
+  lspPerformanceLogging: boolean;
   lspTraceServer: TraceServer;
   codeLensEnabled: boolean;
   codeLensRunProcedure: boolean;
@@ -25,6 +26,7 @@ export function readConfig(): XlflowConfig {
     lspEnabled: config.get<boolean>("lsp.enabled", true),
     lspLogFile: readString(config, "lsp.logFile", ".xlflow/lsp.log"),
     lspLogFileConfigured: hasConfiguredValue(config, "lsp.logFile"),
+    lspPerformanceLogging: config.get<boolean>("lsp.performanceLogging", false),
     lspTraceServer: readTraceServer(config),
     codeLensEnabled: config.get<boolean>("codeLens.enabled", true),
     codeLensRunProcedure: config.get<boolean>("codeLens.runProcedure", true),
