@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added opt-in structured LSP performance logging through `xlflow lsp --performance-log`, including operation timing and result metadata for diagnostics and language features.
+- Improved LSP responsiveness by caching document source symbols per document version and content, sharing the result across symbols, completion, hover, CodeLens, semantic tokens, and type inference while preserving unsaved-buffer and UserForm freshness.
 
 ## v0.24.0
 

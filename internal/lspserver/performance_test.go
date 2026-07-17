@@ -115,6 +115,46 @@ func TestWorkspaceSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
 	}
 }
 
+func TestDocumentSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
+	var output bytes.Buffer
+	s, cleanup, err := New(Options{
+		RootDir:        t.TempDir(),
+		Config:         config.Default(),
+		Stderr:         &output,
+		PerformanceLog: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	doc := intel.Document{
+		URI:        `file:///C:/work/Main.bas`,
+		Path:       `C:\work\Main.bas`,
+		Source:     "Option Explicit\nSub Main()\nEnd Sub\n",
+		ModuleKind: "standard",
+		Version:    42,
+	}
+	if _, err := s.analyzer.DocumentSymbols(doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.analyzer.DocumentSymbols(doc); err != nil {
+		t.Fatal(err)
+	}
+	logOutput := output.String()
+	for _, expected := range []string{
+		`operation="documentSymbols/cache"`,
+		`cache="miss"`,
+		`cache="hit"`,
+		`uri="file:///C:/work/Main.bas"`,
+		`path="C:\\work\\Main.bas"`,
+		`version=42`,
+	} {
+		if !strings.Contains(logOutput, expected) {
+			t.Fatalf("document symbol cache log missing %q:\n%s", expected, logOutput)
+		}
+	}
+}
+
 func TestPerformanceLoggingIncludesDocumentResolutionFailures(t *testing.T) {
 	var output bytes.Buffer
 	s, cleanup, err := New(Options{
