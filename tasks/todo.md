@@ -14,7 +14,7 @@
   - `task test`, `task lint`, `pnpm docs:build`, and `git diff --check` passed
   - `go test -race ./internal/lspserver ./internal/vba/intel` passed through the Windows wrapper
   - `task bench:lsp` completed with 2 diagnostics runs, 1 discard, 1 publish, and `max_concurrent=1` for 25 continuous edits
-- [ ] Record the #341 comparison on GitHub and publish the branch
+- [x] Record the #341 comparison on GitHub and publish draft PR #352
 
 ---
 
