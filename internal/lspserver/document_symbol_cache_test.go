@@ -1,6 +1,7 @@
 package lspserver
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -205,7 +206,7 @@ func TestDocumentSymbolCacheTracksDiskOverlayCloseAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	s.diagnostics = func(intel.Document) []intel.Diagnostic { return nil }
+	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
 	ctx := &glsp.Context{Notify: func(string, any) {}}
 	uri := pathToFileURI(path)
 

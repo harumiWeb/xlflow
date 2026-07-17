@@ -69,6 +69,40 @@ func TestPerformanceLoggingIncludesStableDocumentFields(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsPerformanceLoggingIncludesGenerationAndDiscardStatus(t *testing.T) {
+	var output bytes.Buffer
+	s, cleanup, err := New(Options{
+		RootDir:        t.TempDir(),
+		Config:         config.Default(),
+		Stderr:         &output,
+		PerformanceLog: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	s.startPerformance("diagnostics", intel.Document{
+		URI:     "file:///work/Main.bas",
+		Source:  "Option Explicit\n",
+		Version: 9,
+	}).finishDiagnostics(2, 12, true)
+
+	logOutput := output.String()
+	for _, expected := range []string{
+		`operation="diagnostics"`,
+		`version=9`,
+		`generation=12`,
+		`result_count=2`,
+		`outcome="discarded"`,
+		`discarded=true`,
+	} {
+		if !strings.Contains(logOutput, expected) {
+			t.Fatalf("diagnostics performance log missing %q:\n%s", expected, logOutput)
+		}
+	}
+}
+
 func TestDocumentsPreserveLSPVersion(t *testing.T) {
 	docs := newDocuments(t.TempDir())
 	uri := pathToFileURI(t.TempDir() + `/Main.bas`)

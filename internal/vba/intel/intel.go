@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -155,7 +156,17 @@ func (a Analyzer) Check() error {
 }
 
 func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
+	return a.DiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	if ctx.Err() != nil {
+		return nil
+	}
 	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintSource(doc.Path, []byte(doc.Source))
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
 		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
 	}
@@ -169,7 +180,13 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	findings, err := analyze.SourceRealtimeFindings(a.RootDir, doc.Path, a.Config, []byte(doc.Source))
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err == nil {
 		for _, finding := range findings {
 			out = append(out, Diagnostic{
@@ -181,12 +198,33 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 			})
 		}
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.argumentDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.unknownMemberDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.propertyAccessDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.assignmentDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	out = append(out, a.documentationDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
 	return out
 }
 

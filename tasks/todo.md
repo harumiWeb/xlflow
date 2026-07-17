@@ -5,7 +5,16 @@
 - [x] Verify #340 with Go, VS Code, lint, docs, and benchmark runs
 - [x] Record #340 baseline on GitHub
 - [x] Publish the #340 draft PR (#351)
-- [ ] After #340 lands on main, implement #341 diagnostics coalescing on a separate branch
+- [x] Start #341 diagnostics coalescing on its dedicated branch after #340 merged
+- [x] Add URI-scoped one-worker scheduling, stale-result discard, close serialization, and shutdown waiting
+- [x] Add `Analyzer.DiagnosticsContext` with compatibility wrapper and stage-boundary cancellation
+- [x] Add fake-timer/channel-controlled diagnostics state-machine tests and post-#340 benchmark metrics
+- [x] Update the LSP contract, user documentation, performance fields, and root changelog
+- [x] Run race, full test/lint/docs, and benchmark verification for #341
+  - `task test`, `task lint`, `pnpm docs:build`, and `git diff --check` passed
+  - `go test -race ./internal/lspserver ./internal/vba/intel` passed through the Windows wrapper
+  - `task bench:lsp` completed with 2 diagnostics runs, 1 discard, 1 publish, and `max_concurrent=1` for 25 continuous edits
+- [x] Record the #341 comparison on GitHub and publish draft PR #352
 
 ---
 

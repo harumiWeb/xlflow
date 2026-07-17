@@ -28,7 +28,7 @@ Exactly one of `--stdio`, `--check`, or `--version` is required.
 
 `xlflow lsp --stdio` reserves stdout exclusively for LSP messages. Normal logs go to stderr unless `--log-file` is provided.
 
-Performance logging is opt-in. With `--performance-log`, each measured operation writes one structured log line to stderr or the configured `--log-file`. Records include the operation, document URI or path where applicable, version or generation, input bytes and lines, elapsed time, result count, and outcome. Cache-aware operations may also report a cache hit or miss.
+Performance logging is opt-in. With `--performance-log`, each measured operation writes one structured log line to stderr or the configured `--log-file`. Records include the operation, document URI or path where applicable, version or generation, input bytes and lines, elapsed time, result count, and outcome. Diagnostics records also identify discarded obsolete results, and cache-aware operations may report a cache hit or miss.
 
 `xlflow lsp --check` works even before a project has an `xlflow.toml`; it validates the parser and built-in type database using default configuration.
 
@@ -38,7 +38,7 @@ The MVP server supports full document synchronization, diagnostics, semantic tok
 
 Rename support is conservative and scope-aware. It works for high-confidence VBA source symbols such as local variables, parameters, procedure-local constants, private module-level variables/constants, same-module private procedures, and same-procedure labels used by `GoTo`, `GoSub`, `Resume`, or `On Error GoTo`. It refuses host object model members, TypeLib/external members, public project-wide APIs, module files, `Attribute VB_Name`, UserForm controls, event handlers, property groups, ambiguous names, and unresolved identifiers.
 
-Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
+Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Opening a document starts diagnostics immediately. Changes are debounced and coalesced so a document never has more than one active diagnostics worker, and only the newest open version can publish results. Slow documents do not prevent other documents from being analyzed. Closing a document cancels its pending work and publishes a final empty diagnostics result; an older analysis cannot publish afterward. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
 
 The LSP also publishes editor-first argument diagnostics such as `VB030` for missing required arguments, excessive arguments, and unknown named arguments when the target signature is known from project symbols or the built-in VBA/COM database. These diagnostics are intentionally LSP-only for now and are not yet part of the `xlflow lint` CLI contract.
 

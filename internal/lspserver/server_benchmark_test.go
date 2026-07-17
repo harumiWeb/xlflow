@@ -1,6 +1,7 @@
 package lspserver
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -276,7 +277,11 @@ func BenchmarkLSPContinuousEditScheduling(b *testing.B) {
 		release := make(chan struct{})
 		var active atomic.Int64
 		var maximum atomic.Int64
-		s.diagnostics = func(doc intel.Document) []intel.Diagnostic {
+		var runs atomic.Int64
+		var discarded atomic.Int64
+		var published atomic.Int64
+		s.diagnostics = func(ctx context.Context, doc intel.Document) []intel.Diagnostic {
+			runs.Add(1)
 			current := active.Add(1)
 			for {
 				observed := maximum.Load()
@@ -286,11 +291,14 @@ func BenchmarkLSPContinuousEditScheduling(b *testing.B) {
 			}
 			started <- doc.Version
 			<-release
+			if ctx.Err() != nil {
+				discarded.Add(1)
+			}
 			active.Add(-1)
 			completed <- doc.Version
 			return nil
 		}
-		ctx := &glsp.Context{Notify: func(string, any) {}}
+		ctx := &glsp.Context{Notify: func(string, any) { published.Add(1) }}
 		b.StartTimer()
 		for edit := 0; edit < edits; edit++ {
 			source := fixture.largeSource
@@ -362,6 +370,9 @@ func BenchmarkLSPContinuousEditScheduling(b *testing.B) {
 		}
 	complete:
 		b.ReportMetric(float64(maximum.Load()), "max_concurrent")
+		b.ReportMetric(float64(runs.Load()), "diagnostic_runs")
+		b.ReportMetric(float64(discarded.Load()), "discarded_runs")
+		b.ReportMetric(float64(published.Load()), "published_runs")
 	}
 }
 
