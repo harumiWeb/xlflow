@@ -54,6 +54,7 @@ type Server struct {
 	docs                     *documents
 	logger                   *log.Logger
 	symbols                  *workspaceSymbolCache
+	documentSymbols          *documentSymbolCache
 	codeLensConfig           intel.CodeLensConfig
 	diagnostics              func(context.Context, intel.Document) []intel.Diagnostic
 	diagnosticsDebounce      time.Duration
@@ -132,13 +133,15 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      typeDB.DB,
 		},
-		docs:           newDocuments(opts.RootDir),
-		logger:         logger,
-		symbols:        newWorkspaceSymbolCache(),
-		codeLensConfig: intel.DefaultCodeLensConfig(),
-		diagStates:     make(map[string]*diagnosticState),
-		docLifecycles:  make(map[string]*sync.Mutex),
+		docs:            newDocuments(opts.RootDir),
+		logger:          logger,
+		symbols:         newWorkspaceSymbolCache(),
+		documentSymbols: newDocumentSymbolCache(),
+		codeLensConfig:  intel.DefaultCodeLensConfig(),
+		diagStates:      make(map[string]*diagnosticState),
+		docLifecycles:   make(map[string]*sync.Mutex),
 	}
+	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsDebounce = diagnosticsDebounce
@@ -290,7 +293,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
-	s.symbols.invalidateOpen(doc)
+	s.documentSymbols.invalidate(doc)
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
 	if done != nil {
@@ -314,7 +317,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if err != nil {
 		return err
 	}
-	s.symbols.invalidateOpen(doc)
+	s.documentSymbols.invalidate(doc)
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
 }
@@ -338,11 +341,11 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
+	s.docs.close(uri)
 	if path, err := fileURIToPath(uri); err == nil {
-		s.symbols.invalidateOpen(intel.Document{URI: uri, Path: path})
+		s.documentSymbols.invalidate(intel.Document{URI: uri, Path: path})
 	}
 	s.symbols.invalidateBase()
-	s.docs.close(uri)
 	return nil
 }
 
@@ -948,6 +951,13 @@ func (s *Server) baseAnalyzer() intel.Analyzer {
 	return intel.Analyzer{RootDir: s.opts.RootDir, Config: s.opts.Config, DB: s.db}
 }
 
+func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.DocumentSymbolLoader) ([]intel.Symbol, error) {
+	started := time.Now()
+	syms, hit, err := s.documentSymbols.get(doc, load)
+	s.logDocumentCachePerformance("documentSymbols/cache", cacheStatus(hit), doc, len(syms), started, err)
+	return syms, err
+}
+
 func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]intel.Symbol, error) {
 	analyzer := s.baseAnalyzer()
 	started := time.Now()
@@ -970,9 +980,7 @@ func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]
 		out = append(out, sym)
 	}
 	for _, doc := range open {
-		started = time.Now()
-		syms, hit, err := s.symbols.open(analyzer, doc)
-		s.logCachePerformance("workspaceSymbols/cache/open", cacheStatus(hit), len(syms), started, err)
+		syms, err := s.analyzer.DocumentSymbols(doc)
 		if err != nil {
 			continue
 		}
@@ -985,16 +993,10 @@ type workspaceSymbolCache struct {
 	mu          sync.RWMutex
 	baseSymbols []intel.Symbol
 	baseOK      bool
-	openSymbols map[string]cachedOpenSymbols
-}
-
-type cachedOpenSymbols struct {
-	source  string
-	symbols []intel.Symbol
 }
 
 func newWorkspaceSymbolCache() *workspaceSymbolCache {
-	return &workspaceSymbolCache{openSymbols: map[string]cachedOpenSymbols{}}
+	return &workspaceSymbolCache{}
 }
 
 func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, bool, error) {
@@ -1015,38 +1017,6 @@ func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, bo
 	c.baseOK = true
 	c.mu.Unlock()
 	return cloneSymbols(syms), false, nil
-}
-
-func (c *workspaceSymbolCache) open(analyzer intel.Analyzer, doc intel.Document) ([]intel.Symbol, bool, error) {
-	key := documentSymbolKey(doc)
-	if key == "" {
-		syms, err := analyzer.DocumentSymbols(doc)
-		return syms, false, err
-	}
-	c.mu.RLock()
-	if cached, ok := c.openSymbols[key]; ok && cached.source == doc.Source {
-		out := cloneSymbols(cached.symbols)
-		c.mu.RUnlock()
-		return out, true, nil
-	}
-	c.mu.RUnlock()
-
-	syms, err := analyzer.DocumentSymbols(doc)
-	if err != nil {
-		return nil, false, err
-	}
-	c.mu.Lock()
-	c.openSymbols[key] = cachedOpenSymbols{source: doc.Source, symbols: cloneSymbols(syms)}
-	c.mu.Unlock()
-	return cloneSymbols(syms), false, nil
-}
-
-func (c *workspaceSymbolCache) invalidateOpen(doc intel.Document) {
-	if key := documentSymbolKey(doc); key != "" {
-		c.mu.Lock()
-		delete(c.openSymbols, key)
-		c.mu.Unlock()
-	}
 }
 
 func (c *workspaceSymbolCache) invalidateBase() {
@@ -1114,7 +1084,23 @@ func hasSymbolPathKey(set map[string]bool, keys []string) bool {
 
 func cloneSymbols(syms []intel.Symbol) []intel.Symbol {
 	out := make([]intel.Symbol, len(syms))
-	copy(out, syms)
+	for i, sym := range syms {
+		out[i] = sym
+		out[i].Parameters = append([]intel.Parameter(nil), sym.Parameters...)
+		out[i].Documentation.ParameterEntries = append(out[i].Documentation.ParameterEntries[:0:0], sym.Documentation.ParameterEntries...)
+		if sym.Documentation.Parameters != nil {
+			out[i].Documentation.Parameters = make(map[string]string, len(sym.Documentation.Parameters))
+			for key, value := range sym.Documentation.Parameters {
+				out[i].Documentation.Parameters[key] = value
+			}
+		}
+		if sym.Documentation.UnknownSections != nil {
+			out[i].Documentation.UnknownSections = make(map[string]string, len(sym.Documentation.UnknownSections))
+			for key, value := range sym.Documentation.UnknownSections {
+				out[i].Documentation.UnknownSections[key] = value
+			}
+		}
+	}
 	return out
 }
 

@@ -104,6 +104,29 @@ func (s *Server) logCachePerformance(operation, cache string, resultCount int, s
 	)
 }
 
+func (s *Server) logDocumentCachePerformance(operation, cache string, doc intel.Document, resultCount int, started time.Time, err error) {
+	if !s.opts.PerformanceLog {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	s.logger.Printf(
+		"performance operation=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f result_count=%d outcome=%q cache=%q",
+		operation,
+		doc.URI,
+		doc.Path,
+		doc.Version,
+		len(doc.Source),
+		sourceLineCount(doc.Source),
+		float64(time.Since(started))/float64(time.Millisecond),
+		resultCount,
+		outcome,
+		cache,
+	)
+}
+
 func sourceLineCount(source string) int {
 	if source == "" {
 		return 0

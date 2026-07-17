@@ -22,10 +22,15 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
+type DocumentSymbolLoader func() ([]Symbol, error)
+
+type DocumentSymbolsFunc func(doc Document, load DocumentSymbolLoader) ([]Symbol, error)
+
 type Analyzer struct {
 	RootDir              string
 	Config               config.Config
 	DB                   *vbadb.DB
+	DocumentSymbolsFunc  DocumentSymbolsFunc
 	WorkspaceSymbolsFunc func(open []Document, query string) ([]Symbol, error)
 }
 
@@ -224,6 +229,27 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 }
 
 func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
+	load := func() ([]Symbol, error) {
+		return a.inspectDocumentSourceSymbols(doc)
+	}
+	var sourceSymbols []Symbol
+	var err error
+	if a.DocumentSymbolsFunc != nil {
+		sourceSymbols, err = a.DocumentSymbolsFunc(doc, load)
+	} else {
+		sourceSymbols, err = load()
+	}
+	if err != nil {
+		return nil, err
+	}
+	controls := a.formControlSymbols(doc)
+	out := make([]Symbol, 0, len(sourceSymbols)+len(controls))
+	out = append(out, sourceSymbols...)
+	out = append(out, controls...)
+	return out, nil
+}
+
+func (a Analyzer) inspectDocumentSourceSymbols(doc Document) ([]Symbol, error) {
 	file, err := symbols.InspectSource(symbols.SourceOptions{
 		RootDir:        a.RootDir,
 		Path:           doc.Path,
@@ -234,9 +260,7 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := symbolsFromFile(file, doc.URI)
-	out = append(out, a.formControlSymbols(doc)...)
-	return out, nil
+	return symbolsFromFile(file, doc.URI), nil
 }
 
 func DefaultCodeLensConfig() CodeLensConfig {
