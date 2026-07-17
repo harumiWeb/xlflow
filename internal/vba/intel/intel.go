@@ -40,6 +40,7 @@ type Document struct {
 	Source     string
 	ModuleKind string
 	Version    int32
+	Snapshot   *AnalysisSnapshot
 }
 
 type Position struct {
@@ -236,6 +237,8 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	var err error
 	if a.DocumentSymbolsFunc != nil {
 		sourceSymbols, err = a.DocumentSymbolsFunc(doc, load)
+	} else if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		sourceSymbols, _, err = snapshot.SourceSymbols(load)
 	} else {
 		sourceSymbols, err = load()
 	}
@@ -1317,7 +1320,7 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 		return nil
 	}
 	var out []Diagnostic
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	seen := map[string]bool{}
 	for lineNo, line := range lines {
 		code := stripLineComment(line)
@@ -1350,7 +1353,7 @@ func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
 	}
 	var out []Diagnostic
 	seen := map[string]bool{}
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	for lineNo, line := range lines {
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
@@ -1561,7 +1564,7 @@ func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
 		return nil
 	}
 	var out []Diagnostic
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	for lineNo, line := range lines {
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
@@ -1675,7 +1678,7 @@ func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
 		return nil
 	}
 	var out []Diagnostic
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	for lineNo, line := range lines {
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
@@ -2728,7 +2731,7 @@ func (a Analyzer) valueRHSCompletions(prefix string, replaceRange Range, doc Doc
 }
 
 func localValueCompletionsFromSource(doc Document, pos Position, prefix string, replaceRange Range) []Completion {
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	if pos.Line >= len(lines) {
 		return nil
 	}
@@ -2874,7 +2877,10 @@ func currentProcedureRangeForDocument(doc Document, pos Position) (Range, bool) 
 }
 
 func currentProcedureForDocument(doc Document, pos Position) (string, *Range) {
-	return currentProcedureForLines(normalizedLines(doc.Source), pos)
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		return snapshot.procedureAt(pos)
+	}
+	return currentProcedureForLines(documentLines(doc), pos)
 }
 
 func currentProcedureForLines(lines []string, pos Position) (string, *Range) {
@@ -2933,7 +2939,7 @@ type documentTypeContext struct {
 	procedureByLine []int
 }
 
-func newDocumentTypeContext(lines []string, symbols []Symbol) *documentTypeContext {
+func newDocumentTypeContext(doc Document, lines []string, symbols []Symbol) *documentTypeContext {
 	ctx := &documentTypeContext{
 		lines:           lines,
 		symbols:         symbols,
@@ -2941,6 +2947,15 @@ func newDocumentTypeContext(lines []string, symbols []Symbol) *documentTypeConte
 	}
 	for i := range ctx.procedureByLine {
 		ctx.procedureByLine[i] = -1
+	}
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		snapshot.initProcedures()
+		ctx.procedures = make([]procedureScope, len(snapshot.procedures))
+		for i, procedure := range snapshot.procedures {
+			ctx.procedures[i] = procedureScope{name: procedure.Name, range_: procedure.Range}
+		}
+		copy(ctx.procedureByLine, snapshot.procedureLines)
+		return ctx
 	}
 	depth := 0
 	active := -1
@@ -3392,7 +3407,7 @@ func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (strin
 }
 
 func (a Analyzer) withBlockTypeAtContext(doc Document, pos Position, offset int, ctx *documentTypeContext) (string, bool) {
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	if ctx != nil {
 		lines = ctx.lines
 	}

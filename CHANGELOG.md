@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added immutable, document-version-scoped LSP analysis snapshots that share normalized source lines, procedure ranges, source symbols, and semantic-token metadata across requests while preserving open-buffer and UserForm freshness.
 - Added opt-in structured LSP performance logging through `xlflow lsp --performance-log`, including operation timing and result metadata for diagnostics and language features.
 - Improved LSP semantic token performance by reusing document and workspace symbol data within each request and caching encoded tokens for unchanged document versions.
 - Improved LSP responsiveness by caching document source symbols per document version and content, sharing the result across symbols, completion, hover, CodeLens, semantic tokens, and type inference while preserving unsaved-buffer and UserForm freshness.

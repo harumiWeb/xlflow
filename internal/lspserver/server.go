@@ -55,7 +55,6 @@ type Server struct {
 	docs                     *documents
 	logger                   *log.Logger
 	symbols                  *workspaceSymbolCache
-	documentSymbols          *documentSymbolCache
 	semanticTokens           *semanticTokenCache
 	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig           intel.CodeLensConfig
@@ -136,14 +135,13 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      typeDB.DB,
 		},
-		docs:            newDocuments(opts.RootDir),
-		logger:          logger,
-		symbols:         newWorkspaceSymbolCache(),
-		documentSymbols: newDocumentSymbolCache(),
-		semanticTokens:  newSemanticTokenCache(),
-		codeLensConfig:  intel.DefaultCodeLensConfig(),
-		diagStates:      make(map[string]*diagnosticState),
-		docLifecycles:   make(map[string]*sync.Mutex),
+		docs:           newDocuments(opts.RootDir),
+		logger:         logger,
+		symbols:        newWorkspaceSymbolCache(),
+		semanticTokens: newSemanticTokenCache(),
+		codeLensConfig: intel.DefaultCodeLensConfig(),
+		diagStates:     make(map[string]*diagnosticState),
+		docLifecycles:  make(map[string]*sync.Mutex),
 	}
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
@@ -177,6 +175,7 @@ func New(opts Options) (*Server, func(), error) {
 	}
 	return s, func() {
 		s.stopDiagnostics()
+		s.docs.closeAll()
 		cleanup()
 	}, nil
 }
@@ -281,6 +280,7 @@ func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeL
 
 func (s *Server) shutdown(_ *glsp.Context) error {
 	s.stopDiagnostics()
+	s.docs.closeAll()
 	s.logger.Printf("shutdown")
 	return nil
 }
@@ -298,7 +298,6 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
-	s.documentSymbols.invalidate(doc)
 	s.semanticTokens.invalidateAll()
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
@@ -323,7 +322,6 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if err != nil {
 		return err
 	}
-	s.documentSymbols.invalidate(doc)
 	s.semanticTokens.invalidateAll()
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
@@ -350,9 +348,6 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	s.closeDiagnostics(ctx, uri)
 	s.docs.close(uri)
 	s.semanticTokens.invalidateAll()
-	if path, err := fileURIToPath(uri); err == nil {
-		s.documentSymbols.invalidate(intel.Document{URI: uri, Path: path})
-	}
 	s.symbols.invalidateBase()
 	return nil
 }
@@ -975,7 +970,14 @@ func (s *Server) baseAnalyzer() intel.Analyzer {
 
 func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.DocumentSymbolLoader) ([]intel.Symbol, error) {
 	started := time.Now()
-	syms, hit, err := s.documentSymbols.get(doc, load)
+	var syms []intel.Symbol
+	var hit bool
+	var err error
+	if doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+		syms, hit, err = doc.Snapshot.SourceSymbols(load)
+	} else {
+		syms, err = load()
+	}
 	s.logDocumentCachePerformance("documentSymbols/cache", cacheStatus(hit), doc, len(syms), started, err)
 	return syms, err
 }
@@ -1153,14 +1155,33 @@ func filterWorkspaceSymbols(syms []intel.Symbol, query string) []intel.Symbol {
 }
 
 type documents struct {
-	root string
-	mu   sync.RWMutex
-	docs map[string]intel.Document
-	keys map[string]string
+	root          string
+	readFile      func(string) ([]byte, error)
+	beforePublish func()
+	mu            sync.RWMutex
+	docs          map[string]documentEntry
+	keys          map[string]string
+	generations   map[string]uint64
+	closed        bool
+}
+
+type documentEntry struct {
+	snapshot   *intel.AnalysisSnapshot
+	open       bool
+	generation uint64
+	lifecycle  uint64
 }
 
 func newDocuments(root string) *documents {
-	return &documents{root: root, docs: map[string]intel.Document{}, keys: map[string]string{}}
+	return &documents{
+		root: root, readFile: os.ReadFile,
+		docs: map[string]documentEntry{}, keys: map[string]string{}, generations: map[string]uint64{},
+	}
+}
+
+func (d *documents) nextGenerationLocked(key string) uint64 {
+	d.generations[key]++
+	return d.generations[key]
 }
 
 func (d *documents) open(uri, text string, versions ...int32) (intel.Document, error) {
@@ -1171,39 +1192,107 @@ func (d *documents) open(uri, text string, versions ...int32) (intel.Document, e
 	if len(versions) > 0 {
 		doc.Version = versions[0]
 	}
+	snapshot := intel.NewAnalysisSnapshot(doc)
+	if d.beforePublish != nil {
+		d.beforePublish()
+	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	if d.closed {
+		d.mu.Unlock()
+		snapshot.Retire()
+		return intel.Document{}, errDocumentsClosed
+	}
 	key := normalizePathKey(doc.Path)
-	d.docs[key] = doc
+	previous := d.docs[key].snapshot
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: generation}
 	d.keys[uri] = key
-	return doc, nil
+	d.mu.Unlock()
+	previous.Retire()
+	return snapshot.Document(), nil
 }
 
 func (d *documents) change(uri, text string, versions ...int32) (intel.Document, error) {
 	d.mu.RLock()
+	if d.closed {
+		d.mu.RUnlock()
+		return intel.Document{}, errDocumentsClosed
+	}
 	key := d.keys[uri]
-	current, ok := d.docs[key]
+	if key == "" {
+		if path, err := fileURIToPath(uri); err == nil {
+			key = normalizePathKey(path)
+		}
+	}
+	entry, ok := d.docs[key]
 	d.mu.RUnlock()
-	if !ok {
+	if !ok || !entry.open || entry.snapshot == nil {
 		return d.open(uri, text, versions...)
 	}
+	current := entry.snapshot.Document()
 	current.Source = text
+	current.Snapshot = nil
 	if len(versions) > 0 {
 		current.Version = versions[0]
 	}
+	snapshot := intel.NewAnalysisSnapshot(current)
+	if d.beforePublish != nil {
+		d.beforePublish()
+	}
 	d.mu.Lock()
-	d.docs[key] = current
+	if d.closed {
+		d.mu.Unlock()
+		snapshot.Retire()
+		return intel.Document{}, errDocumentsClosed
+	}
+	latest := d.docs[key]
+	if latest.snapshot != entry.snapshot || latest.generation != entry.generation || !latest.open {
+		if latest.open && latest.snapshot != nil {
+			d.keys[uri] = key
+			if latest.lifecycle == entry.lifecycle && snapshot.Version() > latest.snapshot.Version() {
+				generation := d.nextGenerationLocked(key)
+				d.docs[key] = documentEntry{
+					snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle,
+				}
+				d.mu.Unlock()
+				latest.snapshot.Retire()
+				return snapshot.Document(), nil
+			}
+		}
+		d.mu.Unlock()
+		snapshot.Retire()
+		if latest.open && latest.snapshot != nil {
+			return latest.snapshot.Document(), nil
+		}
+		return intel.Document{}, errDocumentChangedConcurrently
+	}
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle}
+	d.keys[uri] = key
 	d.mu.Unlock()
-	return current, nil
+	entry.snapshot.Retire()
+	return snapshot.Document(), nil
 }
 
 func (d *documents) close(uri string) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if key := d.keys[uri]; key != "" {
-		delete(d.docs, key)
+	var snapshot *intel.AnalysisSnapshot
+	key := d.keys[uri]
+	if key == "" {
+		if path, err := fileURIToPath(uri); err == nil {
+			key = normalizePathKey(path)
+		}
+	}
+	if key != "" {
+		if entry := d.docs[key]; entry.open {
+			snapshot = entry.snapshot
+			delete(d.docs, key)
+		}
+		d.nextGenerationLocked(key)
 		delete(d.keys, uri)
 	}
+	d.mu.Unlock()
+	snapshot.Retire()
 }
 
 func (d *documents) getOrRead(uri string) (intel.Document, error) {
@@ -1212,28 +1301,91 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 		return intel.Document{}, err
 	}
 	key := normalizePathKey(path)
-	d.mu.RLock()
-	if doc, ok := d.docs[key]; ok {
+	for {
+		d.mu.RLock()
+		if d.closed {
+			d.mu.RUnlock()
+			return intel.Document{}, errDocumentsClosed
+		}
+		if entry, ok := d.docs[key]; ok && entry.open && entry.snapshot != nil {
+			d.mu.RUnlock()
+			return entry.snapshot.Document(), nil
+		}
+		observedGeneration := d.generations[key]
 		d.mu.RUnlock()
-		return doc, nil
+
+		body, err := d.readFile(path)
+		if err != nil {
+			return intel.Document{}, err
+		}
+		candidate := intel.NewAnalysisSnapshot(intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)})
+		if d.beforePublish != nil {
+			d.beforePublish()
+		}
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			candidate.Retire()
+			return intel.Document{}, errDocumentsClosed
+		}
+		current := d.docs[key]
+		if current.open && current.snapshot != nil {
+			d.mu.Unlock()
+			candidate.Retire()
+			return current.snapshot.Document(), nil
+		}
+		if current.snapshot != nil && current.snapshot.SourceHash() == candidate.SourceHash() &&
+			current.snapshot.URI() == candidate.URI() && current.snapshot.ModuleKind() == candidate.ModuleKind() {
+			d.mu.Unlock()
+			candidate.Retire()
+			return current.snapshot.Document(), nil
+		}
+		if d.generations[key] != observedGeneration {
+			d.mu.Unlock()
+			candidate.Retire()
+			continue
+		}
+		generation := d.nextGenerationLocked(key)
+		d.docs[key] = documentEntry{snapshot: candidate, generation: generation}
+		d.mu.Unlock()
+		current.snapshot.Retire()
+		return candidate.Document(), nil
 	}
-	d.mu.RUnlock()
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return intel.Document{}, err
-	}
-	return intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)}, nil
 }
 
 func (d *documents) openDocuments() []intel.Document {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	out := make([]intel.Document, 0, len(d.docs))
-	for _, doc := range d.docs {
-		out = append(out, doc)
+	for _, entry := range d.docs {
+		if entry.open && entry.snapshot != nil {
+			out = append(out, entry.snapshot.Document())
+		}
 	}
 	return out
 }
+
+func (d *documents) closeAll() {
+	d.mu.Lock()
+	snapshots := make([]*intel.AnalysisSnapshot, 0, len(d.docs))
+	for _, entry := range d.docs {
+		if entry.snapshot != nil {
+			snapshots = append(snapshots, entry.snapshot)
+		}
+	}
+	d.docs = make(map[string]documentEntry)
+	d.keys = make(map[string]string)
+	d.closed = true
+	d.mu.Unlock()
+	for _, snapshot := range snapshots {
+		snapshot.Retire()
+	}
+}
+
+var (
+	errDocumentsClosed             = errors.New("LSP document snapshot store is closed")
+	errDocumentChangedConcurrently = errors.New("LSP document changed concurrently")
+)
 
 func (d *documents) docFromURI(uri, text string) (intel.Document, error) {
 	path, err := fileURIToPath(uri)

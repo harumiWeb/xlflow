@@ -130,10 +130,14 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 		}
 	}
 	workspaceSymbols = append(filteredWorkspace, documentSymbols...)
-	lines := normalizedLines(doc.Source)
+	lines := documentLines(doc)
 	identifiers := make([][]byteSpan, len(lines))
-	for lineNo, line := range lines {
-		identifiers[lineNo] = codeIdentifierSpans(line)
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		identifiers = snapshot.identifiers()
+	} else {
+		for lineNo, line := range lines {
+			identifiers[lineNo] = codeIdentifierSpans(line)
+		}
 	}
 	builder := semanticBuilder{
 		analyzer:           a,
@@ -144,7 +148,7 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 		workspaceSymbols:   workspaceSymbols,
 		workspaceSymbolsOK: workspaceSymbolsErr == nil,
 		identifiers:        identifiers,
-		typeContext:        newDocumentTypeContext(lines, documentSymbols),
+		typeContext:        newDocumentTypeContext(doc, lines, documentSymbols),
 	}
 	builder.addLexicalTokens()
 	builder.addSymbolTokens()

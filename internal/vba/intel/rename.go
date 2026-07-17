@@ -142,7 +142,7 @@ func (a Analyzer) resolveRenameSymbol(doc Document, pos Position, open []Documen
 
 func (a Analyzer) symbolRenameRanges(doc Document, target Symbol, open []Document) []Range {
 	word := target.Name
-	search := Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: len(normalizedLines(doc.Source)), Character: 0}}
+	search := Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: len(documentLines(doc)), Character: 0}}
 	if isLocalSymbol(target) {
 		if scope, ok := currentProcedureRangeForDocument(doc, target.Selection.Start); ok {
 			search = scope
