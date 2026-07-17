@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added opt-in structured LSP performance logging through `xlflow lsp --performance-log`, including operation timing and result metadata for diagnostics and language features.
+- Coalesced debounced LSP diagnostics so each open document uses at most one worker, obsolete generations are never published, and closing a document leaves an empty diagnostics result as the final notification.
 
 ## v0.24.0
 

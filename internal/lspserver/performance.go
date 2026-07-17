@@ -61,6 +61,31 @@ func (m *performanceMeasurement) finish(resultCount int, err error) {
 	)
 }
 
+func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation uint64, discarded bool) {
+	if m == nil {
+		return
+	}
+	doc := m.document
+	outcome := "ok"
+	if discarded {
+		outcome = "discarded"
+	}
+	m.server.logger.Printf(
+		"performance operation=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f result_count=%d outcome=%q discarded=%t",
+		m.operation,
+		doc.URI,
+		doc.Path,
+		doc.Version,
+		generation,
+		len(doc.Source),
+		sourceLineCount(doc.Source),
+		float64(time.Since(m.started))/float64(time.Millisecond),
+		resultCount,
+		outcome,
+		discarded,
+	)
+}
+
 func (s *Server) logCachePerformance(operation, cache string, resultCount int, started time.Time, err error) {
 	if !s.opts.PerformanceLog {
 		return
