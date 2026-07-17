@@ -14,13 +14,13 @@ xlflow lsp --version
 
 ## Options and Arguments
 
-| Option / argument | Description                                               | Default |
-| ----------------- | --------------------------------------------------------- | ------- |
-| `--stdio`         | Run the LSP server over standard input/output JSON-RPC.   | false   |
-| `--check`         | Validate server dependencies without starting JSON-RPC.   | false   |
-| `--version`       | Print LSP server build metadata.                          | false   |
-| `--log-file`      | Write server logs to this file instead of standard error. | stderr  |
-| `--performance-log` | Log structured performance measurements for LSP operations. | false |
+| Option / argument   | Description                                                 | Default |
+| ------------------- | ----------------------------------------------------------- | ------- |
+| `--stdio`           | Run the LSP server over standard input/output JSON-RPC.     | false   |
+| `--check`           | Validate server dependencies without starting JSON-RPC.     | false   |
+| `--version`         | Print LSP server build metadata.                            | false   |
+| `--log-file`        | Write server logs to this file instead of standard error.   | stderr  |
+| `--performance-log` | Log structured performance measurements for LSP operations. | false   |
 
 Exactly one of `--stdio`, `--check`, or `--version` is required.
 

@@ -3,7 +3,8 @@
 - [x] Finish #340 opt-in performance instrumentation and document-version metadata
 - [x] Finish deterministic large-project/large-module benchmark fixtures
 - [x] Verify #340 with Go, VS Code, lint, docs, and benchmark runs
-- [ ] Record #340 baseline on GitHub and publish its draft PR
+- [x] Record #340 baseline on GitHub
+- [ ] Publish the #340 draft PR
 - [ ] After #340 lands on main, implement #341 diagnostics coalescing on a separate branch
 
 ---

@@ -163,20 +163,14 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
 }
 
 export async function lspServerArgs(
-  config: Pick<
-    XlflowConfig,
-    "lspLogFile" | "lspLogFileConfigured" | "lspPerformanceLogging"
-  >,
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured" | "lspPerformanceLogging">,
   folder: vscode.WorkspaceFolder | undefined,
 ): Promise<string[]> {
   return lspServerArgsForProject(config, await hasXlflowConfig(folder));
 }
 
 export function lspServerArgsForProject(
-  config: Pick<
-    XlflowConfig,
-    "lspLogFile" | "lspLogFileConfigured" | "lspPerformanceLogging"
-  >,
+  config: Pick<XlflowConfig, "lspLogFile" | "lspLogFileConfigured" | "lspPerformanceLogging">,
   xlflowProject: boolean,
 ): string[] {
   const args = ["lsp", "--stdio"];
