@@ -319,7 +319,10 @@ func BenchmarkLSPContinuousEditScheduling(b *testing.B) {
 			select {
 			case <-started:
 				if !settle.Stop() {
-					<-settle.C
+					select {
+					case <-settle.C:
+					default:
+					}
 				}
 				settle.Reset(50 * time.Millisecond)
 			case <-settle.C:

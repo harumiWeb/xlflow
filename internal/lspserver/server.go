@@ -642,8 +642,9 @@ func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 		measurement.finish(0, err)
 		return nil, err
 	}
+	result := &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}
 	measurement.finish(len(tokens), nil)
-	return &protocol.SemanticTokens{Data: encodeSemanticTokens(tokens)}, nil
+	return result, nil
 }
 
 func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
