@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,32 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
+
+func TestDiagnosticsContextReturnsNoPartialResultsWhenAlreadyCanceled(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	diagnostics := analyzer.DiagnosticsContext(ctx, Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Broken(\n",
+	})
+	if len(diagnostics) != 0 {
+		t.Fatalf("canceled diagnostics = %+v, want none", diagnostics)
+	}
+}
+
+func TestDiagnosticsWrapperMatchesDiagnosticsContext(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \"A\"\nEnd Sub\n",
+	}
+	legacy := analyzer.Diagnostics(doc)
+	contextual := analyzer.DiagnosticsContext(context.Background(), doc)
+	if !reflect.DeepEqual(legacy, contextual) {
+		t.Fatalf("Diagnostics wrapper changed results:\nlegacy=%+v\ncontextual=%+v", legacy, contextual)
+	}
+}
 
 func TestDiagnosticsHandlesMalformedSourceAndJapaneseText(t *testing.T) {
 	analyzer := newTestAnalyzer(t)

@@ -47,20 +47,42 @@ type Options struct {
 }
 
 type Server struct {
-	opts                Options
-	db                  *vbadb.DB
-	analyzer            intel.Analyzer
-	handler             protocol.Handler
-	docs                *documents
-	logger              *log.Logger
-	symbols             *workspaceSymbolCache
-	codeLensConfig      intel.CodeLensConfig
-	diagnostics         func(intel.Document) []intel.Diagnostic
-	diagnosticsDebounce time.Duration
+	opts                     Options
+	db                       *vbadb.DB
+	analyzer                 intel.Analyzer
+	handler                  protocol.Handler
+	docs                     *documents
+	logger                   *log.Logger
+	symbols                  *workspaceSymbolCache
+	codeLensConfig           intel.CodeLensConfig
+	diagnostics              func(context.Context, intel.Document) []intel.Diagnostic
+	diagnosticsDebounce      time.Duration
+	diagnosticsAfterFunc     func(time.Duration, func()) diagnosticTimer
+	beforeDiagnosticsPublish func()
 
-	diagMu     sync.Mutex
-	diagTimers map[string]*time.Timer
-	diagGen    map[string]uint64
+	diagMu      sync.Mutex
+	diagStates  map[string]*diagnosticState
+	diagWorkers sync.WaitGroup
+	diagStopped bool
+
+	docLifecycleMu sync.Mutex
+	docLifecycles  map[string]*sync.Mutex
+}
+
+type diagnosticTimer interface {
+	Stop() bool
+}
+
+type diagnosticState struct {
+	mu         sync.Mutex
+	generation uint64
+	latest     intel.Document
+	notify     *glsp.Context
+	timer      diagnosticTimer
+	running    bool
+	ready      bool
+	open       bool
+	cancel     context.CancelFunc
 }
 
 func Check(opts Options) error {
@@ -114,12 +136,15 @@ func New(opts Options) (*Server, func(), error) {
 		logger:         logger,
 		symbols:        newWorkspaceSymbolCache(),
 		codeLensConfig: intel.DefaultCodeLensConfig(),
-		diagTimers:     make(map[string]*time.Timer),
-		diagGen:        make(map[string]uint64),
+		diagStates:     make(map[string]*diagnosticState),
+		docLifecycles:  make(map[string]*sync.Mutex),
 	}
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
-	s.diagnostics = s.analyzer.Diagnostics
+	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsDebounce = diagnosticsDebounce
+	s.diagnosticsAfterFunc = func(delay time.Duration, callback func()) diagnosticTimer {
+		return time.AfterFunc(delay, callback)
+	}
 	s.handler = protocol.Handler{
 		Initialize:                     s.initialize,
 		Initialized:                    s.initialized,
@@ -143,7 +168,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentCodeLens:           s.codeLens,
 	}
 	return s, func() {
-		s.stopDiagnosticTimers()
+		s.stopDiagnostics()
 		cleanup()
 	}, nil
 }
@@ -247,6 +272,7 @@ func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeL
 }
 
 func (s *Server) shutdown(_ *glsp.Context) error {
+	s.stopDiagnostics()
 	s.logger.Printf("shutdown")
 	return nil
 }
@@ -257,12 +283,19 @@ func (s *Server) exit(_ *glsp.Context) error {
 }
 
 func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
-	doc, err := s.docs.open(string(params.TextDocument.URI), params.TextDocument.Text, int32(params.TextDocument.Version))
+	uri := string(params.TextDocument.URI)
+	unlock := s.lockDocumentLifecycle(uri)
+	doc, err := s.docs.open(uri, params.TextDocument.Text, int32(params.TextDocument.Version))
 	if err != nil {
+		unlock()
 		return err
 	}
 	s.symbols.invalidateOpen(doc)
-	s.publishDiagnostics(ctx, doc)
+	done := s.openDiagnostics(ctx, doc)
+	unlock()
+	if done != nil {
+		<-done
+	}
 	return nil
 }
 
@@ -274,7 +307,10 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if !ok {
 		return fmt.Errorf("textDocument/didChange expected full document synchronization")
 	}
-	doc, err := s.docs.change(string(params.TextDocument.URI), text, int32(params.TextDocument.Version))
+	uri := string(params.TextDocument.URI)
+	unlock := s.lockDocumentLifecycle(uri)
+	defer unlock()
+	doc, err := s.docs.change(uri, text, int32(params.TextDocument.Version))
 	if err != nil {
 		return err
 	}
@@ -299,16 +335,14 @@ func fullChangeText(change any) (string, bool) {
 
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
-	s.cancelDiagnostics(uri)
+	unlock := s.lockDocumentLifecycle(uri)
+	defer unlock()
+	s.closeDiagnostics(ctx, uri)
 	if path, err := fileURIToPath(uri); err == nil {
 		s.symbols.invalidateOpen(intel.Document{URI: uri, Path: path})
 	}
 	s.symbols.invalidateBase()
 	s.docs.close(uri)
-	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
-		URI:         protocol.DocumentUri(uri),
-		Diagnostics: []protocol.Diagnostic{},
-	})
 	return nil
 }
 
@@ -691,53 +725,121 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 	return out, nil
 }
 
+func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan struct{} {
+	s.diagMu.Lock()
+	if s.diagStopped {
+		s.diagMu.Unlock()
+		return nil
+	}
+	state := s.diagStates[doc.URI]
+	if state == nil {
+		state = &diagnosticState{}
+		s.diagStates[doc.URI] = state
+	}
+	state.mu.Lock()
+	state.generation++
+	state.latest = doc
+	state.notify = ctx
+	state.ready = true
+	state.open = true
+	if state.timer != nil {
+		state.timer.Stop()
+		state.timer = nil
+	}
+	if state.cancel != nil {
+		state.cancel()
+	}
+	state.mu.Unlock()
+	s.diagMu.Unlock()
+	return s.launchDiagnostics(doc.URI, state)
+}
+
 func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
-	if doc.URI == "" {
-		s.publishDiagnostics(ctx, doc)
+	s.diagMu.Lock()
+	if s.diagStopped {
+		s.diagMu.Unlock()
 		return
 	}
-	s.diagMu.Lock()
-	s.diagGen[doc.URI]++
-	gen := s.diagGen[doc.URI]
-	if timer := s.diagTimers[doc.URI]; timer != nil {
-		timer.Stop()
+	state := s.diagStates[doc.URI]
+	if state == nil {
+		state = &diagnosticState{open: true}
+		s.diagStates[doc.URI] = state
 	}
-	s.diagTimers[doc.URI] = time.AfterFunc(s.diagnosticsDebounce, func() {
-		s.diagMu.Lock()
-		if s.diagGen[doc.URI] != gen {
-			s.diagMu.Unlock()
-			return
-		}
-		delete(s.diagTimers, doc.URI)
-		s.diagMu.Unlock()
-		s.publishDiagnostics(ctx, doc)
+	state.mu.Lock()
+	state.generation++
+	generation := state.generation
+	state.latest = doc
+	state.notify = ctx
+	state.ready = false
+	state.open = true
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	if state.cancel != nil {
+		state.cancel()
+	}
+	state.timer = s.diagnosticsAfterFunc(s.diagnosticsDebounce, func() {
+		s.diagnosticsReady(doc.URI, state, generation)
 	})
+	state.mu.Unlock()
 	s.diagMu.Unlock()
 }
 
-func (s *Server) cancelDiagnostics(uri string) {
-	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	s.diagGen[uri]++
-	if timer := s.diagTimers[uri]; timer != nil {
-		timer.Stop()
-		delete(s.diagTimers, uri)
+func (s *Server) diagnosticsReady(uri string, state *diagnosticState, generation uint64) {
+	state.mu.Lock()
+	if !state.open || state.generation != generation {
+		state.mu.Unlock()
+		return
 	}
+	state.timer = nil
+	state.ready = true
+	state.mu.Unlock()
+	s.launchDiagnostics(uri, state)
 }
 
-func (s *Server) stopDiagnosticTimers() {
+func (s *Server) launchDiagnostics(uri string, state *diagnosticState) <-chan struct{} {
 	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	for uri, timer := range s.diagTimers {
-		timer.Stop()
-		delete(s.diagTimers, uri)
-		delete(s.diagGen, uri)
+	if s.diagStopped || s.diagStates[uri] != state {
+		s.diagMu.Unlock()
+		return nil
 	}
+	state.mu.Lock()
+	if !state.open || !state.ready || state.running {
+		state.mu.Unlock()
+		s.diagMu.Unlock()
+		return nil
+	}
+	doc := state.latest
+	notify := state.notify
+	generation := state.generation
+	runCtx, cancel := context.WithCancel(context.Background())
+	state.latest = intel.Document{}
+	state.ready = false
+	state.running = true
+	state.cancel = cancel
+	s.diagWorkers.Add(1)
+	done := make(chan struct{})
+	state.mu.Unlock()
+	s.diagMu.Unlock()
+
+	go func() {
+		defer close(done)
+		s.runDiagnostics(runCtx, uri, state, generation, doc, notify)
+	}()
+	return done
 }
 
-func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
+func (s *Server) runDiagnostics(
+	runCtx context.Context,
+	uri string,
+	state *diagnosticState,
+	generation uint64,
+	doc intel.Document,
+	notify *glsp.Context,
+) {
+	defer s.diagWorkers.Done()
 	measurement := s.startPerformance("diagnostics", doc)
-	diagnostics := s.diagnostics(doc)
+	diagnostics := s.diagnostics(runCtx, doc)
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, diag := range diagnostics {
 		severity := diagnosticSeverity(diag.Severity)
@@ -751,11 +853,95 @@ func (s *Server) publishDiagnostics(ctx *glsp.Context, doc intel.Document) {
 			Message:  diag.Message,
 		})
 	}
-	ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
-		URI:         protocol.DocumentUri(doc.URI),
-		Diagnostics: out,
-	})
-	measurement.finish(len(out), nil)
+	if s.beforeDiagnosticsPublish != nil {
+		s.beforeDiagnosticsPublish()
+	}
+
+	state.mu.Lock()
+	discarded := !state.open || state.generation != generation || runCtx.Err() != nil
+	if !discarded && notify != nil {
+		notify.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
+			URI:         protocol.DocumentUri(doc.URI),
+			Diagnostics: out,
+		})
+	}
+	state.running = false
+	state.cancel = nil
+	ready := state.open && state.ready
+	state.mu.Unlock()
+	measurement.finishDiagnostics(len(out), generation, discarded)
+
+	if ready {
+		s.launchDiagnostics(uri, state)
+	}
+}
+
+func (s *Server) closeDiagnostics(ctx *glsp.Context, uri string) {
+	s.diagMu.Lock()
+	state := s.diagStates[uri]
+	s.diagMu.Unlock()
+	if state != nil {
+		state.mu.Lock()
+		state.close()
+		if ctx != nil {
+			ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
+				URI:         protocol.DocumentUri(uri),
+				Diagnostics: []protocol.Diagnostic{},
+			})
+		}
+		state.mu.Unlock()
+	} else if ctx != nil {
+		ctx.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
+			URI:         protocol.DocumentUri(uri),
+			Diagnostics: []protocol.Diagnostic{},
+		})
+	}
+}
+
+func (state *diagnosticState) close() {
+	state.generation++
+	state.open = false
+	state.ready = false
+	state.latest = intel.Document{}
+	state.notify = nil
+	if state.timer != nil {
+		state.timer.Stop()
+		state.timer = nil
+	}
+	if state.cancel != nil {
+		state.cancel()
+	}
+}
+
+func (s *Server) stopDiagnostics() {
+	s.diagMu.Lock()
+	var states []*diagnosticState
+	if !s.diagStopped {
+		s.diagStopped = true
+		for uri, state := range s.diagStates {
+			states = append(states, state)
+			delete(s.diagStates, uri)
+		}
+	}
+	s.diagMu.Unlock()
+	for _, state := range states {
+		state.mu.Lock()
+		state.close()
+		state.mu.Unlock()
+	}
+	s.diagWorkers.Wait()
+}
+
+func (s *Server) lockDocumentLifecycle(uri string) func() {
+	s.docLifecycleMu.Lock()
+	lifecycle := s.docLifecycles[uri]
+	if lifecycle == nil {
+		lifecycle = &sync.Mutex{}
+		s.docLifecycles[uri] = lifecycle
+	}
+	s.docLifecycleMu.Unlock()
+	lifecycle.Lock()
+	return lifecycle.Unlock
 }
 
 func (s *Server) baseAnalyzer() intel.Analyzer {
