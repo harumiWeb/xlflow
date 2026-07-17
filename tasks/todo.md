@@ -5,6 +5,7 @@
 - [x] Layer semantic-token caching over snapshot documents while preserving workspace-generation invalidation
 - [x] Preserve UserForm control freshness and document-symbol performance logging
 - [x] Add snapshot concurrency, replacement, disk/open race, close, reopen, and shutdown regression tests
+- [x] Address review feedback with per-path publication generations, open-lifecycle tokens, and disk-read retry on concurrent publication
 - [x] Run full tests, lint, deterministic LSP benchmarks, race tests, diff checks, and final review
   - `task test`, `task lint`, `task bench:lsp`, and `git diff --check` passed
   - `go test -race ./internal/vba/intel ./internal/lspserver` passed through the Windows wrapper

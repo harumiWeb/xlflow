@@ -373,3 +373,89 @@ func TestChangeRegistersURIAliasForClose(t *testing.T) {
 		t.Fatal("closing through the registered alias did not remove the active snapshot")
 	}
 }
+
+func TestPreCloseChangeCannotPublishIntoReopenedLifecycle(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	if _, err := docs.open(uri, "Sub OriginalLifecycle()\nEnd Sub\n", 10); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var publications atomic.Int32
+	docs.beforePublish = func() {
+		if publications.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	}
+	staleResult := make(chan intel.Document, 1)
+	staleErr := make(chan error, 1)
+	go func() {
+		doc, err := docs.change(uri, "Sub PreCloseCandidate()\nEnd Sub\n", 99)
+		staleResult <- doc
+		staleErr <- err
+	}()
+	<-started
+	docs.close(uri)
+	reopened, err := docs.open(uri, "Sub ReopenedLifecycle()\nEnd Sub\n", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-staleErr; err != nil {
+		t.Fatal(err)
+	}
+	stale := <-staleResult
+	if stale.Snapshot != reopened.Snapshot || !strings.Contains(stale.Source, "ReopenedLifecycle") {
+		t.Fatalf("pre-close candidate escaped into reopened lifecycle: %+v", stale)
+	}
+	active, err := docs.getOrRead(uri)
+	if err != nil || active.Snapshot != reopened.Snapshot || active.Version != 1 {
+		t.Fatalf("active snapshot = %+v, err=%v; want reopened lifecycle", active, err)
+	}
+}
+
+func TestDiskSnapshotRetriesAfterConcurrentPublication(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	var reads atomic.Int32
+	docs.readFile = func(string) ([]byte, error) {
+		if reads.Add(1) == 1 {
+			return []byte("Sub StaleDiskRead()\nEnd Sub\n"), nil
+		}
+		return []byte("Sub FreshDiskRead()\nEnd Sub\n"), nil
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var publications atomic.Int32
+	docs.beforePublish = func() {
+		if publications.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	}
+	staleResult := make(chan intel.Document, 1)
+	staleErr := make(chan error, 1)
+	go func() {
+		doc, err := docs.getOrRead(uri)
+		staleResult <- doc
+		staleErr <- err
+	}()
+	<-started
+	fresh, err := docs.getOrRead(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-staleErr; err != nil {
+		t.Fatal(err)
+	}
+	retried := <-staleResult
+	if retried.Snapshot != fresh.Snapshot || !strings.Contains(retried.Source, "FreshDiskRead") {
+		t.Fatalf("stale disk read replaced fresh publication: retried=%+v fresh=%+v", retried, fresh)
+	}
+	if reads.Load() < 3 {
+		t.Fatalf("disk reads = %d, want stale read plus fresh publication and retry", reads.Load())
+	}
+}

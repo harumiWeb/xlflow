@@ -1161,16 +1161,27 @@ type documents struct {
 	mu            sync.RWMutex
 	docs          map[string]documentEntry
 	keys          map[string]string
+	generations   map[string]uint64
 	closed        bool
 }
 
 type documentEntry struct {
-	snapshot *intel.AnalysisSnapshot
-	open     bool
+	snapshot   *intel.AnalysisSnapshot
+	open       bool
+	generation uint64
+	lifecycle  uint64
 }
 
 func newDocuments(root string) *documents {
-	return &documents{root: root, readFile: os.ReadFile, docs: map[string]documentEntry{}, keys: map[string]string{}}
+	return &documents{
+		root: root, readFile: os.ReadFile,
+		docs: map[string]documentEntry{}, keys: map[string]string{}, generations: map[string]uint64{},
+	}
+}
+
+func (d *documents) nextGenerationLocked(key string) uint64 {
+	d.generations[key]++
+	return d.generations[key]
 }
 
 func (d *documents) open(uri, text string, versions ...int32) (intel.Document, error) {
@@ -1193,7 +1204,8 @@ func (d *documents) open(uri, text string, versions ...int32) (intel.Document, e
 	}
 	key := normalizePathKey(doc.Path)
 	previous := d.docs[key].snapshot
-	d.docs[key] = documentEntry{snapshot: snapshot, open: true}
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: generation}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	previous.Retire()
@@ -1234,11 +1246,14 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 		return intel.Document{}, errDocumentsClosed
 	}
 	latest := d.docs[key]
-	if latest.snapshot != entry.snapshot || !latest.open {
+	if latest.snapshot != entry.snapshot || latest.generation != entry.generation || !latest.open {
 		if latest.open && latest.snapshot != nil {
 			d.keys[uri] = key
-			if snapshot.Version() > latest.snapshot.Version() {
-				d.docs[key] = documentEntry{snapshot: snapshot, open: true}
+			if latest.lifecycle == entry.lifecycle && snapshot.Version() > latest.snapshot.Version() {
+				generation := d.nextGenerationLocked(key)
+				d.docs[key] = documentEntry{
+					snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle,
+				}
 				d.mu.Unlock()
 				latest.snapshot.Retire()
 				return snapshot.Document(), nil
@@ -1251,7 +1266,8 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 		}
 		return intel.Document{}, errDocumentChangedConcurrently
 	}
-	d.docs[key] = documentEntry{snapshot: snapshot, open: true}
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	entry.snapshot.Retire()
@@ -1261,11 +1277,18 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 func (d *documents) close(uri string) {
 	d.mu.Lock()
 	var snapshot *intel.AnalysisSnapshot
-	if key := d.keys[uri]; key != "" {
+	key := d.keys[uri]
+	if key == "" {
+		if path, err := fileURIToPath(uri); err == nil {
+			key = normalizePathKey(path)
+		}
+	}
+	if key != "" {
 		if entry := d.docs[key]; entry.open {
 			snapshot = entry.snapshot
 			delete(d.docs, key)
 		}
+		d.nextGenerationLocked(key)
 		delete(d.keys, uri)
 	}
 	d.mu.Unlock()
@@ -1278,46 +1301,56 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 		return intel.Document{}, err
 	}
 	key := normalizePathKey(path)
-	d.mu.RLock()
-	if d.closed {
+	for {
+		d.mu.RLock()
+		if d.closed {
+			d.mu.RUnlock()
+			return intel.Document{}, errDocumentsClosed
+		}
+		if entry, ok := d.docs[key]; ok && entry.open && entry.snapshot != nil {
+			d.mu.RUnlock()
+			return entry.snapshot.Document(), nil
+		}
+		observedGeneration := d.generations[key]
 		d.mu.RUnlock()
-		return intel.Document{}, errDocumentsClosed
-	}
-	if entry, ok := d.docs[key]; ok && entry.open && entry.snapshot != nil {
-		d.mu.RUnlock()
-		return entry.snapshot.Document(), nil
-	}
-	d.mu.RUnlock()
-	body, err := d.readFile(path)
-	if err != nil {
-		return intel.Document{}, err
-	}
-	candidate := intel.NewAnalysisSnapshot(intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)})
-	if d.beforePublish != nil {
-		d.beforePublish()
-	}
-	d.mu.Lock()
-	if d.closed {
+
+		body, err := d.readFile(path)
+		if err != nil {
+			return intel.Document{}, err
+		}
+		candidate := intel.NewAnalysisSnapshot(intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)})
+		if d.beforePublish != nil {
+			d.beforePublish()
+		}
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			candidate.Retire()
+			return intel.Document{}, errDocumentsClosed
+		}
+		current := d.docs[key]
+		if current.open && current.snapshot != nil {
+			d.mu.Unlock()
+			candidate.Retire()
+			return current.snapshot.Document(), nil
+		}
+		if current.snapshot != nil && current.snapshot.SourceHash() == candidate.SourceHash() &&
+			current.snapshot.URI() == candidate.URI() && current.snapshot.ModuleKind() == candidate.ModuleKind() {
+			d.mu.Unlock()
+			candidate.Retire()
+			return current.snapshot.Document(), nil
+		}
+		if d.generations[key] != observedGeneration {
+			d.mu.Unlock()
+			candidate.Retire()
+			continue
+		}
+		generation := d.nextGenerationLocked(key)
+		d.docs[key] = documentEntry{snapshot: candidate, generation: generation}
 		d.mu.Unlock()
-		candidate.Retire()
-		return intel.Document{}, errDocumentsClosed
+		current.snapshot.Retire()
+		return candidate.Document(), nil
 	}
-	current := d.docs[key]
-	if current.open && current.snapshot != nil {
-		d.mu.Unlock()
-		candidate.Retire()
-		return current.snapshot.Document(), nil
-	}
-	if current.snapshot != nil && current.snapshot.SourceHash() == candidate.SourceHash() &&
-		current.snapshot.URI() == candidate.URI() && current.snapshot.ModuleKind() == candidate.ModuleKind() {
-		d.mu.Unlock()
-		candidate.Retire()
-		return current.snapshot.Document(), nil
-	}
-	d.docs[key] = documentEntry{snapshot: candidate}
-	d.mu.Unlock()
-	current.snapshot.Retire()
-	return candidate.Document(), nil
 }
 
 func (d *documents) openDocuments() []intel.Document {
