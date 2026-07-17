@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -124,15 +126,50 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 	}()
 	<-staleStarted
 	staleCache.invalidateAll()
-	close(staleRelease)
-	if err := <-staleDone; err != nil {
-		t.Fatal(err)
+	newerDoc := doc
+	newerDoc.Version++
+	newerDoc.Source = "Option Explicit\nSub Newer()\nEnd Sub\n"
+	newerGeneration := staleCache.begin()
+	var newerLoads atomic.Int32
+	newerDone := make(chan error, 1)
+	go func() {
+		_, _, err := staleCache.get(newerDoc, newerGeneration, func() ([]protocol.UInteger, error) {
+			newerLoads.Add(1)
+			return []protocol.UInteger{0, 0, 2, 12, 0}, nil
+		})
+		newerDone <- err
+	}()
+	identity := documentSymbolKey(doc)
+	deadline := time.Now().Add(time.Second)
+	for {
+		staleCache.mu.Lock()
+		call := staleCache.inflight[identity]
+		waiting := call != nil && call.waiters > 0
+		staleCache.mu.Unlock()
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("newer generation did not wait for the active obsolete generation")
+		}
+		runtime.Gosched()
 	}
-	fresh, hit, err := staleCache.get(doc, staleCache.begin(), func() ([]protocol.UInteger, error) {
+	if newerLoads.Load() != 0 {
+		t.Fatalf("newer loads started while obsolete generation was active: %d", newerLoads.Load())
+	}
+	close(staleRelease)
+	if err := <-staleDone; !errors.Is(err, errSemanticTokensSuperseded) {
+		t.Fatalf("stale generation error = %v, want superseded", err)
+	}
+	if err := <-newerDone; !errors.Is(err, errSemanticTokensSuperseded) {
+		t.Fatalf("waiting newer generation error = %v, want retry notification", err)
+	}
+	fresh, hit, err := staleCache.get(newerDoc, staleCache.begin(), func() ([]protocol.UInteger, error) {
+		newerLoads.Add(1)
 		return []protocol.UInteger{0, 0, 2, 12, 0}, nil
 	})
-	if err != nil || hit || fresh[2] != 2 {
-		t.Fatalf("fresh get = (%v, hit=%v, err=%v), want uncached fresh data", fresh, hit, err)
+	if err != nil || hit || fresh[2] != 2 || newerLoads.Load() != 1 {
+		t.Fatalf("fresh get = (%v, hit=%v, err=%v, loads=%d), want one uncached latest load", fresh, hit, err, newerLoads.Load())
 	}
 }
 
@@ -209,5 +246,102 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	}
 	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 4 {
 		t.Fatalf("close/reopen invalidation = (err=%v, generations=%d), want regeneration", err, generations.Load())
+	}
+}
+
+func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var generations atomic.Int32
+	var active atomic.Int32
+	var maximum atomic.Int32
+	s.semanticTokenGenerator = func(doc intel.Document, _ []intel.Document) ([]intel.SemanticToken, error) {
+		generation := generations.Add(1)
+		current := active.Add(1)
+		for {
+			observed := maximum.Load()
+			if current <= observed || maximum.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		if generation == 1 {
+			close(started)
+			<-release
+		}
+		active.Add(-1)
+		return []intel.SemanticToken{{
+			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: len(doc.Source)}},
+			Type:  intel.SemanticTokenKeyword,
+		}}, nil
+	}
+	ctx := &glsp.Context{Notify: func(string, any) {}}
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), LanguageID: "vba", Version: 1, Text: "A",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}}
+	type result struct {
+		tokens *protocol.SemanticTokens
+		err    error
+	}
+	results := make(chan result, 2)
+	go func() {
+		tokens, err := s.semanticTokensFull(nil, params)
+		results <- result{tokens: tokens, err: err}
+	}()
+	<-started
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 2,
+		},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEventWhole{Text: "AB"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		tokens, err := s.semanticTokensFull(nil, params)
+		results <- result{tokens: tokens, err: err}
+	}()
+	identity := documentSymbolKey(intel.Document{Path: path, URI: uri})
+	deadline := time.Now().Add(time.Second)
+	for {
+		s.semanticTokens.mu.Lock()
+		call := s.semanticTokens.inflight[identity]
+		waiting := call != nil && call.waiters > 0
+		s.semanticTokens.mu.Unlock()
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("latest semantic request did not wait for obsolete generation")
+		}
+		runtime.Gosched()
+	}
+	close(release)
+	for range 2 {
+		select {
+		case got := <-results:
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			if got.tokens == nil || len(got.tokens.Data) != 5 || got.tokens.Data[2] != 2 {
+				t.Fatalf("retried semantic tokens = %+v, want latest version length 2", got.tokens)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("semantic token retry did not complete")
+		}
+	}
+	if generations.Load() != 2 || maximum.Load() != 1 {
+		t.Fatalf("generation stats = calls:%d max_active:%d, want 2 calls and one active", generations.Load(), maximum.Load())
 	}
 }

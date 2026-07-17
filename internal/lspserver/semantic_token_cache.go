@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"crypto/sha256"
+	"errors"
 	"sync"
 
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -22,15 +23,12 @@ type cachedSemanticTokens struct {
 }
 
 type semanticTokenCall struct {
-	done chan struct{}
-	data []protocol.UInteger
-	err  error
-}
-
-type semanticTokenWorkKey struct {
-	identity   string
+	done       chan struct{}
 	generation uint64
 	signature  semanticTokenSignature
+	data       []protocol.UInteger
+	err        error
+	waiters    int
 }
 
 type semanticTokenCache struct {
@@ -38,14 +36,16 @@ type semanticTokenCache struct {
 	generation uint64
 	signatures map[string]semanticTokenSignature
 	entries    map[string]cachedSemanticTokens
-	inflight   map[semanticTokenWorkKey]*semanticTokenCall
+	inflight   map[string]*semanticTokenCall
 }
+
+var errSemanticTokensSuperseded = errors.New("semantic token generation superseded")
 
 func newSemanticTokenCache() *semanticTokenCache {
 	return &semanticTokenCache{
 		signatures: make(map[string]semanticTokenSignature),
 		entries:    make(map[string]cachedSemanticTokens),
-		inflight:   make(map[semanticTokenWorkKey]*semanticTokenCall),
+		inflight:   make(map[string]*semanticTokenCall),
 	}
 }
 
@@ -73,43 +73,56 @@ func (c *semanticTokenCache) get(
 	}
 
 	c.mu.Lock()
-	if generation == c.generation {
-		c.signatures[identity] = signature
-		if entry, ok := c.entries[identity]; ok &&
-			entry.generation == generation && entry.signature == signature {
-			out := cloneSemanticTokenData(entry.data)
-			c.mu.Unlock()
-			return out, true, nil
-		}
+	if generation != c.generation {
+		c.mu.Unlock()
+		return nil, false, errSemanticTokensSuperseded
 	}
-	workKey := semanticTokenWorkKey{identity: identity, generation: generation, signature: signature}
-	if call, ok := c.inflight[workKey]; ok {
+	c.signatures[identity] = signature
+	if entry, ok := c.entries[identity]; ok &&
+		entry.generation == generation && entry.signature == signature {
+		out := cloneSemanticTokenData(entry.data)
+		c.mu.Unlock()
+		return out, true, nil
+	}
+	if call, ok := c.inflight[identity]; ok {
+		call.waiters++
 		c.mu.Unlock()
 		<-call.done
-		return cloneSemanticTokenData(call.data), call.err == nil, call.err
+		if call.generation == generation && call.signature == signature {
+			return cloneSemanticTokenData(call.data), call.err == nil, call.err
+		}
+		return nil, false, errSemanticTokensSuperseded
 	}
-	call := &semanticTokenCall{done: make(chan struct{})}
-	c.inflight[workKey] = call
+	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, signature: signature}
+	c.inflight[identity] = call
 	c.mu.Unlock()
 
 	data, err := load()
 	cloned := cloneSemanticTokenData(data)
 
 	c.mu.Lock()
-	delete(c.inflight, workKey)
-	if err == nil && generation == c.generation && c.signatures[identity] == signature {
+	delete(c.inflight, identity)
+	current := generation == c.generation && c.signatures[identity] == signature
+	if err == nil && current {
 		c.entries[identity] = cachedSemanticTokens{
 			generation: generation,
 			signature:  signature,
 			data:       cloneSemanticTokenData(cloned),
 		}
 	}
+	resultErr := err
+	if resultErr == nil && !current {
+		resultErr = errSemanticTokensSuperseded
+	}
 	call.data = cloned
-	call.err = err
+	call.err = resultErr
 	close(call.done)
 	c.mu.Unlock()
 
-	return cloneSemanticTokenData(cloned), false, err
+	if resultErr != nil {
+		return nil, false, resultErr
+	}
+	return cloneSemanticTokenData(cloned), false, nil
 }
 
 func (c *semanticTokenCache) invalidateAll() {

@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -675,29 +676,34 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 
 func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	measurement := s.startPerformanceURI("textDocument/semanticTokens/full", string(params.TextDocument.URI))
-	generation := s.semanticTokens.begin()
-	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
-	if err != nil {
-		measurement.finish(0, err)
-		return nil, err
-	}
-	measurement.setDocument(doc)
-	cacheStarted := time.Now()
-	data, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
-		tokens, err := s.semanticTokenGenerator(doc, s.docs.openDocuments())
+	for {
+		generation := s.semanticTokens.begin()
+		doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 		if err != nil {
+			measurement.finish(0, err)
 			return nil, err
 		}
-		return encodeSemanticTokens(tokens), nil
-	})
-	s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(data)/5, cacheStarted, err)
-	if err != nil {
-		measurement.finish(0, err)
-		return nil, err
+		measurement.setDocument(doc)
+		cacheStarted := time.Now()
+		data, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
+			tokens, err := s.semanticTokenGenerator(doc, s.docs.openDocuments())
+			if err != nil {
+				return nil, err
+			}
+			return encodeSemanticTokens(tokens), nil
+		})
+		if errors.Is(err, errSemanticTokensSuperseded) {
+			continue
+		}
+		s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(data)/5, cacheStarted, err)
+		if err != nil {
+			measurement.finish(0, err)
+			return nil, err
+		}
+		result := &protocol.SemanticTokens{Data: data}
+		measurement.finish(len(data)/5, nil)
+		return result, nil
 	}
-	result := &protocol.SemanticTokens{Data: data}
-	measurement.finish(len(data)/5, nil)
-	return result, nil
 }
 
 func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {

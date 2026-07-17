@@ -123,7 +123,7 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 		}
 	}
 	workspaceSymbols, workspaceSymbolsErr := a.WorkspaceSymbols(workspaceOpen, "")
-	filteredWorkspace := workspaceSymbols[:0]
+	filteredWorkspace := make([]Symbol, 0, len(workspaceSymbols)+len(documentSymbols))
 	for _, sym := range workspaceSymbols {
 		if !a.sameDocumentSymbol(doc, sym) {
 			filteredWorkspace = append(filteredWorkspace, sym)
@@ -170,13 +170,16 @@ func (b *semanticBuilder) addParameterReferenceTokens() {
 		if !strings.EqualFold(sym.Kind, "parameter") || sym.Name == "" {
 			continue
 		}
-		parameters[procedureLocalKey(sym.Parent, sym.Name)] = true
+		_, scope := b.typeContext.procedureAt(sym.Selection.Start)
+		if key := procedureParameterKey(scope, sym.Name); key != "" {
+			parameters[key] = true
+		}
 	}
 	for lineNo, spans := range b.identifiers {
-		procedure, _ := b.typeContext.procedureAt(Position{Line: lineNo})
+		_, scope := b.typeContext.procedureAt(Position{Line: lineNo})
 		for _, span := range spans {
 			name := b.lines[lineNo][span.start:span.end]
-			if !parameters[procedureLocalKey(procedure, name)] {
+			if !parameters[procedureParameterKey(scope, name)] {
 				continue
 			}
 			rng := byteRange(lineNo, b.lines[lineNo], span.start, span.end)
@@ -187,8 +190,15 @@ func (b *semanticBuilder) addParameterReferenceTokens() {
 	}
 }
 
+func procedureParameterKey(scope *Range, name string) string {
+	if scope == nil || name == "" {
+		return ""
+	}
+	return semanticRangeKey(*scope) + "\x00" + strings.ToLower(name)
+}
+
 func (a Analyzer) sameSemanticDocument(left, right Document) bool {
-	if left.URI != "" && right.URI != "" && strings.EqualFold(left.URI, right.URI) {
+	if left.URI != "" && right.URI != "" && left.URI == right.URI {
 		return true
 	}
 	leftKeys := keySet(a.workspacePathKeys(left.Path))

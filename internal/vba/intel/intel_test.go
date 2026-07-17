@@ -3478,6 +3478,40 @@ End Function
 	}
 }
 
+func TestSemanticTokensKeepPropertyParametersScopedToAccessor(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private value As String
+
+Public Property Get Foo() As String
+    Debug.Print value
+    Foo = value
+End Property
+
+Public Property Let Foo(ByVal value As String)
+    Debug.Print value
+End Property
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+
+	tokens, err := analyzer.SemanticTokens(doc, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	getterLine := lineIndex(source, "Public Property Get Foo") + 1
+	setterLine := lineIndex(source, "Public Property Let Foo") + 1
+	if hasSemanticTokenAt(tokens, SemanticTokenParameter, "value", source, getterLine) {
+		t.Fatalf("Property Let parameter leaked into Property Get tokens: %+v", tokens)
+	}
+	if !hasSemanticTokenAt(tokens, SemanticTokenParameter, "value", source, setterLine) {
+		t.Fatalf("Property Let parameter use should receive a parameter token: %+v", tokens)
+	}
+}
+
 func TestSemanticTokensCoverUserFormControlsAndMalformedSource(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `VERSION 5.00
@@ -3572,6 +3606,44 @@ End Sub
 	}
 	if !hasSemanticTokenAt(tokens, SemanticTokenProperty, "Value", source, lineIndex(source, "ws.Range")) {
 		t.Fatalf("member token missing after symbol reuse: %+v", tokens)
+	}
+}
+
+func TestSemanticTokensDoNotMutateWorkspaceSymbolProviderSlice(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		URI:        "file:///project/Main.bas",
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source:     "Option Explicit\nPublic Sub Run()\nEnd Sub\n",
+	}
+	workspaceSymbols := []Symbol{
+		{Name: "Current", Kind: "sub", File: doc.URI},
+		{Name: "External", Kind: "sub", File: "file:///project/Other.bas"},
+	}
+	want := append([]Symbol(nil), workspaceSymbols...)
+	analyzer.WorkspaceSymbolsFunc = func(_ []Document, _ string) ([]Symbol, error) {
+		return workspaceSymbols, nil
+	}
+
+	if _, err := analyzer.SemanticTokens(doc, []Document{doc}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(workspaceSymbols, want) {
+		t.Fatalf("workspace symbol provider slice mutated:\ngot  %+v\nwant %+v", workspaceSymbols, want)
+	}
+}
+
+func TestSameSemanticDocumentComparesURIExactly(t *testing.T) {
+	analyzer := Analyzer{}
+	upper := Document{URI: "file:///project/Foo.bas"}
+	lower := Document{URI: "file:///project/foo.bas"}
+
+	if analyzer.sameSemanticDocument(upper, lower) {
+		t.Fatal("case-distinct URIs should identify different semantic documents")
+	}
+	if !analyzer.sameSemanticDocument(upper, upper) {
+		t.Fatal("identical URIs should identify the same semantic document")
 	}
 }
 
