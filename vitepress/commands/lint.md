@@ -61,6 +61,7 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                            |
 | `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                     |
 | `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                    |
+| `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                               |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
@@ -87,6 +88,16 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 Rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Disable `VB020` with `disabled_rules = ["VB020"]` when a project intentionally keeps scratch locals. Heavier project-wide rules such as `detect_unused_private_procedures = true` (`VB021`) stay conservative opt-ins; new `xlflow.toml` files include commented examples. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, `Range.Find` `Nothing` guards, and object `Nothing` guards combined with dereferences in non-short-circuit boolean expressions.
+
+To keep runtime-error diagnostics useful after procedure renames, opt into `VB044` with a local constant convention:
+
+```toml
+[lint.procedure_name_constant]
+enabled = true
+constant_name = "PROCEDURE_NAME"
+```
+
+The rule checks existing direct string literals only; it never inserts a missing constant or rewrites source during `xlflow lint`. It supports `Sub`, `Function`, and all `Property` procedures in standard, class, document, and UserForm modules. The LSP offers a Quick Fix that updates only the mismatched string literal.
 
 ## JSON Output Example
 

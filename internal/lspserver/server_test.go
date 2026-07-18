@@ -779,6 +779,89 @@ func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 	}
 }
 
+func TestCodeActionFixesProcedureNameConstantInUnsavedDocument(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"OldName\"\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	line := `    Const PROCEDURE_NAME As String = "OldName"`
+	start := strings.Index(line, `"OldName"`)
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 2, Character: protocol.UInteger(utf16Len(line[:start]))},
+			End:   protocol.Position{Line: 2, Character: protocol.UInteger(utf16Len(line[:start+len(`"OldName"`)]))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, ok := result.([]protocol.CodeAction)
+	if !ok {
+		t.Fatalf("code actions = %T, want []protocol.CodeAction", result)
+	}
+	var fix *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Kind != nil && *actions[i].Kind == protocol.CodeActionKindQuickFix {
+			fix = &actions[i]
+			break
+		}
+	}
+	if fix == nil || fix.Edit == nil || !strings.Contains(fix.Title, "PROCEDURE_NAME") {
+		t.Fatalf("procedure-name quick fix missing: %+v", actions)
+	}
+	edits := fix.Edit.Changes[protocol.DocumentUri(uri)]
+	if len(edits) != 1 || edits[0].NewText != `"Foo"` || edits[0].Range.Start.Line != 2 || edits[0].Range.Start.Character != protocol.UInteger(utf16Len(line[:start])) || edits[0].Range.End.Character != protocol.UInteger(utf16Len(line[:start+len(`"OldName"`)])) {
+		t.Fatalf("unexpected procedure-name edit: %+v", edits)
+	}
+}
+
+func TestCodeActionOmitsSuppressedProcedureNameConstantFix(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"OldName\" ' xlflow:disable-line VB044\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 2, Character: 0},
+			End:   protocol.Position{Line: 2, Character: 60},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, ok := result.([]protocol.CodeAction)
+	if !ok {
+		t.Fatalf("code actions = %T, want []protocol.CodeAction", result)
+	}
+	for _, action := range actions {
+		if action.Kind != nil && *action.Kind == protocol.CodeActionKindQuickFix {
+			t.Fatalf("suppressed VB044 must not offer a quick fix: %+v", actions)
+		}
+	}
+}
+
 func TestSignatureHelpReturnsActiveParameter(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
@@ -900,6 +983,95 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 	}
 	_ = serverConn.Close()
 	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+}
+
+func TestJSONRPCPublishesProcedureNameConstantDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	mismatch := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"OldName\"\nEnd Sub\n"
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "vba", Version: 1, Text: mismatch},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	seenMismatch := false
+	for time.Now().Before(deadline) {
+		for _, params := range recorder.publishDiagnostics() {
+			for _, diag := range params.Diagnostics {
+				if strings.Contains(diag.Message, `Local constant "PROCEDURE_NAME" is "OldName" but its enclosing procedure is "Foo".`) {
+					seenMismatch = true
+					break
+				}
+			}
+			if seenMismatch {
+				break
+			}
+		}
+		if seenMismatch {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !seenMismatch {
+		_ = serverConn.Close()
+		t.Fatalf("VB044 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+	}
+	before := len(recorder.publishDiagnostics())
+	matching := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"Foo\"\nEnd Sub\n"
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidChange), protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Version:                2,
+		},
+		ContentChanges: []any{map[string]any{"text": matching}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		published := recorder.publishDiagnostics()
+		if len(published) > before {
+			latest := published[len(published)-1]
+			hasVB044 := false
+			for _, diag := range latest.Diagnostics {
+				if strings.Contains(diag.Message, "enclosing procedure") {
+					hasVB044 = true
+					break
+				}
+			}
+			if !hasVB044 {
+				_ = serverConn.Close()
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = serverConn.Close()
+	t.Fatalf("VB044 diagnostic did not clear after didChange: %+v", recorder.publishDiagnostics())
 }
 
 func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {

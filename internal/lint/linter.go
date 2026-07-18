@@ -237,6 +237,7 @@ func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bo
 			issues = append(issues, ctx.parseIssue(view.Root))
 		}
 		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
+		issues = append(issues, l.procedureNameConstantIssues(path, view.Root, source)...)
 		if sourceSymbols != nil {
 			issues = append(issues, l.undeclaredVariableIssues(path, string(source), view.Root, *sourceSymbols)...)
 			issues = append(issues, l.unusedLocalVariableIssues(path, string(source), *sourceSymbols)...)

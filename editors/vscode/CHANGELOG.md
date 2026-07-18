@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+## v0.8.0
+
 - Added the `xlflow.lsp.performanceLogging` setting to opt into structured language server performance measurements.
+- Restart the language server when `xlflow.toml` is created, changed, or deleted so project configuration changes apply immediately.
 
 ## v0.7.0
 

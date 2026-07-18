@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
@@ -88,22 +89,30 @@ type FmtConfig struct {
 }
 
 type LintConfig struct {
-	DisabledRules                   []string `toml:"disabled_rules"`
-	RequireOptionExplicit           bool     `toml:"require_option_explicit"`
-	ForbidSelect                    bool     `toml:"forbid_select"`
-	ForbidActivate                  bool     `toml:"forbid_activate"`
-	ForbidOnErrorResumeNext         bool     `toml:"forbid_on_error_resume_next"`
-	DetectImplicitVariant           bool     `toml:"detect_implicit_variant"`
-	ForbidPublicModuleFields        bool     `toml:"forbid_public_module_fields"`
-	ForbidInteractiveInput          bool     `toml:"forbid_interactive_input"`
-	DetectScopeShadowing            bool     `toml:"detect_scope_shadowing"`
-	DetectMultipleDeclaratorClarity bool     `toml:"detect_multiple_declarator_clarity"`
-	DetectUnusedLocalVariables      bool     `toml:"detect_unused_local_variables"`
-	DetectUnusedPrivateProcedures   bool     `toml:"detect_unused_private_procedures"`
-	DetectConfusingCallSyntax       bool     `toml:"detect_confusing_call_syntax"`
-	DetectForEachControlType        bool     `toml:"detect_for_each_control_type"`
-	DetectDangerousResume           bool     `toml:"detect_dangerous_resume"`
-	DetectNestedWithAmbiguity       bool     `toml:"detect_nested_with_ambiguity"`
+	DisabledRules                   []string                    `toml:"disabled_rules"`
+	RequireOptionExplicit           bool                        `toml:"require_option_explicit"`
+	ForbidSelect                    bool                        `toml:"forbid_select"`
+	ForbidActivate                  bool                        `toml:"forbid_activate"`
+	ForbidOnErrorResumeNext         bool                        `toml:"forbid_on_error_resume_next"`
+	DetectImplicitVariant           bool                        `toml:"detect_implicit_variant"`
+	ForbidPublicModuleFields        bool                        `toml:"forbid_public_module_fields"`
+	ForbidInteractiveInput          bool                        `toml:"forbid_interactive_input"`
+	DetectScopeShadowing            bool                        `toml:"detect_scope_shadowing"`
+	DetectMultipleDeclaratorClarity bool                        `toml:"detect_multiple_declarator_clarity"`
+	DetectUnusedLocalVariables      bool                        `toml:"detect_unused_local_variables"`
+	DetectUnusedPrivateProcedures   bool                        `toml:"detect_unused_private_procedures"`
+	DetectConfusingCallSyntax       bool                        `toml:"detect_confusing_call_syntax"`
+	DetectForEachControlType        bool                        `toml:"detect_for_each_control_type"`
+	DetectDangerousResume           bool                        `toml:"detect_dangerous_resume"`
+	DetectNestedWithAmbiguity       bool                        `toml:"detect_nested_with_ambiguity"`
+	ProcedureNameConstant           ProcedureNameConstantConfig `toml:"procedure_name_constant"`
+}
+
+// ProcedureNameConstantConfig controls the opt-in check that keeps a local
+// procedure-name constant aligned with its enclosing VBA procedure.
+type ProcedureNameConstantConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	ConstantName string `toml:"constant_name"`
 }
 
 type AnalyzeConfig struct {
@@ -154,6 +163,7 @@ var configurableLintRules = []lintRuleConfig{
 	{ID: "VB023", Key: "detect_for_each_control_type", Default: true, Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
 	{ID: "VB026", Key: "detect_dangerous_resume", Default: true, Get: func(c LintConfig) bool { return c.DetectDangerousResume }, Set: func(c *LintConfig, v bool) { c.DetectDangerousResume = v }},
 	{ID: "VB027", Key: "detect_nested_with_ambiguity", Default: false, Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
+	{ID: "VB044", Key: "procedure_name_constant", Default: false, Get: func(c LintConfig) bool { return c.ProcedureNameConstant.Enabled }, Set: func(c *LintConfig, v bool) { c.ProcedureNameConstant.Enabled = v }},
 }
 
 var configurableAnalyzeRules = []analyzeRuleConfig{
@@ -342,6 +352,7 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 
 func applyDefaults(cfg *Config) {
 	defaults := Default()
+	cfg.Lint.ProcedureNameConstant.ConstantName = strings.TrimSpace(cfg.Lint.ProcedureNameConstant.ConstantName)
 	if cfg.Project.Name == "" {
 		cfg.Project.Name = defaults.Project.Name
 	}
@@ -403,7 +414,29 @@ func validate(cfg Config) error {
 	if cfg.Backup.Retention.MaxCount > 0 && cfg.Backup.Retention.MinKeep > cfg.Backup.Retention.MaxCount {
 		return errors.New("backup.retention.min_keep must be less than or equal to backup.retention.max_count when max_count is enabled")
 	}
+	if cfg.Lint.ProcedureNameConstant.Enabled {
+		name := strings.TrimSpace(cfg.Lint.ProcedureNameConstant.ConstantName)
+		if name == "" {
+			return errors.New("lint.procedure_name_constant.constant_name is required when enabled")
+		}
+		if !validVBAIdentifier(name) {
+			return fmt.Errorf("lint.procedure_name_constant.constant_name must be a VBA identifier: %q", name)
+		}
+	}
 	return nil
+}
+
+func validVBAIdentifier(name string) bool {
+	runes := []rune(name)
+	if len(runes) == 0 || len(runes) > 255 || !unicode.IsLetter(runes[0]) {
+		return false
+	}
+	for _, r := range runes[1:] {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func indexLintRulesByID() map[string]lintRuleConfig {
@@ -430,6 +463,9 @@ func applyLintRuleConfig(cfg *Config, meta toml.MetaData) error {
 	cfg.Lint.DisabledRules = disabled
 	warnings := make([]map[string]any, 0)
 	for _, rule := range configurableLintRules {
+		if rule.ID == "VB044" {
+			continue
+		}
 		if !meta.IsDefined("lint", rule.Key) {
 			continue
 		}
@@ -455,6 +491,22 @@ func applyLintRuleConfig(cfg *Config, meta toml.MetaData) error {
 				},
 			)
 		}
+	}
+	if cfg.Lint.ProcedureNameConstant.Enabled && disabledSet["VB044"] {
+		warnings = append(warnings,
+			map[string]any{
+				"code":    "conflicting_lint_rule_config",
+				"message": "lint rule VB044 is enabled by [lint.procedure_name_constant] but also listed in [lint].disabled_rules.",
+				"rule":    "VB044",
+				"key":     "procedure_name_constant",
+			},
+			map[string]any{
+				"code":    "disabled_rules_precedence",
+				"message": "[lint].disabled_rules takes precedence.",
+				"rule":    "VB044",
+				"key":     "procedure_name_constant",
+			},
+		)
 	}
 	for id := range disabledSet {
 		rule := lintRuleByID[id]
@@ -634,6 +686,18 @@ func renderLintConfig(cfg LintConfig) string {
 			b.WriteString(" = true\n")
 		}
 	}
+	if cfg.ProcedureNameConstant.Enabled {
+		b.WriteString("\n[lint.procedure_name_constant]\n")
+		b.WriteString("enabled = true\n")
+		b.WriteString("constant_name = ")
+		b.WriteString(strconv.Quote(cfg.ProcedureNameConstant.ConstantName))
+		b.WriteString("\n")
+	} else {
+		b.WriteString("\n# Optional local procedure-name constant check (VB044).\n")
+		b.WriteString("# [lint.procedure_name_constant]\n")
+		b.WriteString("# enabled = true\n")
+		b.WriteString("# constant_name = \"PROCEDURE_NAME\"\n")
+	}
 	return b.String()
 }
 
@@ -662,6 +726,9 @@ func disabledLintRuleIDsForWrite(cfg LintConfig) []string {
 func legacyOptInLintRulesForWrite(cfg LintConfig) []lintRuleConfig {
 	var out []lintRuleConfig
 	for _, rule := range configurableLintRules {
+		if rule.ID == "VB044" {
+			continue
+		}
 		if !rule.Default && rule.Get(cfg) {
 			out = append(out, rule)
 		}

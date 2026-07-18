@@ -78,6 +78,9 @@ path = "build/Sales.xlsm"
 		cfg.Lint.DetectNestedWithAmbiguity {
 		t.Fatalf("expected false-positive-prone AST lint defaults to be opt-in: %+v", cfg.Lint)
 	}
+	if cfg.Lint.ProcedureNameConstant.Enabled || cfg.Lint.ProcedureNameConstant.ConstantName != "" {
+		t.Fatalf("procedure-name constant lint rule must default to disabled: %+v", cfg.Lint.ProcedureNameConstant)
+	}
 	if !cfg.Analyze.DetectRangeFindNothingCheck || !cfg.Analyze.DetectObjectUseBeforeSet ||
 		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
 		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
@@ -449,6 +452,75 @@ disabled_rules = ["` + ruleID + `"]
 	}
 }
 
+func TestLoadProcedureNameConstantConfig(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[lint]
+disabled_rules = ["VB044"]
+
+[lint.procedure_name_constant]
+enabled = true
+constant_name = " procedure_name "
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Lint.ProcedureNameConstant.Enabled || cfg.Lint.ProcedureNameConstant.ConstantName != "procedure_name" {
+		t.Fatalf("disabled_rules should override the enabled procedure-name constant rule: %+v", cfg.Lint.ProcedureNameConstant)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_lint_rule_config", "VB044") || !hasConfigWarning(cfg.Warnings, "disabled_rules_precedence", "VB044") {
+		t.Fatalf("expected VB044 conflict warnings, got %+v", cfg.Warnings)
+	}
+}
+
+func TestLoadRejectsInvalidProcedureNameConstantConfig(t *testing.T) {
+	for name, constantName := range map[string]string{
+		"missing":            "",
+		"invalid_character":  "PROCEDURE NAME",
+		"leading_underscore": "_PROCEDURE_NAME",
+		"combining_mark":     "PROCEDURE\u0301_NAME",
+		"too_long":           strings.Repeat("A", 256),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte(`[project]
+entry = "Main.Run"
+
+[lint.procedure_name_constant]
+enabled = true
+constant_name = "` + constantName + `"
+`)
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "lint.procedure_name_constant.constant_name") {
+				t.Fatalf("expected constant-name validation error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidVBAIdentifier(t *testing.T) {
+	for name, valid := range map[string]bool{
+		"PROCEDURE_NAME":         true,
+		"手続き名":                   true,
+		strings.Repeat("A", 255): true,
+		"_PROCEDURE_NAME":        false,
+		"PROCEDURE\u0301_NAME":   false,
+		strings.Repeat("A", 256): false,
+	} {
+		if got := validVBAIdentifier(name); got != valid {
+			t.Errorf("validVBAIdentifier(%q) = %t, want %t", name, got, valid)
+		}
+	}
+}
+
 func TestLoadRejectsNonConfigurableDisabledAnalyzeRule(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]
@@ -783,6 +855,8 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		"# VB020 unused-local-variable warnings are enabled by default.",
 		"# Add \"VB020\" to disabled_rules if a project intentionally keeps scratch locals.",
 		"# detect_unused_private_procedures = true # VB021",
+		"# [lint.procedure_name_constant]",
+		"# constant_name = \"PROCEDURE_NAME\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated config missing %q:\n%s", want, text)
@@ -828,6 +902,30 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected forbid_unqualified_excel_objects=false")
+	}
+}
+
+func TestWriteProcedureNameConstantConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Lint.ProcedureNameConstant = ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	p := filepath.Join(dir, FileName)
+	if err := Write(p, cfg); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "[lint.procedure_name_constant]\nenabled = true\nconstant_name = \"PROCEDURE_NAME\"") {
+		t.Fatalf("generated config missing enabled procedure-name constant rule:\n%s", body)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Lint.ProcedureNameConstant.Enabled || loaded.Lint.ProcedureNameConstant.ConstantName != "PROCEDURE_NAME" {
+		t.Fatalf("procedure-name constant config did not round-trip: %+v", loaded.Lint.ProcedureNameConstant)
 	}
 }
 

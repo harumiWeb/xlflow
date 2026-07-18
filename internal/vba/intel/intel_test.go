@@ -121,6 +121,40 @@ End Sub
 	}
 }
 
+func TestProcedureNameConstantQuickFixPreservesCRLFRange(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+		Enabled:      true,
+		ConstantName: "PROCEDURE_NAME",
+	}
+	line := "    Const PROCEDURE_NAME As String = \"OldName\""
+	source := "Option Explicit\r\nPublic Sub Foo()\r\n" + line + "\r\nEnd Sub\r\n"
+	start := strings.Index(line, "\"OldName\"")
+	if start < 0 {
+		t.Fatal("test literal missing")
+	}
+	wantRange := Range{
+		Start: Position{Line: 2, Character: utf16Len(line[:start])},
+		End:   Position{Line: 2, Character: utf16Len(line[:start+len("\"OldName\"")])},
+	}
+	actions, err := analyzer.CodeActions(Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: source,
+	}, wantRange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range actions {
+		if action.Kind == "quickfix" {
+			if action.Range != wantRange || action.NewText != "\"Foo\"" {
+				t.Fatalf("quick fix = %+v, want range %+v and replacement %q", action, wantRange, "\"Foo\"")
+			}
+			return
+		}
+	}
+	t.Fatalf("VB044 quick fix missing: %+v", actions)
+}
+
 func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

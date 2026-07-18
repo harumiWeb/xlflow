@@ -808,18 +808,31 @@ func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*S
 	}, nil
 }
 
-type DocumentationAction struct {
+type CodeAction struct {
 	Title   string
+	Kind    string
 	Range   Range
 	NewText string
 }
 
-func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]DocumentationAction, error) {
+func (a Analyzer) CodeActions(doc Document, selection Range) ([]CodeAction, error) {
+	out, err := a.documentationCodeActions(doc, selection)
+	if err != nil {
+		return nil, err
+	}
+	procedureActions, err := a.procedureNameConstantCodeActions(doc, selection)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, procedureActions...), nil
+}
+
+func (a Analyzer) documentationCodeActions(doc Document, selection Range) ([]CodeAction, error) {
 	syms, err := a.DocumentSymbols(doc)
 	if err != nil {
 		return nil, err
 	}
-	var out []DocumentationAction
+	var out []CodeAction
 	for _, sym := range syms {
 		if !documentationSnippetSymbol(sym) || doccomments.HasDocumentation(sym.Documentation) {
 			continue
@@ -832,9 +845,60 @@ func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]Doc
 			continue
 		}
 		insert := Range{Start: Position{Line: sym.Range.Start.Line, Character: 0}, End: Position{Line: sym.Range.Start.Line, Character: 0}}
-		out = append(out, DocumentationAction{Title: snippet.Label, Range: insert, NewText: snippet.Text + "\n"})
+		out = append(out, CodeAction{Title: snippet.Label, Kind: "refactor.rewrite", Range: insert, NewText: snippet.Text + "\n"})
 	}
 	return out, nil
+}
+
+func (a Analyzer) procedureNameConstantCodeActions(doc Document, selection Range) ([]CodeAction, error) {
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return nil, err
+	}
+	defer closeParsed()
+	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
+	issues, err := linter.LintParsed(parsed)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool)
+	for _, issue := range issues {
+		if issue.Code == "VB044" {
+			visible[procedureNameConstantIssueKey(issue.Line, issue.Column)] = true
+		}
+	}
+	fixes, err := linter.ProcedureNameConstantFixesParsed(parsed)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CodeAction, 0, len(fixes))
+	for _, fix := range fixes {
+		if !visible[procedureNameConstantIssueKey(fix.Line, fix.Column)] {
+			continue
+		}
+		editRange := Range{
+			Start: positionForByteOffset(doc.Source, fix.StartByte),
+			End:   positionForByteOffset(doc.Source, fix.EndByte),
+		}
+		if !rangeIntersects(selection, editRange) {
+			continue
+		}
+		out = append(out, CodeAction{
+			Title:   fmt.Sprintf("Update %s to %q", fix.ConstantName, fix.ExpectedName),
+			Kind:    "quickfix",
+			Range:   editRange,
+			NewText: vbaStringLiteral(fix.ExpectedName),
+		})
+	}
+	return out, nil
+}
+
+func procedureNameConstantIssueKey(line, column int) string {
+	return fmt.Sprintf("%d:%d", line, column)
+}
+
+func vbaStringLiteral(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([]Completion, bool, error) {
@@ -5067,20 +5131,24 @@ func utf16Prefix(line string, character int) string {
 }
 
 func byteOffsetForPosition(source string, pos Position) int {
-	lines := normalizedLines(source)
 	if pos.Line < 0 {
 		return 0
 	}
-	offset := 0
-	for lineNo, line := range lines {
+	lineStart := 0
+	for lineNo := 0; ; lineNo++ {
+		lineEnd, nextLineStart := rawLineBounds(source, lineStart)
 		if lineNo == pos.Line {
+			line := source[lineStart:lineEnd]
 			idx := byteIndexForUTF16(line, pos.Character)
 			if idx > len(line) {
 				idx = len(line)
 			}
-			return offset + idx
+			return lineStart + idx
 		}
-		offset += len(line) + 1
+		if nextLineStart == len(source) {
+			break
+		}
+		lineStart = nextLineStart
 	}
 	return len(source)
 }
@@ -5089,20 +5157,40 @@ func positionForByteOffset(source string, offset int) Position {
 	if offset <= 0 {
 		return Position{}
 	}
-	lines := normalizedLines(source)
-	seen := 0
-	for lineNo, line := range lines {
-		lineEnd := seen + len(line)
+	lineStart := 0
+	for lineNo := 0; ; lineNo++ {
+		lineEnd, nextLineStart := rawLineBounds(source, lineStart)
 		if offset <= lineEnd {
-			return Position{Line: lineNo, Character: utf16Len(line[:max(0, min(offset-seen, len(line)))])}
+			line := source[lineStart:lineEnd]
+			return Position{Line: lineNo, Character: utf16Len(line[:max(0, min(offset-lineStart, len(line)))])}
 		}
-		seen = lineEnd + 1
+		if offset < nextLineStart {
+			line := source[lineStart:lineEnd]
+			return Position{Line: lineNo, Character: utf16Len(line)}
+		}
+		if nextLineStart == len(source) {
+			return Position{Line: lineNo + 1}
+		}
+		lineStart = nextLineStart
 	}
-	if len(lines) == 0 {
-		return Position{}
+}
+
+// rawLineBounds returns the end of the current line's text and the start of
+// the following line without normalizing the source. Byte offsets from the
+// parser refer to this original representation, including CRLF line endings.
+func rawLineBounds(source string, lineStart int) (lineEnd, nextLineStart int) {
+	for i := lineStart; i < len(source); i++ {
+		switch source[i] {
+		case '\n':
+			return i, i + 1
+		case '\r':
+			if i+1 < len(source) && source[i+1] == '\n' {
+				return i, i + 2
+			}
+			return i, i + 1
+		}
 	}
-	last := lines[len(lines)-1]
-	return Position{Line: len(lines) - 1, Character: utf16Len(last)}
+	return len(source), len(source)
 }
 
 func byteIndexForUTF16(s string, character int) int {
