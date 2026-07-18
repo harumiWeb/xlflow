@@ -159,3 +159,39 @@ func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSeman
 		t.Fatalf("parsed documents = factory:%d snapshot:%d, want 1", parses.Load(), snapshot.ParseCount())
 	}
 }
+
+func TestAnalysisSnapshotDocumentIndexIsLazyAndReused(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Version: 7,
+		Source: "Sub First()\n  Dim item As Object\n  Set item = New Collection\n  With item\n    .Count\n  End With\nEnd Sub\n",
+	})
+	var loads atomic.Int32
+	load := func() ([]Symbol, error) {
+		loads.Add(1)
+		return []Symbol{{
+			Name: "item", Kind: "local_variable", Parent: "First", ReturnType: "Object",
+			Range: Range{Start: Position{Line: 1}, End: Position{Line: 1, Character: 17}},
+		}}, nil
+	}
+	first, hit, err := snapshot.documentIndex(load)
+	if err != nil || hit {
+		t.Fatalf("first document index = (hit=%v, err=%v)", hit, err)
+	}
+	second, hit, err := snapshot.documentIndex(load)
+	if err != nil || !hit || first != second {
+		t.Fatalf("reused document index = (same=%v, hit=%v, err=%v)", first == second, hit, err)
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("symbol loads = %d, want 1", loads.Load())
+	}
+	if got := first.symbolsByName["item"]; len(got) != 1 || got[0].Parent != "First" {
+		t.Fatalf("indexed declarations = %+v", got)
+	}
+	first.initAssignments()
+	if got := first.assignmentsByName["item"]; len(got) != 1 || got[0].expression != "New Collection" || got[0].procedure != "First" {
+		t.Fatalf("indexed assignments = %+v", got)
+	}
+	if block, ok := first.withBlockAt(Position{Line: 4}); !ok || first.withBlocks[block].receiver != "item" {
+		t.Fatalf("indexed With block = (%d, %v, %+v)", block, ok, first.withBlocks)
+	}
+}

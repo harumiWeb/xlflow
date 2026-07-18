@@ -139,6 +139,7 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 			identifiers[lineNo] = codeIdentifierSpans(line)
 		}
 	}
+	typeIndex, _ := a.documentIndexFor(doc)
 	builder := semanticBuilder{
 		analyzer:           a,
 		doc:                doc,
@@ -148,7 +149,7 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 		workspaceSymbols:   workspaceSymbols,
 		workspaceSymbolsOK: workspaceSymbolsErr == nil,
 		identifiers:        identifiers,
-		typeContext:        newDocumentTypeContext(doc, lines, documentSymbols),
+		typeContext:        newDocumentTypeContext(doc, lines, documentSymbols, typeIndex),
 	}
 	builder.addLexicalTokens()
 	builder.addSymbolTokens()

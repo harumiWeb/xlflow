@@ -2951,13 +2951,15 @@ type documentTypeContext struct {
 	symbols         []Symbol
 	procedures      []procedureScope
 	procedureByLine []int
+	index           *documentIndex
 }
 
-func newDocumentTypeContext(doc Document, lines []string, symbols []Symbol) *documentTypeContext {
+func newDocumentTypeContext(doc Document, lines []string, symbols []Symbol, index *documentIndex) *documentTypeContext {
 	ctx := &documentTypeContext{
 		lines:           lines,
 		symbols:         symbols,
 		procedureByLine: make([]int, len(lines)),
+		index:           index,
 	}
 	for i := range ctx.procedureByLine {
 		ctx.procedureByLine[i] = -1
@@ -3009,6 +3011,28 @@ func newDocumentTypeContext(doc Document, lines []string, symbols []Symbol) *doc
 		}
 	}
 	return ctx
+}
+
+func (a Analyzer) documentIndexFor(doc Document) (*documentIndex, bool) {
+	load := func() ([]Symbol, error) {
+		parsed, closeParsed, err := parsedDocumentForDocument(doc)
+		if err != nil {
+			return nil, err
+		}
+		defer closeParsed()
+		return a.inspectDocumentSourceSymbols(doc, parsed)
+	}
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		index, _, err := snapshot.documentIndex(load)
+		return index, err == nil && index != nil
+	}
+	syms, err := load()
+	if err != nil {
+		return nil, false
+	}
+	lines := documentLines(doc)
+	procedures, procedureLines := procedureIndexForLines(lines)
+	return buildDocumentIndex(doc.Source, lines, procedures, procedureLines, syms), true
 }
 
 func (c *documentTypeContext) procedureAt(pos Position) (string, *Range) {
@@ -3123,30 +3147,31 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 			return inferredType{}, false
 		}
 	}
-	declRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b(?:\s*\([^)]*\))?\s+As\s+(?:New\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
-	if declared == "" {
-		if typ, ok := bestTypeMatch(doc.Source, declRe, offset, 1); ok {
-			declared = typ
-			if !isObjectFallbackType(declared) {
-				return inferredType{Type: declared, Source: "declaration"}, true
-			}
-		}
-	}
 	if declared != "" && !isObjectFallbackType(declared) {
 		return inferredType{Type: declared, Source: "declaration"}, true
 	}
-	newRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*New\s+([A-Za-z_][A-Za-z0-9_.]*)`)
-	if typ, ok := bestTypeMatch(doc.Source, newRe, offset, 1); ok {
-		return inferredType{Type: typ, Source: "inferred from Set New"}, true
+	index := (*documentIndex)(nil)
+	if ctx != nil {
+		index = ctx.index
 	}
-	createRe := regexp.MustCompile(`(?i)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*CreateObject\s*\(\s*"([^"]+)"\s*\)`)
-	if progID, ok := bestTypeMatch(doc.Source, createRe, offset, 1); ok {
-		if typ, ok := a.DB.ResolveProgID(progID); ok {
-			return inferredType{Type: typ.Name, Source: "inferred from CreateObject"}, true
+	if index == nil {
+		index, _ = a.documentIndexFor(doc)
+	}
+	lookupOffset := offset
+	if lookupOffset < 0 {
+		lookupOffset = len(doc.Source)
+	}
+	lookupPosition := positionForByteOffset(doc.Source, lookupOffset)
+	if assignment, ok := index.nearestAssignment(word, currentProcedureNameAt(doc, lookupPosition, ctx), lookupPosition); ok {
+		if match := newAssignmentExprRe.FindStringSubmatch(assignment.expression); len(match) == 2 {
+			return inferredType{Type: match[1], Source: "inferred from Set New"}, true
 		}
-	}
-	if expr, exprOffset, ok := bestSetAssignmentExpression(doc.Source, word, offset); ok {
-		if typ, ok := a.resolveDocumentExpressionTypeAtContext(doc, expr, exprOffset, ctx); ok {
+		if match := createObjectExprRe.FindStringSubmatch(assignment.expression); len(match) == 2 {
+			if typ, ok := a.DB.ResolveProgID(match[1]); ok {
+				return inferredType{Type: typ.Name, Source: "inferred from CreateObject"}, true
+			}
+		}
+		if typ, ok := a.resolveDocumentExpressionTypeAtContext(doc, assignment.expression, assignment.offset, ctx); ok {
 			return inferredType{Type: typ, Source: "inferred from Set assignment"}, true
 		}
 	}
@@ -3161,21 +3186,25 @@ func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offs
 	currentProcedure := currentProcedureNameAt(doc, pos, ctx)
 	var syms []Symbol
 	if ctx != nil {
-		syms = ctx.symbols
+		if ctx.index != nil {
+			syms = ctx.index.symbolsByName[indexName(word)]
+		} else {
+			syms = ctx.symbols
+		}
 	} else {
-		var err error
-		syms, err = a.DocumentSymbols(doc)
-		if err != nil {
+		index, ok := a.documentIndexFor(doc)
+		if !ok {
 			return inferredType{}, false
 		}
+		syms = index.symbolsByName[indexName(word)]
 	}
 	var fallback inferredType
 	for _, sym := range syms {
-		if !strings.EqualFold(sym.Name, word) || sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
+		if sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
 			continue
 		}
 		inferred := inferredType{Type: sym.ReturnType, Source: "declaration"}
-		if isLocalSymbol(sym) {
+		if isLocalSymbol(sym) || strings.EqualFold(sym.Kind, "function_return") {
 			return inferred, true
 		}
 		if fallback.Type == "" {
@@ -3421,34 +3450,31 @@ func (a Analyzer) withBlockTypeAt(doc Document, pos Position, offset int) (strin
 }
 
 func (a Analyzer) withBlockTypeAtContext(doc Document, pos Position, offset int, ctx *documentTypeContext) (string, bool) {
-	lines := documentLines(doc)
+	index := (*documentIndex)(nil)
 	if ctx != nil {
-		lines = ctx.lines
+		index = ctx.index
 	}
-	if pos.Line <= 0 || pos.Line > len(lines) {
+	if index == nil {
+		index, _ = a.documentIndexFor(doc)
+	}
+	block, ok := index.withBlockAt(pos)
+	if !ok {
 		return "", false
 	}
+	chain := make([]int, 0, 4)
+	for block >= 0 {
+		chain = append(chain, block)
+		block = index.withBlocks[block].parent
+	}
 	var stack []string
-	for lineNo := 0; lineNo < pos.Line; lineNo++ {
-		trimmed := strings.TrimSpace(stripLineComment(lines[lineNo]))
-		if trimmed == "" {
-			continue
-		}
-		if regexp.MustCompile(`(?i)^End\s+With\b`).MatchString(trimmed) {
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-			continue
-		}
-		m := regexp.MustCompile(`(?i)^With\s+(.+)$`).FindStringSubmatch(trimmed)
-		if len(m) == 0 {
-			continue
-		}
-		if typ, ok := a.resolveWithExpressionTypeAtContext(doc, strings.TrimSpace(m[1]), stack, offset, ctx); ok {
-			stack = append(stack, typ)
-		} else {
+	for i := len(chain) - 1; i >= 0; i-- {
+		candidate := index.withBlocks[chain[i]]
+		typ, found := a.resolveWithExpressionTypeAtContext(doc, candidate.receiver, stack, offset, ctx)
+		if !found {
 			stack = append(stack, "")
+			continue
 		}
+		stack = append(stack, typ)
 	}
 	for i := len(stack) - 1; i >= 0; i-- {
 		if stack[i] != "" {
@@ -3511,53 +3537,6 @@ func stripLineComment(line string) string {
 		}
 	}
 	return line
-}
-
-func bestTypeMatch(source string, re *regexp.Regexp, offset int, group int) (string, bool) {
-	matches := re.FindAllStringSubmatchIndex(source, -1)
-	bestStart := -1
-	bestType := ""
-	for _, match := range matches {
-		if len(match) <= group*2+1 || match[group*2] < 0 || match[group*2+1] < 0 {
-			continue
-		}
-		start := match[0]
-		if offset >= 0 && start > offset {
-			continue
-		}
-		if bestStart < 0 || start > bestStart {
-			bestStart = start
-			bestType = source[match[group*2]:match[group*2+1]]
-		}
-	}
-	return bestType, bestType != ""
-}
-
-func bestSetAssignmentExpression(source, word string, offset int) (string, int, bool) {
-	re := regexp.MustCompile(`(?im)\bSet\s+` + regexp.QuoteMeta(word) + `\s*=\s*([^\r\n:]+)`)
-	matches := re.FindAllStringSubmatchIndex(source, -1)
-	bestStart := -1
-	bestExpr := ""
-	bestExprOffset := -1
-	for _, match := range matches {
-		if len(match) < 4 || match[2] < 0 || match[3] < 0 {
-			continue
-		}
-		start := match[0]
-		if offset >= 0 && start > offset {
-			continue
-		}
-		expr := strings.TrimSpace(stripLineComment(source[match[2]:match[3]]))
-		if expr == "" {
-			continue
-		}
-		if bestStart < 0 || start > bestStart {
-			bestStart = start
-			bestExpr = expr
-			bestExprOffset = match[2]
-		}
-	}
-	return bestExpr, bestExprOffset, bestExpr != ""
 }
 
 func (a Analyzer) collectionDefaultType(name string) (string, bool) {

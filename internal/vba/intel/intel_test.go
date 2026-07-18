@@ -1990,6 +1990,47 @@ End Sub
 	}
 }
 
+func TestIndexedInferenceRespectsProcedureScopeAssignmentsAndFunctionReturns(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub First()
+    Dim item As Object
+    Set item = New Collection
+End Sub
+
+Sub Second()
+    Dim item As Object
+    item.Co
+End Sub
+
+Function Build() As Object
+    Set Build = New Collection
+    Build.Co
+End Function
+
+Sub LatestAssignment()
+    Dim item As Object
+    Set item = New Collection
+    Set item = CreateObject("Scripting.Dictionary")
+    item.Ex
+End Sub
+`
+	doc := NewAnalysisSnapshot(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source, Version: 1}).Document()
+
+	secondOffset := byteOffsetForPosition(source, Position{Line: 8, Character: utf16Len("    item")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "item", secondOffset); !ok || got != "Object" {
+		t.Fatalf("Second.item type = %q, %v, want Object without First assignment", got, ok)
+	}
+	returnOffset := byteOffsetForPosition(source, Position{Line: 13, Character: utf16Len("    Build")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "Build", returnOffset); !ok || got != "Collection" {
+		t.Fatalf("function return type = %q, %v, want Collection", got, ok)
+	}
+	latestOffset := byteOffsetForPosition(source, Position{Line: 20, Character: utf16Len("    item")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "item", latestOffset); !ok || got != "Scripting.Dictionary" {
+		t.Fatalf("latest item assignment type = %q, %v, want Scripting.Dictionary", got, ok)
+	}
+}
+
 func TestPracticalWorkbookFileSystemAndWorksheetChains(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
