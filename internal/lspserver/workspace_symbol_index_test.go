@@ -193,15 +193,8 @@ func TestWorkspaceSymbolIndexExcludesExternalOpenDocumentAndUsesAbsoluteDiscover
 	if err := os.WriteFile(inside, []byte("Sub Inside()\nEnd Sub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relativeRoot, err := filepath.Rel(cwd, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: relativeRoot, Config: config.Default()})
+	t.Chdir(root)
+	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: ".", Config: config.Default()})
 	if err != nil || len(files) != 1 || !filepath.IsAbs(files[0].Path) {
 		t.Fatalf("relative-root discovery = %#v, %v", files, err)
 	}

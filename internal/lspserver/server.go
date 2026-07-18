@@ -994,10 +994,6 @@ func (s *Server) lockDocumentLifecycle(uri string) func() {
 	return lifecycle.Unlock
 }
 
-func (s *Server) baseAnalyzer() intel.Analyzer {
-	return intel.Analyzer{RootDir: s.opts.RootDir, Config: s.opts.Config, DB: s.db}
-}
-
 func (s *Server) newWorkspaceSymbolIndex() *workspaceSymbolIndex {
 	return newWorkspaceSymbolIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFile, s.logInitialWorkspaceIndexPerformance)
 }

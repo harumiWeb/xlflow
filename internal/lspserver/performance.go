@@ -86,24 +86,6 @@ func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation u
 	)
 }
 
-func (s *Server) logCachePerformance(operation, cache string, resultCount int, started time.Time, err error) {
-	if !s.opts.PerformanceLog {
-		return
-	}
-	outcome := "ok"
-	if err != nil {
-		outcome = "error"
-	}
-	s.logger.Printf(
-		"performance operation=%q elapsed_ms=%.3f result_count=%d outcome=%q cache=%q",
-		operation,
-		float64(time.Since(started))/float64(time.Millisecond),
-		resultCount,
-		outcome,
-		cache,
-	)
-}
-
 func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time.Time, err error) {
 	if !s.opts.PerformanceLog {
 		return
