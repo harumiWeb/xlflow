@@ -33,6 +33,8 @@ Pull before editing if the workbook may contain newer VBA than the source tree.
 > [!IMPORTANT]
 > UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
 
+With `[vba.line_numbers].enabled = true`, `pull` strips only xlflow-generated, fixed-width space-padded physical line labels from workbook exports, so tracked source remains unnumbered. It never treats colon labels as generated. xlflow stops safely rather than rewriting source when it encounters non-generated or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets. This is configuration-only behavior; `pull` has no line-number flag.
+
 `--formulas` runs the normal VBA pull first. If it succeeds, xlflow also extracts worksheet formulas, defined names, formula references, and parse summaries into `formulas/`.
 
 Formula extraction reads the saved workbook file directly. When using `pull --session --formulas`, save the session first if formulas were changed only in the live workbook.

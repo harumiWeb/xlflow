@@ -52,9 +52,16 @@ type SourceConfig struct {
 }
 
 type VBAConfig struct {
-	Folders                 bool   `toml:"folders"`
-	FolderAnnotation        string `toml:"folder_annotation"`
-	DefaultComponentFolders bool   `toml:"default_component_folders"`
+	Folders                 bool                 `toml:"folders"`
+	FolderAnnotation        string               `toml:"folder_annotation"`
+	DefaultComponentFolders bool                 `toml:"default_component_folders"`
+	LineNumbers             VBALineNumbersConfig `toml:"line_numbers"`
+}
+
+// VBALineNumbersConfig controls temporary Erl-compatible instrumentation used
+// only while source is imported into an Excel workbook.
+type VBALineNumbersConfig struct {
+	Enabled bool `toml:"enabled"`
 }
 
 type UserFormConfig struct {
@@ -781,6 +788,11 @@ folders = %t
 folder_annotation = %q
 # Automatically assign default folder annotations based on source paths.
 default_component_folders = %t
+
+# Optional Erl instrumentation. When enabled, push numbers only temporary
+# import copies; tracked source remains unnumbered.
+# [vba.line_numbers]
+# enabled = true
 
 # UserForm source mode.
 [userform]

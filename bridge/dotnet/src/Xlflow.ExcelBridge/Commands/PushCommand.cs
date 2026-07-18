@@ -49,7 +49,8 @@ public sealed class PushCommand : ICommandHandler
             ChangedOnly: BridgePayload.GetBool(request.Payload, "ChangedOnly"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
             NoSave: BridgePayload.GetBool(request.Payload, "NoSave"),
-            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
+            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
+            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"));
 
         return _service.Execute(request, args, cancellationToken);
     }

@@ -74,7 +74,16 @@ public sealed class ExcelPushService : IPushService
                 args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
             var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
             var fingerprint = VbaSourceHelper.ComputeFingerprint(
-                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource, args.LineNumbersEnabled);
+
+            if (args.LineNumbersEnabled && !TryValidateLineNumberSources(sourceFiles, out var lineNumberIssue))
+            {
+                return BridgeResponse.Failed(request, new BridgeError(
+                    Code: "vba_line_number_safety_failed",
+                    Message: lineNumberIssue!,
+                    Phase: "prepare_line_numbers",
+                    Source: "xlflow-excel-bridge"));
+            }
 
             var duplicates = VbaSourceHelper.FindDuplicateModuleNames(sourceFiles);
             if (duplicates.Count > 0)
@@ -327,6 +336,14 @@ public sealed class ExcelPushService : IPushService
                 Code: "bridge_file_not_openable",
                 Message: ex.Message.Replace("bridge_file_not_openable: ", "", StringComparison.OrdinalIgnoreCase),
                 Phase: "push",
+                Source: "xlflow-excel-bridge")), backupRef);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("vba_line_number_safety_failed:", StringComparison.OrdinalIgnoreCase))
+        {
+            return WithBackup(BridgeResponse.Failed(request, new BridgeError(
+                Code: "vba_line_number_safety_failed",
+                Message: ex.Message.Replace("vba_line_number_safety_failed: ", "", StringComparison.OrdinalIgnoreCase),
+                Phase: "prepare_line_numbers",
                 Source: "xlflow-excel-bridge")), backupRef);
         }
         catch (ComponentRemovalException ex)
@@ -740,7 +757,8 @@ public sealed class ExcelPushService : IPushService
                     file.FullPath,
                     Path.Combine(tmpImportDir, Path.GetFileName(file.FullPath)),
                     rootDir,
-                    args.FolderAnnotation);
+                    args.FolderAnnotation,
+                    args.LineNumbersEnabled);
 
                 if (string.IsNullOrWhiteSpace(importPath))
                 {
@@ -776,7 +794,7 @@ public sealed class ExcelPushService : IPushService
 
                 if (VbaSourceHelper.IsSidecarMode(args.CodeSource) && file.Kind == "form" && file.Extension == ".frm")
                 {
-                    SyncUserFormCodeBehind(workbook, file.ModuleName, args.FormsDir);
+                    SyncUserFormCodeBehind(workbook, file.ModuleName, args.FormsDir, args.LineNumbersEnabled);
                 }
             }
         }
@@ -789,7 +807,7 @@ public sealed class ExcelPushService : IPushService
         return imported;
     }
 
-    private static void SyncUserFormCodeBehind(object workbook, string formName, string formsDir)
+    private static void SyncUserFormCodeBehind(object workbook, string formName, string formsDir, bool lineNumbersEnabled)
     {
         var codePath = VbaSourceHelper.GetUserFormCodePath(formsDir, formName);
         if (string.IsNullOrWhiteSpace(codePath) || !File.Exists(codePath))
@@ -798,6 +816,10 @@ public sealed class ExcelPushService : IPushService
         }
 
         var codeText = File.ReadAllText(codePath, Encoding.UTF8);
+        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(codeText, out codeText, out var lineNumberIssue))
+        {
+            throw new InvalidOperationException($"vba_line_number_safety_failed: {codePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
+        }
         if (string.IsNullOrWhiteSpace(codeText))
         {
             return;
@@ -933,6 +955,10 @@ public sealed class ExcelPushService : IPushService
                         var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(args.WorkbookDir, sourcePath);
                         sourceContent = VbaSourceHelper.UpdateFolderAnnotationText(sourceContent, args.FolderAnnotation, desiredAnnotation);
                     }
+                    if (args.LineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(sourceContent, out sourceContent, out var lineNumberIssue))
+                    {
+                        throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
+                    }
 
                     object? codeModule = null;
                     try
@@ -978,6 +1004,33 @@ public sealed class ExcelPushService : IPushService
         }
 
         return updated;
+    }
+
+    private static bool TryValidateLineNumberSources(IEnumerable<DiscoveredSourceFile> sourceFiles, out string? message)
+    {
+        foreach (var file in sourceFiles)
+        {
+            if (file.Extension == ".frx" || !File.Exists(file.FullPath))
+            {
+                continue;
+            }
+            try
+            {
+                var content = File.ReadAllText(file.FullPath, Encoding.UTF8);
+                if (!ErlLineNumberTransformer.TryAdd(content, out _, out var issue))
+                {
+                    message = $"{file.RelativePath}:{issue!.Line}: {issue.Message}";
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                message = $"{file.RelativePath}: could not inspect source for Erl line numbers: {ExcelBridgeSupport.FormatExceptionDetail(ex)}";
+                return false;
+            }
+        }
+        message = null;
+        return true;
     }
 
     private static string? FindDocumentModuleSource(string workbookDir, string componentName)

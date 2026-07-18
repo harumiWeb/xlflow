@@ -21,6 +21,7 @@ public sealed class ExcelPullService : IPullService
         object? excel = null;
         object? workbook = null;
         var sessionAttached = false;
+        var stagingRoot = Path.Combine(Path.GetTempPath(), "xlflow-pull-stage-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
 
         try
         {
@@ -38,19 +39,23 @@ public sealed class ExcelPullService : IPullService
             var formsDir = args.FormsDir;
             var workbookDir = args.WorkbookDir;
 
-            EnsureDirectory(modulesDir);
-            EnsureDirectory(classesDir);
-            EnsureDirectory(formsDir);
-            EnsureDirectory(workbookDir);
-
-            ClearExistingSourceFiles(modulesDir, classesDir, formsDir, workbookDir, args.CodeSource);
+            var stagedModulesDir = Path.Combine(stagingRoot, "modules");
+            var stagedClassesDir = Path.Combine(stagingRoot, "classes");
+            var stagedFormsDir = Path.Combine(stagingRoot, "forms");
+            var stagedWorkbookDir = Path.Combine(stagingRoot, "workbook");
+            EnsureDirectory(stagedModulesDir);
+            EnsureDirectory(stagedClassesDir);
+            EnsureDirectory(stagedFormsDir);
+            EnsureDirectory(stagedWorkbookDir);
 
             var (exportedCount, exportedFormCodeCount) = ExcelBridgeSupport.RunPhase(
                 "export_vba_components",
                 () => ExportVbaComponents(
-                    workbook, modulesDir, classesDir, formsDir, workbookDir,
+                    workbook, stagedModulesDir, stagedClassesDir, stagedFormsDir, stagedWorkbookDir,
                     args.Folders, args.FolderAnnotation, args.DefaultComponentFolders,
-                    args.CodeSource));
+                    args.CodeSource, args.LineNumbersEnabled));
+
+            PromoteStagedSource(stagingRoot, modulesDir, classesDir, formsDir, workbookDir, args.CodeSource);
 
             var userFormNames = ExcelBridgeSupport.RunPhase(
                 "discover_userforms",
@@ -164,6 +169,14 @@ public sealed class ExcelPullService : IPullService
                 Phase: "pull",
                 Source: "xlflow-excel-bridge"));
         }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("vba_line_number_safety_failed:", StringComparison.OrdinalIgnoreCase))
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "vba_line_number_safety_failed",
+                Message: ex.Message.Replace("vba_line_number_safety_failed: ", "", StringComparison.OrdinalIgnoreCase),
+                Phase: "strip_line_numbers",
+                Source: "xlflow-excel-bridge"));
+        }
         catch (Exception ex)
         {
             var detail = ExcelBridgeSupport.FormatExceptionDetail(ex);
@@ -175,6 +188,11 @@ public sealed class ExcelPullService : IPullService
         }
         finally
         {
+            if (Directory.Exists(stagingRoot))
+            {
+                try { Directory.Delete(stagingRoot, true); }
+                catch (IOException) { /* best-effort cleanup */ }
+            }
             if (!sessionAttached)
             {
                 CloseComInstance(workbook, excel);
@@ -216,7 +234,7 @@ public sealed class ExcelPullService : IPullService
 
     private static (int ExportedCount, int ExportedFormCodeCount) ExportVbaComponents(
         object workbook, string modulesDir, string classesDir, string formsDir, string workbookDir,
-        bool folders, string folderAnnotation, bool defaultComponentFolders, string? codeSource)
+        bool folders, string folderAnnotation, bool defaultComponentFolders, string? codeSource, bool lineNumbersEnabled)
     {
         object? vbProject = null;
         object? vbComponents = null;
@@ -236,13 +254,13 @@ public sealed class ExcelPullService : IPullService
                 {
                     component = ExcelBridgeSupport.Get(vbComponents!, "Item", index);
                     ExportComponent(component!, modulesDir, classesDir, formsDir, workbookDir,
-                        folders, folderAnnotation, defaultComponentFolders);
+                        folders, folderAnnotation, defaultComponentFolders, lineNumbersEnabled);
                     exported++;
 
                     if (VbaSourceHelper.IsSidecarMode(codeSource) &&
                         ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component!, "Type")) == ComponentTypeForm)
                     {
-                        if (ExportUserFormCodeBehind(component!, formsDir))
+                        if (ExportUserFormCodeBehind(component!, formsDir, lineNumbersEnabled))
                         {
                             exportedFormCode++;
                         }
@@ -264,7 +282,7 @@ public sealed class ExcelPullService : IPullService
     }
 
     private static void ExportComponent(object component, string modulesDir, string classesDir, string formsDir, string workbookDir,
-        bool folders, string folderAnnotation, bool defaultComponentFolders)
+        bool folders, string folderAnnotation, bool defaultComponentFolders, bool lineNumbersEnabled)
     {
         var name = ExcelBridgeSupport.GetString(component, "Name") ?? "";
         var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(component, "Type"));
@@ -322,6 +340,11 @@ public sealed class ExcelPullService : IPullService
                         }
                     }
 
+                    if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(content, out content, out var lineNumberIssue, excelExported: true))
+                    {
+                        throw new InvalidOperationException($"vba_line_number_safety_failed: {targetFile}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
+                    }
+
                     File.WriteAllText(targetFile, content, new UTF8Encoding(false));
                 }
                 else
@@ -341,7 +364,7 @@ public sealed class ExcelPullService : IPullService
         }
     }
 
-    private static bool ExportUserFormCodeBehind(object component, string formsDir)
+    private static bool ExportUserFormCodeBehind(object component, string formsDir, bool lineNumbersEnabled)
     {
         var name = ExcelBridgeSupport.GetString(component, "Name") ?? "";
         var codePath = VbaSourceHelper.GetUserFormCodePath(formsDir, name);
@@ -355,6 +378,10 @@ public sealed class ExcelPullService : IPullService
         {
             codeModule = ExcelBridgeSupport.Get(component, "CodeModule");
             var text = VbaSourceHelper.GetCodeModuleText(codeModule!);
+            if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(text, out text, out var lineNumberIssue, excelExported: true))
+            {
+                throw new InvalidOperationException($"vba_line_number_safety_failed: {codePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
+            }
             if (string.IsNullOrWhiteSpace(text))
             {
                 if (File.Exists(codePath))
@@ -372,6 +399,10 @@ public sealed class ExcelPullService : IPullService
             }
             File.WriteAllText(codePath, text, new UTF8Encoding(false));
             return true;
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
         }
         catch
         {
@@ -460,17 +491,43 @@ public sealed class ExcelPullService : IPullService
         return ext is ".bas" or ".cls" or ".frm";
     }
 
-    private static void ClearExistingSourceFiles(string modulesDir, string classesDir, string formsDir, string workbookDir, string? codeSource)
+    internal static void ClearExistingSourceFiles(string modulesDir, string classesDir, string formsDir, string workbookDir, string? codeSource)
     {
         var files = VbaSourceHelper.DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource);
         foreach (var file in files)
         {
-            if (file.Kind == "form_code")
+            try { File.Delete(file.FullPath); }
+            catch (IOException) { /* best-effort */ }
+        }
+    }
+
+    private static void PromoteStagedSource(string stagingRoot, string modulesDir, string classesDir, string formsDir, string workbookDir, string? codeSource)
+    {
+        ClearExistingSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource);
+        var targets = new[]
+        {
+            (Stage: Path.Combine(stagingRoot, "modules"), Destination: modulesDir),
+            (Stage: Path.Combine(stagingRoot, "classes"), Destination: classesDir),
+            (Stage: Path.Combine(stagingRoot, "forms"), Destination: formsDir),
+            (Stage: Path.Combine(stagingRoot, "workbook"), Destination: workbookDir),
+        };
+        foreach (var (stage, destination) in targets)
+        {
+            if (!Directory.Exists(stage))
             {
                 continue;
             }
-            try { File.Delete(file.FullPath); }
-            catch (IOException) { /* best-effort */ }
+            foreach (var source in Directory.GetFiles(stage, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(stage, source);
+                var target = Path.Combine(destination, relative);
+                var parent = Path.GetDirectoryName(target);
+                if (!string.IsNullOrWhiteSpace(parent))
+                {
+                    Directory.CreateDirectory(parent);
+                }
+                File.Copy(source, target, true);
+            }
         }
     }
 

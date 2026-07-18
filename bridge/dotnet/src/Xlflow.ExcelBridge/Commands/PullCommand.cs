@@ -44,7 +44,8 @@ public sealed class PullCommand : ICommandHandler
             DefaultComponentFolders: BridgePayload.GetBool(request.Payload, "DefaultComponentFolders"),
             Visible: BridgePayload.GetBool(request.Payload, "Visible"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
-            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
+            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
+            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"));
 
         return _service.Execute(request, args, cancellationToken);
     }

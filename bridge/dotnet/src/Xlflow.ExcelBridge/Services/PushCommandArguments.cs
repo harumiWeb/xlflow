@@ -17,4 +17,5 @@ public sealed record PushCommandArguments(
     bool ChangedOnly,
     bool UseSession,
     bool NoSave,
-    string MetadataPath);
+    string MetadataPath,
+    bool LineNumbersEnabled = false);
