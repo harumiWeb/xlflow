@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
@@ -54,7 +54,7 @@ type Server struct {
 	handler                  protocol.Handler
 	docs                     *documents
 	logger                   *log.Logger
-	symbols                  *workspaceSymbolCache
+	symbols                  *workspaceSymbolIndex
 	semanticTokens           *semanticTokenCache
 	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig           intel.CodeLensConfig
@@ -137,14 +137,15 @@ func New(opts Options) (*Server, func(), error) {
 		},
 		docs:           newDocuments(opts.RootDir),
 		logger:         logger,
-		symbols:        newWorkspaceSymbolCache(),
 		semanticTokens: newSemanticTokenCache(),
 		codeLensConfig: intel.DefaultCodeLensConfig(),
 		diagStates:     make(map[string]*diagnosticState),
 		docLifecycles:  make(map[string]*sync.Mutex),
 	}
+	s.symbols = s.newWorkspaceSymbolIndex()
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
+	s.analyzer.WorkspaceSymbolQueryFunc = s.cachedWorkspaceSymbolQuery
 	s.semanticTokenGenerator = s.analyzer.SemanticTokens
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsDebounce = diagnosticsDebounce
@@ -161,6 +162,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentDidClose:           s.didClose,
 		TextDocumentDocumentSymbol:     s.documentSymbol,
 		WorkspaceSymbol:                s.workspaceSymbol,
+		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
 		TextDocumentDefinition:         s.definition,
 		TextDocumentReferences:         s.references,
 		TextDocumentPrepareRename:      s.prepareRename,
@@ -246,6 +248,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 }
 
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
+	s.symbols.start()
 	s.logger.Printf("initialized")
 	return nil
 }
@@ -299,6 +302,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		return err
 	}
 	s.semanticTokens.invalidateAll()
+	s.updateWorkspaceSymbolOverlay(doc)
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
 	if done != nil {
@@ -323,6 +327,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		return err
 	}
 	s.semanticTokens.invalidateAll()
+	s.updateWorkspaceSymbolOverlay(doc)
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
 }
@@ -348,7 +353,32 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	s.closeDiagnostics(ctx, uri)
 	s.docs.close(uri)
 	s.semanticTokens.invalidateAll()
-	s.symbols.invalidateBase()
+	if path, err := fileURIToPath(uri); err == nil {
+		if err := s.symbols.clearOverlay(path); err != nil {
+			s.logger.Printf("workspace symbol index close refresh failed for %q: %v", path, err)
+		}
+	}
+	return nil
+}
+
+func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
+	for _, event := range params.Changes {
+		path, err := fileURIToPath(string(event.URI))
+		if err != nil {
+			return err
+		}
+		paths, err := symbols.RelatedSourcePaths(s.opts.RootDir, s.opts.Config, path)
+		if err != nil {
+			return err
+		}
+		for _, affected := range paths {
+			s.docs.invalidateDisk(affected)
+			if err := s.symbols.updatePath(affected); err != nil {
+				s.logger.Printf("workspace symbol index watcher update failed for %q: %v", affected, err)
+			}
+		}
+	}
+	s.semanticTokens.invalidateAll()
 	return nil
 }
 
@@ -964,8 +994,47 @@ func (s *Server) lockDocumentLifecycle(uri string) func() {
 	return lifecycle.Unlock
 }
 
-func (s *Server) baseAnalyzer() intel.Analyzer {
-	return intel.Analyzer{RootDir: s.opts.RootDir, Config: s.opts.Config, DB: s.db}
+func (s *Server) newWorkspaceSymbolIndex() *workspaceSymbolIndex {
+	return newWorkspaceSymbolIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFile, s.logInitialWorkspaceIndexPerformance)
+}
+
+func (s *Server) parseIndexedFile(file symbols.SourceFile, body []byte) (indexedFileSymbols, error) {
+	snapshot := intel.NewAnalysisSnapshot(intel.Document{
+		Path:       file.Path,
+		Source:     string(body),
+		ModuleKind: file.ModuleKind,
+	})
+	doc := snapshot.Document()
+	defer snapshot.Retire()
+	syms, err := s.analyzer.DocumentSymbols(doc)
+	if err != nil {
+		return indexedFileSymbols{}, err
+	}
+	return indexedFileSymbols{
+		path:       file.Path,
+		version:    documentVersion(doc),
+		moduleKind: file.ModuleKind,
+		symbols:    syms,
+	}, nil
+}
+
+func (s *Server) updateWorkspaceSymbolOverlay(doc intel.Document) {
+	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, doc.Path)
+	if err != nil {
+		s.logger.Printf("workspace symbol index overlay classification failed for %q: %v", doc.Path, err)
+		return
+	}
+	if !included {
+		return
+	}
+	doc.Path = file.Path
+	doc.ModuleKind = file.ModuleKind
+	syms, err := s.analyzer.DocumentSymbols(doc)
+	if err != nil {
+		s.logger.Printf("workspace symbol index overlay update failed for %q: %v", doc.Path, err)
+		return
+	}
+	s.symbols.setOverlay(doc, syms)
 }
 
 func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.DocumentSymbolLoader) ([]intel.Symbol, error) {
@@ -983,71 +1052,30 @@ func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.Docu
 }
 
 func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]intel.Symbol, error) {
-	analyzer := s.baseAnalyzer()
-	started := time.Now()
-	base, hit, err := s.symbols.base(analyzer)
-	s.logCachePerformance("workspaceSymbols/cache/base", cacheStatus(hit), len(base), started, err)
-	if err != nil {
-		return nil, err
-	}
-	openKeys := make(map[string]bool, len(open))
+	return s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: query, Mode: intel.WorkspaceSymbolQueryContains})
+}
+
+func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	// Server handlers publish overlays eagerly. Keeping this reconciliation here
+	// preserves the Analyzer callback contract for direct callers and tests that
+	// populate the document store without going through didOpen/didChange.
 	for _, doc := range open {
-		for _, key := range s.symbolPathKeys(doc.Path) {
-			openKeys[key] = true
-		}
+		s.updateWorkspaceSymbolOverlay(doc)
 	}
-	out := make([]intel.Symbol, 0, len(base))
-	for _, sym := range base {
-		if hasSymbolPathKey(openKeys, s.symbolPathKeys(sym.File)) {
-			continue
-		}
-		out = append(out, sym)
+	switch query.Mode {
+	case intel.WorkspaceSymbolQueryExact:
+		return s.symbols.searchExact(query.Text)
+	case intel.WorkspaceSymbolQueryPrefix:
+		return s.symbols.searchPrefix(query.Text)
+	case intel.WorkspaceSymbolQueryQualified:
+		return s.symbols.searchQualified(query.Text)
+	case intel.WorkspaceSymbolQueryModule:
+		return s.symbols.searchModule(query.Text)
+	case intel.WorkspaceSymbolQueryKind:
+		return s.symbols.searchKind(query.Text)
+	default:
+		return s.symbols.searchContains(query.Text)
 	}
-	for _, doc := range open {
-		syms, err := s.analyzer.DocumentSymbols(doc)
-		if err != nil {
-			continue
-		}
-		out = append(out, syms...)
-	}
-	return filterWorkspaceSymbols(out, query), nil
-}
-
-type workspaceSymbolCache struct {
-	mu          sync.RWMutex
-	baseSymbols []intel.Symbol
-	baseOK      bool
-}
-
-func newWorkspaceSymbolCache() *workspaceSymbolCache {
-	return &workspaceSymbolCache{}
-}
-
-func (c *workspaceSymbolCache) base(analyzer intel.Analyzer) ([]intel.Symbol, bool, error) {
-	c.mu.RLock()
-	if c.baseOK {
-		out := cloneSymbols(c.baseSymbols)
-		c.mu.RUnlock()
-		return out, true, nil
-	}
-	c.mu.RUnlock()
-
-	syms, err := analyzer.WorkspaceSymbols(nil, "")
-	if err != nil {
-		return nil, false, err
-	}
-	c.mu.Lock()
-	c.baseSymbols = cloneSymbols(syms)
-	c.baseOK = true
-	c.mu.Unlock()
-	return cloneSymbols(syms), false, nil
-}
-
-func (c *workspaceSymbolCache) invalidateBase() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.baseSymbols = nil
-	c.baseOK = false
 }
 
 func documentSymbolKey(doc intel.Document) string {
@@ -1073,85 +1101,6 @@ func symbolFileKey(path string) string {
 		}
 	}
 	return normalizePathKey(path)
-}
-
-func (s *Server) symbolPathKeys(path string) []string {
-	var keys []string
-	if key := symbolFileKey(path); key != "" {
-		keys = append(keys, key)
-	}
-	if strings.TrimSpace(path) == "" || strings.TrimSpace(s.opts.RootDir) == "" {
-		return keys
-	}
-	if filepath.IsAbs(path) {
-		if rel, err := filepath.Rel(s.opts.RootDir, path); err == nil {
-			if key := symbolFileKey(rel); key != "" {
-				keys = append(keys, key)
-			}
-		}
-		return keys
-	}
-	if key := symbolFileKey(filepath.Join(s.opts.RootDir, filepath.FromSlash(path))); key != "" {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-func hasSymbolPathKey(set map[string]bool, keys []string) bool {
-	for _, key := range keys {
-		if set[key] {
-			return true
-		}
-	}
-	return false
-}
-
-func cloneSymbols(syms []intel.Symbol) []intel.Symbol {
-	out := make([]intel.Symbol, len(syms))
-	for i, sym := range syms {
-		out[i] = sym
-		out[i].Parameters = append([]intel.Parameter(nil), sym.Parameters...)
-		out[i].Documentation.ParameterEntries = append(out[i].Documentation.ParameterEntries[:0:0], sym.Documentation.ParameterEntries...)
-		if sym.Documentation.Parameters != nil {
-			out[i].Documentation.Parameters = make(map[string]string, len(sym.Documentation.Parameters))
-			for key, value := range sym.Documentation.Parameters {
-				out[i].Documentation.Parameters[key] = value
-			}
-		}
-		if sym.Documentation.UnknownSections != nil {
-			out[i].Documentation.UnknownSections = make(map[string]string, len(sym.Documentation.UnknownSections))
-			for key, value := range sym.Documentation.UnknownSections {
-				out[i].Documentation.UnknownSections[key] = value
-			}
-		}
-	}
-	return out
-}
-
-func filterWorkspaceSymbols(syms []intel.Symbol, query string) []intel.Symbol {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query != "" {
-		filtered := syms[:0]
-		for _, sym := range syms {
-			if strings.Contains(strings.ToLower(sym.Name), query) || strings.Contains(strings.ToLower(sym.Module+"."+sym.Name), query) {
-				filtered = append(filtered, sym)
-			}
-		}
-		syms = filtered
-	}
-	sort.SliceStable(syms, func(i, j int) bool {
-		if syms[i].File != syms[j].File {
-			return syms[i].File < syms[j].File
-		}
-		if syms[i].Range.Start.Line != syms[j].Range.Start.Line {
-			return syms[i].Range.Start.Line < syms[j].Range.Start.Line
-		}
-		if syms[i].Range.Start.Character != syms[j].Range.Start.Character {
-			return syms[i].Range.Start.Character < syms[j].Range.Start.Character
-		}
-		return syms[i].Name < syms[j].Name
-	})
-	return syms
 }
 
 type documents struct {
@@ -1293,6 +1242,29 @@ func (d *documents) close(uri string) {
 	}
 	d.mu.Unlock()
 	snapshot.Retire()
+}
+
+// invalidateDisk drops a cached closed-file snapshot after a watcher event.
+// Open snapshots remain authoritative until didClose.
+func (d *documents) invalidateDisk(path string) {
+	key := normalizePathKey(path)
+	if key == "" {
+		return
+	}
+	d.mu.Lock()
+	entry, ok := d.docs[key]
+	if ok && entry.open {
+		d.mu.Unlock()
+		return
+	}
+	if ok {
+		delete(d.docs, key)
+	}
+	d.nextGenerationLocked(key)
+	d.mu.Unlock()
+	if ok && entry.snapshot != nil {
+		entry.snapshot.Retire()
+	}
 }
 
 func (d *documents) getOrRead(uri string) (intel.Document, error) {

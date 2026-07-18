@@ -123,7 +123,7 @@ func TestDocumentsPreserveLSPVersion(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
+func TestWorkspaceSymbolIndexPerformanceReportsInitialBuild(t *testing.T) {
 	var output bytes.Buffer
 	s, cleanup, err := New(Options{
 		RootDir:        t.TempDir(),
@@ -139,14 +139,11 @@ func TestWorkspaceSymbolCachePerformanceReportsMissThenHit(t *testing.T) {
 	if _, err := s.cachedWorkspaceSymbols(nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.cachedWorkspaceSymbols(nil, ""); err != nil {
-		t.Fatal(err)
-	}
 	logOutput := output.String()
-	if !strings.Contains(logOutput, `operation="workspaceSymbols/cache/base"`) ||
-		!strings.Contains(logOutput, `cache="miss"`) ||
-		!strings.Contains(logOutput, `cache="hit"`) {
-		t.Fatalf("cache performance log missing miss/hit events:\n%s", logOutput)
+	if !strings.Contains(logOutput, `operation="workspaceSymbols/index/initial"`) ||
+		!strings.Contains(logOutput, `file_count=0`) ||
+		!strings.Contains(logOutput, `elapsed_ms=`) {
+		t.Fatalf("workspace index performance log missing initial build fields:\n%s", logOutput)
 	}
 }
 
