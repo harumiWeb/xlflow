@@ -26,12 +26,33 @@ type DocumentSymbolLoader func() ([]Symbol, error)
 
 type DocumentSymbolsFunc func(doc Document, load DocumentSymbolLoader) ([]Symbol, error)
 
+type WorkspaceSymbolQueryMode string
+
+const (
+	WorkspaceSymbolQueryContains  WorkspaceSymbolQueryMode = "contains"
+	WorkspaceSymbolQueryExact     WorkspaceSymbolQueryMode = "exact"
+	WorkspaceSymbolQueryPrefix    WorkspaceSymbolQueryMode = "prefix"
+	WorkspaceSymbolQueryQualified WorkspaceSymbolQueryMode = "qualified"
+	WorkspaceSymbolQueryModule    WorkspaceSymbolQueryMode = "module"
+	WorkspaceSymbolQueryKind      WorkspaceSymbolQueryMode = "kind"
+)
+
+// WorkspaceSymbolQuery lets workspace consumers state their lookup intent
+// without changing the LSP workspace/symbol contains-search contract.
+type WorkspaceSymbolQuery struct {
+	Text string
+	Mode WorkspaceSymbolQueryMode
+}
+
+type WorkspaceSymbolQueryFunc func(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error)
+
 type Analyzer struct {
-	RootDir              string
-	Config               config.Config
-	DB                   *vbadb.DB
-	DocumentSymbolsFunc  DocumentSymbolsFunc
-	WorkspaceSymbolsFunc func(open []Document, query string) ([]Symbol, error)
+	RootDir                  string
+	Config                   config.Config
+	DB                       *vbadb.DB
+	DocumentSymbolsFunc      DocumentSymbolsFunc
+	WorkspaceSymbolsFunc     func(open []Document, query string) ([]Symbol, error)
+	WorkspaceSymbolQueryFunc WorkspaceSymbolQueryFunc
 }
 
 type Document struct {
@@ -332,10 +353,17 @@ func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]Runnab
 }
 
 func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, error) {
-	if a.WorkspaceSymbolsFunc != nil {
-		return a.WorkspaceSymbolsFunc(open, query)
+	return a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+}
+
+func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+	if a.WorkspaceSymbolQueryFunc != nil {
+		return a.WorkspaceSymbolQueryFunc(open, query)
 	}
-	return a.workspaceSymbols(open, query)
+	if a.WorkspaceSymbolsFunc != nil {
+		return a.WorkspaceSymbolsFunc(open, query.Text)
+	}
+	return a.workspaceSymbols(open, query.Text)
 }
 
 func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, error) {
@@ -515,7 +543,7 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 }
 
 func (a Analyzer) definitionSymbols(doc Document, pos Position, open []Document, word string) ([]Symbol, error) {
-	syms, err := a.WorkspaceSymbols(open, word)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return nil, err
 	}
@@ -740,7 +768,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 			})
 		}
 	}
-	syms, err := a.WorkspaceSymbols(open, word)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return nil, err
 	}
@@ -1127,7 +1155,7 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 	if member, found := a.DB.ResolveMember("VBA.Global", target); found {
 		return a.signatureFromMember("VBA.Global", member, a.memberKind("VBA.Global", target)), true, nil
 	}
-	syms, err := a.WorkspaceSymbols(open, target)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
 	}
@@ -1853,7 +1881,7 @@ func (a Analyzer) knownModuleOrNamespaceReceiver(doc Document, receiver string) 
 	if _, ok := a.DB.ResolveGlobal(receiver); ok {
 		return true
 	}
-	syms, err := a.WorkspaceSymbols([]Document{doc}, receiver)
+	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: receiver, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return false
 	}
@@ -2425,7 +2453,7 @@ func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Documen
 			ReplaceRange: &replace,
 		})
 	}
-	syms, err := a.WorkspaceSymbols(open, prefix)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -2527,7 +2555,7 @@ func (a Analyzer) namespaceCompletions(namespace, prefix string) []Completion {
 }
 
 func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
-	syms, err := a.WorkspaceSymbols(open, prefix)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -2656,7 +2684,7 @@ func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Docum
 			ReplaceRange: &replace,
 		})
 	}
-	syms, err := a.WorkspaceSymbols(open, prefix)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -2721,7 +2749,7 @@ func (a Analyzer) valueRHSCompletions(prefix string, replaceRange Range, doc Doc
 		})
 	}
 	out = append(out, localValueCompletionsFromSource(doc, pos, prefix, replaceRange)...)
-	syms, err := a.WorkspaceSymbols(open, prefix)
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -3909,7 +3937,7 @@ func (a Analyzer) moduleMemberCompletions(open []Document, moduleName, prefix st
 	if moduleName == "" {
 		return nil, nil
 	}
-	syms, err := a.WorkspaceSymbols(open, "")
+	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: moduleName, Mode: WorkspaceSymbolQueryModule})
 	if err != nil {
 		return nil, err
 	}

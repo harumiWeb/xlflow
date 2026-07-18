@@ -90,6 +90,17 @@ type fileCandidate struct {
 	moduleKind string
 }
 
+// SourceFile is a configured VBA source file together with the module kind
+// inferred from its configured source root.
+//
+// It is intentionally a small value type so callers that need incremental
+// discovery (such as the language server) can share the same source-root and
+// sidecar rules as Inspect without depending on its parser lifecycle.
+type SourceFile struct {
+	Path       string
+	ModuleKind string
+}
+
 type SourceOptions struct {
 	RootDir        string
 	Path           string
@@ -185,6 +196,123 @@ func Inspect(opts Options) (*Result, error) {
 	}
 	result.Summary.Files = len(result.Files)
 	return result, nil
+}
+
+// DiscoverSourceFiles returns the VBA files included by the configured source
+// roots. The result is absolute-path deduplicated and deterministically sorted.
+func DiscoverSourceFiles(opts Options) ([]SourceFile, error) {
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	absRoot, err := filepath.Abs(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	opts.RootDir = absRoot
+	files, err := discoverFiles(opts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SourceFile, len(files))
+	for i, file := range files {
+		out[i] = SourceFile{Path: file.path, ModuleKind: file.moduleKind}
+	}
+	return out, nil
+}
+
+// SourceFileForPath reports whether path is a configured VBA source file and,
+// when it is, returns the same module kind that DiscoverSourceFiles would use.
+// It deliberately does not require the file to exist so watcher deletion events
+// can still be classified.
+func SourceFileForPath(rootDir string, cfg config.Config, path string) (SourceFile, bool, error) {
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return SourceFile{}, false, err
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rootDir, path)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return SourceFile{}, false, err
+	}
+	path = filepath.Clean(path)
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".bas" && ext != ".cls" && ext != ".frm" {
+		return SourceFile{}, false, nil
+	}
+
+	dirs := []struct {
+		path string
+		kind string
+	}{
+		{cfg.Src.Modules, "standard"},
+		{cfg.Src.Classes, "class"},
+		{cfg.Src.Forms, "form"},
+		{cfg.Src.Workbook, "document"},
+	}
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir.path) == "" {
+			continue
+		}
+		if !isPathInsideRoot(path, filepath.Join(rootDir, dir.path)) {
+			continue
+		}
+		if shouldSkipFormArtifact(rootDir, cfg, path) {
+			return SourceFile{}, false, nil
+		}
+		kind := dir.kind
+		if kind == "form" {
+			kind = formFileKind(rootDir, cfg, path)
+		}
+		return SourceFile{Path: path, ModuleKind: kind}, true, nil
+	}
+	return SourceFile{}, false, nil
+}
+
+// RelatedSourcePaths returns the path plus any UserForm sidecar counterpart
+// whose eligibility changes when path is created, changed, or deleted.
+func RelatedSourcePaths(rootDir string, cfg config.Config, path string) ([]string, error) {
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rootDir, path)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	path = filepath.Clean(path)
+	out := []string{path}
+	if !strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		return out, nil
+	}
+	formsRoot := filepath.Clean(filepath.Join(rootDir, cfg.Src.Forms))
+	if !isPathInsideRoot(path, formsRoot) {
+		return out, nil
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if base == "" {
+		return out, nil
+	}
+	codePath := filepath.Join(formsRoot, "code", base+".bas")
+	formPath := filepath.Join(formsRoot, base+".frm")
+	if strings.EqualFold(filepath.Clean(path), filepath.Clean(codePath)) {
+		return append(out, formPath), nil
+	}
+	if strings.EqualFold(filepath.Clean(path), filepath.Clean(formPath)) {
+		return append(out, codePath), nil
+	}
+	return out, nil
 }
 
 func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {

@@ -104,6 +104,23 @@ func (s *Server) logCachePerformance(operation, cache string, resultCount int, s
 	)
 }
 
+func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time.Time, err error) {
+	if !s.opts.PerformanceLog {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	s.logger.Printf(
+		"performance operation=%q elapsed_ms=%.3f file_count=%d outcome=%q",
+		"workspaceSymbols/index/initial",
+		float64(time.Since(started))/float64(time.Millisecond),
+		fileCount,
+		outcome,
+	)
+}
+
 func (s *Server) logDocumentCachePerformance(operation, cache string, doc intel.Document, resultCount int, started time.Time, err error) {
 	if !s.opts.PerformanceLog {
 		return
