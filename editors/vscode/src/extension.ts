@@ -133,6 +133,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const refreshFormulas = () => {
     void sidebar?.refreshFormulas();
   };
+  const refreshAfterConfigChange = () => {
+    void (async () => {
+      // The language server loads xlflow.toml at startup, so a project
+      // configuration change needs a full restart rather than only a view refresh.
+      await clientManager?.restart();
+      await refreshSelectedProject();
+    })();
+  };
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       lastSelectedWorkspaceKey = selectedWorkspaceKey();
@@ -151,15 +159,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     configWatcher,
     formulasManifestWatcher,
     formulasJsonlWatcher,
-    configWatcher.onDidCreate(() => {
-      void refreshSelectedProject();
-    }),
-    configWatcher.onDidChange(() => {
-      void refreshSelectedProject();
-    }),
-    configWatcher.onDidDelete(() => {
-      void refreshSelectedProject();
-    }),
+    configWatcher.onDidCreate(refreshAfterConfigChange),
+    configWatcher.onDidChange(refreshAfterConfigChange),
+    configWatcher.onDidDelete(refreshAfterConfigChange),
     formulasManifestWatcher.onDidCreate(refreshFormulas),
     formulasManifestWatcher.onDidChange(refreshFormulas),
     formulasManifestWatcher.onDidDelete(refreshFormulas),

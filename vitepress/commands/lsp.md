@@ -40,7 +40,7 @@ Rename support is conservative and scope-aware. It works for high-confidence VBA
 
 Diagnostics reuse xlflow's file-local VBA lint rules against the current in-memory editor buffer and publish stable `VB...` codes with `source="xlflow"`. Opening a document starts diagnostics immediately. Changes are debounced and coalesced so a document never has more than one active diagnostics worker, and only the newest open version can publish results. Slow documents do not prevent other documents from being analyzed. Closing a document cancels its pending work and publishes a final empty diagnostics result; an older analysis cannot publish afterward. Project-wide and filesystem-only lint checks remain available through `xlflow lint`.
 
-For an enabled `VB044` procedure-name constant mismatch, `textDocument/codeAction` offers a `quickfix` that replaces only the direct string literal with the enclosing procedure name. This does not add missing constants or change procedure rename behavior.
+For an enabled `VB044` procedure-name constant mismatch, diagnostics are published for the current editor buffer on open and after edits. `textDocument/codeAction` offers a `quickfix` that replaces only the direct string literal with the enclosing procedure name. This does not add missing constants or change procedure rename behavior.
 
 The LSP also publishes editor-first argument diagnostics such as `VB030` for missing required arguments, excessive arguments, and unknown named arguments when the target signature is known from project symbols or the built-in VBA/COM database. These diagnostics are intentionally LSP-only for now and are not yet part of the `xlflow lint` CLI contract.
 
