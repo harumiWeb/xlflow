@@ -36,7 +36,11 @@ language server entry point.
   structs only in `internal/lspserver`.
 - Treat open LSP documents as authoritative over filesystem content until
   `didClose`.
-- Use full document synchronization for the MVP.
+- Advertise incremental document synchronization and apply ranged changes in
+  client order using LSP UTF-16 positions. Retain full-document replacements as
+  a compatibility fallback, and replace only the changed document's immutable
+  analysis snapshot. Refresh semantic tokens when the open workspace changes,
+  because their classification can depend on project symbols from other files.
 - Load a curated built-in database for practical Excel, MSForms, Scripting,
   ADODB, VBIDE, Office, and VBA constant/type metadata.
 
@@ -61,6 +65,8 @@ The VS Code extension should remain a thin language client that launches:
 - Negative: The main binary now carries LSP protocol and JSON-RPC dependencies.
 - Negative: URI, path normalization, and UTF-16 position conversion become part
   of xlflow's long-lived compatibility surface.
+- Negative: The document store must retain source and a line-offset index, and
+  reject malformed or out-of-order edits without corrupting editor state.
 - Negative: The curated COM database requires maintenance until a TypeLib
   importer and patch pipeline are available.
 

@@ -18,6 +18,7 @@ type semanticTokenSignature struct {
 
 type cachedSemanticTokens struct {
 	generation uint64
+	revision   uint64
 	signature  semanticTokenSignature
 	data       []protocol.UInteger
 }
@@ -25,6 +26,7 @@ type cachedSemanticTokens struct {
 type semanticTokenCall struct {
 	done       chan struct{}
 	generation uint64
+	revision   uint64
 	signature  semanticTokenSignature
 	data       []protocol.UInteger
 	err        error
@@ -34,6 +36,7 @@ type semanticTokenCall struct {
 type semanticTokenCache struct {
 	mu         sync.Mutex
 	generation uint64
+	revisions  map[string]uint64
 	signatures map[string]semanticTokenSignature
 	entries    map[string]cachedSemanticTokens
 	inflight   map[string]*semanticTokenCall
@@ -46,6 +49,7 @@ func newSemanticTokenCache() *semanticTokenCache {
 		signatures: make(map[string]semanticTokenSignature),
 		entries:    make(map[string]cachedSemanticTokens),
 		inflight:   make(map[string]*semanticTokenCall),
+		revisions:  make(map[string]uint64),
 	}
 }
 
@@ -77,9 +81,10 @@ func (c *semanticTokenCache) get(
 		c.mu.Unlock()
 		return nil, false, errSemanticTokensSuperseded
 	}
+	revision := c.revisions[identity]
 	c.signatures[identity] = signature
 	if entry, ok := c.entries[identity]; ok &&
-		entry.generation == generation && entry.signature == signature {
+		entry.generation == generation && entry.revision == revision && entry.signature == signature {
 		out := cloneSemanticTokenData(entry.data)
 		c.mu.Unlock()
 		return out, true, nil
@@ -88,12 +93,12 @@ func (c *semanticTokenCache) get(
 		call.waiters++
 		c.mu.Unlock()
 		<-call.done
-		if call.generation == generation && call.signature == signature {
+		if call.generation == generation && call.revision == revision && call.signature == signature {
 			return cloneSemanticTokenData(call.data), call.err == nil, call.err
 		}
 		return nil, false, errSemanticTokensSuperseded
 	}
-	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, signature: signature}
+	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, revision: revision, signature: signature}
 	c.inflight[identity] = call
 	c.mu.Unlock()
 
@@ -102,10 +107,11 @@ func (c *semanticTokenCache) get(
 
 	c.mu.Lock()
 	delete(c.inflight, identity)
-	current := generation == c.generation && c.signatures[identity] == signature
+	current := generation == c.generation && c.revisions[identity] == revision && c.signatures[identity] == signature
 	if err == nil && current {
 		c.entries[identity] = cachedSemanticTokens{
 			generation: generation,
+			revision:   revision,
 			signature:  signature,
 			data:       cloneSemanticTokenData(cloned),
 		}
@@ -130,6 +136,27 @@ func (c *semanticTokenCache) invalidateAll() {
 	c.generation++
 	c.signatures = make(map[string]semanticTokenSignature)
 	c.entries = make(map[string]cachedSemanticTokens)
+	c.mu.Unlock()
+}
+
+// invalidateWorkspace supersedes token results that may depend on the set of
+// open documents and their project symbols. Document snapshots themselves stay
+// scoped to the changed document.
+func (c *semanticTokenCache) invalidateWorkspace() {
+	c.invalidateAll()
+}
+
+// invalidate retires semantic-token state for one document without discarding
+// cache entries or in-flight requests for other documents.
+func (c *semanticTokenCache) invalidate(doc intel.Document) {
+	identity := documentSymbolKey(doc)
+	if identity == "" {
+		return
+	}
+	c.mu.Lock()
+	c.revisions[identity]++
+	delete(c.signatures, identity)
+	delete(c.entries, identity)
 	c.mu.Unlock()
 }
 

@@ -125,7 +125,7 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 		staleDone <- err
 	}()
 	<-staleStarted
-	staleCache.invalidateAll()
+	staleCache.invalidate(doc)
 	newerDoc := doc
 	newerDoc.Version++
 	newerDoc.Source = "Option Explicit\nSub Newer()\nEnd Sub\n"
@@ -182,14 +182,10 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	defer cleanup()
 	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
 	var generations atomic.Int32
-	s.semanticTokenGenerator = func(doc intel.Document, _ []intel.Document) ([]intel.SemanticToken, error) {
+	s.semanticTokenGenerator = func(doc intel.Document, open []intel.Document) ([]intel.SemanticToken, error) {
 		generations.Add(1)
-		length := 1
-		if len(doc.Source) > 1 {
-			length = 2
-		}
 		return []intel.SemanticToken{{
-			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: length}},
+			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: len(open)}},
 			Type:  intel.SemanticTokenKeyword,
 		}}, nil
 	}
@@ -221,7 +217,7 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 		t.Fatal(err)
 	}
 	changed, err := s.semanticTokensFull(nil, params)
-	if err != nil || generations.Load() != 2 || changed.Data[2] != 2 {
+	if err != nil || generations.Load() != 2 || changed.Data[2] != 1 {
 		t.Fatalf("changed result = (%v, err=%v, generations=%d), want regenerated data", changed.Data, err, generations.Load())
 	}
 
@@ -232,8 +228,9 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 3 {
-		t.Fatalf("cross-document invalidation = (err=%v, generations=%d), want regeneration", err, generations.Load())
+	otherChanged, err := s.semanticTokensFull(nil, params)
+	if err != nil || generations.Load() != 3 || otherChanged.Data[2] != 2 {
+		t.Fatalf("cross-document invalidation = (%v, err=%v, generations=%d), want regenerated workspace-dependent tokens", otherChanged, err, generations.Load())
 	}
 
 	if err := s.didClose(ctx, &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}}); err != nil {
