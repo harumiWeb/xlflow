@@ -4,11 +4,35 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+func TestInspectParsedMatchesInspectSource(t *testing.T) {
+	dir := t.TempDir()
+	opts := SourceOptions{RootDir: dir, Path: "Main.bas", ModuleKind: "standard", IncludePrivate: true, IncludeLabels: true}
+	source := []byte("Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n10: Debug.Print \"ok\"\nEnd Sub\n")
+	want, err := InspectSource(opts, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := vbaast.ParseDocument(opts.Path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	got, err := InspectParsed(opts, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("InspectParsed = %+v, want %+v", got, want)
+	}
+}
 
 func TestInspectExtractsRepresentativeStandardModuleSymbols(t *testing.T) {
 	dir := t.TempDir()

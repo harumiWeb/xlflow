@@ -3,10 +3,15 @@ package intel
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+var errAnalysisSnapshotRetired = errors.New("analysis snapshot is retired")
 
 // ProcedureInfo describes the source range occupied by a VBA procedure.
 type ProcedureInfo struct {
@@ -15,7 +20,10 @@ type ProcedureInfo struct {
 }
 
 // AnalysisSnapshot is the immutable source state for one document revision.
-// Derived values are initialized once and may be read concurrently.
+// Derived Go values are initialized once and may be read concurrently. Its
+// lazily-created ParsedDocument owns the revision's tree-sitter result; tree
+// access is serialized by ParsedDocument because tree-sitter trees are not
+// thread safe. Retire closes that document after its in-flight readers finish.
 type AnalysisSnapshot struct {
 	uri        string
 	path       string
@@ -36,6 +44,12 @@ type AnalysisSnapshot struct {
 	semanticOnce        sync.Once
 	semanticIdentifiers [][]byteSpan
 
+	parsedMu       sync.Mutex
+	parsedDocument *ast.ParsedDocument
+	parsedErr      error
+	parseDocument  func(string, []byte) (*ast.ParsedDocument, error)
+	parseCount     atomic.Uint64
+
 	retired atomic.Bool
 }
 
@@ -45,13 +59,14 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	normalized := strings.ReplaceAll(source, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	return &AnalysisSnapshot{
-		uri:        doc.URI,
-		path:       doc.Path,
-		version:    doc.Version,
-		moduleKind: doc.ModuleKind,
-		source:     source,
-		sourceHash: sha256.Sum256([]byte(source)),
-		lines:      strings.Split(normalized, "\n"),
+		uri:           doc.URI,
+		path:          doc.Path,
+		version:       doc.Version,
+		moduleKind:    doc.ModuleKind,
+		source:        source,
+		sourceHash:    sha256.Sum256([]byte(source)),
+		lines:         strings.Split(normalized, "\n"),
+		parseDocument: ast.ParseDocument,
 	}
 }
 
@@ -201,12 +216,52 @@ func (s *AnalysisSnapshot) identifiers() [][]byteSpan {
 	return s.semanticIdentifiers
 }
 
+// ParsedDocument returns the snapshot-owned tree-sitter state, creating it at
+// most once for this document revision. Callers must not close the returned
+// document; the snapshot owns its lifecycle and retires it exactly once.
+func (s *AnalysisSnapshot) ParsedDocument() (*ast.ParsedDocument, error) {
+	if s == nil {
+		return nil, errAnalysisSnapshotRetired
+	}
+	s.parsedMu.Lock()
+	defer s.parsedMu.Unlock()
+	if s.parsedDocument != nil || s.parsedErr != nil {
+		return s.parsedDocument, s.parsedErr
+	}
+	if s.retired.Load() {
+		return nil, errAnalysisSnapshotRetired
+	}
+	parse := s.parseDocument
+	if parse == nil {
+		parse = ast.ParseDocument
+	}
+	s.parsedDocument, s.parsedErr = parse(s.path, []byte(s.source))
+	if s.parsedDocument != nil {
+		s.parseCount.Add(1)
+	}
+	return s.parsedDocument, s.parsedErr
+}
+
+// ParseCount reports how many document-owned parses this snapshot created.
+// It exists for diagnostics benchmarking and regression tests.
+func (s *AnalysisSnapshot) ParseCount() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.parseCount.Load()
+}
+
 // Retire marks the snapshot as no longer owned by its publisher.
 // It is idempotent and is the cleanup boundary for future owned resources.
 func (s *AnalysisSnapshot) Retire() {
-	if s != nil {
-		s.retired.Store(true)
+	if s == nil || !s.retired.CompareAndSwap(false, true) {
+		return
 	}
+	s.parsedMu.Lock()
+	if s.parsedDocument != nil {
+		s.parsedDocument.Close()
+	}
+	s.parsedMu.Unlock()
 }
 
 func (s *AnalysisSnapshot) Retired() bool { return s != nil && s.retired.Load() }
@@ -216,6 +271,18 @@ func analysisSnapshotForDocument(doc Document) *AnalysisSnapshot {
 		return doc.Snapshot
 	}
 	return nil
+}
+
+func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error) {
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		parsed, err := snapshot.ParsedDocument()
+		return parsed, func() {}, err
+	}
+	parsed, err := ast.ParseDocument(doc.Path, []byte(doc.Source))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return parsed, parsed.Close, nil
 }
 
 func documentLines(doc Document) []string {

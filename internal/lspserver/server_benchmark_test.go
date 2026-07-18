@@ -199,6 +199,7 @@ func BenchmarkLSPDiagnostics(b *testing.B) {
 
 	b.Run("First", func(b *testing.B) {
 		b.ReportAllocs()
+		var parses uint64
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			s := newLSPBenchmarkServer(b, fixture)
@@ -206,9 +207,12 @@ func BenchmarkLSPDiagnostics(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			before := doc.Snapshot.ParseCount()
 			b.StartTimer()
 			_ = s.analyzer.Diagnostics(doc)
+			parses += doc.Snapshot.ParseCount() - before
 		}
+		b.ReportMetric(float64(parses)/float64(b.N), "parses/op")
 	})
 	b.Run("Repeated", func(b *testing.B) {
 		s := newLSPBenchmarkServer(b, fixture)
@@ -217,11 +221,13 @@ func BenchmarkLSPDiagnostics(b *testing.B) {
 			b.Fatal(err)
 		}
 		_ = s.analyzer.Diagnostics(doc)
+		before := doc.Snapshot.ParseCount()
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = s.analyzer.Diagnostics(doc)
 		}
+		b.ReportMetric(float64(doc.Snapshot.ParseCount()-before)/float64(b.N), "parses/op")
 	})
 }
 

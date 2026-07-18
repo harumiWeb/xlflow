@@ -186,30 +186,65 @@ func (l Linter) LintSource(path string, source []byte) ([]Issue, error) {
 	return l.lintSource(path, source, false)
 }
 
+// LintParsed runs file-local lint rules against a caller-owned parsed VBA
+// document. It does not close doc or retain tree-sitter nodes beyond each read.
+func (l Linter) LintParsed(doc *vbaast.ParsedDocument) ([]Issue, error) {
+	return l.lintParsed(doc, false)
+}
+
 func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+	return l.lintParsed(doc, includeFilesystemRules)
+}
+
+func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bool) ([]Issue, error) {
+	var path string
+	var source []byte
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		path = view.Path
+		source = append([]byte(nil), view.Source...)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	issues, err := l.textSafetyIssues(path, string(source))
 	if err != nil {
 		return nil, err
 	}
 	issues = append(issues, l.standardModuleAttributeIssues(path, string(source))...)
 
-	parser, err := vbaast.NewParser()
-	if err != nil {
+	var sourceSymbols *symbols.FileResult
+	if sourceHasOptionExplicit(string(source)) || l.Config.Lint.DetectUnusedLocalVariables {
+		file, inspectErr := symbols.InspectParsed(symbols.SourceOptions{
+			RootDir:        l.RootDir,
+			Path:           path,
+			IncludePrivate: true,
+			IncludeLabels:  false,
+		}, doc)
+		if inspectErr == nil {
+			sourceSymbols = &file
+		}
+	}
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		ctx := astLintContext{linter: l, path: path, source: source}
+		ctx.lint(view.Root)
+		issues = append(issues, ctx.issues...)
+		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) {
+			issues = append(issues, ctx.parseIssue(view.Root))
+		}
+		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
+		if sourceSymbols != nil {
+			issues = append(issues, l.undeclaredVariableIssues(path, string(source), view.Root, *sourceSymbols)...)
+			issues = append(issues, l.unusedLocalVariableIssues(path, string(source), *sourceSymbols)...)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	defer parser.Close()
-	parsed := parser.Parse(path, source)
-	defer parsed.Close()
-
-	ctx := astLintContext{linter: l, path: path, source: source}
-	ctx.lint(parsed.Root)
-	issues = append(issues, ctx.issues...)
-	if shouldReportParseIssue(parsed, issues) {
-		issues = append(issues, ctx.parseIssue(parsed.Root))
-	}
-	issues = append(issues, l.flowIssues(path, string(source), parsed.Root)...)
-	issues = append(issues, l.undeclaredVariableIssues(path, string(source), parsed.Root)...)
-	issues = append(issues, l.unusedLocalVariableIssues(path, string(source))...)
 
 	if includeFilesystemRules && l.Config.Lint.ForbidInteractiveInput {
 		boundaries, err := gui.Analyzer{RootDir: l.RootDir, Config: l.Config}.AnalyzeFile(path)
@@ -553,17 +588,8 @@ func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) [
 	return issues
 }
 
-func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_sitter.Node) []Issue {
+func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_sitter.Node, file symbols.FileResult) []Issue {
 	if !sourceHasOptionExplicit(source) {
-		return nil
-	}
-	file, err := symbols.InspectSource(symbols.SourceOptions{
-		RootDir:        l.RootDir,
-		Path:           path,
-		IncludePrivate: true,
-		IncludeLabels:  false,
-	}, []byte(source))
-	if err != nil {
 		return nil
 	}
 	scope := declarationScopeFromSymbols(file.Symbols)
@@ -1301,17 +1327,8 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 	return issues
 }
 
-func (l Linter) unusedLocalVariableIssues(path, source string) []Issue {
+func (l Linter) unusedLocalVariableIssues(path, source string, file symbols.FileResult) []Issue {
 	if !l.Config.Lint.DetectUnusedLocalVariables {
-		return nil
-	}
-	file, err := symbols.InspectSource(symbols.SourceOptions{
-		RootDir:        l.RootDir,
-		Path:           path,
-		IncludePrivate: true,
-		IncludeLabels:  false,
-	}, []byte(source))
-	if err != nil {
 		return nil
 	}
 	var issues []Issue
@@ -1590,11 +1607,11 @@ func hasSpecificSyntaxIssue(issues []Issue) bool {
 	return false
 }
 
-func shouldReportParseIssue(parsed *vbaast.ParseResult, issues []Issue) bool {
-	if parsed == nil || (!parsed.HasError && !parsed.HasMissing) || hasSpecificSyntaxIssue(issues) {
+func shouldReportParseIssue(hasError, hasMissing bool, root *tree_sitter.Node, issues []Issue) bool {
+	if (!hasError && !hasMissing) || hasSpecificSyntaxIssue(issues) {
 		return false
 	}
-	problemLines := parseProblemLines(parsed.Root)
+	problemLines := parseProblemLines(root)
 	if len(problemLines) == 0 {
 		return true
 	}

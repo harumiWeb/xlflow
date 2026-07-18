@@ -3,11 +3,36 @@ package analyze
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte("Option Explicit\nPublic Sub Run()\n  Dim found As Range\n  Set found = Range(\"A1\").Find(What:=\"x\")\n  Debug.Print found.Value\nEnd Sub\n")
+	cfg := config.Default()
+	want, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	got, err := SourceRealtimeFindingsParsed(dir, cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SourceRealtimeFindingsParsed = %+v, want %+v", got, want)
+	}
+}
 
 func TestAnalyzerFindsMissingSetForObjectVariable(t *testing.T) {
 	dir := t.TempDir()
