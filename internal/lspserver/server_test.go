@@ -779,6 +779,89 @@ func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 	}
 }
 
+func TestCodeActionFixesProcedureNameConstantInUnsavedDocument(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"OldName\"\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	line := `    Const PROCEDURE_NAME As String = "OldName"`
+	start := strings.Index(line, `"OldName"`)
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 2, Character: protocol.UInteger(utf16Len(line[:start]))},
+			End:   protocol.Position{Line: 2, Character: protocol.UInteger(utf16Len(line[:start+len(`"OldName"`)]))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, ok := result.([]protocol.CodeAction)
+	if !ok {
+		t.Fatalf("code actions = %T, want []protocol.CodeAction", result)
+	}
+	var fix *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Kind != nil && *actions[i].Kind == protocol.CodeActionKindQuickFix {
+			fix = &actions[i]
+			break
+		}
+	}
+	if fix == nil || fix.Edit == nil || !strings.Contains(fix.Title, "PROCEDURE_NAME") {
+		t.Fatalf("procedure-name quick fix missing: %+v", actions)
+	}
+	edits := fix.Edit.Changes[protocol.DocumentUri(uri)]
+	if len(edits) != 1 || edits[0].NewText != `"Foo"` || edits[0].Range.Start.Line != 2 || edits[0].Range.Start.Character != protocol.UInteger(utf16Len(line[:start])) || edits[0].Range.End.Character != protocol.UInteger(utf16Len(line[:start+len(`"OldName"`)])) {
+		t.Fatalf("unexpected procedure-name edit: %+v", edits)
+	}
+}
+
+func TestCodeActionOmitsSuppressedProcedureNameConstantFix(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = \"OldName\" ' xlflow:disable-line VB044\nEnd Sub\n"
+	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 2, Character: 0},
+			End:   protocol.Position{Line: 2, Character: 60},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, ok := result.([]protocol.CodeAction)
+	if !ok {
+		t.Fatalf("code actions = %T, want []protocol.CodeAction", result)
+	}
+	for _, action := range actions {
+		if action.Kind != nil && *action.Kind == protocol.CodeActionKindQuickFix {
+			t.Fatalf("suppressed VB044 must not offer a quick fix: %+v", actions)
+		}
+	}
+}
+
 func TestSignatureHelpReturnsActiveParameter(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

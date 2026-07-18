@@ -1726,6 +1726,134 @@ func hasWarning(warnings []map[string]any, code string, rule string) bool {
 	return false
 }
 
+func TestLinterProcedureNameConstantRule(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "procedure_name"}
+	source := `Option Explicit
+Const PROCEDURE_NAME As String = "ModuleLevel"
+
+Public Sub Matching()
+    Const PROCEDURE_NAME As String = "Matching"
+End Sub
+
+Public Function CaseOnly() As String
+    Const PROCEDURE_NAME As String = "caseonly"
+End Function
+
+Public Sub Multiple()
+    Const PROCEDURE_NAME As String = "OldMultiple", OTHER_NAME As String = "ignored"
+End Sub
+
+Public Sub DynamicValue()
+    Const PROCEDURE_NAME As String = "Dynamic" & "Value"
+End Sub
+
+Public Property Get Caption() As String
+    Const PROCEDURE_NAME As String = "OldGet"
+End Property
+
+Public Property Let Caption(ByVal value As String)
+    Const PROCEDURE_NAME As String = "OldLet"
+End Property
+
+Public Property Set Caption(ByVal value As Object)
+    Const PROCEDURE_NAME As String = "OldSet"
+End Property
+`
+	issues, err := (Linter{RootDir: root, Config: cfg}).LintSource(filepath.Join(root, "Main.bas"), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, procedureNameConstantRuleID)
+	if len(got) != 5 {
+		t.Fatalf("VB044 issues = %d, want 5: %+v", len(got), got)
+	}
+	want := map[string]string{
+		"caseonly":    "CaseOnly",
+		"OldMultiple": "Multiple",
+		"OldGet":      "Caption",
+		"OldLet":      "Caption",
+		"OldSet":      "Caption",
+	}
+	for _, issue := range got {
+		matched := false
+		for current, expected := range want {
+			if strings.Contains(issue.Message, current) && strings.Contains(issue.Message, expected) {
+				matched = issue.Kind == "procedure_name_constant" && issue.Symbol == "PROCEDURE_NAME" && issue.Column > 0
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("unexpected VB044 issue: %+v", issue)
+		}
+	}
+}
+
+func TestLinterProcedureNameConstantRuleScansModuleKinds(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "PROCEDURE_NAME"}
+	files := map[string]string{
+		"src/modules/Main.bas": `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub StandardProcedure()
+    Const PROCEDURE_NAME As String = "OldStandard"
+End Sub
+`,
+		"src/classes/Worker.cls": `Attribute VB_Name = "Worker"
+Option Explicit
+Public Sub ClassProcedure()
+    Const PROCEDURE_NAME As String = "OldClass"
+End Sub
+`,
+		"src/workbook/ThisWorkbook.cls": `Attribute VB_Name = "ThisWorkbook"
+Option Explicit
+Private Sub Workbook_Open()
+    Const PROCEDURE_NAME As String = "OldWorkbook"
+End Sub
+`,
+		"src/forms/Dialog.frm": `VERSION 5.00
+Begin VB.UserForm Dialog
+End
+Attribute VB_Name = "Dialog"
+Option Explicit
+Private Sub UserForm_Initialize()
+    Const PROCEDURE_NAME As String = "OldForm"
+End Sub
+`,
+	}
+	for name, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issues, err := (Linter{RootDir: root, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, procedureNameConstantRuleID)
+	if len(got) != 4 {
+		t.Fatalf("VB044 issues = %d, want 4: %+v", len(got), got)
+	}
+	wantFiles := map[string]bool{
+		"src/modules/Main.bas":          true,
+		"src/classes/Worker.cls":        true,
+		"src/workbook/ThisWorkbook.cls": true,
+		"src/forms/Dialog.frm":          true,
+	}
+	for _, issue := range got {
+		if !wantFiles[issue.File] {
+			t.Fatalf("unexpected VB044 file: %+v", issue)
+		}
+	}
+}
+
 func writeLintModule(t *testing.T, dir, name, body string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "modules")

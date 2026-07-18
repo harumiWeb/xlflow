@@ -605,14 +605,17 @@ func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 	if err != nil {
 		return nil, err
 	}
-	actions, err := s.analyzer.DocumentationCodeActions(doc, fromProtocolRange(params.Range))
+	actions, err := s.analyzer.CodeActions(doc, fromProtocolRange(params.Range))
 	if err != nil {
 		return nil, err
 	}
-	kind := protocol.CodeActionKindRefactorRewrite
 	out := make([]protocol.CodeAction, 0, len(actions))
 	requestURI := protocol.DocumentUri(params.TextDocument.URI)
 	for _, action := range actions {
+		kind := protocol.CodeActionKindRefactorRewrite
+		if action.Kind == "quickfix" {
+			kind = protocol.CodeActionKindQuickFix
+		}
 		out = append(out, protocol.CodeAction{
 			Title: action.Title,
 			Kind:  &kind,

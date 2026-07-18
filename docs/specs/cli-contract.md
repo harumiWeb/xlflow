@@ -340,6 +340,11 @@ disabled_rules = []
 # Other project-wide lint rules remain disabled by default.
 # detect_unused_private_procedures = true # VB021
 
+# Optional local procedure-name constant check (VB044).
+# [lint.procedure_name_constant]
+# enabled = true
+# constant_name = "PROCEDURE_NAME"
+
 [analyze]
 disabled_rules = []
 ```
@@ -790,6 +795,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB041`: documentation comment lists duplicate or case-only duplicate parameters
 - `VB042`: documentation comment has `Returns:` on a `Sub`
 - `VB043`: documentation comment is not associated with any declaration
+- `VB044`: an enabled local procedure-name string constant does not exactly match its enclosing procedure name. The constant name comparison is case-insensitive; only direct string literals are checked.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
@@ -803,7 +809,7 @@ Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB0
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 
-Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_option_explicit`, `VB002` = `forbid_select`, `VB003` = `forbid_activate`, `VB004` = `forbid_on_error_resume_next`, `VB005` = `detect_implicit_variant`, `VB006` = `forbid_public_module_fields`, `VB007` = `forbid_interactive_input`, `VB018` = `detect_scope_shadowing`, `VB019` = `detect_multiple_declarator_clarity`, `VB020` = `detect_unused_local_variables`, `VB021` = `detect_unused_private_procedures`, `VB022` = `detect_confusing_call_syntax`, `VB023` = `detect_for_each_control_type`, `VB026` = `detect_dangerous_resume`, and `VB027` = `detect_nested_with_ambiguity`.
+Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_option_explicit`, `VB002` = `forbid_select`, `VB003` = `forbid_activate`, `VB004` = `forbid_on_error_resume_next`, `VB005` = `detect_implicit_variant`, `VB006` = `forbid_public_module_fields`, `VB007` = `forbid_interactive_input`, `VB018` = `detect_scope_shadowing`, `VB019` = `detect_multiple_declarator_clarity`, `VB020` = `detect_unused_local_variables`, `VB021` = `detect_unused_private_procedures`, `VB022` = `detect_confusing_call_syntax`, `VB023` = `detect_for_each_control_type`, `VB026` = `detect_dangerous_resume`, and `VB027` = `detect_nested_with_ambiguity`. `VB044` uses `[lint.procedure_name_constant]` instead of a legacy boolean; it is disabled by default, requires `constant_name` when enabled, and may be disabled through `[lint].disabled_rules`.
 
 Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB021`, and `VB027` are disabled by default and can still be enabled with their legacy `[lint]` booleans during the compatibility window.
 

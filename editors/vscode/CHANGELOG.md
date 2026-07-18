@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.8.0
+
 - Added the `xlflow.lsp.performanceLogging` setting to opt into structured language server performance measurements.
 
 ## v0.7.0

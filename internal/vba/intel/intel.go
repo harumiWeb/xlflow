@@ -808,18 +808,31 @@ func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*S
 	}, nil
 }
 
-type DocumentationAction struct {
+type CodeAction struct {
 	Title   string
+	Kind    string
 	Range   Range
 	NewText string
 }
 
-func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]DocumentationAction, error) {
+func (a Analyzer) CodeActions(doc Document, selection Range) ([]CodeAction, error) {
+	out, err := a.documentationCodeActions(doc, selection)
+	if err != nil {
+		return nil, err
+	}
+	procedureActions, err := a.procedureNameConstantCodeActions(doc, selection)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, procedureActions...), nil
+}
+
+func (a Analyzer) documentationCodeActions(doc Document, selection Range) ([]CodeAction, error) {
 	syms, err := a.DocumentSymbols(doc)
 	if err != nil {
 		return nil, err
 	}
-	var out []DocumentationAction
+	var out []CodeAction
 	for _, sym := range syms {
 		if !documentationSnippetSymbol(sym) || doccomments.HasDocumentation(sym.Documentation) {
 			continue
@@ -832,9 +845,60 @@ func (a Analyzer) DocumentationCodeActions(doc Document, selection Range) ([]Doc
 			continue
 		}
 		insert := Range{Start: Position{Line: sym.Range.Start.Line, Character: 0}, End: Position{Line: sym.Range.Start.Line, Character: 0}}
-		out = append(out, DocumentationAction{Title: snippet.Label, Range: insert, NewText: snippet.Text + "\n"})
+		out = append(out, CodeAction{Title: snippet.Label, Kind: "refactor.rewrite", Range: insert, NewText: snippet.Text + "\n"})
 	}
 	return out, nil
+}
+
+func (a Analyzer) procedureNameConstantCodeActions(doc Document, selection Range) ([]CodeAction, error) {
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return nil, err
+	}
+	defer closeParsed()
+	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
+	issues, err := linter.LintParsed(parsed)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool)
+	for _, issue := range issues {
+		if issue.Code == "VB044" {
+			visible[procedureNameConstantIssueKey(issue.Line, issue.Column)] = true
+		}
+	}
+	fixes, err := linter.ProcedureNameConstantFixesParsed(parsed)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CodeAction, 0, len(fixes))
+	for _, fix := range fixes {
+		if !visible[procedureNameConstantIssueKey(fix.Line, fix.Column)] {
+			continue
+		}
+		editRange := Range{
+			Start: positionForByteOffset(doc.Source, fix.StartByte),
+			End:   positionForByteOffset(doc.Source, fix.EndByte),
+		}
+		if !rangeIntersects(selection, editRange) {
+			continue
+		}
+		out = append(out, CodeAction{
+			Title:   fmt.Sprintf("Update %s to %q", fix.ConstantName, fix.ExpectedName),
+			Kind:    "quickfix",
+			Range:   editRange,
+			NewText: vbaStringLiteral(fix.ExpectedName),
+		})
+	}
+	return out, nil
+}
+
+func procedureNameConstantIssueKey(line, column int) string {
+	return fmt.Sprintf("%d:%d", line, column)
+}
+
+func vbaStringLiteral(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([]Completion, bool, error) {

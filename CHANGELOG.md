@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.25.0
+
+- Added opt-in `VB044` lint diagnostics for local `PROCEDURE_NAME`-style constants whose direct string literals drift from their enclosing `Sub`, `Function`, or `Property` name. The `[lint.procedure_name_constant]` configuration supports standard, class, document, and UserForm modules; the LSP supplies a Quick Fix that updates only the string literal, while `xlflow lint` remains read-only.
 - Added opt-in `[vba.line_numbers].enabled` instrumentation for meaningful VBA `Erl` diagnostics: `push` injects fixed-width, space-padded physical line numbers only into temporary import copies, while `pull` strips recognized generated labels to keep tracked source unnumbered. Unsafe existing numeric labels and numeric `GoTo` / `GoSub` / `Resume` targets stop the operation without transformation; no new CLI flags were added.
 - Added LSP semantic-token delta responses with stable result IDs, a bounded per-open-document history, and automatic full-response fallback when a delta base is unavailable or not smaller on the wire.
 - Changed VBA LSP document synchronization to incremental UTF-16 ranged edits while retaining full-document replacements for client compatibility; document-version snapshots invalidate only the changed document, while semantic-token caches refresh when workspace symbols change.

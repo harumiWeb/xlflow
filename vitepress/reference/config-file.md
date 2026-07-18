@@ -83,6 +83,11 @@ disabled_rules = []
 # detect_unused_private_procedures = true # VB021
 # detect_nested_with_ambiguity = true    # VB027
 
+# Optional local procedure-name constant check (VB044).
+# [lint.procedure_name_constant]
+# enabled = true
+# constant_name = "PROCEDURE_NAME"
+
 # Runtime-risk analysis rules.
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
@@ -168,6 +173,8 @@ Legacy per-rule booleans such as `forbid_select = false` remain accepted for com
 
 `VB020` unused-local-variable warnings are enabled by default and can be disabled with `disabled_rules = ["VB020"]`. Other project-wide lint rules such as `detect_unused_private_procedures = true` (`VB021`) remain disabled by default. New `xlflow.toml` files include commented examples so projects can opt in deliberately.
 
+`VB044` is disabled by default and uses the nested `[lint.procedure_name_constant]` table rather than a legacy boolean. When enabled, `constant_name` is required and must be a VBA identifier. xlflow compares matching procedure-local constants case-insensitively by name, but requires their direct string-literal values to match the enclosing procedure name exactly. `disabled_rules = ["VB044"]` takes precedence over `enabled = true`.
+
 Configurable lint rule IDs:
 
 | ID      | Legacy key                           |
@@ -187,6 +194,7 @@ Configurable lint rule IDs:
 | `VB023` | `detect_for_each_control_type`       |
 | `VB026` | `detect_dangerous_resume`            |
 | `VB027` | `detect_nested_with_ambiguity`       |
+| `VB044` | `[lint.procedure_name_constant]`     |
 
 Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be disabled with `disabled_rules`.
 
@@ -199,6 +207,15 @@ Range("A2").Select ' xlflow:disable-line VB002
 ```
 
 Preflight-blocking lint diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` cannot be suppressed inline.
+
+### `[lint.procedure_name_constant]`
+
+| Key             | Type   | Required | Default | Description                                                              |
+| --------------- | ------ | -------- | ------- | ------------------------------------------------------------------------ |
+| `enabled`       | bool   | no       | `false` | Enable `VB044` checks for existing matching procedure-local constants.   |
+| `constant_name` | string | yes\*    | —       | Case-insensitive local constant name to check, such as `PROCEDURE_NAME`. |
+
+\* Required when `enabled = true`; the value must be a VBA identifier. The rule supports `Sub`, `Function`, `Property Get`, `Property Let`, and `Property Set` in standard, class, document, and UserForm code. It reports only direct string-literal values and leaves missing or expression-based constants alone.
 
 ### `[analyze]`
 
