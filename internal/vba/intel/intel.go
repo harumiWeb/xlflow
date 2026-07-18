@@ -3155,7 +3155,14 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 		index = ctx.index
 	}
 	if index == nil {
-		index, _ = a.documentIndexFor(doc)
+		var ok bool
+		index, ok = a.documentIndexFor(doc)
+		if !ok || index == nil {
+			if declared != "" {
+				return inferredType{Type: declared, Source: "declaration"}, true
+			}
+			return inferredType{}, false
+		}
 	}
 	lookupOffset := offset
 	if lookupOffset < 0 {
@@ -3200,7 +3207,7 @@ func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offs
 	}
 	var fallback inferredType
 	for _, sym := range syms {
-		if sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
+		if !strings.EqualFold(sym.Name, word) || sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
 			continue
 		}
 		inferred := inferredType{Type: sym.ReturnType, Source: "declaration"}
@@ -3455,7 +3462,11 @@ func (a Analyzer) withBlockTypeAtContext(doc Document, pos Position, offset int,
 		index = ctx.index
 	}
 	if index == nil {
-		index, _ = a.documentIndexFor(doc)
+		var ok bool
+		index, ok = a.documentIndexFor(doc)
+		if !ok || index == nil {
+			return "", false
+		}
 	}
 	block, ok := index.withBlockAt(pos)
 	if !ok {
