@@ -31,6 +31,8 @@ xlflow push --session --fast --no-save --json
 > [!IMPORTANT]
 > `push` runs source preflight before opening Excel so modal compile dialogs are caught as structured CLI errors whenever possible.
 
+When `[vba.line_numbers].enabled = true`, `push` adds temporary physical-source-line labels to its import copies so VBA `Erl` reports useful locations. The tracked source is not changed. Labels use fixed-width space padding and no colon; no `push` flag is provided for this feature. xlflow stops safely instead of instrumenting code that contains existing or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets.
+
 ::: warning
 `--session --no-save` leaves the live workbook newer than disk. Run `xlflow save --session` when the changes should persist.
 :::

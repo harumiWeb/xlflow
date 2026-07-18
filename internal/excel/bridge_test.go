@@ -2380,6 +2380,19 @@ func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	if args["CodeSource"] != "sidecar" {
 		t.Fatalf("CodeSource = %q", args["CodeSource"])
 	}
+	if args["LineNumbersEnabled"] != "false" {
+		t.Fatalf("LineNumbersEnabled = %q", args["LineNumbersEnabled"])
+	}
+}
+
+func TestVBALineNumberSafetyFailureIsValidationFailure(t *testing.T) {
+	result := ScriptResult{
+		Status: output.StatusFailed,
+		Error:  &output.Error{Code: "vba_line_number_safety_failed", Message: "unsafe numeric label"},
+	}
+	if got := exitCodeForScriptResult(result); got != output.ExitValidation {
+		t.Fatalf("exitCodeForScriptResult(vba_line_number_safety_failed) = %d, want %d", got, output.ExitValidation)
+	}
 }
 
 func TestListFormsScriptArgsIncludeFolderAndSessionConfig(t *testing.T) {

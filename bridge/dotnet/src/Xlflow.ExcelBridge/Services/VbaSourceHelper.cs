@@ -271,7 +271,8 @@ internal static class VbaSourceHelper
         string classesDir,
         string formsDir,
         string workbookDir,
-        string? codeSource)
+        string? codeSource,
+        bool lineNumbersEnabled = false)
     {
         var files = new List<SourceFileEntry>();
         foreach (var file in DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource))
@@ -287,6 +288,7 @@ internal static class VbaSourceHelper
         {
             WorkbookPath = Path.GetFullPath(workbookPath),
             Files = files.ToArray(),
+            LineNumbersEnabled = lineNumbersEnabled,
         };
     }
 
@@ -405,7 +407,7 @@ internal static class VbaSourceHelper
         return duplicates;
     }
 
-    public static string PrepareSourceForImport(string sourcePath, string destPath, string? rootDir, string folderAnnotationMode)
+    public static string PrepareSourceForImport(string sourcePath, string destPath, string? rootDir, string folderAnnotationMode, bool lineNumbersEnabled = false)
     {
         var parent = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrWhiteSpace(parent))
@@ -421,6 +423,10 @@ internal static class VbaSourceHelper
         }
 
         var content = File.ReadAllText(sourcePath, Encoding.UTF8);
+        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(content, out content, out var issue))
+        {
+            throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{issue!.Line}: {issue.Message}");
+        }
         if (!string.IsNullOrWhiteSpace(rootDir))
         {
             var desiredAnnotation = BuildFolderAnnotation(GetRelativePathSegments(rootDir, sourcePath));
@@ -688,6 +694,7 @@ internal sealed record SourceFingerprint
 {
     public string WorkbookPath { get; init; } = "";
     public SourceFileEntry[] Files { get; init; } = [];
+    public bool LineNumbersEnabled { get; init; }
 }
 
 internal sealed record SourceFileEntry

@@ -33,6 +33,9 @@ path = "build/Sales.xlsm"
 	if !cfg.VBA.Folders || cfg.VBA.FolderAnnotation != "update" || !cfg.VBA.DefaultComponentFolders {
 		t.Fatalf("unexpected vba defaults: %+v", cfg.VBA)
 	}
+	if cfg.VBA.LineNumbers.Enabled {
+		t.Fatal("vba.line_numbers.enabled must default to false")
+	}
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("unexpected userform defaults: %+v", cfg.UserForm)
 	}
@@ -85,6 +88,29 @@ path = "build/Sales.xlsm"
 	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
 		cfg.Analyze.DetectFunctionReturnPath {
 		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
+	}
+}
+
+func TestLoadParsesVBALineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[vba.line_numbers]
+enabled = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.VBA.LineNumbers.Enabled {
+		t.Fatal("vba.line_numbers.enabled was not loaded")
 	}
 }
 
@@ -740,6 +766,14 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		"# enabled = false",
 		"# max_count = 20",
 		"# min_keep = 5",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
+	for _, want := range []string{
+		"# [vba.line_numbers]",
+		"# enabled = true",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated config missing %q:\n%s", want, text)

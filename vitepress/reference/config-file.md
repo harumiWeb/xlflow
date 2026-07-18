@@ -49,6 +49,11 @@ folder_annotation = "update"
 # Automatically assign default folder annotations based on source paths.
 default_component_folders = true
 
+# Optional Erl instrumentation. When enabled, push adds temporary physical
+# source-line numbers to imported procedure statements; tracked source stays unnumbered.
+# [vba.line_numbers]
+# enabled = true
+
 # UserForm source mode.
 [userform]
 # Where UserForm code-behind lives in the source tree.
@@ -120,6 +125,16 @@ When `[vba].folders = true`, files may be nested under these roots according to 
 | `folders`                   | bool   | no       | `true`     | Enable Rubberduck-style `@Folder("A.B")` annotations and nested source paths.                  |
 | `folder_annotation`         | string | no       | `"update"` | How `push` treats `@Folder` annotations.<br>Valid values: `"update"`, `"preserve"`, `"ignore"` |
 | `default_component_folders` | bool   | no       | `true`     | Automatically assign default folder annotations based on the relative source path.             |
+
+### `[vba.line_numbers]`
+
+| Key       | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `enabled` | bool | no       | `false` | Opt in to temporary `Erl` line-number instrumentation during `push`. |
+
+Set `enabled = true` only when runtime diagnostics need meaningful `Erl` values. `push` adds labels only to its temporary import copies, so the tracked source files are never rewritten. Labels use the physical source line number, fixed-width space padding, and two spaces before the statement; they never use a colon (for example, ` 7  Debug.Print value`).
+
+`pull` removes only labels that exactly match this generated format, keeping exported source unnumbered. To avoid changing intentional VBA control flow, xlflow stops the affected `push` or `pull` without transforming it when it finds pre-existing or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets. This is configuration-only behavior: `push` and `pull` have no line-number CLI flags.
 
 ### `[userform]`
 

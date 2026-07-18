@@ -12,4 +12,5 @@ public sealed record PullCommandArguments(
     bool DefaultComponentFolders,
     bool Visible,
     bool UseSession,
-    string MetadataPath);
+    string MetadataPath,
+    bool LineNumbersEnabled = false);
