@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -100,6 +101,31 @@ func TestDiagnosticsPerformanceLoggingIncludesGenerationAndDiscardStatus(t *test
 	} {
 		if !strings.Contains(logOutput, expected) {
 			t.Fatalf("diagnostics performance log missing %q:\n%s", expected, logOutput)
+		}
+	}
+}
+
+func TestDocumentChangePerformanceLoggingIncludesParseModeAndFallback(t *testing.T) {
+	var output bytes.Buffer
+	s, cleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default(), Stderr: &output, PerformanceLog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.logDocumentChangePerformance("file:///work/Main.bas", 4, documentChangeResult{
+		document:       intel.Document{URI: "file:///work/Main.bas", Path: "/work/Main.bas", Source: "Sub Main()\nEnd Sub\n", Version: 4},
+		applied:        true,
+		parseMode:      "full_fallback",
+		fallbackReason: "full_document_change",
+	}, time.Now())
+	for _, expected := range []string{
+		`operation="textDocument/didChange/parse"`,
+		`outcome="ok"`,
+		`parse_mode="full_fallback"`,
+		`fallback_reason="full_document_change"`,
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("change performance log missing %q:\n%s", expected, output.String())
 		}
 	}
 }

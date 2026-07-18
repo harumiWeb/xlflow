@@ -4,6 +4,7 @@ import (
 	"unicode/utf8"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 // lineOffsetIndex maps LSP line numbers to byte offsets in the original source.
@@ -95,26 +96,66 @@ func decodeDocumentContentChanges(changes []any) ([]documentContentChange, bool)
 	return out, true
 }
 
-func applyDocumentContentChanges(source string, index *lineOffsetIndex, changes []documentContentChange) (string, *lineOffsetIndex, bool) {
+// prepareDocumentContentChanges applies changes in LSP client order and, when
+// possible, returns the equivalent tree-sitter edits. LSP positions are
+// UTF-16; tree-sitter points are UTF-8 byte columns in the raw source.
+func prepareDocumentContentChanges(source string, index *lineOffsetIndex, changes []documentContentChange) (string, *lineOffsetIndex, []tree_sitter.InputEdit, bool, bool) {
 	if index == nil {
 		index = newLineOffsetIndex(source)
 	}
+	edits := make([]tree_sitter.InputEdit, 0, len(changes))
+	canIncrementallyParse := true
 	for _, change := range changes {
 		if change.rng == nil {
 			source = change.text
 			index = newLineOffsetIndex(source)
+			edits = nil
+			canIncrementallyParse = false
 			continue
 		}
 		start, ok := index.byteOffset(source, change.rng.Start)
 		if !ok {
-			return "", nil, false
+			return "", nil, nil, false, false
 		}
 		end, ok := index.byteOffset(source, change.rng.End)
 		if !ok || end < start {
-			return "", nil, false
+			return "", nil, nil, false, false
 		}
-		source = source[:start] + change.text + source[end:]
+		oldSource := source
+		source = oldSource[:start] + change.text + oldSource[end:]
+		if canIncrementallyParse {
+			edits = append(edits, tree_sitter.InputEdit{
+				StartByte:      uint(start),
+				OldEndByte:     uint(end),
+				NewEndByte:     uint(start + len(change.text)),
+				StartPosition:  treeSitterPoint(oldSource, start),
+				OldEndPosition: treeSitterPoint(oldSource, end),
+				NewEndPosition: treeSitterPoint(source, start+len(change.text)),
+			})
+		}
 		index = newLineOffsetIndex(source)
 	}
-	return source, index, true
+	return source, index, edits, canIncrementallyParse && len(edits) > 0, true
+}
+
+// treeSitterPoint counts a point exactly as tree-sitter does: rows advance on
+// LF and columns count UTF-8 bytes from the last LF. In particular, CRLF
+// leaves the CR in the preceding byte column and then resets at LF; a bare CR
+// is not a tree-sitter line break.
+func treeSitterPoint(source string, offset int) tree_sitter.Point {
+	var point tree_sitter.Point
+	for index := 0; index < offset; index++ {
+		if source[index] == '\n' {
+			point.Row++
+			point.Column = 0
+			continue
+		}
+		point.Column++
+	}
+	return point
+}
+
+func applyDocumentContentChanges(source string, index *lineOffsetIndex, changes []documentContentChange) (string, *lineOffsetIndex, bool) {
+	source, index, _, _, ok := prepareDocumentContentChanges(source, index, changes)
+	return source, index, ok
 }

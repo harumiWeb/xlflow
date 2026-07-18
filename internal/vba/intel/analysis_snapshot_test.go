@@ -9,6 +9,7 @@ import (
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 func TestAnalysisSnapshotIdentityLinesAndProcedures(t *testing.T) {
@@ -49,6 +50,22 @@ func TestAnalysisSnapshotIdentityLinesAndProcedures(t *testing.T) {
 	}
 	if name, scope := currentProcedureForDocument(view, Position{Line: 2}); name != "First" || scope == nil || scope.End.Line != 3 {
 		t.Fatalf("procedure lookup = (%q, %+v)", name, scope)
+	}
+}
+
+func TestNewIncrementalAnalysisSnapshotRejectsDivergedPreviousSource(t *testing.T) {
+	previousDoc := Document{Path: "Main.bas", Source: "Sub A()\nEnd Sub\n", Version: 1}
+	previous := NewAnalysisSnapshot(previousDoc)
+	previous.parseDocument = func(string, []byte) (*vbaast.ParsedDocument, error) {
+		return vbaast.ParseDocument("Main.bas", []byte("Sub Other()\nEnd Sub\n"))
+	}
+	_, err := NewIncrementalAnalysisSnapshot(
+		Document{Path: "Main.bas", Source: "Sub B()\nEnd Sub\n", Version: 2},
+		previous,
+		[]tree_sitter.InputEdit{{StartByte: 4, OldEndByte: 5, NewEndByte: 5, StartPosition: tree_sitter.Point{Column: 4}, OldEndPosition: tree_sitter.Point{Column: 5}, NewEndPosition: tree_sitter.Point{Column: 5}}},
+	)
+	if !errors.Is(err, ErrIncrementalSnapshotUnavailable) {
+		t.Fatalf("incremental snapshot error = %v, want ErrIncrementalSnapshotUnavailable", err)
 	}
 }
 
