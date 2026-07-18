@@ -125,7 +125,7 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 		staleDone <- err
 	}()
 	<-staleStarted
-	staleCache.invalidateAll()
+	staleCache.invalidate(doc)
 	newerDoc := doc
 	newerDoc.Version++
 	newerDoc.Source = "Option Explicit\nSub Newer()\nEnd Sub\n"
@@ -232,8 +232,8 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 3 {
-		t.Fatalf("cross-document invalidation = (err=%v, generations=%d), want regeneration", err, generations.Load())
+	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 2 {
+		t.Fatalf("cross-document invalidation = (err=%v, generations=%d), want cache hit", err, generations.Load())
 	}
 
 	if err := s.didClose(ctx, &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}}); err != nil {
@@ -244,7 +244,7 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 4 {
+	if _, err := s.semanticTokensFull(nil, params); err != nil || generations.Load() != 3 {
 		t.Fatalf("close/reopen invalidation = (err=%v, generations=%d), want regeneration", err, generations.Load())
 	}
 }

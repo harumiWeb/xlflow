@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Changed VBA LSP document synchronization to incremental UTF-16 ranged edits while retaining full-document replacements for client compatibility; document-version snapshots and semantic-token caches now invalidate only the changed document.
 - Added immutable, document-version-scoped LSP analysis snapshots that share normalized source lines, procedure ranges, source symbols, and semantic-token metadata across requests while preserving open-buffer and UserForm freshness.
 - Added opt-in structured LSP performance logging through `xlflow lsp --performance-log`, including operation timing and result metadata for diagnostics and language features.
 - Improved LSP semantic token performance by reusing document and workspace symbol data within each request and caching encoded tokens for unchanged document versions.

@@ -270,6 +270,34 @@ func BenchmarkLSPEdit(b *testing.B) {
 	})
 }
 
+// BenchmarkLSPIncrementalSingleCharacterEdit keeps the immutable snapshot
+// publication cost visible while reporting the one-byte incremental payload
+// against the full-document payload used by BenchmarkLSPEdit.
+func BenchmarkLSPIncrementalSingleCharacterEdit(b *testing.B) {
+	fixture := makeLSPBenchmarkFixture(b)
+	s := newLSPBenchmarkServer(b, fixture)
+	lineNo := benchmarkSourceLine(fixture.largeSource, "    localSheet.Ra")
+	line := strings.Split(fixture.largeSource, "\n")[lineNo]
+	column := strings.Index(line, "Ra") + len("Ra")
+	if column < len("Ra") {
+		b.Fatal("benchmark edit target missing")
+	}
+	insert := []documentContentChange{{rng: protocolRange(lineNo, column, lineNo, column), text: "n"}}
+	remove := []documentContentChange{{rng: protocolRange(lineNo, column, lineNo, column+1), text: ""}}
+	b.ReportAllocs()
+	b.SetBytes(1)
+	for i := 0; i < b.N; i++ {
+		changes := insert
+		if i%2 == 1 {
+			changes = remove
+		}
+		if _, applied, err := s.docs.applyChanges(fixture.largeURI, changes, int32(i+1)); err != nil || !applied {
+			b.Fatalf("incremental change = (applied=%v, err=%v)", applied, err)
+		}
+	}
+	b.ReportMetric(float64(len(fixture.largeSource)), "full-change-bytes/op")
+}
+
 func BenchmarkLSPContinuousEditScheduling(b *testing.B) {
 	fixture := makeLSPBenchmarkFixture(b)
 	const edits = 25

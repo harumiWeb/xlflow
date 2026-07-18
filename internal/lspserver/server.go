@@ -212,7 +212,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 		capabilities.CodeLensProvider.ResolveProvider = &resolveProvider
 	}
 	if syncOptions, ok := capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions); ok {
-		kind := protocol.TextDocumentSyncKindFull
+		kind := protocol.TextDocumentSyncKindIncremental
 		syncOptions.Change = &kind
 	}
 	if capabilities.CompletionProvider != nil {
@@ -301,7 +301,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
-	s.semanticTokens.invalidateAll()
+	s.semanticTokens.invalidate(doc)
 	s.updateWorkspaceSymbolOverlay(doc)
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
@@ -315,35 +315,26 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if len(params.ContentChanges) == 0 {
 		return nil
 	}
-	text, ok := fullChangeText(params.ContentChanges[len(params.ContentChanges)-1])
+	changes, ok := decodeDocumentContentChanges(params.ContentChanges)
 	if !ok {
-		return fmt.Errorf("textDocument/didChange expected full document synchronization")
+		s.logger.Printf("ignored textDocument/didChange with unsupported content changes")
+		return nil
 	}
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
-	doc, err := s.docs.change(uri, text, int32(params.TextDocument.Version))
+	doc, applied, err := s.docs.applyChanges(uri, changes, int32(params.TextDocument.Version))
 	if err != nil {
 		return err
 	}
-	s.semanticTokens.invalidateAll()
+	if !applied {
+		s.logger.Printf("ignored textDocument/didChange for %q version=%d", uri, params.TextDocument.Version)
+		return nil
+	}
+	s.semanticTokens.invalidate(doc)
 	s.updateWorkspaceSymbolOverlay(doc)
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
-}
-
-func fullChangeText(change any) (string, bool) {
-	switch typed := change.(type) {
-	case protocol.TextDocumentContentChangeEventWhole:
-		return typed.Text, true
-	case protocol.TextDocumentContentChangeEvent:
-		if typed.Range == nil {
-			return typed.Text, true
-		}
-		return "", false
-	default:
-		return "", false
-	}
 }
 
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
@@ -352,8 +343,8 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
 	s.docs.close(uri)
-	s.semanticTokens.invalidateAll()
 	if path, err := fileURIToPath(uri); err == nil {
+		s.semanticTokens.invalidatePath(path)
 		if err := s.symbols.clearOverlay(path); err != nil {
 			s.logger.Printf("workspace symbol index close refresh failed for %q: %v", path, err)
 		}
@@ -373,12 +364,12 @@ func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChan
 		}
 		for _, affected := range paths {
 			s.docs.invalidateDisk(affected)
+			s.semanticTokens.invalidatePath(affected)
 			if err := s.symbols.updatePath(affected); err != nil {
 				s.logger.Printf("workspace symbol index watcher update failed for %q: %v", affected, err)
 			}
 		}
 	}
-	s.semanticTokens.invalidateAll()
 	return nil
 }
 
@@ -1116,6 +1107,7 @@ type documents struct {
 
 type documentEntry struct {
 	snapshot   *intel.AnalysisSnapshot
+	lineIndex  *lineOffsetIndex
 	open       bool
 	generation uint64
 	lifecycle  uint64
@@ -1134,6 +1126,10 @@ func (d *documents) nextGenerationLocked(key string) uint64 {
 }
 
 func (d *documents) open(uri, text string, versions ...int32) (intel.Document, error) {
+	return d.openWithIndex(uri, text, newLineOffsetIndex(text), versions...)
+}
+
+func (d *documents) openWithIndex(uri, text string, lineIndex *lineOffsetIndex, versions ...int32) (intel.Document, error) {
 	doc, err := d.docFromURI(uri, text)
 	if err != nil {
 		return intel.Document{}, err
@@ -1154,7 +1150,7 @@ func (d *documents) open(uri, text string, versions ...int32) (intel.Document, e
 	key := normalizePathKey(doc.Path)
 	previous := d.docs[key].snapshot
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: generation}
+	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	previous.Retire()
@@ -1162,10 +1158,15 @@ func (d *documents) open(uri, text string, versions ...int32) (intel.Document, e
 }
 
 func (d *documents) change(uri, text string, versions ...int32) (intel.Document, error) {
+	doc, _, err := d.changeWithIndex(uri, text, newLineOffsetIndex(text), versions...)
+	return doc, err
+}
+
+func (d *documents) changeWithIndex(uri, text string, lineIndex *lineOffsetIndex, versions ...int32) (intel.Document, bool, error) {
 	d.mu.RLock()
 	if d.closed {
 		d.mu.RUnlock()
-		return intel.Document{}, errDocumentsClosed
+		return intel.Document{}, false, errDocumentsClosed
 	}
 	key := d.keys[uri]
 	if key == "" {
@@ -1176,7 +1177,8 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 	entry, ok := d.docs[key]
 	d.mu.RUnlock()
 	if !ok || !entry.open || entry.snapshot == nil {
-		return d.open(uri, text, versions...)
+		doc, err := d.openWithIndex(uri, text, lineIndex, versions...)
+		return doc, err == nil, err
 	}
 	current := entry.snapshot.Document()
 	current.Source = text
@@ -1192,7 +1194,7 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 	if d.closed {
 		d.mu.Unlock()
 		snapshot.Retire()
-		return intel.Document{}, errDocumentsClosed
+		return intel.Document{}, false, errDocumentsClosed
 	}
 	latest := d.docs[key]
 	if latest.snapshot != entry.snapshot || latest.generation != entry.generation || !latest.open {
@@ -1201,26 +1203,64 @@ func (d *documents) change(uri, text string, versions ...int32) (intel.Document,
 			if latest.lifecycle == entry.lifecycle && snapshot.Version() > latest.snapshot.Version() {
 				generation := d.nextGenerationLocked(key)
 				d.docs[key] = documentEntry{
-					snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle,
+					snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle,
 				}
 				d.mu.Unlock()
 				latest.snapshot.Retire()
-				return snapshot.Document(), nil
+				return snapshot.Document(), true, nil
 			}
 		}
 		d.mu.Unlock()
 		snapshot.Retire()
 		if latest.open && latest.snapshot != nil {
-			return latest.snapshot.Document(), nil
+			return latest.snapshot.Document(), false, nil
 		}
-		return intel.Document{}, errDocumentChangedConcurrently
+		return intel.Document{}, false, errDocumentChangedConcurrently
 	}
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, open: true, generation: generation, lifecycle: entry.lifecycle}
+	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	entry.snapshot.Retire()
-	return snapshot.Document(), nil
+	return snapshot.Document(), true, nil
+}
+
+// applyChanges applies an ordered didChange notification to an open document.
+// Ranged changes need a retained source; a full replacement may recover an
+// unseen document just as the historic full-sync path did.
+func (d *documents) applyChanges(uri string, changes []documentContentChange, version int32) (intel.Document, bool, error) {
+	d.mu.RLock()
+	if d.closed {
+		d.mu.RUnlock()
+		return intel.Document{}, false, errDocumentsClosed
+	}
+	key := d.keys[uri]
+	if key == "" {
+		if path, err := fileURIToPath(uri); err == nil {
+			key = normalizePathKey(path)
+		}
+	}
+	entry, exists := d.docs[key]
+	d.mu.RUnlock()
+	if !exists || !entry.open || entry.snapshot == nil {
+		if len(changes) == 0 || changes[0].rng != nil {
+			return intel.Document{}, false, nil
+		}
+		source, index, ok := applyDocumentContentChanges("", newLineOffsetIndex(""), changes)
+		if !ok {
+			return intel.Document{}, false, nil
+		}
+		doc, err := d.openWithIndex(uri, source, index, version)
+		return doc, err == nil, err
+	}
+	if version <= entry.snapshot.Version() {
+		return entry.snapshot.Document(), false, nil
+	}
+	source, index, ok := applyDocumentContentChanges(entry.snapshot.Source(), entry.lineIndex, changes)
+	if !ok {
+		return entry.snapshot.Document(), false, nil
+	}
+	return d.changeWithIndex(uri, source, index, version)
 }
 
 func (d *documents) close(uri string) {

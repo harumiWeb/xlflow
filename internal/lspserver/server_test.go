@@ -15,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/sourcegraph/jsonrpc2"
+	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
@@ -1145,6 +1146,94 @@ func TestInitializeAdvertisesSemanticTokensProvider(t *testing.T) {
 	}
 	if !containsString(provider.Legend.TokenModifiers, "defaultLibrary") {
 		t.Fatalf("semantic token modifiers missing defaultLibrary: %+v", provider.Legend.TokenModifiers)
+	}
+}
+
+func TestInitializeAdvertisesIncrementalDocumentSync(t *testing.T) {
+	s, cleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	result, err := s.initialize(nil, &protocol.InitializeParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	init := result.(protocol.InitializeResult)
+	options, ok := init.Capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions)
+	if !ok || options.Change == nil || *options.Change != protocol.TextDocumentSyncKindIncremental {
+		t.Fatalf("textDocumentSync = %+v, want incremental options", init.Capabilities.TextDocumentSync)
+	}
+}
+
+func TestDidChangeAppliesRangesTracksVersionsAndIgnoresStaleChanges(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
+	uri := pathToFileURI(filepath.Join(root, "src", "modules", "Main.bas"))
+	ctx := &glsp.Context{Notify: func(string, any) {}}
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), LanguageID: "vba", Version: 1, Text: "' 日本語 😀\r\nDim 名前 As String\r\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 2},
+		ContentChanges: []any{
+			protocol.TextDocumentContentChangeEvent{Range: protocolRange(0, 6, 0, 8), Text: "🚀"},
+			protocol.TextDocumentContentChangeEvent{Range: protocolRange(1, 4, 1, 6), Text: "値"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.docs.getOrRead(uri)
+	if err != nil || doc.Version != 2 || doc.Source != "' 日本語 🚀\r\nDim 値 As String\r\n" {
+		t.Fatalf("ranged change document = %+v, err=%v", doc, err)
+	}
+	active := doc.Snapshot
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 3},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEvent{Range: protocolRange(0, 7, 0, 7), Text: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err = s.docs.getOrRead(uri)
+	if err != nil || doc.Snapshot != active || doc.Version != 2 {
+		t.Fatalf("invalid UTF-16 range changed document = %+v, err=%v", doc, err)
+	}
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 2},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEventWhole{Text: "stale"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err = s.docs.getOrRead(uri)
+	if err != nil || doc.Snapshot != active || doc.Source != "' 日本語 🚀\r\nDim 値 As String\r\n" {
+		t.Fatalf("stale replacement changed document = %+v, err=%v", doc, err)
+	}
+	unknownURI := pathToFileURI(filepath.Join(root, "src", "modules", "Unknown.bas"))
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(unknownURI)}, Version: 1},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEvent{Range: protocolRange(0, 0, 0, 0), Text: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.docs.getOrRead(unknownURI); err == nil {
+		t.Fatal("unopened ranged change created a document")
+	}
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(unknownURI)}, Version: 1},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEventWhole{Text: "full fallback"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := s.docs.getOrRead(unknownURI)
+	if err != nil || fallback.Source != "full fallback" || fallback.Version != 1 {
+		t.Fatalf("full replacement fallback = %+v, err=%v", fallback, err)
 	}
 }
 
