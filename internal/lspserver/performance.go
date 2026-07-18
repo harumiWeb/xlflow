@@ -126,6 +126,33 @@ func (s *Server) logDocumentCachePerformance(operation, cache string, doc intel.
 	)
 }
 
+func (s *Server) logDocumentChangePerformance(uri string, version int32, change documentChangeResult, started time.Time) {
+	if !s.opts.PerformanceLog {
+		return
+	}
+	doc := change.document
+	if doc.URI == "" {
+		doc.URI = uri
+	}
+	// A retained change reports the attempted LSP version, even though the
+	// source fields intentionally describe the last valid snapshot.
+	doc.Version = version
+	s.logger.Printf(
+		"performance operation=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f result_count=%d outcome=%q parse_mode=%q fallback_reason=%q",
+		"textDocument/didChange/parse",
+		doc.URI,
+		doc.Path,
+		doc.Version,
+		len(doc.Source),
+		sourceLineCount(doc.Source),
+		float64(time.Since(started))/float64(time.Millisecond),
+		0,
+		map[bool]string{true: "ok", false: "retained"}[change.applied],
+		change.parseMode,
+		change.fallbackReason,
+	)
+}
+
 func sourceLineCount(source string) int {
 	if source == "" {
 		return 0

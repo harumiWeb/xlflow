@@ -323,17 +323,19 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
-	doc, applied, err := s.docs.applyChanges(uri, changes, int32(params.TextDocument.Version))
+	changeStarted := time.Now()
+	change, err := s.docs.applyChangesWithResult(uri, changes, int32(params.TextDocument.Version))
+	s.logDocumentChangePerformance(uri, int32(params.TextDocument.Version), change, changeStarted)
 	if err != nil {
 		return err
 	}
-	if !applied {
+	if !change.applied {
 		s.logger.Printf("ignored textDocument/didChange for %q version=%d", uri, params.TextDocument.Version)
 		return nil
 	}
 	s.semanticTokens.invalidateWorkspace()
-	s.updateWorkspaceSymbolOverlay(doc)
-	s.scheduleDiagnostics(ctx, doc)
+	s.updateWorkspaceSymbolOverlay(change.document)
+	s.scheduleDiagnostics(ctx, change.document)
 	return nil
 }
 
@@ -1229,10 +1231,22 @@ func (d *documents) changeWithIndex(uri, text string, lineIndex *lineOffsetIndex
 // Ranged changes need a retained source; a full replacement may recover an
 // unseen document just as the historic full-sync path did.
 func (d *documents) applyChanges(uri string, changes []documentContentChange, version int32) (intel.Document, bool, error) {
+	result, err := d.applyChangesWithResult(uri, changes, version)
+	return result.document, result.applied, err
+}
+
+type documentChangeResult struct {
+	document       intel.Document
+	applied        bool
+	parseMode      string
+	fallbackReason string
+}
+
+func (d *documents) applyChangesWithResult(uri string, changes []documentContentChange, version int32) (documentChangeResult, error) {
 	d.mu.RLock()
 	if d.closed {
 		d.mu.RUnlock()
-		return intel.Document{}, false, errDocumentsClosed
+		return documentChangeResult{}, errDocumentsClosed
 	}
 	key := d.keys[uri]
 	if key == "" {
@@ -1244,23 +1258,115 @@ func (d *documents) applyChanges(uri string, changes []documentContentChange, ve
 	d.mu.RUnlock()
 	if !exists || !entry.open || entry.snapshot == nil {
 		if len(changes) == 0 || changes[0].rng != nil {
-			return intel.Document{}, false, nil
+			return documentChangeResult{parseMode: "retained", fallbackReason: "document_not_open"}, nil
 		}
-		source, index, ok := applyDocumentContentChanges("", newLineOffsetIndex(""), changes)
+		source, index, _, _, ok := prepareDocumentContentChanges("", newLineOffsetIndex(""), changes)
 		if !ok {
-			return intel.Document{}, false, nil
+			return documentChangeResult{parseMode: "retained", fallbackReason: "edit_coordinates_unreconciled"}, nil
 		}
-		doc, err := d.openWithIndex(uri, source, index, version)
-		return doc, err == nil, err
+		doc, err := d.docFromURI(uri, source)
+		if err != nil {
+			return documentChangeResult{}, err
+		}
+		doc.Version = version
+		snapshot, err := fullyParsedSnapshot(doc)
+		if err != nil {
+			return documentChangeResult{parseMode: "retained", fallbackReason: "full_parse_failed"}, nil
+		}
+		return d.publishOpenedSnapshot(uri, snapshot, index)
 	}
 	if version <= entry.snapshot.Version() {
-		return entry.snapshot.Document(), false, nil
+		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "invalid_version"}, nil
 	}
-	source, index, ok := applyDocumentContentChanges(entry.snapshot.Source(), entry.lineIndex, changes)
+	source, index, edits, canIncrementallyParse, ok := prepareDocumentContentChanges(entry.snapshot.Source(), entry.lineIndex, changes)
 	if !ok {
-		return entry.snapshot.Document(), false, nil
+		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "edit_coordinates_unreconciled"}, nil
 	}
-	return d.changeWithIndex(uri, source, index, version)
+	doc := entry.snapshot.Document()
+	doc.Source = source
+	doc.Version = version
+	doc.Snapshot = nil
+
+	var (
+		snapshot       *intel.AnalysisSnapshot
+		parseMode      = "incremental"
+		fallbackReason string
+		err            error
+	)
+	if canIncrementallyParse {
+		snapshot, err = intel.NewIncrementalAnalysisSnapshot(doc, entry.snapshot, edits)
+	}
+	if snapshot == nil {
+		parseMode = "full_fallback"
+		if !canIncrementallyParse {
+			fallbackReason = "full_document_change"
+		} else {
+			fallbackReason = "incremental_parse_unavailable"
+		}
+		snapshot, err = fullyParsedSnapshot(doc)
+	}
+	if err != nil || snapshot == nil {
+		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "full_parse_failed"}, nil
+	}
+	return d.publishChangedSnapshot(uri, key, entry, snapshot, index, parseMode, fallbackReason)
+}
+
+func fullyParsedSnapshot(doc intel.Document) (*intel.AnalysisSnapshot, error) {
+	snapshot := intel.NewAnalysisSnapshot(doc)
+	if _, err := snapshot.ParsedDocument(); err != nil {
+		snapshot.Retire()
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (d *documents) publishOpenedSnapshot(uri string, snapshot *intel.AnalysisSnapshot, lineIndex *lineOffsetIndex) (documentChangeResult, error) {
+	if snapshot == nil {
+		return documentChangeResult{}, errDocumentChangedConcurrently
+	}
+	key := normalizePathKey(snapshot.Path())
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		snapshot.Retire()
+		return documentChangeResult{}, errDocumentsClosed
+	}
+	if current, exists := d.docs[key]; exists && current.open && current.snapshot != nil {
+		d.mu.Unlock()
+		snapshot.Retire()
+		return documentChangeResult{document: current.snapshot.Document(), parseMode: "retained", fallbackReason: "document_changed_concurrently"}, nil
+	}
+	previous := d.docs[key].snapshot
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
+	d.keys[uri] = key
+	d.mu.Unlock()
+	previous.Retire()
+	return documentChangeResult{document: snapshot.Document(), applied: true, parseMode: "full_fallback", fallbackReason: "no_previous_tree"}, nil
+}
+
+func (d *documents) publishChangedSnapshot(uri, key string, entry documentEntry, snapshot *intel.AnalysisSnapshot, lineIndex *lineOffsetIndex, parseMode, fallbackReason string) (documentChangeResult, error) {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		snapshot.Retire()
+		return documentChangeResult{}, errDocumentsClosed
+	}
+	latest, exists := d.docs[key]
+	if !exists || !latest.open || latest.snapshot != entry.snapshot || latest.generation != entry.generation || latest.lifecycle != entry.lifecycle {
+		d.mu.Unlock()
+		snapshot.Retire()
+		if latest.open && latest.snapshot != nil {
+			return documentChangeResult{document: latest.snapshot.Document(), parseMode: "retained", fallbackReason: "document_changed_concurrently"}, nil
+		}
+		return documentChangeResult{}, errDocumentChangedConcurrently
+	}
+	generation := d.nextGenerationLocked(key)
+	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
+	d.keys[uri] = key
+	d.mu.Unlock()
+	entry.snapshot.Retire()
+	return documentChangeResult{document: snapshot.Document(), applied: true, parseMode: parseMode, fallbackReason: fallbackReason}, nil
 }
 
 func (d *documents) close(uri string) {

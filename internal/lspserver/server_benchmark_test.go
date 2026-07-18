@@ -296,6 +296,34 @@ func BenchmarkLSPIncrementalSingleCharacterEdit(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(len(fixture.largeSource)), "full-change-bytes/op")
+	b.ReportMetric(1, "parses/op")
+}
+
+// BenchmarkLSPFullParseSingleCharacterEdit is the comparable complete-parse
+// baseline for BenchmarkLSPIncrementalSingleCharacterEdit.
+func BenchmarkLSPFullParseSingleCharacterEdit(b *testing.B) {
+	fixture := makeLSPBenchmarkFixture(b)
+	s := newLSPBenchmarkServer(b, fixture)
+	changed := strings.Replace(fixture.largeSource, "    localSheet.Ra\n", "    localSheet.Ran\n", 1)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(fixture.largeSource)))
+	var parses uint64
+	for i := 0; i < b.N; i++ {
+		source := fixture.largeSource
+		if i%2 == 0 {
+			source = changed
+		}
+		doc, err := s.docs.change(fixture.largeURI, source, int32(i+1))
+		if err != nil {
+			b.Fatal(err)
+		}
+		before := doc.Snapshot.ParseCount()
+		if _, err := doc.Snapshot.ParsedDocument(); err != nil {
+			b.Fatal(err)
+		}
+		parses += doc.Snapshot.ParseCount() - before
+	}
+	b.ReportMetric(float64(parses)/float64(b.N), "parses/op")
 }
 
 func BenchmarkLSPContinuousEditScheduling(b *testing.B) {

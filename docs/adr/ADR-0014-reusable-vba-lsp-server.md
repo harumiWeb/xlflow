@@ -41,6 +41,18 @@ language server entry point.
   a compatibility fallback, and replace only the changed document's immutable
   analysis snapshot. Refresh semantic tokens when the open workspace changes,
   because their classification can depend on project symbols from other files.
+- Reuse a previous tree-sitter tree only by cloning it under the previous
+  snapshot's serialized tree lease, editing that clone with byte-based
+  tree-sitter coordinates, and parsing the new source with a parser local to
+  that operation. The published previous tree is never edited.
+- Let each immutable snapshot own its parsed tree. Retiring a superseded
+  snapshot rejects new readers and closes its tree only after active readers
+  complete. Candidate snapshots publish only when their captured document
+  generation and lifecycle still match the open document.
+- On unreconcilable edit coordinates or invalid version ordering, retain the
+  last valid snapshot until a later full-document replacement can resynchronize
+  it. When a valid new source cannot use an old tree, parse it completely and
+  record the fallback in opt-in performance logging.
 - Load a curated built-in database for practical Excel, MSForms, Scripting,
   ADODB, VBIDE, Office, and VBA constant/type metadata.
 
@@ -67,6 +79,9 @@ The VS Code extension should remain a thin language client that launches:
   of xlflow's long-lived compatibility surface.
 - Negative: The document store must retain source and a line-offset index, and
   reject malformed or out-of-order edits without corrupting editor state.
+- Negative: Incremental parsing needs temporary cloned trees and eagerly parses
+  changed revisions; this trades a small per-edit allocation for safely
+  reusing unchanged syntax structure without exposing mutable trees to readers.
 - Negative: The curated COM database requires maintenance until a TypeLib
   importer and patch pipeline are available.
 

@@ -9,9 +9,14 @@ import (
 	"sync/atomic"
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 var errAnalysisSnapshotRetired = errors.New("analysis snapshot is retired")
+
+// ErrIncrementalSnapshotUnavailable reports that a successor cannot safely
+// reuse the preceding snapshot's tree and must be parsed from scratch.
+var ErrIncrementalSnapshotUnavailable = errors.New("incremental analysis snapshot is unavailable")
 
 // ProcedureInfo describes the source range occupied by a VBA procedure.
 type ProcedureInfo struct {
@@ -72,6 +77,36 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 		lines:         strings.Split(normalized, "\n"),
 		parseDocument: ast.ParseDocument,
 	}
+}
+
+// NewAnalysisSnapshotWithParsedDocument captures doc and seeds it with a
+// parsed document produced while preparing this exact revision. Ownership of
+// parsed transfers to the returned snapshot, which retires it exactly once.
+func NewAnalysisSnapshotWithParsedDocument(doc Document, parsed *ast.ParsedDocument) *AnalysisSnapshot {
+	snapshot := NewAnalysisSnapshot(doc)
+	if parsed != nil {
+		snapshot.parsedDocument = parsed
+		snapshot.parseCount.Add(1)
+	}
+	return snapshot
+}
+
+// NewIncrementalAnalysisSnapshot creates doc from an edited clone of
+// previous's tree. previous remains immutable and continues to own its tree;
+// the returned snapshot owns only the newly parsed tree.
+func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, edits []tree_sitter.InputEdit) (*AnalysisSnapshot, error) {
+	if previous == nil || len(edits) == 0 || previous.Retired() {
+		return nil, ErrIncrementalSnapshotUnavailable
+	}
+	parsed, err := previous.ParsedDocument()
+	if err != nil || parsed == nil || !parsed.SourceMatches([]byte(previous.Source())) {
+		return nil, ErrIncrementalSnapshotUnavailable
+	}
+	next, err := ast.ParseDocumentIncremental(doc.Path, []byte(doc.Source), parsed, edits)
+	if err != nil || next == nil {
+		return nil, ErrIncrementalSnapshotUnavailable
+	}
+	return NewAnalysisSnapshotWithParsedDocument(doc, next), nil
 }
 
 // Document returns a document view associated with this snapshot.

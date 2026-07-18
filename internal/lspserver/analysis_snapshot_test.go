@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 )
 
@@ -64,6 +65,116 @@ func TestDocumentsReuseReplaceCloseAndReopenSnapshots(t *testing.T) {
 	docs.closeAll()
 	if !reopened.Snapshot.Retired() {
 		t.Fatal("shutdown cleanup did not retire the active snapshot")
+	}
+}
+
+func TestDocumentsApplyChangesPublishesIncrementalParsedSnapshot(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	oldSource := "Option Explicit\nSub A()\nEnd Sub\n"
+	opened, err := docs.open(uri, oldSource, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opened.Snapshot.ParsedDocument(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := docs.applyChangesWithResult(uri, []documentContentChange{{rng: protocolRange(1, 4, 1, 5), text: "B"}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.applied || result.parseMode != "incremental" || result.fallbackReason != "" {
+		t.Fatalf("change result = %+v, want incremental publication", result)
+	}
+	if !opened.Snapshot.Retired() || result.document.Snapshot == opened.Snapshot || result.document.Snapshot.ParseCount() != 1 {
+		t.Fatalf("snapshot lifecycle = oldRetired:%v new:%p old:%p parses:%d", opened.Snapshot.Retired(), result.document.Snapshot, opened.Snapshot, result.document.Snapshot.ParseCount())
+	}
+	full, err := intel.NewAnalysisSnapshotWithParsedDocument(result.document, nil).ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer full.Close()
+	var incrementalSexp, fullSexp string
+	parsed, err := result.document.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parsed.Read(func(view vbaast.ParsedView) error { incrementalSexp = view.Root.ToSexp(); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := full.Read(func(view vbaast.ParsedView) error { fullSexp = view.Root.ToSexp(); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if incrementalSexp != fullSexp {
+		t.Fatalf("incremental tree = %s, want complete tree %s", incrementalSexp, fullSexp)
+	}
+}
+
+func TestDocumentsApplyChangesFullFallbackAndRetainedRecovery(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	opened, err := docs.open(uri, "Sub A()\nEnd Sub\n", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := docs.applyChangesWithResult(uri, []documentContentChange{{text: "Sub B()\nEnd Sub\n"}}, 2)
+	if err != nil || !full.applied || full.parseMode != "full_fallback" || full.fallbackReason != "full_document_change" {
+		t.Fatalf("full fallback = (%+v, %v)", full, err)
+	}
+	if full.document.Snapshot.ParseCount() != 1 {
+		t.Fatalf("full fallback parse count = %d, want 1", full.document.Snapshot.ParseCount())
+	}
+	stale, err := docs.applyChangesWithResult(uri, []documentContentChange{{text: "Sub Stale()\nEnd Sub\n"}}, 2)
+	if err != nil || stale.applied || stale.document.Snapshot != full.document.Snapshot || stale.fallbackReason != "invalid_version" {
+		t.Fatalf("stale recovery = (%+v, %v)", stale, err)
+	}
+	invalid, err := docs.applyChangesWithResult(uri, []documentContentChange{{rng: protocolRange(9, 0, 9, 0), text: "x"}}, 3)
+	if err != nil || invalid.applied || invalid.document.Snapshot != full.document.Snapshot || invalid.fallbackReason != "edit_coordinates_unreconciled" {
+		t.Fatalf("invalid recovery = (%+v, %v)", invalid, err)
+	}
+	if !opened.Snapshot.Retired() {
+		t.Fatal("old snapshot was not retired after full fallback publication")
+	}
+}
+
+func TestDocumentsApplyChangesIncrementalMultilineMatchesFullParse(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	if _, err := docs.open(uri, "Sub A()\nEnd Sub\n", 1); err != nil {
+		t.Fatal(err)
+	}
+	result, err := docs.applyChangesWithResult(uri, []documentContentChange{{rng: protocolRange(1, 0, 1, 0), text: "    Dim value As Long\n"}}, 2)
+	if err != nil || !result.applied || result.parseMode != "incremental" {
+		t.Fatalf("multiline incremental change = (%+v, %v)", result, err)
+	}
+	complete := intel.NewAnalysisSnapshot(result.document)
+	defer complete.Retire()
+	incrementalParsed, err := result.document.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeParsed, err := complete.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var incrementalSexp, completeSexp string
+	var incrementalRecovery, completeRecovery [2]bool
+	if err := incrementalParsed.Read(func(view vbaast.ParsedView) error {
+		incrementalSexp = view.Root.ToSexp()
+		incrementalRecovery = [2]bool{view.HasError, view.HasMissing}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := completeParsed.Read(func(view vbaast.ParsedView) error {
+		completeSexp = view.Root.ToSexp()
+		completeRecovery = [2]bool{view.HasError, view.HasMissing}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if incrementalSexp != completeSexp || incrementalRecovery != completeRecovery {
+		t.Fatalf("incremental = (%s, %v), complete = (%s, %v)", incrementalSexp, incrementalRecovery, completeSexp, completeRecovery)
 	}
 }
 

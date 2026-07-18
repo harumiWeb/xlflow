@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"sync"
@@ -12,6 +13,10 @@ import (
 // ErrParsedDocumentClosed reports an attempt to read a document whose owner
 // has retired it. A parsed document never reopens after Close.
 var ErrParsedDocumentClosed = errors.New("parsed VBA document is closed")
+
+// ErrIncrementalParseUnavailable reports that a previous parsed document can
+// no longer safely provide a tree for incremental parsing.
+var ErrIncrementalParseUnavailable = errors.New("incremental VBA parse is unavailable")
 
 type ParseResult struct {
 	Path       string
@@ -50,12 +55,46 @@ type ParsedDocument struct {
 // supplied source is copied so callers cannot mutate the bytes backing a
 // shared parsed document after construction.
 func ParseDocument(path string, source []byte) (*ParsedDocument, error) {
+	return parseDocument(path, source, nil)
+}
+
+// ParseDocumentIncremental parses source using an edited clone of previous's
+// tree. It never mutates the previous document's tree, so a published
+// immutable analysis snapshot remains readable while its successor is built.
+// The caller must fall back to ParseDocument when this returns
+// ErrIncrementalParseUnavailable.
+func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocument, edits []tree_sitter.InputEdit) (*ParsedDocument, error) {
+	if previous == nil || len(edits) == 0 {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	oldTree, err := previous.cloneEditedTree(edits)
+	if err != nil {
+		return nil, err
+	}
+	defer oldTree.Close()
+	return parseDocument(path, source, oldTree)
+}
+
+func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
 	parser, err := NewParser()
 	if err != nil {
 		return nil, err
 	}
 	defer parser.Close()
-	return &ParsedDocument{result: parser.Parse(path, append([]byte(nil), source...))}, nil
+	copySource := append([]byte(nil), source...)
+	tree := parser.parser.Parse(copySource, oldTree)
+	if tree == nil {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	root := tree.RootNode()
+	if root == nil {
+		tree.Close()
+		return nil, ErrIncrementalParseUnavailable
+	}
+	return &ParsedDocument{result: &ParseResult{
+		Path: path, Source: copySource, Tree: tree, Root: root,
+		HasError: root.HasError(), HasMissing: HasMissing(root),
+	}}, nil
 }
 
 // Read serializes access to the document tree and invokes visit with its
@@ -86,6 +125,23 @@ func (d *ParsedDocument) Read(visit func(ParsedView) error) error {
 	})
 }
 
+// SourceMatches reports whether this document still owns exactly source. It
+// takes the same read lease as Read so a concurrent Close cannot release the
+// tree during the comparison.
+func (d *ParsedDocument) SourceMatches(source []byte) bool {
+	matched := false
+	if d == nil {
+		return false
+	}
+	if d.Read(func(view ParsedView) error {
+		matched = bytes.Equal(view.Source, source)
+		return nil
+	}) != nil {
+		return false
+	}
+	return matched
+}
+
 func (d *ParsedDocument) releaseRead() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -93,6 +149,35 @@ func (d *ParsedDocument) releaseRead() {
 	if d.closed && d.readers == 0 {
 		d.closeResultLocked()
 	}
+}
+
+// cloneEditedTree takes a read lease while it clones and edits the tree. This
+// makes Close wait until the clone is complete and serializes the operation
+// with every tree reader.
+func (d *ParsedDocument) cloneEditedTree(edits []tree_sitter.InputEdit) (*tree_sitter.Tree, error) {
+	if d == nil {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	d.mu.Lock()
+	if d.closed || d.result == nil || d.result.Tree == nil {
+		d.mu.Unlock()
+		return nil, ErrIncrementalParseUnavailable
+	}
+	d.readers++
+	result := d.result
+	d.mu.Unlock()
+
+	d.treeMu.Lock()
+	clone := result.Tree.Clone()
+	for index := range edits {
+		clone.Edit(&edits[index])
+	}
+	d.treeMu.Unlock()
+	d.releaseRead()
+	if clone == nil {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	return clone, nil
 }
 
 // Close retires the document. It is safe to call more than once and never
