@@ -301,7 +301,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
-	s.semanticTokens.invalidate(doc)
+	s.semanticTokens.invalidateWorkspace()
 	s.updateWorkspaceSymbolOverlay(doc)
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
@@ -331,7 +331,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		s.logger.Printf("ignored textDocument/didChange for %q version=%d", uri, params.TextDocument.Version)
 		return nil
 	}
-	s.semanticTokens.invalidate(doc)
+	s.semanticTokens.invalidateWorkspace()
 	s.updateWorkspaceSymbolOverlay(doc)
 	s.scheduleDiagnostics(ctx, doc)
 	return nil
@@ -343,8 +343,8 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
 	s.docs.close(uri)
+	s.semanticTokens.invalidateWorkspace()
 	if path, err := fileURIToPath(uri); err == nil {
-		s.semanticTokens.invalidatePath(path)
 		if err := s.symbols.clearOverlay(path); err != nil {
 			s.logger.Printf("workspace symbol index close refresh failed for %q: %v", path, err)
 		}
@@ -364,12 +364,12 @@ func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChan
 		}
 		for _, affected := range paths {
 			s.docs.invalidateDisk(affected)
-			s.semanticTokens.invalidatePath(affected)
 			if err := s.symbols.updatePath(affected); err != nil {
 				s.logger.Printf("workspace symbol index watcher update failed for %q: %v", affected, err)
 			}
 		}
 	}
+	s.semanticTokens.invalidateWorkspace()
 	return nil
 }
 

@@ -39,7 +39,8 @@ language server entry point.
 - Advertise incremental document synchronization and apply ranged changes in
   client order using LSP UTF-16 positions. Retain full-document replacements as
   a compatibility fallback, and replace only the changed document's immutable
-  analysis snapshot.
+  analysis snapshot. Refresh semantic tokens when the open workspace changes,
+  because their classification can depend on project symbols from other files.
 - Load a curated built-in database for practical Excel, MSForms, Scripting,
   ADODB, VBIDE, Office, and VBA constant/type metadata.
 

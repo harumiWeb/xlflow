@@ -139,6 +139,13 @@ func (c *semanticTokenCache) invalidateAll() {
 	c.mu.Unlock()
 }
 
+// invalidateWorkspace supersedes token results that may depend on the set of
+// open documents and their project symbols. Document snapshots themselves stay
+// scoped to the changed document.
+func (c *semanticTokenCache) invalidateWorkspace() {
+	c.invalidateAll()
+}
+
 // invalidate retires semantic-token state for one document without discarding
 // cache entries or in-flight requests for other documents.
 func (c *semanticTokenCache) invalidate(doc intel.Document) {
@@ -151,10 +158,6 @@ func (c *semanticTokenCache) invalidate(doc intel.Document) {
 	delete(c.signatures, identity)
 	delete(c.entries, identity)
 	c.mu.Unlock()
-}
-
-func (c *semanticTokenCache) invalidatePath(path string) {
-	c.invalidate(intel.Document{Path: path})
 }
 
 func cloneSemanticTokenData(data []protocol.UInteger) []protocol.UInteger {
