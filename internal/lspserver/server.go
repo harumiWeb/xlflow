@@ -767,10 +767,11 @@ func (s *Server) semanticTokenResult(uri string) (cachedSemanticTokens, intel.Do
 }
 
 func semanticTokensResponse(result cachedSemanticTokens) *protocol.SemanticTokens {
-	return &protocol.SemanticTokens{
-		ResultID: &result.resultID,
-		Data:     cloneSemanticTokenData(result.data),
+	response := &protocol.SemanticTokens{Data: cloneSemanticTokenData(result.data)}
+	if result.resultID != "" {
+		response.ResultID = &result.resultID
 	}
+	return response
 }
 
 func semanticTokenDeltaEdits(previous, current []protocol.UInteger) []protocol.SemanticTokensEdit {

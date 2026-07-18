@@ -170,7 +170,11 @@ func TestSemanticTokenHistoryIsBoundedAndClearedOnClose(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	identity := documentSymbolKey(intel.Document{URI: uri, Path: filepath.FromSlash(strings.TrimPrefix(uri, "file:///"))})
+	path, err := fileURIToPath(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := documentSymbolKey(intel.Document{URI: uri, Path: path})
 	s.semanticTokens.mu.Lock()
 	historyCount := len(s.semanticTokens.histories[identity])
 	s.semanticTokens.mu.Unlock()

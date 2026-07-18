@@ -40,25 +40,27 @@ type semanticTokenCall struct {
 }
 
 type semanticTokenCache struct {
-	mu           sync.Mutex
-	generation   uint64
-	nextResultID uint64
-	revisions    map[string]uint64
-	signatures   map[string]semanticTokenSignature
-	entries      map[string]cachedSemanticTokens
-	histories    map[string][]cachedSemanticTokens
-	inflight     map[string]*semanticTokenCall
+	mu             sync.Mutex
+	generation     uint64
+	nextResultID   uint64
+	revisions      map[string]uint64
+	signatures     map[string]semanticTokenSignature
+	entries        map[string]cachedSemanticTokens
+	histories      map[string][]cachedSemanticTokens
+	openIdentities map[string]struct{}
+	inflight       map[string]*semanticTokenCall
 }
 
 var errSemanticTokensSuperseded = errors.New("semantic token generation superseded")
 
 func newSemanticTokenCache() *semanticTokenCache {
 	return &semanticTokenCache{
-		signatures: make(map[string]semanticTokenSignature),
-		entries:    make(map[string]cachedSemanticTokens),
-		histories:  make(map[string][]cachedSemanticTokens),
-		inflight:   make(map[string]*semanticTokenCall),
-		revisions:  make(map[string]uint64),
+		signatures:     make(map[string]semanticTokenSignature),
+		entries:        make(map[string]cachedSemanticTokens),
+		histories:      make(map[string][]cachedSemanticTokens),
+		openIdentities: make(map[string]struct{}),
+		inflight:       make(map[string]*semanticTokenCall),
+		revisions:      make(map[string]uint64),
 	}
 }
 
@@ -128,7 +130,9 @@ func (c *semanticTokenCache) get(
 			data:       cloneSemanticTokenData(cloned),
 		}
 		c.entries[identity] = entry
-		c.appendHistoryLocked(identity, entry)
+		if _, open := c.openIdentities[identity]; open {
+			c.appendHistoryLocked(identity, entry)
+		}
 		call.result = cloneCachedSemanticTokens(entry)
 	} else if resultErr == nil {
 		resultErr = errSemanticTokensSuperseded
@@ -177,15 +181,27 @@ func (c *semanticTokenCache) open(doc intel.Document) {
 		return
 	}
 	c.mu.Lock()
-	c.revisions[identity]++
-	delete(c.signatures, identity)
-	delete(c.entries, identity)
-	delete(c.histories, identity)
+	c.resetDocumentLocked(identity)
+	c.openIdentities[identity] = struct{}{}
 	c.mu.Unlock()
 }
 
 func (c *semanticTokenCache) close(doc intel.Document) {
-	c.open(doc)
+	identity := documentSymbolKey(doc)
+	if identity == "" {
+		return
+	}
+	c.mu.Lock()
+	c.resetDocumentLocked(identity)
+	delete(c.openIdentities, identity)
+	c.mu.Unlock()
+}
+
+func (c *semanticTokenCache) resetDocumentLocked(identity string) {
+	c.revisions[identity]++
+	delete(c.signatures, identity)
+	delete(c.entries, identity)
+	delete(c.histories, identity)
 }
 
 func (c *semanticTokenCache) invalidateAll() {

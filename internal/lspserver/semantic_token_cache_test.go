@@ -173,6 +173,43 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 	}
 }
 
+func TestSemanticTokenCacheRetainsHistoryOnlyForOpenDocuments(t *testing.T) {
+	cache := newSemanticTokenCache()
+	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
+	load := func() ([]protocol.UInteger, error) { return []protocol.UInteger{0, 0, 6, 12, 0}, nil }
+	identity := documentSymbolKey(doc)
+
+	if _, _, err := cache.get(doc, cache.begin(), load); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	unopenedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if unopenedHistory != 0 {
+		t.Fatalf("unopened history count = %d, want 0", unopenedHistory)
+	}
+
+	cache.open(doc)
+	if _, _, err := cache.get(doc, cache.begin(), load); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	openedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if openedHistory != 1 {
+		t.Fatalf("open history count = %d, want 1", openedHistory)
+	}
+
+	cache.close(doc)
+	cache.mu.Lock()
+	_, stillOpen := cache.openIdentities[identity]
+	closedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if stillOpen || closedHistory != 0 {
+		t.Fatalf("closed cache state = (open=%v, history=%d), want (false, 0)", stillOpen, closedHistory)
+	}
+}
+
 func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
