@@ -1135,8 +1135,9 @@ func TestInitializeAdvertisesSemanticTokensProvider(t *testing.T) {
 	if !ok {
 		t.Fatalf("semanticTokensProvider = %T, want *SemanticTokensOptions", init.Capabilities.SemanticTokensProvider)
 	}
-	if provider.Full != true {
-		t.Fatalf("semantic full provider = %+v, want true", provider.Full)
+	full, ok := provider.Full.(protocol.SemanticDelta)
+	if !ok || full.Delta == nil || !*full.Delta {
+		t.Fatalf("semantic full provider = %+v, want delta support", provider.Full)
 	}
 	if provider.Range != nil {
 		t.Fatalf("semantic range provider = %+v, want nil", provider.Range)
