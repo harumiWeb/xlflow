@@ -3,11 +3,13 @@ package lint
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
 
 func TestLinterFindsMVPRules(t *testing.T) {
@@ -1447,6 +1449,29 @@ func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
 	assertIssue(t, issues, "VB002", 2)
 	assertIssue(t, issues, "VB005", 3)
 	assertIssue(t, issues, "VB020", 3)
+}
+
+func TestLinterLintParsedMatchesLintSource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nPublic Sub Run()\n    Dim value\n    Range(\"A1\").Select\nEnd Sub\n")
+	linter := Linter{RootDir: dir, Config: config.Default()}
+	want, err := linter.LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	got, err := linter.LintParsed(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LintParsed issues = %+v, want %+v", got, want)
+	}
 }
 
 func TestLinterLintSourceAppliesInlineSuppressions(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 )
 
@@ -129,5 +130,32 @@ func TestAnalysisSnapshotCachesDeterministicSymbolErrorAndRetires(t *testing.T) 
 	snapshot.Retire()
 	if !snapshot.Retired() {
 		t.Fatal("snapshot was not retired")
+	}
+}
+
+func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSemanticTokens(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{
+		URI:        "file:///Main.bas",
+		Path:       "Main.bas",
+		ModuleKind: "standard",
+		Version:    1,
+		Source:     "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n  Dim found As Range\n  Set found = Range(\"A1\").Find(What:=\"x\")\n  Debug.Print found.Value\nEnd Sub\n",
+	})
+	var parses atomic.Int32
+	snapshot.parseDocument = func(path string, source []byte) (*vbaast.ParsedDocument, error) {
+		parses.Add(1)
+		return vbaast.ParseDocument(path, source)
+	}
+	doc := snapshot.Document()
+	analyzer := newTestAnalyzer(t)
+	_ = analyzer.Diagnostics(doc)
+	if _, err := analyzer.DocumentSymbols(doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := analyzer.SemanticTokens(doc, []Document{doc}); err != nil {
+		t.Fatal(err)
+	}
+	if parses.Load() != 1 || snapshot.ParseCount() != 1 {
+		t.Fatalf("parsed documents = factory:%d snapshot:%d, want 1", parses.Load(), snapshot.ParseCount())
 	}
 }

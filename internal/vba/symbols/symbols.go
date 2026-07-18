@@ -188,6 +188,21 @@ func Inspect(opts Options) (*Result, error) {
 }
 
 func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
+	path := opts.Path
+	if strings.TrimSpace(path) == "" {
+		path = "Untitled.bas"
+	}
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		return FileResult{}, err
+	}
+	defer doc.Close()
+	return InspectParsed(opts, doc)
+}
+
+// InspectParsed extracts symbols from a caller-owned parsed VBA document. It
+// does not close doc or retain tree-sitter nodes after its read callback.
+func InspectParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
 	rootDir := opts.RootDir
 	if rootDir == "" {
 		rootDir = "."
@@ -196,50 +211,48 @@ func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
 	if err != nil {
 		return FileResult{}, err
 	}
-	path := opts.Path
-	if strings.TrimSpace(path) == "" {
-		path = "Untitled.bas"
-	}
-	moduleKind := opts.ModuleKind
-	if moduleKind == "" {
-		moduleKind = kindForPath(rootDir, config.Config{}, path)
-	}
-	parser, err := vbaast.NewParser()
-	if err != nil {
-		return FileResult{}, err
-	}
-	defer parser.Close()
-	parsed := parser.Parse(path, source)
-	defer parsed.Close()
-	rel := displayPath(rootDir, path)
-	if !filepath.IsAbs(path) {
-		rel = filepath.ToSlash(path)
-	}
-	moduleName, attrs := moduleMetadata(path, parsed.Source)
-	ext := extractor{
-		opts: Options{
-			RootDir:        rootDir,
-			IncludePrivate: opts.IncludePrivate,
-			IncludeLabels:  opts.IncludeLabels,
-		},
-		rootDir:     rootDir,
-		source:      parsed.Source,
-		sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
-		file:        rel,
-		moduleName:  moduleName,
-		moduleKind:  moduleKind,
-		attrs:       attrs,
-	}
-	return FileResult{
-		Path:       rel,
-		ModuleName: moduleName,
-		ModuleKind: moduleKind,
-		Parse: ParseSummary{
-			HasError:   parsed.HasError,
-			HasMissing: parsed.HasMissing,
-		},
-		Symbols: ext.extract(parsed.Root),
-	}, nil
+	var result FileResult
+	err = doc.Read(func(view vbaast.ParsedView) error {
+		path := opts.Path
+		if strings.TrimSpace(path) == "" {
+			path = view.Path
+		}
+		if strings.TrimSpace(path) == "" {
+			path = "Untitled.bas"
+		}
+		moduleKind := opts.ModuleKind
+		if moduleKind == "" {
+			moduleKind = kindForPath(rootDir, config.Config{}, path)
+		}
+		rel := displayPath(rootDir, path)
+		if !filepath.IsAbs(path) {
+			rel = filepath.ToSlash(path)
+		}
+		moduleName, attrs := moduleMetadata(path, view.Source)
+		ext := extractor{
+			opts: Options{
+				RootDir:        rootDir,
+				IncludePrivate: opts.IncludePrivate,
+				IncludeLabels:  opts.IncludeLabels,
+			},
+			rootDir:     rootDir,
+			source:      view.Source,
+			sourceLines: doccomments.NormalizedLines(string(view.Source)),
+			file:        rel,
+			moduleName:  moduleName,
+			moduleKind:  moduleKind,
+			attrs:       attrs,
+		}
+		result = FileResult{
+			Path:       rel,
+			ModuleName: moduleName,
+			ModuleKind: moduleKind,
+			Parse:      ParseSummary{HasError: view.HasError, HasMissing: view.HasMissing},
+			Symbols:    ext.extract(view.Root),
+		}
+		return nil
+	})
+	return result, err
 }
 
 func discoverFiles(opts Options) ([]fileCandidate, error) {

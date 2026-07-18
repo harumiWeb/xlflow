@@ -164,7 +164,12 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintSource(doc.Path, []byte(doc.Source))
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
+	}
+	defer closeParsed()
+	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintParsed(parsed)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -184,7 +189,7 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	findings, err := analyze.SourceRealtimeFindings(a.RootDir, doc.Path, a.Config, []byte(doc.Source))
+	findings, err := analyze.SourceRealtimeFindingsParsed(a.RootDir, a.Config, parsed)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -222,7 +227,7 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.documentationDiagnostics(doc)...)
+	out = append(out, a.documentationDiagnosticsParsed(doc, parsed)...)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -230,8 +235,17 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 }
 
 func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return nil, err
+	}
+	defer closeParsed()
+	return a.documentSymbolsParsed(doc, parsed)
+}
+
+func (a Analyzer) documentSymbolsParsed(doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
 	load := func() ([]Symbol, error) {
-		return a.inspectDocumentSourceSymbols(doc)
+		return a.inspectDocumentSourceSymbols(doc, parsed)
 	}
 	var sourceSymbols []Symbol
 	var err error
@@ -252,14 +266,14 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	return out, nil
 }
 
-func (a Analyzer) inspectDocumentSourceSymbols(doc Document) ([]Symbol, error) {
-	file, err := symbols.InspectSource(symbols.SourceOptions{
+func (a Analyzer) inspectDocumentSourceSymbols(doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
+	file, err := symbols.InspectParsed(symbols.SourceOptions{
 		RootDir:        a.RootDir,
 		Path:           doc.Path,
 		ModuleKind:     doc.ModuleKind,
 		IncludePrivate: true,
 		IncludeLabels:  true,
-	}, []byte(doc.Source))
+	}, parsed)
 	if err != nil {
 		return nil, err
 	}
@@ -1268,8 +1282,8 @@ func (line logicalCallAnalysisLine) positionForOffset(offset int) (int, int) {
 	return segment.Line, utf16Len(segment.Text[:column])
 }
 
-func (a Analyzer) documentationDiagnostics(doc Document) []Diagnostic {
-	syms, err := a.DocumentSymbols(doc)
+func (a Analyzer) documentationDiagnosticsParsed(doc Document, parsed *ast.ParsedDocument) []Diagnostic {
+	syms, err := a.documentSymbolsParsed(doc, parsed)
 	if err != nil {
 		return nil
 	}

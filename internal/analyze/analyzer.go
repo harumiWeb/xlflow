@@ -145,6 +145,7 @@ type parsedFile struct {
 	Path   string
 	Lines  []string
 	Module string
+	Source []byte
 	Root   *tree_sitter.Node
 	Result *vbaast.ParseResult
 }
@@ -212,6 +213,7 @@ func (a Analyzer) RunResult() (Result, error) {
 			Path:   file,
 			Lines:  normalizedSourceLines(string(parsed.Source)),
 			Module: strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
+			Source: parsed.Source,
 			Root:   parsed.Root,
 			Result: parsed,
 		})
@@ -245,33 +247,40 @@ func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.C
 	if !cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		return nil, nil
 	}
-	parser, err := vbaast.NewParser()
+	doc, err := vbaast.ParseDocument(path, source)
 	if err != nil {
 		return nil, err
 	}
-	defer parser.Close()
-	parsed := parser.Parse(path, source)
-	defer parsed.Close()
-	file := parsedFile{
-		Path:   path,
-		Lines:  normalizedSourceLines(string(source)),
-		Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-		Root:   parsed.Root,
-		Result: parsed,
-	}
-	analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+	defer doc.Close()
+	return SourceNonShortCircuitObjectGuardFindingsParsed(rootDir, cfg, doc)
+}
+
+// SourceNonShortCircuitObjectGuardFindingsParsed analyzes a caller-owned
+// parsed VBA document without closing it or retaining tree-sitter nodes.
+func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
 	var findings []Finding
-	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
-	for _, proc := range procedures {
-		findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, proc)...)
-	}
-	if len(procedures) == 0 {
-		findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, sourceProcedure{StartLine: 1, EndLine: len(file.Lines)})...)
-	}
-	sortFindings(findings)
-	directives, _ := suppression.DirectivesForSource(rootDir, path, string(source))
-	findings, _ = applyInlineSuppressions(findings, directives)
-	return findings, nil
+	err := doc.Read(func(view vbaast.ParsedView) error {
+		file := parsedFile{
+			Path:   view.Path,
+			Lines:  normalizedSourceLines(string(view.Source)),
+			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			Source: view.Source,
+			Root:   view.Root,
+		}
+		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+		procedures := sourceProceduresFromAST(file.Root, file.Source)
+		for _, proc := range procedures {
+			findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, proc)...)
+		}
+		if len(procedures) == 0 {
+			findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, sourceProcedure{StartLine: 1, EndLine: len(file.Lines)})...)
+		}
+		sortFindings(findings)
+		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
+		findings, _ = applyInlineSuppressions(findings, directives)
+		return nil
+	})
+	return findings, err
 }
 
 func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
@@ -282,34 +291,48 @@ func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []by
 		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		return nil, nil
 	}
-	parser, err := vbaast.NewParser()
+	doc, err := vbaast.ParseDocument(path, source)
 	if err != nil {
 		return nil, err
 	}
-	defer parser.Close()
-	parsed := parser.Parse(path, source)
-	defer parsed.Close()
-	file := parsedFile{
-		Path:   path,
-		Lines:  normalizedSourceLines(string(source)),
-		Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-		Root:   parsed.Root,
-		Result: parsed,
-	}
-	analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
-	moduleDecls := moduleDeclarations(file.Lines, procedures)
-	if len(procedures) == 0 {
-		procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
+	defer doc.Close()
+	return SourceRealtimeFindingsParsed(rootDir, cfg, doc)
+}
+
+// SourceRealtimeFindingsParsed runs real-time source analysis against a
+// caller-owned parsed VBA document. It does not close doc or retain nodes.
+func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
+	if !cfg.Analyze.DetectRangeFindNothingCheck &&
+		!cfg.Analyze.DetectErrorHandlerFallthrough &&
+		!cfg.Analyze.DetectRedimPreserveDimension &&
+		!cfg.Analyze.DetectObjectArrayComparison &&
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		return nil, nil
 	}
 	var findings []Finding
-	for _, proc := range procedures {
-		findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
-	}
-	sortFindings(findings)
-	directives, _ := suppression.DirectivesForSource(rootDir, path, string(source))
-	findings, _ = applyInlineSuppressions(findings, directives)
-	return findings, nil
+	err := doc.Read(func(view vbaast.ParsedView) error {
+		file := parsedFile{
+			Path:   view.Path,
+			Lines:  normalizedSourceLines(string(view.Source)),
+			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			Source: view.Source,
+			Root:   view.Root,
+		}
+		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+		procedures := sourceProceduresFromAST(file.Root, file.Source)
+		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		if len(procedures) == 0 {
+			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
+		}
+		for _, proc := range procedures {
+			findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
+		}
+		sortFindings(findings)
+		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
+		findings, _ = applyInlineSuppressions(findings, directives)
+		return nil
+	})
+	return findings, err
 }
 
 func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
@@ -414,7 +437,7 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx := analysisContext{functionReturns: map[string]string{}, procedures: map[string]procedureSignature{}}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromAST(file.Root, file.Result.Source) {
+		for _, proc := range sourceProceduresFromAST(file.Root, file.Source) {
 			if isObjectType(proc.ReturnType) {
 				ctx.functionReturns[strings.ToLower(proc.Name)] = proc.ReturnType
 			}
@@ -432,7 +455,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
-	procedures := sourceProceduresFromAST(file.Root, file.Result.Source)
+	procedures := sourceProceduresFromAST(file.Root, file.Source)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
 	appStateProcedures := applicationStateProcedureSummaries(file.Lines, procedures)
 	for _, proc := range procedures {
@@ -1222,11 +1245,11 @@ func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourc
 		}
 		r := vbaast.NodeRange(node)
 		if r.StartLine >= proc.StartLine && (proc.EndLine == 0 || r.StartLine <= proc.EndLine) &&
-			isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Result.Source) {
+			isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Source) {
 			guards := map[string]string{}
 			accesses := map[string]string{}
-			collectNothingGuards(node, file.Result.Source, guards)
-			collectDirectMemberAccesses(node, file.Result.Source, accesses)
+			collectNothingGuards(node, file.Source, guards)
+			collectDirectMemberAccesses(node, file.Source, accesses)
 			for key, name := range guards {
 				if _, ok := accesses[key]; !ok {
 					continue
