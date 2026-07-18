@@ -423,14 +423,14 @@ internal static class VbaSourceHelper
         }
 
         var content = File.ReadAllText(sourcePath, Encoding.UTF8);
-        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(content, out content, out var issue))
-        {
-            throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{issue!.Line}: {issue.Message}");
-        }
         if (!string.IsNullOrWhiteSpace(rootDir))
         {
             var desiredAnnotation = BuildFolderAnnotation(GetRelativePathSegments(rootDir, sourcePath));
             content = UpdateFolderAnnotationText(content, folderAnnotationMode, desiredAnnotation);
+        }
+        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(content, out content, out var issue))
+        {
+            throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{issue!.Line}: {issue.Message}");
         }
 
         var encoding = GetVbaInteropEncoding();

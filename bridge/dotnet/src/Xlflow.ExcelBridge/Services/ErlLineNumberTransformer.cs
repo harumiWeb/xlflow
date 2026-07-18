@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace Xlflow.ExcelBridge.Services;
 
-// This transformer deliberately preserves every source line and its contents.
-// Erl values are therefore physical line numbers in the tracked source file.
+// This transformer deliberately preserves every input line and its contents.
+// Erl values are therefore physical line numbers in the prepared import source.
 internal static class ErlLineNumberTransformer
 {
     private static readonly Regex NumberPrefix = new(@"^\s*(\d+)\s+(.+)$", RegexOptions.Compiled);

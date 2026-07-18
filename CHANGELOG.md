@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added opt-in `[vba.line_numbers].enabled` instrumentation for meaningful VBA `Erl` diagnostics: `push` injects fixed-width, space-padded physical line numbers only into temporary import copies, while `pull` strips recognized generated labels to keep tracked source unnumbered. Unsafe existing numeric labels and numeric `GoTo` / `GoSub` / `Resume` targets stop the operation without transformation; no new CLI flags were added.
+- Added LSP semantic-token delta responses with stable result IDs, a bounded per-open-document history, and automatic full-response fallback when a delta base is unavailable or not smaller on the wire.
 - Changed VBA LSP document synchronization to incremental UTF-16 ranged edits while retaining full-document replacements for client compatibility; document-version snapshots invalidate only the changed document, while semantic-token caches refresh when workspace symbols change.
 - Added tree-sitter incremental parsing for open VBA documents. New immutable snapshots parse against an edited clone of the prior tree, preserve in-flight readers of the old tree, safely retain the last valid snapshot for unreconcilable changes, and log incremental/full-fallback outcomes with `--performance-log`.
 - Added immutable, document-version-scoped LSP analysis snapshots that share normalized source lines, procedure ranges, source symbols, and semantic-token metadata across requests while preserving open-buffer and UserForm freshness.

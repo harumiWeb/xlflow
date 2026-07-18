@@ -16,6 +16,30 @@ public sealed class ExcelPullServiceTests
     }
 
     [Fact]
+    public void ClearExistingSourceFiles_DeletesStaleSidecarCode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-pull-sidecar-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var formsDir = Path.Combine(root, "forms");
+            var staleCodePath = Path.Combine(formsDir, "code", "CustomerForm.bas");
+            Directory.CreateDirectory(Path.GetDirectoryName(staleCodePath)!);
+            File.WriteAllText(staleCodePath, "Private Sub UserForm_Initialize()\r\nEnd Sub\r\n");
+
+            ExcelPullService.ClearExistingSourceFiles("", "", formsDir, "", "sidecar");
+
+            Assert.False(File.Exists(staleCodePath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
     public void Execute_ReturnsBridgeFileNotOpenableForNonExcelFile()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), "xlflow-test-" + Guid.NewGuid().ToString("N"));

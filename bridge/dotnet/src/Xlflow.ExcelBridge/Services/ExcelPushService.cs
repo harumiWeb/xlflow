@@ -948,16 +948,16 @@ public sealed class ExcelPushService : IPushService
                     }
 
                     var sourceContent = File.ReadAllText(sourcePath, Encoding.UTF8);
-                    if (args.LineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(sourceContent, out sourceContent, out var lineNumberIssue))
-                    {
-                        throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
-                    }
                     sourceContent = VbaSourceHelper.NormalizeDocumentModuleContent(sourceContent);
 
                     if (!string.IsNullOrWhiteSpace(args.WorkbookDir))
                     {
                         var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(args.WorkbookDir, sourcePath);
                         sourceContent = VbaSourceHelper.UpdateFolderAnnotationText(sourceContent, args.FolderAnnotation, desiredAnnotation);
+                    }
+                    if (args.LineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(sourceContent, out sourceContent, out var lineNumberIssue))
+                    {
+                        throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
                     }
 
                     object? codeModule = null;

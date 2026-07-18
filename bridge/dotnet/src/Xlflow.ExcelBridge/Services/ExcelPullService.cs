@@ -319,10 +319,6 @@ public sealed class ExcelPullService : IPullService
                     if (type == ComponentTypeDocument)
                     {
                         content = VbaSourceHelper.NormalizeDocumentModuleContent(content);
-                        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(content, out content, out var lineNumberIssue, excelExported: true))
-                        {
-                            throw new InvalidOperationException($"vba_line_number_safety_failed: {targetFile}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
-                        }
                         if (!string.IsNullOrWhiteSpace(workbookDir))
                         {
                             var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(workbookDir, targetFile);
@@ -331,15 +327,7 @@ public sealed class ExcelPullService : IPullService
                     }
                     else if (type == ComponentTypeForm)
                     {
-                        if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(content, out content, out var lineNumberIssue, excelExported: true))
-                        {
-                            throw new InvalidOperationException($"vba_line_number_safety_failed: {targetFile}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
-                        }
                         content = NormalizeUserFormArtifact(content, component);
-                    }
-                    else if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(content, out content, out var lineNumberIssue, excelExported: true))
-                    {
-                        throw new InvalidOperationException($"vba_line_number_safety_failed: {targetFile}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
                     }
 
                     if (type != ComponentTypeDocument && folderAnnotation != "ignore")
@@ -350,6 +338,11 @@ public sealed class ExcelPullService : IPullService
                             var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(rootDir, targetFile);
                             content = VbaSourceHelper.UpdateFolderAnnotationText(content, folderAnnotation, desiredAnnotation);
                         }
+                    }
+
+                    if (lineNumbersEnabled && !ErlLineNumberTransformer.TryRemove(content, out content, out var lineNumberIssue, excelExported: true))
+                    {
+                        throw new InvalidOperationException($"vba_line_number_safety_failed: {targetFile}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
                     }
 
                     File.WriteAllText(targetFile, content, new UTF8Encoding(false));
@@ -498,15 +491,11 @@ public sealed class ExcelPullService : IPullService
         return ext is ".bas" or ".cls" or ".frm";
     }
 
-    private static void ClearExistingSourceFiles(string modulesDir, string classesDir, string formsDir, string workbookDir, string? codeSource)
+    internal static void ClearExistingSourceFiles(string modulesDir, string classesDir, string formsDir, string workbookDir, string? codeSource)
     {
         var files = VbaSourceHelper.DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource);
         foreach (var file in files)
         {
-            if (file.Kind == "form_code")
-            {
-                continue;
-            }
             try { File.Delete(file.FullPath); }
             catch (IOException) { /* best-effort */ }
         }

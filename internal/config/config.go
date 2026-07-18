@@ -52,9 +52,9 @@ type SourceConfig struct {
 }
 
 type VBAConfig struct {
-	Folders                 bool   `toml:"folders"`
-	FolderAnnotation        string `toml:"folder_annotation"`
-	DefaultComponentFolders bool   `toml:"default_component_folders"`
+	Folders                 bool                 `toml:"folders"`
+	FolderAnnotation        string               `toml:"folder_annotation"`
+	DefaultComponentFolders bool                 `toml:"default_component_folders"`
 	LineNumbers             VBALineNumbersConfig `toml:"line_numbers"`
 }
 

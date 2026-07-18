@@ -34,12 +34,12 @@ func TestSemanticTokenCacheUsesVersionContentAndFullIdentity(t *testing.T) {
 	}
 
 	first, hit, err := cache.get(doc, cache.begin(), load)
-	if err != nil || hit || len(first) != 5 {
+	if err != nil || hit || len(first.data) != 5 || first.resultID == "" {
 		t.Fatalf("first get = (%v, hit=%v, err=%v), want miss", first, hit, err)
 	}
-	first[0] = 99
+	first.data[0] = 99
 	second, hit, err := cache.get(doc, cache.begin(), load)
-	if err != nil || !hit || loads.Load() != 1 || second[0] != 0 {
+	if err != nil || !hit || loads.Load() != 1 || second.data[0] != 0 || second.resultID != first.resultID {
 		t.Fatalf("second get = (%v, hit=%v, err=%v, loads=%d), want isolated hit", second, hit, err, loads.Load())
 	}
 
@@ -92,8 +92,8 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 	for range requests {
 		go func() {
 			<-start
-			data, _, err := cache.get(doc, generation, load)
-			if err == nil && len(data) != 5 {
+			result, _, err := cache.get(doc, generation, load)
+			if err == nil && len(result.data) != 5 {
 				err = errors.New("unexpected token data")
 			}
 			results <- err
@@ -168,8 +168,45 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 		newerLoads.Add(1)
 		return []protocol.UInteger{0, 0, 2, 12, 0}, nil
 	})
-	if err != nil || hit || fresh[2] != 2 || newerLoads.Load() != 1 {
+	if err != nil || hit || fresh.data[2] != 2 || newerLoads.Load() != 1 {
 		t.Fatalf("fresh get = (%v, hit=%v, err=%v, loads=%d), want one uncached latest load", fresh, hit, err, newerLoads.Load())
+	}
+}
+
+func TestSemanticTokenCacheRetainsHistoryOnlyForOpenDocuments(t *testing.T) {
+	cache := newSemanticTokenCache()
+	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
+	load := func() ([]protocol.UInteger, error) { return []protocol.UInteger{0, 0, 6, 12, 0}, nil }
+	identity := documentSymbolKey(doc)
+
+	if _, _, err := cache.get(doc, cache.begin(), load); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	unopenedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if unopenedHistory != 0 {
+		t.Fatalf("unopened history count = %d, want 0", unopenedHistory)
+	}
+
+	cache.open(doc)
+	if _, _, err := cache.get(doc, cache.begin(), load); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	openedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if openedHistory != 1 {
+		t.Fatalf("open history count = %d, want 1", openedHistory)
+	}
+
+	cache.close(doc)
+	cache.mu.Lock()
+	_, stillOpen := cache.openIdentities[identity]
+	closedHistory := len(cache.histories[identity])
+	cache.mu.Unlock()
+	if stillOpen || closedHistory != 0 {
+		t.Fatalf("closed cache state = (open=%v, history=%d), want (false, 0)", stillOpen, closedHistory)
 	}
 }
 
@@ -340,5 +377,11 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 	}
 	if generations.Load() != 2 || maximum.Load() != 1 {
 		t.Fatalf("generation stats = calls:%d max_active:%d, want 2 calls and one active", generations.Load(), maximum.Load())
+	}
+	s.semanticTokens.mu.Lock()
+	history := append([]cachedSemanticTokens(nil), s.semanticTokens.histories[identity]...)
+	s.semanticTokens.mu.Unlock()
+	if len(history) != 1 || history[0].signature.version != 2 {
+		t.Fatalf("cached history after stale generation = %+v, want only version 2", history)
 	}
 }

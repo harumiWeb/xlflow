@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -153,27 +154,28 @@ func New(opts Options) (*Server, func(), error) {
 		return time.AfterFunc(delay, callback)
 	}
 	s.handler = protocol.Handler{
-		Initialize:                     s.initialize,
-		Initialized:                    s.initialized,
-		Shutdown:                       s.shutdown,
-		Exit:                           s.exit,
-		TextDocumentDidOpen:            s.didOpen,
-		TextDocumentDidChange:          s.didChange,
-		TextDocumentDidClose:           s.didClose,
-		TextDocumentDocumentSymbol:     s.documentSymbol,
-		WorkspaceSymbol:                s.workspaceSymbol,
-		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
-		TextDocumentDefinition:         s.definition,
-		TextDocumentReferences:         s.references,
-		TextDocumentPrepareRename:      s.prepareRename,
-		TextDocumentRename:             s.rename,
-		TextDocumentHover:              s.hover,
-		TextDocumentCompletion:         s.completion,
-		TextDocumentCodeAction:         s.codeAction,
-		TextDocumentSignatureHelp:      s.signatureHelp,
-		TextDocumentFormatting:         s.formatting,
-		TextDocumentSemanticTokensFull: s.semanticTokensFull,
-		TextDocumentCodeLens:           s.codeLens,
+		Initialize:                          s.initialize,
+		Initialized:                         s.initialized,
+		Shutdown:                            s.shutdown,
+		Exit:                                s.exit,
+		TextDocumentDidOpen:                 s.didOpen,
+		TextDocumentDidChange:               s.didChange,
+		TextDocumentDidClose:                s.didClose,
+		TextDocumentDocumentSymbol:          s.documentSymbol,
+		WorkspaceSymbol:                     s.workspaceSymbol,
+		WorkspaceDidChangeWatchedFiles:      s.didChangeWatchedFiles,
+		TextDocumentDefinition:              s.definition,
+		TextDocumentReferences:              s.references,
+		TextDocumentPrepareRename:           s.prepareRename,
+		TextDocumentRename:                  s.rename,
+		TextDocumentHover:                   s.hover,
+		TextDocumentCompletion:              s.completion,
+		TextDocumentCodeAction:              s.codeAction,
+		TextDocumentSignatureHelp:           s.signatureHelp,
+		TextDocumentFormatting:              s.formatting,
+		TextDocumentSemanticTokensFull:      s.semanticTokensFull,
+		TextDocumentSemanticTokensFullDelta: s.semanticTokensFullDelta,
+		TextDocumentCodeLens:                s.codeLens,
 	}
 	return s, func() {
 		s.stopDiagnostics()
@@ -231,7 +233,8 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 			TokenTypes:     intel.SemanticTokenTypes,
 			TokenModifiers: intel.SemanticTokenModifiers,
 		}
-		semantic.Full = true
+		delta := true
+		semantic.Full = protocol.SemanticDelta{Delta: &delta}
 		semantic.Range = nil
 	}
 	version := s.opts.Build.Version
@@ -301,6 +304,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
+	s.semanticTokens.open(doc)
 	s.semanticTokens.invalidateWorkspace()
 	s.updateWorkspaceSymbolOverlay(doc)
 	done := s.openDiagnostics(ctx, doc)
@@ -344,6 +348,9 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
+	if doc, err := s.docs.getOrRead(uri); err == nil {
+		s.semanticTokens.close(doc)
+	}
 	s.docs.close(uri)
 	s.semanticTokens.invalidateWorkspace()
 	if path, err := fileURIToPath(uri); err == nil {
@@ -694,16 +701,58 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 
 func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	measurement := s.startPerformanceURI("textDocument/semanticTokens/full", string(params.TextDocument.URI))
+	cacheStarted := time.Now()
+	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
+	measurement.setDocument(doc)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(result.data)/5, cacheStarted, nil)
+	response := semanticTokensResponse(result)
+	measurement.finish(len(result.data)/5, nil)
+	return response, nil
+}
+
+// semanticTokensFullDelta returns a full result when the client's base is not
+// retained or when the valid one-edit delta would cost at least as much on the
+// wire as the complete result.
+func (s *Server) semanticTokensFullDelta(_ *glsp.Context, params *protocol.SemanticTokensDeltaParams) (any, error) {
+	measurement := s.startPerformanceURI("textDocument/semanticTokens/full/delta", string(params.TextDocument.URI))
+	cacheStarted := time.Now()
+	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
+	measurement.setDocument(doc)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(result.data)/5, cacheStarted, nil)
+	full := semanticTokensResponse(result)
+	previous, known := s.semanticTokens.previous(doc, params.PreviousResultID)
+	if !known {
+		measurement.finish(len(result.data)/5, nil)
+		return full, nil
+	}
+	delta := &protocol.SemanticTokensDelta{
+		ResultId: &result.resultID,
+		Edits:    semanticTokenDeltaEdits(previous.data, result.data),
+	}
+	if semanticTokenResponseSize(delta) >= semanticTokenResponseSize(full) {
+		measurement.finish(len(result.data)/5, nil)
+		return full, nil
+	}
+	measurement.finish(len(result.data)/5, nil)
+	return delta, nil
+}
+
+func (s *Server) semanticTokenResult(uri string) (cachedSemanticTokens, intel.Document, bool, error) {
 	for {
 		generation := s.semanticTokens.begin()
-		doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
+		doc, err := s.docs.getOrRead(uri)
 		if err != nil {
-			measurement.finish(0, err)
-			return nil, err
+			return cachedSemanticTokens{}, intel.Document{}, false, err
 		}
-		measurement.setDocument(doc)
-		cacheStarted := time.Now()
-		data, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
+		result, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
 			tokens, err := s.semanticTokenGenerator(doc, s.docs.openDocuments())
 			if err != nil {
 				return nil, err
@@ -713,15 +762,44 @@ func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 		if errors.Is(err, errSemanticTokensSuperseded) {
 			continue
 		}
-		s.logDocumentCachePerformance("semanticTokens/cache", cacheStatus(hit), doc, len(data)/5, cacheStarted, err)
-		if err != nil {
-			measurement.finish(0, err)
-			return nil, err
-		}
-		result := &protocol.SemanticTokens{Data: data}
-		measurement.finish(len(data)/5, nil)
-		return result, nil
+		return result, doc, hit, err
 	}
+}
+
+func semanticTokensResponse(result cachedSemanticTokens) *protocol.SemanticTokens {
+	response := &protocol.SemanticTokens{Data: cloneSemanticTokenData(result.data)}
+	if result.resultID != "" {
+		response.ResultID = &result.resultID
+	}
+	return response
+}
+
+func semanticTokenDeltaEdits(previous, current []protocol.UInteger) []protocol.SemanticTokensEdit {
+	prefix := 0
+	for prefix < len(previous) && prefix < len(current) && previous[prefix] == current[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(previous)-prefix && suffix < len(current)-prefix &&
+		previous[len(previous)-1-suffix] == current[len(current)-1-suffix] {
+		suffix++
+	}
+	if prefix == len(previous) && prefix == len(current) {
+		return []protocol.SemanticTokensEdit{}
+	}
+	return []protocol.SemanticTokensEdit{{
+		Start:       protocol.UInteger(prefix),
+		DeleteCount: protocol.UInteger(len(previous) - prefix - suffix),
+		Data:        cloneSemanticTokenData(current[prefix : len(current)-suffix]),
+	}}
+}
+
+func semanticTokenResponseSize(response any) int {
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return int(^uint(0) >> 1)
+	}
+	return len(encoded)
 }
 
 func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {

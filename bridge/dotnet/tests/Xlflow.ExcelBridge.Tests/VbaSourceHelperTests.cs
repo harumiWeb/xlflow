@@ -120,6 +120,36 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void PrepareSourceForImport_NumbersAfterFolderAnnotationIsUpdated()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-line-number-annotation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var sourcePath = Path.Combine(root, "Nested", "Main.bas");
+            var destinationPath = Path.Combine(root, "import", "Main.bas");
+            var source = "Attribute VB_Name = \"Main\"\r\nPublic Sub Run()\r\n    Debug.Print \"ok\"\r\nEnd Sub\r\n";
+            Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+            File.WriteAllText(sourcePath, source);
+
+            VbaSourceHelper.PrepareSourceForImport(sourcePath, destinationPath, root, "update", lineNumbersEnabled: true);
+
+            var prepared = File.ReadAllText(destinationPath, VbaSourceHelper.GetVbaInteropEncoding());
+            Assert.True(ErlLineNumberTransformer.TryRemove(prepared, out var restored, out var issue));
+            Assert.Null(issue);
+            Assert.Equal(
+                VbaSourceHelper.UpdateFolderAnnotationText(source, "update", "Nested"),
+                restored);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
     public void Fingerprint_ChangesWhenErlInstrumentationIsToggled()
     {
         var root = Path.Combine(Path.GetTempPath(), "xlflow-fingerprint-" + Guid.NewGuid().ToString("N"));
@@ -140,7 +170,10 @@ public sealed class VbaSourceHelperTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
         }
     }
 }
