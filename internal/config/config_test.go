@@ -481,8 +481,11 @@ constant_name = " procedure_name "
 
 func TestLoadRejectsInvalidProcedureNameConstantConfig(t *testing.T) {
 	for name, constantName := range map[string]string{
-		"missing": "",
-		"invalid": "PROCEDURE NAME",
+		"missing":            "",
+		"invalid_character":  "PROCEDURE NAME",
+		"leading_underscore": "_PROCEDURE_NAME",
+		"combining_mark":     "PROCEDURE\u0301_NAME",
+		"too_long":           strings.Repeat("A", 256),
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -500,6 +503,21 @@ constant_name = "` + constantName + `"
 				t.Fatalf("expected constant-name validation error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestValidVBAIdentifier(t *testing.T) {
+	for name, valid := range map[string]bool{
+		"PROCEDURE_NAME":         true,
+		"手続き名":                   true,
+		strings.Repeat("A", 255): true,
+		"_PROCEDURE_NAME":        false,
+		"PROCEDURE\u0301_NAME":   false,
+		strings.Repeat("A", 256): false,
+	} {
+		if got := validVBAIdentifier(name); got != valid {
+			t.Errorf("validVBAIdentifier(%q) = %t, want %t", name, got, valid)
+		}
 	}
 }
 

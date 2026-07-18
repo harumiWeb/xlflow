@@ -427,18 +427,16 @@ func validate(cfg Config) error {
 }
 
 func validVBAIdentifier(name string) bool {
-	for i, r := range []rune(name) {
-		if i == 0 {
-			if r != '_' && !unicode.IsLetter(r) {
-				return false
-			}
-			continue
-		}
-		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) {
+	runes := []rune(name)
+	if len(runes) == 0 || len(runes) > 255 || !unicode.IsLetter(runes[0]) {
+		return false
+	}
+	for _, r := range runes[1:] {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
 			return false
 		}
 	}
-	return name != ""
+	return true
 }
 
 func indexLintRulesByID() map[string]lintRuleConfig {

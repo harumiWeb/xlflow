@@ -5131,20 +5131,24 @@ func utf16Prefix(line string, character int) string {
 }
 
 func byteOffsetForPosition(source string, pos Position) int {
-	lines := normalizedLines(source)
 	if pos.Line < 0 {
 		return 0
 	}
-	offset := 0
-	for lineNo, line := range lines {
+	lineStart := 0
+	for lineNo := 0; ; lineNo++ {
+		lineEnd, nextLineStart := rawLineBounds(source, lineStart)
 		if lineNo == pos.Line {
+			line := source[lineStart:lineEnd]
 			idx := byteIndexForUTF16(line, pos.Character)
 			if idx > len(line) {
 				idx = len(line)
 			}
-			return offset + idx
+			return lineStart + idx
 		}
-		offset += len(line) + 1
+		if nextLineStart == len(source) {
+			break
+		}
+		lineStart = nextLineStart
 	}
 	return len(source)
 }
@@ -5153,20 +5157,40 @@ func positionForByteOffset(source string, offset int) Position {
 	if offset <= 0 {
 		return Position{}
 	}
-	lines := normalizedLines(source)
-	seen := 0
-	for lineNo, line := range lines {
-		lineEnd := seen + len(line)
+	lineStart := 0
+	for lineNo := 0; ; lineNo++ {
+		lineEnd, nextLineStart := rawLineBounds(source, lineStart)
 		if offset <= lineEnd {
-			return Position{Line: lineNo, Character: utf16Len(line[:max(0, min(offset-seen, len(line)))])}
+			line := source[lineStart:lineEnd]
+			return Position{Line: lineNo, Character: utf16Len(line[:max(0, min(offset-lineStart, len(line)))])}
 		}
-		seen = lineEnd + 1
+		if offset < nextLineStart {
+			line := source[lineStart:lineEnd]
+			return Position{Line: lineNo, Character: utf16Len(line)}
+		}
+		if nextLineStart == len(source) {
+			return Position{Line: lineNo + 1}
+		}
+		lineStart = nextLineStart
 	}
-	if len(lines) == 0 {
-		return Position{}
+}
+
+// rawLineBounds returns the end of the current line's text and the start of
+// the following line without normalizing the source. Byte offsets from the
+// parser refer to this original representation, including CRLF line endings.
+func rawLineBounds(source string, lineStart int) (lineEnd, nextLineStart int) {
+	for i := lineStart; i < len(source); i++ {
+		switch source[i] {
+		case '\n':
+			return i, i + 1
+		case '\r':
+			if i+1 < len(source) && source[i+1] == '\n' {
+				return i, i + 2
+			}
+			return i, i + 1
+		}
 	}
-	last := lines[len(lines)-1]
-	return Position{Line: len(lines) - 1, Character: utf16Len(last)}
+	return len(source), len(source)
 }
 
 func byteIndexForUTF16(s string, character int) int {

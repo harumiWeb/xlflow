@@ -133,13 +133,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const refreshFormulas = () => {
     void sidebar?.refreshFormulas();
   };
+  let configRefreshPromise: Promise<void> = Promise.resolve();
   const refreshAfterConfigChange = () => {
-    void (async () => {
+    configRefreshPromise = configRefreshPromise.then(async () => {
       // The language server loads xlflow.toml at startup, so a project
       // configuration change needs a full restart rather than only a view refresh.
-      await clientManager?.restart();
-      await refreshSelectedProject();
-    })();
+      try {
+        await clientManager?.restart();
+      } catch (error) {
+        channels.output.error(`xlflow configuration refresh failed: ${String(error)}`);
+      }
+      try {
+        await refreshSelectedProject();
+      } catch (error) {
+        channels.output.error(`xlflow project refresh failed: ${String(error)}`);
+      }
+    });
   };
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
