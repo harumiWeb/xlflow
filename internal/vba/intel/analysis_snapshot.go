@@ -41,6 +41,10 @@ type AnalysisSnapshot struct {
 	symbols     []Symbol
 	symbolsErr  error
 
+	indexOnce sync.Once
+	index     *documentIndex
+	indexErr  error
+
 	semanticOnce        sync.Once
 	semanticIdentifiers [][]byteSpan
 
@@ -201,6 +205,30 @@ func (s *AnalysisSnapshot) SourceSymbols(load DocumentSymbolLoader) ([]Symbol, b
 		s.symbolsErr = err
 	})
 	return cloneAnalysisSymbols(s.symbols), initialized, s.symbolsErr
+}
+
+// documentIndex returns the immutable lookup index for this snapshot. The
+// caller supplies the same symbol loader used by document analysis so custom
+// analyzers and the normal source-symbol cache retain identical semantics.
+func (s *AnalysisSnapshot) documentIndex(load DocumentSymbolLoader) (*documentIndex, bool, error) {
+	if s == nil {
+		return nil, false, errAnalysisSnapshotRetired
+	}
+	initialized := true
+	s.indexOnce.Do(func() {
+		initialized = false
+		s.initProcedures()
+		_, _, err := s.SourceSymbols(load)
+		if err != nil {
+			s.indexErr = err
+			return
+		}
+		// SourceSymbols returns a defensive copy to public callers. The snapshot
+		// owns s.symbols and never mutates it after symbolsOnce completes, so the
+		// internal index can safely avoid a second full clone.
+		s.index = buildDocumentIndex(s.source, s.lines, s.procedures, s.procedureLines, s.symbols)
+	})
+	return s.index, initialized, s.indexErr
 }
 
 func (s *AnalysisSnapshot) identifiers() [][]byteSpan {

@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1987,6 +1988,75 @@ End Sub
 	}
 	if !hasCompletion(items, "ReadLine") {
 		t.Fatalf("ts should complete TextStream.ReadLine after method-return inference: %+v", items)
+	}
+}
+
+func TestIndexedInferenceRespectsProcedureScopeAssignmentsAndFunctionReturns(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub First()
+    Dim item As Object
+    Set item = New Collection
+End Sub
+
+Sub Second()
+    Dim item As Object
+    item.Co
+End Sub
+
+Function Build() As Object
+    Set Build = New Collection
+    Build.Co
+End Function
+
+Sub LatestAssignment()
+    Dim item As Object
+    Set item = New Collection
+    Set item = CreateObject("Scripting.Dictionary")
+    item.Ex
+End Sub
+`
+	doc := NewAnalysisSnapshot(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source, Version: 1}).Document()
+
+	secondOffset := byteOffsetForPosition(source, Position{Line: 8, Character: utf16Len("    item")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "item", secondOffset); !ok || got != "Object" {
+		t.Fatalf("Second.item type = %q, %v, want Object without First assignment", got, ok)
+	}
+	returnOffset := byteOffsetForPosition(source, Position{Line: 13, Character: utf16Len("    Build")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "Build", returnOffset); !ok || got != "Collection" {
+		t.Fatalf("function return type = %q, %v, want Collection", got, ok)
+	}
+	latestOffset := byteOffsetForPosition(source, Position{Line: 20, Character: utf16Len("    item")})
+	if got, ok := analyzer.inferWordTypeAt(doc, "item", latestOffset); !ok || got != "Scripting.Dictionary" {
+		t.Fatalf("latest item assignment type = %q, %v, want Scripting.Dictionary", got, ok)
+	}
+}
+
+func TestIndexedInferenceGracefullyHandlesUnavailableIndex(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	snapshot := NewAnalysisSnapshot(Document{
+		Path: "Main.bas", Version: 1,
+		Source: "Sub Test()\n    Dim item As Object\n    With item\n        .Value\n    End With\nEnd Sub\n",
+	})
+	want := errors.New("indexed symbols unavailable")
+	snapshot.indexOnce.Do(func() { snapshot.indexErr = want })
+	doc := snapshot.Document()
+	if got, ok := analyzer.inferWordTypeAt(doc, "item", len(doc.Source)); ok || got != "" {
+		t.Fatalf("inference with unavailable index = %q, %v, want no inference", got, ok)
+	}
+	if got, ok := analyzer.withBlockTypeAt(doc, Position{Line: 3}, len(doc.Source)); ok || got != "" {
+		t.Fatalf("With lookup with unavailable index = %q, %v, want no type", got, ok)
+	}
+}
+
+func TestVisibleSymbolTypeContextFallbackFiltersRequestedName(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{Path: "Main.bas", Source: "Sub Test()\nEnd Sub\n"}
+	ctx := newDocumentTypeContext(doc, documentLines(doc), []Symbol{{
+		Name: "other", Kind: "local_variable", Parent: "Test", ReturnType: "Excel.Range", File: "Main.bas",
+	}}, nil)
+	if got, ok := analyzer.visibleSymbolTypeInfoAtContext(doc, "target", 0, ctx); ok || got.Type != "" {
+		t.Fatalf("unrelated context symbol inferred %q, %v", got.Type, ok)
 	}
 }
 

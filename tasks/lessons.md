@@ -75,3 +75,4 @@
 - Performance measurements for protocol handlers must include response encoding and serialization work performed before returning, not only the underlying analysis call.
 - Keep duplicated public capability lists synchronized with the server handler registration and advertised capabilities.
 - Work computed outside a cache/store lock must capture and validate a per-key publication generation before publishing. Compare document versions only inside the same open lifecycle; close/reopen boundaries and concurrent disk I/O need separate lifecycle/generation tokens so stale candidates cannot overwrite newer state.
+- When replacing repeated scans with a lazy index, treat index construction as fallible at every caller. Check both the returned status and pointer before lookup, and retain a safe declared-type fallback where one already exists.
