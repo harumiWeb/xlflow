@@ -34,12 +34,12 @@ func TestSemanticTokenCacheUsesVersionContentAndFullIdentity(t *testing.T) {
 	}
 
 	first, hit, err := cache.get(doc, cache.begin(), load)
-	if err != nil || hit || len(first) != 5 {
+	if err != nil || hit || len(first.data) != 5 || first.resultID == "" {
 		t.Fatalf("first get = (%v, hit=%v, err=%v), want miss", first, hit, err)
 	}
-	first[0] = 99
+	first.data[0] = 99
 	second, hit, err := cache.get(doc, cache.begin(), load)
-	if err != nil || !hit || loads.Load() != 1 || second[0] != 0 {
+	if err != nil || !hit || loads.Load() != 1 || second.data[0] != 0 || second.resultID != first.resultID {
 		t.Fatalf("second get = (%v, hit=%v, err=%v, loads=%d), want isolated hit", second, hit, err, loads.Load())
 	}
 
@@ -92,8 +92,8 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 	for range requests {
 		go func() {
 			<-start
-			data, _, err := cache.get(doc, generation, load)
-			if err == nil && len(data) != 5 {
+			result, _, err := cache.get(doc, generation, load)
+			if err == nil && len(result.data) != 5 {
 				err = errors.New("unexpected token data")
 			}
 			results <- err
@@ -168,7 +168,7 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 		newerLoads.Add(1)
 		return []protocol.UInteger{0, 0, 2, 12, 0}, nil
 	})
-	if err != nil || hit || fresh[2] != 2 || newerLoads.Load() != 1 {
+	if err != nil || hit || fresh.data[2] != 2 || newerLoads.Load() != 1 {
 		t.Fatalf("fresh get = (%v, hit=%v, err=%v, loads=%d), want one uncached latest load", fresh, hit, err, newerLoads.Load())
 	}
 }
@@ -340,5 +340,11 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 	}
 	if generations.Load() != 2 || maximum.Load() != 1 {
 		t.Fatalf("generation stats = calls:%d max_active:%d, want 2 calls and one active", generations.Load(), maximum.Load())
+	}
+	s.semanticTokens.mu.Lock()
+	history := append([]cachedSemanticTokens(nil), s.semanticTokens.histories[identity]...)
+	s.semanticTokens.mu.Unlock()
+	if len(history) != 1 || history[0].signature.version != 2 {
+		t.Fatalf("cached history after stale generation = %+v, want only version 2", history)
 	}
 }
