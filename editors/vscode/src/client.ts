@@ -9,9 +9,13 @@ import {
 import { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig, TraceServer, XlflowConfig } from "./config";
 import { XlflowChannels } from "./logging";
+import { readFormsRootFromToml } from "./sidebar";
 import { resolveWorkspaceRoot } from "./xlflow";
 
-export const userFormSpecLSPGlob = "**/src/forms/specs/*.{yaml,yml,json}";
+export function userFormSpecLSPGlob(formsRoot = "src/forms"): string {
+  const normalizedRoot = formsRoot.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return `**/${normalizedRoot || "src/forms"}/specs/*.{yaml,yml,json}`;
+}
 
 export class XlflowLanguageClientManager implements vscode.Disposable {
   private client: LanguageClient | undefined;
@@ -44,6 +48,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const cwd = folder?.uri.fsPath;
     const workspaceFolderKey = folder?.uri.toString();
     const xlflowProject = await hasXlflowConfig(folder);
+    const formSpecGlob = await userFormSpecGlobForWorkspace(folder);
     const args = lspServerArgsForProject(config, xlflowProject);
     const codeLens = lspCodeLensOptions(config, xlflowProject);
     const serverOptions: ServerOptions = {
@@ -56,12 +61,12 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       documentSelector: [
         { scheme: "file", language: "vba" },
         { scheme: "file", pattern: "**/*.{bas,cls,frm}" },
-        { scheme: "file", pattern: userFormSpecLSPGlob },
+        { scheme: "file", pattern: formSpecGlob },
       ],
       synchronize: {
         fileEvents: [
           vscode.workspace.createFileSystemWatcher("**/*.{bas,cls,frm}"),
-          vscode.workspace.createFileSystemWatcher(userFormSpecLSPGlob),
+          vscode.workspace.createFileSystemWatcher(formSpecGlob),
         ],
       },
       outputChannel: this.channels.output,
@@ -220,6 +225,19 @@ async function hasXlflowConfig(folder: vscode.WorkspaceFolder | undefined): Prom
     return (stat.type & vscode.FileType.File) !== 0;
   } catch {
     return false;
+  }
+}
+
+async function userFormSpecGlobForWorkspace(folder: vscode.WorkspaceFolder | undefined): Promise<string> {
+  if (folder === undefined) {
+    return userFormSpecLSPGlob();
+  }
+  try {
+    const configUri = vscode.Uri.joinPath(folder.uri, "xlflow.toml");
+    const bytes = await vscode.workspace.fs.readFile(configUri);
+    return userFormSpecLSPGlob(readFormsRootFromToml(Buffer.from(bytes).toString("utf8")));
+  } catch {
+    return userFormSpecLSPGlob();
   }
 }
 

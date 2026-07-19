@@ -530,7 +530,11 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   );
   assert.strictEqual(isProgIdStringPrefix('Set app = CreateObject("Excel.'), true);
   assert.strictEqual(isProgIdStringPrefix('Debug.Print "Excel.'), false);
-	assert.strictEqual(userFormSpecLSPGlob, "**/src/forms/specs/*.{yaml,yml,json}");
+  assert.strictEqual(userFormSpecLSPGlob(), "**/src/forms/specs/*.{yaml,yml,json}");
+  assert.strictEqual(
+    userFormSpecLSPGlob("custom/forms"),
+    "**/custom/forms/specs/*.{yaml,yml,json}",
+  );
   assert.strictEqual(isVbaSourcePath("src/modules/Main.bas"), true);
   assert.strictEqual(isVbaSourcePath("src/classes/Invoice.cls"), true);
   assert.strictEqual(isVbaSourcePath("src/forms/Customer.frm"), true);

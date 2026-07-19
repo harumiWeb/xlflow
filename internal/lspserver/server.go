@@ -1617,33 +1617,6 @@ func fullyParsedSnapshot(doc intel.Document) (*intel.AnalysisSnapshot, error) {
 	return snapshot, nil
 }
 
-func (d *documents) publishOpenedSnapshot(uri string, snapshot *intel.AnalysisSnapshot, lineIndex *lineOffsetIndex) (documentChangeResult, error) {
-	if snapshot == nil {
-		return documentChangeResult{}, errDocumentChangedConcurrently
-	}
-	key := normalizePathKey(snapshot.Path())
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
-		snapshot.Retire()
-		return documentChangeResult{}, errDocumentsClosed
-	}
-	if current, exists := d.docs[key]; exists && current.open && current.snapshot != nil {
-		d.mu.Unlock()
-		snapshot.Retire()
-		return documentChangeResult{document: current.snapshot.Document(), parseMode: "retained", fallbackReason: "document_changed_concurrently"}, nil
-	}
-	previous := d.docs[key].snapshot
-	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, document: snapshot.Document(), kind: DocumentKindVBA, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
-	d.keys[uri] = key
-	d.mu.Unlock()
-	if previous != nil {
-		previous.Retire()
-	}
-	return documentChangeResult{document: snapshot.Document(), applied: true, parseMode: "full_fallback", fallbackReason: "no_previous_tree"}, nil
-}
-
 func (d *documents) publishChangedSnapshot(uri, key string, entry documentEntry, snapshot *intel.AnalysisSnapshot, lineIndex *lineOffsetIndex, parseMode, fallbackReason string) (documentChangeResult, error) {
 	d.mu.Lock()
 	if d.closed {
