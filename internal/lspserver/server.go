@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +23,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -136,7 +139,7 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      typeDB.DB,
 		},
-		docs:           newDocuments(opts.RootDir),
+		docs:           newDocuments(opts.RootDir, opts.Config.Src.Forms),
 		logger:         logger,
 		semanticTokens: newSemanticTokenCache(),
 		codeLensConfig: intel.DefaultCodeLensConfig(),
@@ -304,9 +307,11 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		unlock()
 		return err
 	}
-	s.semanticTokens.open(doc)
-	s.semanticTokens.invalidateWorkspace()
-	s.updateWorkspaceSymbolOverlay(doc)
+	if s.documentKind(doc) == DocumentKindVBA {
+		s.semanticTokens.open(doc)
+		s.semanticTokens.invalidateWorkspace()
+		s.updateWorkspaceSymbolOverlay(doc)
+	}
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
 	if done != nil {
@@ -337,8 +342,10 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		s.logger.Printf("ignored textDocument/didChange for %q version=%d", uri, params.TextDocument.Version)
 		return nil
 	}
-	s.semanticTokens.invalidateWorkspace()
-	s.updateWorkspaceSymbolOverlay(change.document)
+	if s.documentKind(change.document) == DocumentKindVBA {
+		s.semanticTokens.invalidateWorkspace()
+		s.updateWorkspaceSymbolOverlay(change.document)
+	}
 	s.scheduleDiagnostics(ctx, change.document)
 	return nil
 }
@@ -348,12 +355,12 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
-	if doc, err := s.docs.getOrRead(uri); err == nil {
+	if doc, err := s.docs.getOrRead(uri); err == nil && s.documentKind(doc) == DocumentKindVBA {
 		s.semanticTokens.close(doc)
 	}
 	s.docs.close(uri)
 	s.semanticTokens.invalidateWorkspace()
-	if path, err := fileURIToPath(uri); err == nil {
+	if path, err := fileURIToPath(uri); err == nil && !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
 		if err := s.symbols.clearOverlay(path); err != nil {
 			s.logger.Printf("workspace symbol index close refresh failed for %q: %v", path, err)
 		}
@@ -366,6 +373,10 @@ func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChan
 		path, err := fileURIToPath(string(event.URI))
 		if err != nil {
 			return err
+		}
+		if isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
+			s.docs.invalidateDisk(path)
+			continue
 		}
 		paths, err := symbols.RelatedSourcePaths(s.opts.RootDir, s.opts.Config, path)
 		if err != nil {
@@ -390,6 +401,10 @@ func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return []protocol.DocumentSymbol{}, nil
+	}
 	syms, err := s.analyzer.DocumentSymbols(doc)
 	if err != nil {
 		measurement.finish(0, err)
@@ -445,6 +460,10 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return []protocol.Location{}, nil
+	}
 	locs, err := s.analyzer.Definition(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), s.docs.uriForDisplayPath)
 	if err != nil {
 		measurement.finish(0, err)
@@ -470,6 +489,10 @@ func (s *Server) references(_ *glsp.Context, params *protocol.ReferenceParams) (
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return []protocol.Location{}, nil
+	}
 	locs, err := s.analyzer.References(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), params.Context.IncludeDeclaration, s.docs.uriForDisplayPath)
 	if err != nil {
 		measurement.finish(0, err)
@@ -492,6 +515,9 @@ func (s *Server) prepareRename(_ *glsp.Context, params *protocol.PrepareRenamePa
 	if err != nil {
 		return nil, err
 	}
+	if s.documentKind(doc) != DocumentKindVBA {
+		return nil, nil
+	}
 	target, err := s.analyzer.PrepareRename(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil {
 		return nil, err
@@ -506,6 +532,9 @@ func (s *Server) rename(_ *glsp.Context, params *protocol.RenameParams) (*protoc
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
 		return nil, err
+	}
+	if s.documentKind(doc) != DocumentKindVBA {
+		return &protocol.WorkspaceEdit{Changes: map[protocol.DocumentUri][]protocol.TextEdit{}}, nil
 	}
 	edits, err := s.analyzer.Rename(doc, fromProtocolPosition(params.Position), params.NewName, s.docs.openDocuments(), s.docs.uriForDisplayPath)
 	if err != nil {
@@ -534,6 +563,10 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return nil, nil
+	}
 	hover, err := s.analyzer.Hover(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || hover == nil {
 		measurement.finish(0, err)
@@ -557,6 +590,10 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
+	}
 	completions, err := s.analyzer.Completions(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil {
 		measurement.finish(0, err)
@@ -605,6 +642,9 @@ func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 	if err != nil {
 		return nil, err
 	}
+	if s.documentKind(doc) != DocumentKindVBA {
+		return []protocol.CodeAction{}, nil
+	}
 	actions, err := s.analyzer.CodeActions(doc, fromProtocolRange(params.Range))
 	if err != nil {
 		return nil, err
@@ -638,6 +678,10 @@ func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpPa
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return nil, nil
+	}
 	help, err := s.analyzer.SignatureHelp(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || help == nil || len(help.Signatures) == 0 {
 		measurement.finish(0, err)
@@ -673,6 +717,9 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 	if err != nil {
 		return nil, err
 	}
+	if s.documentKind(doc) != DocumentKindVBA {
+		return []protocol.TextEdit{}, nil
+	}
 	if !documentSupportsFormatting(doc) {
 		return []protocol.TextEdit{}, nil
 	}
@@ -704,6 +751,14 @@ func (s *Server) formatting(_ *glsp.Context, params *protocol.DocumentFormatting
 
 func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	measurement := s.startPerformanceURI("textDocument/semanticTokens/full", string(params.TextDocument.URI))
+	if doc, err := s.docs.getOrRead(string(params.TextDocument.URI)); err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	} else if s.documentKind(doc) != DocumentKindVBA {
+		measurement.setDocument(doc)
+		measurement.finish(0, nil)
+		return &protocol.SemanticTokens{Data: []protocol.UInteger{}}, nil
+	}
 	cacheStarted := time.Now()
 	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
 	measurement.setDocument(doc)
@@ -722,6 +777,14 @@ func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 // wire as the complete result.
 func (s *Server) semanticTokensFullDelta(_ *glsp.Context, params *protocol.SemanticTokensDeltaParams) (any, error) {
 	measurement := s.startPerformanceURI("textDocument/semanticTokens/full/delta", string(params.TextDocument.URI))
+	if doc, err := s.docs.getOrRead(string(params.TextDocument.URI)); err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	} else if s.documentKind(doc) != DocumentKindVBA {
+		measurement.setDocument(doc)
+		measurement.finish(0, nil)
+		return &protocol.SemanticTokens{Data: []protocol.UInteger{}}, nil
+	}
 	cacheStarted := time.Now()
 	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
 	measurement.setDocument(doc)
@@ -813,6 +876,10 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) != DocumentKindVBA {
+		measurement.finish(0, nil)
+		return []protocol.CodeLens{}, nil
+	}
 	procedures, err := s.analyzer.RunnableProcedures(doc, s.codeLensConfig)
 	if err != nil {
 		measurement.finish(0, err)
@@ -963,7 +1030,7 @@ func (s *Server) runDiagnostics(
 ) {
 	defer s.diagWorkers.Done()
 	measurement := s.startPerformance("diagnostics", doc)
-	diagnostics := s.diagnostics(runCtx, doc)
+	diagnostics := s.documentDiagnostics(runCtx, doc)
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, diag := range diagnostics {
 		severity := diagnosticSeverity(diag.Severity)
@@ -998,6 +1065,56 @@ func (s *Server) runDiagnostics(
 	if ready {
 		s.launchDiagnostics(uri, state)
 	}
+}
+
+func (s *Server) documentKind(doc intel.Document) DocumentKind {
+	return s.docs.documentKind(doc)
+}
+
+func (s *Server) documentDiagnostics(ctx context.Context, doc intel.Document) []intel.Diagnostic {
+	switch s.documentKind(doc) {
+	case DocumentKindVBA:
+		return s.diagnostics(ctx, doc)
+	case DocumentKindUserFormYAML:
+		return userFormYAMLDiagnostics(doc)
+	default:
+		return nil
+	}
+}
+
+var yamlErrorLocation = regexp.MustCompile(`line (\d+)(?:: column (\d+))?`)
+
+func userFormYAMLDiagnostics(doc intel.Document) []intel.Diagnostic {
+	syntax := formsintel.ParseYAML(doc.Source)
+	if syntax.ParseError == nil {
+		return nil
+	}
+	line, character := yamlErrorPosition(doc.Source, syntax.ParseError)
+	return []intel.Diagnostic{{
+		Code: "UFY001", Severity: "error", Source: "xlflow",
+		Message: syntax.ParseError.Error(),
+		Range:   intel.Range{Start: intel.Position{Line: line, Character: character}, End: intel.Position{Line: line, Character: character + 1}},
+	}}
+}
+
+func yamlErrorPosition(source string, err error) (int, int) {
+	matches := yamlErrorLocation.FindStringSubmatch(err.Error())
+	if len(matches) < 2 {
+		return 0, 0
+	}
+	line, _ := strconv.Atoi(matches[1])
+	line = max(0, line-1)
+	column := 0
+	if len(matches) > 2 && matches[2] != "" {
+		column, _ = strconv.Atoi(matches[2])
+		column = max(0, column-1)
+	}
+	lines := strings.Split(strings.ReplaceAll(source, "\r\n", "\n"), "\n")
+	if line >= len(lines) {
+		return max(0, len(lines)-1), 0
+	}
+	column = min(column, len(lines[line]))
+	return line, utf16Len(lines[line][:column])
 }
 
 func (s *Server) closeDiagnostics(ctx *glsp.Context, uri string) {
@@ -1179,6 +1296,7 @@ func symbolFileKey(path string) string {
 
 type documents struct {
 	root          string
+	formsRoot     string
 	readFile      func(string) ([]byte, error)
 	beforePublish func()
 	mu            sync.RWMutex
@@ -1190,17 +1308,41 @@ type documents struct {
 
 type documentEntry struct {
 	snapshot   *intel.AnalysisSnapshot
+	document   intel.Document
+	kind       DocumentKind
 	lineIndex  *lineOffsetIndex
 	open       bool
 	generation uint64
 	lifecycle  uint64
 }
 
-func newDocuments(root string) *documents {
+func newDocuments(root string, formsRoots ...string) *documents {
+	formsRoot := ""
+	if len(formsRoots) > 0 {
+		formsRoot = formsRoots[0]
+	}
 	return &documents{
-		root: root, readFile: os.ReadFile,
+		root: root, formsRoot: formsRoot, readFile: os.ReadFile,
 		docs: map[string]documentEntry{}, keys: map[string]string{}, generations: map[string]uint64{},
 	}
+}
+
+func (d *documents) documentKind(doc intel.Document) DocumentKind {
+	return DetectDocumentKind(d.root, d.formsRoot, doc.Path, doc.Source)
+}
+
+func (entry documentEntry) currentDocument() intel.Document {
+	if entry.snapshot != nil {
+		return entry.snapshot.Document()
+	}
+	return entry.document
+}
+
+func (entry documentEntry) currentVersion() int32 {
+	if entry.snapshot != nil {
+		return entry.snapshot.Version()
+	}
+	return entry.document.Version
 }
 
 func (d *documents) nextGenerationLocked(key string) uint64 {
@@ -1220,6 +1362,24 @@ func (d *documents) openWithIndex(uri, text string, lineIndex *lineOffsetIndex, 
 	if len(versions) > 0 {
 		doc.Version = versions[0]
 	}
+	kind := d.documentKind(doc)
+	if kind != DocumentKindVBA {
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			return intel.Document{}, errDocumentsClosed
+		}
+		key := normalizePathKey(doc.Path)
+		previous := d.docs[key].snapshot
+		generation := d.nextGenerationLocked(key)
+		d.docs[key] = documentEntry{document: doc, kind: kind, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
+		d.keys[uri] = key
+		d.mu.Unlock()
+		if previous != nil {
+			previous.Retire()
+		}
+		return doc, nil
+	}
 	snapshot := intel.NewAnalysisSnapshot(doc)
 	if d.beforePublish != nil {
 		d.beforePublish()
@@ -1233,10 +1393,12 @@ func (d *documents) openWithIndex(uri, text string, lineIndex *lineOffsetIndex, 
 	key := normalizePathKey(doc.Path)
 	previous := d.docs[key].snapshot
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
+	d.docs[key] = documentEntry{snapshot: snapshot, document: snapshot.Document(), kind: kind, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
 	d.keys[uri] = key
 	d.mu.Unlock()
-	previous.Retire()
+	if previous != nil {
+		previous.Retire()
+	}
 	return snapshot.Document(), nil
 }
 
@@ -1259,9 +1421,37 @@ func (d *documents) changeWithIndex(uri, text string, lineIndex *lineOffsetIndex
 	}
 	entry, ok := d.docs[key]
 	d.mu.RUnlock()
-	if !ok || !entry.open || entry.snapshot == nil {
+	if !ok || !entry.open {
 		doc, err := d.openWithIndex(uri, text, lineIndex, versions...)
 		return doc, err == nil, err
+	}
+	if entry.kind != DocumentKindVBA {
+		if len(versions) > 0 && versions[0] <= entry.currentVersion() {
+			return entry.currentDocument(), false, nil
+		}
+		doc, err := d.docFromURI(uri, text)
+		if err != nil {
+			return intel.Document{}, false, err
+		}
+		if len(versions) > 0 {
+			doc.Version = versions[0]
+		}
+		kind := d.documentKind(doc)
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			return intel.Document{}, false, errDocumentsClosed
+		}
+		latest := d.docs[key]
+		if !latest.open || latest.generation != entry.generation || latest.lifecycle != entry.lifecycle {
+			d.mu.Unlock()
+			return latest.currentDocument(), false, nil
+		}
+		generation := d.nextGenerationLocked(key)
+		d.docs[key] = documentEntry{document: doc, kind: kind, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
+		d.keys[uri] = key
+		d.mu.Unlock()
+		return doc, true, nil
 	}
 	current := entry.snapshot.Document()
 	current.Source = text
@@ -1286,7 +1476,8 @@ func (d *documents) changeWithIndex(uri, text string, lineIndex *lineOffsetIndex
 			if latest.lifecycle == entry.lifecycle && snapshot.Version() > latest.snapshot.Version() {
 				generation := d.nextGenerationLocked(key)
 				d.docs[key] = documentEntry{
-					snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle,
+					snapshot: snapshot, document: snapshot.Document(), kind: DocumentKindVBA,
+					lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle,
 				}
 				d.mu.Unlock()
 				latest.snapshot.Retire()
@@ -1301,7 +1492,7 @@ func (d *documents) changeWithIndex(uri, text string, lineIndex *lineOffsetIndex
 		return intel.Document{}, false, errDocumentChangedConcurrently
 	}
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
+	d.docs[key] = documentEntry{snapshot: snapshot, document: snapshot.Document(), kind: DocumentKindVBA, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	entry.snapshot.Retire()
@@ -1337,7 +1528,7 @@ func (d *documents) applyChangesWithResult(uri string, changes []documentContent
 	}
 	entry, exists := d.docs[key]
 	d.mu.RUnlock()
-	if !exists || !entry.open || entry.snapshot == nil {
+	if !exists || !entry.open {
 		if len(changes) == 0 || changes[0].rng != nil {
 			return documentChangeResult{parseMode: "retained", fallbackReason: "document_not_open"}, nil
 		}
@@ -1345,16 +1536,41 @@ func (d *documents) applyChangesWithResult(uri string, changes []documentContent
 		if !ok {
 			return documentChangeResult{parseMode: "retained", fallbackReason: "edit_coordinates_unreconciled"}, nil
 		}
+		doc, err := d.openWithIndex(uri, source, index, version)
+		if err != nil {
+			return documentChangeResult{}, err
+		}
+		return documentChangeResult{document: doc, applied: true, parseMode: "full_fallback", fallbackReason: "no_previous_tree"}, nil
+	}
+	if entry.kind != DocumentKindVBA {
+		if version <= entry.currentVersion() {
+			return documentChangeResult{document: entry.currentDocument(), parseMode: "retained", fallbackReason: "invalid_version"}, nil
+		}
+		source, index, _, _, ok := prepareDocumentContentChanges(entry.document.Source, entry.lineIndex, changes)
+		if !ok {
+			return documentChangeResult{document: entry.currentDocument(), parseMode: "retained", fallbackReason: "edit_coordinates_unreconciled"}, nil
+		}
 		doc, err := d.docFromURI(uri, source)
 		if err != nil {
 			return documentChangeResult{}, err
 		}
 		doc.Version = version
-		snapshot, err := fullyParsedSnapshot(doc)
-		if err != nil {
-			return documentChangeResult{parseMode: "retained", fallbackReason: "full_parse_failed"}, nil
+		kind := d.documentKind(doc)
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			return documentChangeResult{}, errDocumentsClosed
 		}
-		return d.publishOpenedSnapshot(uri, snapshot, index)
+		latest := d.docs[key]
+		if !latest.open || latest.generation != entry.generation || latest.lifecycle != entry.lifecycle {
+			d.mu.Unlock()
+			return documentChangeResult{document: latest.currentDocument(), parseMode: "retained", fallbackReason: "document_changed_concurrently"}, nil
+		}
+		generation := d.nextGenerationLocked(key)
+		d.docs[key] = documentEntry{document: doc, kind: kind, lineIndex: index, open: true, generation: generation, lifecycle: entry.lifecycle}
+		d.keys[uri] = key
+		d.mu.Unlock()
+		return documentChangeResult{document: doc, applied: true, parseMode: "full_fallback", fallbackReason: "not_vba_document"}, nil
 	}
 	if version <= entry.snapshot.Version() {
 		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "invalid_version"}, nil
@@ -1419,10 +1635,12 @@ func (d *documents) publishOpenedSnapshot(uri string, snapshot *intel.AnalysisSn
 	}
 	previous := d.docs[key].snapshot
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
+	d.docs[key] = documentEntry{snapshot: snapshot, document: snapshot.Document(), kind: DocumentKindVBA, lineIndex: lineIndex, open: true, generation: generation, lifecycle: generation}
 	d.keys[uri] = key
 	d.mu.Unlock()
-	previous.Retire()
+	if previous != nil {
+		previous.Retire()
+	}
 	return documentChangeResult{document: snapshot.Document(), applied: true, parseMode: "full_fallback", fallbackReason: "no_previous_tree"}, nil
 }
 
@@ -1443,7 +1661,7 @@ func (d *documents) publishChangedSnapshot(uri, key string, entry documentEntry,
 		return documentChangeResult{}, errDocumentChangedConcurrently
 	}
 	generation := d.nextGenerationLocked(key)
-	d.docs[key] = documentEntry{snapshot: snapshot, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
+	d.docs[key] = documentEntry{snapshot: snapshot, document: snapshot.Document(), kind: DocumentKindVBA, lineIndex: lineIndex, open: true, generation: generation, lifecycle: entry.lifecycle}
 	d.keys[uri] = key
 	d.mu.Unlock()
 	entry.snapshot.Retire()
@@ -1468,7 +1686,9 @@ func (d *documents) close(uri string) {
 		delete(d.keys, uri)
 	}
 	d.mu.Unlock()
-	snapshot.Retire()
+	if snapshot != nil {
+		snapshot.Retire()
+	}
 }
 
 // invalidateDisk drops a cached closed-file snapshot after a watcher event.
@@ -1506,9 +1726,9 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 			d.mu.RUnlock()
 			return intel.Document{}, errDocumentsClosed
 		}
-		if entry, ok := d.docs[key]; ok && entry.open && entry.snapshot != nil {
+		if entry, ok := d.docs[key]; ok && entry.open {
 			d.mu.RUnlock()
-			return entry.snapshot.Document(), nil
+			return entry.currentDocument(), nil
 		}
 		observedGeneration := d.generations[key]
 		d.mu.RUnlock()
@@ -1517,7 +1737,32 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 		if err != nil {
 			return intel.Document{}, err
 		}
-		candidate := intel.NewAnalysisSnapshot(intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)})
+		doc := intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)}
+		kind := d.documentKind(doc)
+		if kind != DocumentKindVBA {
+			d.mu.Lock()
+			if d.closed {
+				d.mu.Unlock()
+				return intel.Document{}, errDocumentsClosed
+			}
+			current := d.docs[key]
+			if current.open {
+				d.mu.Unlock()
+				return current.currentDocument(), nil
+			}
+			if d.generations[key] != observedGeneration {
+				d.mu.Unlock()
+				continue
+			}
+			generation := d.nextGenerationLocked(key)
+			d.docs[key] = documentEntry{document: doc, kind: kind, generation: generation}
+			d.mu.Unlock()
+			if current.snapshot != nil {
+				current.snapshot.Retire()
+			}
+			return doc, nil
+		}
+		candidate := intel.NewAnalysisSnapshot(doc)
 		if d.beforePublish != nil {
 			d.beforePublish()
 		}
@@ -1528,10 +1773,10 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 			return intel.Document{}, errDocumentsClosed
 		}
 		current := d.docs[key]
-		if current.open && current.snapshot != nil {
+		if current.open {
 			d.mu.Unlock()
 			candidate.Retire()
-			return current.snapshot.Document(), nil
+			return current.currentDocument(), nil
 		}
 		if current.snapshot != nil && current.snapshot.SourceHash() == candidate.SourceHash() &&
 			current.snapshot.URI() == candidate.URI() && current.snapshot.ModuleKind() == candidate.ModuleKind() {
@@ -1545,9 +1790,11 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 			continue
 		}
 		generation := d.nextGenerationLocked(key)
-		d.docs[key] = documentEntry{snapshot: candidate, generation: generation}
+		d.docs[key] = documentEntry{snapshot: candidate, document: candidate.Document(), kind: DocumentKindVBA, generation: generation}
 		d.mu.Unlock()
-		current.snapshot.Retire()
+		if current.snapshot != nil {
+			current.snapshot.Retire()
+		}
 		return candidate.Document(), nil
 	}
 }
@@ -1557,7 +1804,7 @@ func (d *documents) openDocuments() []intel.Document {
 	defer d.mu.RUnlock()
 	out := make([]intel.Document, 0, len(d.docs))
 	for _, entry := range d.docs {
-		if entry.open && entry.snapshot != nil {
+		if entry.open && entry.kind == DocumentKindVBA && entry.snapshot != nil {
 			out = append(out, entry.snapshot.Document())
 		}
 	}

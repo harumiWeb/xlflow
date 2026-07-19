@@ -11,6 +11,8 @@ import { readConfig, TraceServer, XlflowConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { resolveWorkspaceRoot } from "./xlflow";
 
+export const userFormSpecLSPGlob = "**/src/forms/specs/*.{yaml,yml,json}";
+
 export class XlflowLanguageClientManager implements vscode.Disposable {
   private client: LanguageClient | undefined;
   private workspaceFolderKey: string | undefined;
@@ -54,9 +56,13 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       documentSelector: [
         { scheme: "file", language: "vba" },
         { scheme: "file", pattern: "**/*.{bas,cls,frm}" },
+        { scheme: "file", pattern: userFormSpecLSPGlob },
       ],
       synchronize: {
-        fileEvents: vscode.workspace.createFileSystemWatcher("**/*.{bas,cls,frm}"),
+        fileEvents: [
+          vscode.workspace.createFileSystemWatcher("**/*.{bas,cls,frm}"),
+          vscode.workspace.createFileSystemWatcher(userFormSpecLSPGlob),
+        ],
       },
       outputChannel: this.channels.output,
       traceOutputChannel: this.channels.trace,
