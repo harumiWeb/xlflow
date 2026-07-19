@@ -213,6 +213,22 @@ controls:
 	requireUserFormDiagnostic(t, diagnostics, "UFV002", "error", controls.KeyRange)
 }
 
+func TestUserFormParentPath(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{"controls[0].list[0]", "controls[0].list"},
+		{"controls[0].controls[1].id", "controls[0].controls[1]"},
+		{"controls[0]", "controls"},
+		{"schemaVersion", ""},
+	} {
+		if got := userFormParentPath(test.path); got != test.want {
+			t.Errorf("userFormParentPath(%q) = %q, want %q", test.path, got, test.want)
+		}
+	}
+}
+
 func requireUserFormDiagnostic(t *testing.T, diagnostics []vbaintel.Diagnostic, code, severity string, want formsintel.Range) {
 	t.Helper()
 	for _, diagnostic := range diagnostics {

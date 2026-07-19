@@ -104,13 +104,13 @@ func userFormRange(r formsintel.Range) intel.Range {
 }
 
 func userFormParentPath(path string) string {
-	if dot := strings.LastIndex(path, "."); dot >= 0 {
-		return path[:dot]
+	dot := strings.LastIndex(path, ".")
+	bracket := strings.LastIndex(path, "[")
+	if bracket > dot {
+		return path[:bracket]
 	}
-	if strings.HasSuffix(path, "]") {
-		if bracket := strings.LastIndex(path, "["); bracket >= 0 {
-			return path[:bracket]
-		}
+	if dot >= 0 {
+		return path[:dot]
 	}
 	return ""
 }
