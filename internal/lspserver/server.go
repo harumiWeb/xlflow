@@ -23,7 +23,6 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
-	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -1083,19 +1082,6 @@ func (s *Server) documentDiagnostics(ctx context.Context, doc intel.Document) []
 }
 
 var yamlErrorLocation = regexp.MustCompile(`line (\d+)(?:: column (\d+))?`)
-
-func userFormYAMLDiagnostics(doc intel.Document) []intel.Diagnostic {
-	syntax := formsintel.ParseYAML(doc.Source)
-	if syntax.ParseError == nil {
-		return nil
-	}
-	line, character := yamlErrorPosition(doc.Source, syntax.ParseError)
-	return []intel.Diagnostic{{
-		Code: "UFY001", Severity: "error", Source: "xlflow",
-		Message: syntax.ParseError.Error(),
-		Range:   intel.Range{Start: intel.Position{Line: line, Character: character}, End: intel.Position{Line: line, Character: character + 1}},
-	}}
-}
 
 func yamlErrorPosition(source string, err error) (int, int) {
 	matches := yamlErrorLocation.FindStringSubmatch(err.Error())

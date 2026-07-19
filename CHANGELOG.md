@@ -4,7 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added initial LSP routing for UserForm specifications under `src.forms/specs`: VS Code now synchronizes `.yaml`, `.yml`, and `.json` candidates without claiming unrelated structured-data files. YAML syntax failures publish `UFY001`; contract diagnostics, completion candidates, and Hover documentation follow in later work.
+- Added type-aware LSP diagnostics for UserForm YAML specifications under `src.forms/specs`. The shared UserForm validator now publishes stable `UFV001`–`UFV014` errors and support-level warnings with precise YAML key/value ranges alongside syntax diagnostic `UFY001`; malformed, invalid-kind, and corrected editor buffers update without reopening while unrelated YAML remains ignored. JSON diagnostics, completion, and Hover documentation remain future work.
+- Changed `form new` to omit the snapshot-only `warnings` field from blank authoring specifications, and added a UserForm specification reference covering fields, controls, support levels, validation, and diagnostics.
 
 ## v0.25.0
 

@@ -446,7 +446,6 @@ form:
   name: %s
   caption: %s
 controls: []
-warnings: []
 
 # Example controls:
 # controls:

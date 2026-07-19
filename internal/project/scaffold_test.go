@@ -430,6 +430,13 @@ func TestNewUserFormCreatesSidecarArtifacts(t *testing.T) {
 		t.Fatalf("code body = %q", string(codeBody))
 	}
 	specPath := filepath.Join(dir, "custom", "forms", "specs", "CustomerForm.yaml")
+	specBody, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(specBody), "warnings:") {
+		t.Fatalf("new authoring spec must not include snapshot-only warnings: %s", specBody)
+	}
 	input, err := forms.ResolveSpecInput(dir, specPath)
 	if err != nil {
 		t.Fatal(err)

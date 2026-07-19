@@ -405,7 +405,7 @@ func TestValidateFormSpecSourceReportsReferenceAndProgIDIssues(t *testing.T) {
 		code  string
 		field string
 	}{
-		{"UFV010", "controls"},
+		{"UFV010", "controls[0].parentId"},
 		{"UFV011", "controls[3].parentId"},
 		{"UFV009", "controls[4].parentId"},
 		{"UFV008", "controls[5].parentId"},
@@ -414,6 +414,41 @@ func TestValidateFormSpecSourceReportsReferenceAndProgIDIssues(t *testing.T) {
 		if !hasValidationIssue(issues, want.code, want.field) {
 			t.Fatalf("missing validation issue %s at %s in %+v", want.code, want.field, issues)
 		}
+	}
+}
+
+func TestValidateFormSpecSourceReportsOnlyCycleMembersAtParentFields(t *testing.T) {
+	body := []byte(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+controls:
+  - id: frame_a
+    name: FrameA
+    type: Frame
+    parentId: frame_b
+  - id: frame_b
+    name: FrameB
+    type: Frame
+    parentId: frame_a
+  - id: label_child
+    name: LabelChild
+    type: Label
+    parentId: frame_a
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cycles := make([]ValidationIssue, 0)
+	for _, issue := range issues {
+		if issue.Code == "UFV010" {
+			cycles = append(cycles, issue)
+		}
+	}
+	if len(cycles) != 1 || cycles[0].Field != "controls[0].parentId" {
+		t.Fatalf("cycle issues = %+v, want one issue at controls[0].parentId", cycles)
 	}
 }
 

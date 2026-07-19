@@ -105,6 +105,7 @@ function referenceSidebar() {
       text: "Reference",
       items: [
         { text: "JSON Output", link: "/reference/json-output" },
+        { text: "UserForm Specification", link: "/reference/userform-spec" },
         { text: "Project Structure", link: "/reference/project-structure" },
         { text: "Config File", link: "/reference/config-file" },
         { text: "XlflowUI", link: "/reference/xlflow-ui" },
