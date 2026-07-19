@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added initial LSP routing for UserForm specifications under `src.forms/specs`: VS Code now synchronizes `.yaml`, `.yml`, and `.json` candidates without claiming unrelated structured-data files. YAML syntax failures publish `UFY001`; contract diagnostics, completion candidates, and Hover documentation follow in later work.
+
 ## v0.25.0
 
 - Added opt-in `VB044` lint diagnostics for local `PROCEDURE_NAME`-style constants whose direct string literals drift from their enclosing `Sub`, `Function`, or `Property` name. The `[lint.procedure_name_constant]` configuration supports standard, class, document, and UserForm modules; the LSP supplies a Quick Fix that updates only the string literal, while `xlflow lint` remains read-only.

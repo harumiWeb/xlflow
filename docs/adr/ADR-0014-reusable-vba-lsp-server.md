@@ -24,12 +24,17 @@ transport.
 ## Decision
 
 Implement `xlflow lsp --stdio` in the main xlflow binary as the reusable VBA
-language server entry point.
+language server entry point, with document-kind dispatch for additional
+xlflow-owned source formats.
 
 - Keep CLI flag handling in `internal/cli`.
 - Keep LSP protocol handling, JSON-RPC stdio transport, URI conversion, and
   protocol type conversion in `internal/lspserver`.
 - Keep VBA source analysis in protocol-neutral packages under `internal/vba`.
+- Classify documents before analysis. VBA documents retain tree-sitter snapshots;
+  UserForm specifications under the configured `src.forms/specs` root retain raw
+  source and use protocol-neutral YAML syntax helpers under
+  `internal/excel/forms/intel`. Unrelated YAML and JSON documents are ignored.
 - Keep the practical VBA/COM metadata database in `internal/vbadb`.
 - Represent analysis results with xlflow-owned structures such as `Range`,
   `Diagnostic`, `Symbol`, `Location`, and `Hover`; convert them to LSP protocol
@@ -82,6 +87,8 @@ The VS Code extension should remain a thin language client that launches:
 - Negative: Incremental parsing needs temporary cloned trees and eagerly parses
   changed revisions; this trades a small per-edit allocation for safely
   reusing unchanged syntax structure without exposing mutable trees to readers.
+- Negative: Each supported non-VBA document kind needs an explicit analyzer
+  adapter and must not fall through to VBA symbols, semantic tokens, or edits.
 - Negative: The curated COM database requires maintenance until a TypeLib
   importer and patch pipeline are available.
 
