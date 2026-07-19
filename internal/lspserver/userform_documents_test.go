@@ -19,7 +19,13 @@ func TestUserFormYAMLUsesRawDocumentAndEmptyFeatureResponses(t *testing.T) {
 
 	path := filepath.Join(root, "src", "forms", "specs", "Login.yaml")
 	uri := pathToFileURI(path)
-	doc, err := s.docs.open(uri, "kind: xlflow.userform\ncontrols:\n  - type: TextBox\n")
+	doc, err := s.docs.open(uri, `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: Login
+controls: []
+`)
 	if err != nil {
 		t.Fatal(err)
 	}

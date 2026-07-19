@@ -228,7 +228,9 @@ async function hasXlflowConfig(folder: vscode.WorkspaceFolder | undefined): Prom
   }
 }
 
-async function userFormSpecGlobForWorkspace(folder: vscode.WorkspaceFolder | undefined): Promise<string> {
+async function userFormSpecGlobForWorkspace(
+  folder: vscode.WorkspaceFolder | undefined,
+): Promise<string> {
   if (folder === undefined) {
     return userFormSpecLSPGlob();
   }

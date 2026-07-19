@@ -343,6 +343,7 @@ func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
 		controlsByID[control.ID] = control
 	}
 	parentByID := make(map[string]string, len(spec.Controls))
+	parentFieldByID := make(map[string]string, len(spec.Controls))
 	for i, control := range spec.Controls {
 		if strings.TrimSpace(control.ParentID) == "" {
 			continue
@@ -361,8 +362,9 @@ func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
 			issues = append(issues, validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", field, control.ParentID, parent.Name), field, "Use a Frame or custom container control as the parent.", ""))
 		}
 		parentByID[control.ID] = control.ParentID
+		parentFieldByID[control.ID] = field
 	}
-	issues = append(issues, parentCycleIssues(parentByID)...)
+	issues = append(issues, parentCycleIssues(parentByID, parentFieldByID)...)
 	return issues
 }
 
@@ -587,6 +589,7 @@ func validateRawControlStructure(controls []rawControlRef) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	ids := make(map[string]rawControlRef, len(controls))
 	parentByID := make(map[string]string, len(controls))
+	parentFieldByID := make(map[string]string, len(controls))
 	for _, control := range controls {
 		if control.ID == "" {
 			continue
@@ -616,9 +619,10 @@ func validateRawControlStructure(controls []rawControlRef) []ValidationIssue {
 		}
 		if control.ID != "" {
 			parentByID[control.ID] = control.ParentID
+			parentFieldByID[control.ID] = field
 		}
 	}
-	return append(issues, parentCycleIssues(parentByID)...)
+	return append(issues, parentCycleIssues(parentByID, parentFieldByID)...)
 }
 
 func rawControlCanContainChildren(control rawControlRef) (bool, bool) {
@@ -742,20 +746,33 @@ func formObservedProperties() map[string]PropertyContract {
 	}
 }
 
-func parentCycleIssues(parentByID map[string]string) []ValidationIssue {
+func parentCycleIssues(parentByID, parentFieldByID map[string]string) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	reported := map[string]bool{}
 	for _, id := range sortedMapKeys(parentByID) {
-		seen := map[string]bool{}
+		if reported[id] {
+			continue
+		}
+		path := make([]string, 0)
+		seen := make(map[string]int)
 		for current := id; current != ""; current = parentByID[current] {
-			if seen[current] {
-				if !reported[id] {
-					issues = append(issues, validationIssue("UFV010", SeverityError, fmt.Sprintf("controls parentId chain for %q contains a cycle.", id), "controls", "Break the parentId cycle so controls form a tree.", ""))
-					reported[id] = true
+			if cycleStart, exists := seen[current]; exists {
+				cycle := path[cycleStart:]
+				for _, cycleID := range cycle {
+					reported[cycleID] = true
 				}
+				field := parentFieldByID[cycle[0]]
+				if field == "" {
+					field = "controls"
+				}
+				issues = append(issues, validationIssue("UFV010", SeverityError, fmt.Sprintf("controls parentId chain for %q contains a cycle.", cycle[0]), field, "Break the parentId cycle so controls form a tree.", ""))
 				break
 			}
-			seen[current] = true
+			if reported[current] {
+				break
+			}
+			seen[current] = len(path)
+			path = append(path, current)
 		}
 	}
 	return issues

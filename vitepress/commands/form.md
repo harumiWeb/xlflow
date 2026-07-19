@@ -31,7 +31,7 @@ xlflow [--wait] form export-image <name> --out <png>
 
 `form snapshot` reads the design-time Designer state without loading the form at runtime or running workbook VBA. Controls created only by runtime code are visible through runtime inspection or image export, not through snapshot.
 
-`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); it does not create `.frm` or `.frx` artifacts.
+`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and an authoring-focused `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); blank specs omit snapshot-only fields such as `warnings`. It does not create `.frm` or `.frx` artifacts.
 
 All other workbook-backed form commands share the configured workbook lock with
 `run`, `test`, `push`, `pull`, and Designer inspection. Contention returns
@@ -127,3 +127,4 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 
 - [list](./list)
 - [inspect form](./inspect)
+- [UserForm specification](../reference/userform-spec)
