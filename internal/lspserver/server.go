@@ -23,6 +23,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -589,6 +590,14 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) == DocumentKindUserFormYAML {
+		items := userFormCompletionProtocolItems(formsintel.CompleteYAML(doc.Source, formsintel.Position{
+			Line:      int(params.Position.Line),
+			Character: int(params.Position.Character),
+		}))
+		measurement.finish(len(items), nil)
+		return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+	}
 	if s.documentKind(doc) != DocumentKindVBA {
 		measurement.finish(0, nil)
 		return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
@@ -634,6 +643,61 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	}
 	measurement.finish(len(items), nil)
 	return protocol.CompletionList{IsIncomplete: false, Items: items}, nil
+}
+
+func userFormCompletionProtocolItems(completions []formsintel.CompletionItem) []protocol.CompletionItem {
+	items := make([]protocol.CompletionItem, 0, len(completions))
+	for _, completion := range completions {
+		kind := userFormCompletionItemKind(completion.Kind)
+		item := protocol.CompletionItem{
+			Label: completion.Label,
+			Kind:  &kind,
+			TextEdit: protocol.TextEdit{
+				Range:   toProtocolRange(userFormCompletionRange(completion.Replace)),
+				NewText: completion.InsertText,
+			},
+		}
+		if completion.SortText != "" {
+			item.SortText = &completion.SortText
+		}
+		if completion.Snippet {
+			format := protocol.InsertTextFormatSnippet
+			item.InsertTextFormat = &format
+		}
+		if completion.Detail != "" {
+			item.Detail = &completion.Detail
+		}
+		if completion.Documentation != "" {
+			item.Documentation = protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
+				Value: completion.Documentation,
+			}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func userFormCompletionRange(r formsintel.Range) intel.Range {
+	return intel.Range{
+		Start: intel.Position{Line: r.Start.Line, Character: r.Start.Character},
+		End:   intel.Position{Line: r.End.Line, Character: r.End.Character},
+	}
+}
+
+func userFormCompletionItemKind(kind formsintel.CompletionKind) protocol.CompletionItemKind {
+	switch kind {
+	case formsintel.CompletionKindProperty:
+		return protocol.CompletionItemKindProperty
+	case formsintel.CompletionKindValue:
+		return protocol.CompletionItemKindValue
+	case formsintel.CompletionKindReference:
+		return protocol.CompletionItemKindReference
+	case formsintel.CompletionKindSnippet:
+		return protocol.CompletionItemKindSnippet
+	default:
+		return protocol.CompletionItemKindText
+	}
 }
 
 func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
