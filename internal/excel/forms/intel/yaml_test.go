@@ -56,3 +56,17 @@ func TestCursorContextFallsBackForIncompleteYAML(t *testing.T) {
 		t.Fatalf("ExistingKeys = %#v, want [type]", context.ExistingKeys)
 	}
 }
+
+func TestCursorContextBlankLineRespectsItsIndentation(t *testing.T) {
+	doc := ParseYAML("controls:\n  - type: Label\n\n")
+	context := doc.CursorContextAt(Position{Line: 2, Character: 0})
+	if context.ParentPath != "" {
+		t.Fatalf("unindented blank line ParentPath = %q, want root", context.ParentPath)
+	}
+
+	doc = ParseYAML("controls:\n  - type: Label\n    \n")
+	context = doc.CursorContextAt(Position{Line: 2, Character: 4})
+	if context.ParentPath != "controls[0]" {
+		t.Fatalf("indented blank line ParentPath = %q, want controls[0]", context.ParentPath)
+	}
+}

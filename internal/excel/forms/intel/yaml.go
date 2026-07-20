@@ -193,8 +193,29 @@ func fallbackCursorContext(lines []string, pos Position) CursorContext {
 		line := lines[i]
 		indent := len(line) - len(strings.TrimLeft(line, " "))
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if trimmed == "" {
+			// A blank line is still meaningful at the cursor: its indentation
+			// determines which mappings remain open.  In particular, an
+			// unindented blank line after a control starts a new root-level
+			// context rather than inheriting the preceding control item.
+			for len(mappings) > 1 && mappings[len(mappings)-1].indent >= indent {
+				mappings = mappings[:len(mappings)-1]
+			}
+			for len(sequences) > 0 && sequences[len(sequences)-1].indent > indent {
+				sequences = sequences[:len(sequences)-1]
+			}
 			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		isSequenceItem := strings.HasPrefix(trimmed, "-") && (len(trimmed) == 1 || trimmed[1] == ' ')
+		// YAML permits a sequence entry at the same indentation as the key whose
+		// value is that sequence (`controls:\n- ...`). Preserve that mapping as
+		// the sequence owner before normal same-indent mapping unwinding.
+		sameIndentSequenceOwner := ""
+		if isSequenceItem && len(mappings) > 1 && mappings[len(mappings)-1].indent == indent {
+			sameIndentSequenceOwner = mappings[len(mappings)-1].path
 		}
 		for len(mappings) > 1 && mappings[len(mappings)-1].indent >= indent {
 			mappings = mappings[:len(mappings)-1]
@@ -202,10 +223,13 @@ func fallbackCursorContext(lines []string, pos Position) CursorContext {
 		for len(sequences) > 0 && sequences[len(sequences)-1].indent > indent {
 			sequences = sequences[:len(sequences)-1]
 		}
-		if strings.HasPrefix(trimmed, "-") && (len(trimmed) == 1 || trimmed[1] == ' ') {
+		if isSequenceItem {
 			seqIndex := len(sequences) - 1
 			if seqIndex < 0 || sequences[seqIndex].indent != indent {
 				parent := mappings[len(mappings)-1].path
+				if sameIndentSequenceOwner != "" {
+					parent = sameIndentSequenceOwner
+				}
 				sequences = append(sequences, sequence{indent: indent, path: parent, index: -1})
 				seqIndex = len(sequences) - 1
 			}

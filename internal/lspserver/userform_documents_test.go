@@ -9,7 +9,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
-func TestUserFormYAMLUsesRawDocumentAndEmptyFeatureResponses(t *testing.T) {
+func TestUserFormYAMLUsesRawDocumentAndCompletion(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
 	if err != nil {
@@ -49,8 +49,8 @@ controls: []
 		t.Fatal(err)
 	}
 	list := completion.(protocol.CompletionList)
-	if len(list.Items) != 0 {
-		t.Fatalf("UserForm YAML completion = %#v, want empty foundation response", list.Items)
+	if !hasCompletionLabel(list.Items, "basis") {
+		t.Fatalf("UserForm YAML completion = %#v, want basis", list.Items)
 	}
 	hover, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: protocol.Position{Line: 0, Character: 2},
@@ -69,7 +69,7 @@ func TestUserFormYAMLMalformedDiagnosticDoesNotBreakLaterRequests(t *testing.T) 
 	defer cleanup()
 
 	uri := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "Login.yml"))
-	doc, err := s.docs.open(uri, "controls:\n  - type: TextBox\n    ca\n")
+	doc, err := s.docs.open(uri, "controls:\n  - type: TextBox\n    te\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +77,94 @@ func TestUserFormYAMLMalformedDiagnosticDoesNotBreakLaterRequests(t *testing.T) 
 	if len(diagnostics) != 1 || diagnostics[0].Code != "UFY001" {
 		t.Fatalf("malformed YAML diagnostics = %#v, want UFY001", diagnostics)
 	}
-	if _, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+	completion, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: protocol.Position{Line: 2, Character: 6},
-	}}); err != nil {
+	}})
+	if err != nil {
 		t.Fatalf("completion after malformed YAML failed: %v", err)
 	}
+	if !hasCompletionLabel(completion.(protocol.CompletionList).Items, "text") {
+		t.Fatalf("incomplete YAML completion = %#v, want TextBox text property", completion)
+	}
+}
+
+func TestUserFormYAMLCompletionUsesProtocolEditsAndSnippets(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	valueURI := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "Values.yaml"))
+	if _, err := s.docs.open(valueURI, "controls:\n  - type: Label\n    enabled: \n"); err != nil {
+		t.Fatal(err)
+	}
+	completion, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(valueURI)},
+		Position:     protocol.Position{Line: 2, Character: protocol.UInteger(len("    enabled: "))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trueItem, ok := completionByProtocolLabel(completion.(protocol.CompletionList).Items, "true")
+	edit, editOK := trueItem.TextEdit.(protocol.TextEdit)
+	if !ok || !editOK || edit.NewText != "true" {
+		t.Fatalf("boolean completion = %#v, want true text edit", trueItem)
+	}
+
+	snippetURI := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "Snippet.yaml"))
+	if _, err := s.docs.open(snippetURI, ""); err != nil {
+		t.Fatal(err)
+	}
+	completion, err = s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(snippetURI)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snippet, ok := completionByProtocolLabel(completion.(protocol.CompletionList).Items, "UserForm document")
+	if !ok || snippet.InsertTextFormat == nil || *snippet.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("document snippet = %#v, want snippet insert format", snippet)
+	}
+}
+
+func TestUserFormYAMLCompletionSupportsIndentationlessControls(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	uri := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "Indentationless.yaml"))
+	if _, err := s.docs.open(uri, "controls:\n- type: Label\n  ca"); err != nil {
+		t.Fatal(err)
+	}
+	completion, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Position:     protocol.Position{Line: 2, Character: 4},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletionLabel(completion.(protocol.CompletionList).Items, "caption") {
+		t.Fatalf("indentationless completion = %#v, want caption", completion)
+	}
+}
+
+func hasCompletionLabel(items []protocol.CompletionItem, want string) bool {
+	_, ok := completionByProtocolLabel(items, want)
+	return ok
+}
+
+func completionByProtocolLabel(items []protocol.CompletionItem, want string) (protocol.CompletionItem, bool) {
+	for _, item := range items {
+		if item.Label == want {
+			return item, true
+		}
+	}
+	return protocol.CompletionItem{}, false
 }
 
 func TestUnrelatedYAMLIsIgnored(t *testing.T) {

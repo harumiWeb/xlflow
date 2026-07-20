@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added context-aware LSP completion for UserForm YAML specifications under `src/forms/specs`. Completion derives structural keys, control properties, fixed values, built-in control types, ProgIDs, and parent IDs from the shared UserForm contract; it also remains available for common incomplete YAML states and includes authoring snippets. Snapshot-oriented fields are offered only when explicitly typed, and JSON completion remains future work.
 - Added type-aware LSP diagnostics for UserForm YAML specifications under `src.forms/specs`. The shared UserForm validator now publishes stable `UFV001`–`UFV014` errors and support-level warnings with precise YAML key/value ranges alongside syntax diagnostic `UFY001`; malformed, invalid-kind, and corrected editor buffers update without reopening while unrelated YAML remains ignored. JSON diagnostics, completion, and Hover documentation remain future work.
 - Changed `form new` to omit the snapshot-only `warnings` field from blank authoring specifications, and added a UserForm specification reference covering fields, controls, support levels, validation, and diagnostics.
 
