@@ -193,7 +193,20 @@ func fallbackCursorContext(lines []string, pos Position) CursorContext {
 		line := lines[i]
 		indent := len(line) - len(strings.TrimLeft(line, " "))
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if trimmed == "" {
+			// A blank line is still meaningful at the cursor: its indentation
+			// determines which mappings remain open.  In particular, an
+			// unindented blank line after a control starts a new root-level
+			// context rather than inheriting the preceding control item.
+			for len(mappings) > 1 && mappings[len(mappings)-1].indent >= indent {
+				mappings = mappings[:len(mappings)-1]
+			}
+			for len(sequences) > 0 && sequences[len(sequences)-1].indent > indent {
+				sequences = sequences[:len(sequences)-1]
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		isSequenceItem := strings.HasPrefix(trimmed, "-") && (len(trimmed) == 1 || trimmed[1] == ' ')

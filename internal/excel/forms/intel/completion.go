@@ -117,6 +117,19 @@ func completionLineContext(line string, pos Position) lineCompletionContext {
 		for valueStart < bytePos && (line[valueStart] == ' ' || line[valueStart] == '\t') {
 			valueStart++
 		}
+		if valueStart < len(line) && (line[valueStart] == '\'' || line[valueStart] == '"') {
+			// Keep YAML quotes outside the replacement range. This lets a
+			// completion filter against the scalar contents and preserves a
+			// closing quote when completion is requested inside a quoted value.
+			quoteStart := valueStart
+			quote := line[quoteStart]
+			valueStart++
+			valueEnd := bytePos
+			if quotedEnd := quotedEnd(line, quoteStart); quotedEnd <= bytePos && quotedEnd > quoteStart+1 && line[quotedEnd-1] == quote {
+				valueEnd = quotedEnd - 1
+			}
+			return lineCompletionContext{key: key, prefix: strings.TrimSpace(line[valueStart:valueEnd]), value: true, Replace: Range{Start: positionForByte(line, lineIndex, valueStart), End: positionForByte(line, lineIndex, valueEnd)}}
+		}
 		return lineCompletionContext{key: key, prefix: strings.TrimSpace(line[valueStart:bytePos]), value: true, Replace: Range{Start: positionForByte(line, lineIndex, valueStart), End: positionForByte(line, lineIndex, bytePos)}}
 	}
 	if bytePos < start {

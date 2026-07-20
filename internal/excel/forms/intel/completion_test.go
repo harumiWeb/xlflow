@@ -50,6 +50,16 @@ func TestCompleteYAMLFixedAndScalarValues(t *testing.T) {
 			t.Fatalf("kind values = %#v", labels(items))
 		}
 	})
+	t.Run("quoted fixed root value", func(t *testing.T) {
+		items := CompleteYAML("kind: \"xl\"", Position{Line: 0, Character: len("kind: \"xl")})
+		item, ok := completionByLabel(items, "xlflow.userform")
+		if !ok {
+			t.Fatalf("quoted kind values = %#v", labels(items))
+		}
+		if item.Replace != (Range{Start: Position{Line: 0, Character: len("kind: \"")}, End: Position{Line: 0, Character: len("kind: \"xl")}}) {
+			t.Fatalf("quoted kind replacement = %#v", item.Replace)
+		}
+	})
 	t.Run("control type and matching ProgID", func(t *testing.T) {
 		typeItems := CompleteYAML("controls:\n  - type: \n", Position{Line: 1, Character: len("  - type: ")})
 		if !hasLabel(typeItems, "TextBox") || !hasLabel(typeItems, "Frame") {
@@ -114,6 +124,18 @@ func TestCompleteYAMLParentReferencesAreSafeAndCasePreserving(t *testing.T) {
 	}
 }
 
+func TestCompleteYAMLQuotedParentIDPrefix(t *testing.T) {
+	source := "controls:\n  - id: Frame_Main\n    name: Main frame\n    type: Frame\n  - id: Child\n    name: Child\n    type: Label\n    parentId: \"Fra\"\n"
+	items := CompleteYAML(source, Position{Line: 7, Character: len("    parentId: \"Fra")})
+	item, ok := completionByLabel(items, "Frame_Main")
+	if !ok {
+		t.Fatalf("quoted parentId values = %#v", labels(items))
+	}
+	if item.Replace != (Range{Start: Position{Line: 7, Character: len("    parentId: \"")}, End: Position{Line: 7, Character: len("    parentId: \"Fra")}}) {
+		t.Fatalf("quoted parentId replacement = %#v", item.Replace)
+	}
+}
+
 func TestCompleteYAMLIncompleteAndLegacyNestedControls(t *testing.T) {
 	t.Run("incomplete property prefix", func(t *testing.T) {
 		items := CompleteYAML("controls:\n  - type: TextBox\n    te", Position{Line: 2, Character: 6})
@@ -125,6 +147,12 @@ func TestCompleteYAMLIncompleteAndLegacyNestedControls(t *testing.T) {
 		items := CompleteYAML("controls:\n- type: Label\n  ca", Position{Line: 2, Character: 4})
 		if !hasLabel(items, "caption") {
 			t.Fatalf("indentationless items = %#v", labels(items))
+		}
+	})
+	t.Run("unindented blank line returns to root", func(t *testing.T) {
+		items := CompleteYAML("controls:\n  - type: Label\n\n", Position{Line: 2, Character: 0})
+		if !hasLabel(items, "kind") || hasLabel(items, "caption") {
+			t.Fatalf("root blank line items = %#v", labels(items))
 		}
 	})
 	t.Run("legacy nested control is visible to parent completion", func(t *testing.T) {

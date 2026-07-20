@@ -507,8 +507,11 @@ func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testin
 	defer func() { _ = firstOwner.Release() }()
 	defer func() { _ = secondOwner.Release() }()
 
-	const waitBudget = 220 * time.Millisecond
-	time.AfterFunc(120*time.Millisecond, func() { _ = firstOwner.Release() })
+	// Keep a wide enough gap between one shared deadline (about 1.5s) and a
+	// mistakenly restarted second deadline (about 2.4s) for Windows CI
+	// scheduling delays. The former 220ms budget was too narrow and flaky.
+	const waitBudget = 1500 * time.Millisecond
+	time.AfterFunc(900*time.Millisecond, func() { _ = firstOwner.Release() })
 	var stdout bytes.Buffer
 	a := &app{cwd: rootDir, json: true, wait: true, waitTimeout: waitBudget, stdout: &stdout, stderr: &bytes.Buffer{}, coordination: manager}
 	started := time.Now()
@@ -518,10 +521,10 @@ func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testin
 	})
 	elapsed := time.Since(started)
 	assertCoordinationWaitFailure(t, err, stdout.Bytes(), coordination.WorkbookBusyTimeoutCode, waitBudget.String())
-	if elapsed < 180*time.Millisecond {
+	if elapsed < 1200*time.Millisecond {
 		t.Fatalf("multi-target acquisition timed out too early after %s", elapsed)
 	}
-	if elapsed >= 300*time.Millisecond {
+	if elapsed >= 2100*time.Millisecond {
 		t.Fatalf("multi-target acquisition took %s; timeout budget appears to have restarted per target", elapsed)
 	}
 }
