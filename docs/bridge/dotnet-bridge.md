@@ -154,11 +154,10 @@ xlflow macros --bridge dotnet --runnable-only --json
 
 The command opens the workbook (or attaches to an active session), iterates VBComponents, and parses each code module for `Sub`/`Function` declarations:
 
-- Skips `Private` and `Friend` procedures
 - Skips `Xlflow*` prefixed modules
 - Skips event procedures (`Workbook_*`, `Worksheet_*`, `Auto_Open`, `Auto_Close`)
 - Skips procedures with parameters
-- Marks procedures in `userform`, `document_module`, or `unknown` component types as not runnable
+- Marks procedures in `userform` or `unknown` component types as not runnable
 
 The response includes `target`, `session`, `workbook`, `macros`, `default_entry`, `suggestions`, `warnings`, and `hints` envelope fields matching the PowerShell macros contract.
 
@@ -184,7 +183,7 @@ The command opens the workbook (or attaches to an active session), invokes the m
 - Captures `Err.Number`, `Err.Description`, and execution duration
 - Supports `--save`, `--save-as`, and default no-save behavior
 - Supports `--timeout` via bridge request timeout
-- Returns `macro_failed`, `macro_not_found`, or `macro_disabled` structured errors
+- Returns `macro_failed`, `macro_not_found`, `macro_disabled`, or `runner_not_invocable` structured errors
 - Stabilizes Excel before `Application.Run` by activating the target workbook
   when possible, waiting for the STA/COM caller to settle, and pumping messages
   around macro invocation; generated harness runs also call `DoEvents` before

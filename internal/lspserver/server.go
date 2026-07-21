@@ -139,7 +139,7 @@ func New(opts Options) (*Server, func(), error) {
 			Config:  opts.Config,
 			DB:      typeDB.DB,
 		},
-		docs:           newDocuments(opts.RootDir, opts.Config.Src.Forms),
+		docs:           newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook),
 		logger:         logger,
 		semanticTokens: newSemanticTokenCache(),
 		codeLensConfig: intel.DefaultCodeLensConfig(),
@@ -1347,6 +1347,7 @@ func symbolFileKey(path string) string {
 type documents struct {
 	root          string
 	formsRoot     string
+	workbookRoot  string
 	readFile      func(string) ([]byte, error)
 	beforePublish func()
 	mu            sync.RWMutex
@@ -1366,13 +1367,17 @@ type documentEntry struct {
 	lifecycle  uint64
 }
 
-func newDocuments(root string, formsRoots ...string) *documents {
+func newDocuments(root string, sourceRoots ...string) *documents {
 	formsRoot := ""
-	if len(formsRoots) > 0 {
-		formsRoot = formsRoots[0]
+	workbookRoot := ""
+	if len(sourceRoots) > 0 {
+		formsRoot = sourceRoots[0]
+	}
+	if len(sourceRoots) > 1 {
+		workbookRoot = sourceRoots[1]
 	}
 	return &documents{
-		root: root, formsRoot: formsRoot, readFile: os.ReadFile,
+		root: root, formsRoot: formsRoot, workbookRoot: workbookRoot, readFile: os.ReadFile,
 		docs: map[string]documentEntry{}, keys: map[string]string{}, generations: map[string]uint64{},
 	}
 }
@@ -1760,7 +1765,7 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 		if err != nil {
 			return intel.Document{}, err
 		}
-		doc := intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: moduleKindForPath(path)}
+		doc := intel.Document{URI: uri, Path: path, Source: string(body), ModuleKind: d.moduleKindForPath(path)}
 		kind := d.documentKind(doc)
 		if kind != DocumentKindVBA {
 			d.mu.Lock()
@@ -1861,7 +1866,7 @@ func (d *documents) docFromURI(uri, text string) (intel.Document, error) {
 	if err != nil {
 		return intel.Document{}, err
 	}
-	return intel.Document{URI: uri, Path: path, Source: text, ModuleKind: moduleKindForPath(path)}, nil
+	return intel.Document{URI: uri, Path: path, Source: text, ModuleKind: d.moduleKindForPath(path)}, nil
 }
 
 func (d *documents) uriForDisplayPath(path string) string {
@@ -1940,6 +1945,42 @@ func moduleKindForPath(path string) string {
 	default:
 		return "standard"
 	}
+}
+
+func (d *documents) moduleKindForPath(path string) string {
+	if isWorkbookModulePath(d.root, d.workbookRoot, path) {
+		return "document"
+	}
+	return moduleKindForPath(path)
+}
+
+func isWorkbookModulePath(root, configuredWorkbookRoot, path string) bool {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	workbookRoot := strings.TrimSpace(configuredWorkbookRoot)
+	if workbookRoot == "" {
+		workbookRoot = filepath.Join("src", "workbook")
+	}
+	if !filepath.IsAbs(workbookRoot) {
+		workbookRoot = filepath.Join(root, workbookRoot)
+	}
+	workbookRoot, err := filepath.Abs(workbookRoot)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(workbookRoot), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func documentSupportsFormatting(doc intel.Document) bool {

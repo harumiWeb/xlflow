@@ -270,14 +270,9 @@ public sealed class ExcelMacrosService : IMacrosService
                 continue;
             }
 
-            if (StartsWithPrivateOrFriend(line))
-            {
-                continue;
-            }
-
             var match = System.Text.RegularExpressions.Regex.Match(
                 line,
-                $@"^(?:(Public)\s+)?(Sub|Function)\s+({VbaIdentifierPattern.Identifier})\s*(?:\(([^)]*)\))?",
+                $@"^(?:(Public|Private|Friend)\s+)?(?:Static\s+)?(Sub|Function)\s+({VbaIdentifierPattern.Identifier})\s*(?:\(([^)]*)\))?",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (!match.Success)
@@ -291,7 +286,15 @@ public sealed class ExcelMacrosService : IMacrosService
                 continue;
             }
 
-            var visibility = match.Groups[1].Success ? "Public" : "Implicit";
+            var visibility = match.Groups[1].Success
+                ? match.Groups[1].Value.ToLowerInvariant() switch
+                {
+                    "public" => "Public",
+                    "private" => "Private",
+                    "friend" => "Friend",
+                    _ => "Implicit",
+                }
+                : "Implicit";
             var argText = match.Groups[4].Value.Trim();
             var macroArgs = new List<string>();
             var hasParams = false;
@@ -316,7 +319,7 @@ public sealed class ExcelMacrosService : IMacrosService
             {
                 reason = "event_procedure";
             }
-            else if (componentTypeName is "userform" or "document_module" or "unknown")
+            else if (componentTypeName is "userform" or "unknown")
             {
                 reason = "unsupported_component_type";
             }
@@ -342,12 +345,6 @@ public sealed class ExcelMacrosService : IMacrosService
         }
 
         return macros;
-    }
-
-    private static bool StartsWithPrivateOrFriend(string line)
-    {
-        return line.StartsWith("PRIVATE ", StringComparison.OrdinalIgnoreCase) ||
-               line.StartsWith("FRIEND ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsEventProcedureName(string name)

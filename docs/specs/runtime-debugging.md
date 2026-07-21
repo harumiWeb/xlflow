@@ -35,12 +35,18 @@ For failed macro runs, the default JSON contract keeps top-level `status`, `comm
 - `compile_vba`
 - `verify_macro`
 - `inject_harness`
+- `invoke_runner`
 - `invoke_macro`
 - `save_result`
 
 The phase is included in JSON error metadata. Plain-text output remains short, but failures should include enough context for a user or agent to decide whether to inspect configuration, VBIDE access, macro names, source code, or debug output.
 
 When Excel exposes enough information to distinguish a missing or invalid macro target from user-code failure, xlflow reports a target-specific error code instead of generic `macro_failed`.
+
+If the injected `XlflowRun_*` harness cannot be invoked, xlflow returns
+`runner_not_invocable` with `error.phase = "invoke_runner"`. This identifies a
+runner or Excel execution-boundary failure, not a failure to invoke the target
+macro.
 
 For `macro_failed` during `invoke_macro`, xlflow may add top-level `run_diagnostic`. Diagnostics include location, nearby source, debug context, likely cause, and suggestion when source analysis can match the failure to a known runtime-risk pattern. In the default JSON contract, `suggestion` and the best available `location` are promoted to top-level fields; `run_diagnostic` remains a verbose/debug-oriented namespace.
 

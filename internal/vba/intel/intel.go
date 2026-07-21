@@ -333,6 +333,9 @@ func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]Runnab
 		if isUserFormEventProcedure(sym) && !cfg.UserFormEvents {
 			continue
 		}
+		if isWorkbookEventProcedure(sym) {
+			continue
+		}
 		moduleName := firstNonEmpty(sym.Module, moduleNameForDocument(doc))
 		kind := "sub"
 		if isTest {
@@ -5514,6 +5517,17 @@ func isUserFormEventProcedure(sym Symbol) bool {
 	}
 	idx := strings.LastIndex(name, "_")
 	return idx > 0 && idx < len(name)-1
+}
+
+func isWorkbookEventProcedure(sym Symbol) bool {
+	name := strings.ToLower(strings.TrimSpace(sym.Name))
+	if name == "auto_open" || name == "auto_close" {
+		return true
+	}
+	if !strings.EqualFold(sym.ModuleKind, "document") {
+		return false
+	}
+	return strings.HasPrefix(name, "workbook_") || strings.HasPrefix(name, "worksheet_")
 }
 
 func moduleNameForDocument(doc Document) string {
