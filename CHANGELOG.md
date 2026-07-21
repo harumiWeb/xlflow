@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.26.0
+
 - Fixed generated and updated project `.gitignore` files to ignore Excel add-ins (`*.xlam`).
 - Fixed macro discovery and CodeLens run actions to recognize runnable no-argument private, public, and friend procedures in worksheet and `ThisWorkbook` document modules, while hiding workbook event procedures. `xlflow run` now reports an unavailable injected harness as `runner_not_invocable` instead of a target-macro failure.
 - Added context-aware LSP completion for UserForm YAML specifications under `src/forms/specs`. Completion derives structural keys, control properties, fixed values, built-in control types, ProgIDs, and parent IDs from the shared UserForm contract; it also remains available for common incomplete YAML states and includes authoring snippets. Snapshot-oriented fields are offered only when explicitly typed, and JSON completion remains future work.

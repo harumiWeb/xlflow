@@ -1,0 +1,120 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: points
+form:
+  name: AllControlsForm
+  caption: All controls
+  width: 360
+  height: 260
+controls:
+  - id: frame_main
+    name: FrameMain
+    type: Frame
+    progId: Forms.Frame.1
+    caption: Main
+    left: 12
+    top: 12
+    width: 320
+    height: 220
+    enabled: true
+    visible: true
+  - id: label_title
+    name: LabelTitle
+    type: Label
+    progId: Forms.Label.1
+    parentId: frame_main
+    caption: Customer
+    left: 12
+    top: 12
+    width: 90
+    height: 18
+    enabled: true
+    visible: true
+  - id: text_customer
+    name: TextCustomer
+    type: TextBox
+    progId: Forms.TextBox.1
+    parentId: frame_main
+    text: Alice
+    value: Alice
+    left: 108
+    top: 10
+    width: 150
+    height: 18
+    tabIndex: 0
+    enabled: true
+    visible: true
+  - id: combo_region
+    name: ComboRegion
+    type: ComboBox
+    progId: Forms.ComboBox.1
+    parentId: frame_main
+    text: East
+    value: East
+    list: [East, West]
+    selectedIndex: 0
+    left: 12
+    top: 44
+    width: 120
+    height: 18
+    tabIndex: 1
+    enabled: true
+    visible: true
+  - id: list_status
+    name: ListStatus
+    type: ListBox
+    progId: Forms.ListBox.1
+    parentId: frame_main
+    text: Open
+    value: Open
+    list: [Open, Closed]
+    selectedIndex: 0
+    left: 144
+    top: 44
+    width: 120
+    height: 54
+    tabIndex: 2
+    enabled: true
+    visible: true
+  - id: button_ok
+    name: ButtonOK
+    type: CommandButton
+    progId: Forms.CommandButton.1
+    parentId: frame_main
+    caption: OK
+    left: 12
+    top: 112
+    width: 72
+    height: 24
+    tabIndex: 3
+    enabled: true
+    visible: true
+  - id: check_notify
+    name: CheckNotify
+    type: CheckBox
+    progId: Forms.CheckBox.1
+    parentId: frame_main
+    caption: Notify me
+    value: true
+    left: 96
+    top: 114
+    width: 96
+    height: 18
+    tabIndex: 4
+    enabled: true
+    visible: true
+  - id: option_priority
+    name: OptionPriority
+    type: OptionButton
+    progId: Forms.OptionButton.1
+    parentId: frame_main
+    caption: Priority
+    value: false
+    left: 204
+    top: 114
+    width: 84
+    height: 18
+    tabIndex: 5
+    enabled: true
+    visible: true

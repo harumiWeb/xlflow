@@ -570,7 +570,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         }
         if (spec.Value.ValueKind != JsonValueKind.Undefined)
         {
-            var value = JsonSerializer.Deserialize<object>(spec.Value.GetRawText());
+            var value = ConvertFormValue(spec.Value);
             if (value is not null)
             {
                 TrySetProperty(control, "Value", value);
@@ -578,7 +578,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         }
         else if (spec.Observed?.Value.ValueKind != JsonValueKind.Undefined)
         {
-            var observedValue = JsonSerializer.Deserialize<object>(spec.Observed!.Value.GetRawText());
+            var observedValue = ConvertFormValue(spec.Observed!.Value);
             if (observedValue is not null)
             {
                 TrySetProperty(control, "Value", observedValue);
@@ -595,6 +595,20 @@ public sealed class ExcelFormWriteService : IFormWriteService
         {
             TrySetProperty(control, "ListIndex", selectedIndex.Value);
         }
+    }
+
+    // System.Text.Json deserializes object to JsonElement. COM needs concrete
+    // scalar CLR values, especially for Boolean CheckBox/OptionButton values.
+    private static object? ConvertFormValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.True or JsonValueKind.False => value.GetBoolean(),
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
+            JsonValueKind.Number => value.GetDouble(),
+            _ => null,
+        };
     }
 
     private static void SetControlListItems(object control, IReadOnlyList<string>? items)
