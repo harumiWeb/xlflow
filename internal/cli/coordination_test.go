@@ -406,7 +406,9 @@ func TestWorkbookCoordinationWithoutContentionEmitsNoWaitMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	a := &app{cwd: rootDir, wait: true, waitTimeout: time.Second, stdout: &bytes.Buffer{}, stderr: &stderr, coordination: manager}
+	// The wait deadline also covers lock metadata publication, which can be slow
+	// on loaded Windows CI runners even without workbook contention.
+	a := &app{cwd: rootDir, wait: true, waitTimeout: 5 * time.Second, stdout: &bytes.Buffer{}, stderr: &stderr, coordination: manager}
 	if err := a.withWorkbookCoordination(context.Background(), "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
