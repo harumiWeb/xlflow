@@ -79,6 +79,47 @@ func LookupControlProperty(typeName, propertyName string) (PropertyContract, boo
 	return clonePropertyContract(property), true
 }
 
+// LookupFormBuildProperty returns metadata for the explicit form.build
+// override object. It is shared by source validation and editor intelligence.
+func LookupFormBuildProperty(propertyName string) (PropertyContract, bool) {
+	property, ok := lookupProperty(formBuildProperties(), propertyName)
+	return clonePropertyContract(property), ok
+}
+
+// LookupFormObservedProperty returns metadata for captured form.observed
+// fields. These fields are snapshots rather than normal authoring inputs.
+func LookupFormObservedProperty(propertyName string) (PropertyContract, bool) {
+	property, ok := lookupProperty(formObservedProperties(), propertyName)
+	return clonePropertyContract(property), ok
+}
+
+// LookupObservedControlProperty returns snapshot metadata for fields nested
+// under controls[*].observed. The same field names may be build-supported at a
+// control's top level, but their observed copies describe captured state.
+func LookupObservedControlProperty(typeName, propertyName string) (PropertyContract, bool) {
+	contract := UserFormContract()
+	for _, name := range []string{"left", "top", "width", "height", "tabIndex", "enabled", "visible", "unsupported", "properties"} {
+		if !strings.EqualFold(name, propertyName) {
+			continue
+		}
+		property, ok := lookupProperty(contract.CommonControlProperties, name)
+		return observedProperty(property), ok
+	}
+	if control, ok := LookupControlContract(typeName); ok {
+		if property, found := lookupProperty(control.Properties, propertyName); found {
+			return observedProperty(property), true
+		}
+	}
+	return PropertyContract{}, false
+}
+
+func observedProperty(property PropertyContract) PropertyContract {
+	property.SupportLevel = SupportLevelSnapshotOnly
+	property.IncludeInAuthoring = false
+	property.ApplicableControls = append([]string(nil), property.ApplicableControls...)
+	return property
+}
+
 func BuiltInControlProgID(typeName string) (string, bool) {
 	control, ok := userFormContract.Controls[contractKey(typeName)]
 	if !ok {

@@ -45,11 +45,17 @@ func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string,
 	name := lastPathSegment(path)
 	switch {
 	case parent == "":
-		property, ok := contract.DocumentProperties[name]
+		property, ok := lookupProperty(contract.DocumentProperties, name)
 		return property, "document root", ok
 	case parent == "form":
-		property, ok := contract.FormProperties[name]
+		property, ok := lookupProperty(contract.FormProperties, name)
 		return property, "form", ok
+	case parent == "form.build":
+		property, ok := forms.LookupFormBuildProperty(name)
+		return property, "form build override", ok
+	case parent == "form.observed":
+		property, ok := forms.LookupFormObservedProperty(name)
+		return property, "captured form state", ok
 	case isControlPath(parent):
 		control := controlAtPath(doc.Source, parent)
 		if property, ok := forms.LookupControlProperty(control.Type, name); ok {
@@ -58,6 +64,11 @@ func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string,
 			}
 			return property, control.Type, true
 		}
+	case strings.HasSuffix(parent, ".observed") && isControlPath(strings.TrimSuffix(parent, ".observed")):
+		controlPath := strings.TrimSuffix(parent, ".observed")
+		control := controlAtPath(doc.Source, controlPath)
+		property, ok := forms.LookupObservedControlProperty(control.Type, name)
+		return property, "captured " + control.Type + " control state", ok
 	}
 	return forms.PropertyContract{}, "", false
 }
