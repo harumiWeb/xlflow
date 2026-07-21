@@ -78,3 +78,4 @@
 - Semantic-token cache entries can depend on symbols from every open document. A per-document source edit may therefore require a workspace-generation invalidation for token results even when immutable analysis snapshots remain document-scoped.
 - Semantic-token delta history must be retained only for documents opened through the LSP lifecycle. Disk-backed `getOrRead` requests have no matching `didClose`, so they may cache a current full result but must not accumulate retained delta bases.
 - When replacing repeated scans with a lazy index, treat index construction as fallible at every caller. Check both the returned status and pointer before lookup, and retain a safe declared-type fallback where one already exists.
+- When adding procedure-name filters or staged execution errors, preserve VBA modifier/casing variants and scope filters to the component kinds where they are semantic. Keep timeout and dialog outcomes ahead of inferred runner-stage classifications.

@@ -251,8 +251,11 @@ public sealed class ExcelRunService : IRunService
                     : null;
                 var fatalStage = invocation.Result?.Error?.Stage ?? "invoke_macro";
                 var compileFailure = !runTimedOut && IsLikelyVbaCompileFailure(runError, runErrorNumber, invocation.Dialog);
-                var runnerInvocationFailure = !args.Direct &&
-                    (invocation.Result is null || !invocation.Result.Ok);
+                var runnerInvocationFailure = IsRunnerInvocationFailure(
+                    args.Direct,
+                    runTimedOut,
+                    invocation.Dialog,
+                    invocation.Result);
                 var errorCode = fatalComFailure ? "excel_com_rpc_failure" : runTimedOut ? "macro_timeout" : compileFailure ? "vba_compile_failed" : ClassifyRunFailure(runError, runErrorNumber, runnerInvocationFailure);
                 var errorPhase = fatalComFailure ? fatalStage : compileFailure ? "compile_vba" : runnerInvocationFailure ? "invoke_runner" : "invoke_macro";
                 logs.Add(compileFailure ? $"VBA compile failed: {runError}" : runnerInvocationFailure ? $"temporary runner invocation failed: {runError}" : $"macro execution failed: {runError}");
@@ -1124,6 +1127,15 @@ public sealed class ExcelRunService : IRunService
     internal static string ClassifyRunFailure(string message, int? number, bool runnerInvocationFailure)
     {
         return runnerInvocationFailure ? "runner_not_invocable" : ClassifyRunError(message, number);
+    }
+
+    internal static bool IsRunnerInvocationFailure(
+        bool direct,
+        bool timedOut,
+        DialogSnapshot? dialog,
+        MacroRunWorkerResult? result)
+    {
+        return !direct && !timedOut && dialog is null && (result is null || !result.Ok);
     }
 
     internal static bool IsLikelyVbaCompileFailure(string message, int? number, DialogSnapshot? dialog = null)

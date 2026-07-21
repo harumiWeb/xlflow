@@ -5,6 +5,7 @@ using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Serialization;
 using Xlflow.ExcelBridge.Services;
 using Xlflow.ExcelBridge.Windows;
+using Xlflow.ExcelBridge.Windows;
 using Xlflow.ExcelBridge.Workers;
 
 namespace Xlflow.ExcelBridge.Tests;
@@ -261,6 +262,15 @@ public sealed class RunCommandTests
     {
         Assert.Equal("runner_not_invocable", ExcelRunService.ClassifyRunFailure("Cannot run the macro", 1004, runnerInvocationFailure: true));
         Assert.Equal("macro_not_found", ExcelRunService.ClassifyRunFailure("Cannot run the macro", 1004, runnerInvocationFailure: false));
+    }
+
+    [Fact]
+    public void RunnerInvocationFailureExcludesTimeoutsAndDialogs()
+    {
+        Assert.True(ExcelRunService.IsRunnerInvocationFailure(direct: false, timedOut: false, dialog: null, result: null));
+        Assert.False(ExcelRunService.IsRunnerInvocationFailure(direct: false, timedOut: true, dialog: null, result: null));
+        Assert.False(ExcelRunService.IsRunnerInvocationFailure(direct: false, timedOut: false, dialog: new DialogSnapshot(), result: null));
+        Assert.False(ExcelRunService.IsRunnerInvocationFailure(direct: true, timedOut: false, dialog: null, result: null));
     }
 
     [Fact]

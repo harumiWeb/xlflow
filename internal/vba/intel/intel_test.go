@@ -1743,6 +1743,27 @@ End Sub
 	}
 }
 
+func TestRunnableProceduresKeepWorkbookPrefixedTestsInStandardModules(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Worksheet_Change_Test()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"Worksheet_Change_Test:test"}) {
+		t.Fatalf("runnable standard procedures = %#v", got)
+	}
+}
+
 func TestRunnableProceduresUserFormEventsAreConfigurable(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

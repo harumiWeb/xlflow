@@ -22,7 +22,7 @@ public sealed class ExcelMacrosServiceTests
             Public Function Build() As Boolean
             End Function
 
-            Private Sub Hidden()
+            private Static Sub Hidden()
             End Sub
             """;
 
@@ -51,7 +51,7 @@ public sealed class ExcelMacrosServiceTests
             Private Sub PrivateProbe()
             End Sub
 
-            Public Sub PublicProbe()
+            Public Static Sub PublicProbe()
             End Sub
 
             Friend Sub FriendProbe()

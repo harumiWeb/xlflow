@@ -147,6 +147,21 @@ func TestDocumentsOverlayUsesUnsavedChangesAndClearsOnClose(t *testing.T) {
 	}
 }
 
+func TestDocumentsClassifyWorkbookModulesAsDocument(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	path := filepath.Join(root, cfg.Src.Workbook, "Sheet1.bas")
+	docs := newDocuments(root, cfg.Src.Forms, cfg.Src.Workbook)
+
+	doc, err := docs.open(pathToFileURI(path), "Option Explicit\nPrivate Sub Worksheet_Activate()\nEnd Sub\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.ModuleKind != "document" {
+		t.Fatalf("module kind = %q, want document", doc.ModuleKind)
+	}
+}
+
 func TestWorkspaceSymbolCacheUsesOpenDocumentOverlay(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

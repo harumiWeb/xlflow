@@ -272,7 +272,7 @@ public sealed class ExcelMacrosService : IMacrosService
 
             var match = System.Text.RegularExpressions.Regex.Match(
                 line,
-                $@"^(?:(Public|Private|Friend)\s+)?(Sub|Function)\s+({VbaIdentifierPattern.Identifier})\s*(?:\(([^)]*)\))?",
+                $@"^(?:(Public|Private|Friend)\s+)?(?:Static\s+)?(Sub|Function)\s+({VbaIdentifierPattern.Identifier})\s*(?:\(([^)]*)\))?",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (!match.Success)
@@ -286,7 +286,15 @@ public sealed class ExcelMacrosService : IMacrosService
                 continue;
             }
 
-            var visibility = match.Groups[1].Success ? match.Groups[1].Value : "Implicit";
+            var visibility = match.Groups[1].Success
+                ? match.Groups[1].Value.ToLowerInvariant() switch
+                {
+                    "public" => "Public",
+                    "private" => "Private",
+                    "friend" => "Friend",
+                    _ => "Implicit",
+                }
+                : "Implicit";
             var argText = match.Groups[4].Value.Trim();
             var macroArgs = new List<string>();
             var hasParams = false;
