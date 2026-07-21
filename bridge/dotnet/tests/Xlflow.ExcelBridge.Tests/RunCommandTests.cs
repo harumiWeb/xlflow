@@ -257,6 +257,13 @@ public sealed class RunCommandTests
     }
 
     [Fact]
+    public void ClassifyRunFailureSeparatesTemporaryRunnerInvocationFromTargetFailure()
+    {
+        Assert.Equal("runner_not_invocable", ExcelRunService.ClassifyRunFailure("Cannot run the macro", 1004, runnerInvocationFailure: true));
+        Assert.Equal("macro_not_found", ExcelRunService.ClassifyRunFailure("Cannot run the macro", 1004, runnerInvocationFailure: false));
+    }
+
+    [Fact]
     public void FatalComFailureClassifierDetectsRpcFailureAndFormatsHResult()
     {
         const int rpcFailed = unchecked((int)0x800706BE);

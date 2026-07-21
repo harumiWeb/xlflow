@@ -1,6 +1,6 @@
 # xlflow macros
 
-Discover runnable public workbook macro entrypoints without executing user code.
+Discover runnable workbook macro entrypoints without executing user code.
 
 ## Usage
 
@@ -29,7 +29,7 @@ xlflow macros --runnable --json
 Macro procedure names may use Unicode VBA identifiers; discovered `name` and `qualified_name` values preserve those names.
 
 ::: tip
-Run `macros --json` before `run` so agents can choose an exact entrypoint. Use `--runnable` to filter out non-runnable procedures (those with parameters, event handlers, or on unsupported component types).
+Run `macros --json` before `run` so agents can choose an exact entrypoint. Use `--runnable` to filter out non-runnable procedures (those with parameters, event handlers, or on unsupported component types). The injected runner can invoke no-argument private, public, and friend procedures in standard, class, and workbook document modules.
 :::
 
 > [!IMPORTANT]
@@ -96,7 +96,7 @@ Each macro entry in the `macros` array includes:
 | `args`                | `string[]` | Raw parameter declarations (e.g. `"path As String"`).                                    |
 | `line`                | `number`   | 1-based line number in the source module.                                                |
 | `component_type`      | `string`   | One of: `standard_module`, `class_module`, `document_module`, `userform`, `unknown`.     |
-| `visibility`          | `string`   | Always `"Public"` (non-public procedures are excluded).                                  |
+| `visibility`          | `string`   | Declared visibility: `"Public"`, `"Private"`, `"Friend"`, or `"Implicit"`.               |
 | `has_parameters`      | `boolean`  | Whether the procedure declares parameters.                                               |
 | `runnable`            | `boolean`  | Whether the macro can be run directly via `xlflow run`.                                  |
 | `reason_not_runnable` | `string?`  | If not runnable, why: `has_parameters`, `event_procedure`, `unsupported_component_type`. |
@@ -115,7 +115,7 @@ A macro is considered **runnable** when **all** of the following are true:
 
 - `has_parameters` is `false` (no parameters)
 - Not an event procedure (e.g. `Workbook_Open`, `Worksheet_Change`, `Auto_Open`)
-- `component_type` is `standard_module` or `class_module` (not `document_module`, `userform`, or `unknown`)
+- `component_type` is `standard_module`, `class_module`, or `document_module` (not `userform` or `unknown`)
 
 ## Related
 

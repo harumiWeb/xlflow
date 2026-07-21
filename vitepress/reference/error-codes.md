@@ -34,6 +34,7 @@ Common examples:
 - `vbide_access_denied`
 - `macro_failed`
 - `macro_not_found`
+- `runner_not_invocable`
 - `macro_timeout`
 - `vba_compile_failed`
 - `gui_boundary_detected`

@@ -1714,6 +1714,35 @@ End Sub
 	}
 }
 
+func TestRunnableProceduresAllowPrivateDocumentProceduresAndHideWorkbookEvents(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Sheet1.bas"),
+		ModuleKind: "document",
+		Source: `Attribute VB_Name = "Sheet1"
+Option Explicit
+Private Sub PrivateProbe()
+End Sub
+Public Sub PublicProbe()
+End Sub
+Private Sub Worksheet_Activate()
+End Sub
+Public Sub workbook_Open()
+End Sub
+Public Sub Auto_Open()
+End Sub
+`,
+	}
+
+	procedures, err := analyzer.RunnableProcedures(doc, DefaultCodeLensConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runnableProcedureNames(procedures); !reflect.DeepEqual(got, []string{"PrivateProbe:sub", "PublicProbe:sub"}) {
+		t.Fatalf("runnable document procedures = %#v", got)
+	}
+}
+
 func TestRunnableProceduresUserFormEventsAreConfigurable(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
