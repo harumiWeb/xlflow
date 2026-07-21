@@ -518,7 +518,7 @@ func TestScaffoldAppendsMissingGitignoreEntries(t *testing.T) {
 	if !strings.HasPrefix(got, existing) {
 		t.Fatalf("existing .gitignore content should be preserved:\n%s", got)
 	}
-	for _, want := range []string{"~$*.xls*", "*.tmp", ".xlflow/", "build/"} {
+	for _, want := range []string{"~$*.xls*", "*.tmp", "*.xlam", ".xlflow/", "build/"} {
 		if strings.Count(got, want) != 1 {
 			t.Fatalf("expected one %q entry in .gitignore:\n%s", want, got)
 		}
@@ -530,7 +530,7 @@ func TestScaffoldAppendsMissingGitignoreEntries(t *testing.T) {
 
 func TestScaffoldDoesNotDuplicateGitignoreEntries(t *testing.T) {
 	dir := t.TempDir()
-	existing := "# Existing\nbuild/\n*.tmp\n.xlflow/\n~$*.xls*\n"
+	existing := "# Existing\nbuild/\n*.tmp\n*.xlam\n.xlflow/\n~$*.xls*\n"
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
