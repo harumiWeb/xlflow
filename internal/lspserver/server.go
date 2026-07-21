@@ -563,6 +563,18 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, err
 	}
 	measurement.setDocument(doc)
+	if s.documentKind(doc) == DocumentKindUserFormYAML {
+		hover := formsintel.HoverYAML(doc.Source, formsintel.Position{Line: int(params.Position.Line), Character: int(params.Position.Character)})
+		if hover == nil {
+			measurement.finish(0, nil)
+			return nil, nil
+		}
+		measurement.finish(1, nil)
+		return &protocol.Hover{
+			Contents: protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: hover.Contents},
+			Range:    toProtocolRangePtr(intel.Range{Start: intel.Position{Line: hover.Range.Start.Line, Character: hover.Range.Start.Character}, End: intel.Position{Line: hover.Range.End.Line, Character: hover.Range.End.Character}}),
+		}, nil
+	}
 	if s.documentKind(doc) != DocumentKindVBA {
 		measurement.finish(0, nil)
 		return nil, nil

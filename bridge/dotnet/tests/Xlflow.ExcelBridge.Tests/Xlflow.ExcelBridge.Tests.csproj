@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\Xlflow.ExcelBridge\Xlflow.ExcelBridge.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\..\..\internal\excel\forms\intel\testdata\contract-snapshot.json" Link="contract-snapshot.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

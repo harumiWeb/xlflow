@@ -95,6 +95,8 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 
 `form build` reports all detected contract issues before Excel opens. YAML files directly under the configured `src/forms/specs` directory receive the same live diagnostics in the xlflow LSP.
 
+The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, support level, and build limitations. In particular, `width` and `height` are best-effort; `list` and `selectedIndex` are observed-only state that may be applied best-effort; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than guaranteed normal build inputs.
+
 | Code              | Meaning                                                                                                                       |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `UFY001`          | YAML parse error.                                                                                                             |
@@ -102,7 +104,7 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
 | `UFV013`–`UFV014` | Support-level warning or custom-control validation warning.                                                                   |
 
-For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above.
+For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
 
 ## Related
 

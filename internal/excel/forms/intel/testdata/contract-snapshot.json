@@ -1,0 +1,37 @@
+{
+  "builtInControls": [
+    { "type": "Label", "progId": "Forms.Label.1" },
+    { "type": "TextBox", "progId": "Forms.TextBox.1" },
+    { "type": "ComboBox", "progId": "Forms.ComboBox.1" },
+    { "type": "ListBox", "progId": "Forms.ListBox.1" },
+    { "type": "CommandButton", "progId": "Forms.CommandButton.1" },
+    { "type": "CheckBox", "progId": "Forms.CheckBox.1" },
+    { "type": "OptionButton", "progId": "Forms.OptionButton.1" },
+    { "type": "Frame", "progId": "Forms.Frame.1" }
+  ],
+  "bridge": {
+    "formFields": ["name", "caption", "width", "height", "observed", "build"],
+    "controlFields": [
+      "id",
+      "parentId",
+      "zIndex",
+      "type",
+      "name",
+      "progId",
+      "caption",
+      "text",
+      "value",
+      "left",
+      "top",
+      "width",
+      "height",
+      "tabIndex",
+      "selectedIndex",
+      "enabled",
+      "visible",
+      "list",
+      "controls",
+      "observed"
+    ]
+  }
+}

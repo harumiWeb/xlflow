@@ -2,7 +2,9 @@ package lspserver
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -55,9 +57,67 @@ controls: []
 	hover, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: protocol.Position{Line: 0, Character: 2},
 	}})
-	if err != nil || hover != nil {
-		t.Fatalf("UserForm YAML hover = %#v, %v; want nil, nil", hover, err)
+	if err != nil || hover == nil || !strings.Contains(hover.Contents.(protocol.MarkupContent).Value, "schemaVersion") {
+		t.Fatalf("UserForm YAML hover = %#v, %v; want schemaVersion documentation", hover, err)
 	}
+}
+
+func TestRepresentativeUserFormFixtureUsesSharedLSPContract(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	source, err := os.ReadFile(filepath.Join("..", "excel", "forms", "intel", "testdata", "representative-userform.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "AllControlsForm.yaml"))
+	doc, err := s.docs.open(uri, string(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range s.documentDiagnostics(context.Background(), doc) {
+		if diagnostic.Severity == "error" {
+			t.Fatalf("fixture diagnostic = %#v, want warnings only", diagnostic)
+		}
+	}
+
+	selectedLine := lineNumberContaining(string(source), "selectedIndex: 0")
+	hover, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Position:     protocol.Position{Line: protocol.UInteger(selectedLine), Character: protocol.UInteger(strings.Index(lineAt(string(source), selectedLine), "selectedIndex") + 2)},
+	}})
+	if err != nil || hover == nil || !strings.Contains(hover.Contents.(protocol.MarkupContent).Value, "observed-only") {
+		t.Fatalf("selectedIndex hover = %#v, %v", hover, err)
+	}
+
+	parentLine := lineNumberContaining(string(source), "parentId: frame_main")
+	completion, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Position:     protocol.Position{Line: protocol.UInteger(parentLine), Character: protocol.UInteger(len(lineAt(string(source), parentLine)))},
+	}})
+	if err != nil || !hasCompletionLabel(completion.(protocol.CompletionList).Items, "frame_main") {
+		t.Fatalf("fixture parent completion = %#v, %v", completion, err)
+	}
+}
+
+func lineNumberContaining(source, want string) int {
+	for index, line := range strings.Split(source, "\n") {
+		if strings.Contains(line, want) {
+			return index
+		}
+	}
+	return -1
+}
+
+func lineAt(source string, line int) string {
+	lines := strings.Split(source, "\n")
+	if line < 0 || line >= len(lines) {
+		return ""
+	}
+	return lines[line]
 }
 
 func TestUserFormYAMLMalformedDiagnosticDoesNotBreakLaterRequests(t *testing.T) {

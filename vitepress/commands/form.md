@@ -33,6 +33,8 @@ xlflow [--wait] form export-image <name> --out <png>
 
 `form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and an authoring-focused `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); blank specs omit snapshot-only fields such as `warnings`. It does not create `.frm` or `.frx` artifacts.
 
+Edit Designer specifications directly under `src/forms/specs/` to receive real-time UserForm YAML diagnostics, context-aware completion, and Hover documentation from `xlflow lsp`. Hover distinguishes supported fields from best-effort geometry, observed-only list state, snapshot metadata, and custom/unchecked fields before `form build` opens Excel.
+
 All other workbook-backed form commands share the configured workbook lock with
 `run`, `test`, `push`, `pull`, and Designer inspection. Contention returns
 `workbook_busy` before Excel or VBIDE starts. Use global `--wait` for an explicit
@@ -58,6 +60,9 @@ xlflow --wait --wait-timeout 15s form snapshot CalendarForm --out artifacts/Cale
 
 > [!IMPORTANT]
 > The canonical Designer source is `src/forms/specs/*.yaml` or `*.json`; sidecar code lives separately under `src/forms/code/`.
+
+> [!TIP]
+> Prefer the built-in first-class control types and their suggested ProgIDs. A custom `progId` remains compatible, but xlflow can validate only common structure; type-specific properties and Designer compatibility depend on the installed ActiveX control.
 
 > [!WARNING]
 > `form new` refuses to overwrite an existing sidecar code or spec file. In `frm` code-source mode, use `form snapshot` / `form build` workflows or switch the project to sidecar mode intentionally.
