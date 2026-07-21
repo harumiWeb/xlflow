@@ -623,13 +623,16 @@ func missingGitignoreSections(body string) []string {
 	}
 
 	var sections []string
-	if !lines["~$*.xls*"] || !lines["*.tmp"] {
+	if !lines["~$*.xls*"] || !lines["*.tmp"] || !lines["*.xlam"] {
 		var entries []string
 		if !lines["~$*.xls*"] {
 			entries = append(entries, "~$*.xls*")
 		}
 		if !lines["*.tmp"] {
 			entries = append(entries, "*.tmp")
+		}
+		if !lines["*.xlam"] {
+			entries = append(entries, "*.xlam")
 		}
 		sections = append(sections, "# Excel\n"+strings.Join(entries, "\n"))
 	}
@@ -670,6 +673,7 @@ func normalizeWorkbookName(name string) (string, error) {
 const defaultGitignore = `# Excel
 ~$*.xls*
 *.tmp
+*.xlam
 
 # xlflow
 .xlflow/
