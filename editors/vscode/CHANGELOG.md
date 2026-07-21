@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.8.1
+
+- Minor fixes accompanying updates to the xlflow CLI
+
 ## v0.8.0
 
 - Added the `xlflow.lsp.performanceLogging` setting to opt into structured language server performance measurements.
