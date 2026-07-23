@@ -966,6 +966,36 @@ End Sub
 	}
 }
 
+func TestUnknownMemberDiagnosticsUseGeneratedExcelWorksheetType(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.Worksheet",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "properties": [{ "name": "Range", "return_type": "Excel.Range" }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim ws As Excel.Worksheet
+    ws.LastRow
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB033")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, `Unknown member "LastRow" on Excel.Worksheet.`) {
+		t.Fatalf("generated Excel.Worksheet unknown-member diagnostic = %+v", diagnostics)
+	}
+}
+
 func TestUnknownMemberDiagnosticsSkipLowConfidenceReceivers(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -3477,6 +3507,65 @@ End Sub
 	}
 	if len(withoutDecl) != 2 || withoutDecl[0].Range.Start.Line != 2 || withoutDecl[1].Range.Start.Line != 2 {
 		t.Fatalf("parameter references without declaration = %+v, want First body references only", withoutDecl)
+	}
+}
+
+func TestGenericWorksheetMemberDoesNotResolveDocumentProperty(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Property Get LastRow() As Long
+    LastRow = Me.UsedRange(Me.UsedRange.CountLarge).Row
+End Property
+
+Public Sub Hoge(ByRef TargetSheet As Worksheet)
+    Debug.Print TargetSheet.LastRow
+End Sub
+
+Public Sub ValidDocumentAccess()
+    Debug.Print Me.LastRow
+End Sub
+`
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Sheet1.bas"),
+		ModuleKind: "document",
+		Source:     source,
+	}
+	invalidLine := `    Debug.Print TargetSheet.LastRow`
+	invalidPos := Position{Line: lineIndex(source, invalidLine), Character: utf16Len(invalidLine[:strings.Index(invalidLine, "LastRow")+3])}
+
+	defs, err := analyzer.Definition(doc, invalidPos, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("generic Worksheet member definition = %+v, want none", defs)
+	}
+	hover, err := analyzer.Hover(doc, invalidPos, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover != nil {
+		t.Fatalf("generic Worksheet member hover = %+v, want none", hover)
+	}
+	refs, err := analyzer.References(doc, invalidPos, []Document{doc}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("generic Worksheet member references = %+v, want none", refs)
+	}
+	if _, err := analyzer.PrepareRename(doc, invalidPos, []Document{doc}); err == nil {
+		t.Fatal("PrepareRename unexpectedly accepted generic Worksheet member")
+	}
+
+	validLine := `    Debug.Print Me.LastRow`
+	validPos := Position{Line: lineIndex(source, validLine), Character: utf16Len(validLine[:strings.Index(validLine, "LastRow")+3])}
+	defs, err = analyzer.Definition(doc, validPos, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].Range.Start.Line != 1 {
+		t.Fatalf("Me.LastRow definition = %+v, want document property", defs)
 	}
 }
 

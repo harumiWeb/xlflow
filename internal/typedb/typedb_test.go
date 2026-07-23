@@ -119,10 +119,12 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
       "properties": [{ "name": "Name", "return_type": "String" }]
     },
     {
-      "name": "Excel.Range",
+      "name": "Excel.Worksheet",
       "library": "Excel",
-      "kind": "class",
-      "properties": [{ "name": "Value", "return_type": "Long" }]
+      "kind": "interface",
+      "confidence": "generated",
+      "source": "typelib",
+      "properties": [{ "name": "GeneratedOnly", "return_type": "Long" }]
     }
   ]
 }`), 0o644); err != nil {
@@ -142,8 +144,15 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	if member, ok := result.DB.ResolveMember("Vendor.Widget", "Name"); !ok || member.ReturnType != "String" {
 		t.Fatalf("generated member missing: %+v, %v", member, ok)
 	}
-	if member, ok := result.DB.ResolveMember("Excel.Range", "Value"); !ok || member.ReturnType != "Variant" {
-		t.Fatalf("built-in overlay should override generated Excel.Range.Value: %+v, %v", member, ok)
+	worksheet, ok := result.DB.ResolveType("Excel.Worksheet")
+	if !ok || worksheet.Source != "typelib" || worksheet.Confidence != "generated" {
+		t.Fatalf("built-in overlay should preserve generated Excel.Worksheet provenance: %+v, %v", worksheet, ok)
+	}
+	if member, ok := result.DB.ResolveMember("Excel.Worksheet", "GeneratedOnly"); !ok || member.ReturnType != "Long" {
+		t.Fatalf("built-in overlay should retain generated Excel.Worksheet members: %+v, %v", member, ok)
+	}
+	if member, ok := result.DB.ResolveMember("Excel.Worksheet", "Range"); !ok || member.ReturnType != "Excel.Range" {
+		t.Fatalf("built-in overlay should retain curated Excel.Worksheet members: %+v, %v", member, ok)
 	}
 }
 

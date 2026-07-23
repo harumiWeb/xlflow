@@ -72,6 +72,49 @@ func TestMergeJSONPreservesParamArrayParameters(t *testing.T) {
 	}
 }
 
+func TestCuratedOverlayPreservesGeneratedTypeLibProvenance(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.Worksheet",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "properties": [{ "name": "GeneratedMember", "return_type": "String" }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.Worksheet",
+    "kind": "class",
+    "confidence": "curated",
+    "source": "xlflow",
+    "summary": "Curated worksheet summary.",
+    "properties": [{ "name": "CuratedMember", "return_type": "Long" }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	typ, ok := db.ResolveType("Excel.Worksheet")
+	if !ok {
+		t.Fatal("Excel.Worksheet missing after merge")
+	}
+	if typ.Source != "typelib" || typ.Confidence != "generated" {
+		t.Fatalf("generated provenance was downgraded: %+v", typ)
+	}
+	if typ.Kind != "class" || typ.Summary != "Curated worksheet summary." {
+		t.Fatalf("curated overlay metadata was not retained: %+v", typ)
+	}
+	for _, name := range []string{"GeneratedMember", "CuratedMember"} {
+		if _, ok := db.ResolveMember("Excel.Worksheet", name); !ok {
+			t.Fatalf("merged member %s missing", name)
+		}
+	}
+}
+
 func TestIsAssignableUsesExplicitRelationshipsOnly(t *testing.T) {
 	db := New()
 	if err := db.MergeJSON([]byte(`{
