@@ -26,6 +26,7 @@ type Config struct {
 	Src      SourceConfig     `toml:"src"`
 	VBA      VBAConfig        `toml:"vba"`
 	UserForm UserFormConfig   `toml:"userform"`
+	Build    BuildConfig      `toml:"build"`
 	Backup   BackupConfig     `toml:"backup"`
 	Fmt      FmtConfig        `toml:"fmt"`
 	Lint     LintConfig       `toml:"lint"`
@@ -67,6 +68,12 @@ type VBALineNumbersConfig struct {
 
 type UserFormConfig struct {
 	CodeSource string `toml:"code_source"`
+}
+
+// BuildConfig controls release-build source selection. It is intentionally
+// separate from push, which always synchronizes the complete source tree.
+type BuildConfig struct {
+	Exclude []string `toml:"exclude"`
 }
 
 type BackupConfig struct {

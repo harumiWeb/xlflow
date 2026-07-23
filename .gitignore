@@ -13,7 +13,7 @@ coverage.out
 
 # xlflow
 .xlflow/
-build/
+/build/
 .worktrees/
 xlflow.toml
 /src/

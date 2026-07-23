@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,9 @@ entry = "Main.Run"
 
 [excel]
 path = "build/Sales.xlsm"
+
+[build]
+exclude = ["src/modules/Tests/**"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -38,6 +42,9 @@ path = "build/Sales.xlsm"
 	}
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("unexpected userform defaults: %+v", cfg.UserForm)
+	}
+	if got, want := cfg.Build.Exclude, []string{"src/modules/Tests/**"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("build.exclude = %#v, want %#v", got, want)
 	}
 	if cfg.Backup.Retention.Enabled ||
 		cfg.Backup.Retention.MaxCount != 20 ||
