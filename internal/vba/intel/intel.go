@@ -485,6 +485,9 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 	if err != nil {
 		return nil, err
 	}
+	if len(defSyms) == 0 {
+		return nil, nil
+	}
 	var localScope *Range
 	if hasLocalDefinitionSymbol(defSyms) {
 		if scope, ok := currentProcedureRangeForDocument(doc, pos); ok {
@@ -546,6 +549,9 @@ func (a Analyzer) References(doc Document, pos Position, open []Document, includ
 }
 
 func (a Analyzer) definitionSymbols(doc Document, pos Position, open []Document, word string) ([]Symbol, error) {
+	if a.unresolvedExternalMemberReference(doc, pos, word) {
+		return nil, nil
+	}
 	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return nil, err
@@ -562,6 +568,75 @@ func (a Analyzer) definitionSymbols(doc Document, pos Position, open []Document,
 		return local, nil
 	}
 	return out, nil
+}
+
+// unresolvedExternalMemberReference reports member access on a known host type
+// that is absent from the type database. Such an access must not fall back to a
+// same-named project declaration: a variable declared As Worksheet is not an
+// instance of the current worksheet's document module.
+func (a Analyzer) unresolvedExternalMemberReference(doc Document, pos Position, word string) bool {
+	if a.DB == nil {
+		return false
+	}
+	_, wordRange := WordAt(doc.Source, pos)
+	line := lineAt(doc.Source, wordRange.Start.Line)
+	if line == "" {
+		return false
+	}
+	startByte := byteIndexForUTF16(line, wordRange.Start.Character)
+	if startByte > len(line) {
+		startByte = len(line)
+	}
+	offset := byteOffsetForPosition(doc.Source, pos)
+	var receiverType string
+	var ok bool
+	beforeWord := strings.TrimRight(line[:startByte], " \t")
+	beforeDot := strings.TrimSuffix(beforeWord, ".")
+	relativeMember := strings.HasSuffix(beforeWord, ".") && (strings.TrimSpace(beforeDot) == "" || strings.TrimRight(beforeDot, " \t") != beforeDot)
+	receiverExpr := ""
+	if !relativeMember {
+		for _, match := range memberExprRe.FindAllStringSubmatchIndex(line, -1) {
+			if len(match) < 6 || match[4] > startByte || startByte >= match[5] {
+				continue
+			}
+			receiverExpr = strings.TrimSpace(line[match[2]:match[3]])
+			break
+		}
+	}
+	if receiverExpr != "" {
+		if strings.EqualFold(receiverExpr, "Me") {
+			return false
+		}
+		receiverType, ok = a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+	} else {
+		if !strings.HasSuffix(beforeWord, ".") {
+			return false
+		}
+		if receiver, found := a.withBlockReceiverAt(doc, pos); found && strings.EqualFold(receiver, "Me") {
+			return false
+		}
+		receiverType, ok = a.withBlockTypeAt(doc, pos, offset)
+	}
+	if !ok {
+		return false
+	}
+	if _, ok := a.DB.ResolveType(receiverType); !ok {
+		return false
+	}
+	_, found := a.DB.ResolveMember(receiverType, word)
+	return !found
+}
+
+func (a Analyzer) withBlockReceiverAt(doc Document, pos Position) (string, bool) {
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return "", false
+	}
+	block, ok := index.withBlockAt(pos)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(index.withBlocks[block].receiver), true
 }
 
 func (a Analyzer) visibleDefinitionSymbol(doc Document, currentProcedure string, sym Symbol) bool {
@@ -626,6 +701,9 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	}
 	if hover, ok := a.memberHover(doc, word, r, byteOffsetForPosition(doc.Source, pos)); ok {
 		return hover, nil
+	}
+	if a.unresolvedExternalMemberReference(doc, pos, word) {
+		return nil, nil
 	}
 	if control, ok := a.resolveFormControl(doc, word); ok {
 		return &Hover{Contents: variableHover(word, control.Type, "UserForm control"), Range: r}, nil

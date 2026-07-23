@@ -241,10 +241,10 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	if overlay.Collection {
 		out.Collection = true
 	}
-	if overlay.Confidence != "" {
+	if overlay.Confidence != "" && !preserveGeneratedProvenance(base, overlay) {
 		out.Confidence = overlay.Confidence
 	}
-	if overlay.Source != "" {
+	if overlay.Source != "" && !preserveGeneratedProvenance(base, overlay) {
 		out.Source = overlay.Source
 	}
 	out.Aliases = mergeStrings(out.Aliases, overlay.Aliases)
@@ -253,6 +253,17 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	out.Methods = mergeMembers(out.Methods, overlay.Methods)
 	out.Events = mergeMembers(out.Events, overlay.Events)
 	return out
+}
+
+// preserveGeneratedProvenance keeps a generated TypeLib type authoritative
+// when the embedded curated DB supplies convenience metadata or member
+// corrections. The curated overlay is intentionally loaded after generated
+// databases, but it must not make a complete generated member set look partial.
+func preserveGeneratedProvenance(base, overlay TypeInfo) bool {
+	return strings.EqualFold(base.Source, "typelib") &&
+		strings.EqualFold(base.Confidence, "generated") &&
+		strings.EqualFold(overlay.Source, "xlflow") &&
+		strings.EqualFold(overlay.Confidence, "curated")
 }
 
 func mergeStrings(base, overlay []string) []string {
