@@ -183,6 +183,7 @@ function helpSidebar() {
     {
       text: "Help",
       items: [
+        { text: "Overview", link: "/help/" },
         { text: "Troubleshooting", link: "/help/troubleshooting" },
         { text: "FAQ", link: "/help/faq" },
         { text: "Known limitations", link: "/help/known-limitations" },
