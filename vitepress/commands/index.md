@@ -1,5 +1,9 @@
 # Commands
 
+This is the exact-command reference, not the best first learning path. If you are deciding _what_ to do, start with [Choose your workflow](../choose-workflow) or a [tutorial](../tutorials/). Return here when you know your goal and need an option, argument, or machine-readable contract.
+
+For almost every project, the basic story is: create/import a project → `pull` if Excel is newer → edit `src/` → `lint`/`analyze` → `push` → `run` or `test` → inspect the result. The [source, workbook, and session model](../concepts/workbook-session-source) explains why these are separate commands.
+
 xlflow exposes a Cobra-based CLI. Every command accepts the global `--json` flag
 for machine-readable output. Retryable workbook commands also accept `--wait`
 and `--wait-timeout <duration>`; waiting is opt-in and defaults to a 30-second
@@ -17,6 +21,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | ------------------------------ | -------------------------------------------------------------------------------- |
 | [new](./new)                   | Create a new xlflow project and macro-enabled workbook or add-in.                |
 | [init](./init)                 | Initialize an xlflow project from an existing workbook or add-in.                |
+| [capabilities](./capabilities) | Show machine-readable command safety metadata.                                   |
 | [doctor](./doctor)             | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.        |
 | [attach](./attach)             | Validate that the active Excel workbook matches the configured workbook.         |
 | [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.              |
@@ -25,6 +30,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [formulas](./formulas)         | Extract worksheet formulas into region-based JSONL snapshots without Excel.      |
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
+| [pack](./pack)                 | Build a release `.xlsm` artifact from source and a workbook template.            |
 | [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
 | [status](./status)             | Show project, source, workbook, and session state in one read-only command.      |
 | [session](./session)           | Keep Excel and the configured workbook open across repeated commands.            |

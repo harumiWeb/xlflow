@@ -1,0 +1,45 @@
+# Diagnostic rule inventory
+
+Generated from diagnostic IDs in `internal/`. Run `pnpm docs:generate-reference` after adding a rule.
+
+- `FRM201`
+- `FRM203`
+- `UFY001`
+- `VB001`
+- `VB002`
+- `VB003`
+- `VB004`
+- `VB005`
+- `VB006`
+- `VB007`
+- `VB018`
+- `VB019`
+- `VB020`
+- `VB021`
+- `VB022`
+- `VB023`
+- `VB026`
+- `VB027`
+- `VB029`
+- `VB030`
+- `VB033`
+- `VB040`
+- `VB041`
+- `VB042`
+- `VB043`
+- `VB044`
+- `VBA104`
+- `VBA105`
+- `VBA106`
+- `VBA201`
+- `VBA202`
+- `VBA203`
+- `VBA204`
+- `VBA205`
+- `VBA206`
+- `VBA207`
+- `VBA208`
+- `VBA209`
+- `VBA210`
+- `VBA211`
+- `VBA212`

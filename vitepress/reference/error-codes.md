@@ -56,3 +56,18 @@ Common examples:
 - `windows_xlflow_execution_failed`
 
 Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, `VB026` through `VB029`, `VB031`, `VB032`, and `VB044`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA212`.
+
+## Recovery map
+
+| Code or symptom                                                | Likely cause                                           | Recovery                                                                                        |
+| -------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `vbide_access_denied`                                          | Excel Trust Center blocks VBIDE automation.            | Enable Trust access, restart Excel, rerun `doctor`.                                             |
+| `macro_not_found`                                              | The target name is not a runnable qualified procedure. | Run `macros --json` and use `qualified_name`.                                                   |
+| `source_preflight_failed`                                      | Source would trigger a VBE compile/dialog failure.     | Fix the reported source issue, then rerun `lint` and `push`.                                    |
+| `vba_compile_failed` / `0x800A03EC`                            | Excel rejected imported VBA or a workbook operation.   | Use `run --diagnostic`, inspect the source location, and retry only after preflight passes.     |
+| `macro_timeout`                                                | A macro loop or modal UI did not complete.             | Inspect dialogs and session state; use interactive mode only with a human.                      |
+| `workbook_recovery_required`                                   | Excel/VBA termination was not proven safe.             | Follow [recovery](../commands/recovery); `--wait` cannot clear quarantine.                      |
+| `windows_xlflow_not_found`                                     | WSL cannot locate the Windows frontend.                | Install it or set `XLFLOW_WINDOWS_EXE`; see [WSL troubleshooting](../help/troubleshooting#wsl). |
+| `wsl_project_path_unsupported` / `wsl_path_translation_failed` | The project is outside a Windows-mounted path.         | Move it under `/mnt/c`, `/mnt/d`, or another mounted drive.                                     |
+
+The [symptom-oriented troubleshooting guide](../help/troubleshooting) adds diagnosis and verification steps for each category.

@@ -1,5 +1,16 @@
 # Installation
 
+The recommended install includes both the `xlflow` CLI and the Windows `.NET` Excel bridge. You need both for commands that open or change Excel. Installing only a Go binary is enough for source checks such as `lint`, but not for `push`, `run`, or sessions.
+
+After installing, do not start with a workbook operation. First prove that the command and Excel setup are available:
+
+```powershell
+xlflow version
+xlflow doctor --json
+```
+
+`version` confirms the shell can find xlflow. `doctor` confirms Excel, the bridge, and VBA-project access. Its successful JSON result has `"status": "ok"`.
+
 ## Recommended for Windows users
 
 ### Quick install
@@ -8,7 +19,8 @@ If you want the fastest path:
 
 ```powershell
 irm https://harumiweb.github.io/xlflow/install.ps1 | iex
-xlflow new
+xlflow version
+xlflow doctor --json
 ```
 
 ### Uninstall
@@ -27,6 +39,8 @@ If you just want to use xlflow on Windows with a package manager, install it wit
 ```powershell
 winget install HarumiWeb.Xlflow
 ```
+
+Close and reopen PowerShell after a package-manager installation if `xlflow` is not yet found. Then run the two verification commands above before creating a project.
 
 Use `upgrade` to update an existing installation:
 
@@ -68,7 +82,7 @@ Linux release archives are built separately with native CGO on Ubuntu and contai
 
 ## WSL development frontend
 
-Install xlflow on both Windows and WSL. Use the Windows installer, winget, Scoop, or Windows release archive for `xlflow.exe` plus `xlflow-excel-bridge.exe`.
+Install xlflow on both Windows and WSL. Windows owns Excel; WSL supplies the source-oriented command-line frontend. Use the Windows installer, winget, Scoop, or Windows release archive for `xlflow.exe` plus `xlflow-excel-bridge.exe`.
 
 From a WSL shell, install the Linux frontend with:
 
@@ -125,6 +139,14 @@ Verify the install:
 xlflow version
 xlflow --help
 ```
+
+Then verify the Excel environment and project boundary:
+
+```powershell
+xlflow doctor --json
+```
+
+If the command is not found, the bridge is missing, Trust Center blocks VBIDE, or WSL cannot translate the project path, use [Troubleshooting](./help/troubleshooting).
 
 For source checkout development:
 

@@ -1,16 +1,16 @@
 # Source of Truth
 
-For normal development, source files under `src/` are the authority. Agents should edit files first, then run `push`, `lint`, `test`, and `run`.
+“Source of truth” simply means the copy whose changes you intend to keep. For normal development, that is source files under `src/`: edit them first, check them, then run `push` to put them into Excel.
 
 The workbook can become newer than source when a user edits in Excel, when a session is dirty, or when a command intentionally mutates workbook state. In that case, run `pull` before editing source.
 
-Use `xlflow status` to quickly check whether source, workbook, and session are in sync:
+Use `xlflow status` to quickly check whether source, workbook, and session are in sync. This is safe to run before any decision:
 
 ```bash
 xlflow status
 ```
 
-If `src_newer_than_workbook` is `true`, run `xlflow push`. If the session is dirty, run `xlflow save --session`.
+If `src_newer_than_workbook` is `true`, source has an unpushed edit: run `xlflow push` when you want Excel to receive it. If the session is dirty, run `xlflow save --session` when you want the live result to survive. If Excel/VBE is newer, run `pull` before editing source again.
 
 UserForms have two tracked concerns:
 

@@ -1,16 +1,18 @@
 # AI Agents
 
-xlflow gives coding agents a stable interface for Excel VBA projects: source files, JSON output, explicit exit codes, diagnostics, sessions, and visual inspection commands.
+xlflow gives coding agents a stable interface for Excel VBA projects: source files, JSON output, explicit exit codes, diagnostics, sessions, and visual inspection commands. An agent does not need to click through Excel to make progress; it can change source, run a controlled command, and inspect an observable result.
+
+The safety boundary matters: agents edit `src/`, `push` places that source into Excel, and `save --session` is the explicit point where a live experiment becomes the workbook file on disk.
 
 Every command can return a stable JSON envelope, so coding agents can parse results without scraping terminal text. See [JSON Output](../reference/json-output) and [Error Codes](../reference/error-codes).
 
-Before editing, confirm workbook and source state:
+Before editing, confirm workbook and source state. This command changes nothing and prevents an agent from overwriting VBE work by accident:
 
 ```bash
 xlflow status --json
 ```
 
-Recommended loop:
+Recommended loop (replace `Main.Run` with a name returned by `macros`):
 
 ```bash
 xlflow doctor --json
@@ -38,7 +40,9 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
-If a run fails, check state and recover with a short loop:
+Read the loop in four phases: **understand** (`doctor`, `status`, `pull`), **edit and check** (`lint`, `analyze`), **prove** (`push`, `test`, `run`, `inspect`), then **persist** (`save`, `stop`). `--no-save` makes the proof reversible until the agent has inspected the result.
+
+If a run fails, read `error.code` first. A source error normally means fix source and repeat the checks; a `workbook_recovery_required` error means stop the loop. Do not blindly repeat an Excel command. For ordinary failures, check state and recover with a short loop:
 
 ```bash
 xlflow status --json
