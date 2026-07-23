@@ -1,5 +1,16 @@
 # Config File
 
+## Formatter settings
+
+The `[fmt]` table controls the source formatter. These options are read by `fmt` and the VS Code formatting action:
+
+| Key                   | Meaning                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `operator_spacing`    | Normalize spacing around operators.                                  |
+| `declaration_spacing` | Keep declaration blocks separated consistently.                      |
+| `keyword_casing`      | Normalize VBA keyword casing.                                        |
+| `builtin_casing`      | Normalize curated built-in names without recasing user declarations. |
+
 xlflow reads `xlflow.toml` from the project root. It is the single source of truth for workbook paths, source directories, VBE behaviour, and static analysis rules.
 
 ## Full annotated example
