@@ -587,18 +587,36 @@ func (a Analyzer) unresolvedExternalMemberReference(doc Document, pos Position, 
 	if startByte > len(line) {
 		startByte = len(line)
 	}
+	offset := byteOffsetForPosition(doc.Source, pos)
+	var receiverType string
+	var ok bool
+	beforeWord := strings.TrimRight(line[:startByte], " \t")
+	beforeDot := strings.TrimSuffix(beforeWord, ".")
+	relativeMember := strings.HasSuffix(beforeWord, ".") && (strings.TrimSpace(beforeDot) == "" || strings.TrimRight(beforeDot, " \t") != beforeDot)
 	receiverExpr := ""
-	for _, match := range memberExprRe.FindAllStringSubmatchIndex(line, -1) {
-		if len(match) < 6 || match[4] > startByte || startByte >= match[5] {
-			continue
+	if !relativeMember {
+		for _, match := range memberExprRe.FindAllStringSubmatchIndex(line, -1) {
+			if len(match) < 6 || match[4] > startByte || startByte >= match[5] {
+				continue
+			}
+			receiverExpr = strings.TrimSpace(line[match[2]:match[3]])
+			break
 		}
-		receiverExpr = strings.TrimSpace(line[match[2]:match[3]])
-		break
 	}
-	if receiverExpr == "" || strings.EqualFold(receiverExpr, "Me") {
-		return false
+	if receiverExpr != "" {
+		if strings.EqualFold(receiverExpr, "Me") {
+			return false
+		}
+		receiverType, ok = a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+	} else {
+		if !strings.HasSuffix(beforeWord, ".") {
+			return false
+		}
+		if receiver, found := a.withBlockReceiverAt(doc, pos); found && strings.EqualFold(receiver, "Me") {
+			return false
+		}
+		receiverType, ok = a.withBlockTypeAt(doc, pos, offset)
 	}
-	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, byteOffsetForPosition(doc.Source, pos))
 	if !ok {
 		return false
 	}
@@ -607,6 +625,18 @@ func (a Analyzer) unresolvedExternalMemberReference(doc Document, pos Position, 
 	}
 	_, found := a.DB.ResolveMember(receiverType, word)
 	return !found
+}
+
+func (a Analyzer) withBlockReceiverAt(doc Document, pos Position) (string, bool) {
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return "", false
+	}
+	block, ok := index.withBlockAt(pos)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(index.withBlocks[block].receiver), true
 }
 
 func (a Analyzer) visibleDefinitionSymbol(doc Document, currentProcedure string, sym Symbol) bool {

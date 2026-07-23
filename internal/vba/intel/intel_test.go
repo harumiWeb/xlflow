@@ -3519,6 +3519,9 @@ End Property
 
 Public Sub Hoge(ByRef TargetSheet As Worksheet)
     Debug.Print TargetSheet.LastRow
+    With TargetSheet
+        Debug.Print .LastRow
+    End With
 End Sub
 
 Public Sub ValidDocumentAccess()
@@ -3556,6 +3559,28 @@ End Sub
 	}
 	if _, err := analyzer.PrepareRename(doc, invalidPos, []Document{doc}); err == nil {
 		t.Fatal("PrepareRename unexpectedly accepted generic Worksheet member")
+	}
+	withInvalidLine := `        Debug.Print .LastRow`
+	withInvalidPos := Position{Line: lineIndex(source, withInvalidLine), Character: utf16Len(withInvalidLine[:strings.Index(withInvalidLine, "LastRow")+3])}
+	if typ, ok := analyzer.withBlockTypeAt(doc, withInvalidPos, byteOffsetForPosition(doc.Source, withInvalidPos)); !ok || typ != "Worksheet" {
+		t.Fatalf("With TargetSheet type = %q, %v; want Worksheet", typ, ok)
+	}
+	if !analyzer.unresolvedExternalMemberReference(doc, withInvalidPos, "LastRow") {
+		t.Fatal("With TargetSheet.LastRow should be recognized as an unresolved external member")
+	}
+	defs, err = analyzer.Definition(doc, withInvalidPos, []Document{doc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("With generic Worksheet member definition = %+v, want none", defs)
+	}
+	hover, err = analyzer.Hover(doc, withInvalidPos, []Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover != nil {
+		t.Fatalf("With generic Worksheet member hover = %+v, want none", hover)
 	}
 
 	validLine := `    Debug.Print Me.LastRow`
