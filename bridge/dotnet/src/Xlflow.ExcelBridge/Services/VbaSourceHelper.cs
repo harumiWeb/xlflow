@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,7 +9,7 @@ using System.Text.RegularExpressions;
 namespace Xlflow.ExcelBridge.Services;
 
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Source helper degrades file/hash failures into best-effort results.")]
-internal static class VbaSourceHelper
+internal static partial class VbaSourceHelper
 {
     private static readonly Regex FolderAnnotationPattern = new(
         @"^'?@Folder\(\s*""([^""]*)""\s*\)",
@@ -449,13 +450,27 @@ internal static class VbaSourceHelper
         try
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            return Encoding.GetEncoding(932);
+            // Excel/VBIDE export and import VBA source using the Windows system
+            // ANSI code page (e.g. 932 on Japanese Windows, 1252 on Western
+            // European). Read the actual ACP via GetACP() rather than the .NET
+            // current culture, which can diverge from the system locale in
+            // mixed-locale environments.
+            return Encoding.GetEncoding(GetSystemAnsiCodePage());
         }
         catch
         {
             return new UTF8Encoding(false);
         }
     }
+
+    // Windows system ANSI code page (the "language for non-Unicode programs"
+    // setting) that Excel/VBIDE use. Exposed internally so tests can verify the
+    // selected code page against the OS ACP. Throws on non-Windows, where
+    // callers fall back to UTF-8.
+    internal static int GetSystemAnsiCodePage() => (int)GetAcp();
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetACP")]
+    private static partial uint GetAcp();
 
     public static Encoding GetVbaImportEncoding()
     {

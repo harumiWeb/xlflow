@@ -8,6 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- Required by the LibraryImport source generator (GetACP P/Invoke in VbaSourceHelper). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
