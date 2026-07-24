@@ -328,6 +328,10 @@ default_component_folders = true
 [userform]
 code_source = "sidecar"
 
+[build]
+# Source paths are project-root-relative doublestar globs.
+exclude = ["src/modules/Tests/**"]
+
 # [backup.retention]
 # enabled = false
 # max_count = 20
@@ -350,6 +354,8 @@ disabled_rules = []
 [analyze]
 disabled_rules = []
 ```
+
+`[build].exclude` defines the source filtering policy used only by the forthcoming Excel-backed `build` command; it never changes `push` or `pack` source selection. Each entry is a project-root-relative `doublestar` glob. Paths and patterns are normalized to `/`, so Windows and WSL separators match identically; absolute paths and patterns that traverse outside the project root are invalid. Matching is component-level: standard, class, and document components match their source file, while a UserForm matches its `.frm` and any associated `.frx`, sidecar code, or persisted spec path. A matching UserForm artifact excludes the whole form component. The resolver reports unmatched patterns as stable `build_exclude_unmatched` warnings, but malformed patterns, unreadable configured source roots or files, incomplete UserForm artifacts, duplicate included VBA component names (case-insensitive across component types), and equal resolved base/output paths are errors before Excel is opened. Included and excluded lists are sorted by normalized source path for stable future human and JSON build output.
 
 `[backup.retention]` controls automatic pruning after successful backup-producing operations. It is disabled by default. `max_count <= 0`, `max_age_days <= 0`, and `max_total_size_mb <= 0` disable their respective limits. `min_keep` must be zero or greater and always protects the newest valid backups when automatic pruning is enabled. Negative values are configuration errors, and `min_keep > max_count` is invalid when `max_count > 0`. If all limits are disabled, automatic pruning performs no deletion, though invalid or legacy entries may still be reported as skipped.
 
