@@ -164,21 +164,6 @@ func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID c
 			template = workbookArgPath(a.cwd, template)
 		}
 		return []string{configured, template, workbookArgPath(a.cwd, out)}, true
-	case "build":
-		cfg, ok := a.coordinationConfig()
-		if !ok {
-			return nil, false
-		}
-		base, _ := commandFlagString(cmd, "base")
-		if base == "" {
-			base = cfg.Excel.Path
-		}
-		base = workbookArgPath(a.cwd, base)
-		out, _ := commandFlagString(cmd, "out")
-		if out == "" {
-			out = filepath.Join("build", "Release", filepath.Base(base))
-		}
-		return []string{base, workbookArgPath(a.cwd, out)}, true
 	case "run":
 		cfg, ok := a.coordinationConfig()
 		if !ok {

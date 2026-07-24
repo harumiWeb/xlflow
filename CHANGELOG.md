@@ -4,7 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added the `xlflow build` CLI contract and deterministic `--dry-run` release-plan output. It validates project-local `.xlsm`, `.xlam`, and `.xlsb` base/output paths, reports filtered source components, and publishes workbook coordination metadata without opening Excel or writing files. The Excel-backed mutation pipeline intentionally remains pending and non-dry-run calls return `build_not_implemented`.
+- Added the `xlflow build` CLI contract and deterministic `--dry-run` release-plan output. It validates project-local `.xlsm`, `.xlam`, and `.xlsb` base/output paths, reports filtered source components, and remains source-local without opening Excel, acquiring workbook coordination, or writing files. The Excel-backed mutation pipeline intentionally remains pending and non-dry-run calls return `build_not_implemented`.
 - Fixed `.NET` temporary macro runner invocation to qualify the generated runner with its workbook name, preventing Excel error 1004 when another workbook or VBA project is active.
 
 ## v0.26.0

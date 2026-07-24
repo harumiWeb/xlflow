@@ -11,7 +11,7 @@ xlflow build --base templates/Production.xlsm --out dist/Product.xlsm --dry-run
 
 ## Dry-run
 
-Use `--dry-run` to validate the workbook paths and configured `[build].exclude` patterns without opening Excel, creating a directory, or writing an artifact. The output lists included and excluded VBA components; `--json` exposes the same information under `build`.
+Use `--dry-run` to validate the workbook paths and configured `[build].exclude` patterns without opening Excel, acquiring a workbook lock, creating a directory, or writing an artifact. It also remains local when invoked from WSL. The output lists included and excluded VBA components; `--json` exposes the same information under `build`.
 
 The Excel/VBIDE reconstruction and publication pipeline is not available yet. A validated invocation without `--dry-run` returns `build_not_implemented`. Use `pack` when an Excel-independent artifact workflow is needed.
 

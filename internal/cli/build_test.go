@@ -41,8 +41,12 @@ func TestCapabilitiesPublishesBuildCoordinationPolicy(t *testing.T) {
 	capabilities := cliObjectMap(env.Capabilities)
 	commands := cliObjectMap(capabilities["commands"])
 	build := cliObjectMap(commands["build"])
-	if build["resource_scope"] != "workbook" || build["operation_kind"] != "mutate" || build["retryable_when_busy"] != true || build["recovery_behavior"] != "block" {
+	if build["resource_scope"] != "none" || build["operation_kind"] != "read" || build["parallel_safe"] != true || build["retryable_when_busy"] != false || build["recovery_behavior"] != "not_applicable" {
 		t.Fatalf("build capability = %#v", build)
+	}
+	buildCommand, _, err := root.Find([]string{"build"})
+	if err != nil || shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
+		t.Fatalf("build dry-run must stay local: command=%#v, err=%v", buildCommand, err)
 	}
 }
 
