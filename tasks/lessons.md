@@ -65,6 +65,7 @@
 - Windows path tests must not assume the lexical path returned by `t.TempDir()` survives final-path resolution. Hosted runners may return an 8.3 path such as `RUNNER~1` while Windows canonicalization returns the long name; assert resolved identity or preserved path semantics instead.
 - When a validation rule is scoped to included build components, apply path exclusions before duplicate-name validation; when one component has multiple related source paths, record every matching exclusion pattern before emitting unmatched-pattern warnings.
 - Flat UserForm sidecar/spec artifacts are keyed by component name, not source subdirectory. Resolve them only after primary `.frm` exclusions select the remaining same-named candidate; do not invent a directory-scoped sidecar layout that conflicts with the source contract.
+- Windows coordination wait tests need a generous gap between scheduled owner release and the waiter deadline; a one-second budget can expire before timer delivery or owner metadata publication on hosted runners.
 
 # DialogWatcher
 
