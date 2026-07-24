@@ -68,6 +68,24 @@ func TestPlanAllowsExcludedDuplicateUserForm(t *testing.T) {
 	}
 }
 
+func TestPlanResolvesFlatSidecarAfterExcludingDuplicateUserForm(t *testing.T) {
+	root := writeSourceTree(t)
+	write(t, filepath.Join(root, "src", "forms", "alternate", "Login.frm"), "VERSION 5.00\nAttribute VB_Name = \"Login\"\nOption Explicit\n")
+	cfg := config.Default()
+	cfg.Build.Exclude = []string{"src/forms/alternate/Login.frm"}
+
+	plan, err := Plan(Options{Root: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := componentPaths(plan.Included), []string{"src/classes/Service.cls", "src/forms/Login.frm", "src/modules/Main.bas", "src/modules/Tests/TestMain.bas", "src/workbook/ThisWorkbook.bas"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("included = %#v, want %#v", got, want)
+	}
+	if got := plan.Included[1].RelatedPaths; !reflect.DeepEqual(got, []string{"src/forms/Login.frx", "src/forms/code/Login.bas"}) {
+		t.Fatalf("remaining form related paths = %#v", got)
+	}
+}
+
 func TestPlanMatchesPersistedSpecsInFRMMode(t *testing.T) {
 	root := writeSourceTree(t)
 	write(t, filepath.Join(root, "src", "forms", "specs", "Login.yaml"), "kind: xlflow.userform\n")

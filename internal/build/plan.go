@@ -97,7 +97,7 @@ func Plan(opts Options) (BuildPlan, error) {
 	if err != nil {
 		return BuildPlan{}, err
 	}
-	components, err := collectComponents(root, opts.Config)
+	components, err := collectComponents(root, opts.Config, patterns)
 	if err != nil {
 		return BuildPlan{}, err
 	}
@@ -202,7 +202,7 @@ func isDriveAbsolute(path string) bool {
 	return len(path) >= 2 && path[1] == ':' && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
 }
 
-func collectComponents(root string, cfg config.Config) ([]BuildComponent, error) {
+func collectComponents(root string, cfg config.Config, patterns []string) ([]BuildComponent, error) {
 	components := make([]BuildComponent, 0)
 	for _, source := range []struct {
 		dir  string
@@ -219,7 +219,7 @@ func collectComponents(root string, cfg config.Config) ([]BuildComponent, error)
 		}
 		components = append(components, items...)
 	}
-	formComponents, err := collectFormComponents(root, cfg)
+	formComponents, err := collectFormComponents(root, cfg, patterns)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func collectCodeComponents(root, configured string, typ ComponentType, allowed m
 	return out, nil
 }
 
-func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, error) {
+func collectFormComponents(root string, cfg config.Config, patterns []string) ([]BuildComponent, error) {
 	base, err := projectPath(root, cfg.Src.Forms)
 	if err != nil {
 		return nil, fmt.Errorf("resolve form source root: %w", err)
@@ -350,7 +350,8 @@ func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, er
 	if err != nil {
 		return nil, err
 	}
-	if err := addFormArtifacts(root, base.absolute, byName, cfg.UserForm.CodeSource == "sidecar"); err != nil {
+	artifactForms := formsAfterPrimaryExclusions(root, byName, patterns)
+	if err := addFormArtifacts(root, base.absolute, artifactForms, byName, cfg.UserForm.CodeSource == "sidecar"); err != nil {
 		return nil, err
 	}
 	var out []BuildComponent
@@ -371,7 +372,22 @@ func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, er
 	return out, nil
 }
 
-func addFormArtifacts(root, formsDir string, byName map[string][]*formFiles, sidecar bool) error {
+// formsAfterPrimaryExclusions limits flat sidecar/spec lookup to forms whose
+// own .frm path remains eligible. This lets a build exclude one of otherwise
+// same-named forms before resolving a single name-keyed sidecar.
+func formsAfterPrimaryExclusions(root string, byName map[string][]*formFiles, patterns []string) map[string][]*formFiles {
+	remaining := make(map[string][]*formFiles, len(byName))
+	for name, forms := range byName {
+		for _, form := range forms {
+			if form.frm == "" || len(matchingPatterns(BuildComponent{SourcePath: displayPath(root, form.frm)}, patterns)) == 0 {
+				remaining[name] = append(remaining[name], form)
+			}
+		}
+	}
+	return remaining
+}
+
+func addFormArtifacts(root, formsDir string, byName, allForms map[string][]*formFiles, sidecar bool) error {
 	locations := []struct {
 		dir     string
 		allowed map[string]bool
@@ -409,7 +425,10 @@ func addFormArtifacts(root, formsDir string, byName map[string][]*formFiles, sid
 			name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			forms := byName[strings.ToLower(name)]
 			if len(forms) == 0 {
-				return fmt.Errorf("orphan UserForm sidecar %s has no matching .frm", displayPath(root, path))
+				forms = allForms[strings.ToLower(name)]
+				if len(forms) == 0 {
+					return fmt.Errorf("orphan UserForm sidecar %s has no matching .frm", displayPath(root, path))
+				}
 			}
 			if location.unique && len(forms) != 1 {
 				return fmt.Errorf("ambiguous UserForm sidecar %s matches multiple .frm artifacts", displayPath(root, path))
