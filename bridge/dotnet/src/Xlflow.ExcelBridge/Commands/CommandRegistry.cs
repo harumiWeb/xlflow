@@ -22,6 +22,7 @@ public sealed class CommandRegistry
         return new CommandRegistry(new ICommandHandler[]
         {
             new AttachCommand(),
+            new BuildCommand(),
             new DoctorCommand(),
             new EditCommand(),
             new ExportImageCommand(),
@@ -46,6 +47,7 @@ public sealed class CommandRegistry
 
     public static CommandRegistry Create(
         Func<ExcelDiagnosticsResult>? probeExcel,
+        IBuildService? buildService = null,
         IAttachService? attachService = null,
         IEditService? editService = null,
         IExportImageService? exportImageService = null,
@@ -69,6 +71,7 @@ public sealed class CommandRegistry
         return new CommandRegistry(new ICommandHandler[]
         {
             new AttachCommand(attachService),
+            new BuildCommand(buildService),
             new DoctorCommand(probeExcel),
             new EditCommand(editService),
             new ExportImageCommand(exportImageService),

@@ -67,6 +67,8 @@
 - When a validation rule is scoped to included build components, apply path exclusions before duplicate-name validation; when one component has multiple related source paths, record every matching exclusion pattern before emitting unmatched-pattern warnings.
 - Flat UserForm sidecar/spec artifacts are keyed by component name, not source subdirectory. Resolve them only after primary `.frm` exclusions select the remaining same-named candidate; do not invent a directory-scoped sidecar layout that conflicts with the source contract.
 - Windows coordination wait tests need a generous gap between scheduled owner release and the waiter deadline; a one-second budget can expire before timer delivery or owner metadata publication on hosted runners.
+- Treat caller-supplied temporary directories as ownership boundaries: create and clean up only a unique child directory created by the operation, never recursively delete the supplied root.
+- Preserve source-plan path contracts across process boundaries. When a planner publishes project-root-relative paths, the receiving bridge must resolve them against an explicit project root rather than requiring callers to rewrite the plan ad hoc.
 
 # DialogWatcher
 
