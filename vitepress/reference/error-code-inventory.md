@@ -36,6 +36,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `backup_scan_failed`
 - `bad_arg_count`
 - `bad_prog`
+- `base_workbook`
 - `before_dialog_action`
 - `binary_expression`
 - `bridge_file_not_openable`
@@ -45,6 +46,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `bridge_protocol_mismatch`
 - `bridge_response_indeterminate`
 - `bridge_terminated_during_excel_operation`
+- `build_args_invalid`
+- `build_exclude_unmatched`
+- `build_not_implemented`
+- `build_plan_invalid`
 - `build_settings`
 - `builtin_casing`
 - `builtin_like`
