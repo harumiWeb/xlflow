@@ -17,15 +17,17 @@ public sealed class BuildCommand : ICommandHandler
 
     public BridgeResponse Handle(BridgeRequest request, CancellationToken cancellationToken)
     {
+        var projectRoot = BridgePayload.GetString(request.Payload, "ProjectRoot") ?? "";
         var baseWorkbookPath = BridgePayload.GetString(request.Payload, "BaseWorkbookPath") ?? "";
         var temporaryDirectory = BridgePayload.GetString(request.Payload, "TemporaryDirectory") ?? "";
         var planJson64 = BridgePayload.GetString(request.Payload, "PlanJson64") ?? "";
-        if (string.IsNullOrWhiteSpace(baseWorkbookPath) || string.IsNullOrWhiteSpace(temporaryDirectory) || string.IsNullOrWhiteSpace(planJson64))
+        if (string.IsNullOrWhiteSpace(projectRoot) || string.IsNullOrWhiteSpace(baseWorkbookPath) || string.IsNullOrWhiteSpace(temporaryDirectory) || string.IsNullOrWhiteSpace(planJson64))
         {
-            return BridgeResponse.Failed(request, new BridgeError("build_args_invalid", "BaseWorkbookPath, TemporaryDirectory, and PlanJson64 are required", "build", "xlflow-excel-bridge"));
+            return BridgeResponse.Failed(request, new BridgeError("build_args_invalid", "ProjectRoot, BaseWorkbookPath, TemporaryDirectory, and PlanJson64 are required", "build", "xlflow-excel-bridge"));
         }
 
         return _service.Execute(request, new BuildCommandArguments(
+            projectRoot,
             baseWorkbookPath,
             temporaryDirectory,
             planJson64,

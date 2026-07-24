@@ -19,38 +19,37 @@ public sealed class ExcelBuildService : IBuildService
     {
         object? excel = null;
         object? workbook = null;
-        var tempCreated = false;
+        string? temporaryBuildDirectory = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var plan = DecodePlan(args.PlanJson64);
-            ValidatePlan(plan);
+            ValidatePlan(plan, args.ProjectRoot);
             var basePath = ExcelBridgeSupport.NormalizePath(args.BaseWorkbookPath);
             if (!File.Exists(basePath))
             {
                 throw new InvalidOperationException("base workbook does not exist");
             }
 
-            var tempRoot = Path.GetFullPath(args.TemporaryDirectory);
-            if (string.Equals(basePath, tempRoot, StringComparison.OrdinalIgnoreCase) || basePath.StartsWith(tempRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            var tempParent = Path.GetFullPath(args.TemporaryDirectory);
+            if (IsWithinDirectory(basePath, tempParent))
             {
                 throw new InvalidOperationException("temporary directory must not contain the base workbook");
             }
 
-            Directory.CreateDirectory(tempRoot);
-            tempCreated = true;
-            var temporaryWorkbook = Path.Combine(tempRoot, Path.GetFileName(basePath));
-            if (File.Exists(temporaryWorkbook))
-            {
-                throw new InvalidOperationException("temporary build workbook already exists");
-            }
+            // TemporaryDirectory belongs to the caller. Own and later remove
+            // only this invocation's unique child directory.
+            Directory.CreateDirectory(tempParent);
+            temporaryBuildDirectory = Path.Combine(tempParent, "xlflow-build-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temporaryBuildDirectory);
+            var temporaryWorkbook = Path.Combine(temporaryBuildDirectory, Path.GetFileName(basePath));
 
             File.Copy(basePath, temporaryWorkbook);
 
             var attachment = ExcelBridgeSupport.OpenWorkbookDirect(temporaryWorkbook, args.Visible, disableAutomationMacros: true);
             excel = attachment.Excel;
             workbook = attachment.Workbook;
-            var applied = Reconstruct(workbook, plan, args.CodeSource, tempRoot, cancellationToken);
+            var applied = Reconstruct(workbook, plan, args.CodeSource, temporaryBuildDirectory, cancellationToken);
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
             ExcelBridgeSupport.ReleaseComObject(workbook);
@@ -83,9 +82,9 @@ public sealed class ExcelBuildService : IBuildService
         finally
         {
             CloseDedicated(workbook, excel);
-            if (tempCreated && Directory.Exists(args.TemporaryDirectory))
+            if (temporaryBuildDirectory is not null && Directory.Exists(temporaryBuildDirectory))
             {
-                try { Directory.Delete(args.TemporaryDirectory, true); } catch { }
+                try { Directory.Delete(temporaryBuildDirectory, true); } catch { }
             }
         }
     }
@@ -209,8 +208,13 @@ public sealed class ExcelBuildService : IBuildService
         catch (JsonException ex) { throw new InvalidOperationException("PlanJson64 does not contain a valid build plan", ex); }
     }
 
-    private static void ValidatePlan(BuildPlanPayload plan)
+    private static void ValidatePlan(BuildPlanPayload plan, string projectRoot)
     {
+        projectRoot = Path.GetFullPath(projectRoot);
+        if (!Directory.Exists(projectRoot))
+        {
+            throw new InvalidOperationException("project root does not exist");
+        }
         foreach (var component in plan.Included)
         {
             if (component.Type is not ("standard" or "class" or "document" or "form"))
@@ -218,19 +222,42 @@ public sealed class ExcelBuildService : IBuildService
                 throw new InvalidOperationException($"unsupported build component type '{component.Type}'");
             }
 
-            if (string.IsNullOrWhiteSpace(component.Name) || !Path.IsPathFullyQualified(component.SourcePath) || !File.Exists(component.SourcePath))
+            component.SourcePath = ResolvePlannerPath(projectRoot, component.SourcePath);
+            if (string.IsNullOrWhiteSpace(component.Name) || !File.Exists(component.SourcePath))
             {
                 throw new InvalidOperationException($"invalid planned component '{component.Name}'");
             }
 
-            foreach (var path in component.RelatedPaths)
+            for (var index = 0; index < component.RelatedPaths.Count; index++)
             {
-                if (!Path.IsPathFullyQualified(path) || !File.Exists(path))
+                component.RelatedPaths[index] = ResolvePlannerPath(projectRoot, component.RelatedPaths[index]);
+                if (!File.Exists(component.RelatedPaths[index]))
                 {
-                    throw new InvalidOperationException($"missing related artifact for '{component.Name}': {path}");
+                    throw new InvalidOperationException($"missing related artifact for '{component.Name}': {component.RelatedPaths[index]}");
                 }
             }
         }
+    }
+
+    private static string ResolvePlannerPath(string projectRoot, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        var resolved = Path.GetFullPath(Path.IsPathFullyQualified(path)
+            ? path
+            : Path.Combine(projectRoot, path.Replace('/', Path.DirectorySeparatorChar)));
+        if (!IsWithinDirectory(resolved, projectRoot))
+        {
+            throw new InvalidOperationException($"planned component path is outside the project root: {path}");
+        }
+        return resolved;
+    }
+
+    private static bool IsWithinDirectory(string path, string directory)
+    {
+        var relative = Path.GetRelativePath(Path.GetFullPath(directory), Path.GetFullPath(path));
+        return relative == "." || (!relative.Equals("..", StringComparison.Ordinal) &&
+            !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+            !Path.IsPathFullyQualified(relative));
     }
 
     private static string Classify(Exception ex) => ex.Message.Contains("VBProject", StringComparison.OrdinalIgnoreCase) ? "build_vbproject_access_denied" : ex.Message.Contains("document module", StringComparison.OrdinalIgnoreCase) ? "build_document_module_unresolved" : ex.Message.Contains("UserForm", StringComparison.OrdinalIgnoreCase) ? "build_userform_reconstruct_failed" : "build_reconstruct_failed";
@@ -252,12 +279,12 @@ public sealed class ExcelBuildService : IBuildService
     private sealed class BuildComponentPayload
     {
         [JsonPropertyName("source_path")]
-        public string SourcePath { get; init; } = "";
+        public string SourcePath { get; set; } = "";
         [JsonPropertyName("name")]
         public string Name { get; init; } = "";
         [JsonPropertyName("type")]
         public string Type { get; init; } = "";
         [JsonPropertyName("related_paths")]
-        public List<string> RelatedPaths { get; init; } = [];
+        public List<string> RelatedPaths { get; set; } = [];
     }
 }
