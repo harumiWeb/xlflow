@@ -320,6 +320,23 @@ public sealed class RunCommandTests
         Assert.Contains("  Application.Run targetMacro" + Environment.NewLine + "  DoEvents", code);
     }
 
+    [Theory]
+    [InlineData(null, "'Team''s Book.xlsm'!FacilitySheet.MessageBoxTest")]
+    [InlineData("XlflowRun_12345678", "'Team''s Book.xlsm'!XlflowRun_12345678.RunMacro")]
+    public void BuildRunMacroReferenceQualifiesDirectAndTemporaryRunnerTargets(
+        string? runnerName,
+        string expected)
+    {
+        var workbook = new FakeWorkbook("Team's Book.xlsm");
+
+        var reference = ExcelRunService.BuildRunMacroReference(
+            workbook,
+            "FacilitySheet.MessageBoxTest",
+            runnerName);
+
+        Assert.Equal(expected, reference);
+    }
+
     [Fact]
     public void ComFailureDetailsIncludeRunContext()
     {
@@ -904,6 +921,11 @@ public sealed class RunCommandTests
             cancellationToken.ThrowIfCancellationRequested();
             return handler(request, args);
         }
+    }
+
+    private sealed class FakeWorkbook(string name)
+    {
+        public string Name { get; } = name;
     }
 
     private sealed class SequencedWindowEnumerator : IWindowEnumerator
