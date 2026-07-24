@@ -81,6 +81,12 @@ code_source = "sidecar"
 # min_keep = 5
 # max_total_size_mb = 2048
 
+# Release build source filtering. This affects `build` only; `push` and `pack`
+# always use the complete source tree.
+# [build]
+# Exclude project-root-relative doublestar glob patterns from `xlflow build`.
+# exclude = ["src/modules/Tests/**"]
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
@@ -173,6 +179,14 @@ Set `enabled = true` only when runtime diagnostics need meaningful `Erl` values.
 Automatic retention is disabled by default and only affects backups for the configured `[excel].path`. Manual `xlflow backup prune` does not require `enabled = true`.
 
 Negative numeric values are configuration errors. `min_keep > max_count` is also invalid when `max_count` is greater than zero. If all limits are disabled, automatic pruning performs no deletion. Invalid entries and legacy directories without metadata are skipped, not deleted.
+
+### `[build]`
+
+| Key       | Type     | Required | Default | Description                                                                                             |
+| --------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `exclude` | string[] | no       | `[]`    | Project-root-relative `doublestar` glob patterns excluded from `xlflow build` source selection only. |
+
+Each pattern is normalized to `/`; Windows and WSL separators match identically. Absolute paths and patterns that traverse outside the project root are invalid. `xlflow build` reports unmatched patterns as `build_exclude_unmatched` warnings. A matching UserForm artifact excludes the whole form component, including its related `.frx`, sidecar code, and persisted spec files. This setting does not change source selection for `push` or `pack`.
 
 ### `[lint]`
 
