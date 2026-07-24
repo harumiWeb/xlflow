@@ -807,7 +807,7 @@ public sealed class ExcelPushService : IPushService
         return imported;
     }
 
-    private static void SyncUserFormCodeBehind(object workbook, string formName, string formsDir, bool lineNumbersEnabled)
+    internal static void SyncUserFormCodeBehind(object workbook, string formName, string formsDir, bool lineNumbersEnabled)
     {
         var codePath = VbaSourceHelper.GetUserFormCodePath(formsDir, formName);
         if (string.IsNullOrWhiteSpace(codePath) || !File.Exists(codePath))
@@ -815,16 +815,23 @@ public sealed class ExcelPushService : IPushService
             return;
         }
 
+        SyncUserFormCodeBehindFromPath(workbook, formName, codePath, lineNumbersEnabled, strict: false);
+    }
+
+    // Build reconstruction supplies the exact sidecar file selected by the Go
+    // planner, rather than rediscovering it under a forms root.
+    internal static void SyncUserFormCodeBehindFromPath(object workbook, string formName, string codePath, bool lineNumbersEnabled, bool strict)
+    {
+
         var codeText = File.ReadAllText(codePath, Encoding.UTF8);
         if (lineNumbersEnabled && !ErlLineNumberTransformer.TryAdd(codeText, out codeText, out var lineNumberIssue))
         {
             throw new InvalidOperationException($"vba_line_number_safety_failed: {codePath}:{lineNumberIssue!.Line}: {lineNumberIssue.Message}");
         }
-        if (string.IsNullOrWhiteSpace(codeText))
+        if (string.IsNullOrWhiteSpace(codeText) && !strict)
         {
             return;
         }
-
         object? vbProject = null;
         object? vbComponents = null;
         try
@@ -832,13 +839,13 @@ public sealed class ExcelPushService : IPushService
             vbProject = ExcelBridgeSupport.Get(workbook, "VBProject");
             if (vbProject is null)
             {
-                return;
+                throw new InvalidOperationException("VBProject is unavailable while synchronizing UserForm code-behind.");
             }
 
             vbComponents = ExcelBridgeSupport.Get(vbProject, "VBComponents");
             if (vbComponents is null)
             {
-                return;
+                throw new InvalidOperationException("VBComponents are unavailable while synchronizing UserForm code-behind.");
             }
 
             var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(vbComponents, "Count"));
@@ -880,8 +887,12 @@ public sealed class ExcelPushService : IPushService
                     ExcelBridgeSupport.ReleaseComObject(component);
                 }
             }
+            if (strict)
+            {
+                throw new InvalidOperationException($"UserForm '{formName}' was not found after import.");
+            }
         }
-        catch
+        catch when (!strict)
         {
             // best-effort UserForm code-behind sync
         }

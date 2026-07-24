@@ -14,11 +14,11 @@ xlflow status --json
 
 ## Find the right kind of help
 
-| If you are trying to… | Start here |
-| --- | --- |
-| Fix an installation, Excel, execution, session, or WSL failure | [Troubleshooting](./troubleshooting) |
-| Understand a common xlflow question | [FAQ](./faq) |
-| Check whether a capability is currently supported | [Known limitations](./known-limitations) |
-| Report a reproducible problem safely | [Reporting bugs](./reporting-bugs) |
+| If you are trying to…                                          | Start here                               |
+| -------------------------------------------------------------- | ---------------------------------------- |
+| Fix an installation, Excel, execution, session, or WSL failure | [Troubleshooting](./troubleshooting)     |
+| Understand a common xlflow question                            | [FAQ](./faq)                             |
+| Check whether a capability is currently supported              | [Known limitations](./known-limitations) |
+| Report a reproducible problem safely                           | [Reporting bugs](./reporting-bugs)       |
 
 When a command returns JSON with `"status": "error"`, use its `error.code` and the command's exit code to select the relevant troubleshooting section. If `error.code` is `workbook_recovery_required`, stop normal workbook commands and follow the recovery guidance; retrying with `--wait` cannot clear that state.
