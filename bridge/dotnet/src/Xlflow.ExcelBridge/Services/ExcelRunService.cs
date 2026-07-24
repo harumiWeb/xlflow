@@ -123,7 +123,7 @@ public sealed class ExcelRunService : IRunService
             }
             ExcelBridgeSupport.SleepAndPump(TimeSpan.FromMilliseconds(150));
 
-            var macroReference = BuildWorkbookQualifiedMacroReference(workbook, macroName);
+            string? runnerName = null;
             if (!args.Direct)
             {
                 vbProject = ExcelBridgeSupport.RunPhase("prepare_vbide", () => ExcelBridgeSupport.Get(workbook, "VBProject"))
@@ -133,7 +133,7 @@ public sealed class ExcelRunService : IRunService
                     ?? throw new InvalidOperationException("prepare_vbide failed: VBComponents is unavailable.");
                 runnerComponent = ExcelBridgeSupport.InvokeMethod(runnerComponents, "Add", 1)
                     ?? throw new InvalidOperationException("inject_harness failed: could not add a temporary module.");
-                var runnerName = "XlflowRun_" + Guid.NewGuid().ToString("N")[..8];
+                runnerName = "XlflowRun_" + Guid.NewGuid().ToString("N")[..8];
                 SetProperty(runnerComponent, "Name", runnerName);
                 RuntimeInjectionHelper.EnsureDefinedNameRestoration(
                     workbook,
@@ -147,9 +147,9 @@ public sealed class ExcelRunService : IRunService
                 runnerCodeModule = null;
                 ExcelBridgeSupport.ReleaseComObject(runnerComponents);
                 runnerComponents = null;
-                macroReference = runnerName + ".RunMacro";
             }
 
+            var macroReference = BuildRunMacroReference(workbook, macroName, runnerName);
             var sw = Stopwatch.StartNew();
             var invocation = InvokeWithWorker(
                 new MacroRunWorkerRequest(
@@ -629,6 +629,14 @@ public sealed class ExcelRunService : IRunService
     {
         var index = macroName.LastIndexOf('.');
         return index > 0 ? macroName[..index] : macroName;
+    }
+
+    internal static string BuildRunMacroReference(object workbook, string macroName, string? runnerName)
+    {
+        var procedure = string.IsNullOrWhiteSpace(runnerName)
+            ? macroName
+            : runnerName + ".RunMacro";
+        return BuildWorkbookQualifiedMacroReference(workbook, procedure);
     }
 
     private static string BuildWorkbookQualifiedMacroReference(object workbook, string macroName)

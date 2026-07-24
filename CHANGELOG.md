@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `.NET` temporary macro runner invocation to qualify the generated runner with its workbook name, preventing Excel error 1004 when another workbook or VBA project is active.
+
 ## v0.26.0
 
 - Fixed generated and updated project `.gitignore` files to ignore Excel add-ins (`*.xlam`).
