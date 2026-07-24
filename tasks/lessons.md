@@ -63,6 +63,7 @@
 - Destructive VBIDE replacement must fail before import when any existing component cannot be removed or remains after `VBComponents.Remove`; partial best-effort deletion lets Excel silently auto-suffix colliding module names.
 - Once destructive VBIDE replacement begins, route every removal/import exception through the discard-poison path, preserve the attachment owner (`external` versus managed), and never emit `save_required` for state explicitly marked for discard.
 - Windows path tests must not assume the lexical path returned by `t.TempDir()` survives final-path resolution. Hosted runners may return an 8.3 path such as `RUNNER~1` while Windows canonicalization returns the long name; assert resolved identity or preserved path semantics instead.
+- When a validation rule is scoped to included build components, apply path exclusions before duplicate-name validation; when one component has multiple related source paths, record every matching exclusion pattern before emitting unmatched-pattern warnings.
 
 # DialogWatcher
 

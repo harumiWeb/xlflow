@@ -49,10 +49,73 @@ func TestPlanRejectsCrossTypeDuplicateIncludedNames(t *testing.T) {
 	}
 }
 
+func TestPlanAllowsExcludedDuplicateUserForm(t *testing.T) {
+	root := writeSourceTree(t)
+	write(t, filepath.Join(root, "src", "forms", "alternate", "Login.frm"), "VERSION 5.00\nAttribute VB_Name = \"Login\"\nOption Explicit\n")
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	cfg.Build.Exclude = []string{"src/forms/alternate/Login.frm"}
+
+	plan, err := Plan(Options{Root: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := componentPaths(plan.Included), []string{"src/classes/Service.cls", "src/forms/Login.frm", "src/modules/Main.bas", "src/modules/Tests/TestMain.bas", "src/workbook/ThisWorkbook.bas"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("included = %#v, want %#v", got, want)
+	}
+	if got, want := componentPaths(plan.Excluded), []string{"src/forms/alternate/Login.frm"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlanMatchesPersistedSpecsInFRMMode(t *testing.T) {
+	root := writeSourceTree(t)
+	write(t, filepath.Join(root, "src", "forms", "specs", "Login.yaml"), "kind: xlflow.userform\n")
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "frm"
+	cfg.Build.Exclude = []string{"src/forms/specs/Login.yaml"}
+
+	plan, err := Plan(Options{Root: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := componentPaths(plan.Excluded), []string{"src/forms/Login.frm"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded = %#v, want %#v", got, want)
+	}
+	if got := plan.Excluded[0].RelatedPaths; !reflect.DeepEqual(got, []string{"src/forms/Login.frx", "src/forms/specs/Login.yaml"}) {
+		t.Fatalf("form related paths = %#v", got)
+	}
+}
+
+func TestPlanRecordsEveryMatchingExcludePattern(t *testing.T) {
+	root := writeSourceTree(t)
+	cfg := config.Default()
+	cfg.Build.Exclude = []string{"src/forms/Login.frm", "src/forms/code/Login.bas"}
+
+	plan, err := Plan(Options{Root: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Fatalf("warnings = %#v", plan.Warnings)
+	}
+	if got, want := componentPaths(plan.Excluded), []string{"src/forms/Login.frm"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded = %#v, want %#v", got, want)
+	}
+}
+
 func TestPlanRejectsInvalidLayoutsAndPaths(t *testing.T) {
 	t.Run("invalid pattern", func(t *testing.T) {
 		cfg := config.Default()
 		cfg.Build.Exclude = []string{"../outside/**"}
+		_, err := Plan(Options{Root: writeSourceTree(t), Config: cfg})
+		if err == nil || !strings.Contains(err.Error(), "project-root-relative") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("Windows absolute pattern", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Build.Exclude = []string{"C:\\repo\\src\\modules\\Tests\\**"}
 		_, err := Plan(Options{Root: writeSourceTree(t), Config: cfg})
 		if err == nil || !strings.Contains(err.Error(), "project-root-relative") {
 			t.Fatalf("err = %v", err)

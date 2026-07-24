@@ -60,6 +60,7 @@ type Options struct {
 }
 
 type formFiles struct {
+	name    string
 	frm     string
 	frx     string
 	related []string
@@ -104,14 +105,16 @@ func Plan(opts Options) (BuildPlan, error) {
 	matched := make(map[string]bool, len(patterns))
 	plan := BuildPlan{BaseWorkbook: base.relative, OutputPath: output.relative}
 	for _, component := range components {
-		pattern := firstMatch(component, patterns)
-		if pattern == "" {
+		componentPatterns := matchingPatterns(component, patterns)
+		if len(componentPatterns) == 0 {
 			component.Reason = "included"
 			plan.Included = append(plan.Included, component)
 			continue
 		}
-		matched[pattern] = true
-		component.Reason = "excluded by " + pattern
+		for _, pattern := range componentPatterns {
+			matched[pattern] = true
+		}
+		component.Reason = "excluded by " + componentPatterns[0]
 		plan.Excluded = append(plan.Excluded, component)
 	}
 	if err := validateIncludedNames(plan.Included); err != nil {
@@ -180,7 +183,7 @@ func normalizePatterns(raw []string) ([]string, error) {
 		if pattern == "" {
 			return nil, errors.New("build.exclude must not contain an empty pattern")
 		}
-		if strings.HasPrefix(pattern, "/") || pattern == ".." || strings.HasPrefix(pattern, "../") || strings.Contains(pattern, "/../") {
+		if strings.HasPrefix(pattern, "/") || isDriveAbsolute(pattern) || pattern == ".." || strings.HasPrefix(pattern, "../") || strings.Contains(pattern, "/../") {
 			return nil, fmt.Errorf("build exclusion pattern %q must be project-root-relative", value)
 		}
 		if !doublestar.ValidatePattern(pattern) {
@@ -193,6 +196,10 @@ func normalizePatterns(raw []string) ([]string, error) {
 	}
 	sort.Strings(patterns)
 	return patterns, nil
+}
+
+func isDriveAbsolute(path string) bool {
+	return len(path) >= 2 && path[1] == ':' && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
 }
 
 func collectComponents(root string, cfg config.Config) ([]BuildComponent, error) {
@@ -212,11 +219,11 @@ func collectComponents(root string, cfg config.Config) ([]BuildComponent, error)
 		}
 		components = append(components, items...)
 	}
-	forms, err := collectFormComponents(root, cfg)
+	formComponents, err := collectFormComponents(root, cfg)
 	if err != nil {
 		return nil, err
 	}
-	components = append(components, forms...)
+	components = append(components, formComponents...)
 	sort.Slice(components, func(i, j int) bool {
 		if components[i].SourcePath != components[j].SourcePath {
 			return components[i].SourcePath < components[j].SourcePath
@@ -294,7 +301,8 @@ func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, er
 		}
 	}
 
-	byName := map[string]*formFiles{}
+	byLocation := map[string]*formFiles{}
+	byName := map[string][]*formFiles{}
 	codeDir := filepath.Join(base.absolute, "code")
 	specDir := filepath.Join(base.absolute, "specs")
 	err = filepath.WalkDir(base.absolute, func(path string, d os.DirEntry, walkErr error) error {
@@ -318,16 +326,17 @@ func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, er
 		if !validComponentName(name) {
 			return fmt.Errorf("invalid VBA component name %q in %s", name, displayPath(root, path))
 		}
-		key := strings.ToLower(name)
-		entry := byName[key]
+		key := formLocationKey(filepath.Dir(path), name)
+		entry := byLocation[key]
 		if entry == nil {
-			entry = &formFiles{}
-			byName[key] = entry
+			entry = &formFiles{name: name}
+			byLocation[key] = entry
+			byName[strings.ToLower(name)] = append(byName[strings.ToLower(name)], entry)
 		}
 		switch ext {
 		case ".frm":
 			if entry.frm != "" {
-				return fmt.Errorf("ambiguous UserForm %q: %s and %s", name, displayPath(root, entry.frm), displayPath(root, path))
+				return fmt.Errorf("ambiguous UserForm source %q: %s and %s", name, displayPath(root, entry.frm), displayPath(root, path))
 			}
 			entry.frm = path
 		case ".frx":
@@ -341,35 +350,43 @@ func collectFormComponents(root string, cfg config.Config) ([]BuildComponent, er
 	if err != nil {
 		return nil, err
 	}
-	if cfg.UserForm.CodeSource == "sidecar" {
-		if err := addSidecarArtifacts(root, base.absolute, byName); err != nil {
-			return nil, err
-		}
+	if err := addFormArtifacts(root, base.absolute, byName, cfg.UserForm.CodeSource == "sidecar"); err != nil {
+		return nil, err
 	}
 	var out []BuildComponent
-	for key, entry := range byName {
-		if entry.frm == "" {
-			return nil, fmt.Errorf("incomplete UserForm %q: .frx has no matching .frm", key)
+	for _, entries := range byName {
+		for _, entry := range entries {
+			if entry.frm == "" {
+				return nil, fmt.Errorf("incomplete UserForm %q: .frx has no matching .frm", entry.name)
+			}
+			name := strings.TrimSuffix(filepath.Base(entry.frm), filepath.Ext(entry.frm))
+			related := append([]string{}, entry.related...)
+			if entry.frx != "" {
+				related = append(related, displayPath(root, entry.frx))
+			}
+			sort.Strings(related)
+			out = append(out, BuildComponent{SourcePath: displayPath(root, entry.frm), Name: name, Type: ComponentForm, RelatedPaths: related})
 		}
-		name := strings.TrimSuffix(filepath.Base(entry.frm), filepath.Ext(entry.frm))
-		related := append([]string{}, entry.related...)
-		if entry.frx != "" {
-			related = append(related, displayPath(root, entry.frx))
-		}
-		sort.Strings(related)
-		out = append(out, BuildComponent{SourcePath: displayPath(root, entry.frm), Name: name, Type: ComponentForm, RelatedPaths: related})
 	}
 	return out, nil
 }
 
-func addSidecarArtifacts(root, formsDir string, byName map[string]*formFiles) error {
-	for _, location := range []struct {
+func addFormArtifacts(root, formsDir string, byName map[string][]*formFiles, sidecar bool) error {
+	locations := []struct {
 		dir     string
 		allowed map[string]bool
+		unique  bool
 	}{
-		{filepath.Join(formsDir, "code"), map[string]bool{".bas": true}},
-		{filepath.Join(formsDir, "specs"), map[string]bool{".yaml": true, ".yml": true, ".json": true}},
-	} {
+		{filepath.Join(formsDir, "specs"), map[string]bool{".yaml": true, ".yml": true, ".json": true}, false},
+	}
+	if sidecar {
+		locations = append(locations, struct {
+			dir     string
+			allowed map[string]bool
+			unique  bool
+		}{filepath.Join(formsDir, "code"), map[string]bool{".bas": true}, true})
+	}
+	for _, location := range locations {
 		entries, err := os.ReadDir(location.dir)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -390,27 +407,41 @@ func addSidecarArtifacts(root, formsDir string, byName map[string]*formFiles) er
 				return fmt.Errorf("read source %s: %w", displayPath(root, path), err)
 			}
 			name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			form := byName[strings.ToLower(name)]
-			if form == nil || form.frm == "" {
+			forms := byName[strings.ToLower(name)]
+			if len(forms) == 0 {
 				return fmt.Errorf("orphan UserForm sidecar %s has no matching .frm", displayPath(root, path))
 			}
-			form.related = append(form.related, displayPath(root, path))
+			if location.unique && len(forms) != 1 {
+				return fmt.Errorf("ambiguous UserForm sidecar %s matches multiple .frm artifacts", displayPath(root, path))
+			}
+			for _, form := range forms {
+				if form.frm == "" {
+					return fmt.Errorf("orphan UserForm sidecar %s has no matching .frm", displayPath(root, path))
+				}
+				form.related = append(form.related, displayPath(root, path))
+			}
 		}
 	}
 	return nil
 }
 
-func firstMatch(component BuildComponent, patterns []string) string {
+func formLocationKey(dir, name string) string {
+	return strings.ToLower(filepath.Clean(dir)) + "\x00" + strings.ToLower(name)
+}
+
+func matchingPatterns(component BuildComponent, patterns []string) []string {
 	paths := append([]string{component.SourcePath}, component.RelatedPaths...)
+	var matches []string
 	for _, pattern := range patterns {
 		for _, path := range paths {
 			matched, err := doublestar.Match(pattern, path)
 			if err == nil && matched {
-				return pattern
+				matches = append(matches, pattern)
+				break
 			}
 		}
 	}
-	return ""
+	return matches
 }
 
 func validateIncludedNames(components []BuildComponent) error {
