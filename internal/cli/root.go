@@ -207,6 +207,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.formulasCommand(),
 		a.pullCommand(),
 		a.pushCommand(),
+		a.buildCommand(),
 		a.packCommand(),
 		a.rollbackCommand(),
 		a.sessionCommand(),

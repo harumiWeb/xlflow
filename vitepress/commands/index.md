@@ -30,6 +30,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [formulas](./formulas)         | Extract worksheet formulas into region-based JSONL snapshots without Excel.      |
 | [pull](./pull)                 | Export workbook VBA components into configured source directories.               |
 | [push](./push)                 | Import edited source files back into the configured workbook.                    |
+| [build](./build)               | Preview the Excel-backed release build plan without changing a workbook.         |
 | [pack](./pack)                 | Build a release `.xlsm` artifact from source and a workbook template.            |
 | [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                   |
 | [status](./status)             | Show project, source, workbook, and session state in one read-only command.      |
