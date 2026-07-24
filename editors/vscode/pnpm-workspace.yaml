@@ -3,4 +3,10 @@ allowBuilds:
   esbuild: true
   keytar: true
 
+overrides:
+  brace-expansion: 5.0.7
+  fast-uri: 3.1.4
+  js-yaml: 4.3.0
+  linkify-it: 5.0.2
+
 minimumReleaseAge: 1440
