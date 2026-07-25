@@ -41,12 +41,12 @@ func TestCapabilitiesPublishesBuildCoordinationPolicy(t *testing.T) {
 	capabilities := cliObjectMap(env.Capabilities)
 	commands := cliObjectMap(capabilities["commands"])
 	build := cliObjectMap(commands["build"])
-	if build["resource_scope"] != "none" || build["operation_kind"] != "read" || build["parallel_safe"] != true || build["retryable_when_busy"] != false || build["recovery_behavior"] != "not_applicable" {
+	if build["resource_scope"] != "workbook" || build["operation_kind"] != "mutate" || build["parallel_safe"] != false || build["retryable_when_busy"] != true || build["recovery_behavior"] != "block" {
 		t.Fatalf("build capability = %#v", build)
 	}
 	buildCommand, _, err := root.Find([]string{"build"})
-	if err != nil || shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
-		t.Fatalf("build dry-run must stay local: command=%#v, err=%v", buildCommand, err)
+	if err != nil || !shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
+		t.Fatalf("build must delegate to the Excel bridge: command=%#v, err=%v", buildCommand, err)
 	}
 }
 
@@ -118,7 +118,7 @@ func TestBuildValidationAndNonDryRunBoundary(t *testing.T) {
 		{name: "extension mismatch", args: []string{"--json", "build", "--dry-run", "--out", "dist/Book.xlam"}, want: "build_args_invalid", code: output.ExitConfig},
 		{name: "same file", args: []string{"--json", "build", "--dry-run", "--out", "build/Book.xlsm"}, want: "build_plan_invalid", code: output.ExitConfig},
 		{name: "missing base", args: []string{"--json", "build", "--dry-run", "--base", "missing.xlsm"}, want: "build_args_invalid", code: output.ExitConfig},
-		{name: "pipeline pending", args: []string{"--json", "build"}, want: "build_not_implemented", code: output.ExitEnvironment},
+		{name: "bridge validation failure", args: []string{"--json", "build"}, want: "build_reconstruct_failed", code: output.ExitEnvironment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := runBuildCommandForTest(dir, tc.args...)

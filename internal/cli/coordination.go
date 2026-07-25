@@ -121,6 +121,20 @@ func commandRecoveryIntent(cmd *cobra.Command, commandID coordination.CommandID)
 
 func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID coordination.CommandID) ([]string, bool) {
 	switch commandID {
+	case "build":
+		cfg, ok := a.coordinationConfig()
+		if !ok {
+			return nil, false
+		}
+		base := cfg.Excel.Path
+		if value, exists := commandFlagString(cmd, "base"); exists && value != "" {
+			base = value
+		}
+		out := filepath.Join("build", "Release", filepath.Base(base))
+		if value, exists := commandFlagString(cmd, "out"); exists && value != "" {
+			out = value
+		}
+		return []string{workbookArgPath(a.cwd, cfg.Excel.Path), workbookArgPath(a.cwd, base), workbookArgPath(a.cwd, out)}, true
 	case "new":
 		name := ""
 		if len(args) > 0 {

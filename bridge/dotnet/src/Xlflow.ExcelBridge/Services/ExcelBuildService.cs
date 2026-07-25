@@ -19,74 +19,153 @@ public sealed class ExcelBuildService : IBuildService
     {
         object? excel = null;
         object? workbook = null;
-        string? temporaryBuildDirectory = null;
+        string? stagingDirectory = null;
+        var stage = "source_applied";
+        var excelProcessId = 0;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var plan = DecodePlan(args.PlanJson64);
             ValidatePlan(plan, args.ProjectRoot);
             var basePath = ExcelBridgeSupport.NormalizePath(args.BaseWorkbookPath);
+            var outputPath = ExcelBridgeSupport.NormalizePath(args.OutputWorkbookPath);
             if (!File.Exists(basePath))
             {
                 throw new InvalidOperationException("base workbook does not exist");
             }
-
-            var tempParent = Path.GetFullPath(args.TemporaryDirectory);
-            if (IsWithinDirectory(basePath, tempParent))
+            if (string.Equals(basePath, outputPath, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("temporary directory must not contain the base workbook");
+                throw new InvalidOperationException("base workbook and output workbook must be different files");
+            }
+            if (HasDirtyMatchingSession(args))
+            {
+                return BridgeResponse.Failed(request, new BridgeError("build_session_dirty", "A live xlflow session has unsaved changes. Run `xlflow save --session` before building.", "session", "xlflow-excel-bridge"));
             }
 
-            // TemporaryDirectory belongs to the caller. Own and later remove
-            // only this invocation's unique child directory.
-            Directory.CreateDirectory(tempParent);
-            temporaryBuildDirectory = Path.Combine(tempParent, "xlflow-build-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(temporaryBuildDirectory);
-            var temporaryWorkbook = Path.Combine(temporaryBuildDirectory, Path.GetFileName(basePath));
+            // Stage beside the final output so the final replacement is a
+            // same-volume atomic move. Never touch the previous artifact until
+            // Excel has saved, closed, and exited cleanly.
+            var outputParent = Path.GetDirectoryName(outputPath) ?? throw new InvalidOperationException("output workbook parent is required");
+            Directory.CreateDirectory(outputParent);
+            stagingDirectory = Path.Combine(outputParent, ".xlflow-build-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(stagingDirectory);
+            var temporaryWorkbook = Path.Combine(stagingDirectory, Path.GetFileName(outputPath));
 
             File.Copy(basePath, temporaryWorkbook);
 
             var attachment = ExcelBridgeSupport.OpenWorkbookDirect(temporaryWorkbook, args.Visible, disableAutomationMacros: true);
             excel = attachment.Excel;
             workbook = attachment.Workbook;
-            var applied = Reconstruct(workbook, plan, args.CodeSource, temporaryBuildDirectory, cancellationToken);
+            var applied = Reconstruct(workbook, plan, args.CodeSource, stagingDirectory, cancellationToken);
+            excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
+            if (excelProcessId <= 0)
+            {
+                throw new InvalidOperationException("could not resolve Excel process id for VBE compilation");
+            }
+
+            stage = "vbe_compile";
+            var compile = ExcelWorkerInvocation.InvokeWithWorker(
+                new Workers.MacroRunWorkerRequest(excelProcessId, excelHwnd, "", Operation: "compile", WorkbookPath: temporaryWorkbook),
+                excelHwnd, Windows.DialogKind.Compile, true, ExcelPushService.ResolveCompileTimeout(request), cancellationToken);
+            if (compile.Dialog is not null || compile.TimedOut || compile.Result is null || !compile.Result.Ok)
+            {
+                var message = compile.Dialog is not null ? "Unexpected VBE compile dialog: " + compile.Dialog.Title : compile.TimedOut ? "VBE Compile timed out." : compile.Result?.Error?.Message ?? "VBE Compile failed.";
+                var fatalComFailure = compile.Result?.Error is not null && ExcelBridgeSupport.IsFatalComFailure(compile.Result.Error.Number);
+                return BuildFailure(request, "build_compile_failed", message, stage, excelProcessId, compile.WorkerProcessId, compile.TimedOut || fatalComFailure, compile.LocationCapture.Location);
+            }
+
+            stage = "workbook_save";
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
+            stage = "workbook_close";
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
             ExcelBridgeSupport.ReleaseComObject(workbook);
             workbook = null;
+            stage = "excel_cleanup";
             ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit");
             ExcelBridgeSupport.ReleaseComObject(excel);
             excel = null;
+            stage = "publish";
+            var replaced = File.Exists(outputPath);
+            File.Move(temporaryWorkbook, outputPath, true);
 
             return BridgeResponse.Ok(request, new Dictionary<string, object?>
             {
+                ["output"] = new Dictionary<string, object?> { ["path"] = outputPath, ["replaced_existing"] = replaced },
                 ["build"] = new Dictionary<string, object?>
                 {
                     ["backend"] = "excel",
-                    ["temporary_reconstruction"] = true,
                     ["source_applied"] = true,
                     ["components_applied"] = applied,
+                    ["vbe_compile"] = "passed",
                     ["workbook_saved"] = true,
                     ["workbook_closed"] = true,
+                    ["excel_cleanup"] = "clean",
                 },
             });
         }
         catch (Exception ex)
         {
-            return BridgeResponse.Failed(request, new BridgeError(
-                Code: Classify(ex),
-                Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
-                Phase: "build_reconstruct",
-                Source: "xlflow-excel-bridge"));
+            var uncertain = excel is not null || workbook is not null;
+            return BuildFailure(request, Classify(ex), ExcelBridgeSupport.FormatExceptionDetail(ex), stage, excelProcessId, 0, uncertain, null);
         }
         finally
         {
             CloseDedicated(workbook, excel);
-            if (temporaryBuildDirectory is not null && Directory.Exists(temporaryBuildDirectory))
+            if (stagingDirectory is not null && Directory.Exists(stagingDirectory))
             {
-                try { Directory.Delete(temporaryBuildDirectory, true); } catch { }
+                try { Directory.Delete(stagingDirectory, true); } catch { }
             }
         }
+    }
+
+    private static bool HasDirtyMatchingSession(BuildCommandArguments args)
+    {
+        if (string.IsNullOrWhiteSpace(args.MetadataPath) || !File.Exists(args.MetadataPath) || string.IsNullOrWhiteSpace(args.SessionWorkbookPath))
+        {
+            return false;
+        }
+
+        object? excel = null;
+        object? workbook = null;
+        try
+        {
+            if (!ExcelBridgeSupport.SessionMetadataMatchesWorkbook(args.MetadataPath, args.SessionWorkbookPath))
+            {
+                return false;
+            }
+
+            var attachment = ExcelBridgeSupport.AttachToSessionWorkbook(args.SessionWorkbookPath, args.MetadataPath, useSession: false);
+            excel = attachment.Excel;
+            workbook = attachment.Workbook;
+            // If live dirty state cannot be inspected safely, fail closed: the
+            // saved base file cannot be trusted as the session's source state.
+            return !ExcelBridgeSupport.TryGetWorkbookDirtyState(workbook, out var dirty) || dirty;
+        }
+        catch { return true; }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
+    }
+
+    private static BridgeResponse BuildFailure(BridgeRequest request, string code, string message, string stage, int excelPid, int workerPid, bool uncertain, object? location)
+    {
+        var details = new Dictionary<string, object?> { ["stage"] = stage };
+        if (location is not null)
+        {
+            details["location"] = location;
+        }
+
+        return new BridgeResponse
+        {
+            RequestId = request.RequestId,
+            Command = request.Command,
+            Status = BridgeStatus.Failed,
+            Error = new BridgeError(code, message, stage, "xlflow-excel-bridge", Details: details),
+            Recovery = uncertain ? new BridgeRecovery { Required = true, Reason = "excel_cleanup_unconfirmed", Operation = "build", ExcelProcessId = excelPid > 0 ? excelPid : null, WorkerProcessId = workerPid > 0 ? workerPid : null, CleanupConfirmed = false } : null,
+        };
     }
 
     private static int Reconstruct(object workbook, BuildPlanPayload plan, string codeSource, string tempRoot, CancellationToken cancellationToken)
@@ -241,7 +320,11 @@ public sealed class ExcelBuildService : IBuildService
 
     private static string ResolvePlannerPath(string projectRoot, string path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return "";
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "";
+        }
+
         var resolved = Path.GetFullPath(Path.IsPathFullyQualified(path)
             ? path
             : Path.Combine(projectRoot, path.Replace('/', Path.DirectorySeparatorChar)));

@@ -39,9 +39,7 @@ func buildDescriptors() []Descriptor {
 		both("doctor", "doctor", excelRead, bridge("doctor")),
 		both("attach", "attach", withRecovery(excelMutate, RecoveryBlock), bridge("attach")),
 		both("pull", "pull", workbookRead, bridge("pull")),
-		// The current build implementation only resolves a source plan. It must
-		// stay local and parallel-safe until the Excel mutation pipeline exists.
-		cli("build", "build", sourceRead),
+		both("build", "build", workbookMutate, bridge("build")),
 		cli("pack", "pack", workbookMutate),
 		both("push", "push", workbookMutate, bridge("push")),
 		cli("generate.test", "generate test", sourceMutate),

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,9 +16,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
 
-// buildCommand currently owns the stable planning contract only. The Excel
-// mutation pipeline intentionally remains separate so planning cannot modify a
-// development workbook or publish a partial release artifact.
 func (a *app) buildCommand() *cobra.Command {
 	var basePath, outPath string
 	var dryRun bool
@@ -45,13 +44,20 @@ func (a *app) buildCommand() *cobra.Command {
 				env.Logs = []string{"build plan resolved without opening Excel or writing an artifact"}
 				return a.write(env, output.ExitSuccess)
 			}
-			env := output.Failure("build", output.Error{
-				Code:    "build_not_implemented",
-				Message: "The Excel-backed build pipeline is not implemented yet. Use --dry-run to inspect the validated build plan.",
-				Source:  "xlflow",
-			})
-			env.Build = payload
-			return a.write(env, output.ExitEnvironment)
+			planJSON, err := json.Marshal(plan)
+			if err != nil {
+				return a.writeFailure("build", output.ExitEnvironment, "build_plan_encode_failed", err)
+			}
+			base := workbookArgPath(a.cwd, plan.BaseWorkbook)
+			out := workbookArgPath(a.cwd, plan.OutputPath)
+			env, code, err := a.excelRunnerForConfig(cfg).Build(cfg, base64.StdEncoding.EncodeToString(planJSON), base, out, buildCommandOptions(a.stderrWriter()))
+			if err != nil {
+				return err
+			}
+			if env.Build == nil {
+				env.Build = payload
+			}
+			return a.write(env, code)
 		},
 	}
 	cmd.Flags().StringVar(&basePath, "base", "", "base workbook path (defaults to [excel].path)")

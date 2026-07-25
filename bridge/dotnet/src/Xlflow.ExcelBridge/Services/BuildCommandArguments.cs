@@ -5,7 +5,10 @@ namespace Xlflow.ExcelBridge.Services;
 public sealed record BuildCommandArguments(
     string ProjectRoot,
     string BaseWorkbookPath,
+    string OutputWorkbookPath,
     string TemporaryDirectory,
     string PlanJson64,
     string CodeSource,
-    bool Visible);
+    bool Visible,
+    string MetadataPath,
+    string SessionWorkbookPath);
