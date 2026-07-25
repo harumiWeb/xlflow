@@ -87,6 +87,9 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 		}
 		original := command.RunE
 		command.RunE = func(cmd *cobra.Command, args []string) error {
+			if descriptor.ID == "build" && buildDryRun(cmd) {
+				return original(cmd, args)
+			}
 			targets, resolved := a.coordinationTargets(cmd, args, descriptor.ID)
 			if !resolved {
 				return original(cmd, args)
@@ -97,6 +100,14 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 		}
 	}
 	walk(root)
+}
+
+func buildDryRun(cmd *cobra.Command) bool {
+	if cmd == nil || cmd.Flags().Lookup("dry-run") == nil {
+		return false
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	return err == nil && dryRun
 }
 
 func requiresWorkbookLease(policy coordination.Policy) bool {

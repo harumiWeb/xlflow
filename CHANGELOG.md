@@ -7,7 +7,7 @@ All notable changes to xlflow will be documented in this file.
 ## v0.26.1
 
 - Fixed VBA source encoding to use the Windows system ANSI code page (`GetACP()`) instead of a hard-coded `932` when reading exported components and preparing components for import. Non-ASCII source (for example German umlauts and em dashes on a `1252` machine) now round-trips through `pull`/`push` without corruption on non-Japanese locales, while Japanese (`932`) environments are unaffected.
-- Added the `xlflow build` CLI contract and deterministic `--dry-run` release-plan output. It validates project-local `.xlsm`, `.xlam`, and `.xlsb` base/output paths, reports filtered source components, and remains source-local without opening Excel, acquiring workbook coordination, or writing files. The Excel-backed mutation pipeline intentionally remains pending and non-dry-run calls return `build_not_implemented`.
+- Added the `xlflow build` CLI contract and deterministic `--dry-run` release-plan output. Non-dry builds now use isolated Excel staging with VBE compilation, validated save/close/process cleanup, atomic output replacement, dirty-session blocking, and recovery quarantine for uncertain cleanup.
 - Fixed `.NET` temporary macro runner invocation to qualify the generated runner with its workbook name, preventing Excel error 1004 when another workbook or VBA project is active.
 
 ## v0.26.0

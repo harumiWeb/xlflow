@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	buildpkg "github.com/harumiWeb/xlflow/internal/build"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
@@ -54,8 +55,8 @@ func (a *app) buildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if env.Build == nil {
-				env.Build = payload
+			if env.Status == output.StatusOK {
+				env.Build = mergeBuildPayload(payload, env.Build)
 			}
 			return a.write(env, code)
 		},
@@ -93,7 +94,32 @@ func validateBuildPaths(root string, plan buildpkg.BuildPlan) error {
 	if _, err := existingOutputAncestor(outputPath); err != nil {
 		return err
 	}
+	rootIdentity, err := coordination.NewWorkbookIdentity(root, root)
+	if err != nil {
+		return fmt.Errorf("resolve project root identity: %w", err)
+	}
+	outputIdentity, err := coordination.NewWorkbookIdentity(root, outputPath)
+	if err != nil {
+		return fmt.Errorf("resolve output identity: %w", err)
+	}
+	relative, err := filepath.Rel(rootIdentity.CanonicalPath, outputIdentity.CanonicalPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return fmt.Errorf("output workbook resolves outside the project root: %s", plan.OutputPath)
+	}
 	return nil
+}
+
+func mergeBuildPayload(plan map[string]any, bridge any) map[string]any {
+	merged := make(map[string]any, len(plan)+4)
+	for key, value := range plan {
+		merged[key] = value
+	}
+	if fields, ok := bridge.(map[string]any); ok {
+		for key, value := range fields {
+			merged[key] = value
+		}
+	}
+	return merged
 }
 
 func existingOutputAncestor(path string) (string, error) {

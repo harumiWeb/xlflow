@@ -6,8 +6,6 @@ using Xlflow.ExcelBridge.Contract;
 
 namespace Xlflow.ExcelBridge.Services;
 
-// Reconstructs only an isolated workbook copy. Publication, compilation, and
-// recovery policy intentionally belong to later build sub-issues.
 [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The bridge converts Excel and filesystem failures into structured build errors.")]
 public sealed class ExcelBuildService : IBuildService
 {
@@ -20,13 +18,14 @@ public sealed class ExcelBuildService : IBuildService
         object? excel = null;
         object? workbook = null;
         string? stagingDirectory = null;
-        var stage = "source_applied";
+        var stage = "validate";
         var excelProcessId = 0;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var plan = DecodePlan(args.PlanJson64);
             ValidatePlan(plan, args.ProjectRoot);
+            stage = "validate_paths";
             var basePath = ExcelBridgeSupport.NormalizePath(args.BaseWorkbookPath);
             var outputPath = ExcelBridgeSupport.NormalizePath(args.OutputWorkbookPath);
             if (!File.Exists(basePath))
@@ -45,6 +44,7 @@ public sealed class ExcelBuildService : IBuildService
             // Stage beside the final output so the final replacement is a
             // same-volume atomic move. Never touch the previous artifact until
             // Excel has saved, closed, and exited cleanly.
+            stage = "stage_prepare";
             var outputParent = Path.GetDirectoryName(outputPath) ?? throw new InvalidOperationException("output workbook parent is required");
             Directory.CreateDirectory(outputParent);
             stagingDirectory = Path.Combine(outputParent, ".xlflow-build-" + Guid.NewGuid().ToString("N"));
@@ -53,11 +53,13 @@ public sealed class ExcelBuildService : IBuildService
 
             File.Copy(basePath, temporaryWorkbook);
 
+            stage = "open_workbook";
             var attachment = ExcelBridgeSupport.OpenWorkbookDirect(temporaryWorkbook, args.Visible, disableAutomationMacros: true);
             excel = attachment.Excel;
             workbook = attachment.Workbook;
-            var applied = Reconstruct(workbook, plan, args.CodeSource, stagingDirectory, cancellationToken);
             excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
+            stage = "source_applied";
+            var applied = Reconstruct(workbook, plan, args.CodeSource, stagingDirectory, cancellationToken);
             var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
             if (excelProcessId <= 0)
             {
@@ -72,19 +74,19 @@ public sealed class ExcelBuildService : IBuildService
             {
                 var message = compile.Dialog is not null ? "Unexpected VBE compile dialog: " + compile.Dialog.Title : compile.TimedOut ? "VBE Compile timed out." : compile.Result?.Error?.Message ?? "VBE Compile failed.";
                 var fatalComFailure = compile.Result?.Error is not null && ExcelBridgeSupport.IsFatalComFailure(compile.Result.Error.Number);
-                return BuildFailure(request, "build_compile_failed", message, stage, excelProcessId, compile.WorkerProcessId, compile.TimedOut || fatalComFailure, compile.LocationCapture.Location);
+                throw new BuildOperationException("build_compile_failed", message, stage, compile.WorkerProcessId, compile.TimedOut || fatalComFailure, compile.LocationCapture.Location);
             }
 
             stage = "workbook_save";
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             stage = "workbook_close";
-            ExcelBridgeSupport.InvokeViaDynamic(workbook, "Close", false);
-            ExcelBridgeSupport.ReleaseComObject(workbook);
+            var cleanupConfirmed = ExcelBridgeSupport.CloseWorkbookAndQuitApplicationAndConfirmExit(workbook, excel, excelProcessId);
             workbook = null;
-            stage = "excel_cleanup";
-            ExcelBridgeSupport.InvokeViaDynamic(excel, "Quit");
-            ExcelBridgeSupport.ReleaseComObject(excel);
             excel = null;
+            if (!cleanupConfirmed)
+            {
+                return BuildFailure(request, "build_excel_cleanup_unconfirmed", "Excel did not exit cleanly after saving the staged workbook.", "excel_cleanup", excelProcessId, 0, true, null);
+            }
             stage = "publish";
             var replaced = File.Exists(outputPath);
             File.Move(temporaryWorkbook, outputPath, true);
@@ -104,10 +106,15 @@ public sealed class ExcelBuildService : IBuildService
                 },
             });
         }
+        catch (BuildOperationException failure)
+        {
+            var cleanupConfirmed = CloseAndConfirm(ref workbook, ref excel, excelProcessId);
+            return BuildFailure(request, failure.Code, failure.Message, failure.Stage, excelProcessId, failure.WorkerProcessId, failure.Uncertain || !cleanupConfirmed, failure.Location);
+        }
         catch (Exception ex)
         {
-            var uncertain = excel is not null || workbook is not null;
-            return BuildFailure(request, Classify(ex), ExcelBridgeSupport.FormatExceptionDetail(ex), stage, excelProcessId, 0, uncertain, null);
+            var cleanupConfirmed = CloseAndConfirm(ref workbook, ref excel, excelProcessId);
+            return BuildFailure(request, Classify(ex), ExcelBridgeSupport.FormatExceptionDetail(ex), stage, excelProcessId, 0, !cleanupConfirmed, null);
         }
         finally
         {
@@ -117,6 +124,28 @@ public sealed class ExcelBuildService : IBuildService
                 try { Directory.Delete(stagingDirectory, true); } catch { }
             }
         }
+    }
+
+    private static bool CloseAndConfirm(ref object? workbook, ref object? excel, int excelProcessId)
+    {
+        if (workbook is null && excel is null)
+        {
+            return true;
+        }
+
+        var confirmed = ExcelBridgeSupport.CloseWorkbookAndQuitApplicationAndConfirmExit(workbook, excel, excelProcessId);
+        workbook = null;
+        excel = null;
+        return confirmed;
+    }
+
+    private sealed class BuildOperationException(string code, string message, string stage, int workerProcessId, bool uncertain, object? location) : Exception(message)
+    {
+        public string Code { get; } = code;
+        public string Stage { get; } = stage;
+        public int WorkerProcessId { get; } = workerProcessId;
+        public bool Uncertain { get; } = uncertain;
+        public object? Location { get; } = location;
     }
 
     private static bool HasDirtyMatchingSession(BuildCommandArguments args)
